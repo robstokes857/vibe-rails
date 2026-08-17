@@ -19,6 +19,7 @@ import { JobController } from './js/modules/jobs-controller.js';
 import { LlmPickerController } from './js/modules/llm-picker-controller.js';
 import { AppEventClient } from './js/modules/app-event-client.js';
 import { TerminalTokenCompressionMeter, getTokenSaverEnabledSources } from './js/modules/terminal-token-compression.js';
+import { openFileExplorer } from './js/modules/file-explorer.js';
 import { showAppToast } from './js/modules/toast-service.js';
 import { getLlmName, getProjectNameFromPath, formatRelativeTime, getCliBrand, escapeHtml } from './js/modules/utils.js';
 
@@ -1095,6 +1096,10 @@ export class VibeControlApp {
     // UI Helpers
     // ============================================
 
+    pickFileSystemEntry(options = {}) {
+        return openFileExplorer(this, options);
+    }
+
     showModal(title, content) {
         const modalContainer = document.getElementById('modal-container');
         // Escape title to prevent XSS, content is trusted HTML template
@@ -1335,7 +1340,21 @@ export class VibeControlApp {
                 throw new Error('Unauthorized');
             }
 
-            if (!response.ok) throw new Error(`API call failed: ${response.statusText}`);
+            if (!response.ok) {
+                let message = `API call failed: ${response.statusText}`;
+                if (requestOptions?.preferErrorResponseMessage
+                    && response.headers.get('content-type')?.toLowerCase().includes('json')) {
+                    try {
+                        const errorBody = await response.json();
+                        if (typeof errorBody?.error === 'string' && errorBody.error.trim()) {
+                            message = errorBody.error.trim();
+                        }
+                    } catch {
+                        // Keep the stable status-text fallback for malformed/non-JSON errors.
+                    }
+                }
+                throw new Error(message);
+            }
             return await response.json();
         } catch (error) {
             if (this.isHostUnreachableError(error)) {

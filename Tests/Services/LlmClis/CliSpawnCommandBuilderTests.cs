@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Text;
 using VibeRails.Services;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.LlmClis.Launchers;
@@ -22,8 +24,11 @@ public class CliSpawnCommandBuilderTests
             Assert.Equal("pwsh.exe", app);
             Assert.Equal(["-File", argv[1]], argv);
 
-            Assert.Contains("$exe = 'claude'", script);
-            Assert.Contains("$argv = @('--model', 'opus')", script);
+            Assert.Contains(
+                $"$exe = $utf8.GetString([System.Convert]::FromBase64String('{EncodeUtf8Base64("claude")}'))",
+                script);
+            Assert.Contains(EncodeUtf8Base64("--model"), script);
+            Assert.Contains(EncodeUtf8Base64("opus"), script);
             Assert.Contains("& $exe @argv", script);
 
             // The PTY waits on this script, so its exit code IS the run's exit code.
@@ -75,17 +80,80 @@ public class CliSpawnCommandBuilderTests
     [Fact]
     public void Windows_PromptContainingQuotesSurvivesIntact()
     {
-        // Passed as argv rather than interpolated into a command string, so shell metacharacters
-        // are inert. A prompt is user text and routinely contains all of these.
+        // Encoded as data and then passed as argv rather than interpolated into a command string,
+        // so shell metacharacters are inert. A prompt is user text and routinely contains these.
         const string prompt = "it's a $test & `backtick` \"quoted\" | pipe";
         var (_, argv, script) = BuildWindows("claude", [prompt], []);
         try
         {
-            Assert.Contains("$argv = @('it''s a $test & `backtick` \"quoted\" | pipe')", script);
+            Assert.DoesNotContain(prompt, script);
+            Assert.Contains(EncodeUtf8Base64(prompt), script);
         }
         finally
         {
             File.Delete(argv[1]);
+        }
+    }
+
+    [Fact]
+    public async Task Windows_PromptContainingSmartApostropheAndLiteralSlashNRoundTrips()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        const string prompt = "The wrapper stored the separators literally as \\n. I’m correcting that.\r\nPlease don't change the text.";
+        var tempDirectory = Path.Combine(
+            Path.GetTempPath(),
+            $"viberails-argv-roundtrip-{Guid.NewGuid():N}");
+        var captureScript = Path.Combine(tempDirectory, "capture.ps1");
+        var capturePath = Path.Combine(tempDirectory, "captured.txt");
+        Directory.CreateDirectory(tempDirectory);
+        File.WriteAllText(
+            captureScript,
+            """
+            param([string] $OutputPath, [string] $Prompt)
+            [System.IO.File]::WriteAllText(
+                $OutputPath,
+                $Prompt,
+                [System.Text.UTF8Encoding]::new($false))
+            """,
+            new UTF8Encoding(false));
+
+        var (app, argv) = CliSpawnCommandBuilder.BuildWindows(
+            "pwsh.exe",
+            ["-NoProfile", "-File", captureScript, capturePath, prompt],
+            []);
+
+        try
+        {
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = app,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+            foreach (var argument in argv)
+                startInfo.ArgumentList.Add(argument);
+
+            using var process = Process.Start(startInfo);
+            Assert.NotNull(process);
+            var cancellationToken = TestContext.Current.CancellationToken;
+            var standardOutput = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var standardError = process.StandardError.ReadToEndAsync(cancellationToken);
+            await process.WaitForExitAsync(cancellationToken);
+
+            var output = await standardOutput;
+            var error = await standardError;
+            Assert.True(
+                process.ExitCode == 0,
+                $"Generated PowerShell wrapper failed with exit code {process.ExitCode}:\n{output}\n{error}");
+            Assert.Equal(prompt, File.ReadAllText(capturePath));
+        }
+        finally
+        {
+            File.Delete(argv[1]);
+            Directory.Delete(tempDirectory, recursive: true);
         }
     }
 
@@ -130,6 +198,7 @@ public class CliSpawnCommandBuilderTests
     [InlineData(LLM.OpenCode)]
     [InlineData(LLM.Glm52)]
     [InlineData(LLM.Grok46)]
+    [InlineData(LLM.Glm53)]
     public void ResolvedExecutableMatchesTheNativeLauncher(LLM llm)
     {
         var launchService = new LaunchLLMService(
@@ -146,6 +215,7 @@ public class CliSpawnCommandBuilderTests
     [InlineData(LLM.OpenCode, "opencode")]
     [InlineData(LLM.Glm52, "glm-5.2")]
     [InlineData(LLM.Grok46, "grok-4.6")]
+    [InlineData(LLM.Glm53, "glm-5.3")]
     public void NativeLauncherBootstrapPreservesRequestedLlmWireName(LLM llm, string expectedEnv)
     {
         var argv = BaseLlmCliLauncher.BuildVbArgv(
@@ -163,4 +233,7 @@ public class CliSpawnCommandBuilderTests
         var (app, builtArgv) = CliSpawnCommandBuilder.BuildWindows(cli, argv, setupCommands);
         return (app, builtArgv, File.ReadAllText(builtArgv[1]));
     }
+
+    private static string EncodeUtf8Base64(string value) =>
+        Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
 }

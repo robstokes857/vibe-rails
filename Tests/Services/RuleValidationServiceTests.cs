@@ -39,5 +39,41 @@ namespace Tests.Services
             Assert.True(validation.Passed);
             Assert.Null(validation.AffectedFiles);
         }
+
+        [Fact]
+        public async Task ValidateWithSourceAsync_FileLockUsesTheAgentDirectoryAsItsBase()
+        {
+            var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "rule-validation-locks"));
+            var source = Path.Combine(root, "nested", "AGENTS.md");
+
+            var result = await _service.ValidateWithSourceAsync(
+                ["nested/config/settings.json", "outside.txt"],
+                [new RuleWithSource(
+                    new RuleWithEnforcement("File Lock('config/settings.json')", Enforcement.STOP),
+                    source)],
+                root,
+                TestContext.Current.CancellationToken);
+
+            var validation = Assert.Single(result.Results);
+            Assert.False(validation.Passed);
+            Assert.Equal(["nested/config/settings.json"], validation.AffectedFiles);
+        }
+
+        [Fact]
+        public async Task ValidateWithSourceAsync_DirectoryLockIsPathBoundaryAware()
+        {
+            var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "rule-validation-locks"));
+            var source = Path.Combine(root, "AGENTS.md");
+
+            var result = await _service.ValidateWithSourceAsync(
+                ["locked-old/file.txt"],
+                [new RuleWithSource(
+                    new RuleWithEnforcement("Directory Lock('locked')", Enforcement.STOP),
+                    source)],
+                root,
+                TestContext.Current.CancellationToken);
+
+            Assert.True(Assert.Single(result.Results).Passed);
+        }
     }
 }

@@ -58,10 +58,11 @@ namespace VibeRails.Services.LlmClis
                     await _copilotLlmCliEnvironment.SaveEnvironment(environment, cancellationToken);
                     break;
                 case LLM.OpenCode:
-                // Glm52 / Grok46 are OpenCode-backed pseudo-CLIs — delegate to the OpenCode
+                // Glm52 / Grok46 / Glm53 are OpenCode-backed pseudo-CLIs — delegate to the OpenCode
                 // environment so they share XDG_CONFIG_HOME isolation and config layout.
                 case LLM.Glm52:
                 case LLM.Grok46:
+                case LLM.Glm53:
                     await _opencodeLlmCliEnvironment.SaveEnvironment(environment, cancellationToken);
                     break;
                 default:
@@ -272,7 +273,7 @@ namespace VibeRails.Services.LlmClis
                 // config. Point OpenCode's XDG config root at the environment root instead;
                 // OpenCode then resolves its config under the existing "opencode" subdirectory.
                 // XDG_DATA_HOME stays untouched so credentials remain shared.
-                LLM.OpenCode or LLM.Glm52 or LLM.Grok46 => new Dictionary<string, string>
+                LLM.OpenCode or LLM.Glm52 or LLM.Grok46 or LLM.Glm53 => new Dictionary<string, string>
                 {
                     ["XDG_CONFIG_HOME"] = envPath
                 },

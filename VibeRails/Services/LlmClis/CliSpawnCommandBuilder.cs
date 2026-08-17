@@ -27,8 +27,10 @@ namespace VibeRails.Services.LlmClis;
 /// the script ends by exiting with the CLI's code.
 ///
 /// Arguments are passed as real argv — PowerShell splatting or POSIX single-quoting, the same
-/// technique <c>BaseLlmCliLauncher</c> uses — never as an interpolated command string. That is what
-/// lets a prompt containing quotes, <c>$</c>, backticks, or shell metacharacters survive intact.
+/// technique <c>BaseLlmCliLauncher</c> uses — never as an interpolated command string. On Windows,
+/// each value is UTF-8/Base64 encoded before it is emitted into the script and decoded immediately
+/// before splatting. That keeps PowerShell's parser away from every character in a prompt,
+/// including the curly quotation marks that PowerShell also treats as string delimiters.
 /// </summary>
 internal static class CliSpawnCommandBuilder
 {
@@ -61,14 +63,18 @@ internal static class CliSpawnCommandBuilder
         script.AppendLine("try { Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -ErrorAction SilentlyContinue } catch { }");
 
         foreach (var setupCommand in setupCommands)
-            script.AppendLine(setupCommand);
+            script.AppendLine(RequireSingleStatement(setupCommand));
 
-        script.AppendLine($"$exe = {QuotePowerShellSingleQuoted(cliExecutable)}");
+        script.AppendLine("$utf8 = [System.Text.Encoding]::UTF8");
+        script.AppendLine(
+            $"$exe = $utf8.GetString([System.Convert]::FromBase64String('{EncodeUtf8Base64(cliExecutable)}'))");
         script.Append("$argv = @(");
         for (var i = 0; i < argv.Count; i++)
         {
             if (i > 0) script.Append(", ");
-            script.Append(QuotePowerShellSingleQuoted(argv[i]));
+            script.Append("$utf8.GetString([System.Convert]::FromBase64String('");
+            script.Append(EncodeUtf8Base64(argv[i]));
+            script.Append("'))");
         }
         script.AppendLine(")");
         script.AppendLine("& $exe @argv");
@@ -107,7 +113,7 @@ internal static class CliSpawnCommandBuilder
         var program = new StringBuilder();
         foreach (var setupCommand in setupCommands)
         {
-            program.Append(setupCommand);
+            program.Append(RequireSingleStatement(setupCommand));
             program.Append("; ");
         }
 
@@ -122,8 +128,29 @@ internal static class CliSpawnCommandBuilder
         return (ShellDefaults.GetUnixCommandShellPath(), ["-c", program.ToString()]);
     }
 
-    private static string QuotePowerShellSingleQuoted(string value) =>
-        "'" + value.Replace("'", "''") + "'";
+    /// <summary>
+    /// Setup lines are the one part of the generated script that stays raw. They are whole shell
+    /// statements — redirection, pipelines — so they cannot be splatted as argv the way the CLI's
+    /// own arguments are, and the caller owns their quoting.
+    ///
+    /// That is only sound while a setup line is exactly one statement. It is not built purely
+    /// from constants: the MCP registration lines interpolate <c>Environment.ProcessPath</c>, and
+    /// a line break in an install path (legal on POSIX) would append statements to the script
+    /// rather than corrupt the one it appears in. Failing here beats generating that script.
+    /// </summary>
+    private static string RequireSingleStatement(string setupCommand)
+    {
+        if (setupCommand.AsSpan().ContainsAny('\r', '\n', '\0'))
+        {
+            throw new InvalidOperationException(
+                "A CLI setup command may not contain a line break or null character.");
+        }
+
+        return setupCommand;
+    }
+
+    private static string EncodeUtf8Base64(string value) =>
+        Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
 
     private static string QuotePosixSingleQuoted(string value) =>
         ShellArgSanitizer.QuotePosixSingleQuoted(value);

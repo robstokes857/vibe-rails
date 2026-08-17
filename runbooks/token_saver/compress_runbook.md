@@ -37,7 +37,7 @@ A capture holds:
 | `Trace` | Legacy persisted column; new DB rows leave it empty. Live in-memory captures carry pipeline entries when compression runs and an empty list for diagnostic-only observations. |
 | `EnabledIds` | The exact stage/scope set active for this observation. |
 
-Background: [`TokenSaver/README.md`](../TokenSaver/README.md). Read it first if you
+Background: [`TokenSaver/README.md`](../../TokenSaver/README.md). Read it first if you
 have not — you cannot judge a stage without knowing its invariants.
 
 ## 1. Fetching the capture

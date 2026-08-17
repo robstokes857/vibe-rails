@@ -62,6 +62,7 @@ public sealed class EnvironmentRoutesNameCollisionTests
     [Theory]
     [InlineData("glm-5.2")]
     [InlineData("grok-4.6")]
+    [InlineData("glm-5.3")]
     public async Task CreateEnvironment_RefusesThePseudoCliName_ViaTheCharacterRulesThatRunFirst(string name)
     {
         // Hyphenated pseudo-CLI wire names also resolve to a CLI, but their period is already

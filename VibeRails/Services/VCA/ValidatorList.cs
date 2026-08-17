@@ -62,7 +62,11 @@ namespace VibeRails.Services.VCA
                 [Rule.PackageChangeDetected] = serviceProvider.GetRequiredService<PackageChangeValidator>(),
 
                 // Commit message word check
-                [Rule.CheckCommitMessageForWords] = new CommitMessageWordValidator()
+                [Rule.CheckCommitMessageForWords] = new CommitMessageWordValidator(),
+
+                // Exact-file and recursive-directory locks
+                [Rule.FileLock] = new PathLockValidator(PathLockKind.File),
+                [Rule.DirectoryLock] = new PathLockValidator(PathLockKind.Directory)
             };
         }
 

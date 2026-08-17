@@ -141,10 +141,16 @@ separate because they fail in completely different ways, and conflating them mak
 
 | Id | Default | Tools |
 | -- | ------- | ----- |
-| `scope-shell` | on | `Bash`, `PowerShell` |
-| `scope-shell-background` | on | `BashOutput` |
-| `scope-read` | **off** | `Read` |
-| `scope-grep` | **off** | `Grep` |
+| `scope-shell` | on | `Bash`, `PowerShell` (Claude) · `shell_command`, `exec_command`, `exec` (Codex) · `bash` (OpenCode) |
+| `scope-shell-background` | on | `BashOutput` (Claude) · `write_stdin`, `wait` (Codex) |
+| `scope-read` | **off** | `Read` (Claude) · `read` (OpenCode) |
+| `scope-grep` | **off** | `Grep` (Claude) · `grep` (OpenCode) |
+
+Codex's code-mode `exec` and background `wait` joined the shell scopes 2026-08-16
+(`runbooks/token_saver/plans/plan_1A.md`): exec alone carried 61% of every tool-output char
+the proxy had ever relayed, all untouched. Its output can quote file contents the model later
+edits against — the same accepted risk class as `cat` through `shell_command` — which is why
+plan_1A pairs the allowlisting with a capture-audited soak on real code-mode traffic.
 
 **`scope-read` is the dangerous one.** The model builds Edit `old_string` values out
 of Read output. If we rewrite Read output, the model constructs an `old_string` that

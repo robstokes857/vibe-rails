@@ -947,10 +947,22 @@ namespace VibeRails.DTOs
         List<string> DefaultSelection
     );
 
+    // Two mutually exclusive forms (plan_1A A3): {captureId} replays a stored capture, and
+    // {text, toolName, provider[, command]} runs the same pipeline over caller-supplied text --
+    // the bridge that lets exchange-mined candidate strings hit the real pipeline without first
+    // being reproduced as live traffic. Provider is the stored wire key ("anthropic" | "openai"
+    // | "zai" | "xai"), matched exactly the way the proxy matches tool names.
+    //
     // EnabledIds is nullable because null and empty are different answers: null means "not
     // specified" and resolves to the catalog defaults, empty means "every stage off". See
     // CompressionCatalog.Resolve, which draws that line.
-    public record CompressionPreviewRequest(Guid CaptureId, string[]? EnabledIds);
+    public record CompressionPreviewRequest(
+        Guid? CaptureId,
+        string? Text,
+        string? ToolName,
+        string? Command,
+        string? Provider,
+        string[]? EnabledIds);
 
     public record CompressionPreviewResponse(
         string Output,
@@ -1266,6 +1278,11 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(ContextResponse))]
     [JsonSerializable(typeof(GitOpenDirectoryRequest))]
     [JsonSerializable(typeof(GitOpenDirectoryResponse))]
+    [JsonSerializable(typeof(FileSystemLocationResponse))]
+    [JsonSerializable(typeof(List<FileSystemLocationResponse>))]
+    [JsonSerializable(typeof(FileSystemEntryResponse))]
+    [JsonSerializable(typeof(List<FileSystemEntryResponse>))]
+    [JsonSerializable(typeof(FileSystemBrowseResponse))]
     // Agent File DTOs
     [JsonSerializable(typeof(RuleWithEnforcementResponse))]
     [JsonSerializable(typeof(List<RuleWithEnforcementResponse>))]

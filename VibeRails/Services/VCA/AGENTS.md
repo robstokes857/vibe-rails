@@ -84,6 +84,18 @@ files in scope are not evaluated and do not count toward "applicable rule(s)".
 
 Duplicate rules from the same source file are collapsed (`RulesTool.AddRuleIfNew`).
 
+### 6. Parameterized path locks
+
+`File Lock('path/to/file')` protects one exact Git path. `Directory Lock('path/to/directory')`
+protects the directory and every descendant. Paths are relative to the directory containing the
+declaring AGENTS.md; absolute paths and `..` escapes are invalid. Additions, modifications,
+deletions, and both sides of renames count as changes. Matching uses Git path boundaries, so a lock
+on `src/locked` does not match `src/locked-old`.
+
+The declaring AGENTS.md is excluded from its own lock. This is the control-plane escape hatch that
+keeps a STOP rule editable and removable; other AGENTS.md files beneath a directory lock remain
+ordinary protected content.
+
 ## Enforcement levels
 
 | Level | Pre-commit | Commit-msg | Meaning |
@@ -98,7 +110,7 @@ that does not exist yet. The commit-msg hook is where it is enforced.
 
 ## When a rule cannot be evaluated
 
-Two different failures, deliberately treated differently:
+Three different failures, deliberately treated differently:
 
 **Recognized but unevaluable** — a validator exists and refuses to guess. The coverage rules are
 the live example: the hook has no coverage report for a staged snapshot, so it reports
@@ -112,8 +124,21 @@ unenforceable as written. It is always reported as a **warning regardless of dec
 Blocking a commit over a typo in `AGENTS.md` would enforce nothing while costing the user the
 commit, and the level on the line describes a check that is not running.
 
-Both are surfaced. Neither is silently swallowed — a rule that quietly does nothing is worse than
-one that complains.
+**Recognized but with an unusable argument** — the path locks are the live example. A lock whose
+path will not parse, escapes the declaring directory, or escapes the repository has no target to
+compare the staged files against. That is not the coverage case: a coverage rule with no report
+still describes a real gate over the staged files, while a lock with no path describes nothing,
+so a violation would fire on *every* commit regardless of what changed. At `STOP` that wedges all
+work until `AGENTS.md` is hand-edited — possibly the very file the lock covers. These report
+`UNSUPPORTED:` through `RuleValidationState.Unrecognized`, so they warn and never block.
+
+The write path is where lock syntax is actually enforced: `AgentFileService` rejects
+lock-shaped text it cannot parse, so the UI cannot author a lock that will only warn later. A
+lock pointing at a path that does not exist yet is legal — it simply never matches until
+something at that path is staged.
+
+All three are surfaced. None is silently swallowed — a rule that quietly does nothing is worse
+than one that complains.
 
 ## Why discovery is shared
 
@@ -160,6 +185,7 @@ author junk. Reads no longer filter, so hand-edited junk is shown rather than hi
 | `Hooks/` | Git-hook host, runner, console presenter. See `Hooks/` for the console UI. |
 | `../Mcp/Tools/RulesTool.cs` | `ValidateVcaReportAsync` — the validation the hooks actually run. |
 | `../AgentFileService.cs` | Rules-page CRUD over `AGENTS.md` files. |
+| `PathLockRule.cs` | Shared File Lock / Directory Lock syntax, safe path resolution, and matching. |
 | `../GitPreflight/` | Step pipeline (VCA → MintLint → automated workflows) and its event stream. |
 
 ## Testing

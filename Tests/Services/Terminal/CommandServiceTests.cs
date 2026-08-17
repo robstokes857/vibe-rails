@@ -185,6 +185,7 @@ public class CommandServiceTests : IDisposable
     [InlineData(LLM.OpenCode)]
     [InlineData(LLM.Glm52)]
     [InlineData(LLM.Grok46)]
+    [InlineData(LLM.Glm53)]
     public async Task PrepareSession_NonClaude_DoesNotSetForceSyncOutputEnvVar(LLM llm)
     {
         var service = CreateService();
@@ -236,6 +237,7 @@ public class CommandServiceTests : IDisposable
     [InlineData(LLM.OpenCode)]
     [InlineData(LLM.Glm52)]
     [InlineData(LLM.Grok46)]
+    [InlineData(LLM.Glm53)]
     public async Task PrepareSession_OpenCodeBackedClis_AddVibeRailsMcpBeforeLaunch(LLM llm)
     {
         var service = CreateService();
@@ -461,6 +463,82 @@ public class CommandServiceTests : IDisposable
         Assert.True(
             prepared.Environment.ContainsKey("XDG_CONFIG_HOME"),
             "Grok 4.6 must share OpenCode's XDG_CONFIG_HOME env isolation.");
+    }
+
+    [Fact]
+    public async Task PrepareSession_Glm53_UsesOpencodeExecutableWithPinnedModel()
+    {
+        var service = CreateService();
+
+        // GLM 5.3 is a pseudo-CLI backed by OpenCode. The binary is `opencode` (not `glm53`),
+        // and base CLI launches inject --model=zai-coding-plan/glm-5.3 — GLM 5.3 ships under
+        // the zai-coding-plan provider in the live OpenCode catalog, not plain zai.
+        var prepared = await service.PrepareSessionAsync(LLM.Glm53, envName: null, extraArgs: null);
+
+        Assert.Equal("opencode --model=zai-coding-plan/glm-5.3", prepared.LaunchCommand);
+    }
+
+    [Fact]
+    public async Task PrepareSession_Glm53_PassesPromptViaPromptFlag()
+    {
+        var service = CreateService();
+
+        var prepared = await service.PrepareSessionAsync(
+            LLM.Glm53, envName: null, extraArgs: null, initialPrompt: "hello world");
+
+        Assert.StartsWith("opencode --model=zai-coding-plan/glm-5.3 --prompt=", prepared.LaunchCommand);
+    }
+
+    [Fact]
+    public async Task PrepareSession_Glm53_InjectsOpenCodeProxyConfigWithoutRemappingCodingPlanProvider()
+    {
+        // GLM 5.3 is OpenCode-backed, so the OpenCode proxy config is injected — but it only
+        // remaps the zai/xai providers. The pinned zai-coding-plan provider must NOT appear in
+        // the injected config: its traffic deliberately goes direct to Z.AI (no token saver).
+        var service = CreateService(openCodeLlmProxyEnabled: true);
+
+        var prepared = await service.PrepareSessionAsync(LLM.Glm53, envName: null, extraArgs: null);
+
+        Assert.True(prepared.OpenCodeProxyActive);
+        Assert.Equal(
+            "test-session-token",
+            prepared.Environment[LocalLlmProxyContext.SessionTokenVariable]);
+        Assert.Equal(
+            "test-tab-token",
+            prepared.Environment[LocalLlmProxyContext.TabTokenVariable]);
+        var config = prepared.Environment[LlmProxyZaiConfig.ConfigContentVariable];
+        Assert.Contains("http://127.0.0.1:4321/llm/zai/api/paas/v4", config);
+        Assert.Contains("http://127.0.0.1:4321/llm/xai/v1", config);
+        Assert.DoesNotContain("zai-coding-plan", config);
+    }
+
+    [Fact]
+    public async Task PrepareSession_Glm53_DoesNotInjectModelWhenEnvIsSet()
+    {
+        var service = CreateService();
+
+        var prepared = await service.PrepareSessionAsync(
+            LLM.Glm53,
+            envName: "my-glm53-env",
+            extraArgs: ["--model=zai-coding-plan/glm-5.3", "--auto"]);
+
+        Assert.Equal("opencode --model=zai-coding-plan/glm-5.3 --auto", prepared.LaunchCommand);
+        Assert.Equal(
+            1,
+            prepared.LaunchCommand.Split(' ').Count(tok => tok.StartsWith("--model")));
+    }
+
+    [Fact]
+    public async Task PrepareSession_Glm53_SetsXdgConfigHomeForEnvIsolation()
+    {
+        var service = CreateService();
+
+        var prepared = await service.PrepareSessionAsync(
+            LLM.Glm53, envName: "my-glm53-env", extraArgs: null);
+
+        Assert.True(
+            prepared.Environment.ContainsKey("XDG_CONFIG_HOME"),
+            "GLM 5.3 must share OpenCode's XDG_CONFIG_HOME env isolation.");
     }
 
     [Fact]

@@ -6,6 +6,27 @@ const ENFORCEMENT_LEVELS = [
     { value: 'STOP', icon: '🛑', blurb: 'Block the commit until it is fixed.' }
 ];
 
+const PATH_LOCK_RULES = [
+    {
+        kind: 'file',
+        template: "File Lock('path to file')",
+        label: 'File path',
+        placeholder: 'src/config.json'
+    },
+    {
+        kind: 'directory',
+        template: "Directory Lock('path to directory')",
+        label: 'Directory path',
+        placeholder: 'src/generated'
+    }
+];
+
+export function buildAgentFilePath(rawDirectory) {
+    const directory = String(rawDirectory ?? '').trim();
+    if (!directory) return null;
+    return `${directory.replace(/[\\/]+$/, '')}/AGENTS.md`;
+}
+
 export class AgentController {
     constructor(app) {
         this.app = app;
@@ -22,6 +43,101 @@ export class AgentController {
             selectedRules: [],  // Array of { text: string, enforcement: string }
             fileReferences: []
         };
+    }
+
+    getPathLockDefinition(ruleText) {
+        const text = String(ruleText || '').trim();
+        return PATH_LOCK_RULES.find(definition =>
+            text === definition.template
+            || text.toLowerCase().startsWith(`${definition.kind === 'file' ? 'file' : 'directory'} lock(`)
+            || text.toLowerCase().startsWith(`${definition.kind === 'file' ? 'file' : 'directory'} lock (`)
+        ) || null;
+    }
+
+    isPathLockTemplate(ruleText) {
+        return PATH_LOCK_RULES.some(definition => definition.template === ruleText);
+    }
+
+    extractPathLockPath(ruleText) {
+        const definition = this.getPathLockDefinition(ruleText);
+        if (!definition || this.isPathLockTemplate(ruleText)) return '';
+        // `s` so a hand-edited rule carrying a line break still round-trips into the editor rather
+        // than silently rendering as an empty path. The writer refuses to author one (see
+        // buildPathLockRuleText, and PathLockRule.TryParse server-side), but reading is not writing.
+        const match = String(ruleText).match(/\(\s*(['"])(.*?)\1\s*\)\s*$/s);
+        return match?.[2] || '';
+    }
+
+    buildPathLockRuleText(ruleTemplate, rawPath) {
+        const definition = PATH_LOCK_RULES.find(item => item.template === ruleTemplate);
+        if (!definition) return ruleTemplate;
+
+        const enteredPath = String(rawPath || '').trim();
+        if (!enteredPath) {
+            throw new Error(`${definition.label} is required.`);
+        }
+        if (/^(?:[a-z]:[\\/]|[\\/])/i.test(enteredPath)) {
+            throw new Error(`${definition.label} must be relative to the AGENTS.md directory.`);
+        }
+        if (enteredPath.includes("'")) {
+            throw new Error(`${definition.label} cannot contain a single quote.`);
+        }
+        // A rule is one line of AGENTS.md. A line break here would be written back as two lines,
+        // and a second line starting with '#' ends the rules section, dropping every rule below it
+        // from both the hook and this page. The server refuses it too; this is the readable error.
+        if (/[\r\n\0]/.test(enteredPath)) {
+            throw new Error(`${definition.label} cannot contain a line break.`);
+        }
+
+        let normalizedPath = enteredPath.replaceAll('\\', '/');
+        while (normalizedPath.startsWith('./')) normalizedPath = normalizedPath.slice(2);
+        if (normalizedPath.split('/').includes('..')) {
+            throw new Error(`${definition.label} cannot leave the AGENTS.md directory.`);
+        }
+        if (!normalizedPath || (definition.kind === 'file' && normalizedPath === '.')) {
+            throw new Error(`${definition.label} must identify a file.`);
+        }
+        if (normalizedPath.length > 1) normalizedPath = normalizedPath.replace(/\/+$/, '');
+
+        const name = definition.kind === 'file' ? 'File Lock' : 'Directory Lock';
+        return `${name}('${normalizedPath}')`;
+    }
+
+    showPathLockPathPicker(agent, ruleTemplate) {
+        const definition = PATH_LOCK_RULES.find(item => item.template === ruleTemplate);
+        if (!definition) {
+            this.showEnforcementPicker(agent, ruleTemplate);
+            return;
+        }
+
+        this.app.showModal(`Configure ${definition.kind} lock`, `
+            <form id="path-lock-rule-form">
+                <p class="text-muted">Enter a path relative to the directory containing this AGENTS.md.</p>
+                <div class="mb-3">
+                    <label class="form-label" for="path-lock-rule-path">${definition.label}</label>
+                    <input class="form-control" id="path-lock-rule-path" type="text"
+                        placeholder="${definition.placeholder}" autocomplete="off" required>
+                    <small class="form-text text-muted">
+                        ${definition.kind === 'file'
+                            ? 'The exact file is protected from additions, edits, deletion, and renames.'
+                            : 'Every file at or below this directory is protected recursively.'}
+                    </small>
+                </div>
+                <div class="d-flex justify-content-end gap-2">
+                    <button type="button" class="btn btn-outline-secondary" data-action="close-modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Choose enforcement</button>
+                </div>
+            </form>`);
+
+        document.getElementById('path-lock-rule-form')?.addEventListener('submit', event => {
+            event.preventDefault();
+            try {
+                const path = document.getElementById('path-lock-rule-path')?.value;
+                this.showEnforcementPicker(agent, this.buildPathLockRuleText(ruleTemplate, path));
+            } catch (error) {
+                this.app.showToast('Path lock', error.message, 'warning');
+            }
+        });
     }
 
     // ============================================
@@ -268,7 +384,9 @@ export class AgentController {
     showInlineAddRule(agent, root) {
         const available = this.app.data.availableRulesWithDescriptions || [];
         const existing = new Set((agent.rules || []).map(rule => rule.text));
-        const unused = available.filter(rule => !existing.has(rule.name));
+        // Parameterized locks stay available so one AGENTS.md can protect multiple paths.
+        const unused = available.filter(rule =>
+            this.isPathLockTemplate(rule.name) || !existing.has(rule.name));
 
         if (unused.length === 0) {
             this.app.showToast('Add rule', 'Every available rule is already in this file.', 'info');
@@ -294,6 +412,14 @@ export class AgentController {
             <form id="inline-add-rule-form" class="rules-add-rule">
                 <p class="text-muted mb-2">Adding to <code>${this.app.escapeHtml(agent.path)}</code></p>
                 <div class="rules-add-rule-list">${options}</div>
+                <div class="mt-3 d-none" data-inline-path-lock-fields>
+                    <label class="form-label" for="inline-path-lock-path" data-inline-path-lock-label>Path</label>
+                    <input class="form-control" id="inline-path-lock-path" name="inline-path-lock-path"
+                        type="text" autocomplete="off">
+                    <small class="form-text text-muted">
+                        Relative to this AGENTS.md directory. Directory locks include every descendant.
+                    </small>
+                </div>
                 <div class="form-label mt-3 mb-2">Enforcement</div>
                 <div class="rules-add-rule-levels">${levels}</div>
                 <div class="d-flex justify-content-end gap-2 mt-4">
@@ -302,13 +428,39 @@ export class AgentController {
                 </div>
             </form>`);
 
-        document.getElementById('inline-add-rule-form')?.addEventListener('submit', async (event) => {
+        const inlineForm = document.getElementById('inline-add-rule-form');
+        const syncPathLockFields = () => {
+            const selectedTemplate = inlineForm?.querySelector('input[name="inline-rule-pick"]:checked')?.value;
+            const definition = PATH_LOCK_RULES.find(item => item.template === selectedTemplate);
+            const fields = inlineForm?.querySelector('[data-inline-path-lock-fields]');
+            fields?.classList.toggle('d-none', !definition);
+            const label = inlineForm?.querySelector('[data-inline-path-lock-label]');
+            const input = inlineForm?.querySelector('input[name="inline-path-lock-path"]');
+            if (label && definition) label.textContent = definition.label;
+            if (input) {
+                input.placeholder = definition?.placeholder || '';
+                input.required = Boolean(definition);
+            }
+        };
+        inlineForm?.querySelectorAll('input[name="inline-rule-pick"]').forEach(input =>
+            input.addEventListener('change', syncPathLockFields));
+
+        inlineForm?.addEventListener('submit', async (event) => {
             event.preventDefault();
             const form = event.currentTarget;
-            const ruleText = form.querySelector('input[name="inline-rule-pick"]:checked')?.value;
+            const ruleTemplate = form.querySelector('input[name="inline-rule-pick"]:checked')?.value;
             const enforcement = form.querySelector('input[name="inline-rule-level"]:checked')?.value || 'WARN';
-            if (!ruleText) {
+            if (!ruleTemplate) {
                 this.app.showToast('Add rule', 'Pick a rule first.', 'warning');
+                return;
+            }
+            let ruleText;
+            try {
+                ruleText = this.buildPathLockRuleText(
+                    ruleTemplate,
+                    form.querySelector('input[name="inline-path-lock-path"]')?.value);
+            } catch (error) {
+                this.app.showToast('Path lock', error.message, 'warning');
                 return;
             }
             try {
@@ -741,7 +893,8 @@ export class AgentController {
 
         // Filter out rules already in use
         const existingRuleTexts = agent.rules.map(r => r.text);
-        const unusedRulesWithDescriptions = rulesWithDescriptions.filter(r => !existingRuleTexts.includes(r.name));
+        const unusedRulesWithDescriptions = rulesWithDescriptions.filter(r =>
+            this.isPathLockTemplate(r.name) || !existingRuleTexts.includes(r.name));
 
         if (unusedRulesWithDescriptions.length === 0) {
             this.app.showToast('Add Rule', 'All available rules are already added', 'info');
@@ -766,7 +919,11 @@ export class AgentController {
         document.querySelectorAll('[data-rule]').forEach(el => {
             el.addEventListener('click', () => {
                 const ruleText = el.dataset.rule;
-                this.showEnforcementPicker(agent, ruleText);
+                if (this.isPathLockTemplate(ruleText)) {
+                    this.showPathLockPathPicker(agent, ruleText);
+                } else {
+                    this.showEnforcementPicker(agent, ruleText);
+                }
             });
         });
     }
@@ -1031,18 +1188,27 @@ export class AgentController {
     renderStep1Directory(container) {
         const rootPath = this.app.data.configs?.rootPath || '';
         const defaultPath = rootPath || '';
+        const stripAgentFileName = path => String(path || '').replace(/[\\/]AGENTS\.md$/i, '');
+        const directoryValue = stripAgentFileName(this.wizardState.directory || defaultPath);
 
         // Escape user data to prevent XSS
-        const escapedDirectory = this.app.escapeHtml(this.wizardState.directory || defaultPath);
+        const escapedDirectory = this.app.escapeHtml(directoryValue);
         const escapedRootPath = this.app.escapeHtml(rootPath);
 
         container.innerHTML = `
             <h5 class="mb-4">Step 1: Select Directory</h5>
             <div class="mb-4">
-                <label class="form-label">Directory for AGENTS.md</label>
-                <input type="text" class="form-control" id="agent-directory"
-                       placeholder="/path/to/directory"
-                       value="${escapedDirectory}">
+                <label class="form-label" for="agent-directory">Directory for AGENTS.md</label>
+                <div class="input-group">
+                    <input type="text" class="form-control" id="agent-directory"
+                           placeholder="/path/to/directory"
+                           value="${escapedDirectory}">
+                    <button type="button" class="btn btn-outline-primary d-inline-flex align-items-center gap-2"
+                            data-action="pick-agent-directory">
+                        <i class="fa-regular fa-folder-open" aria-hidden="true"></i>
+                        Browse
+                    </button>
+                </div>
                 <small class="form-text text-muted">
                     Enter the directory where <code>AGENTS.md</code> will be created.
                 </small>
@@ -1063,15 +1229,31 @@ export class AgentController {
             </div>
         `;
 
+        const directoryInput = container.querySelector('#agent-directory');
+        const browseButton = container.querySelector('[data-action="pick-agent-directory"]');
+        browseButton?.addEventListener('click', async () => {
+            const enteredPath = directoryInput?.value || '';
+            const requestedPath = enteredPath.trim() ? stripAgentFileName(enteredPath) : rootPath;
+            const result = await this.app.pickFileSystemEntry({
+                mode: 'directory',
+                initialPath: requestedPath,
+                title: 'Choose AGENTS.md Directory',
+                triggerElement: browseButton
+            });
+            if (result.canceled || !directoryInput?.isConnected) return;
+
+            directoryInput.value = result.path;
+            directoryInput.focus();
+            directoryInput.setSelectionRange?.(directoryInput.value.length, directoryInput.value.length);
+        });
+
         document.getElementById('wizard-next-btn').addEventListener('click', () => {
-            let directory = document.getElementById('agent-directory').value.trim();
-            if (!directory) {
+            const agentPath = buildAgentFilePath(document.getElementById('agent-directory').value);
+            if (!agentPath) {
                 this.app.showToast('Validation Error', 'Please enter a directory path', 'warning');
                 return;
             }
-            // Remove trailing slash if present and append AGENTS.md
-            directory = directory.replace(/[\\/]+$/, '');
-            this.wizardState.directory = `${directory}/AGENTS.md`;
+            this.wizardState.directory = agentPath;
             this.wizardState.currentStep = 2;
             this.renderWizardStep();
         });
@@ -1082,7 +1264,12 @@ export class AgentController {
         const rulesWithDescriptions = this.app.data.availableRulesWithDescriptions || [];
 
         const ruleCheckboxes = rulesWithDescriptions.map((rule, index) => {
-            const isChecked = this.wizardState.selectedRules.some(r => r.text === rule.name);
+            const lockDefinition = PATH_LOCK_RULES.find(item => item.template === rule.name);
+            const selectedRule = this.wizardState.selectedRules.find(selected =>
+                selected.text === rule.name
+                || (lockDefinition && this.getPathLockDefinition(selected.text)?.kind === lockDefinition.kind));
+            const isChecked = Boolean(selectedRule);
+            const lockPath = lockDefinition ? this.extractPathLockPath(selectedRule?.text) : '';
             return `
                 <div class="form-check mb-3 pb-2 border-bottom">
                     <input class="form-check-input" type="checkbox" id="rule-${index}"
@@ -1091,6 +1278,15 @@ export class AgentController {
                         <strong>${this.app.escapeHtml(rule.name)}</strong>
                         <br><small class="text-muted">${this.app.escapeHtml(rule.description)}</small>
                     </label>
+                    ${lockDefinition ? `
+                        <div class="mt-2 ms-4">
+                            <label class="form-label small" for="path-lock-${index}">${lockDefinition.label}</label>
+                            <input class="form-control form-control-sm" id="path-lock-${index}"
+                                data-path-lock-index="${index}" type="text"
+                                value="${this.app.escapeHtml(lockPath)}"
+                                placeholder="${lockDefinition.placeholder}" autocomplete="off">
+                            <small class="form-text text-muted">Relative to this AGENTS.md directory.</small>
+                        </div>` : ''}
                 </div>
             `;
         }).join('');
@@ -1129,14 +1325,28 @@ export class AgentController {
             const checkboxes = container.querySelectorAll('input[type="checkbox"]:checked');
             const newSelectedRules = [];
 
-            checkboxes.forEach(cb => {
-                const ruleText = cb.dataset.rule;
-                const existingRule = this.wizardState.selectedRules.find(r => r.text === ruleText);
+            for (const cb of checkboxes) {
+                const ruleTemplate = cb.dataset.rule;
+                const lockDefinition = PATH_LOCK_RULES.find(item => item.template === ruleTemplate);
+                let ruleText = ruleTemplate;
+                if (lockDefinition) {
+                    try {
+                        const index = cb.id.replace('rule-', '');
+                        const path = container.querySelector(`[data-path-lock-index="${index}"]`)?.value;
+                        ruleText = this.buildPathLockRuleText(ruleTemplate, path);
+                    } catch (error) {
+                        this.app.showToast('Path lock', error.message, 'warning');
+                        return;
+                    }
+                }
+                const existingRule = this.wizardState.selectedRules.find(r =>
+                    r.text === ruleText
+                    || (lockDefinition && this.getPathLockDefinition(r.text)?.kind === lockDefinition.kind));
                 newSelectedRules.push({
                     text: ruleText,
                     enforcement: existingRule?.enforcement || 'WARN'
                 });
-            });
+            }
 
             this.wizardState.selectedRules = newSelectedRules;
 

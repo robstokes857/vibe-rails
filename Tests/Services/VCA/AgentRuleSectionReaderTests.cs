@@ -104,6 +104,29 @@ public class AgentRuleSectionReaderTests
     }
 
     [Fact]
+    public void Read_PreservesPathLockParenthesesBeforeTheEnforcementSuffix()
+    {
+        var rules = AgentRuleSectionReader.Read("""
+            ## Vibe Rails Rules
+            - File Lock('src/app.cs') (STOP)
+            - Directory Lock('generated') (COMMIT)
+            """);
+
+        Assert.Collection(
+            rules,
+            rule =>
+            {
+                Assert.Equal("File Lock('src/app.cs')", rule.RuleText);
+                Assert.Equal("STOP", rule.Enforcement);
+            },
+            rule =>
+            {
+                Assert.Equal("Directory Lock('generated')", rule.RuleText);
+                Assert.Equal("COMMIT", rule.Enforcement);
+            });
+    }
+
+    [Fact]
     public void Read_ResumesAtASecondRulesSection()
     {
         var rules = AgentRuleSectionReader.Read("""

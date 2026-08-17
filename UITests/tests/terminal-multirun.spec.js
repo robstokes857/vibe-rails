@@ -139,6 +139,7 @@ test.describe('terminal-multirun', () => {
                 'base:claude',
                 'base:codex',
                 'base:glm-5.2',
+                'base:glm-5.3',
                 'base:grok-4.6',
                 'base:opencode',
                 'base:copilot',

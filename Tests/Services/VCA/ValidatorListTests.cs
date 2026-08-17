@@ -66,6 +66,27 @@ namespace Tests.Services.VCA
         }
 
         [Fact]
+        public async Task IsGoodCodeAsync_WithFileLock_ShouldUseThePathLockValidator()
+        {
+            var parsedRule = Rule.FileLock;
+            _mockRulesService
+                .Setup(x => x.TryParse("File Lock('locked.txt')", out parsedRule))
+                .Returns(true);
+
+            var rule = new RuleWithEnforcement("File Lock('locked.txt')", Enforcement.STOP);
+
+            var result = await _validatorList.IsGoodCodeAsync(
+                "locked.txt",
+                rule,
+                Path.Combine(Path.GetPathRoot(Environment.CurrentDirectory)!, "repo", "AGENTS.md"),
+                Path.Combine(Path.GetPathRoot(Environment.CurrentDirectory)!, "repo"),
+                null,
+                TestContext.Current.CancellationToken);
+
+            Assert.False(result);
+        }
+
+        [Fact]
         public async Task IsGoodCodeAsync_WithDisabledRule_ShouldReturnTrue()
         {
             // Arrange

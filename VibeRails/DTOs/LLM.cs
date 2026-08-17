@@ -23,6 +23,7 @@ namespace VibeRails.Services
         // injected server-side. Enum names can't contain hyphens/periods, so LlmParser
         // special-cases the hyphenated wire names to these values.
         Glm52,
-        Grok46
+        Grok46,
+        Glm53
     }
 }

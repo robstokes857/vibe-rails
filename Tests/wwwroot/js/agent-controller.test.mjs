@@ -4,7 +4,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const modulePath = path.resolve('VibeRails/wwwroot/js/modules/agent-controller.js');
-const { AgentController } = await import(pathToFileURL(modulePath).href);
+const { AgentController, buildAgentFilePath } = await import(pathToFileURL(modulePath).href);
 
 function escapeHtml(value) {
     return String(value ?? '')
@@ -42,6 +42,12 @@ function createWorkspaceRoot(host) {
         }
     };
 }
+
+test('Agent wizard trims a manually entered directory before appending AGENTS.md', () => {
+    assert.equal(buildAgentFilePath('  C:\\repo\\  '), 'C:\\repo/AGENTS.md');
+    assert.equal(buildAgentFilePath('  /repo/  '), '/repo/AGENTS.md');
+    assert.equal(buildAgentFilePath('   '), null);
+});
 
 test('Agent rule cards escape rule text and enforcement values', () => {
     const controller = new AgentController(createApp());
@@ -159,6 +165,57 @@ test('Inline add-rule modal escapes rule names and the target path', (t) => {
     assert.doesNotMatch(modalHtml, /<script>/);
     assert.match(modalHtml, /&lt;svg onload=&quot;alert\(1\)&quot;&gt;/);
     assert.match(modalHtml, /&lt;b&gt;desc&lt;\/b&gt;/);
+});
+
+test('Path lock templates materialize canonical relative rules', () => {
+    const controller = new AgentController(createApp());
+
+    assert.equal(
+        controller.buildPathLockRuleText("File Lock('path to file')", String.raw`src\config.json`),
+        "File Lock('src/config.json')");
+    assert.equal(
+        controller.buildPathLockRuleText("Directory Lock('path to directory')", './src/generated/'),
+        "Directory Lock('src/generated')");
+    assert.equal(
+        controller.extractPathLockPath("Directory Lock('src/generated')"),
+        'src/generated');
+});
+
+test('Path lock templates reject absolute and escaping paths', () => {
+    const controller = new AgentController(createApp());
+
+    assert.throws(
+        () => controller.buildPathLockRuleText("File Lock('path to file')", 'C:\\secrets.txt'),
+        /relative/);
+    assert.throws(
+        () => controller.buildPathLockRuleText("Directory Lock('path to directory')", '../outside'),
+        /cannot leave/);
+    assert.throws(
+        () => controller.buildPathLockRuleText("File Lock('path to file')", "it's.txt"),
+        /single quote/);
+});
+
+// A rule is one line of AGENTS.md. A line break in the path is written back as two lines, and a
+// second line opening with '#' ends the rules section — silently unenforcing every rule below it
+// in both the Git hook and this page. Rejected server-side too; this is the readable error.
+test('Path lock templates reject a path carrying a line break', () => {
+    const controller = new AgentController(createApp());
+
+    assert.throws(
+        () => controller.buildPathLockRuleText("File Lock('path to file')", 'x\n## Injected'),
+        /line break/);
+    assert.throws(
+        () => controller.buildPathLockRuleText("Directory Lock('path to directory')", 'x\r\n## Injected'),
+        /line break/);
+});
+
+// Reading is not writing: the editor must still show what a hand-edited file actually says.
+test('Path lock paths round-trip through the editor even across a line break', () => {
+    const controller = new AgentController(createApp());
+
+    assert.equal(
+        controller.extractPathLockPath("File Lock('x\n## Injected')"),
+        'x\n## Injected');
 });
 
 test('Validate Agent renders successful API responses without a missing renderer call', async (t) => {

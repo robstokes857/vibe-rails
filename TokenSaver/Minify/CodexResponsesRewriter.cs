@@ -22,11 +22,14 @@ namespace TokenSaver.Minify;
 public static class CodexResponsesRewriter
 {
     /// <summary>
-    /// Shell function names used by current and earlier Codex clients. Unknown tools fail toward
-    /// no savings: their outputs are observed in the seen counter but never rewritten.
+    /// Shell-output tool names used by current and earlier Codex clients, including code-mode
+    /// exec and background wait (allowlisted 2026-08-16, plan_1A). Unknown tools fail toward
+    /// no savings: their outputs are observed in the seen counter but never rewritten. The live
+    /// path resolves its allowlist from <see cref="CompressionCatalog"/>; this list only backs
+    /// the legacy overload and mirrors the catalog's Codex union.
     /// </summary>
     public static readonly IReadOnlyList<string> DefaultToolAllowlist =
-        ["shell_command", "exec_command", "write_stdin"];
+        ["shell_command", "exec_command", "exec", "write_stdin", "wait"];
 
     private static readonly JsonWriterOptions StringWriterOptions = new()
     {

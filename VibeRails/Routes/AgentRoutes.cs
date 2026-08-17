@@ -144,10 +144,19 @@ public static class AgentRoutes
                 return Results.BadRequest(new ErrorResponse("Agent file already exists at this path"));
             }
 
-            await agentService.CreateAgentFileAsync(
-                request.Path,
-                cancellationToken,
-                request.Rules ?? Array.Empty<string>());
+            try
+            {
+                await agentService.CreateAgentFileAsync(
+                    request.Path,
+                    cancellationToken,
+                    request.Rules ?? Array.Empty<string>());
+            }
+            catch (ArgumentException ex)
+            {
+                // Rule text the writer refuses (malformed path lock, embedded line break) is a bad
+                // request, not a server fault. The add-rule route below already answers this way.
+                return Results.BadRequest(new ErrorResponse(ex.Message));
+            }
 
             // Fetch the created rules with their enforcement levels
             var rules = await agentService.GetRulesWithEnforcementAsync(request.Path, cancellationToken);

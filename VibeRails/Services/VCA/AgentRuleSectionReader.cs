@@ -8,6 +8,22 @@ namespace VibeRails.Services.VCA;
 public sealed record AgentRuleLine(string RuleText, string Enforcement);
 
 /// <summary>
+/// Parser output used by the rules-page writer. Keeping the source line and owning section next
+/// to the parsed rule lets CRUD target exactly the same live Markdown that discovery reports,
+/// without teaching a second parser about headings or code fences.
+/// </summary>
+internal sealed record LocatedAgentRuleLine(
+    AgentRuleLine Rule,
+    int LineIndex,
+    int SectionHeadingLineIndex);
+
+internal sealed record AgentRuleSection(int HeadingLineIndex);
+
+internal sealed record AgentRuleDocument(
+    List<AgentRuleSection> Sections,
+    List<LocatedAgentRuleLine> Rules);
+
+/// <summary>
 /// The one answer to "which rules does this AGENTS.md declare".
 ///
 /// There used to be two answers. The Rules page read a heading-scoped section and showed what it
@@ -66,19 +82,31 @@ public static partial class AgentRuleSectionReader
     private static partial Regex BareRule();
 
     /// <summary>Reads every rule declared by <paramref name="content"/>, in file order.</summary>
-    public static List<AgentRuleLine> Read(string? content)
+    public static List<AgentRuleLine> Read(string? content) =>
+        ParseDocument(content).Rules.Select(rule => rule.Rule).ToList();
+
+    /// <summary>
+    /// Reads the same rule-discovery contract while retaining source locations for safe edits.
+    /// This is intentionally internal: callers that only enforce or display rules should use
+    /// <see cref="Read"/> and remain independent of the Markdown layout.
+    /// </summary>
+    internal static AgentRuleDocument ParseDocument(string? content)
     {
-        List<AgentRuleLine> rules = [];
+        List<AgentRuleSection> sections = [];
+        List<LocatedAgentRuleLine> rules = [];
         if (string.IsNullOrEmpty(content))
         {
-            return rules;
+            return new AgentRuleDocument(sections, rules);
         }
 
         var insideFence = false;
         var insideRulesSection = false;
+        var sectionHeadingLineIndex = -1;
 
-        foreach (var rawLine in content.Split('\n'))
+        var lines = content.Split('\n');
+        for (var lineIndex = 0; lineIndex < lines.Length; lineIndex++)
         {
+            var rawLine = lines[lineIndex];
             var line = rawLine.TrimEnd('\r');
 
             if (FenceDelimiter().IsMatch(line))
@@ -96,6 +124,11 @@ public static partial class AgentRuleSectionReader
             if (trimmed.StartsWith('#'))
             {
                 insideRulesSection = IsRulesHeading(trimmed);
+                sectionHeadingLineIndex = insideRulesSection ? lineIndex : -1;
+                if (insideRulesSection)
+                {
+                    sections.Add(new AgentRuleSection(lineIndex));
+                }
                 continue;
             }
 
@@ -107,24 +140,24 @@ public static partial class AgentRuleSectionReader
             var bracket = BracketRule().Match(trimmed);
             if (bracket.Success)
             {
-                Add(rules, bracket.Groups[2].Value, bracket.Groups[1].Value);
+                Add(rules, bracket.Groups[2].Value, bracket.Groups[1].Value, lineIndex, sectionHeadingLineIndex);
                 continue;
             }
 
             var suffix = SuffixRule().Match(trimmed);
             if (suffix.Success)
             {
-                Add(rules, suffix.Groups[1].Value, suffix.Groups[2].Value);
+                Add(rules, suffix.Groups[1].Value, suffix.Groups[2].Value, lineIndex, sectionHeadingLineIndex);
                 continue;
             }
 
             if (BareRule().IsMatch(trimmed))
             {
-                Add(rules, trimmed[1..], "WARN");
+                Add(rules, trimmed[1..], "WARN", lineIndex, sectionHeadingLineIndex);
             }
         }
 
-        return rules;
+        return new AgentRuleDocument(sections, rules);
     }
 
     /// <summary>True when <paramref name="headingLine"/> opens a rules section.</summary>
@@ -133,12 +166,20 @@ public static partial class AgentRuleSectionReader
             headingLine.TrimStart('#').Trim(),
             StringComparer.OrdinalIgnoreCase);
 
-    private static void Add(List<AgentRuleLine> rules, string ruleText, string enforcement)
+    private static void Add(
+        List<LocatedAgentRuleLine> rules,
+        string ruleText,
+        string enforcement,
+        int lineIndex,
+        int sectionHeadingLineIndex)
     {
         var text = ruleText.Trim();
         if (text.Length > 0)
         {
-            rules.Add(new AgentRuleLine(text, enforcement.ToUpperInvariant()));
+            rules.Add(new LocatedAgentRuleLine(
+                new AgentRuleLine(text, enforcement.ToUpperInvariant()),
+                lineIndex,
+                sectionHeadingLineIndex));
         }
     }
 }

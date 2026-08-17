@@ -69,25 +69,35 @@ public class CodexResponsesRewriterTests
     }
 
     [Fact]
-    public void Rewrite_CurrentCodeModeExec_CapturesTextWithoutRewritingOrCapturingBinaryBlocks()
+    public void Rewrite_CurrentCodeModeExec_CompressesTextAndLeavesBinaryBlocksByteVerbatim()
     {
         var body = File.ReadAllBytes(
             Path.Combine(CodexFixtureDir, "code_mode_exec_request.json"));
-        var original = body.ToArray();
         var plan = CompressionCatalog.Resolve(null);
         var writer = new ArrayBufferWriter<byte>();
         var captures = new RecordingCaptureSink();
 
-        Assert.DoesNotContain("exec", plan.CodexAllowlist);
+        // plan_1A A1 (2026-08-16): code-mode exec output is compressed, no longer just observed.
+        Assert.Contains("exec", plan.CodexAllowlist);
 
         var result = CodexResponsesRewriter.Rewrite(body, plan, writer, captures);
 
-        Assert.False(result.Rewritten);
+        Assert.True(result.Rewritten);
         Assert.Equal(1, result.ToolResultsSeen);
-        Assert.Equal(0, result.ToolResultsMinified);
-        Assert.Equal(result.BytesBefore, result.BytesAfter);
-        Assert.Equal(0, writer.WrittenCount);
-        Assert.Equal(original, body);
+        Assert.Equal(1, result.ToolResultsMinified);
+        Assert.True(result.BytesAfter < result.BytesBefore);
+
+        // The curated set keeps ansi-strip and cr-collapse OFF: the SGR bytes survive while
+        // crlf-normalize, trailing-whitespace and blank-edges take the framing around them.
+        var rewritten = Encoding.UTF8.GetString(writer.WrittenSpan);
+        using var document = JsonDocument.Parse(rewritten);
+        Assert.Equal(
+            "\u001b[31mdiagnostic exec output\u001b[0m",
+            document.RootElement.GetProperty("input")[1].GetProperty("output")[0]
+                .GetProperty("text").GetString());
+        Assert.Contains("NOT_CAPTURED_IMAGE", rewritten, StringComparison.Ordinal);
+        Assert.Contains("NOT_CAPTURED_AUDIO", rewritten, StringComparison.Ordinal);
+        Assert.Contains("\"preserve\": \"byte-for-byte\"", rewritten, StringComparison.Ordinal);
 
         var capture = Assert.Single(captures.Captures);
         Assert.Equal("openai", capture.Provider);
@@ -96,14 +106,10 @@ public class CodexResponsesRewriterTests
             "const result = await tools.shell_command({\"command\":\"Get-ChildItem\"});\ntext(result);",
             capture.Command);
         Assert.Equal("\u001b[31mdiagnostic exec output\u001b[0m  \r\n", capture.RawText);
-        Assert.Equal(capture.RawText, capture.CompressedText);
-        Assert.False(capture.Changed);
-        Assert.False(capture.RewriteAccepted);
-        Assert.Empty(capture.Trace);
-
-        var requestText = Encoding.UTF8.GetString(body);
-        Assert.Contains("NOT_CAPTURED_IMAGE", requestText, StringComparison.Ordinal);
-        Assert.Contains("NOT_CAPTURED_AUDIO", requestText, StringComparison.Ordinal);
+        Assert.Equal("\u001b[31mdiagnostic exec output\u001b[0m", capture.CompressedText);
+        Assert.True(capture.Changed);
+        Assert.True(capture.RewriteAccepted);
+        Assert.NotEmpty(capture.Trace);
         Assert.DoesNotContain("NOT_CAPTURED_IMAGE", capture.RawText, StringComparison.Ordinal);
         Assert.DoesNotContain("NOT_CAPTURED_AUDIO", capture.RawText, StringComparison.Ordinal);
     }
@@ -136,7 +142,7 @@ public class CodexResponsesRewriterTests
     }
 
     [Fact]
-    public void Rewrite_CurrentCodeModeExec_MultipleTextBlocks_AreCapturedSeparately()
+    public void Rewrite_CurrentCodeModeExec_MultipleTextBlocks_AreCompressedAndCapturedSeparately()
     {
         const string body = """
             {"input":[
@@ -151,22 +157,32 @@ public class CodexResponsesRewriterTests
         var plan = CompressionCatalog.Resolve(null);
         var captures = new RecordingCaptureSink();
 
-        var (result, rewritten, writtenCount) = RewriteIncludingNoOp(
+        var (result, rewritten, _) = RewriteIncludingNoOp(
             body, plan: plan, captures: captures);
 
-        Assert.False(result.Rewritten);
-        Assert.Equal(0, writtenCount);
-        Assert.Equal(body, rewritten);
+        Assert.True(result.Rewritten);
+        Assert.Equal(1, result.ToolResultsSeen);
+        Assert.Equal(1, result.ToolResultsMinified);
+        Assert.Contains("\"text\":\"first\"", rewritten, StringComparison.Ordinal);
+        Assert.Contains("\"text\":\"second\"", rewritten, StringComparison.Ordinal);
+        Assert.Contains("data:image/png;base64,NOT_CAPTURED", rewritten, StringComparison.Ordinal);
         Assert.Collection(
             captures.Captures,
-            capture => Assert.Equal("first  \n", capture.RawText),
-            capture => Assert.Equal("second  \n", capture.RawText));
+            capture =>
+            {
+                Assert.Equal("first  \n", capture.RawText);
+                Assert.Equal("first", capture.CompressedText);
+            },
+            capture =>
+            {
+                Assert.Equal("second  \n", capture.RawText);
+                Assert.Equal("second", capture.CompressedText);
+            });
         Assert.All(captures.Captures, capture =>
         {
             Assert.Equal("exec", capture.ToolName);
-            Assert.Equal(capture.RawText, capture.CompressedText);
-            Assert.False(capture.RewriteAccepted);
-            Assert.Empty(capture.Trace);
+            Assert.True(capture.RewriteAccepted);
+            Assert.NotEmpty(capture.Trace);
         });
     }
 
@@ -206,7 +222,7 @@ public class CodexResponsesRewriterTests
     }
 
     [Fact]
-    public void Rewrite_MixedExecAndShellOutputs_CapturesExecAndOnlyRewritesShell()
+    public void Rewrite_MixedExecAndShellOutputs_RewritesBothThroughTheShellScope()
     {
         const string body = """
             {"input":[
@@ -228,8 +244,8 @@ public class CodexResponsesRewriterTests
 
         Assert.True(result.Rewritten);
         Assert.Equal(2, result.ToolResultsSeen);
-        Assert.Equal(1, result.ToolResultsMinified);
-        Assert.Contains("\"text\":\"exec \\\\u263a  \\n\"", rewritten, StringComparison.Ordinal);
+        Assert.Equal(2, result.ToolResultsMinified);
+        Assert.Equal("exec \\u263a\n", ReadFirstOutputText(rewritten));
         Assert.Equal("shell output\n", ReadOutput(rewritten, 3));
         Assert.Contains("\"metadata\":{\"keep\":\"exact\"}", rewritten, StringComparison.Ordinal);
 
@@ -239,9 +255,9 @@ public class CodexResponsesRewriterTests
             {
                 Assert.Equal("exec", capture.ToolName);
                 Assert.Equal("exec \\u263a  \n", capture.RawText);
-                Assert.Equal(capture.RawText, capture.CompressedText);
-                Assert.False(capture.RewriteAccepted);
-                Assert.Empty(capture.Trace);
+                Assert.Equal("exec \\u263a\n", capture.CompressedText);
+                Assert.True(capture.RewriteAccepted);
+                Assert.NotEmpty(capture.Trace);
             },
             capture =>
             {

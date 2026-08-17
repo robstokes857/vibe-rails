@@ -95,14 +95,26 @@ public sealed class JobService(
         if (executableResolver.Resolve(job.Llm) is null)
             throw JobServiceException.BadRequest($"The {job.Llm} CLI is not available on PATH.");
 
-        var runId = await store.EnqueueManualRunAsync(id, cancellationToken)
+        // Enqueue + reservation are one logical commit point. Once validation has completed, do
+        // not let RequestAborted split them and leave either an unreserved manual run for the
+        // native scheduler or a reserved run that the route never gets a chance to clean up.
+        cancellationToken.ThrowIfCancellationRequested();
+        var runId = await store.EnqueueManualRunAsync(id, CancellationToken.None)
             ?? throw JobServiceException.Conflict("The Automation could not be queued.");
 
         // Manual runs are handed directly to an interactive Web UI terminal by JobRoutes. Mark
         // the launch before that potentially-slow terminal bootstrap so the background scheduler
         // cannot race it and open a second native terminal for the same run.
-        if (!await store.TryMarkLaunchedAsync(runId, cancellationToken))
+        if (!await store.TryMarkLaunchedAsync(runId, CancellationToken.None))
+        {
+            await store.CompleteRunAsync(
+                runId,
+                JobRunStatus.Failed,
+                null,
+                "The Automation could not reserve an interactive terminal.",
+                CancellationToken.None);
             throw JobServiceException.Conflict("The Automation could not reserve an interactive terminal.");
+        }
 
         return new JobActionResponse(true, "Automation is starting.", runId);
     }
@@ -324,7 +336,7 @@ public sealed class JobService(
         else if (requireEnvironmentPrompt)
             throw JobServiceException.BadRequest("The selected Environment needs an Initial Message before it can run as an Automation.");
 
-        if (resolvedLlm is not (LLM.Codex or LLM.Claude or LLM.Antigravity or LLM.Copilot or LLM.OpenCode or LLM.Glm52 or LLM.Grok46))
+        if (resolvedLlm is not (LLM.Codex or LLM.Claude or LLM.Antigravity or LLM.Copilot or LLM.OpenCode or LLM.Glm52 or LLM.Grok46 or LLM.Glm53))
             throw JobServiceException.BadRequest("The selected LLM cannot run as an Automation.");
         if (resolvedPrompt.Length > MaximumPromptLength)
             throw JobServiceException.BadRequest($"Initial message must be at most {MaximumPromptLength} characters.");

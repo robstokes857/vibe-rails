@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using VibeRails.Services.VCA;
 
 namespace VibeRails.Services
 {
@@ -84,7 +85,9 @@ namespace VibeRails.Services
         RequireTestCoverageMinimum100,
         SkipTestCoverage,
         PackageChangeDetected,
-        CheckCommitMessageForWords
+        CheckCommitMessageForWords,
+        FileLock,
+        DirectoryLock
     }
     public static class RuleParser
     {
@@ -103,7 +106,9 @@ namespace VibeRails.Services
             { Rule.RequireTestCoverageMinimum100, "Require test coverage minimum 100%" },
             { Rule.SkipTestCoverage, "Skip test coverage" },
             { Rule.PackageChangeDetected, "Package file changes" },
-            { Rule.CheckCommitMessageForWords, "Check commit message for" }
+            { Rule.CheckCommitMessageForWords, "Check commit message for" },
+            { Rule.FileLock, PathLockRule.FileTemplate },
+            { Rule.DirectoryLock, PathLockRule.DirectoryTemplate }
         };
 
         private static Dictionary<Rule, string> _descriptions = new Dictionary<Rule, string>()
@@ -121,7 +126,9 @@ namespace VibeRails.Services
             { Rule.RequireTestCoverageMinimum100, "Requires 100% test coverage for changed code files. Full coverage is mandatory." },
             { Rule.SkipTestCoverage, "Disables test coverage checking for this project or directory." },
             { Rule.PackageChangeDetected, "Detects changes to package/dependency files (package.json, .csproj, requirements.txt, etc.) and alerts or blocks based on enforcement level." },
-            { Rule.CheckCommitMessageForWords, "Checks commit messages for specific forbidden words (CSV list). Useful for catching recurring LLM mistakes. Format: 'Check commit message for: word1,word2,word3'" }
+            { Rule.CheckCommitMessageForWords, "Checks commit messages for specific forbidden words (CSV list). Useful for catching recurring LLM mistakes. Format: 'Check commit message for: word1,word2,word3'" },
+            { Rule.FileLock, "Warns or blocks when the exact file path is added, modified, deleted, or renamed. The path is relative to the declaring AGENTS.md. Format: File Lock('path/to/file')" },
+            { Rule.DirectoryLock, "Warns or blocks when any file at or below the directory is added, modified, deleted, or renamed. The path is relative to the declaring AGENTS.md. Format: Directory Lock('path/to/directory')" }
         };
 
         public static List<string> GetRules()
@@ -148,14 +155,39 @@ namespace VibeRails.Services
 
         public static bool TryParse(string value, out Rule rule)
         {
-            foreach (var kvp in _keyValuePairs)
+            if (PathLockRule.TryParse(value, out var pathLock))
             {
-                if (kvp.Value.Contains(value))
+                rule = pathLock.Kind == PathLockKind.File
+                    ? Rule.FileLock
+                    : Rule.DirectoryLock;
+                return true;
+            }
+
+            const string commitMessagePrefix = "Check commit message for";
+            if (value.Equals(commitMessagePrefix, StringComparison.OrdinalIgnoreCase)
+                || value.StartsWith(commitMessagePrefix + ":", StringComparison.OrdinalIgnoreCase))
+            {
+                rule = Rule.CheckCommitMessageForWords;
+                return true;
+            }
+
+            // Exact match, not Contains. Matching a template that *contains* the input made every
+            // prefix of every rule parse as that rule: "" matched the first entry, and "File Lock"
+            // resolved to Rule.FileLock without a path — which is how malformed lock text got past
+            // the write-side gate. The two rules that take an argument are handled above.
+            var trimmed = value?.Trim();
+            if (!string.IsNullOrEmpty(trimmed))
+            {
+                foreach (var kvp in _keyValuePairs)
                 {
-                    rule = kvp.Key;
-                    return true;
+                    if (kvp.Value.Equals(trimmed, StringComparison.OrdinalIgnoreCase))
+                    {
+                        rule = kvp.Key;
+                        return true;
+                    }
                 }
             }
+
             rule = default;
             return false;
         }

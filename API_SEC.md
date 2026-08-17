@@ -2,10 +2,14 @@
 
 Audit date: 2026-08-15
 
-Full production route/authentication reconciliation completed: 2026-08-15. All 142
+Full production route/authentication reconciliation completed: 2026-08-15; the
+filesystem-picker delta was reconciled on 2026-08-16. All 143
 `/api/v1` method/path surfaces, eight protected non-`/api` API surfaces, and the three
 bootstrap/page/probe mappings match the current working tree. The only middleware bypasses
 remain exact `GET /health`, exact `GET /auth/bootstrap`, and global `OPTIONS` requests.
+
+Filesystem-picker inventory added: 2026-08-16 (one authenticated, active-root-only metadata
+endpoint; no new listener and no authentication bypass).
 
 Jobs inventory re-checked: 2026-08-03 (three run-history routes added; see § 3).
 
@@ -22,10 +26,10 @@ unchanged).
 
 Route inventory updated: 2026-08-15 (`ANY /llm/xai/{**rest}` added as a fourth Kestrel-mapped
 LLM proxy tree for OpenCode's xAI/Grok provider). This is not the rejected `/llm/grok`
-sidecar. The 153 mapped surfaces and frozen three-case middleware bypass remain otherwise
+sidecar. The 154 mapped surfaces and frozen three-case middleware bypass remain otherwise
 unchanged.
 
-Listener topology re-checked: 2026-08-15. The only approved production request listener
+Listener topology re-checked: 2026-08-16. The only approved production request listener
 is the main Kestrel host. An uncommitted Grok integration's second `HttpListener` was
 rejected and is logged below; no other production request listener was found.
 
@@ -101,7 +105,7 @@ discovery alone is insufficient if the same feature change is allowed to expand 
 set. The production listener set is now frozen above so a new match starts as a finding, not as
 an expectation.
 
-### Repository-wide listener result — 2026-08-15
+### Repository-wide listener result — 2026-08-16
 
 - Approved serving implementation: the main Kestrel host in `VibeRails/Program.cs`.
 - Rejected and removed before merge: `GrokLoopbackBridge`'s `HttpListener`.
@@ -131,8 +135,8 @@ session-scoped browser credential (`viberails_tab`), which the implementation ca
 Authentication is enforced primarily by
 [`CookieAuthMiddleware`](VibeRails/Middleware/CookieAuthMiddleware.cs). The LLM proxy
 routes additionally use
-[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 153 mapped route
-surfaces in this inventory: 142 `/api/v1` method/path mappings, eight non-`/api` protected
+[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 154 mapped route
+surfaces in this inventory: 143 `/api/v1` method/path mappings, eight non-`/api` protected
 API surfaces, and three bootstrap/page/probe routes. Static-file middleware and the
 global `OPTIONS` behavior are noted separately because they are not finite mapped-route
 lists.
@@ -414,6 +418,16 @@ WebSocket handshakes use the session cookie/subprotocol plus the tab-token subpr
 - `GET /api/v1/context`
 - `GET /api/v1/projects/name`
 - `PUT /api/v1/projects/name`
+
+### Local filesystem browser (1)
+
+- `GET /api/v1/filesystem/entries` — mapped only by an active root-backend process and
+  returns one directory level of metadata; it never returns file contents. Listings use
+  bounded cursor pages with literal server-side name search. Requests reject relative,
+  UNC/device, mapped/unknown Windows-drive, and any symlink/junction/reparse-component path;
+  linked rows are metadata-only and the picker will not open or return them. Ordinary Unix
+  network mounts cannot be classified portably, and downstream filesystem operations must
+  independently revalidate a selected path before use.
 
 ### Sandboxes (9)
 
