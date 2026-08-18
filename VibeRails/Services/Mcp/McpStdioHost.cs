@@ -89,6 +89,11 @@ public static class McpStdioHost
             client.Timeout = TimeSpan.FromSeconds(10);
         });
         services.AddScoped<TokenSaverTool>();
+        // Signed-Python-script guidance. File-based state only (no DB, no interpreter
+        // probe on construction), so it is safe in this stdio child process too.
+        services.AddSingleton<VibeRails.Services.PythonScripts.IPythonScriptService>(
+            new VibeRails.Services.PythonScripts.PythonScriptService());
+        services.AddScoped<PythonScriptTool>();
         // HostShellTools (run_shell_command) and WebResearchTools (web_search/web_fetch) are
         // intentionally not exposed for now (security review 2026-07-02); mirrors MapRegisterServices.
         // Classes kept in-tree for re-add.
@@ -101,6 +106,7 @@ public static class McpStdioHost
             .WithStdioServerTransport()
             .WithTools<RulesTool>()
             .WithTools<SessionSearchTool>()
-            .WithTools<TokenSaverTool>();
+            .WithTools<TokenSaverTool>()
+            .WithTools<PythonScriptTool>();
     }
 }

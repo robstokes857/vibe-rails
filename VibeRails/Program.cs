@@ -11,6 +11,7 @@ using VibeRails.Services.Mcp;
 using VibeRails.Services.Terminal;
 using VibeRails.Services.VCA.Hooks;
 using VibeRails.Services.Jobs;
+using VibeRails.Services.PythonScripts;
 
 using VibeRails.Utils;
 
@@ -142,6 +143,14 @@ if (VcaHookProcessHost.IsRequested(args))
 if (JobTriggerProcessHost.IsRequested(args))
 {
     Environment.ExitCode = await JobTriggerProcessHost.RunAsync(args);
+    return;
+}
+
+// Code-sign helper: `vb --sign-script <name>.py`. Approves a Python script with the
+// user's signing PIN. File-based state only — no Kestrel, no browser, no auth.
+if (PythonScriptSignProcessHost.IsRequested(args))
+{
+    Environment.ExitCode = await PythonScriptSignProcessHost.RunAsync(args);
     return;
 }
 

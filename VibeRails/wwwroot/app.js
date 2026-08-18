@@ -17,6 +17,7 @@ import { VibeRailsAiController } from './js/modules/vibe-rails-ai-controller.js'
 import { McpController } from './js/modules/mcp-controller.js';
 import { JobController } from './js/modules/jobs-controller.js';
 import { LlmPickerController } from './js/modules/llm-picker-controller.js';
+import { AutomationNavLauncher } from './js/modules/automation-launcher.js';
 import { AppEventClient } from './js/modules/app-event-client.js';
 import { TerminalTokenCompressionMeter, getTokenSaverEnabledSources } from './js/modules/terminal-token-compression.js';
 import { openFileExplorer } from './js/modules/file-explorer.js';
@@ -55,6 +56,7 @@ export class VibeControlApp {
         this.vibeRailsAiController = new VibeRailsAiController(this);
         this.mcpController = new McpController(this);
         this.jobController = new JobController(this);
+        this.automationNavLauncher = new AutomationNavLauncher(this);
         this.appEventClient = new AppEventClient(this);
         this.lifecycleHeartbeatTimer = null;
         this.lifecycleClientId = this.getOrCreateLifecycleClientId();
@@ -391,6 +393,12 @@ export class VibeControlApp {
             if (goHome) {
                 e.preventDefault();
                 this.navigate('dashboard', {}, { resetStack: true });
+            }
+
+            const launchAutomation = e.target.closest('[data-action="automation-launcher"]');
+            if (launchAutomation) {
+                e.preventDefault();
+                void this.automationNavLauncher.toggle(launchAutomation);
             }
 
             const goSettings = e.target.closest('[data-action="navigate-settings"]');

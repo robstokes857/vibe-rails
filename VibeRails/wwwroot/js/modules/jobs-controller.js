@@ -7,6 +7,7 @@ import {
 } from './utils.js';
 import { mountWorkerPicker } from './pickers/worker-picker.js';
 import { showReplayModal } from './session-viewer.js';
+import { PythonScriptsController } from './python-scripts-controller.js';
 
 const LLM = Object.freeze({
     CODEX: 1,
@@ -75,6 +76,7 @@ export class JobController {
         // actions confirm through this in-app dialog instead. Held as a field so tests
         // can substitute a resolved value.
         this.confirm = confirmDialog;
+        this.pythonScripts = new PythonScriptsController(app);
         this.root = null;
         this.jobs = [];
         // One entry per automation for the page-level table; the full run list is fetched per
@@ -112,6 +114,7 @@ export class JobController {
         // visit would make the first renderJobs() skip and leave the spinner forever.
         this._lastJobsListHtml = null;
         this._lastRunsHtml = null;
+        void this.pythonScripts.mount(this.root?.querySelector('[data-python-scripts-root]'));
         await this.refreshAll();
 
         if (data?.newJob) {
@@ -127,6 +130,7 @@ export class JobController {
     }
 
     unload() {
+        this.pythonScripts.unmount();
         this.runModalGeneration += 1;
         this.historyRequestGeneration += 1;
         this.disposeEditorModal();
@@ -214,6 +218,9 @@ export class JobController {
                         <div class="jobs-empty" role="status"><span class="spinner-border spinner-border-sm"></span> Loading automations…</div>
                     </div>
                 </section>
+
+                <section class="jobs-section jobs-panel python-scripts-section" aria-labelledby="python-scripts-title"
+                         data-python-scripts-root></section>
 
                 <details class="jobs-history-panel">
                     <summary>
@@ -1128,6 +1135,21 @@ export class JobController {
             this.app.showToast('Automation started', response?.message || 'The automation is running.', 'success');
             await this.refreshRuns({ quiet: true });
         });
+    }
+
+    /**
+     * Run an automation from outside the jobs view (the nav launcher). The jobs view
+     * populates this.jobs/this.environments when it loads; from the nav they may be
+     * empty or stale, so refresh them first — runNow needs both to route the run into
+     * its interactive terminal tab instead of falling back to a bare toast.
+     */
+    async launchFromNav(jobId) {
+        const id = Number(jobId);
+        if (!Number.isFinite(id)) return;
+        if (!this.jobs.some(job => Number(job.id) === id) || this.environments.length === 0) {
+            await this.refreshAll({ quiet: true });
+        }
+        return this.runNow(id, null);
     }
 
     async toggleJob(jobId, button) {

@@ -22,6 +22,8 @@ public static class RouteExtensions
         EnvironmentRoutes.Map(app);
         EnvironmentStepRoutes.Map(app);
         LlmPickerRoutes.Map(app);
+        AutomationNavRoutes.Map(app);
+        PythonScriptRoutes.Map(app);
         JobRoutes.Map(app, launchDirectory);
         CliLaunchRoutes.Map(app, launchDirectory);
         SessionRoutes.Map(app);

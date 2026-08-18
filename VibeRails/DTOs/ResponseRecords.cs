@@ -343,6 +343,108 @@ namespace VibeRails.DTOs
         List<string> DisabledBaseKeys
     );
 
+    // Nav Automation launcher preferences. Keys are job:{id} / script:{name} so saved
+    // ordering survives renames; labels are resolved from the live catalogs. Kind is
+    // "automation" (a Job) or "script" (a signed Python script; JobId is 0).
+    public record AutomationNavPreferenceItem(
+        string Key,
+        string Kind,
+        string Label,
+        long JobId,
+        bool Enabled,
+        int Order
+    );
+
+    public record AutomationNavPreferencesResponse(
+        List<AutomationNavPreferenceItem> Items
+    );
+
+    public record UpdateAutomationNavPreferencesRequest(
+        List<AutomationNavPreferenceItem>? Items
+    );
+
+    // Versioned document persisted in GlobalCache. Order and hidden state both live
+    // here (unlike the LLM picker, no per-row compatibility flag exists on the Job),
+    // and entries for automations outside the current project scope are preserved
+    // across saves so switching projects never rewrites another project's choices.
+    public record AutomationNavPreferenceDocument(
+        int Version,
+        List<string> Order,
+        List<string> HiddenKeys
+    );
+
+    // Python script signing (hash pinning). A script is runnable only while its
+    // canonical content hash matches the approval the user blessed with their PIN.
+    public record PythonScriptInfo(
+        string Name,
+        string Status,
+        string? ApprovedUtc,
+        string? ModifiedUtc,
+        long SizeBytes
+    );
+
+    public record PythonScriptListResponse(
+        bool PinConfigured,
+        string ScriptsDirectory,
+        List<PythonScriptInfo> Scripts
+    );
+
+    public record SetPythonScriptPinRequest(
+        string? CurrentPin,
+        string? NewPin
+    );
+
+    public record PythonScriptApprovalRequest(
+        string? Name,
+        string? Pin
+    );
+
+    public record PythonScriptRunRequest(
+        string? Name
+    );
+
+    public record PythonScriptRunResponse(
+        string Name,
+        int ExitCode,
+        bool TimedOut,
+        string StandardOutput,
+        string StandardError,
+        double DurationMs,
+        string StartedUtc
+    );
+
+    public record PythonScriptRunRecord(
+        string Name,
+        string StartedUtc,
+        int ExitCode,
+        bool TimedOut,
+        double DurationMs
+    );
+
+    public record PythonScriptRunHistoryResponse(
+        List<PythonScriptRunRecord> Runs
+    );
+
+    // Versioned signing state persisted at ~/.vibe_rails/script_signing.json:
+    // the PBKDF2 PIN verifier plus every approval (script name → canonical hash).
+    public record PythonScriptSigningDocument(
+        int Version,
+        PythonScriptPinRecord? Pin,
+        List<PythonScriptApprovalRecord> Approvals
+    );
+
+    public record PythonScriptPinRecord(
+        string Salt,
+        int Iterations,
+        string Hash
+    );
+
+    public record PythonScriptApprovalRecord(
+        string Name,
+        string Hash,
+        string ApprovedUtc
+    );
+
     // Hook Management DTOs
     public record HookFileStatusResponse(
         string Name,
@@ -1360,6 +1462,27 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(LlmPickerPreferencesResponse))]
     [JsonSerializable(typeof(UpdateLlmPickerPreferencesRequest))]
     [JsonSerializable(typeof(LlmPickerPreferenceDocument))]
+    // Nav Automation launcher preferences
+    [JsonSerializable(typeof(AutomationNavPreferenceItem))]
+    [JsonSerializable(typeof(List<AutomationNavPreferenceItem>))]
+    [JsonSerializable(typeof(AutomationNavPreferencesResponse))]
+    [JsonSerializable(typeof(UpdateAutomationNavPreferencesRequest))]
+    [JsonSerializable(typeof(AutomationNavPreferenceDocument))]
+    // Python script signing
+    [JsonSerializable(typeof(PythonScriptInfo))]
+    [JsonSerializable(typeof(List<PythonScriptInfo>))]
+    [JsonSerializable(typeof(PythonScriptListResponse))]
+    [JsonSerializable(typeof(SetPythonScriptPinRequest))]
+    [JsonSerializable(typeof(PythonScriptApprovalRequest))]
+    [JsonSerializable(typeof(PythonScriptRunRequest))]
+    [JsonSerializable(typeof(PythonScriptRunResponse))]
+    [JsonSerializable(typeof(PythonScriptRunRecord))]
+    [JsonSerializable(typeof(List<PythonScriptRunRecord>))]
+    [JsonSerializable(typeof(PythonScriptRunHistoryResponse))]
+    [JsonSerializable(typeof(PythonScriptSigningDocument))]
+    [JsonSerializable(typeof(PythonScriptPinRecord))]
+    [JsonSerializable(typeof(PythonScriptApprovalRecord))]
+    [JsonSerializable(typeof(List<PythonScriptApprovalRecord>))]
     // Jobs DTOs
     [JsonSerializable(typeof(JobTriggerDto))]
     [JsonSerializable(typeof(List<JobTriggerDto>))]

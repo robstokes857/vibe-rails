@@ -16255,3 +16255,238 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
     .vb-file-explorer-entry,
     .vb-file-explorer-address-form { transition: none; }
 }
+
+/* ============================================================
+   Nav Automation launcher (flyout on the "Launch" nav button)
+   ============================================================ */
+
+.automation-launch-btn.is-flyout-open {
+    background: var(--color-bg-surface-hover);
+    color: var(--color-text);
+}
+
+.automation-launch-flyout {
+    position: fixed;
+    z-index: 1060;
+    min-width: 250px;
+    max-width: 340px;
+    display: flex;
+    flex-direction: column;
+    background: var(--color-bg-elevated);
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+    overflow: hidden;
+}
+
+.automation-launch-flyout-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px 8px;
+    color: var(--color-text-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.automation-launch-flyout-items {
+    display: flex;
+    flex-direction: column;
+    max-height: min(48vh, 420px);
+    overflow-y: auto;
+    padding: 0 6px 6px;
+}
+
+.automation-launch-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--color-text);
+    text-align: left;
+    cursor: pointer;
+}
+
+.automation-launch-item:hover,
+.automation-launch-item:focus-visible {
+    background: var(--color-bg-surface-hover);
+}
+
+.automation-launch-item > .fa-play {
+    flex: 0 0 auto;
+    font-size: 0.7rem;
+    color: var(--color-success);
+}
+
+.automation-launch-item-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.automation-launch-flyout-empty {
+    padding: 10px 12px 12px;
+    font-size: 0.85rem;
+}
+
+.automation-launch-flyout-footer {
+    display: flex;
+    flex-direction: column;
+    padding: 6px;
+    border-top: 1px solid var(--color-border);
+    background: var(--color-bg-surface);
+}
+
+.automation-launch-footer-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 7px 10px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--color-text-muted);
+    font-size: 0.85rem;
+    text-align: left;
+    cursor: pointer;
+}
+
+.automation-launch-footer-btn:hover,
+.automation-launch-footer-btn:focus-visible {
+    background: var(--color-bg-surface-hover);
+    color: var(--color-text);
+}
+
+/* ============================================================
+   Python scripts (Automation page section + signing UI)
+   ============================================================ */
+
+/* Nothing in this section may impose an unbreakable minimum width: the scripts
+   directory path is one long token, and the heading/actions rows must wrap rather
+   than widen the page at narrow (320px) viewports. */
+.python-scripts-section {
+    min-width: 0;
+}
+
+.python-scripts-heading-copy {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.python-scripts-heading-copy [data-python-scripts-dir] {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.python-scripts-heading-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: flex-start;
+}
+
+.python-scripts-list {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.python-script-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border);
+    border-bottom-width: 0;
+    background: var(--color-bg-surface);
+}
+
+.python-script-row:first-child {
+    border-radius: 8px 8px 0 0;
+}
+
+.python-script-row:last-child {
+    border-bottom-width: 1px;
+    border-radius: 0 0 8px 8px;
+}
+
+.python-script-row:only-child {
+    border-radius: 8px;
+}
+
+.python-script-main {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.python-script-name {
+    font-weight: 600;
+    color: var(--color-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.python-script-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.78rem;
+    color: var(--color-text-muted);
+    white-space: nowrap;
+}
+
+.python-script-status[data-tone="success"] {
+    color: var(--color-success);
+}
+
+.python-script-status[data-tone="warning"] {
+    color: var(--color-warning);
+}
+
+.python-script-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    flex: 0 0 auto;
+}
+
+.python-script-output {
+    flex-basis: 100%;
+    margin-top: 2px;
+}
+
+.python-script-output > summary {
+    cursor: pointer;
+    font-size: 0.8rem;
+    color: var(--color-text-muted);
+}
+
+.python-script-output > pre {
+    margin: 6px 0 0;
+    max-height: 280px;
+    overflow: auto;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: var(--color-bg-base);
+    border: 1px solid var(--color-border);
+    font-size: 0.78rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.python-scripts-pin-modal {
+    z-index: 1070;
+}

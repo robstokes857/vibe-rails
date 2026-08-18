@@ -180,6 +180,16 @@ namespace VibeRails
                 return new Repository(connectionString, gitDiff, logger);
             });
             serviceCollection.AddScoped<ILlmPickerPreferenceService, LlmPickerPreferenceService>();
+            serviceCollection.AddScoped<IAutomationNavPreferenceService, AutomationNavPreferenceService>();
+            // Python script signing: file-based state + a lazily-probed interpreter. Singleton so
+            // the run-history and the signing-file lock live in one place. Factory form on
+            // purpose: Discover() probes the filesystem/PATH for an interpreter, and that must
+            // happen on the first python-scripts call, not during startup of every vb process
+            // (terminal tab children register services too).
+            serviceCollection.AddSingleton<PyBridge.IPythonRunner>(_ =>
+                new PyBridge.PythonRunner(PyBridge.PythonRunnerOptions.Discover()));
+            serviceCollection.AddSingleton<Services.PythonScripts.IPythonScriptService>(sp =>
+                new Services.PythonScripts.PythonScriptService(sp.GetRequiredService<PyBridge.IPythonRunner>()));
             serviceCollection.AddScoped<IGetUserText, GetUserText>();
             serviceCollection.AddScoped<IProjectCache, ProjectCache>();
             serviceCollection.AddScoped<IGlobalCache, GlobalCache>();
@@ -255,6 +265,7 @@ namespace VibeRails
                     client.Timeout = TimeSpan.FromSeconds(10);
                 });
                 serviceCollection.AddScoped<TokenSaverTool>();
+                serviceCollection.AddScoped<PythonScriptTool>();
                 // run_shell_command (HostShellTools) and web_search/web_fetch (WebResearchTools) are
                 // intentionally not exposed for now (security review 2026-07-02). Classes kept in-tree;
                 // to restore, re-add AddScoped<...>() here, WithTools<...>() in the chain below, and the
@@ -268,7 +279,8 @@ namespace VibeRails
                     .WithHttpTransport()
                     .WithTools<RulesTool>()
                     .WithTools<SessionSearchTool>()
-                    .WithTools<TokenSaverTool>();
+                    .WithTools<TokenSaverTool>()
+                    .WithTools<PythonScriptTool>();
             }
 
             // Claude Agent Sync Service (syncs CLAUDE.md to AGENTS.md on session lifecycle)

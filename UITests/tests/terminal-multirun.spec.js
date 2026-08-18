@@ -201,7 +201,7 @@ test.describe('terminal-multirun', () => {
             }
         });
 
-        const PROMPT = 'Make me a cat photo';
+        const PROMPT = 'THIS IS AN AUTOMATED TEST';
         await openMultiRunModal(page);
         await page.locator('#vb-multirun-input').fill(PROMPT);
         await page.locator('#vb-multirun-run-btn').click();
@@ -232,7 +232,7 @@ test.describe('terminal-multirun', () => {
         });
 
         await openMultiRunModal(page);
-        await page.locator('#vb-multirun-input').fill('test prompt');
+        await page.locator('#vb-multirun-input').fill('THIS IS AN AUTOMATED TEST');
         // Dispatch the keydown directly. Playwright's locator.press('Control+Enter')
         // sometimes lands without the ctrlKey modifier flag depending on focus
         // bookkeeping, which causes the handler's `event.ctrlKey` check to miss.
