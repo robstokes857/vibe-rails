@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Readiness probe against the backend's `/health` endpoint after bootstrap, so a backend that binds its port before it can serve requests surfaces as an error instead of a blank dashboard.
 - Marketplace metadata: `AI` / `Machine Learning` categories, keywords, and declared `untrustedWorkspaces` / `virtualWorkspaces` capabilities.
 - `CHANGELOG.md` and `CONTRIBUTING.md`; README now documents the bundled backend and common troubleshooting.
+- `__viberails_openFile__` webview bridge: the dashboard can ask the extension to open a file (a Python script, for example) in a real editor tab beside the panel.
 
 ### Changed
 

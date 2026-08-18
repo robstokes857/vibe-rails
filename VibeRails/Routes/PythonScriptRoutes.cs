@@ -5,7 +5,7 @@ namespace VibeRails.Routes;
 
 public static class PythonScriptRoutes
 {
-    public static void Map(WebApplication app)
+    public static void Map(WebApplication app, bool isActiveRootBackend)
     {
         // Status reads fail closed (400 + message) while another process briefly holds
         // the signing file, rather than reporting an empty/unsigned state or a raw 500.
@@ -54,9 +54,60 @@ public static class PythonScriptRoutes
         app.MapGet("/api/v1/python-scripts/runs", (IPythonScriptService service) =>
             Results.Ok(service.GetRunHistory()))
             .WithName("GetPythonScriptRuns");
+
+        // Authoring. None of these take a PIN, and none of them can make a script runnable:
+        // every write moves the file's canonical hash away from whatever was approved. Only
+        // approve/revoke above touch the signing document's trust.
+        app.MapGet("/api/v1/python-scripts/content", (
+            IPythonScriptService service,
+            string? name,
+            CancellationToken cancellationToken) =>
+            ExecuteAsync(() => service.GetContentAsync(name, cancellationToken)))
+            .WithName("GetPythonScriptContent");
+
+        app.MapPost("/api/v1/python-scripts/content", (
+            IPythonScriptService service,
+            PythonScriptSaveRequest request,
+            CancellationToken cancellationToken) =>
+            ExecuteAsync(() => service.SaveContentAsync(request, cancellationToken)))
+            .WithName("SavePythonScriptContent");
+
+        app.MapPost("/api/v1/python-scripts/create", (
+            IPythonScriptService service,
+            PythonScriptSaveRequest request,
+            CancellationToken cancellationToken) =>
+            ExecuteAsync(() => service.CreateAsync(request, cancellationToken)))
+            .WithName("CreatePythonScript");
+
+        app.MapPost("/api/v1/python-scripts/rename", (
+            IPythonScriptService service,
+            PythonScriptRenameRequest request,
+            CancellationToken cancellationToken) =>
+            ExecuteAsync(() => service.RenameAsync(request, cancellationToken)))
+            .WithName("RenamePythonScript");
+
+        app.MapDelete("/api/v1/python-scripts", (
+            IPythonScriptService service,
+            string? name,
+            CancellationToken cancellationToken) =>
+            ExecuteAsync(() => service.DeleteAsync(name, cancellationToken)))
+            .WithName("DeletePythonScript");
+
+        // Import reads a caller-supplied path from anywhere on the host, so it is a root
+        // dashboard capability like the file picker that feeds it (see FileSystemRoutes) and
+        // is not exposed from the short-lived backend behind every terminal tab.
+        if (isActiveRootBackend)
+        {
+            app.MapPost("/api/v1/python-scripts/import", (
+                IPythonScriptService service,
+                PythonScriptImportRequest request,
+                CancellationToken cancellationToken) =>
+                ExecuteAsync(() => service.ImportAsync(request, cancellationToken)))
+                .WithName("ImportPythonScript");
+        }
     }
 
-    private static async Task<IResult> ExecuteAsync(Func<Task<PythonScriptListResponse>> operation)
+    private static async Task<IResult> ExecuteAsync<TResponse>(Func<Task<TResponse>> operation)
     {
         try
         {

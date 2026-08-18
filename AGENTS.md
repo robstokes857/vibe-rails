@@ -519,6 +519,19 @@ tools (security review 2026-07-02).
 - `DELETE /api/v1/sandboxes/{id}` - Delete sandbox (removes directory + DB record)
 - `POST /api/v1/sandboxes/{id}/launch/vscode` - Launch VS Code in sandbox directory
 
+**Python scripts** (single-file scripts in `~/.vibe_rails/scripts`, gated by PIN-backed hash pinning):
+- `GET /api/v1/python-scripts` - List scripts with signing status
+- `POST /api/v1/python-scripts/pin` - Create or change the signing PIN
+- `POST /api/v1/python-scripts/approve` | `/revoke` - Sign / unsign a script (PIN required)
+- `POST /api/v1/python-scripts/run` - Run a signed script; `GET .../runs` for history
+- `GET|POST /api/v1/python-scripts/content` - Read / write a script's text. GET returns a
+  raw-content version; POST requires it as `expectedVersion` so a stale editor cannot overwrite
+  a newer file. No PIN is accepted and a write can never create an approval.
+- `POST /api/v1/python-scripts/create` | `/rename`, `DELETE /api/v1/python-scripts?name=` - File management
+- `POST /api/v1/python-scripts/import` - Copy a regular UTF-8 file from a local disk into the
+  scripts folder (root-dashboard backend only, like the filesystem picker; network/device
+  paths and links are rejected)
+
 **Session Logging**:
 - `GET /api/v1/sessions/{sessionId}/logs` - Get session logs
 - `GET /api/v1/sessions/recent` - Recent sessions

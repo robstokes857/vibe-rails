@@ -385,7 +385,7 @@ export class JobController {
                                 <h3>${safeName}</h3>
                                 <span class="job-provider" data-provider="${this.escape(cli)}">${this.escape(llm)}</span>
                             </div>
-                            <span class="job-state" data-tone="${job.enabled ? 'success' : 'neutral'}">${job.enabled ? 'Enabled' : 'Disabled'}</span>
+                            ${this.renderEnabledSwitch(job, jobId, safeName)}
                         </div>
                         <div class="job-card-meta">
                             <span ${environment ? '' : 'data-tone="warning"'} title="Worker"><i class="fa-solid fa-robot" aria-hidden="true"></i><span class="job-card-meta-text">${this.escape(environmentName)}</span></span>
@@ -398,7 +398,6 @@ export class JobController {
                     <div class="job-card-actions">
                         <button class="btn btn-sm btn-primary" type="button" data-job-action="run" data-job-id="${jobId}" aria-label="Run ${safeName} now"><i class="fa-solid fa-play me-1" aria-hidden="true"></i>Run now</button>
                         <button class="btn btn-sm btn-outline-secondary" type="button" data-job-action="edit" data-job-id="${jobId}" aria-label="Edit ${safeName}"><i class="fa-solid fa-pen me-1" aria-hidden="true"></i>Edit</button>
-                        <button class="btn btn-sm job-toggle-action ${job.enabled ? 'is-enabled' : 'is-paused'}" type="button" data-job-action="toggle" data-job-id="${jobId}" title="${job.enabled ? 'Pause scheduled and commit-triggered runs' : 'Enable scheduled and commit-triggered runs'}" aria-label="${job.enabled ? 'Pause' : 'Enable'} ${safeName}"><i class="fa-solid ${job.enabled ? 'fa-pause' : 'fa-power-off'}" aria-hidden="true"></i><span>${job.enabled ? 'Pause' : 'Enable'}</span></button>
                         <details class="job-more">
                             <summary class="btn btn-sm btn-outline-secondary" aria-label="More actions for ${safeName}">More<i class="fa-solid fa-chevron-down ms-1" aria-hidden="true"></i></summary>
                             <div class="job-more-menu">
@@ -411,8 +410,19 @@ export class JobController {
         }).join('');
     }
 
+    // One control carries both jobs: it reads the state (green ON / red OFF) and flips it.
+    // The old pair of Pause/Enable buttons named the action instead, which meant the label
+    // said the opposite of what the automation was actually doing.
+    renderEnabledSwitch(job, jobId, safeName) {
+        const enabled = job.enabled === true;
+        const title = enabled
+            ? 'Enabled — scheduled and commit-triggered runs are on. Click to disable.'
+            : 'Disabled — scheduled and commit-triggered runs are off. Click to enable.';
+        return `<button class="job-switch" type="button" role="switch" aria-checked="${enabled}" data-job-action="toggle" data-job-id="${jobId}" title="${title}" aria-label="${safeName} automatic runs"><span class="job-switch-track" aria-hidden="true"><span class="job-switch-thumb"></span></span><span class="job-switch-text">${enabled ? 'Enabled' : 'Disabled'}</span></button>`;
+    }
+
     nextRunSummary(job) {
-        if (job.enabled !== true) return { label: 'Paused', utc: null };
+        if (job.enabled !== true) return { label: 'Disabled', utc: null };
 
         const triggers = job.triggers || [];
         const scheduled = triggers.filter(trigger => Number(trigger.kind) === TRIGGER.SCHEDULE);
@@ -1336,12 +1346,24 @@ export class JobController {
     async withBusy(button, label, operation) {
         const original = button?.innerHTML;
         const originalTitle = button?.getAttribute?.('title');
+        const originalChecked = button?.getAttribute?.('aria-checked');
         if (button) {
             button.disabled = true;
+            if (button.classList?.contains?.('job-switch')) {
+                // The switch is the state read-out, so it flips right away and then goes quiet:
+                // swapping it for "Enabling…" would pull the control out from under the pointer.
+                // The finally below puts it back if the save fails; a save that works re-renders
+                // the card anyway.
+                const next = button.getAttribute?.('aria-checked') !== 'true';
+                button.setAttribute?.('aria-checked', String(next));
+                const switchText = button.querySelector?.('.job-switch-text');
+                if (switchText) switchText.textContent = next ? 'Enabled' : 'Disabled';
+                button.classList.add('is-busy');
+                button.setAttribute?.('title', label);
             // Icon actions are a fixed square, so a text label ("Queueing…") overflows
             // the box. Spin in place instead and put the wording in the tooltip, which is
             // already where an icon-only button explains itself.
-            if (button.classList?.contains?.('job-icon-action')) {
+            } else if (button.classList?.contains?.('job-icon-action')) {
                 button.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span>';
                 button.setAttribute?.('title', label);
             } else {
@@ -1353,9 +1375,14 @@ export class JobController {
         finally {
             if (button?.isConnected) {
                 button.disabled = false;
+                button.classList?.remove?.('is-busy');
                 button.innerHTML = original;
                 if (originalTitle !== null && originalTitle !== undefined) {
                     button.setAttribute?.('title', originalTitle);
+                }
+                // innerHTML restores the label but not the attribute the switch is painted from.
+                if (originalChecked !== null && originalChecked !== undefined) {
+                    button.setAttribute?.('aria-checked', originalChecked);
                 }
             }
         }

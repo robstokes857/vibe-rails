@@ -48,6 +48,8 @@ export class WebviewPanelManager {
         this.panel.webview.onDidReceiveMessage(message => {
             if (message.command === 'close') {
                 this._onCloseRequested.fire();
+            } else if (message.command === 'openFile' && typeof message.path === 'string') {
+                void this.openFileInEditor(message.path);
             } else if (message.command === 'setTitle' && this.panel && typeof message.title === 'string') {
                 // Strip Unicode format (Cf — RTL/LTR overrides, zero-width joiners) and
                 // control (Cc) characters before assigning the tab title, so a crafted
@@ -66,6 +68,32 @@ export class WebviewPanelManager {
         });
 
         return this.panel;
+    }
+
+    /**
+     * Opens a file from the dashboard in a real editor tab (the Python scripts section
+     * hands off here instead of opening its in-app Monaco modal). Beside, not on top: the
+     * panel owns column one and must stay visible next to the file being edited.
+     *
+     * The path comes from the webview, which only ever runs our own dashboard against the
+     * loopback backend — but it is still checked for being a real file so a bad path
+     * surfaces as a message rather than an empty untitled editor.
+     */
+    private async openFileInEditor(filePath: string): Promise<void> {
+        try {
+            const uri = vscode.Uri.file(filePath);
+            const stat = await vscode.workspace.fs.stat(uri);
+            if (stat.type !== vscode.FileType.File) {
+                throw new Error('not a file');
+            }
+            const document = await vscode.workspace.openTextDocument(uri);
+            await vscode.window.showTextDocument(document, {
+                viewColumn: vscode.ViewColumn.Beside,
+                preview: false
+            });
+        } catch {
+            vscode.window.showErrorMessage(`Vibe Rails could not open ${filePath}`);
+        }
     }
 
     private getInitialPanelTitle(): string {
@@ -162,8 +190,10 @@ export class WebviewPanelManager {
         // The dashboard owns its own Exit buttons (`.nav-exit-btn-sm` in the top nav and
         // sidebar, both visible by default) and wires them in app.js `setupVSCodeIntegration()`.
         // The contract between the two is the injected globals below — `__viberails_VSCODE__`,
-        // `__viberails_close__`, `__viberails_setTitle__` — not any DOM structure. Do not
-        // reintroduce markup-scraping button injection here.
+        // `__viberails_close__`, `__viberails_setTitle__`, `__viberails_openFile__` — not any
+        // DOM structure. Do not reintroduce markup-scraping button injection here.
+        // The dashboard feature-detects `__viberails_openFile__`, so an older extension host
+        // simply falls back to its in-app editor instead of posting a message nobody handles.
         const headInjection = `
     <meta http-equiv="Content-Security-Policy" content="${csp}">
     <base href="${assetsBaseUri}/">
@@ -176,6 +206,7 @@ export class WebviewPanelManager {
         const vscode = acquireVsCodeApi();
         window.__viberails_close__ = function() { vscode.postMessage({ command: 'close' }); };
         window.__viberails_setTitle__ = function(title) { vscode.postMessage({ command: 'setTitle', title: title }); };
+        window.__viberails_openFile__ = function(path) { vscode.postMessage({ command: 'openFile', path: path }); };
         ${fetchPatch}
     </script>`;
 

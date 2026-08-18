@@ -238,7 +238,8 @@ public sealed class AutomationNavPreferenceServiceTests : IDisposable
     }
 
     private static PythonScriptInfo Script(string name, string status = "approved") =>
-        new(name, status, ApprovedUtc: null, ModifiedUtc: null, SizeBytes: 12);
+        new(name, status, ApprovedUtc: null, ModifiedUtc: null, SizeBytes: 12,
+            Path: $@"C:\test\scripts\{name}");
 
     private static void CaptureWrites(Mock<IRepository> repository, Action<string> onWrite) =>
         repository

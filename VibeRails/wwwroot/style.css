@@ -14437,8 +14437,24 @@ body.git-guard-focus-active #app-content {
 }
 
 .job-card:last-child { border-bottom: 0; }
-.job-card[data-enabled="false"] { border-left: 3px solid var(--color-border); }
+
+/* State is worth more than one badge: a live automation gets a green edge, a disabled one a
+   red edge over a faint red wash with its detail lines dimmed, so a stopped row is obvious
+   while scrolling. Both states carry the same 3px edge so the text never shifts on toggle. */
+.job-card[data-enabled="true"] {
+    border-left: 3px solid color-mix(in srgb, var(--color-success, #22c55e) 75%, transparent);
+}
+
+.job-card[data-enabled="false"] {
+    border-left: 3px solid color-mix(in srgb, var(--color-danger, #ef4444) 70%, transparent);
+    background-color: color-mix(in srgb, var(--color-danger, #ef4444) 4%, var(--color-bg-base, #121212));
+}
+
+/* Dimming is done with colors, never opacity: a translucent row lets the page show through
+   the card and undoes the opaque-surface rule the rest of this section follows. */
 .job-card[data-enabled="false"] .job-card-title h3 { color: var(--color-text-muted); }
+.job-card[data-enabled="false"] .job-card-meta strong { color: var(--color-text-muted); }
+.job-card[data-enabled="false"] .job-provider { color: var(--color-text-muted); }
 .job-card-main { min-width: 0; }
 .job-card-topline { justify-content: space-between; gap: 0.75rem; }
 .job-card-title {
@@ -14540,40 +14556,89 @@ body.git-guard-focus-active #app-content {
     place-items: center;
 }
 
-/* This control describes the action, not the current state: an active Automation gets a
-   calm Pause button, while a paused one gets the stronger green Enable affordance. */
-.job-toggle-action {
+/* The card's on/off control. It reads as the state first (green ENABLED / red DISABLED) and
+   acts as the control second, replacing the old Pause/Enable button pair that named the
+   action and left the state to a separate badge. */
+.job-switch {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    gap: 0.45rem;
-    min-width: 82px;
-    border-color: color-mix(in srgb, var(--color-text-muted) 55%, var(--color-border));
-    background-color: color-mix(in srgb, var(--color-text-muted) 8%, var(--color-bg-base, #121212));
-    color: var(--color-text);
+    flex: 0 0 auto;
+    gap: 0.5rem;
+    padding: 0.22rem 0.6rem 0.22rem 0.3rem;
+    border: 1px solid color-mix(in srgb, var(--color-danger, #ef4444) 45%, transparent);
+    border-radius: 999px;
+    background-color: color-mix(in srgb, var(--color-danger, #ef4444) 12%, var(--color-bg-base, #121212));
+    color: var(--color-danger, #ef4444);
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
-.job-toggle-action:hover,
-.job-toggle-action:focus-visible {
-    border-color: var(--color-warning);
-    background-color: color-mix(in srgb, var(--color-warning) 12%, var(--color-bg-base, #121212));
-    color: var(--color-warning);
-}
-
-.job-toggle-action.is-paused {
-    border-color: color-mix(in srgb, var(--color-success, #22c55e) 58%, var(--color-border));
+.job-switch[aria-checked="true"] {
+    border-color: color-mix(in srgb, var(--color-success, #22c55e) 45%, transparent);
     background-color: color-mix(in srgb, var(--color-success, #22c55e) 12%, var(--color-bg-base, #121212));
     color: var(--color-success, #22c55e);
 }
 
-.job-toggle-action.is-paused:hover,
-.job-toggle-action.is-paused:focus-visible {
-    border-color: var(--color-success, #22c55e);
-    background-color: color-mix(in srgb, var(--color-success, #22c55e) 20%, var(--color-bg-base, #121212));
-    color: var(--color-success, #22c55e);
+.job-switch:hover {
+    border-color: var(--color-danger, #ef4444);
+    background-color: color-mix(in srgb, var(--color-danger, #ef4444) 20%, var(--color-bg-base, #121212));
 }
 
-.job-toggle-action i { font-size: 0.84rem; }
+.job-switch[aria-checked="true"]:hover {
+    border-color: var(--color-success, #22c55e);
+    background-color: color-mix(in srgb, var(--color-success, #22c55e) 20%, var(--color-bg-base, #121212));
+}
+
+.job-switch:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--color-accent) 35%, transparent);
+    outline-offset: 2px;
+}
+
+.job-switch-track {
+    position: relative;
+    display: block;
+    flex: 0 0 auto;
+    width: 2.1rem;
+    height: 1.15rem;
+    border-radius: 999px;
+    background-color: color-mix(in srgb, var(--color-danger, #ef4444) 55%, transparent);
+    transition: background-color 0.15s ease;
+}
+
+.job-switch[aria-checked="true"] .job-switch-track {
+    background-color: color-mix(in srgb, var(--color-success, #22c55e) 65%, transparent);
+}
+
+.job-switch-thumb {
+    position: absolute;
+    top: 0.15rem;
+    left: 0.15rem;
+    display: block;
+    width: 0.85rem;
+    height: 0.85rem;
+    border-radius: 50%;
+    background-color: #fff;
+    transition: transform 0.15s ease;
+}
+
+.job-switch[aria-checked="true"] .job-switch-thumb { transform: translateX(0.95rem); }
+
+.job-switch-text {
+    font-family: var(--vb-font-mono, ui-monospace, monospace);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+/* Mid-flight: the switch has already flipped optimistically, so it only needs to go quiet. */
+.job-switch.is-busy { cursor: progress; opacity: 0.6; }
+
+@media (prefers-reduced-motion: reduce) {
+    .job-switch,
+    .job-switch-track,
+    .job-switch-thumb { transition: none; }
+}
 
 .job-more {
     position: relative;
@@ -14629,7 +14694,6 @@ body.git-guard-focus-active #app-content {
 .job-more-menu .job-more-danger { color: var(--color-danger); }
 
 .job-provider,
-.job-state,
 .job-run-status {
     display: inline-flex;
     align-items: center;
@@ -14644,9 +14708,7 @@ body.git-guard-focus-active #app-content {
 
 .job-provider { color: var(--color-accent); }
 .job-provider[data-provider="claude"] { color: #e58b5b; }
-.job-state,
 .job-run-status { padding: 0.24rem 0.5rem; background-color: color-mix(in srgb, var(--color-text-muted) 10%, var(--color-bg-base, #121212)); color: var(--color-text-muted); }
-.job-state[data-tone="success"],
 .job-run-status[data-tone="success"] { background-color: color-mix(in srgb, var(--color-success) 13%, var(--color-bg-base, #121212)); color: var(--color-success); }
 .job-run-status[data-tone="danger"] { background-color: color-mix(in srgb, var(--color-danger) 13%, var(--color-bg-base, #121212)); color: var(--color-danger); }
 
@@ -16261,8 +16323,8 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
    ============================================================ */
 
 .automation-launch-btn.is-flyout-open {
-    background: var(--color-bg-surface-hover);
-    color: var(--color-text);
+    background: var(--color-bg-surface-hover, #2c2c2c);
+    color: var(--color-text, #f8fafc);
 }
 
 .automation-launch-flyout {
@@ -16272,8 +16334,8 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
     max-width: 340px;
     display: flex;
     flex-direction: column;
-    background: var(--color-bg-elevated);
-    border: 1px solid var(--color-border);
+    background: var(--color-bg-elevated, #232323);
+    border: 1px solid var(--color-border, #334155);
     border-radius: 10px;
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
     overflow: hidden;
@@ -16284,7 +16346,7 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
     align-items: center;
     gap: 8px;
     padding: 10px 14px 8px;
-    color: var(--color-text-muted);
+    color: var(--color-text-muted, #94a3b8);
     font-size: 0.72rem;
     font-weight: 700;
     letter-spacing: 0.06em;
@@ -16308,20 +16370,20 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
     border: 0;
     border-radius: 7px;
     background: transparent;
-    color: var(--color-text);
+    color: var(--color-text, #f8fafc);
     text-align: left;
     cursor: pointer;
 }
 
 .automation-launch-item:hover,
 .automation-launch-item:focus-visible {
-    background: var(--color-bg-surface-hover);
+    background: var(--color-bg-surface-hover, #2c2c2c);
 }
 
 .automation-launch-item > .fa-play {
     flex: 0 0 auto;
     font-size: 0.7rem;
-    color: var(--color-success);
+    color: var(--color-success, #10b981);
 }
 
 .automation-launch-item-label {
@@ -16340,8 +16402,8 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
     display: flex;
     flex-direction: column;
     padding: 6px;
-    border-top: 1px solid var(--color-border);
-    background: var(--color-bg-surface);
+    border-top: 1px solid var(--color-border, #334155);
+    background: var(--color-bg-surface, #1e1e1e);
 }
 
 .automation-launch-footer-btn {
@@ -16353,7 +16415,7 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
     border: 0;
     border-radius: 7px;
     background: transparent;
-    color: var(--color-text-muted);
+    color: var(--color-text-muted, #94a3b8);
     font-size: 0.85rem;
     text-align: left;
     cursor: pointer;
@@ -16361,8 +16423,8 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
 
 .automation-launch-footer-btn:hover,
 .automation-launch-footer-btn:focus-visible {
-    background: var(--color-bg-surface-hover);
-    color: var(--color-text);
+    background: var(--color-bg-surface-hover, #2c2c2c);
+    color: var(--color-text, #f8fafc);
 }
 
 /* ============================================================
@@ -16405,9 +16467,9 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
     align-items: center;
     gap: 10px;
     padding: 10px 12px;
-    border: 1px solid var(--color-border);
+    border: 1px solid var(--color-border, #334155);
     border-bottom-width: 0;
-    background: var(--color-bg-surface);
+    background: var(--color-bg-surface, #1e1e1e);
 }
 
 .python-script-row:first-child {
@@ -16433,7 +16495,7 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
 
 .python-script-name {
     font-weight: 600;
-    color: var(--color-text);
+    color: var(--color-text, #f8fafc);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -16444,16 +16506,16 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
     align-items: center;
     gap: 6px;
     font-size: 0.78rem;
-    color: var(--color-text-muted);
+    color: var(--color-text-muted, #94a3b8);
     white-space: nowrap;
 }
 
 .python-script-status[data-tone="success"] {
-    color: var(--color-success);
+    color: var(--color-success, #10b981);
 }
 
 .python-script-status[data-tone="warning"] {
-    color: var(--color-warning);
+    color: var(--color-warning, #f59e0b);
 }
 
 .python-script-actions {
@@ -16471,7 +16533,7 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
 .python-script-output > summary {
     cursor: pointer;
     font-size: 0.8rem;
-    color: var(--color-text-muted);
+    color: var(--color-text-muted, #94a3b8);
 }
 
 .python-script-output > pre {
@@ -16480,8 +16542,8 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
     overflow: auto;
     padding: 8px 10px;
     border-radius: 6px;
-    background: var(--color-bg-base);
-    border: 1px solid var(--color-border);
+    background: var(--color-bg-base, #121212);
+    border: 1px solid var(--color-border, #334155);
     font-size: 0.78rem;
     white-space: pre-wrap;
     word-break: break-word;
@@ -16489,4 +16551,201 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
 
 .python-scripts-pin-modal {
     z-index: 1070;
+}
+
+/* --- Script authoring: row identity, row menu, drop target, editor modal ---
+   Same rule as the rest of this section: nothing here may impose an unbreakable
+   minimum width, and every color carries an explicit fallback. */
+
+.python-script-identity {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+button.python-script-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    text-align: left;
+    cursor: pointer;
+    color: var(--color-text, #f8fafc);
+}
+
+button.python-script-name > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+button.python-script-name > i {
+    flex: 0 0 auto;
+    font-size: 0.72rem;
+    color: var(--color-text-muted, #94a3b8);
+    opacity: 0;
+    transition: opacity 0.12s ease;
+}
+
+button.python-script-name:hover,
+button.python-script-name:focus-visible {
+    color: var(--color-primary, #3b82f6);
+}
+
+.python-script-row:hover button.python-script-name > i,
+button.python-script-name:focus-visible > i {
+    opacity: 1;
+}
+
+.python-script-meta {
+    font-size: 0.72rem;
+    color: var(--color-text-muted, #94a3b8);
+    overflow-wrap: anywhere;
+}
+
+.python-script-menu-wrap {
+    position: relative;
+}
+
+.python-script-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 20;
+    min-width: 190px;
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--color-border, #334155);
+    border-radius: 8px;
+    background: var(--color-bg-elevated, #232323);
+    box-shadow: 0 10px 26px rgb(0 0 0 / 38%);
+}
+
+.python-script-menu[hidden] {
+    display: none;
+}
+
+.python-script-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 10px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    text-align: left;
+    font-size: 0.82rem;
+    white-space: nowrap;
+    cursor: pointer;
+    color: var(--color-text, #f8fafc);
+}
+
+.python-script-menu-item > i {
+    width: 14px;
+    text-align: center;
+    color: var(--color-text-muted, #94a3b8);
+}
+
+.python-script-menu-item:hover,
+.python-script-menu-item:focus-visible {
+    background: var(--color-bg-surface-hover, #2c2c2c);
+}
+
+.python-script-menu-item-danger,
+.python-script-menu-item-danger > i {
+    color: var(--color-danger, #ef4444);
+}
+
+.python-scripts-list.python-scripts-list-dropping {
+    outline: 2px dashed var(--color-primary, #3b82f6);
+    outline-offset: 4px;
+    border-radius: 10px;
+}
+
+/* The shared .jobs-empty is a centred row; stacking keeps the two calls to action
+   readable instead of strung out beside the copy. */
+.jobs-empty.python-scripts-empty {
+    flex-direction: column;
+    gap: 4px;
+    text-align: center;
+}
+
+.python-scripts-empty-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    margin-top: 10px;
+}
+
+/* Monaco needs an explicitly sized flex container; app.showModal's auto-height
+   dialog would collapse it to 0px (same reason as .vb-terminal-editor-modal). */
+.vb-python-editor-modal .modal-dialog {
+    max-width: min(1040px, 88vw);
+    height: 82vh;
+    margin: 9vh auto;
+}
+
+.vb-python-editor-modal .modal-content {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    background-color: #1a1a22;
+    border: 1px solid var(--color-border, #334155);
+}
+
+.vb-python-editor-modal .modal-header,
+.vb-python-editor-modal .modal-footer {
+    background-color: #1e1e24;
+    flex-shrink: 0;
+}
+
+.vb-python-editor-modal .modal-header {
+    border-bottom: 1px solid #2b2b36;
+    align-items: flex-start;
+}
+
+.vb-python-editor-modal .modal-footer {
+    border-top: 1px solid #2b2b36;
+}
+
+.vb-python-editor-modal .modal-body {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
+.vb-python-editor-heading {
+    min-width: 0;
+}
+
+.vb-python-editor-subhead {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-top: 4px;
+}
+
+.vb-python-editor-subhead code {
+    font-size: 0.72rem;
+    color: var(--color-text-muted, #94a3b8);
+    overflow-wrap: anywhere;
+}
+
+.vb-python-editor-host {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+}
+
+.vb-python-editor-hint {
+    overflow-wrap: anywhere;
 }

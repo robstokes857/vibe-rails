@@ -21,6 +21,20 @@ public interface IPythonScriptService
     Task<PythonScriptRunResponse> RunAsync(string? name, CancellationToken cancellationToken = default);
     PythonScriptRunHistoryResponse GetRunHistory();
     string GetScriptsDirectory();
+
+    // Authoring. These never take a PIN — see the class remarks.
+    Task<PythonScriptContentResponse> GetContentAsync(
+        string? name, CancellationToken cancellationToken = default);
+    Task<PythonScriptSaveResponse> SaveContentAsync(
+        PythonScriptSaveRequest request, CancellationToken cancellationToken = default);
+    Task<PythonScriptListResponse> CreateAsync(
+        PythonScriptSaveRequest request, CancellationToken cancellationToken = default);
+    Task<PythonScriptListResponse> ImportAsync(
+        PythonScriptImportRequest request, CancellationToken cancellationToken = default);
+    Task<PythonScriptListResponse> RenameAsync(
+        PythonScriptRenameRequest request, CancellationToken cancellationToken = default);
+    Task<PythonScriptListResponse> DeleteAsync(
+        string? name, CancellationToken cancellationToken = default);
 }
 
 public sealed class PythonScriptValidationException(string message) : Exception(message);
@@ -50,7 +64,15 @@ public sealed class PythonScriptValidationException(string message) : Exception(
 ///
 /// Hashes are computed over LF-normalized, BOM-stripped, strictly-decoded UTF-8 bytes
 /// with the script name mixed in, so CRLF churn (git autocrlf, editors) cannot
-/// invalidate an approval, while renaming a file or changing its bytes always does.
+/// invalidate an approval, while renaming a file or changing its canonical content does.
+///
+/// Authoring (create / save / import / rename / delete) deliberately takes no PIN and can
+/// never create an approval. Create/import/rename always land unsigned; a changed save
+/// becomes modified, while a byte-for-byte or canonical line-ending-only save may retain
+/// the approval for that same version. Create, import, delete, and rename remove stale
+/// approvals before publishing their filesystem mutation, so restoring a removed name
+/// cannot silently recover trust. Approve/revoke keep requiring the PIN; only Approve can
+/// make a previously unapproved or modified script runnable.
 /// </summary>
 public sealed class PythonScriptService : IPythonScriptService
 {
@@ -353,6 +375,296 @@ public sealed class PythonScriptService : IPythonScriptService
         }
     }
 
+    public async Task<PythonScriptContentResponse> GetContentAsync(
+        string? requestedName,
+        CancellationToken cancellationToken = default)
+    {
+        var name = ValidateScriptName(requestedName);
+        var scriptPath = ResolveScriptPath(name);
+        if (!File.Exists(scriptPath))
+        {
+            throw new PythonScriptValidationException($"Script '{name}' was not found.");
+        }
+
+        name = CanonicalOnDiskName(scriptPath) ?? name;
+        byte[] content;
+        try
+        {
+            content = ReadScriptBytes(scriptPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new PythonScriptValidationException($"Could not read '{name}': {ex.Message}");
+        }
+
+        var text = DecodeUtf8OrThrow(content);
+        // Hand the editor BOM-free text. Canonicalization already ignores a BOM, so saving
+        // the round-tripped text back does not by itself invalidate an approval.
+        if (text.StartsWith('﻿')) text = text[1..];
+        var fileInfo = new FileInfo(scriptPath);
+
+        await _documentLock.WaitAsync(cancellationToken);
+        PythonScriptApprovalRecord? approval;
+        try
+        {
+            approval = ReadDocument().Approvals.FirstOrDefault(entry => NameEquals(entry.Name, name));
+        }
+        finally
+        {
+            _documentLock.Release();
+        }
+
+        return new PythonScriptContentResponse(
+            name,
+            text,
+            ResolveStatus(approval, name, () => content),
+            fileInfo.LastWriteTimeUtc.ToString("O"),
+            fileInfo.Length,
+            ComputeContentVersion(content));
+    }
+
+    public async Task<PythonScriptSaveResponse> SaveContentAsync(
+        PythonScriptSaveRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var name = ValidateScriptName(request.Name);
+        var scriptPath = ResolveScriptPath(name);
+        var bytes = EncodeScriptContent(request.Content);
+        var expectedVersion = ValidateExpectedVersion(request.ExpectedVersion);
+        Directory.CreateDirectory(GetScriptsDirectory());
+
+        // Serialize with signing and the other file mutations across every vb process.
+        // This makes the optimistic version check meaningful for concurrent API callers and
+        // prevents an approval from being recorded in the middle of a replacement.
+        using (await AcquireCrossProcessWriteLockAsync(cancellationToken))
+        {
+            var current = ReadScriptBytes(scriptPath);
+            if (!string.Equals(
+                    ComputeContentVersion(current), expectedVersion, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new PythonScriptValidationException(
+                    $"'{name}' changed after it was opened. Reopen it before saving so newer edits are not overwritten.");
+            }
+
+            await ReplaceFileAtomicallyAsync(
+                scriptPath, bytes, name, expectedVersion, cancellationToken);
+        }
+
+        // No approval bookkeeping: the entry (if any) stays, and the new bytes simply stop
+        // matching its hash, so the script reads as "modified" until the user re-signs.
+        Log.Information("[PythonScripts] Saved script {Name} ({Bytes} bytes)", name, bytes.Length);
+        return new PythonScriptSaveResponse(
+            await GetStatusAsync(CancellationToken.None),
+            ComputeContentVersion(bytes));
+    }
+
+    public async Task<PythonScriptListResponse> CreateAsync(
+        PythonScriptSaveRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var name = ValidateScriptName(request.Name);
+        var scriptPath = ResolveScriptPath(name);
+        var bytes = EncodeScriptContent(request.Content);
+        Directory.CreateDirectory(GetScriptsDirectory());
+        await WriteUnsignedNewFileAsync(scriptPath, bytes, name, cancellationToken);
+        Log.Information("[PythonScripts] Created script {Name}", name);
+        return await GetStatusAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Copies a file from anywhere the user can browse into the scripts folder. The copy
+    /// lands unsigned like any other new script, so this grants no execution the user did
+    /// not already have; it is gated to the root dashboard (see <see cref="Routes"/>)
+    /// because the source path is arbitrary, matching the file picker that drives it.
+    /// </summary>
+    public async Task<PythonScriptListResponse> ImportAsync(
+        PythonScriptImportRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var requestedSource = (request.SourcePath ?? string.Empty).Trim();
+        if (requestedSource.Length == 0)
+        {
+            throw new PythonScriptValidationException("Choose a file to import.");
+        }
+
+        if (!Path.IsPathFullyQualified(requestedSource) || IsNetworkOrDevicePath(requestedSource))
+        {
+            throw new PythonScriptValidationException(
+                "Choose a fully qualified path on a local drive. Network and device paths are not supported.");
+        }
+
+        string sourcePath;
+        try
+        {
+            sourcePath = Path.GetFullPath(requestedSource);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            throw new PythonScriptValidationException("That is not a valid file path.");
+        }
+
+        if (IsNetworkOrDevicePath(sourcePath)
+            || (OperatingSystem.IsWindows() && IsUnsupportedWindowsDrive(sourcePath)))
+        {
+            throw new PythonScriptValidationException(
+                "Network and device paths are not supported.");
+        }
+
+        var sourceInfo = new FileInfo(sourcePath);
+        if (!sourceInfo.Exists)
+        {
+            throw new PythonScriptValidationException("The file to import was not found.");
+        }
+
+        // A link would copy whatever it currently points at rather than the file the user
+        // picked, and could be re-aimed between the pick and the copy.
+        if (IsLinkOrReparsePoint(sourceInfo))
+        {
+            throw new PythonScriptValidationException(
+                "That path is a shortcut or symbolic link. Pick the file it points to.");
+        }
+
+        if (sourceInfo.Length > MaxScriptBytes)
+        {
+            throw new PythonScriptValidationException(
+                $"That file is larger than the {MaxScriptBytes / (1024 * 1024)} MB limit.");
+        }
+
+        byte[] content;
+        try
+        {
+            content = File.ReadAllBytes(sourcePath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new PythonScriptValidationException($"Could not read that file: {ex.Message}");
+        }
+
+        // Refuse what could never be signed (binaries, latin-1 text) instead of dropping a
+        // permanently unrunnable file into the folder.
+        DecodeUtf8OrThrow(content);
+
+        var name = ValidateScriptName(string.IsNullOrWhiteSpace(request.Name)
+            ? SuggestScriptName(sourceInfo.Name)
+            : request.Name);
+        var scriptPath = ResolveScriptPath(name);
+        Directory.CreateDirectory(GetScriptsDirectory());
+        await WriteUnsignedNewFileAsync(scriptPath, content, name, cancellationToken);
+        Log.Information("[PythonScripts] Imported {Source} as {Name}", sourceInfo.Name, name);
+        return await GetStatusAsync(cancellationToken);
+    }
+
+    public async Task<PythonScriptListResponse> RenameAsync(
+        PythonScriptRenameRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var requestedName = ValidateScriptName(request.Name);
+        var newName = ValidateScriptName(request.NewName);
+        var scriptPath = ResolveScriptPath(requestedName);
+        var targetPath = ResolveScriptPath(newName);
+        string canonicalName;
+
+        using (await AcquireCrossProcessWriteLockAsync(cancellationToken))
+        {
+            await _documentLock.WaitAsync(cancellationToken);
+            try
+            {
+                // Read validates that the source is a regular file rather than a link that
+                // escapes the scripts directory.
+                ReadScriptBytes(scriptPath);
+                canonicalName = CanonicalOnDiskName(scriptPath) ?? requestedName;
+                if (NameEquals(canonicalName, newName))
+                {
+                    return BuildStatus(ReadDocument());
+                }
+
+                // On a case-insensitive volume "job.py" -> "Job.py" is the same file, so an
+                // existence check would refuse a legitimate case-only rename.
+                var caseOnlyRename = string.Equals(
+                    scriptPath, targetPath, StringComparison.OrdinalIgnoreCase);
+                if (!caseOnlyRename && PathEntryExists(targetPath))
+                {
+                    throw new PythonScriptValidationException(
+                        $"A script named '{newName}' already exists. Pick another name.");
+                }
+
+                // Revoke both names before moving. If the move subsequently fails, the old
+                // file is left unsigned (fail closed); a stale target-name approval can never
+                // make the renamed file runnable.
+                var document = ReadDocument();
+                var updated = WithoutApprovals(
+                    document, canonicalName, requestedName, newName);
+                if (updated.Approvals.Count != document.Approvals.Count)
+                {
+                    WriteDocument(updated);
+                }
+
+                try
+                {
+                    File.Move(scriptPath, targetPath);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    throw new PythonScriptValidationException(
+                        $"Could not rename '{canonicalName}': {ex.Message}");
+                }
+            }
+            finally
+            {
+                _documentLock.Release();
+            }
+        }
+
+        Log.Information("[PythonScripts] Renamed script {Name} to {NewName}", canonicalName, newName);
+        return await GetStatusAsync(CancellationToken.None);
+    }
+
+    public async Task<PythonScriptListResponse> DeleteAsync(
+        string? requestedName,
+        CancellationToken cancellationToken = default)
+    {
+        var name = ValidateScriptName(requestedName);
+        var scriptPath = ResolveScriptPath(name);
+        string canonicalName;
+
+        using (await AcquireCrossProcessWriteLockAsync(cancellationToken))
+        {
+            await _documentLock.WaitAsync(cancellationToken);
+            try
+            {
+                canonicalName = CanonicalOnDiskName(scriptPath) ?? name;
+                var document = ReadDocument();
+                var updated = WithoutApprovals(document, canonicalName, name);
+                if (updated.Approvals.Count != document.Approvals.Count)
+                {
+                    // Trust is removed before the filesystem mutation. A later delete error
+                    // may leave the file present, but it can never leave it runnable.
+                    WriteDocument(updated);
+                }
+
+                try
+                {
+                    // Already gone is success: two tabs deleting the same row should both end
+                    // up with the row gone rather than one of them showing an error. File.Delete
+                    // removes a link itself, which is the safe cleanup for a linked script.
+                    File.Delete(scriptPath);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    throw new PythonScriptValidationException(
+                        $"Could not delete '{canonicalName}': {ex.Message}");
+                }
+            }
+            finally
+            {
+                _documentLock.Release();
+            }
+        }
+
+        Log.Information("[PythonScripts] Deleted script {Name}", canonicalName);
+        return await GetStatusAsync(CancellationToken.None);
+    }
+
     public PythonScriptRunHistoryResponse GetRunHistory()
     {
         lock (_historyLock)
@@ -418,40 +730,22 @@ public sealed class PythonScriptService : IPythonScriptService
                 try
                 {
                     var approval = document.Approvals.FirstOrDefault(entry => NameEquals(entry.Name, name));
-                    string status;
-                    if (approval == null)
-                    {
-                        status = StatusUnapproved;
-                    }
-                    else
-                    {
-                        string currentHash;
-                        try
-                        {
-                            currentHash = ComputeCanonicalHash(name, ReadScriptBytes(path));
-                        }
-                        catch (PythonScriptValidationException)
-                        {
-                            currentHash = string.Empty;
-                        }
-
-                        status = string.Equals(approval.Hash, currentHash, StringComparison.Ordinal)
-                            ? StatusApproved
-                            : StatusModified;
-                    }
-
-                    var fileInfo = new FileInfo(path);
+                    var fileInfo = GetRegularScriptFileInfo(path);
+                    var status = ResolveStatus(approval, name, () => ReadScriptBytes(path));
                     scripts.Add(new PythonScriptInfo(
                         name,
                         status,
                         approval?.ApprovedUtc,
                         fileInfo.LastWriteTimeUtc.ToString("O"),
-                        fileInfo.Length));
+                        fileInfo.Length,
+                        path));
                 }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                catch (Exception ex) when (ex is
+                    IOException or UnauthorizedAccessException or PythonScriptValidationException)
                 {
-                    // The file was deleted or locked between enumeration and stat/read; skip
-                    // it rather than fail the whole listing with a 500.
+                    // A linked, deleted, or locked entry is not a runnable script. Skip it
+                    // rather than exposing a path that escapes the scripts directory or
+                    // failing the whole listing.
                     Log.Debug(ex, "[PythonScripts] Skipping {Path} while building status.", path);
                 }
             }
@@ -489,7 +783,7 @@ public sealed class PythonScriptService : IPythonScriptService
 
     private static byte[] ReadScriptBytes(string path)
     {
-        var info = new FileInfo(path);
+        var info = GetRegularScriptFileInfo(path);
         if (info.Length > MaxScriptBytes)
         {
             throw new PythonScriptValidationException(
@@ -497,6 +791,300 @@ public sealed class PythonScriptService : IPythonScriptService
         }
 
         return File.ReadAllBytes(path);
+    }
+
+    private static FileInfo GetRegularScriptFileInfo(string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            if (!info.Exists)
+            {
+                throw new PythonScriptValidationException(
+                    $"Script '{Path.GetFileName(path)}' was not found.");
+            }
+
+            if (IsLinkOrReparsePoint(info))
+            {
+                throw new PythonScriptValidationException(
+                    $"Script '{Path.GetFileName(path)}' is a symbolic link or reparse point. "
+                    + "Only regular files in the scripts folder can be opened, signed, or run.");
+            }
+
+            return info;
+        }
+        catch (PythonScriptValidationException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new PythonScriptValidationException(
+                $"Could not inspect '{Path.GetFileName(path)}': {ex.Message}");
+        }
+    }
+
+
+    /// <summary>
+    /// Encodes editor text for disk: UTF-8, no BOM, byte-exact (line endings included — the
+    /// canonical hash normalizes them, so there is nothing to gain by rewriting the file).
+    /// </summary>
+    private static byte[] EncodeScriptContent(string? content)
+    {
+        byte[] bytes;
+        try
+        {
+            bytes = StrictUtf8.GetBytes(content ?? string.Empty);
+        }
+        catch (EncoderFallbackException)
+        {
+            throw new PythonScriptValidationException(
+                "The script text contains characters that cannot be saved as UTF-8.");
+        }
+
+        if (bytes.Length > MaxScriptBytes)
+        {
+            throw new PythonScriptValidationException(
+                $"Script is larger than the {MaxScriptBytes / (1024 * 1024)} MB limit.");
+        }
+
+        return bytes;
+    }
+
+    private static string DecodeUtf8OrThrow(byte[] content)
+    {
+        try
+        {
+            return StrictUtf8.GetString(content);
+        }
+        catch (DecoderFallbackException)
+        {
+            throw new PythonScriptValidationException(
+                "Script is not valid UTF-8. Save it as UTF-8 before signing or running it.");
+        }
+    }
+
+    private async Task WriteUnsignedNewFileAsync(
+        string path, byte[] bytes, string name, CancellationToken cancellationToken)
+    {
+        using (await AcquireCrossProcessWriteLockAsync(cancellationToken))
+        {
+            await _documentLock.WaitAsync(cancellationToken);
+            try
+            {
+                if (PathEntryExists(path))
+                {
+                    throw new PythonScriptValidationException(
+                        $"A script named '{name}' already exists. Pick another name.");
+                }
+
+                // A file deleted outside the dashboard can leave an approval record behind.
+                // Remove it before publishing the new file so Create and Import always land
+                // unsigned, even when the bytes happen to match the old approved version.
+                var document = ReadDocument();
+                var updated = WithoutApprovals(document, name);
+                if (updated.Approvals.Count != document.Approvals.Count)
+                {
+                    WriteDocument(updated);
+                }
+
+                await WriteNewFileAtomicallyAsync(path, bytes, name, cancellationToken);
+            }
+            finally
+            {
+                _documentLock.Release();
+            }
+        }
+    }
+
+    private static async Task WriteNewFileAtomicallyAsync(
+        string path, byte[] bytes, string name, CancellationToken cancellationToken)
+    {
+        var tempPath = TemporarySiblingPath(path);
+        try
+        {
+            await WriteTemporaryFileAsync(tempPath, bytes, cancellationToken);
+            File.Move(tempPath, path);
+        }
+        catch (IOException) when (PathEntryExists(path))
+        {
+            throw new PythonScriptValidationException(
+                $"A script named '{name}' already exists. Pick another name.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new PythonScriptValidationException($"Could not create '{name}': {ex.Message}");
+        }
+        finally
+        {
+            TryDeleteTemporaryFile(tempPath);
+        }
+    }
+
+    private static async Task ReplaceFileAtomicallyAsync(
+        string path,
+        byte[] bytes,
+        string name,
+        string expectedVersion,
+        CancellationToken cancellationToken)
+    {
+        var tempPath = TemporarySiblingPath(path);
+        try
+        {
+            await WriteTemporaryFileAsync(tempPath, bytes, cancellationToken);
+
+            // Recheck immediately before the atomic rename. This catches an external editor
+            // changing or deleting the file while the replacement bytes were being written.
+            var current = ReadScriptBytes(path);
+            if (!string.Equals(
+                    ComputeContentVersion(current), expectedVersion, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new PythonScriptValidationException(
+                    $"'{name}' changed while it was being saved. Reopen it and try again.");
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Move(tempPath, path, overwrite: true);
+        }
+        catch (PythonScriptValidationException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new PythonScriptValidationException($"Could not save '{name}': {ex.Message}");
+        }
+        finally
+        {
+            TryDeleteTemporaryFile(tempPath);
+        }
+    }
+
+    private static async Task WriteTemporaryFileAsync(
+        string path, byte[] bytes, CancellationToken cancellationToken)
+    {
+        await using var stream = new FileStream(
+            path,
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.None,
+            bufferSize: 64 * 1024,
+            options: FileOptions.Asynchronous | FileOptions.WriteThrough);
+        await stream.WriteAsync(bytes, cancellationToken);
+        await stream.FlushAsync(cancellationToken);
+    }
+
+    private static string TemporarySiblingPath(string path) =>
+        Path.Combine(
+            Path.GetDirectoryName(path)!,
+            $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+
+    private static void TryDeleteTemporaryFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "[PythonScripts] Temp cleanup failed for {Path}", path);
+        }
+    }
+
+    /// <summary>A plain file name turned into a candidate script name (adds the .py).</summary>
+    private static string SuggestScriptName(string fileName)
+    {
+        var trimmed = (fileName ?? string.Empty).Trim();
+        return trimmed.EndsWith(".py", StringComparison.OrdinalIgnoreCase) ? trimmed : trimmed + ".py";
+    }
+
+    private static string ResolveStatus(
+        PythonScriptApprovalRecord? approval, string name, Func<byte[]> contentFactory)
+    {
+        if (approval == null)
+        {
+            return StatusUnapproved;
+        }
+
+        string currentHash;
+        try
+        {
+            currentHash = ComputeCanonicalHash(name, contentFactory());
+        }
+        catch (PythonScriptValidationException)
+        {
+            currentHash = string.Empty;
+        }
+
+        return string.Equals(approval.Hash, currentHash, StringComparison.Ordinal)
+            ? StatusApproved
+            : StatusModified;
+    }
+
+    private static PythonScriptSigningDocument WithoutApprovals(
+        PythonScriptSigningDocument document, params string[] names) =>
+        document with
+        {
+            Approvals = document.Approvals
+                .Where(approval => !names.Any(name => NameEquals(approval.Name, name)))
+                .ToList()
+        };
+
+    private static string ValidateExpectedVersion(string? version)
+    {
+        var trimmed = (version ?? string.Empty).Trim();
+        if (trimmed.Length != 64 || !trimmed.All(Uri.IsHexDigit))
+        {
+            throw new PythonScriptValidationException(
+                "The script version is missing or invalid. Reopen the script before saving.");
+        }
+
+        return trimmed;
+    }
+
+    internal static string ComputeContentVersion(byte[] content) =>
+        Convert.ToHexStringLower(SHA256.HashData(content));
+
+    private static bool PathEntryExists(string path)
+    {
+        if (File.Exists(path) || Directory.Exists(path)) return true;
+        try
+        {
+            return new FileInfo(path).LinkTarget is not null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // An entry that cannot be inspected is not safe to overwrite as a new script.
+            return true;
+        }
+    }
+
+    private static bool IsLinkOrReparsePoint(FileInfo info) =>
+        info.LinkTarget is not null || info.Attributes.HasFlag(FileAttributes.ReparsePoint);
+
+    private static bool IsNetworkOrDevicePath(string path) =>
+        path.StartsWith(@"\\", StringComparison.Ordinal)
+        || path.StartsWith("//", StringComparison.Ordinal);
+
+    private static bool IsUnsupportedWindowsDrive(string path)
+    {
+        var rootPath = Path.GetPathRoot(path);
+        if (string.IsNullOrEmpty(rootPath)) return true;
+
+        try
+        {
+            return new DriveInfo(rootPath).DriveType is
+                DriveType.Network or DriveType.Unknown or DriveType.NoRootDirectory;
+        }
+        catch (Exception ex) when (ex is
+            ArgumentException or
+            IOException or
+            UnauthorizedAccessException or
+            System.Security.SecurityException or
+            NotSupportedException)
+        {
+            return true;
+        }
     }
 
     /// <summary>
@@ -511,17 +1099,7 @@ public sealed class PythonScriptService : IPythonScriptService
     /// </summary>
     internal static string ComputeCanonicalHash(string name, byte[] content)
     {
-        string text;
-        try
-        {
-            text = StrictUtf8.GetString(content);
-        }
-        catch (DecoderFallbackException)
-        {
-            throw new PythonScriptValidationException(
-                "Script is not valid UTF-8. Save it as UTF-8 before signing or running it.");
-        }
-
+        var text = DecodeUtf8OrThrow(content);
         if (text.StartsWith('﻿')) text = text[1..];
         text = text.Replace("\r\n", "\n", StringComparison.Ordinal)
             .Replace('\r', '\n');
