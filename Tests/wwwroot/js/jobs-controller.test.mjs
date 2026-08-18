@@ -1345,11 +1345,11 @@ test('Automation rows show the next scheduled run and disabled state', () => {
 
     assert.match(list.innerHTML, /Next run/);
     assert.match(list.innerHTML, /in 12 min/);
-    assert.match(list.innerHTML, /Paused/);
+    assert.match(list.innerHTML, /Next: <strong>Disabled<\/strong>/);
     assert.doesNotMatch(list.innerHTML, /No time limit/);
 });
 
-test('Automation cards use Pause and Enable actions instead of state-colored toggle icons', () => {
+test('Automation cards carry one Enabled/Disabled switch instead of a badge plus a Pause button', () => {
     const controller = new JobController(createApp());
     controller.environments = [{ id: 42, name: 'Worker', cli: 'codex', customPrompt: 'Review.' }];
     controller.jobs = [
@@ -1359,11 +1359,49 @@ test('Automation cards use Pause and Enable actions instead of state-colored tog
 
     const html = controller.renderJobsListHtml();
 
-    assert.match(html, /job-toggle-action is-enabled[^>]*title="Pause scheduled/);
-    assert.match(html, /fa-pause[^>]*><\/i><span>Pause<\/span>/);
-    assert.match(html, /job-toggle-action is-paused[^>]*title="Enable scheduled/);
-    assert.match(html, /fa-power-off[^>]*><\/i><span>Enable<\/span>/);
-    assert.doesNotMatch(html, /fa-toggle-on|fa-toggle-off|btn-outline-danger/);
+    // aria-checked is what the green/red styling keys off, so it has to track the state.
+    assert.match(html, /class="job-switch" type="button" role="switch" aria-checked="true"[^>]*data-job-action="toggle" data-job-id="1"/);
+    assert.match(html, /class="job-switch" type="button" role="switch" aria-checked="false"[^>]*data-job-action="toggle" data-job-id="2"/);
+    assert.match(html, /<span class="job-switch-text">Enabled<\/span>/);
+    assert.match(html, /<span class="job-switch-text">Disabled<\/span>/);
+    // The switch replaces both the old action button and the read-only state badge.
+    assert.doesNotMatch(html, /job-toggle-action|job-state|fa-pause|fa-power-off/);
+    assert.doesNotMatch(html, /<span>Pause<\/span>|<span>Enable<\/span>/);
+});
+
+test('Toggling an automation flips its switch before the request and restores it when the save fails', async () => {
+    const app = createApp();
+    app.apiCall = async () => { throw new Error('nope'); };
+    app.showError = () => {};
+    const controller = new JobController(app);
+    controller.environments = [{ id: 42, name: 'Worker', cli: 'codex', customPrompt: 'Review.' }];
+    controller.jobs = [{ id: 1, name: 'Active review', llm: 1, environmentId: 42, enabled: true, triggers: [] }];
+
+    const text = { textContent: 'Enabled' };
+    const attributes = new Map([['aria-checked', 'true'], ['title', 'Enabled — …']]);
+    const classes = new Set(['job-switch']);
+    const button = {
+        isConnected: true,
+        disabled: false,
+        innerHTML: '<span class="job-switch-text">Enabled</span>',
+        classList: {
+            contains: name => classes.has(name),
+            add: name => classes.add(name),
+            remove: name => classes.delete(name)
+        },
+        getAttribute: name => (attributes.has(name) ? attributes.get(name) : null),
+        setAttribute: (name, value) => attributes.set(name, value),
+        querySelector: selector => (selector === '.job-switch-text' ? text : null)
+    };
+
+    const pending = controller.toggleJob(1, button);
+    assert.equal(attributes.get('aria-checked'), 'false', 'the switch moves on click, not on the response');
+    assert.equal(text.textContent, 'Disabled');
+    await pending;
+
+    assert.equal(attributes.get('aria-checked'), 'true', 'a failed save puts the switch back');
+    assert.equal(classes.has('is-busy'), false);
+    assert.equal(button.disabled, false);
 });
 
 test('Run now opens the tracked Automation in its interactive terminal tab', async () => {
@@ -1634,6 +1672,18 @@ test('Automation CRUD surfaces stay opaque, including disabled rows', () => {
     assert.match(css, /\.job-recipe-review-value\s*\{[^}]*background-color:\s*var\(--color-bg-base/);
     assert.match(css, /\.job-history-bulk\s*\{[^}]*background-color:[^}]*var\(--color-bg-elevated/);
     assert.doesNotMatch(css, /\.job-card\[data-enabled="false"\]\s*\{[^}]*opacity:/);
+});
+
+test('The automation switch reads green when on and red when off, and the row edge echoes it', () => {
+    const css = readFileSync(stylePath, 'utf8');
+
+    assert.match(css, /\.job-switch\s*\{[^}]*color:\s*var\(--color-danger/);
+    assert.match(css, /\.job-switch\[aria-checked="true"\]\s*\{[^}]*var\(--color-success/);
+    assert.match(css, /\.job-switch\[aria-checked="true"\] \.job-switch-thumb\s*\{[^}]*translateX/);
+    // The row itself carries the state too, not just the control in its corner.
+    assert.match(css, /\.job-card\[data-enabled="true"\]\s*\{[^}]*border-left:[^}]*--color-success/);
+    assert.match(css, /\.job-card\[data-enabled="false"\]\s*\{[^}]*border-left:[^}]*--color-danger/);
+    assert.doesNotMatch(css, /\.job-toggle-action/);
 });
 
 test('Automation boolean and multi-select controls replace native checkbox styling', () => {

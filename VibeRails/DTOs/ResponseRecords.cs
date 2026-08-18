@@ -86,7 +86,8 @@ namespace VibeRails.DTOs
         string? RootPath = null,
         string? GitBranch = null,
         string? GitRemoteUrl = null,
-        bool IsSandbox = false
+        bool IsSandbox = false,
+        bool IsActiveRootBackend = true
     );
 
     public record GitOpenDirectoryRequest(string Directory);
@@ -380,7 +381,8 @@ namespace VibeRails.DTOs
         string Status,
         string? ApprovedUtc,
         string? ModifiedUtc,
-        long SizeBytes
+        long SizeBytes,
+        string Path
     );
 
     public record PythonScriptListResponse(
@@ -401,6 +403,39 @@ namespace VibeRails.DTOs
 
     public record PythonScriptRunRequest(
         string? Name
+    );
+
+    // Script authoring (create / edit / import / rename / delete). None of these carry a
+    // PIN or create an approval. Saves use the raw-byte Version as an optimistic concurrency
+    // token; the signing status still comes from the separately approved canonical hash.
+    public record PythonScriptContentResponse(
+        string Name,
+        string Content,
+        string Status,
+        string? ModifiedUtc,
+        long SizeBytes,
+        string Version
+    );
+
+    public record PythonScriptSaveRequest(
+        string? Name,
+        string? Content,
+        string? ExpectedVersion = null
+    );
+
+    public record PythonScriptSaveResponse(
+        PythonScriptListResponse State,
+        string Version
+    );
+
+    public record PythonScriptImportRequest(
+        string? SourcePath,
+        string? Name
+    );
+
+    public record PythonScriptRenameRequest(
+        string? Name,
+        string? NewName
     );
 
     public record PythonScriptRunResponse(
@@ -1475,6 +1510,11 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(SetPythonScriptPinRequest))]
     [JsonSerializable(typeof(PythonScriptApprovalRequest))]
     [JsonSerializable(typeof(PythonScriptRunRequest))]
+    [JsonSerializable(typeof(PythonScriptContentResponse))]
+    [JsonSerializable(typeof(PythonScriptSaveRequest))]
+    [JsonSerializable(typeof(PythonScriptSaveResponse))]
+    [JsonSerializable(typeof(PythonScriptImportRequest))]
+    [JsonSerializable(typeof(PythonScriptRenameRequest))]
     [JsonSerializable(typeof(PythonScriptRunResponse))]
     [JsonSerializable(typeof(PythonScriptRunRecord))]
     [JsonSerializable(typeof(List<PythonScriptRunRecord>))]

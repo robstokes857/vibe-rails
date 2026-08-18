@@ -402,6 +402,376 @@ public sealed class PythonScriptServiceTests : IDisposable
         Assert.Empty(service.GetRunHistory().Runs);
     }
 
+    [Fact]
+    public async Task CreateWritesTheFileUnsignedAndRefusesAnExistingName()
+    {
+        var service = NewService(out _);
+
+        var created = await service.CreateAsync(
+            new PythonScriptSaveRequest("fresh.py", "print('hi')\n"), TestContext.Current.CancellationToken);
+
+        Assert.Equal("print('hi')\n", File.ReadAllText(ScriptPath("fresh.py")));
+        var script = created.Scripts.Single(entry => entry.Name == "fresh.py");
+        Assert.Equal(PythonScriptService.StatusUnapproved, script.Status);
+        Assert.Equal(ScriptPath("fresh.py"), script.Path);
+
+        var error = await Assert.ThrowsAsync<PythonScriptValidationException>(() => service.CreateAsync(
+            new PythonScriptSaveRequest("fresh.py", "print('other')\n"), TestContext.Current.CancellationToken));
+        Assert.Contains("already exists", error.Message);
+        // The refused create must not have touched the original file.
+        Assert.Equal("print('hi')\n", File.ReadAllText(ScriptPath("fresh.py")));
+    }
+
+    [Fact]
+    public async Task CreateWritesUtf8WithoutABom()
+    {
+        var service = NewService(out _);
+
+        await service.CreateAsync(
+            new PythonScriptSaveRequest("accents.py", "print('café')\n"), TestContext.Current.CancellationToken);
+
+        var bytes = File.ReadAllBytes(ScriptPath("accents.py"));
+        Assert.NotEqual([0xEF, 0xBB, 0xBF], bytes.Take(3).ToArray());
+        Assert.Equal("print('café')\n", System.Text.Encoding.UTF8.GetString(bytes));
+    }
+
+    [Fact]
+    public async Task SavingAnEditClearsTheSignature_SavingIdenticalContentKeepsIt()
+    {
+        var service = NewService(out _);
+        WriteScript("job.py", "print('one')\n");
+        await service.SetPinAsync(
+            new SetPythonScriptPinRequest(null, "1234"), TestContext.Current.CancellationToken);
+        await service.ApproveAsync(
+            new PythonScriptApprovalRequest("job.py", "1234"), TestContext.Current.CancellationToken);
+        var opened = await service.GetContentAsync("job.py", TestContext.Current.CancellationToken);
+
+        // A save that changes nothing is not an edit: the canonical hash is unchanged.
+        var unchanged = await service.SaveContentAsync(
+            new PythonScriptSaveRequest("job.py", "print('one')\n", opened.Version),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(
+            PythonScriptService.StatusApproved,
+            unchanged.State.Scripts.Single(entry => entry.Name == "job.py").Status);
+
+        var edited = await service.SaveContentAsync(
+            new PythonScriptSaveRequest("job.py", "print('two')\n", unchanged.Version),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(
+            PythonScriptService.StatusModified,
+            edited.State.Scripts.Single(entry => entry.Name == "job.py").Status);
+        await Assert.ThrowsAsync<PythonScriptValidationException>(
+            () => service.RunAsync("job.py", TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task SaveRejectsAStaleVersionAndNeverRecreatesADeletedFile()
+    {
+        var service = NewService(out _);
+        WriteScript("job.py", "print('opened')\n");
+        var opened = await service.GetContentAsync("job.py", TestContext.Current.CancellationToken);
+
+        await Assert.ThrowsAsync<PythonScriptValidationException>(() =>
+            service.SaveContentAsync(
+                new PythonScriptSaveRequest("job.py", "print('blind')\n"),
+                TestContext.Current.CancellationToken));
+        Assert.Equal("print('opened')\n", File.ReadAllText(ScriptPath("job.py")));
+
+        File.WriteAllText(ScriptPath("job.py"), "print('newer')\n");
+        var stale = await Assert.ThrowsAsync<PythonScriptValidationException>(() =>
+            service.SaveContentAsync(
+                new PythonScriptSaveRequest("job.py", "print('stale')\n", opened.Version),
+                TestContext.Current.CancellationToken));
+        Assert.Contains("changed after it was opened", stale.Message);
+        Assert.Equal("print('newer')\n", File.ReadAllText(ScriptPath("job.py")));
+
+        File.Delete(ScriptPath("job.py"));
+        await Assert.ThrowsAsync<PythonScriptValidationException>(() =>
+            service.SaveContentAsync(
+                new PythonScriptSaveRequest("job.py", "print('resurrected')\n", opened.Version),
+                TestContext.Current.CancellationToken));
+        Assert.False(File.Exists(ScriptPath("job.py")));
+    }
+
+    [Fact]
+    public async Task CreateClearsAStaleApprovalBeforePublishingTheFile()
+    {
+        var service = NewService(out _);
+        WriteScript("job.py", "print('approved')\n");
+        await service.SetPinAsync(
+            new SetPythonScriptPinRequest(null, "1234"), TestContext.Current.CancellationToken);
+        await service.ApproveAsync(
+            new PythonScriptApprovalRequest("job.py", "1234"), TestContext.Current.CancellationToken);
+
+        // Model an external deletion, which cannot update the signing document.
+        File.Delete(ScriptPath("job.py"));
+        var created = await service.CreateAsync(
+            new PythonScriptSaveRequest("job.py", "print('approved')\n"),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            PythonScriptService.StatusUnapproved,
+            created.Scripts.Single(entry => entry.Name == "job.py").Status);
+    }
+
+    [Fact]
+    public async Task GetContentReturnsTheTextAndItsSigningStatus()
+    {
+        var service = NewService(out _);
+        WriteScript("job.py", "print('one')\n");
+        await service.SetPinAsync(
+            new SetPythonScriptPinRequest(null, "1234"), TestContext.Current.CancellationToken);
+        await service.ApproveAsync(
+            new PythonScriptApprovalRequest("job.py", "1234"), TestContext.Current.CancellationToken);
+
+        var content = await service.GetContentAsync("job.py", TestContext.Current.CancellationToken);
+
+        Assert.Equal("job.py", content.Name);
+        Assert.Equal("print('one')\n", content.Content);
+        Assert.Equal(PythonScriptService.StatusApproved, content.Status);
+
+        await Assert.ThrowsAsync<PythonScriptValidationException>(
+            () => service.GetContentAsync("../escape.py", TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<PythonScriptValidationException>(
+            () => service.GetContentAsync("missing.py", TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task GetContentStripsALeadingBomSoARoundTripDoesNotBreakTheSignature()
+    {
+        var service = NewService(out _);
+        Directory.CreateDirectory(Path.Combine(_installDirectory, PythonScriptService.ScriptsSubdirectory));
+        File.WriteAllBytes(
+            ScriptPath("bom.py"),
+            [.. new byte[] { 0xEF, 0xBB, 0xBF }, .. System.Text.Encoding.UTF8.GetBytes("print('hi')\n")]);
+        await service.SetPinAsync(
+            new SetPythonScriptPinRequest(null, "1234"), TestContext.Current.CancellationToken);
+        await service.ApproveAsync(
+            new PythonScriptApprovalRequest("bom.py", "1234"), TestContext.Current.CancellationToken);
+
+        var content = await service.GetContentAsync("bom.py", TestContext.Current.CancellationToken);
+        Assert.Equal("print('hi')\n", content.Content);
+
+        var saved = await service.SaveContentAsync(
+            new PythonScriptSaveRequest("bom.py", content.Content, content.Version),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(
+            PythonScriptService.StatusApproved,
+            saved.State.Scripts.Single(entry => entry.Name == "bom.py").Status);
+    }
+
+    [Fact]
+    public async Task ImportCopiesAFileInAndLeavesTheSourceAlone()
+    {
+        var service = NewService(out _);
+        var source = Path.Combine(_installDirectory, "outside.py");
+        Directory.CreateDirectory(_installDirectory);
+        File.WriteAllText(source, "print('imported')\n");
+
+        var imported = await service.ImportAsync(
+            new PythonScriptImportRequest(source, null), TestContext.Current.CancellationToken);
+
+        Assert.Equal("print('imported')\n", File.ReadAllText(ScriptPath("outside.py")));
+        Assert.True(File.Exists(source));
+        Assert.Equal(
+            PythonScriptService.StatusUnapproved,
+            imported.Scripts.Single(entry => entry.Name == "outside.py").Status);
+
+        var clash = await Assert.ThrowsAsync<PythonScriptValidationException>(() => service.ImportAsync(
+            new PythonScriptImportRequest(source, "outside.py"), TestContext.Current.CancellationToken));
+        Assert.Contains("already exists", clash.Message);
+    }
+
+    [Fact]
+    public async Task ImportRefusesMissingFilesAndAnythingThatCouldNeverBeSigned()
+    {
+        var service = NewService(out _);
+        Directory.CreateDirectory(_installDirectory);
+        var binary = Path.Combine(_installDirectory, "binary.py");
+        File.WriteAllBytes(binary, [0xC3, 0x28, 0xA0]);
+
+        await Assert.ThrowsAsync<PythonScriptValidationException>(() => service.ImportAsync(
+            new PythonScriptImportRequest(Path.Combine(_installDirectory, "nope.py"), null),
+            TestContext.Current.CancellationToken));
+
+        var invalid = await Assert.ThrowsAsync<PythonScriptValidationException>(() => service.ImportAsync(
+            new PythonScriptImportRequest(binary, null), TestContext.Current.CancellationToken));
+        Assert.Contains("UTF-8", invalid.Message);
+        Assert.False(File.Exists(ScriptPath("binary.py")));
+
+        // The name still has to be a plain script name, whatever the source was called.
+        var named = Path.Combine(_installDirectory, "notes.txt");
+        File.WriteAllText(named, "print('x')\n");
+        await Assert.ThrowsAsync<PythonScriptValidationException>(() => service.ImportAsync(
+            new PythonScriptImportRequest(named, "../escape.py"), TestContext.Current.CancellationToken));
+        // With no name given it becomes notes.txt.py rather than an extensionless script.
+        var defaulted = await service.ImportAsync(
+            new PythonScriptImportRequest(named, null), TestContext.Current.CancellationToken);
+        Assert.Contains(defaulted.Scripts, entry => entry.Name == "notes.txt.py");
+    }
+
+    [Theory]
+    [InlineData(@"\\server\share\script.py")]
+    [InlineData("//server/share/script.py")]
+    public async Task ImportRejectsNetworkAndDeviceStylePathsBeforeAccess(string sourcePath)
+    {
+        var service = NewService(out _);
+
+        var error = await Assert.ThrowsAsync<PythonScriptValidationException>(() =>
+            service.ImportAsync(
+                new PythonScriptImportRequest(sourcePath, "copy.py"),
+                TestContext.Current.CancellationToken));
+
+        Assert.Contains("Network and device paths", error.Message);
+        Assert.False(File.Exists(ScriptPath("copy.py")));
+    }
+
+    [Fact]
+    public async Task LinkedScriptsAreNeverListedReadSavedSignedOrRun()
+    {
+        var service = NewService(out _);
+        Directory.CreateDirectory(Path.Combine(
+            _installDirectory, PythonScriptService.ScriptsSubdirectory));
+        var outside = Path.Combine(_installDirectory, "outside.txt");
+        File.WriteAllText(outside, "do not overwrite\n");
+        var link = ScriptPath("linked.py");
+        try
+        {
+            File.CreateSymbolicLink(link, outside);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            Assert.Skip("This platform does not permit creating file symbolic links.");
+        }
+
+        var status = await service.GetStatusAsync(TestContext.Current.CancellationToken);
+        Assert.DoesNotContain(status.Scripts, script => script.Name == "linked.py");
+        await Assert.ThrowsAsync<PythonScriptValidationException>(
+            () => service.GetContentAsync("linked.py", TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<PythonScriptValidationException>(
+            () => service.SaveContentAsync(
+                new PythonScriptSaveRequest("linked.py", "overwrite\n", new string('0', 64)),
+                TestContext.Current.CancellationToken));
+        await service.SetPinAsync(
+            new SetPythonScriptPinRequest(null, "1234"), TestContext.Current.CancellationToken);
+        await Assert.ThrowsAsync<PythonScriptValidationException>(
+            () => service.ApproveAsync(
+                new PythonScriptApprovalRequest("linked.py", "1234"),
+                TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<PythonScriptValidationException>(
+            () => service.RunAsync("linked.py", TestContext.Current.CancellationToken));
+        Assert.Equal("do not overwrite\n", File.ReadAllText(outside));
+    }
+
+    [Fact]
+    public async Task RenameMovesTheFileAndTakesTheOldApprovalWithIt()
+    {
+        var service = NewService(out _);
+        WriteScript("job.py", "print('one')\n");
+        await service.SetPinAsync(
+            new SetPythonScriptPinRequest(null, "1234"), TestContext.Current.CancellationToken);
+        await service.ApproveAsync(
+            new PythonScriptApprovalRequest("job.py", "1234"), TestContext.Current.CancellationToken);
+
+        var renamed = await service.RenameAsync(
+            new PythonScriptRenameRequest("job.py", "nightly.py"), TestContext.Current.CancellationToken);
+
+        Assert.False(File.Exists(ScriptPath("job.py")));
+        Assert.Equal("print('one')\n", File.ReadAllText(ScriptPath("nightly.py")));
+        // The name is part of the hash preimage, so the new name is unsigned...
+        Assert.Equal(
+            PythonScriptService.StatusUnapproved,
+            renamed.Scripts.Single(entry => entry.Name == "nightly.py").Status);
+
+        // ...and the old name cannot resurrect its approval by being recreated byte-for-byte.
+        WriteScript("job.py", "print('one')\n");
+        var afterRecreate = await service.GetStatusAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(
+            PythonScriptService.StatusUnapproved,
+            afterRecreate.Scripts.Single(entry => entry.Name == "job.py").Status);
+    }
+
+    [Fact]
+    public async Task RenameRefusesAnExistingTargetName()
+    {
+        var service = NewService(out _);
+        WriteScript("job.py", "print('one')\n");
+        WriteScript("other.py", "print('two')\n");
+
+        var error = await Assert.ThrowsAsync<PythonScriptValidationException>(() => service.RenameAsync(
+            new PythonScriptRenameRequest("job.py", "other.py"), TestContext.Current.CancellationToken));
+
+        Assert.Contains("already exists", error.Message);
+        Assert.Equal("print('one')\n", File.ReadAllText(ScriptPath("job.py")));
+        Assert.Equal("print('two')\n", File.ReadAllText(ScriptPath("other.py")));
+    }
+
+    [Fact]
+    public async Task DeleteRemovesTheFileAndForgetsItsApproval()
+    {
+        var service = NewService(out _);
+        WriteScript("job.py", "print('one')\n");
+        await service.SetPinAsync(
+            new SetPythonScriptPinRequest(null, "1234"), TestContext.Current.CancellationToken);
+        await service.ApproveAsync(
+            new PythonScriptApprovalRequest("job.py", "1234"), TestContext.Current.CancellationToken);
+
+        var deleted = await service.DeleteAsync("job.py", TestContext.Current.CancellationToken);
+
+        Assert.False(File.Exists(ScriptPath("job.py")));
+        Assert.Empty(deleted.Scripts);
+
+        // Restoring the exact bytes must not restore the approval the user threw away.
+        WriteScript("job.py", "print('one')\n");
+        var restored = await service.GetStatusAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(
+            PythonScriptService.StatusUnapproved,
+            restored.Scripts.Single(entry => entry.Name == "job.py").Status);
+        await Assert.ThrowsAsync<PythonScriptValidationException>(
+            () => service.RunAsync("job.py", TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task DeleteDoesNotTouchTheFileWhenTrustStateCannotBeLocked()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Relies on mandatory file-sharing locks.");
+        var service = NewService(out _);
+        WriteScript("job.py", "print('one')\n");
+        await service.SetPinAsync(
+            new SetPythonScriptPinRequest(null, "1234"), TestContext.Current.CancellationToken);
+        await service.ApproveAsync(
+            new PythonScriptApprovalRequest("job.py", "1234"), TestContext.Current.CancellationToken);
+
+        using var heldLock = new FileStream(
+            Path.Combine(_installDirectory, PythonScriptService.SigningFileName + ".lock"),
+            FileMode.OpenOrCreate,
+            FileAccess.ReadWrite,
+            FileShare.None);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => service.DeleteAsync("job.py", cancellation.Token));
+
+        Assert.True(File.Exists(ScriptPath("job.py")));
+        var status = await service.GetStatusAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(
+            PythonScriptService.StatusApproved,
+            status.Scripts.Single(entry => entry.Name == "job.py").Status);
+    }
+
+    [Fact]
+    public async Task DeletingAScriptThatIsAlreadyGoneSucceeds()
+    {
+        var service = NewService(out _);
+        WriteScript("job.py", "print('one')\n");
+
+        await service.DeleteAsync("job.py", TestContext.Current.CancellationToken);
+        var again = await service.DeleteAsync("job.py", TestContext.Current.CancellationToken);
+
+        Assert.Empty(again.Scripts);
+        await Assert.ThrowsAsync<PythonScriptValidationException>(
+            () => service.DeleteAsync("../escape.py", TestContext.Current.CancellationToken));
+    }
+
     private PythonScriptService NewService(out Mock<IPythonRunner> runner)
     {
         runner = new Mock<IPythonRunner>(MockBehavior.Loose);

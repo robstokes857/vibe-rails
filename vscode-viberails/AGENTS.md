@@ -34,6 +34,14 @@ The extension consists of three main components plus a shared constants module:
 3. **Webview Panel Manager** (`webview-panel.ts`) - Handles the VS Code webview panel and content
 4. **Constants** (`constants.ts`) - Command ids, token header names, backend paths, timeouts. Must not import `vscode`.
 
+### Webview bridge
+
+The dashboard and the extension talk through injected globals, not DOM structure:
+`__viberails_VSCODE__`, `__viberails_close__`, `__viberails_setTitle__`, and
+`__viberails_openFile__` (opens a path in an editor tab beside the panel — the Python
+scripts section uses it instead of its in-app Monaco editor). The dashboard
+feature-detects each one, so an older extension host degrades instead of breaking.
+
 ### Backend Server
 
 - Automatically finds and starts the VibeRails backend

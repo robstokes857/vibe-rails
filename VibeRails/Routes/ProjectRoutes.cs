@@ -56,6 +56,10 @@ public static class ProjectRoutes
 
     public static void Map(WebApplication app, string launchDirectory)
     {
+        var isActiveRootBackend = app.Services
+            .GetRequiredService<ProcessRole>()
+            .IsActiveRootBackend;
+
         // Bare readiness probe: the ONLY deliberately unauthenticated endpoint (see
         // CookieAuthMiddleware's skip list). The parent process polls it on a child terminal
         // server BEFORE consuming the child's bootstrap code — i.e. before any token exists —
@@ -79,7 +83,8 @@ public static class ProjectRoutes
                 RootPath: rootPath,
                 GitBranch: Utils.ParserConfigs.GetGitBranch(),
                 GitRemoteUrl: StripUserInfo(Utils.ParserConfigs.GetGitRemoteUrl()),
-                IsSandbox: isSandbox
+                IsSandbox: isSandbox,
+                IsActiveRootBackend: isActiveRootBackend
             ));
         }).WithName("GetContext");
 
@@ -161,7 +166,8 @@ public static class ProjectRoutes
                 LaunchDirectory: launchDirectory,
                 RootPath: detected.projectRoot,
                 GitBranch: Utils.ParserConfigs.GetGitBranch(),
-                GitRemoteUrl: Utils.ParserConfigs.GetGitRemoteUrl()
+                GitRemoteUrl: Utils.ParserConfigs.GetGitRemoteUrl(),
+                IsActiveRootBackend: isActiveRootBackend
             ));
         }).WithName("GitInit");
 
