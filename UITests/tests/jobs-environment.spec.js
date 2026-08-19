@@ -218,6 +218,15 @@ async function installStatefulApi(page) {
                 message: 'Jobs worker is running.'
             });
         }
+        // The Python scripts section reads the developer's real ~/.vibe_rails/scripts
+        // through the fallback; keep this spec deterministic (and read-only) instead.
+        if (method === 'GET' && path === '/api/v1/python-scripts') {
+            return respond({
+                pinConfigured: false,
+                scriptsDirectory: 'C:\Users\test\.vibe_rails\scripts',
+                scripts: []
+            });
+        }
 
         return route.fallback();
     });
@@ -442,20 +451,22 @@ test.describe('Jobs Worker / Environments integration', () => {
         expect(create.body.triggers).toEqual([{ kind: 2 }]);
     });
 
-    test('the enable toggle is state-colored green/red', async ({ page }) => {
+    test('the enable toggle is a real switch that reflects the job state', async ({ page }) => {
         await installStatefulApi(page);
         await openApp(page);
         await openJobs(page);
 
-        // Fixture job 17 is disabled → red with the off icon.
+        // Fixture job 17 is disabled → switch off.
         const toggle = page.locator('[data-job-action="toggle"][data-job-id="17"]');
-        await expect(toggle).toHaveClass(/btn-outline-danger/);
-        await expect(toggle.locator('.fa-toggle-off')).toBeVisible();
+        await expect(toggle).toHaveClass(/job-switch/);
+        await expect(toggle).toHaveAttribute('role', 'switch');
+        await expect(toggle).toHaveAttribute('aria-checked', 'false');
+        await expect(toggle.locator('.job-switch-text')).toHaveText('Disabled');
 
         await toggle.click();
         const enabledToggle = page.locator('[data-job-action="toggle"][data-job-id="17"]');
-        await expect(enabledToggle).toHaveClass(/btn-outline-success/);
-        await expect(enabledToggle.locator('.fa-toggle-on')).toBeVisible();
+        await expect(enabledToggle).toHaveAttribute('aria-checked', 'true');
+        await expect(enabledToggle.locator('.job-switch-text')).toHaveText('Enabled');
     });
 
     test('Automation uses opaque rows and a focused form without an Advanced disclosure', async ({ page }) => {

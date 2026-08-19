@@ -22,6 +22,16 @@ public sealed record FileSystemEntryResponse(
     string? Extension);
 
 /// <summary>
+/// A well-known user folder offered in the picker sidebar ("Quick access"). <c>Kind</c> is one of
+/// <c>home</c>, <c>desktop</c>, <c>documents</c>, or <c>downloads</c>; the client maps it to an icon.
+/// Only existing local directories that pass the same eligibility rules as roots are listed.
+/// </summary>
+public sealed record FileSystemPlaceResponse(
+    string Label,
+    string Path,
+    string Kind);
+
+/// <summary>
 /// One level of the authenticated local filesystem browser.
 /// </summary>
 public sealed record FileSystemBrowseResponse(
@@ -35,4 +45,5 @@ public sealed record FileSystemBrowseResponse(
     bool Truncated,
     string? NextCursor = null,
     long? TotalCount = null,
-    string? Search = null);
+    string? Search = null,
+    List<FileSystemPlaceResponse>? Places = null);

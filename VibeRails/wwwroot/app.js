@@ -16,6 +16,7 @@ import { SettingsController } from './js/modules/settings-controller.js';
 import { VibeRailsAiController } from './js/modules/vibe-rails-ai-controller.js';
 import { McpController } from './js/modules/mcp-controller.js';
 import { JobController } from './js/modules/jobs-controller.js';
+import { PythonScriptWorkbench } from './js/modules/python-script-workbench.js';
 import { LlmPickerController } from './js/modules/llm-picker-controller.js';
 import { AutomationNavLauncher } from './js/modules/automation-launcher.js';
 import { AppEventClient } from './js/modules/app-event-client.js';
@@ -56,6 +57,7 @@ export class VibeControlApp {
         this.vibeRailsAiController = new VibeRailsAiController(this);
         this.mcpController = new McpController(this);
         this.jobController = new JobController(this);
+        this.pythonScriptWorkbench = new PythonScriptWorkbench(this);
         this.automationNavLauncher = new AutomationNavLauncher(this);
         this.appEventClient = new AppEventClient(this);
         this.lifecycleHeartbeatTimer = null;
@@ -615,11 +617,15 @@ export class VibeControlApp {
     }
 
     getDuplicateTabViewName(view) {
+        // Detail views land on their parent page: a duplicated Python workbench tab
+        // opens the Automation page (the script list), not the single-script editor.
         const normalizedView = view === 'agents'
             ? 'dashboard'
             : ['agent-edit', 'agent-create'].includes(view)
                 ? 'rule-files'
-                : view;
+                : view === 'python-script'
+                    ? 'jobs'
+                    : view;
         const duplicateableViews = new Set([
             'dashboard',
             'launch-cli',
@@ -796,12 +802,15 @@ export class VibeControlApp {
 
     updateActiveSubNav(view) {
         // Two nav families: the Code quality page (home) owns the checks, the RULES
-        // entry owns the AGENTS.md editing views.
+        // entry owns the AGENTS.md editing views. The Python script workbench is a
+        // detail view of the Automation page, so Automation stays highlighted.
         const highlightView = ['agents', 'code-quality'].includes(view)
             ? 'dashboard'
             : ['agent-edit', 'agent-create'].includes(view)
                 ? 'rule-files'
-                : view;
+                : view === 'python-script'
+                    ? 'jobs'
+                    : view;
         document.querySelectorAll('.app-subnav-link').forEach(link => {
             const linkView = link.getAttribute('data-view') || (link.getAttribute('data-action') === 'navigate-home' ? 'dashboard' : (link.getAttribute('data-action') === 'navigate-settings' ? 'settings' : ''));
 
@@ -811,6 +820,14 @@ export class VibeControlApp {
                 link.classList.remove('active');
             }
         });
+    }
+
+    // Lets a view that swaps its subject in place (the Python workbench switching
+    // scripts) keep Back and duplicate-tab consistent without a full reload.
+    updateCurrentViewData(data = {}) {
+        const last = this.navigationStack.length - 1;
+        if (last < 0) return;
+        this.navigationStack[last] = { view: this.currentView, data };
     }
 
     goBack() {
@@ -850,6 +867,7 @@ export class VibeControlApp {
         this.settingsController?.unload?.();
         this.ruleController?.unload?.();
         this.jobController?.unload?.();
+        this.pythonScriptWorkbench?.unload?.();
         this.environmentController?.unload?.();
         this.sandboxController?.unload?.();
         this.updateActiveSubNav(view);
@@ -877,7 +895,8 @@ export class VibeControlApp {
             'sandboxes': () => this.sandboxController.loadSandboxes(),
             'vibe-rails-ai': () => this.vibeRailsAiController.loadView(),
             'mcp': () => this.mcpController.loadView(),
-            'jobs': () => this.jobController.loadView(data)
+            'jobs': () => this.jobController.loadView(data),
+            'python-script': () => this.pythonScriptWorkbench.loadView(data)
         };
 
         const loadFunc = views[view];
@@ -896,8 +915,10 @@ export class VibeControlApp {
         const isGitGuardFocus = view === 'git-guard';
         // The Rules workspace is a fixed two-pane split (sections over terminal), so it
         // owns the viewport the same way the terminal focus view does: no page scroll,
-        // no footer, tight gutters. 'dashboard' and 'agents' both render it.
-        const isRulesWorkspace = view === 'dashboard' || view === 'agents';
+        // no footer, tight gutters. 'dashboard' and 'agents' both render it. The class
+        // is really "viewport-filling flowing shell, footer hidden", so the Python
+        // script workbench (editor over a docked terminal) uses it too.
+        const isRulesWorkspace = view === 'dashboard' || view === 'agents' || view === 'python-script';
         const layoutRoots = [document.documentElement, document.body];
 
         layoutRoots.forEach((element) => {
@@ -1445,13 +1466,38 @@ export class VibeControlApp {
         }
     }
 
+    // Escape inside a terminal or Monaco is never ours: Claude Code interrupts on Esc,
+    // Monaco dismisses its suggest widget. Those widgets keep it even with a modal open.
+    isEscapeOwnedByWidget(target) {
+        return Boolean(target?.closest?.('.xterm, .monaco-editor'));
+    }
+
+    // Plain form fields own Escape before it means "back" (a <select> closes its list,
+    // a text field drops its IME composition) — but not before it closes an open modal:
+    // nearly every showModal form starts with focus in an input, and Esc must still
+    // dismiss it. Bubble phase only — the target already handled the key itself.
+    isEscapeOwnedByTarget(target) {
+        return Boolean(target?.closest?.('input, textarea, select, [contenteditable="true"]'));
+    }
+
     setupKeyboardShortcuts() {
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
+                // Order matters: a widget or a handler that already consumed the key
+                // wins; then an open modal closes regardless of the focused field;
+                // then a plain field keeps it; only then does Escape mean "back".
+                if (e.defaultPrevented || this.isEscapeOwnedByWidget(e.target)) {
+                    return;
+                }
                 const modalContainer = document.getElementById('modal-container');
-                const hadOpenModal = Boolean(modalContainer?.firstElementChild);
-                this.closeModal();
-                if (!hadOpenModal && this.navigationStack.length > 1) {
+                if (modalContainer?.firstElementChild) {
+                    this.closeModal();
+                    return;
+                }
+                if (this.isEscapeOwnedByTarget(e.target)) {
+                    return;
+                }
+                if (this.navigationStack.length > 1) {
                     this.goBack();
                 }
             } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {

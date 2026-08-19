@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
@@ -44,6 +45,34 @@ public sealed class FileSystemRoutesTests : IDisposable
             Assert.Equal(browser.DefaultPath, body.CurrentPath);
             Assert.True(Path.IsPathFullyQualified(browser.DefaultPath));
             Assert.True(Directory.Exists(browser.DefaultPath));
+        });
+    }
+
+    [Fact]
+    public async Task BrowsePayload_IncludesTheSidebarPlacesArray()
+    {
+        var browser = new RecordingBrowserService();
+
+        await WithHostAsync(browser, async baseUri =>
+        {
+            using var response = await SharedClient.GetAsync(
+                new Uri(baseUri, "/api/v1/filesystem/entries"),
+                TestContext.Current.CancellationToken);
+            var json = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+            using var document = JsonDocument.Parse(json);
+            var body = JsonSerializer.Deserialize(
+                json,
+                AppJsonSerializerContext.Default.FileSystemBrowseResponse);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var places = document.RootElement.GetProperty("places");
+            Assert.Equal(JsonValueKind.Array, places.ValueKind);
+            var place = Assert.Single(places.EnumerateArray());
+            Assert.Equal("Home", place.GetProperty("label").GetString());
+            Assert.Equal(browser.DefaultPath, place.GetProperty("path").GetString());
+            Assert.Equal("home", place.GetProperty("kind").GetString());
+            Assert.NotNull(body?.Places);
+            Assert.Equal("home", Assert.Single(body.Places).Kind);
         });
     }
 
@@ -159,7 +188,8 @@ public sealed class FileSystemRoutesTests : IDisposable
                 [],
                 [],
                 [],
-                Truncated: false);
+                Truncated: false,
+                Places: [new FileSystemPlaceResponse("Home", defaultPath, "home")]);
         }
     }
 

@@ -1745,3 +1745,45 @@ test('The Worker modal is one plain form with no two-field Advanced disclosure',
     assert.match(environmentHtml, /<select[^>]*id="env-workspace-mode"/);
     assert.match(environmentHtml, /Its own clone/);
 });
+
+test('Escape closing the nav Launch flyout does not also wipe the open Automation editor', (t) => {
+    const originalDocument = globalThis.document;
+    const originalWindow = globalThis.window;
+    t.after(() => {
+        globalThis.document = originalDocument;
+        globalThis.window = originalWindow;
+    });
+
+    // The flyout lives on <body>, outside #modal-container, and closes itself on
+    // Escape (document capture); the editor's window-capture handler runs first and
+    // must stand down while the flyout is present.
+    let flyoutPresent = true;
+    let escapeHandler = null;
+    const documentStub = {
+        getElementById() { return null; },
+        querySelector(selector) {
+            return selector === '.automation-launch-flyout' && flyoutPresent ? { className: 'automation-launch-flyout' } : null;
+        },
+        addEventListener(type, handler, capture) {
+            if (type === 'keydown' && capture === true) escapeHandler = handler;
+        },
+        removeEventListener(type, handler, capture) {
+            if (type === 'keydown' && capture === true && escapeHandler === handler) escapeHandler = null;
+        }
+    };
+    globalThis.document = documentStub;
+    globalThis.window = documentStub;
+
+    const controller = new JobController(createApp());
+    let destroyCount = 0;
+    controller.registerEditorModalCleanup({ tomselect: { destroy() { destroyCount += 1; } } });
+
+    escapeHandler({ key: 'Escape' });
+    assert.equal(destroyCount, 0, 'the editor survives the Escape that closed the flyout');
+    assert.notEqual(escapeHandler, null);
+
+    flyoutPresent = false;
+    escapeHandler({ key: 'Escape' });
+    assert.equal(destroyCount, 1, 'with no flyout up, Escape closes the editor as before');
+    assert.equal(escapeHandler, null);
+});

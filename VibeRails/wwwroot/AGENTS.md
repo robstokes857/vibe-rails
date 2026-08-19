@@ -17,19 +17,53 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | [js/modules/sandbox-controller.js](js/modules/sandbox-controller.js) | Sandbox CRUD + launch terminals/VS Code into sandbox dirs |
 | [js/modules/dashboard-controller.js](js/modules/dashboard-controller.js) | Dashboard layout with state passing for preselection |
 | [js/modules/code-analyzer-dashboard.js](js/modules/code-analyzer-dashboard.js) | Interactive MintLint scan dashboard with Monaco code evidence for the Rules page |
+| [js/modules/jobs-controller.js](js/modules/jobs-controller.js) | Automation page: automation CRUD + inline editor, run history, "Run now" into a terminal tab (`launchFromNav` for the nav launcher); owns the shared `PythonScriptsController` |
+| [js/modules/python-scripts-controller.js](js/modules/python-scripts-controller.js) | "Python scripts" section of the Automation page + the shared sign/revoke/rename/delete/duplicate/run flows (PIN modal, `runningNames`, `lastRunByName`) the workbench and the nav launcher reuse |
+| [js/modules/python-script-workbench.js](js/modules/python-script-workbench.js) | `python-script` view: Monaco editor over a docked agent terminal for one script (see "Python script workbench" below) |
+| [js/modules/automation-launcher.js](js/modules/automation-launcher.js) | Nav "Launch" flyout (automations + Python scripts, unsigned ones disabled) and its order/show-hide customize modal over `/api/v1/automation-nav/preferences` |
 
 ## Reusable local File Explorer
 
-Call `await app.pickFileSystemEntry({ mode, initialPath?, title?, includeHidden?, triggerElement? })`
+Call `await app.pickFileSystemEntry({ mode, initialPath?, title?, includeHidden?, filters?, triggerElement? })`
 from any view. `mode` is `file`, `directory`, or `any`. A selection resolves to
 `{ canceled: false, path, kind, name }`; every dismissal resolves (rather than rejects) to
 `{ canceled: true, path: null, kind: null, name: null }`. The component is a nested modal layer,
 so it can safely open over an existing `app.showModal` form.
 
+`filters` is optional and only honoured in `file` / `any` mode:
+`[{ label: 'Python files', extensions: ['py'] }, { label: 'All files', extensions: [] }]`.
+Extensions are matched case-insensitively without dots; an empty list means all files; folders are
+never filtered. The first entry is the default and renders as the "Files of type" `<select>` next
+to the file-name box, labelled with its pattern ("Python files (*.py)", "All files (*.*)"). Omit
+the option and every file is listed, as before. Filtering is client-side over the loaded page(s),
+so the footer count reads "12 of 340 items (Python files)" while a filter hides rows.
+
+The dialog is laid out like a desktop Open / Select Folder dialog (`file-explorer.js`, styles in
+the "Server-backed File Explorer" block of `style.css`): title bar; toolbar with Back / Forward /
+Up, a breadcrumb address bar (click the empty part, Ctrl+L, or F4 to type a path; Enter goes,
+Escape/blur revert), Refresh, and a search box; a places sidebar ("Quick access": Project, then
+the server-provided Home / Desktop / Documents / Downloads that exist; "This PC" / "Drives": the
+roots) that collapses to a chip strip under 860px; a details list with sortable Name / Date
+modified / Type / Size headers (folders always first, type-ahead, Enter opens, Alt+Up up,
+Backspace back — or up while there is no history — Alt+Left/Right history); a "File name:" row
+("Folder:" in directory mode) whose Enter opens the typed name or navigates an absolute path (a
+name missing from a partially loaded or searched folder is searched for server-side before it is
+declared missing); and a footer with the status, "Show hidden items", and Open / Select Folder +
+Cancel. In directory mode the primary button picks the highlighted folder, else the folder being
+viewed (a highlighted muted file counts as nothing). Only Escape, Cancel, and the X dismiss;
+clicking the backdrop does nothing. Without `initialPath` the dialog reopens at the folder the
+last picker of that mode was accepted from (localStorage `viberails.fileExplorer.lastPath:<mode>`)
+and falls back silently to the project root if that folder no longer loads. Nested-layer rules
+apply: it appends its own layer to `#modal-container`, marks everything else inert, traps Tab, and
+stands down for `confirmDialog()`.
+
 The authenticated root backend serves one metadata-only level at
-`GET /api/v1/filesystem/entries`. Cursor paging and debounced server search keep every item in a
-large directory reachable. Network/device paths and navigation through links/reparse points are
-rejected; linked rows are shown for context but cannot be opened or selected.
+`GET /api/v1/filesystem/entries`; the payload's `places` array (label, path,
+kind ∈ home|desktop|documents|downloads) feeds the sidebar and lists only existing local
+directories that pass the same eligibility rules as roots. Cursor paging and debounced server
+search keep every item in a large directory reachable. Network/device paths and navigation
+through links/reparse points are rejected; linked rows are shown for context but cannot be opened
+or selected.
 
 ## Token Saver Integration
 
@@ -216,6 +250,51 @@ The WebSocket URL accepts `?cols=&rows=` so the backend can resize the PTY befor
 replaying the session buffer (avoids the stale-geometry "double print" bug).
 
 See also: [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for backend terminal service.
+
+## Python script workbench
+
+- **View** `python-script` (data `{ name }`), module `js/modules/python-script-workbench.js`
+  (`PythonScriptWorkbench`, constructed in `app.js`; Automation stays the highlighted nav
+  entry and a duplicated tab lands on `jobs`). Opened from the Automation page's Python
+  scripts section: the row's **Edit** button (outline-primary, first in the row) and the
+  script name navigate here in every host; "Open in VS Code" is a secondary menu item
+  when the extension bridge exists.
+- **Layout**: Back bar (`data-action="go-back"`, bound globally) + identity/status pill +
+  Run / Sign / kebab; a `.rules-section` card with a script rail and Monaco
+  (`viberails-dark`, Ctrl/⌘+S saves in place); an optional last-run drawer; a draggable
+  splitter (`role="separator"`, Arrow keys ±24px); and the agent terminal
+  (`renderTerminalPanel({ workingDirectory })` + `bindTerminalActions(host, null,
+  { defaultWorkingDirectory: scriptsDirectory })`, so sessions start in the **scripts
+  directory**, not the project root). **Wide windows (≥ 1180px, `isSideBySideLayout()`
+  = the CSS `@media (min-width: 1180px)`) put the terminal BESIDE the editor** as a grid
+  column whose width the (now vertical) splitter sets — `--python-workbench-terminal-width`,
+  persisted in localStorage `viberails.pythonWorkbench.terminalWidth`, ArrowLeft/Right —
+  and the panes claim most of the viewport as a minimum height so a short window scrolls
+  the page instead of squeezing either pane. **Narrower windows stack** the terminal under
+  the editor (horizontal splitter, `--python-workbench-terminal-height`, localStorage
+  `viberails.pythonWorkbench.terminalHeight`, ArrowUp/Down; the floor drops to 180px on
+  viewports ≤ 720px tall). The shell class `vb-rules-workspace-active` is applied to this
+  view too.
+- **Shared flows**: signing (PIN prompt), revoke, rename, delete, duplicate, copy path,
+  run and `saveContent` are public methods on `PythonScriptsController`
+  (`app.jobController.pythonScripts`) that work unmounted; the workbench follows list
+  updates through `onStateChange`.
+- **Ask agent**: with a live session (open socket) the brief naming the absolute script
+  path is pasted with `injectText` **without submitting** (`…\n\nChange: `); otherwise
+  `startTerminalWithOptions` starts the panel's picked CLI (default `claude`) in the
+  scripts directory with a read-and-wait `initialPrompt` (auto-submitted, so it never
+  carries the half-finished sentence), `taskKey: 'python-script:<name>'` reuses the tab.
+- **Live reload**: while mounted and visible, `GET /api/v1/python-scripts/content` is
+  polled every ~4s (and on focus / visibilitychange); a new `version` swaps the text
+  preserving cursor + scroll when the editor is clean, or raises an inline banner
+  (Reload / Keep my edits) when dirty. Stale saves (400 from the server) show the same
+  banner; a file deleted on disk offers "Re-create from my edits". Never polls while a
+  save is in flight; everything stops in `unload()`.
+- **Guards**: an app navigation guard (retry-replay via `confirmDialog`) and
+  `beforeunload` protect unsaved edits. `app.js` no longer treats Escape as Back / close
+  modal when the key was already handled or its target sits in `.xterm`, `.monaco-editor`,
+  `input`, `textarea`, `select` or `[contenteditable="true"]` (Claude Code uses Esc to
+  interrupt).
 
 ---
 

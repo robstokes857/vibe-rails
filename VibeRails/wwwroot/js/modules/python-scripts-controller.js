@@ -1,6 +1,5 @@
 import { confirmDialog, escapeHtml, formatRelativeTime, isConfirmDialogOpen } from './utils.js';
 import { formatFileExplorerSize } from './file-explorer.js';
-import { PythonScriptEditorModal } from './python-script-editor.js';
 
 const API = '/api/v1/python-scripts';
 
@@ -11,15 +10,33 @@ const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._ -]{0,120}\.py$/;
 const REFRESH_THROTTLE_MS = 2000;
 const MAX_SCRIPT_BYTES = 5 * 1024 * 1024;
 
-const STATUS_META = Object.freeze({
+// One Run button while its script is in flight, wherever it is rendered.
+const RUNNING_BUTTON_HTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Running…';
+
+// Shared with the workbench so the row pill and the page pill never drift apart.
+export const PYTHON_SCRIPT_STATUS_META = Object.freeze({
     approved: { label: 'Signed', tone: 'success', icon: 'fa-circle-check' },
     modified: { label: 'Changed since signing', tone: 'warning', icon: 'fa-triangle-exclamation' },
     unapproved: { label: 'Not signed', tone: 'neutral', icon: 'fa-circle-minus' }
 });
+const STATUS_META = PYTHON_SCRIPT_STATUS_META;
 
 function newScriptTemplate(name) {
     const stem = name.replace(/\.py$/i, '');
     return `"""${stem}\n\nRuns from the VibeRails Automation page once you sign it with your PIN.\n"""\n\n\ndef main() -> None:\n    print("${stem} ran")\n\n\nif __name__ == "__main__":\n    main()\n`;
+}
+
+/** A run "worked" only when it exited 0 without hitting the timeout. */
+export function isPythonRunOk(run) {
+    return Boolean(run) && run.exitCode === 0 && !run.timedOut;
+}
+
+/** stdout then stderr of one run, as the row and the workbench drawer both show it. */
+export function formatPythonRunOutput(run) {
+    const parts = [];
+    if (run?.standardOutput?.trim()) parts.push(run.standardOutput.trimEnd());
+    if (run?.standardError?.trim()) parts.push(`[stderr]\n${run.standardError.trimEnd()}`);
+    return parts.join('\n\n') || '(no output)';
 }
 
 /**
@@ -32,8 +49,13 @@ function newScriptTemplate(name) {
  * Authoring (new / import / duplicate / rename / edit / delete) never asks for the PIN,
  * because none of it can create an approval: a changed script drops to "Changed since
  * signing" until the user re-signs, while an identical save keeps the same exact approval.
- * Editing opens a real VS Code tab when we are hosted in the extension
- * (window.__viberails_openFile__) and a Monaco modal everywhere else.
+ * Clicking a script opens the workbench view ('python-script': Monaco editor over a
+ * docked agent terminal, see python-script-workbench.js); "Open in VS Code" stays a
+ * secondary action when the extension injected window.__viberails_openFile__.
+ *
+ * The signing / rename / delete / duplicate / run flows live here as public methods
+ * that do not need the section to be mounted: the workbench drives the very same code
+ * (state is refetched on demand, and `onStateChange` lets it follow the list).
  */
 export class PythonScriptsController {
     constructor(app) {
@@ -41,14 +63,13 @@ export class PythonScriptsController {
         this.root = null;
         this.state = null;
         this.lastRunByName = new Map();
+        // Scripts with a run in flight (from this section, the workbench or the nav
+        // launcher). Rows render their Run button from this, so a background rebuild
+        // can never re-enable a button mid-run.
+        this.runningNames = new Set();
         this.modal = null;
         this.confirm = confirmDialog;
-        this.editor = new PythonScriptEditorModal({
-            app,
-            onSave: (name, content, expectedVersion) =>
-                this._saveContent(name, content, expectedVersion),
-            onSign: (name) => this._approve(name)
-        });
+        this._stateListeners = new Set();
         this._lastListHtml = null;
         this._lastRefreshAt = 0;
         this._onWindowFocus = () => this._refreshIfIdle();
@@ -68,7 +89,7 @@ export class PythonScriptsController {
                         <h2 id="python-scripts-title"><i class="fa-brands fa-python me-2" aria-hidden="true"></i>Python scripts</h2>
                         <span class="jobs-count" data-python-scripts-count>0 scripts</span>
                     </div>
-                    <p>Single-file scripts from <code data-python-scripts-dir></code>. A script only runs while it is signed with your PIN.</p>
+                    <p>Single-file scripts from <code data-python-scripts-dir></code>. A script only runs while it is signed with your PIN. Edit a script here with an agent terminal beside it.</p>
                 </div>
                 <div class="python-scripts-heading-actions">
                     <button class="btn btn-sm btn-primary" type="button" data-python-scripts-action="new">
@@ -91,6 +112,12 @@ export class PythonScriptsController {
             </div>`;
 
         root.addEventListener('click', (event) => this._onClick(event));
+        root.addEventListener('keydown', (event) => this._onKeydown(event));
+        // Tabbing out of an open row menu closes it (a click elsewhere is handled below).
+        root.addEventListener('focusout', (event) => this._onFocusOut(event));
+        // The "Last run" drawer remembers whether it was open across list rebuilds.
+        // `toggle` does not bubble, so it is caught in the capture phase.
+        root.addEventListener('toggle', (event) => this._onOutputToggle(event), true);
         // A row menu is a popup: a click anywhere else on the page dismisses it.
         document.addEventListener('click', this._onDocumentClick, true);
         this._bindDropTarget(root.querySelector('[data-python-scripts-list]'));
@@ -104,7 +131,6 @@ export class PythonScriptsController {
     unmount() {
         this._closeMenus();
         this._closeModal();
-        void this.editor.close({ force: true });
         document.removeEventListener('click', this._onDocumentClick, true);
         window.removeEventListener('focus', this._onWindowFocus);
         document.removeEventListener('visibilitychange', this._onWindowFocus);
@@ -122,10 +148,27 @@ export class PythonScriptsController {
         }
     }
 
+    /** The current list state, fetching it when nothing is cached (unmounted callers). */
+    async ensureState() {
+        if (!this.state) await this.refresh({ quiet: true });
+        return this.state;
+    }
+
+    /**
+     * Follows every list update (refresh, save, sign, rename…). Returns the unsubscribe.
+     * @param {(state: object|null) => void} listener
+     */
+    onStateChange(listener) {
+        if (typeof listener !== 'function') return () => {};
+        this._stateListeners.add(listener);
+        return () => this._stateListeners.delete(listener);
+    }
+
     /** Refresh unless something on-screen would be yanked out from under the user. */
     _refreshIfIdle() {
         if (!this.root || document.visibilityState === 'hidden') return;
-        if (this.modal || this.editor.isOpen || isConfirmDialogOpen()) return;
+        if (this.modal || isConfirmDialogOpen()) return;
+        if (this.runningNames.size > 0) return;
         if (this.root.querySelector('.python-script-menu:not([hidden])')) return;
         if (Date.now() - this._lastRefreshAt < REFRESH_THROTTLE_MS) return;
         void this.refresh({ quiet: true });
@@ -135,9 +178,16 @@ export class PythonScriptsController {
         this.state = state;
         this._lastRefreshAt = Date.now();
         this._render();
+        for (const listener of Array.from(this._stateListeners)) {
+            try {
+                listener(state);
+            } catch (error) {
+                console.error('Python scripts state listener failed:', error);
+            }
+        }
     }
 
-    _scriptByName(name) {
+    scriptByName(name) {
         return (this.state?.scripts || []).find((script) => script.name === name) || null;
     }
 
@@ -186,7 +236,8 @@ export class PythonScriptsController {
     _renderRow(script) {
         const meta = STATUS_META[script.status] || STATUS_META.unapproved;
         const name = escapeHtml(script.name);
-        const canRun = script.status === 'approved';
+        const running = this.runningNames.has(script.name);
+        const canRun = script.status === 'approved' && !running;
         const lastRun = this.lastRunByName.get(script.name);
         const approveLabel = script.status === 'approved' ? 'Re-sign' : 'Sign';
         const details = [
@@ -202,9 +253,9 @@ export class PythonScriptsController {
                 <div class="python-script-main">
                     <div class="python-script-identity">
                         <button class="python-script-name" type="button" data-python-scripts-action="open"
-                                data-name="${name}" title="${this._openHint(script.name)}">
+                                data-name="${name}" title="Edit ${name}">
                             <span>${name}</span>
-                            <i class="fa-solid ${this._canOpenInVsCode() ? 'fa-arrow-up-right-from-square' : 'fa-pen-to-square'}" aria-hidden="true"></i>
+                            <i class="fa-solid fa-pen-to-square" aria-hidden="true"></i>
                         </button>
                         <span class="python-script-meta">${escapeHtml(details)}</span>
                     </div>
@@ -213,10 +264,14 @@ export class PythonScriptsController {
                     </span>
                 </div>
                 <div class="python-script-actions">
+                    <button class="btn btn-sm btn-outline-primary python-script-edit" type="button" data-python-scripts-action="edit"
+                            data-name="${name}" title="Open ${name} in the editor with an agent terminal beside it">
+                        <i class="fa-solid fa-pen-to-square me-1" aria-hidden="true"></i>Edit
+                    </button>
                     <button class="btn btn-sm btn-primary" type="button" data-python-scripts-action="run"
                             data-name="${name}" ${canRun ? '' : 'disabled'}
-                            title="${canRun ? `Run ${name} now` : 'Sign the script before running it'}">
-                        <i class="fa-solid fa-play me-1" aria-hidden="true"></i>Run
+                            title="${running ? `${name} is running` : canRun ? `Run ${name} now` : 'Sign the script before running it'}">
+                        ${running ? RUNNING_BUTTON_HTML : '<i class="fa-solid fa-play me-1" aria-hidden="true"></i>Run'}
                     </button>
                     <button class="btn btn-sm btn-outline-secondary" type="button" data-python-scripts-action="approve"
                             data-name="${name}" title="Approve this exact version with your PIN">
@@ -248,9 +303,10 @@ export class PythonScriptsController {
                 <i class="fa-solid ${icon}" aria-hidden="true"></i><span>${label}</span>
             </button>`;
 
+        // Editing has its own visible button on the row (and the name opens the file too),
+        // so the menu holds only the secondary actions.
         return [
-            this._canOpenInVsCode() ? item('open', 'fa-arrow-up-right-from-square', 'Open in VS Code') : '',
-            item('edit', 'fa-pen-to-square', this._canOpenInVsCode() ? 'Edit here' : 'Edit script'),
+            this.canOpenInVsCode() ? item('open-vscode', 'fa-arrow-up-right-from-square', 'Open in VS Code') : '',
             item('duplicate', 'fa-copy', 'Duplicate…'),
             item('rename', 'fa-i-cursor', 'Rename…'),
             item('copy-path', 'fa-clipboard', 'Copy full path'),
@@ -259,16 +315,10 @@ export class PythonScriptsController {
         ].filter(Boolean).join('');
     }
 
-    _openHint(name) {
-        return this._canOpenInVsCode()
-            ? `Open ${escapeHtml(name)} in a VS Code editor tab`
-            : `Edit ${escapeHtml(name)}`;
-    }
-
     /** True when the VS Code extension injected its open-a-file bridge (webview host). */
-    _canOpenInVsCode() {
+    canOpenInVsCode() {
         // Read through globalThis so the row markup can be rendered under the unit tests,
-        // and so an older extension host (no bridge injected) falls back to the in-app editor.
+        // and so an older extension host (no bridge injected) simply lacks the menu item.
         const host = globalThis.window;
         return Boolean(host?.__viberails_VSCODE__ && typeof host.__viberails_openFile__ === 'function');
     }
@@ -279,10 +329,7 @@ export class PythonScriptsController {
     }
 
     _combinedOutput(run) {
-        const parts = [];
-        if (run.standardOutput?.trim()) parts.push(run.standardOutput.trimEnd());
-        if (run.standardError?.trim()) parts.push(`[stderr]\n${run.standardError.trimEnd()}`);
-        return parts.join('\n\n') || '(no output)';
+        return formatPythonRunOutput(run);
     }
 
     _onClick(event) {
@@ -295,19 +342,19 @@ export class PythonScriptsController {
         const name = button.dataset.name;
         if (action !== 'menu') this._closeMenus();
         if (action === 'refresh') return void this.refresh();
-        if (action === 'pin') return void this._openPinSetupModal();
-        if (action === 'new') return void this._newScript();
+        if (action === 'pin') return void this.openPinSetupModal();
+        if (action === 'new') return void this._newScriptAndOpen();
         if (action === 'import') return void this._importScript(button);
         if (action === 'menu') return this._toggleMenu(button);
-        if (action === 'open') return void this._openScript(name);
-        if (action === 'edit') return void this._openScript(name, { inApp: true });
-        if (action === 'duplicate') return void this._duplicate(name);
-        if (action === 'rename') return void this._rename(name);
-        if (action === 'copy-path') return void this._copyPath(name);
-        if (action === 'approve') return void this._approve(name);
-        if (action === 'revoke') return void this._revoke(name);
-        if (action === 'delete') return void this._delete(name);
-        if (action === 'run') return void this._run(name, button);
+        if (action === 'open' || action === 'edit') return this.openScript(name);
+        if (action === 'open-vscode') return this.openInVsCode(name);
+        if (action === 'duplicate') return void this._duplicateAndOpen(name);
+        if (action === 'rename') return void this.rename(name);
+        if (action === 'copy-path') return void this.copyPath(name);
+        if (action === 'approve') return void this.approve(name);
+        if (action === 'revoke') return void this.revoke(name);
+        if (action === 'delete') return void this.deleteScript(name);
+        if (action === 'run') return void this.run(name, button);
     }
 
     _toggleMenu(toggle) {
@@ -328,9 +375,86 @@ export class PythonScriptsController {
             .forEach((toggle) => toggle.setAttribute('aria-expanded', 'false'));
     }
 
+    _openMenu() {
+        return this.root?.querySelector('.python-script-menu:not([hidden])') || null;
+    }
+
+    _onKeydown(event) {
+        const menu = this._openMenu();
+        if (!menu) return;
+        if (event.key === 'Escape') {
+            // Consumed here, so app.js's Escape shortcut does not also navigate back.
+            event.preventDefault();
+            const toggle = menu.closest('.python-script-menu-wrap')?.querySelector('.python-script-menu-toggle');
+            this._closeMenus();
+            toggle?.focus();
+            return;
+        }
+        if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+        const items = Array.from(menu.querySelectorAll('.python-script-menu-item'));
+        if (items.length === 0) return;
+        event.preventDefault();
+        const current = items.indexOf(event.target?.closest?.('.python-script-menu-item'));
+        const step = event.key === 'ArrowDown' ? 1 : -1;
+        const next = current < 0
+            ? (step > 0 ? 0 : items.length - 1)
+            : (current + step + items.length) % items.length;
+        items[next].focus();
+    }
+
+    /** Focus moving out of the open menu's row (Tab, Shift+Tab) closes it. */
+    _onFocusOut(event) {
+        const menu = this._openMenu();
+        if (!menu) return;
+        const wrap = menu.closest('.python-script-menu-wrap');
+        // A null relatedTarget is a click on something unfocusable (Safari/Firefox also
+        // report it for a plain button click); the document click handler owns that case.
+        const next = event.relatedTarget;
+        if (!next || !wrap || wrap.contains(next)) return;
+        this._closeMenus();
+    }
+
+    _onOutputToggle(event) {
+        const details = event.target?.closest?.('.python-script-output');
+        if (!details) return;
+        const name = details.closest('.python-script-row')?.dataset?.pythonScript;
+        const lastRun = name ? this.lastRunByName.get(name) : null;
+        if (lastRun) lastRun.open = Boolean(details.open);
+    }
+
     // --- authoring ---
 
-    async _newScript() {
+    /** Opens the workbench view for a script — the same destination in every host. */
+    openScript(name) {
+        if (!name) return;
+        this.app.navigate('python-script', { name });
+    }
+
+    /** Secondary action in the VS Code webview: hand the file to a real editor tab. */
+    openInVsCode(name) {
+        const script = this.scriptByName(name);
+        if (!script || !this.canOpenInVsCode()) return;
+        globalThis.window.__viberails_openFile__(script.path);
+        const signHint = script.status === 'unapproved' ? 'sign it here when it is ready' : 're-sign it here';
+        this.app.showToast('Opened in VS Code', `${name} is open in an editor tab. Save there, then ${signHint}.`, 'info');
+    }
+
+    async _newScriptAndOpen() {
+        const name = await this.newScript();
+        if (name) this.openScript(name);
+    }
+
+    async _duplicateAndOpen(name) {
+        const copy = await this.duplicate(name);
+        if (copy) this.openScript(copy);
+    }
+
+    /**
+     * Prompts for a name and creates the file from the template. Resolves with the new
+     * script's name, or null when cancelled/failed. Callers decide where to go next.
+     */
+    async newScript() {
+        await this.ensureState();
         const values = await this._promptForm({
             title: 'New Python script',
             body: `The file is created in ${this.state?.scriptsDirectory || 'the scripts folder'}. It starts unsigned — sign it when you are ready to run it.`,
@@ -344,18 +468,30 @@ export class PythonScriptsController {
             submitLabel: 'Create and edit',
             validate: (data) => this._validateNewName(data.name)
         });
-        if (values === null) return;
+        if (values === null) return null;
 
         const name = values.name.trim();
         try {
-            this._applyState(await this.app.apiCall(`${API}/create`, 'POST',
-                { name, content: newScriptTemplate(name) },
-                { showLoading: false, preferErrorResponseMessage: true }));
+            await this.createScript(name, newScriptTemplate(name));
         } catch (error) {
-            return this.app.showError(error?.message || 'Could not create the script.');
+            this.app.showError(error?.message || 'Could not create the script.');
+            return null;
         }
         this.app.showToast('Script created', `${name} is ready to edit.`, 'success');
-        await this._openScript(name);
+        return name;
+    }
+
+    /**
+     * Creates a new, unsigned script file from text (new / duplicate / drop / re-create all
+     * travel through here, so no process role needs host-path import). Resolves with the
+     * refreshed list state; throws with the server's message on refusal.
+     */
+    async createScript(name, content) {
+        const state = await this.app.apiCall(`${API}/create`, 'POST',
+            { name, content },
+            { showLoading: false, preferErrorResponseMessage: true });
+        this._applyState(state);
+        return state;
     }
 
     async _importScript(trigger) {
@@ -368,6 +504,10 @@ export class PythonScriptsController {
         const picked = await this.app.pickFileSystemEntry({
             mode: 'file',
             title: 'Add a Python script',
+            filters: [
+                { label: 'Python files', extensions: ['py'] },
+                { label: 'All files', extensions: [] }
+            ],
             triggerElement: trigger instanceof HTMLElement ? trigger : undefined
         });
         if (!picked || picked.canceled || !picked.path) return;
@@ -392,9 +532,11 @@ export class PythonScriptsController {
         }
     }
 
-    async _duplicate(name) {
-        const script = this._scriptByName(name);
-        if (!script) return;
+    /** Copies a script under a new name. Resolves with the copy's name, or null. */
+    async duplicate(name) {
+        await this.ensureState();
+        const script = this.scriptByName(name);
+        if (!script) return null;
         const values = await this._promptForm({
             title: `Duplicate ${name}`,
             body: 'The copy starts unsigned, even when the original is signed.',
@@ -407,26 +549,29 @@ export class PythonScriptsController {
             submitLabel: 'Duplicate',
             validate: (data) => this._validateNewName(data.name)
         });
-        if (values === null) return;
+        if (values === null) return null;
 
+        const copyName = values.name.trim();
         try {
             // Duplicate travels through content + create, so it works in every process role
             // without granting a terminal-child backend arbitrary host-path import.
             const source = await this.app.apiCall(
                 `${API}/content?name=${encodeURIComponent(name)}`, 'GET', null,
                 { showLoading: false, preferErrorResponseMessage: true });
-            this._applyState(await this.app.apiCall(`${API}/create`, 'POST',
-                { name: values.name.trim(), content: source.content },
-                { showLoading: false, preferErrorResponseMessage: true }));
-            this.app.showToast('Script duplicated', `${values.name.trim()} is ready to edit.`, 'success');
+            await this.createScript(copyName, source.content);
+            this.app.showToast('Script duplicated', `${copyName} is ready to edit.`, 'success');
+            return copyName;
         } catch (error) {
             this.app.showError(error?.message || 'Could not duplicate the script.');
+            return null;
         }
     }
 
-    async _rename(name) {
-        const script = this._scriptByName(name);
-        if (!script) return;
+    /** Renames a script. Resolves with the new name, or null when cancelled/failed. */
+    async rename(name) {
+        await this.ensureState();
+        const script = this.scriptByName(name);
+        if (!script) return null;
         const values = await this._promptForm({
             title: `Rename ${name}`,
             body: script.status === 'unapproved'
@@ -436,7 +581,7 @@ export class PythonScriptsController {
             submitLabel: 'Rename',
             validate: (data) => this._validateNewName(data.name, { allow: name })
         });
-        if (values === null) return;
+        if (values === null) return null;
 
         const newName = values.name.trim();
         try {
@@ -445,13 +590,17 @@ export class PythonScriptsController {
                 { showLoading: false, preferErrorResponseMessage: true }));
             this.lastRunByName.delete(name);
             this.app.showToast('Script renamed', `${name} is now ${newName}.`, 'success');
+            return newName;
         } catch (error) {
             this.app.showError(error?.message || 'Could not rename the script.');
+            return null;
         }
     }
 
-    async _delete(name) {
-        const script = this._scriptByName(name);
+    /** Confirms, then deletes the file and its approval. Resolves true when it is gone. */
+    async deleteScript(name) {
+        await this.ensureState();
+        const script = this.scriptByName(name);
         const confirmed = await this.confirm({
             title: `Delete ${name}?`,
             message: script?.status === 'approved'
@@ -460,7 +609,7 @@ export class PythonScriptsController {
             confirmLabel: 'Delete script',
             danger: true
         });
-        if (!confirmed) return;
+        if (!confirmed) return false;
 
         try {
             this._applyState(await this.app.apiCall(
@@ -468,14 +617,15 @@ export class PythonScriptsController {
                 { showLoading: false, preferErrorResponseMessage: true }));
             this.lastRunByName.delete(name);
             this.app.showToast('Script deleted', `${name} is gone.`, 'info');
-            this.app.automationNavLauncher?.invalidate?.();
+            return true;
         } catch (error) {
             this.app.showError(error?.message || 'Could not delete the script.');
+            return false;
         }
     }
 
-    async _copyPath(name) {
-        const script = this._scriptByName(name);
+    async copyPath(name) {
+        const script = this.scriptByName(name);
         if (!script) return;
         const copied = await this.app.copyTextToClipboard(script.path);
         this.app.showToast(
@@ -484,44 +634,18 @@ export class PythonScriptsController {
             copied ? 'success' : 'warning');
     }
 
-    /** Opens the script — a VS Code editor tab when we are hosted there, Monaco otherwise. */
-    async _openScript(name, { inApp = false } = {}) {
-        const script = this._scriptByName(name);
-        if (!script) return;
-
-        if (!inApp && this._canOpenInVsCode()) {
-            globalThis.window.__viberails_openFile__(script.path);
-            this.app.showToast('Opened in VS Code', `${name} is open in an editor tab. Save there, then re-sign here.`, 'info');
-            return;
-        }
-
-        let content;
-        try {
-            content = await this.app.apiCall(
-                `${API}/content?name=${encodeURIComponent(name)}`, 'GET', null,
-                { showLoading: false, preferErrorResponseMessage: true });
-        } catch (error) {
-            return this.app.showError(error?.message || `Could not open ${name}.`);
-        }
-
-        await this.editor.open({
-            name: content.name,
-            content: content.content,
-            status: content.status,
-            path: script.path,
-            version: content.version
-        });
-        await this.refresh({ quiet: true });
-    }
-
-    /** Editor save hook: persists the file and resolves the script's new status. */
-    async _saveContent(name, content, expectedVersion) {
+    /**
+     * Workbench save hook: persists the file (optimistic `expectedVersion`; the server
+     * answers 400 with a message when the file changed underneath) and resolves the
+     * script's new status + version. Never carries a PIN — saving cannot sign.
+     */
+    async saveContent(name, content, expectedVersion) {
         const result = await this.app.apiCall(`${API}/content`, 'POST',
             { name, content, expectedVersion },
             { showLoading: false, preferErrorResponseMessage: true });
         this._applyState(result.state);
         return {
-            status: this._scriptByName(name)?.status || 'unapproved',
+            status: this.scriptByName(name)?.status || 'unapproved',
             version: result.version
         };
     }
@@ -610,9 +734,7 @@ export class PythonScriptsController {
                 } catch {
                     throw new Error('the file is not valid UTF-8');
                 }
-                this._applyState(await this.app.apiCall(`${API}/create`, 'POST',
-                    { name, content },
-                    { showLoading: false, preferErrorResponseMessage: true }));
+                await this.createScript(name, content);
                 added.push(name);
             } catch (error) {
                 this.app.showError(`Could not add ${file.name}: ${error?.message || 'unknown error'}`);
@@ -629,10 +751,13 @@ export class PythonScriptsController {
 
     // --- signing and running ---
 
-    async _approve(name) {
+    /** PIN-gated approval of the script's current bytes. Resolves true once signed. */
+    async approve(name) {
+        await this.ensureState();
         if (!this.state?.pinConfigured) {
             this.app.showToast('Set a PIN first', 'Create your signing PIN, then sign the script.', 'info');
-            return this._openPinSetupModal();
+            await this.openPinSetupModal();
+            return false;
         }
 
         const pin = await this._promptPin({
@@ -640,56 +765,94 @@ export class PythonScriptsController {
             body: 'Signing approves this exact version of the script to run. Enter your signing PIN.',
             submitLabel: 'Sign script'
         });
-        if (pin === null) return;
+        if (pin === null) return false;
         try {
             this._applyState(await this.app.apiCall(`${API}/approve`, 'POST', { name, pin },
                 { showLoading: false, preferErrorResponseMessage: true }));
             this.app.showToast('Script signed', `${name} is approved to run.`, 'success');
-            this.app.automationNavLauncher?.invalidate?.();
+            return true;
         } catch (error) {
             this.app.showError(error?.message || 'Could not sign the script.');
+            return false;
         }
     }
 
-    async _revoke(name) {
+    /** PIN-gated removal of the approval. Resolves true once revoked. */
+    async revoke(name) {
         const pin = await this._promptPin({
             title: `Remove signature from ${name}`,
             body: 'The script will not run again until it is re-signed. Enter your signing PIN.',
             submitLabel: 'Remove signature'
         });
-        if (pin === null) return;
+        if (pin === null) return false;
         try {
             this._applyState(await this.app.apiCall(`${API}/revoke`, 'POST', { name, pin },
                 { showLoading: false, preferErrorResponseMessage: true }));
             this.app.showToast('Signature removed', `${name} can no longer run.`, 'info');
+            return true;
         } catch (error) {
             this.app.showError(error?.message || 'Could not remove the signature.');
+            return false;
         }
     }
 
-    async _run(name, button) {
-        const original = button.innerHTML;
-        button.disabled = true;
-        button.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Running…';
+    /**
+     * Runs a signed script and remembers the result in lastRunByName. `button` (optional,
+     * the workbench's own) shows a spinner while the run is in flight; the section's rows
+     * follow runningNames instead. `outputHint` is appended to a failure toast raised away
+     * from the Automation page (the nav launcher), where the output drawer is not on
+     * screen. Resolves with the run result, or null (also when a run is already in flight).
+     */
+    async run(name, button = null, { outputHint = '' } = {}) {
+        if (!name || this.runningNames.has(name)) return null;
+        const original = button?.innerHTML;
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = RUNNING_BUTTON_HTML;
+        }
+        this.runningNames.add(name);
+        this._render();
+        let result = null;
         try {
-            const result = await this.app.apiCall(`${API}/run`, 'POST', { name },
+            result = await this.app.apiCall(`${API}/run`, 'POST', { name },
                 { showLoading: false, preferErrorResponseMessage: true });
-            this.lastRunByName.set(name, { ...result, open: true });
-            const ok = result.exitCode === 0 && !result.timedOut;
-            this.app.showToast(
-                ok ? 'Script finished' : 'Script failed',
-                `${name}: exit ${result.exitCode}${result.timedOut ? ' (timed out)' : ''}.`,
-                ok ? 'success' : 'error');
+            this.recordRun(name, result);
+            this.notifyRunResult(name, result, { outputHint });
         } catch (error) {
             this.app.showError(error?.message || `Could not run ${name}.`);
         } finally {
-            button.disabled = false;
-            button.innerHTML = original;
+            this.runningNames.delete(name);
+            if (button) {
+                button.disabled = false;
+                button.innerHTML = original;
+            }
             await this.refresh({ quiet: true });
         }
+        return result;
     }
 
-    async _openPinSetupModal() {
+    /** Remembers a run for the row's "Last run" drawer (opened, since it is news). */
+    recordRun(name, result) {
+        if (!name || !result) return;
+        this.lastRunByName.set(name, { ...result, open: true });
+    }
+
+    /**
+     * The one toast for a finished run — section, workbench and nav launcher all report
+     * through here so the wording never drifts. Returns whether the run succeeded.
+     */
+    notifyRunResult(name, result, { outputHint = '' } = {}) {
+        const ok = isPythonRunOk(result);
+        let detail = `exit ${result?.exitCode}${result?.timedOut ? ' (timed out)' : ''}`;
+        if (!ok && outputHint) detail += ` — ${outputHint}`;
+        this.app.showToast(
+            ok ? 'Script finished' : 'Script failed',
+            `${name}: ${detail}.`,
+            ok ? 'success' : 'error');
+        return ok;
+    }
+
+    async openPinSetupModal() {
         const changing = Boolean(this.state?.pinConfigured);
         const values = await this._promptForm({
             title: changing ? 'Change signing PIN' : 'Create signing PIN',

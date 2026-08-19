@@ -91,7 +91,8 @@ public sealed class FileSystemBrowserService : IFileSystemBrowserService
             page.HasMore,
             page.NextCursor,
             page.TotalCount,
-            normalizedSearch);
+            normalizedSearch,
+            GetPlaces(cancellationToken));
     }
 
     private static string NormalizeDirectory(string path)
@@ -598,7 +599,7 @@ public sealed class FileSystemBrowserService : IFileSystemBrowserService
                     continue;
                 }
 
-                roots.Add(new FileSystemLocationResponse(GetRootLabel(rootPath), rootPath));
+                roots.Add(new FileSystemLocationResponse(GetDriveLabel(rootPath), rootPath));
             }
             catch (Exception ex) when (IsRecoverableEntryException(ex) || ex is FileSystemBrowseException)
             {
@@ -606,9 +607,78 @@ public sealed class FileSystemBrowserService : IFileSystemBrowserService
             }
         }
 
-        roots.Sort((left, right) => HostPathComparer.Compare(left.Label, right.Label));
+        // Drive-letter order, not label order: volume names must not shuffle "This PC".
+        roots.Sort((left, right) => HostPathComparer.Compare(left.Path, right.Path));
         return roots;
     }
+
+    /// <summary>
+    /// Well-known user folders for the picker sidebar, resolved through the runtime's special
+    /// folder API. This is optional UI metadata: anything missing, unresolvable, or ineligible is
+    /// simply left out, and no failure here can fail a browse request.
+    /// </summary>
+    internal static List<FileSystemPlaceResponse> GetPlaces(CancellationToken cancellationToken) =>
+        GetPlaces(ResolveSpecialFolder, cancellationToken);
+
+    internal static List<FileSystemPlaceResponse> GetPlaces(
+        Func<Environment.SpecialFolder, string?> resolveSpecialFolder,
+        CancellationToken cancellationToken)
+    {
+        var places = new List<FileSystemPlaceResponse>();
+        var seen = new HashSet<string>(HostPathComparer);
+        foreach (var (label, kind, folder, subfolder) in PlaceCandidates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            try
+            {
+                var candidate = resolveSpecialFolder(folder);
+                if (string.IsNullOrWhiteSpace(candidate))
+                    continue;
+                if (subfolder is not null)
+                    candidate = Path.Combine(candidate, subfolder);
+
+                // Places obey the same eligibility rules as drives and typed paths: fully qualified,
+                // local, on a supported drive, an existing directory, and not reached through a
+                // link or junction (ValidateNavigationPath walks every segment).
+                if (!Path.IsPathFullyQualified(candidate) || IsNetworkOrDevicePath(candidate))
+                    continue;
+
+                var placePath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(candidate));
+                if (IsNetworkOrDevicePath(placePath)
+                    || (OperatingSystem.IsWindows() && IsUnsupportedWindowsDrive(placePath))
+                    || !Directory.Exists(placePath)
+                    || !ValidateNavigationPath(placePath).HasFlag(FileAttributes.Directory)
+                    || !seen.Add(placePath))
+                {
+                    continue;
+                }
+
+                places.Add(new FileSystemPlaceResponse(label, placePath, kind));
+            }
+            catch (Exception ex) when (IsRecoverableEntryException(ex)
+                                       || ex is FileSystemBrowseException
+                                       || ex is PlatformNotSupportedException)
+            {
+                // A special folder that is unset, redirected somewhere unsupported, or inaccessible
+                // is omitted from the sidebar rather than failing the whole picker view.
+            }
+        }
+
+        return places;
+    }
+
+    private static readonly (string Label, string Kind, Environment.SpecialFolder Folder, string? Subfolder)[]
+        PlaceCandidates =
+        [
+            ("Home", "home", Environment.SpecialFolder.UserProfile, null),
+            ("Desktop", "desktop", Environment.SpecialFolder.DesktopDirectory, null),
+            ("Documents", "documents", Environment.SpecialFolder.MyDocuments, null),
+            ("Downloads", "downloads", Environment.SpecialFolder.UserProfile, "Downloads")
+        ];
+
+    private static string? ResolveSpecialFolder(Environment.SpecialFolder folder) =>
+        Environment.GetFolderPath(folder, Environment.SpecialFolderOption.DoNotVerify);
 
     private static string GetLocationLabel(string path)
     {
@@ -620,6 +690,10 @@ public sealed class FileSystemBrowserService : IFileSystemBrowserService
         return string.IsNullOrEmpty(label) ? path : label;
     }
 
+    /// <summary>
+    /// The short root name used by breadcrumbs and the current-folder name: "C:" on Windows,
+    /// the root path itself elsewhere.
+    /// </summary>
     private static string GetRootLabel(string rootPath)
     {
         if (!OperatingSystem.IsWindows())
@@ -627,6 +701,36 @@ public sealed class FileSystemBrowserService : IFileSystemBrowserService
 
         var label = rootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         return string.IsNullOrEmpty(label) ? rootPath : label;
+    }
+
+    /// <summary>
+    /// The "This PC" sidebar name for a drive: "Local Disk (C:)" or "&lt;VolumeLabel&gt; (C:)"
+    /// on Windows, as Explorer shows it; other platforms keep the root path. Reading the volume
+    /// label is best effort — an unready or restricted drive falls back to "Local Disk".
+    /// </summary>
+    private static string GetDriveLabel(string rootPath)
+    {
+        if (!OperatingSystem.IsWindows())
+            return GetRootLabel(rootPath);
+
+        string? volumeLabel = null;
+        try
+        {
+            volumeLabel = new DriveInfo(rootPath).VolumeLabel;
+        }
+        catch (Exception ex) when (IsRecoverableEntryException(ex))
+        {
+            // The label is decoration; the drive still lists under its generic name.
+        }
+
+        return FormatDriveLabel(GetRootLabel(rootPath), volumeLabel);
+    }
+
+    /// <summary>Formats a Windows drive label from its short root name ("C:") and volume label.</summary>
+    internal static string FormatDriveLabel(string rootLabel, string? volumeLabel)
+    {
+        var name = string.IsNullOrWhiteSpace(volumeLabel) ? "Local Disk" : volumeLabel.Trim();
+        return $"{name} ({rootLabel})";
     }
 
     private static bool PathsEqual(string left, string right) =>

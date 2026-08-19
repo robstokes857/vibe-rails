@@ -164,6 +164,9 @@ export class JobController {
             if (isConfirmDialogOpen()) return;
             const modalContainer = typeof document !== 'undefined' ? document.getElementById?.('modal-container') : null;
             if (modalContainer?.firstElementChild) return;
+            // The nav Launch flyout lives on <body>, outside #modal-container, and closes
+            // itself on Escape; that keypress must not also wipe the open editor.
+            if (typeof document !== 'undefined' && document.querySelector?.('.automation-launch-flyout')) return;
             this.closeEditor();
         };
         const cleanup = () => {

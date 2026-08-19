@@ -1,17 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const modulePath = path.resolve('VibeRails/wwwroot/js/modules/python-scripts-controller.js');
-const editorModulePath = path.resolve('VibeRails/wwwroot/js/modules/python-script-editor.js');
 const servicePath = path.resolve('VibeRails/Services/PythonScripts/PythonScriptService.cs');
 const routesPath = path.resolve('VibeRails/Routes/PythonScriptRoutes.cs');
 const webviewPanelPath = path.resolve('vscode-viberails/src/webview-panel.ts');
 const stylePath = path.resolve('VibeRails/wwwroot/style.css');
+const wwwrootPath = path.resolve('VibeRails/wwwroot');
 
-const { PythonScriptsController } = await import(pathToFileURL(modulePath).href);
+const { PythonScriptsController, formatPythonRunOutput, PYTHON_SCRIPT_STATUS_META } =
+    await import(pathToFileURL(modulePath).href);
 
 function createApp() {
     const calls = [];
@@ -19,10 +20,12 @@ function createApp() {
         calls,
         toasts: [],
         errors: [],
+        navigations: [],
         async apiCall(url, method = 'GET', body = null, requestOptions = undefined) {
             calls.push({ url, method, body, requestOptions });
             return { pinConfigured: true, scriptsDirectory: '/scripts', scripts: [] };
         },
+        navigate(view, data = {}, options = {}) { this.navigations.push({ view, data, options }); return true; },
         showToast(title, message, tone) { this.toasts.push({ title, message, tone }); },
         showError(message) { this.errors.push(message); },
         async copyTextToClipboard() { return true; }
@@ -53,6 +56,18 @@ test('A row offers the whole file lifecycle, not just run and sign', () => {
     for (const action of ['run', 'approve', 'edit', 'duplicate', 'rename', 'copy-path', 'delete']) {
         assert.match(html, new RegExp(`data-python-scripts-action="${action}"`), `missing ${action}`);
     }
+    // A visible Edit button (before Run) says a script opens into an editor + agent
+    // terminal; nothing else on the row did. It replaces the menu's "Edit script" item.
+    const editIndex = html.indexOf('data-python-scripts-action="edit"');
+    const runIndex = html.indexOf('data-python-scripts-action="run"');
+    assert.ok(editIndex > 0 && editIndex < runIndex, 'Edit sits before Run in the row actions');
+    // Primary-outlined so it reads as THE way in (Rob: "make the edit button more obvious").
+    assert.match(html, /<button class="btn btn-sm btn-outline-primary python-script-edit" type="button" data-python-scripts-action="edit"\s+data-name="nightly\.py" title="Open nightly\.py in the editor with an agent terminal beside it">\s*<i class="fa-solid fa-pen-to-square me-1" aria-hidden="true"><\/i>Edit\s*<\/button>/);
+    assert.doesNotMatch(html, /Edit script/);
+    assert.equal(html.match(/data-python-scripts-action="edit"/g).length, 1, 'one Edit affordance besides the name');
+    // The section copy says what opening does.
+    const source = readFileSync(modulePath, 'utf8');
+    assert.match(source, /Edit a script here with an agent terminal beside it\./);
     // Size and edit time are on the row so "did my edit land?" needs no round trip.
     assert.match(html, /2\.00 KB/);
     assert.match(html, /edited /);
@@ -97,7 +112,19 @@ test('The empty state offers both ways to add a script', () => {
     assert.match(listHtml, /drop a <code>\.py<\/code> file/);
 });
 
-test('Opening a script hands off to VS Code when the extension injected its bridge', async () => {
+test('Clicking a script opens the workbench view in every host', () => {
+    // Plain browser: no bridge → the name goes to the workbench.
+    {
+        const app = createApp();
+        const controller = controllerWith([SCRIPT], app);
+        assert.doesNotMatch(controller._renderRow(SCRIPT), /Open in VS Code/);
+        controller.openScript('nightly.py');
+        assert.deepEqual(app.navigations, [{ view: 'python-script', data: { name: 'nightly.py' }, options: {} }]);
+        // Opening never fetches content itself; the workbench does that.
+        assert.equal(app.calls.length, 0);
+    }
+    // VS Code webview: the primary click STILL opens the workbench (Rob: "no back button
+    // from a script"), and "Open in VS Code" is offered as a secondary menu item.
     const opened = [];
     globalThis.window = {
         __viberails_VSCODE__: true,
@@ -106,38 +133,53 @@ test('Opening a script hands off to VS Code when the extension injected its brid
     try {
         const app = createApp();
         const controller = controllerWith([SCRIPT], app);
-        assert.match(controller._renderRow(SCRIPT), /Open in VS Code/);
+        const html = controller._renderRow(SCRIPT);
+        assert.match(html, /data-python-scripts-action="open-vscode"[\s\S]*?Open in VS Code/);
+        assert.match(html, /data-python-scripts-action="edit"[\s\S]*?>Edit\s*<\/button>/);
 
-        await controller._openScript('nightly.py');
+        // Drive the row's click dispatcher: both the name ("open") and the row's Edit
+        // button ("edit") go to the workbench; only "open-vscode" hands off.
+        controller.root = { contains: () => true, querySelectorAll: () => [] };
+        const click = (action) => controller._onClick({
+            target: { closest: () => ({ dataset: { pythonScriptsAction: action, name: 'nightly.py' } }) }
+        });
+        click('open');
+        click('edit');
+        assert.deepEqual(app.navigations.map((entry) => entry.view), ['python-script', 'python-script']);
+        assert.equal(opened.length, 0, 'the primary click must not hand off to VS Code');
 
+        click('open-vscode');
         assert.deepEqual(opened, ['/scripts/nightly.py']);
-        // No content fetch: VS Code reads the file itself.
+
         assert.equal(app.calls.length, 0);
     } finally {
         delete globalThis.window;
     }
 });
 
-test('Without the bridge, opening a script loads its content for the in-app editor', async () => {
+test('New script and Duplicate land in the workbench for the new file', async () => {
     const app = createApp();
-    app.apiCall = async (url) => {
-        app.calls.push({ url });
-        return { name: 'nightly.py', content: 'print(1)\n', status: 'approved', version: 'abc123' };
+    app.apiCall = async (url, method = 'GET', body = null) => {
+        app.calls.push({ url, method, body });
+        if (url.includes('/content?')) {
+            return { name: 'nightly.py', content: 'print("copy me")\n', version: 'v1' };
+        }
+        return { pinConfigured: true, scriptsDirectory: '/scripts', scripts: [SCRIPT] };
     };
     const controller = controllerWith([SCRIPT], app);
-    const opens = [];
-    controller.editor = { isOpen: false, open: (script) => { opens.push(script); return Promise.resolve({}); } };
-    controller.refresh = async () => {};
+    controller._promptForm = async ({ title }) => ({ name: title.startsWith('New') ? 'fresh.py' : 'nightly-copy.py' });
 
-    await controller._openScript('nightly.py');
+    await controller._newScriptAndOpen();
+    assert.equal(app.calls[0].url, '/api/v1/python-scripts/create');
+    assert.equal(app.calls[0].body.name, 'fresh.py');
+    assert.match(app.calls[0].body.content, /def main\(\)/);
+    assert.deepEqual(app.navigations.at(-1), { view: 'python-script', data: { name: 'fresh.py' }, options: {} });
 
-    assert.equal(app.calls[0].url, '/api/v1/python-scripts/content?name=nightly.py');
-    assert.equal(opens[0].content, 'print(1)\n');
-    assert.equal(opens[0].path, '/scripts/nightly.py');
-    assert.equal(opens[0].version, 'abc123');
+    await controller._duplicateAndOpen('nightly.py');
+    assert.deepEqual(app.navigations.at(-1), { view: 'python-script', data: { name: 'nightly-copy.py' }, options: {} });
 });
 
-test('Saving from the editor posts the content and never a PIN', async () => {
+test('Saving posts the content with its optimistic version and never a PIN', async () => {
     const app = createApp();
     app.apiCall = async (url, method, body) => {
         app.calls.push({ url, method, body });
@@ -151,8 +193,10 @@ test('Saving from the editor posts the content and never a PIN', async () => {
         };
     };
     const controller = controllerWith([SCRIPT], app);
+    const seen = [];
+    controller.onStateChange((state) => seen.push(state.scripts[0].status));
 
-    const result = await controller._saveContent('nightly.py', 'print(2)\n', 'opened-version');
+    const result = await controller.saveContent('nightly.py', 'print(2)\n', 'opened-version');
 
     assert.deepEqual(app.calls[0], {
         url: '/api/v1/python-scripts/content',
@@ -160,6 +204,8 @@ test('Saving from the editor posts the content and never a PIN', async () => {
         body: { name: 'nightly.py', content: 'print(2)\n', expectedVersion: 'opened-version' }
     });
     assert.deepEqual(result, { status: 'modified', version: 'next-version' });
+    // The workbench follows the list through onStateChange rather than re-fetching.
+    assert.deepEqual(seen, ['modified']);
 });
 
 test('Delete confirms first, sends the name as a query parameter, and drops its run output', async () => {
@@ -168,12 +214,12 @@ test('Delete confirms first, sends the name as a query parameter, and drops its 
     controller.lastRunByName.set('nightly.py', { exitCode: 0 });
 
     controller.confirm = async () => false;
-    await controller._delete('nightly.py');
+    assert.equal(await controller.deleteScript('nightly.py'), false);
     assert.equal(app.calls.length, 0, 'a declined confirmation must not delete');
     assert.ok(controller.lastRunByName.has('nightly.py'));
 
     controller.confirm = async () => true;
-    await controller._delete('nightly.py');
+    assert.equal(await controller.deleteScript('nightly.py'), true);
     assert.equal(app.calls[0].url, '/api/v1/python-scripts?name=nightly.py');
     assert.equal(app.calls[0].method, 'DELETE');
     assert.equal(controller.lastRunByName.has('nightly.py'), false);
@@ -191,7 +237,7 @@ test('Duplicate uses content + create so it works without host-path import', asy
     const controller = controllerWith([SCRIPT], app);
     controller._promptForm = async () => ({ name: 'nightly-copy.py' });
 
-    await controller._duplicate('nightly.py');
+    assert.equal(await controller.duplicate('nightly.py'), 'nightly-copy.py');
 
     assert.equal(app.calls[0].url, '/api/v1/python-scripts/content?name=nightly.py');
     assert.equal(app.calls[1].url, '/api/v1/python-scripts/create');
@@ -199,6 +245,43 @@ test('Duplicate uses content + create so it works without host-path import', asy
         name: 'nightly-copy.py',
         content: 'print("copy me")\n'
     });
+});
+
+test('Rename resolves with the new name and forgets the old run output', async () => {
+    const app = createApp();
+    const controller = controllerWith([SCRIPT], app);
+    controller.lastRunByName.set('nightly.py', { exitCode: 0 });
+    controller._promptForm = async () => ({ name: 'weekly.py' });
+
+    assert.equal(await controller.rename('nightly.py'), 'weekly.py');
+    assert.deepEqual(app.calls[0], {
+        url: '/api/v1/python-scripts/rename',
+        method: 'POST',
+        body: { name: 'nightly.py', newName: 'weekly.py' },
+        requestOptions: { showLoading: false, preferErrorResponseMessage: true }
+    });
+    assert.equal(controller.lastRunByName.has('nightly.py'), false);
+
+    controller._promptForm = async () => null;
+    assert.equal(await controller.rename('nightly.py'), null);
+});
+
+test('The shared flows fetch the list themselves when nothing is mounted', async () => {
+    const app = createApp();
+    app.apiCall = async (url, method = 'GET', body = null) => {
+        app.calls.push({ url, method, body });
+        return { pinConfigured: true, scriptsDirectory: '/scripts', scripts: [SCRIPT] };
+    };
+    const controller = new PythonScriptsController(app);
+    assert.equal(controller.state, null);
+
+    const state = await controller.ensureState();
+    assert.equal(state.scriptsDirectory, '/scripts');
+    assert.equal(app.calls[0].url, '/api/v1/python-scripts');
+    // Cached afterwards: a second call is free.
+    await controller.ensureState();
+    assert.equal(app.calls.length, 1);
+    assert.equal(controller.scriptByName('nightly.py').path, '/scripts/nightly.py');
 });
 
 test('Suggested names are sanitised, extended to .py, and made unique', () => {
@@ -289,18 +372,36 @@ test('Host-file import is unavailable on non-root backends while duplicate remai
     assert.match(app.errors[0], /main VibeRails dashboard/);
 });
 
+test('Run output combines stdout and stderr the same way for the row and the workbench', () => {
+    assert.equal(formatPythonRunOutput({ standardOutput: 'ok\n', standardError: '' }), 'ok');
+    assert.equal(formatPythonRunOutput({ standardOutput: '', standardError: 'boom\n' }), '[stderr]\nboom');
+    assert.equal(formatPythonRunOutput({ standardOutput: 'a', standardError: 'b' }), 'a\n\n[stderr]\nb');
+    assert.equal(formatPythonRunOutput({}), '(no output)');
+    assert.deepEqual(Object.keys(PYTHON_SCRIPT_STATUS_META), ['approved', 'modified', 'unapproved']);
+});
+
 test('Authoring endpoints never carry a PIN, and only approve/revoke ask for one', () => {
     const source = readFileSync(modulePath, 'utf8');
-    const editor = readFileSync(editorModulePath, 'utf8');
 
     for (const endpoint of ['/create', '/content', '/rename', '/import']) {
         const call = source.slice(source.indexOf(`${endpoint}\``));
         assert.doesNotMatch(call.slice(0, 400), /\bpin\b/i, `${endpoint} must not send a PIN`);
     }
     assert.match(source, /_promptPin\([\s\S]*?Sign \$\{name\}/);
-    // The editor never calls the API itself — it saves through the controller and hands
-    // signing back to the PIN prompt — so no PIN can ever reach it.
-    assert.doesNotMatch(editor, /apiCall|\/api\/v1\//);
+    assert.match(source, /_promptPin\([\s\S]*?Remove signature from \$\{name\}/);
+});
+
+test('The Monaco modal is gone: the workbench view replaced it everywhere', () => {
+    assert.equal(existsSync(path.join(wwwrootPath, 'js/modules/python-script-editor.js')), false);
+    const style = readFileSync(stylePath, 'utf8');
+    assert.doesNotMatch(style, /vb-python-editor/);
+    for (const file of ['app.js', 'js/modules/python-scripts-controller.js', 'js/modules/jobs-controller.js']) {
+        const source = readFileSync(path.join(wwwrootPath, file), 'utf8');
+        assert.doesNotMatch(source, /python-script-editor|PythonScriptEditorModal/, `${file} still references the modal`);
+    }
+    // The row menu keeps its own stacking styles; the drop target keeps its highlight.
+    assert.match(style, /\.python-script-menu \{[\s\S]*?position: absolute/);
+    assert.match(style, /\.python-scripts-list-dropping/);
 });
 
 test('The signing gate still owns what can run: writes cannot approve', () => {
@@ -329,23 +430,159 @@ test('The VS Code bridge is a one-way postMessage the dashboard feature-detects'
     assert.match(source, /typeof host\.__viberails_openFile__ === 'function'/);
 });
 
-test('The editor modal and row menu carry their own sizing and stacking styles', () => {
-    const style = readFileSync(stylePath, 'utf8');
+test('A running script keeps its Run button busy across list rebuilds, and cannot start twice', async () => {
+    const app = createApp();
+    let releaseRun;
+    const runResponse = new Promise((resolve) => { releaseRun = resolve; });
+    app.apiCall = async (url, method = 'GET', body = null) => {
+        app.calls.push({ url, method, body });
+        if (url === '/api/v1/python-scripts/run') return runResponse;
+        return { pinConfigured: true, scriptsDirectory: '/scripts', scripts: [SCRIPT] };
+    };
+    const controller = controllerWith([SCRIPT], app);
+    let listHtml = '';
+    controller.root = {
+        querySelector(selector) {
+            if (selector === '[data-python-scripts-list]') {
+                return { set innerHTML(value) { listHtml = value; } };
+            }
+            return null;
+        }
+    };
 
-    // Monaco collapses to 0px without an explicitly sized flex host.
-    assert.match(style, /\.vb-python-editor-modal \.modal-dialog \{[\s\S]*?height: 82vh/);
-    assert.match(style, /\.vb-python-editor-host \{[\s\S]*?min-height: 0/);
-    assert.match(style, /\.python-script-menu \{[\s\S]*?position: absolute/);
-    assert.match(style, /\.python-scripts-list-dropping/);
+    const first = controller.run('nightly.py');
+    assert.ok(controller.runningNames.has('nightly.py'), 'registered before the request resolves');
+    // The rebuilt row (what any background refresh would draw) is the busy one.
+    assert.match(listHtml, /data-python-scripts-action="run"[^>]*disabled/);
+    assert.match(listHtml, /Running…/);
+    assert.match(controller._renderRow(SCRIPT), /nightly\.py is running/);
+    // A second click (or a nav launch) while in flight is a no-op, not a second POST.
+    assert.equal(await controller.run('nightly.py'), null);
+    assert.equal(app.calls.filter((call) => call.url === '/api/v1/python-scripts/run').length, 1);
+
+    // Background refreshes stand down while a run is in flight.
+    const originalDocument = globalThis.document;
+    globalThis.document = { visibilityState: 'visible' };
+    try {
+        controller._lastRefreshAt = 0;
+        const callsBefore = app.calls.length;
+        controller._refreshIfIdle();
+        assert.equal(app.calls.length, callsBefore, 'no refresh while running');
+    } finally {
+        globalThis.document = originalDocument;
+    }
+
+    releaseRun({ exitCode: 0, timedOut: false, durationMs: 5, standardOutput: 'ok', standardError: '' });
+    const result = await first;
+    assert.equal(result.exitCode, 0);
+    assert.equal(controller.runningNames.size, 0);
+    assert.doesNotMatch(listHtml, /Running…/);
+    assert.match(listHtml, /Last run: exit 0/);
+    assert.deepEqual(app.toasts.at(-1), { title: 'Script finished', message: 'nightly.py: exit 0.', tone: 'success' });
+    // The workbench passes its own button; it is restored after the run.
+    const button = { disabled: false, innerHTML: '<i></i>Run' };
+    app.apiCall = async (url) => (url === '/api/v1/python-scripts/run'
+        ? { exitCode: 1, timedOut: false, durationMs: 1, standardOutput: '', standardError: 'x' }
+        : { pinConfigured: true, scriptsDirectory: '/scripts', scripts: [SCRIPT] });
+    await controller.run('nightly.py', button);
+    assert.deepEqual(button, { disabled: false, innerHTML: '<i></i>Run' });
+    assert.deepEqual(app.toasts.at(-1), { title: 'Script failed', message: 'nightly.py: exit 1.', tone: 'error' });
 });
 
-test('Editor loads and saves are scoped to the modal generation that started them', () => {
-    const source = readFileSync(modulePath, 'utf8');
-    const editor = readFileSync(editorModulePath, 'utf8');
+test('The last-run drawer remembers whether it was open when the list is rebuilt', () => {
+    const controller = controllerWith([SCRIPT]);
+    controller.recordRun('nightly.py', { exitCode: 0, timedOut: false, durationMs: 3 });
+    assert.equal(controller.lastRunByName.get('nightly.py').open, true);
+    assert.match(controller._renderRow(SCRIPT), /<details class="python-script-output" open>/);
 
-    assert.match(source, /onSave: \(name, content, expectedVersion\) =>[\s\S]*?_saveContent\(name, content, expectedVersion\)/);
-    assert.match(editor, /_mountEditor\(generation, layer\)/);
-    assert.match(editor, /generation !== this\._generation \|\| this\.closed \|\| this\.layer !== layer/);
-    assert.match(editor, /const name = this\.name;[\s\S]*?const expectedVersion = this\.version;/);
-    assert.match(editor, /if \(generation !== this\._generation \|\| this\.editor !== editor\) return;/);
+    const row = { dataset: { pythonScript: 'nightly.py' } };
+    const details = {
+        open: false,
+        closest(selector) { return selector === '.python-script-output' ? details : row; }
+    };
+    controller._onOutputToggle({ target: details });
+    assert.equal(controller.lastRunByName.get('nightly.py').open, false);
+    assert.match(controller._renderRow(SCRIPT), /<details class="python-script-output" >/);
+
+    details.open = true;
+    controller._onOutputToggle({ target: details });
+    assert.equal(controller.lastRunByName.get('nightly.py').open, true);
+    // Toggling something that is not a run drawer is ignored.
+    controller._onOutputToggle({ target: { closest: () => null } });
+    // The listener is bound in the capture phase because `toggle` does not bubble.
+    assert.match(readFileSync(modulePath, 'utf8'), /root\.addEventListener\('toggle', \(event\) => this\._onOutputToggle\(event\), true\);/);
+});
+
+test('The row menu closes on Escape (refocusing its toggle), cycles with arrows, and closes when focus leaves it', () => {
+    const controller = controllerWith([SCRIPT]);
+    const focused = [];
+    const toggle = { expanded: 'true', focus() { focused.push('toggle'); }, setAttribute(name, value) { this.expanded = value; } };
+    const items = ['edit', 'rename', 'delete'].map((name) => ({ name, focus() { focused.push(name); } }));
+    const wrap = {
+        querySelector(selector) { return selector === '.python-script-menu-toggle' ? toggle : null; },
+        contains(node) { return node === toggle || items.includes(node); }
+    };
+    const menu = {
+        hidden: false,
+        closest(selector) { return selector === '.python-script-menu-wrap' ? wrap : null; },
+        querySelectorAll(selector) { return selector === '.python-script-menu-item' ? items : []; }
+    };
+    controller.root = {
+        querySelector(selector) { return selector === '.python-script-menu:not([hidden])' && !menu.hidden ? menu : null; },
+        querySelectorAll(selector) {
+            if (selector === '.python-script-menu') return [menu];
+            if (selector === '.python-script-menu-toggle') return [toggle];
+            return [];
+        }
+    };
+    const key = (name, target = null) => {
+        let prevented = false;
+        controller._onKeydown({ key: name, target, preventDefault() { prevented = true; } });
+        return prevented;
+    };
+
+    // Arrows move through the items and wrap; the page's own Escape shortcut is not reached.
+    assert.equal(key('ArrowDown', { closest: () => null }), true);
+    assert.deepEqual(focused, ['edit']);
+    assert.equal(key('ArrowDown', { closest: () => items[2] }), true);
+    assert.equal(focused.at(-1), 'edit');
+    assert.equal(key('ArrowUp', { closest: () => items[0] }), true);
+    assert.equal(focused.at(-1), 'delete');
+    assert.equal(key('Tab', { closest: () => items[0] }), false, 'Tab is left alone');
+
+    assert.equal(key('Escape', { closest: () => items[0] }), true);
+    assert.equal(menu.hidden, true);
+    assert.equal(toggle.expanded, 'false');
+    assert.equal(focused.at(-1), 'toggle');
+    // Nothing open: keys fall through untouched.
+    assert.equal(key('Escape'), false);
+
+    // Focus leaving the row (Tab past the last item) closes it; a click on something
+    // unfocusable (relatedTarget null) is left to the document click handler.
+    menu.hidden = false;
+    controller._onFocusOut({ relatedTarget: null });
+    assert.equal(menu.hidden, false);
+    controller._onFocusOut({ relatedTarget: items[1] });
+    assert.equal(menu.hidden, false, 'moving between items keeps it open');
+    controller._onFocusOut({ relatedTarget: { name: 'next row button' } });
+    assert.equal(menu.hidden, true);
+});
+
+test('Opening in VS Code tells a never-signed script to sign, and a signed one to re-sign', () => {
+    const opened = [];
+    globalThis.window = {
+        __viberails_VSCODE__: true,
+        __viberails_openFile__: (filePath) => opened.push(filePath)
+    };
+    try {
+        const app = createApp();
+        const controller = controllerWith([SCRIPT, { ...SCRIPT, name: 'draft.py', status: 'unapproved', path: '/scripts/draft.py' }], app);
+        controller.openInVsCode('nightly.py');
+        controller.openInVsCode('draft.py');
+        assert.deepEqual(opened, ['/scripts/nightly.py', '/scripts/draft.py']);
+        assert.match(app.toasts[0].message, /Save there, then re-sign it here\.$/);
+        assert.match(app.toasts[1].message, /Save there, then sign it here when it is ready\.$/);
+    } finally {
+        delete globalThis.window;
+    }
 });

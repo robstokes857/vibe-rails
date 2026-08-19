@@ -36,20 +36,12 @@ public static class PythonScriptRoutes
             ExecuteAsync(() => service.RevokeAsync(request, cancellationToken)))
             .WithName("RevokePythonScript");
 
-        app.MapPost("/api/v1/python-scripts/run", async (
+        app.MapPost("/api/v1/python-scripts/run", (
             IPythonScriptService service,
             PythonScriptRunRequest request,
             CancellationToken cancellationToken) =>
-        {
-            try
-            {
-                return Results.Ok(await service.RunAsync(request.Name, cancellationToken));
-            }
-            catch (PythonScriptValidationException exception)
-            {
-                return Results.BadRequest(new ErrorResponse(exception.Message));
-            }
-        }).WithName("RunPythonScript");
+            ExecuteAsync(() => service.RunAsync(request.Name, cancellationToken)))
+            .WithName("RunPythonScript");
 
         app.MapGet("/api/v1/python-scripts/runs", (IPythonScriptService service) =>
             Results.Ok(service.GetRunHistory()))
