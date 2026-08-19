@@ -2,14 +2,51 @@ import { escapeHtml, isConfirmDialogOpen } from './utils.js';
 
 const PREFERENCES_ENDPOINT = '/api/v1/automation-nav/preferences';
 
+// Where to look when a script launched from the nav fails: the row's output drawer
+// lives on the Automation page, not here.
+const OUTPUT_HINT = 'open Automation to see the output';
+
+/**
+ * Shapes the server's launcher catalog into what the flyout and the customize modal
+ * render: one entry per automation (`jobId`) or Python script (`status` = approved |
+ * modified | unapproved), malformed entries dropped, sorted by saved order.
+ */
+export function normalizeLauncherItems(items) {
+    if (!Array.isArray(items)) return [];
+    return items
+        .map((item) => ({
+            key: String(item?.key || ''),
+            kind: item?.kind === 'script' ? 'script' : 'automation',
+            label: String(item?.label || ''),
+            jobId: Number(item?.jobId),
+            enabled: Boolean(item?.enabled),
+            order: Number(item?.order) || 0,
+            status: item?.kind === 'script' ? String(item?.status || 'unapproved') : null
+        }))
+        .filter((item) => item.key && (item.kind === 'script' || Number.isFinite(item.jobId)))
+        .sort((a, b) => a.order - b.order);
+}
+
+/** A launcher item can be run right now: automations always, scripts only while signed. */
+export function isLauncherItemRunnable(item) {
+    return item?.kind !== 'script' || item?.status === 'approved';
+}
+
+function launcherItemIcon(item) {
+    return item.kind === 'script' ? 'fa-brands fa-python' : 'fa-solid fa-play';
+}
+
 /**
  * Nav-bar Automation launcher: a flyout on the nav "Launch" button listing the
- * project's automations (run-now on click), plus a customization modal giving each
- * automation an order and show/hide switch — the same treatment Custom Environments
- * get in the LLM launch pickers. Preferences are server-persisted per install
- * (GET/PUT/DELETE /api/v1/automation-nav/preferences); actual launching delegates to
+ * project's automations and the Python scripts (run-now on click; unsigned scripts are
+ * shown disabled until they are signed on the Automation page), plus a customization
+ * modal giving each entry an order and show/hide switch — the same treatment Custom
+ * Environments get in the LLM launch pickers. Preferences are server-persisted per
+ * install (GET/PUT/DELETE /api/v1/automation-nav/preferences) and fetched fresh on every
+ * open, so there is no client cache to invalidate. Automation launches delegate to
  * JobController.launchFromNav so nav runs land in a terminal tab exactly like the
- * Automation page's own "Run now".
+ * Automation page's own "Run now"; script runs go through PythonScriptsController.run so
+ * the result lands in the same "Last run" drawer as a run from the page.
  *
  * The customization modal intentionally reuses the llm-picker-* modal CSS classes so
  * both "order and show/hide" dialogs stay visually identical.
@@ -49,11 +86,13 @@ export class AutomationNavLauncher {
                 </div>
             </div>
             <div class="automation-launch-flyout-footer">
-                <button type="button" class="automation-launch-footer-btn" data-automation-launch-action="customize"
+                <button type="button" class="automation-launch-footer-btn" role="menuitem"
+                        data-automation-launch-action="customize"
                         title="Choose which automations appear here and arrange their order">
                     <i class="fa-solid fa-sliders" aria-hidden="true"></i><span>Customize list…</span>
                 </button>
-                <button type="button" class="automation-launch-footer-btn" data-automation-launch-action="manage"
+                <button type="button" class="automation-launch-footer-btn" role="menuitem"
+                        data-automation-launch-action="manage"
                         title="Open the Automation page">
                     <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i><span>Manage automations</span>
                 </button>
@@ -68,8 +107,11 @@ export class AutomationNavLauncher {
 
         flyout.querySelector('[data-automation-launch-action="customize"]')
             ?.addEventListener('click', () => {
+                // Remembered so closing the modal can hand focus back to the button that
+                // started it (there are two: top nav and sidebar, one usually hidden).
+                const triggerElement = this.triggerElement;
                 this.closeFlyout();
-                this.openCustomizationModal();
+                this.openCustomizationModal({ triggerElement });
             });
         flyout.querySelector('[data-automation-launch-action="manage"]')
             ?.addEventListener('click', () => {
@@ -86,9 +128,12 @@ export class AutomationNavLauncher {
         const onKeydown = (event) => {
             // A confirmDialog overlay owns Escape while it is up (see utils.js).
             if (isConfirmDialogOpen()) return;
-            if (event.key !== 'Escape') return;
-            event.preventDefault();
-            this.closeFlyout({ restoreFocus: true });
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                this.closeFlyout({ restoreFocus: true });
+                return;
+            }
+            this._handleFlyoutNavigation(event);
         };
         const onRelayout = () => {
             if (this.flyout && this.triggerElement?.isConnected) {
@@ -108,6 +153,8 @@ export class AutomationNavLauncher {
 
         await this._loadPreferences();
         this._renderFlyoutItems();
+        // A menu button hands focus to its menu; Escape hands it back to the trigger.
+        this._focusFlyoutItem();
     }
 
     closeFlyout({ restoreFocus = false } = {}) {
@@ -126,29 +173,75 @@ export class AutomationNavLauncher {
         if (restoreFocus && triggerElement?.isConnected) triggerElement.focus?.();
     }
 
-    /** Forget the cached catalog so the next open/modal re-fetches (scripts changed, etc.). */
-    invalidate() {
-        this.items = null;
+    /** The menu items the keyboard can reach: rows first, then the footer buttons. */
+    _flyoutMenuItems() {
+        return Array.from(this.flyout?.querySelectorAll?.('[role="menuitem"]:not([disabled])') || []);
+    }
+
+    /** True while focus sits nowhere in particular or on the trigger that opened us. */
+    _focusIsLoose() {
+        const active = globalThis.document?.activeElement;
+        return !active || active === globalThis.document?.body || active === this.triggerElement;
+    }
+
+    /** True while focus sits in the flyout, on its trigger, or nowhere in particular. */
+    _flyoutOwnsFocus() {
+        return this._focusIsLoose()
+            || Boolean(this.flyout?.contains?.(globalThis.document?.activeElement));
     }
 
     /**
-     * Signed Python scripts run synchronously server-side; surface start + outcome as
-     * toasts so a launch from the nav needs no page context. Signature failures come
-     * back as 400s with a precise message ("not signed" / "changed since signing").
+     * ArrowUp/ArrowDown/Home/End move through the rows and footer buttons while the
+     * flyout (or nothing / its trigger) owns focus — arrows typed elsewhere on the page
+     * keep their meaning.
      */
-    async _runScript(name) {
-        this.app.showToast('Script started', `Running ${name}…`, 'info');
+    _handleFlyoutNavigation(event) {
+        if (!this.flyout) return;
+        if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+        if (!this._flyoutOwnsFocus()) return;
+        const items = this._flyoutMenuItems();
+        if (items.length === 0) return;
+        event.preventDefault();
+        const current = items.indexOf(globalThis.document?.activeElement);
+        let next;
+        if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = items.length - 1;
+        else if (current < 0) next = event.key === 'ArrowDown' ? 0 : items.length - 1;
+        else next = (current + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+        items[next].focus();
+    }
+
+    /**
+     * Focuses a row by index (only that row — a rebuild that left it busy leaves focus
+     * alone), or the first reachable menu item (a footer button when the list is empty).
+     * Never steals focus that is already parked on something else, in the flyout or out.
+     */
+    _focusFlyoutItem(index = null) {
+        if (!this.flyout || !this._focusIsLoose()) return;
+        const items = this._flyoutMenuItems();
+        const target = index === null
+            ? items[0]
+            : items.find((item) => Number(item.dataset?.automationLaunchIndex) === index);
+        target?.focus?.();
+    }
+
+    /**
+     * Runs a Python script through the shared controller, so the result lands in the
+     * Automation page's "Last run" drawer and the toast wording is the section's. The row
+     * stays on screen showing a busy state until the run returns; there is no optimistic
+     * "started" toast because the outcome is what matters and it arrives in one piece.
+     */
+    async _runScript(name, index = null) {
+        const scripts = this.app.jobController?.pythonScripts;
+        if (!scripts || !name) return;
+        // run() registers the name in runningNames before its first await, so the rows
+        // drawn right after it starts already show this one busy.
+        const pending = scripts.run(name, null, { outputHint: OUTPUT_HINT });
+        this._renderFlyoutItems({ focusIndex: index });
         try {
-            const result = await this.app.apiCall(
-                '/api/v1/python-scripts/run', 'POST', { name },
-                { showLoading: false, preferErrorResponseMessage: true });
-            const ok = result?.exitCode === 0 && !result?.timedOut;
-            this.app.showToast(
-                ok ? 'Script finished' : 'Script failed',
-                `${name}: exit ${result?.exitCode}${result?.timedOut ? ' (timed out)' : ''}.`,
-                ok ? 'success' : 'error');
-        } catch (error) {
-            this.app.showError(error?.message || `Could not run ${name}.`);
+            await pending;
+        } finally {
+            this._renderFlyoutItems({ focusIndex: index });
         }
     }
 
@@ -169,26 +262,38 @@ export class AutomationNavLauncher {
     async _loadPreferences() {
         try {
             const response = await this.app.apiCall(PREFERENCES_ENDPOINT, 'GET', null, { showLoading: false });
-            this.items = Array.isArray(response?.items)
-                ? response.items
-                    .map((item) => ({
-                        key: String(item?.key || ''),
-                        kind: item?.kind === 'script' ? 'script' : 'automation',
-                        label: String(item?.label || ''),
-                        jobId: Number(item?.jobId),
-                        enabled: Boolean(item?.enabled),
-                        order: Number(item?.order) || 0
-                    }))
-                    .filter((item) => item.key && (item.kind === 'script' || Number.isFinite(item.jobId)))
-                    .sort((a, b) => a.order - b.order)
-                : [];
+            this.items = normalizeLauncherItems(response?.items);
         } catch (error) {
             console.error('Failed to load Automation launcher preferences.', error);
             this.items = null;
         }
     }
 
-    _renderFlyoutItems() {
+    _renderFlyoutItem(item, index, running) {
+        const label = escapeHtml(item.label);
+        const unsigned = !isLauncherItemRunnable(item);
+        const disabled = unsigned || running;
+        const title = unsigned
+            ? 'Sign it on the Automation page first'
+            : running ? `${label} is running` : `Run ${label} now`;
+        return `
+            <button type="button" class="automation-launch-item${unsigned ? ' is-unsigned' : ''}${running ? ' is-running' : ''}"
+                    role="menuitem" data-automation-launch-index="${index}"
+                    ${disabled ? 'disabled aria-disabled="true"' : ''}${running ? ' aria-busy="true"' : ''}
+                    title="${title}">
+                ${running
+                    ? '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span>'
+                    : `<i class="${launcherItemIcon(item)}" aria-hidden="true"></i>`}
+                <span class="automation-launch-item-label">${label}</span>
+                ${unsigned ? '<span class="automation-launch-item-note">Not signed</span>' : ''}
+            </button>`;
+    }
+
+    /**
+     * (Re)draws the rows from this.items. `focusIndex` re-focuses that row after a
+     * rebuild (a run finishing under the keyboard user's cursor).
+     */
+    _renderFlyoutItems({ focusIndex = null } = {}) {
         const target = this.flyout?.querySelector('[data-automation-launch-items]');
         if (!target) return;
 
@@ -204,21 +309,18 @@ export class AutomationNavLauncher {
                 ? '<div class="automation-launch-flyout-empty text-muted">All automations are hidden. Use "Customize list…" to show some.</div>'
                 : '<div class="automation-launch-flyout-empty text-muted">No automations yet. Create one from the Automation page.</div>';
         } else {
-            target.innerHTML = visible.map((item, index) => `
-                <button type="button" class="automation-launch-item" role="menuitem"
-                        data-automation-launch-index="${index}"
-                        title="Run ${escapeHtml(item.label)} now">
-                    <i class="${item.kind === 'script' ? 'fa-brands fa-python' : 'fa-solid fa-play'}" aria-hidden="true"></i>
-                    <span class="automation-launch-item-label">${escapeHtml(item.label)}</span>
-                </button>`).join('');
+            const runningNames = this.app.jobController?.pythonScripts?.runningNames;
+            target.innerHTML = visible.map((item, index) => this._renderFlyoutItem(
+                item, index, item.kind === 'script' && Boolean(runningNames?.has?.(item.label)))).join('');
             target.querySelectorAll('[data-automation-launch-index]').forEach((button) => {
                 button.addEventListener('click', () => {
-                    const item = visible[Number(button.dataset.automationLaunchIndex)];
-                    this.closeFlyout();
-                    if (!item) return;
+                    const index = Number(button.dataset.automationLaunchIndex);
+                    const item = visible[index];
+                    if (!item || !isLauncherItemRunnable(item)) return;
                     if (item.kind === 'script') {
-                        void this._runScript(item.label);
+                        void this._runScript(item.label, index);
                     } else {
+                        this.closeFlyout();
                         void this.app.jobController?.launchFromNav?.(item.jobId);
                     }
                 });
@@ -228,16 +330,19 @@ export class AutomationNavLauncher {
         // The list was rendered after the flyout was positioned against its loading
         // placeholder; re-clamp so a long list doesn't run off-screen.
         if (this.triggerElement) this._position(this.triggerElement, this.flyout);
+        if (focusIndex !== null) this._focusFlyoutItem(focusIndex);
     }
 
     // --- Customization modal (order + show/hide, mirroring the LLM picker modal) ---
 
-    async openCustomizationModal() {
+    async openCustomizationModal({ triggerElement = null } = {}) {
         this._closeCustomizationModal({ restoreFocus: false });
         const host = document.getElementById('modal-container');
         if (!host) return;
 
+        // The flyout's own load may have failed; one more try before giving up.
         if (this.items === null || this.items === undefined) await this._loadPreferences();
+        const loadFailed = this.items === null;
         const items = (this.items || []).map((item) => ({ ...item }));
 
         const layer = document.createElement('div');
@@ -270,7 +375,7 @@ export class AutomationNavLauncher {
                                 <button type="button" class="btn btn-secondary"
                                         data-automation-nav-action="cancel">Cancel</button>
                                 <button type="submit" class="btn btn-primary"
-                                        data-automation-nav-action="save">Save</button>
+                                        data-automation-nav-action="save" ${loadFailed ? 'disabled' : ''}>Save</button>
                             </div>
                         </form>
                     </div>
@@ -293,6 +398,8 @@ export class AutomationNavLauncher {
             layer,
             host,
             items,
+            loadFailed,
+            triggerElement,
             pending: false,
             draggingKey: null,
             underlying,
@@ -303,6 +410,9 @@ export class AutomationNavLauncher {
         this.modalState = state;
         this._renderModalRows();
         this._bindModalActions();
+        if (loadFailed) {
+            this._showModalError('Could not load the automations and scripts. Close this dialog and try again.');
+        }
 
         state.observer = new MutationObserver(() => {
             if (!layer.isConnected) this._disposeModalState(state);
@@ -319,7 +429,9 @@ export class AutomationNavLauncher {
         if (!container) return;
 
         container.innerHTML = state.items.length === 0
-            ? '<p class="llm-picker-group-empty text-muted small mb-0">No automations yet. Create one from the Automation page first.</p>'
+            ? `<p class="llm-picker-group-empty text-muted small mb-0">${state.loadFailed
+                ? 'The list could not be loaded.'
+                : 'No automations yet. Create one from the Automation page first.'}</p>`
             : state.items.map((item, index) => this._renderModalRow(item, index, state.items.length)).join('');
 
         this._bindModalRows();
@@ -339,7 +451,7 @@ export class AutomationNavLauncher {
                       aria-label="Drag ${label} to reorder" title="Drag to reorder">
                     <i class="fa-solid fa-grip-vertical" aria-hidden="true"></i>
                 </span>
-                <span class="llm-picker-row-logo llm-picker-row-logo-fallback"><i class="${item.kind === 'script' ? 'fa-brands fa-python' : 'fa-solid fa-robot'}" aria-hidden="true"></i></span>
+                <span class="llm-picker-row-logo llm-picker-row-logo-fallback"><i class="${launcherItemIcon(item)}" aria-hidden="true"></i></span>
                 <span class="llm-picker-row-label">${label}</span>
                 <div class="form-check form-switch llm-picker-visibility-switch">
                     <input class="form-check-input" type="checkbox" role="switch"
@@ -457,7 +569,7 @@ export class AutomationNavLauncher {
 
     async _savePreferences() {
         const state = this.modalState;
-        if (!state || state.pending) return;
+        if (!state || state.pending || state.loadFailed) return;
         state.pending = true;
         this._showModalError(null);
         try {
@@ -478,10 +590,42 @@ export class AutomationNavLauncher {
             this.app.showToast('Automation launcher updated', 'Nav launcher preferences were saved.', 'success');
             this._closeCustomizationModal();
         } catch (error) {
-            this._showModalError(error?.message || 'Could not save Automation launcher preferences.');
+            const message = error?.message || 'Could not save Automation launcher preferences.';
+            // The server rejects a snapshot that no longer matches its catalog (an
+            // automation was added, renamed or removed meanwhile). Rather than a dead end,
+            // pull the current list, keep the user's arrangement for what survived, and
+            // let them look it over and save again.
+            const changed = await this._refreshModalCatalog(state);
+            this._showModalError(changed ? `The list changed — review and save again. ${message}` : message);
         } finally {
             state.pending = false;
         }
+    }
+
+    /**
+     * Reloads the catalog into the open modal, keeping the draft's order and show/hide
+     * choices for entries that still exist. Resolves true when the list actually differed
+     * from the draft (false when it matched, or could not be loaded — the draft is kept).
+     */
+    async _refreshModalCatalog(state) {
+        await this._loadPreferences();
+        if (this.modalState !== state || state.disposed || !Array.isArray(this.items)) return false;
+        const identity = (item) => JSON.stringify([item.key, item.kind, item.label, item.jobId]);
+        const fresh = new Map(this.items.map((item) => [item.key, item]));
+        const draftIdentities = state.items.map(identity).sort();
+        const freshIdentities = this.items.map(identity).sort();
+        if (draftIdentities.length === freshIdentities.length
+            && draftIdentities.every((value, index) => value === freshIdentities[index])) {
+            return false;
+        }
+        const merged = state.items
+            .filter((item) => fresh.has(item.key))
+            .map((item) => ({ ...fresh.get(item.key), enabled: item.enabled }));
+        const kept = new Set(merged.map((item) => item.key));
+        merged.push(...this.items.filter((item) => !kept.has(item.key)).map((item) => ({ ...item })));
+        state.items = merged;
+        this._renderModalRows();
+        return true;
     }
 
     async _resetPreferences() {
@@ -494,6 +638,8 @@ export class AutomationNavLauncher {
                 PREFERENCES_ENDPOINT, 'DELETE', null, { showLoading: false });
             this._acceptCatalog(response);
             state.items = (this.items || []).map((item) => ({ ...item }));
+            state.loadFailed = this.items === null;
+            state.layer.querySelector('[data-automation-nav-action="save"]')?.toggleAttribute('disabled', state.loadFailed);
             this._renderModalRows();
         } catch (error) {
             this._showModalError(error?.message || 'Could not reset Automation launcher preferences.');
@@ -503,19 +649,7 @@ export class AutomationNavLauncher {
     }
 
     _acceptCatalog(response) {
-        this.items = Array.isArray(response?.items)
-            ? response.items
-                .map((item) => ({
-                    key: String(item?.key || ''),
-                    kind: item?.kind === 'script' ? 'script' : 'automation',
-                    label: String(item?.label || ''),
-                    jobId: Number(item?.jobId),
-                    enabled: Boolean(item?.enabled),
-                    order: Number(item?.order) || 0
-                }))
-                .filter((item) => item.key && (item.kind === 'script' || Number.isFinite(item.jobId)))
-                .sort((a, b) => a.order - b.order)
-            : this.items;
+        if (Array.isArray(response?.items)) this.items = normalizeLauncherItems(response.items);
     }
 
     _showModalError(message) {
@@ -551,9 +685,22 @@ export class AutomationNavLauncher {
             else element.setAttribute('aria-hidden', ariaHidden);
         });
         state.layer.remove();
-        if (restoreFocus) {
-            document.querySelector('[data-action="automation-launcher"]')?.focus?.();
+        if (restoreFocus) this._restoreTriggerFocus(state.triggerElement);
+    }
+
+    /**
+     * Focus goes back to the button that opened the modal. Without one (or after a
+     * re-render dropped it), fall back to whichever Launch button is actually visible —
+     * index.html has one in the top nav and one in the sidebar, and only one is shown.
+     */
+    _restoreTriggerFocus(triggerElement) {
+        if (triggerElement?.isConnected) {
+            triggerElement.focus?.();
+            return;
         }
+        const buttons = Array.from(document.querySelectorAll('[data-action="automation-launcher"]'));
+        const visible = buttons.find((button) => (button.getClientRects?.().length ?? 1) > 0);
+        (visible || buttons[0])?.focus?.();
     }
 
     _trapModalFocus(event, layer) {

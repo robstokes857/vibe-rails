@@ -22,9 +22,10 @@ public sealed class AutomationNavPreferenceValidationException(string message) :
 /// <summary>
 /// Order and visibility for the nav-bar Automation launcher, mirroring how the LLM
 /// picker preferences treat Custom Environments. The catalog is the current project's
-/// automations; preferences live entirely in one GlobalCache document keyed job:{id}.
-/// Saves and resets only ever touch keys that are in the current catalog, so another
-/// project's stored choices survive untouched.
+/// automations (keyed job:{id}) followed by every Python script in the global scripts
+/// folder (keyed script:{name}, each carrying its signing status); preferences live
+/// entirely in one GlobalCache document. Saves and resets only ever touch keys that are
+/// in the current catalog, so another project's stored choices survive untouched.
 /// </summary>
 public sealed class AutomationNavPreferenceService(
     IRepository repository,
@@ -99,7 +100,8 @@ public sealed class AutomationNavPreferenceService(
 
     /// <summary>
     /// The launcher catalog: the current project's automations (jobs) followed by every
-    /// signed-Python-script candidate. Scripts are global (they live in the home dir), so
+    /// Python script, signed or not, each with its signing status so the launcher can
+    /// disable the unsigned ones. Scripts are global (they live in the home dir), so
     /// they appear whatever project is open.
     /// </summary>
     private async Task<List<AutomationNavPreferenceItem>> BuildCatalogAsync(
@@ -134,7 +136,8 @@ public sealed class AutomationNavPreferenceService(
             script.Name,
             JobId: 0,
             Enabled: true,
-            Order: 0)));
+            Order: 0,
+            Status: script.Status)));
         return catalog;
     }
 
@@ -227,7 +230,11 @@ public sealed class AutomationNavPreferenceService(
 
         return submitted
             .OrderBy(item => item.Order)
-            .Select((item, index) => item with { Order = index })
+            .Select((item, index) => item with
+            {
+                Order = index,
+                Status = expectedByKey[item.Key].Status
+            })
             .ToList();
     }
 

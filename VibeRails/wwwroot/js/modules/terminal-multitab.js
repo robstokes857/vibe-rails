@@ -1427,7 +1427,10 @@ class TerminalManager {
     }
 
     getDefaultWorkingDirectory() {
-        return cleanString(this.app.data.configs?.rootPath)
+        // A host view can pin the panel to another folder (the Python script workbench
+        // starts agents in the scripts directory); the project root stays the default.
+        return cleanString(this.options?.defaultWorkingDirectory)
+            || cleanString(this.app.data.configs?.rootPath)
             || cleanString(this.app.data.configs?.launchDirectory)
             || null;
     }
@@ -2877,6 +2880,10 @@ export class TerminalController {
 
     async loadTerminalFocusView(data = {}) {
         await this.app.refreshDashboardData();
+        // The user may have navigated on while that refresh was in flight (e.g. clicking
+        // Automation right after the app booted into this view). Rendering now would paint
+        // the terminal over the newer view, so the newer view wins and this load stands down.
+        if (this.app.currentView !== 'terminal-focus') return;
 
         const content = document.getElementById('app-content');
         if (!content) return;
@@ -2926,7 +2933,9 @@ export class TerminalController {
                             </button>
         `;
 
-        const rootPath = this.app.data.configs?.rootPath || '';
+        // The header chip names the folder sessions start in: the project root unless the
+        // host view pins the panel elsewhere (pair with bindTerminalActions' defaultWorkingDirectory).
+        const rootPath = cleanString(options.workingDirectory) || this.app.data.configs?.rootPath || '';
         const projectDirHtml = rootPath ? `
                     <span class="vb-terminal-project-path" title="${this.app.escapeHtml(rootPath)}">
                         <i class="fa-solid fa-folder-open"></i>

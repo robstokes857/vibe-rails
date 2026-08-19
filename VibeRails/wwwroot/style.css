@@ -15689,333 +15689,230 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
 
 /* ==========================================================================
    Server-backed File Explorer
-   Reusable nested modal used when the local web host can provide real paths.
+   Reusable nested modal styled as a desktop Open / Select Folder dialog:
+   title bar, toolbar with breadcrumb address bar, places sidebar, sortable
+   details list, file-name row, footer. Every var(--color-…) carries a
+   fallback — an undefined custom property invalidates the whole declaration
+   and would leave a surface transparent.
    ========================================================================== */
 
 .vb-file-explorer-layer > .vb-file-explorer-modal { z-index: 1080; }
 .vb-file-explorer-layer > .vb-file-explorer-backdrop { z-index: 1075; }
 
+/* Bootstrap's .modal-dialog-centered keeps its own min-height (it is how the dialog is
+   centred), so the size cap lives on the content box, not on .modal-dialog where the
+   min-height would win and stretch the dialog to the viewport. */
 .vb-file-explorer-modal .modal-dialog {
-    width: min(1120px, calc(100vw - 2rem));
+    width: min(980px, calc(100vw - 2rem));
     max-width: none;
-    height: min(760px, calc(100dvh - 2rem));
     margin: 1rem auto;
 }
 
-.vb-file-explorer-modal .modal-content {
-    height: 100%;
-    min-height: 0;
-    overflow: hidden;
-    border-color: color-mix(in srgb, var(--color-accent, #06b6d4) 20%, var(--color-border, #334155));
-    background:
-        radial-gradient(circle at 18% -15%, color-mix(in srgb, var(--color-primary, #3b82f6) 13%, transparent), transparent 42%),
-        linear-gradient(180deg,
-            color-mix(in srgb, var(--color-bg-elevated, #232323) 96%, #000) 0%,
-            var(--color-bg-surface, #1e1e1e) 100%);
-}
-
-.vb-file-explorer-header {
-    flex: 0 0 auto;
-    padding: 0.9rem 1rem;
-}
-
-.vb-file-explorer-heading {
+.vb-file-explorer-modal .vb-file-explorer-dialog {
+    --vb-fx-columns: minmax(160px, 1fr) 150px 130px 88px;
+    --vb-fx-row-height: 28px;
+    --vb-fx-border: color-mix(in srgb, var(--color-border, #334155) 80%, transparent);
     display: flex;
-    min-width: 0;
-    align-items: center;
-    gap: 0.8rem;
-}
-
-.vb-file-explorer-heading-icon {
-    display: grid;
-    width: 38px;
-    height: 38px;
-    flex: 0 0 38px;
-    place-items: center;
-    border: 1px solid color-mix(in srgb, var(--color-accent, #06b6d4) 35%, transparent);
-    border-radius: 9px;
-    background: color-mix(in srgb, var(--color-accent, #06b6d4) 11%, transparent);
-    color: var(--color-accent, #06b6d4);
-    box-shadow: 0 0 22px color-mix(in srgb, var(--color-accent, #06b6d4) 10%, transparent);
-}
-
-.vb-file-explorer-heading > div { min-width: 0; }
-
-.vb-file-explorer-heading p {
-    margin: 0.2rem 0 0;
+    height: min(640px, calc(100dvh - 2rem));
+    min-height: 0;
+    flex-direction: column;
     overflow: hidden;
-    color: var(--color-text-muted, #94a3b8);
-    font-size: 0.75rem;
+    border: 1px solid var(--color-border, #334155);
+    border-radius: 10px;
+    background: var(--color-bg-surface, #1e1e1e);
+    box-shadow: 0 24px 56px rgba(0, 0, 0, 0.5);
+    color: var(--color-text, #f8fafc);
+    font-size: 0.78rem;
+}
+
+/* --- Title bar ----------------------------------------------------------- */
+
+.vb-file-explorer-titlebar {
+    display: flex;
+    flex: 0 0 auto;
+    min-height: 40px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0 0.6rem 0 0.9rem;
+    border-bottom: 1px solid var(--vb-fx-border, #334155);
+    background: var(--color-bg-elevated, #232323);
+}
+
+.vb-file-explorer-titlebar .modal-title {
+    margin: 0;
+    overflow: hidden;
+    color: var(--color-text, #f8fafc);
+    font-family: inherit;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0;
     text-overflow: ellipsis;
+    text-transform: none;
     white-space: nowrap;
 }
 
+.vb-file-explorer-titlebar .btn-close {
+    flex: 0 0 auto;
+    padding: 0.4rem;
+    font-size: 0.7rem;
+}
+
+/* --- Toolbar: history, address bar, refresh, search --------------------- */
+
 .vb-file-explorer-toolbar {
     display: grid;
-    grid-template-columns: auto minmax(220px, 1fr);
+    grid-template-columns: auto minmax(160px, 1fr) auto minmax(150px, 220px);
     flex: 0 0 auto;
     align-items: center;
-    gap: 0.65rem;
-    padding: 0.7rem 0.9rem;
-    border-bottom: 1px solid color-mix(in srgb, var(--color-border, #334155) 72%, transparent);
-    background: color-mix(in srgb, var(--color-bg-base, #121212) 48%, transparent);
+    gap: 0.4rem;
+    padding: 0.4rem 0.6rem;
+    border-bottom: 1px solid var(--vb-fx-border, #334155);
+    background: var(--color-bg-elevated, #232323);
 }
 
-.vb-file-explorer-nav-buttons {
+.vb-file-explorer-nav {
     display: inline-flex;
-    gap: 0.28rem;
+    gap: 0.15rem;
 }
 
-.vb-file-explorer-nav-buttons .btn {
+.vb-file-explorer-tool {
     display: inline-grid;
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     padding: 0;
     place-items: center;
-    border-color: color-mix(in srgb, var(--color-border, #334155) 76%, transparent);
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 0.78rem;
+    transition: background-color 80ms ease, color 80ms ease;
 }
 
-.vb-file-explorer-address-form {
+.vb-file-explorer-tool:hover:not(:disabled) {
+    border-color: var(--vb-fx-border, #334155);
+    background: var(--color-bg-surface-hover, #2c2c2c);
+    color: var(--color-text, #f8fafc);
+}
+
+.vb-file-explorer-tool:focus-visible {
+    outline: 2px solid var(--color-primary, #3b82f6);
+    outline-offset: -1px;
+    color: var(--color-text, #f8fafc);
+}
+
+.vb-file-explorer-tool:disabled {
+    opacity: 0.38;
+    cursor: default;
+}
+
+.vb-file-explorer-address-bar {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr);
+    height: 28px;
     min-width: 0;
     align-items: center;
-    gap: 0.55rem;
-    padding: 0.25rem 0.3rem 0.25rem 0.7rem;
+    gap: 0.4rem;
+    padding: 0 0.3rem 0 0.55rem;
     border: 1px solid var(--color-border, #334155);
-    border-radius: 8px;
-    background: color-mix(in srgb, var(--color-bg-base, #121212) 72%, transparent);
+    border-radius: 4px;
+    background: var(--color-bg-base, #121212);
     color: var(--color-text-muted, #94a3b8);
-    transition: border-color 140ms ease, box-shadow 140ms ease;
+    cursor: text;
 }
 
-.vb-file-explorer-address-form:focus-within {
+.vb-file-explorer-address-bar:focus-within {
     border-color: var(--color-primary, #3b82f6);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary, #3b82f6) 16%, transparent);
 }
 
-.vb-file-explorer-address-form input {
+.vb-file-explorer-address-icon {
+    font-size: 0.78rem;
+    color: var(--color-warning, #f59e0b);
+}
+
+.vb-file-explorer-crumbs {
+    display: flex;
+    height: 100%;
+    min-width: 0;
+    align-items: center;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.vb-file-explorer-crumbs::-webkit-scrollbar { display: none; }
+.vb-file-explorer-crumbs[hidden] { display: none; }
+
+.vb-file-explorer-crumb {
+    flex: 0 0 auto;
+    max-width: 200px;
+    height: 22px;
+    padding: 0 0.4rem;
+    overflow: hidden;
+    border: 0;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--color-text, #f8fafc);
+    font: inherit;
+    font-size: 0.76rem;
+    line-height: 22px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 80ms ease;
+}
+
+.vb-file-explorer-crumb:hover {
+    background: var(--color-bg-surface-hover, #2c2c2c);
+}
+
+.vb-file-explorer-crumb:focus-visible {
+    outline: 2px solid var(--color-primary, #3b82f6);
+    outline-offset: -2px;
+}
+
+.vb-file-explorer-crumb-separator {
+    flex: 0 0 auto;
+    padding: 0 0.1rem;
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 0.8rem;
+}
+
+.vb-file-explorer-address-input {
+    display: block;
+    width: 100%;
+    height: 100%;
     min-width: 0;
     padding: 0;
     border: 0;
     outline: 0;
     background: transparent;
     color: var(--color-text, #f8fafc);
-    font: 0.74rem/1.4 var(--vb-font-mono, ui-monospace, monospace);
-}
-
-.vb-file-explorer-address-form .btn {
-    min-width: 42px;
-    padding: 0.25rem 0.55rem;
-}
-
-.vb-file-explorer-breadcrumbs {
-    display: flex;
-    min-height: 38px;
-    flex: 0 0 auto;
-    align-items: center;
-    gap: 0.15rem;
-    padding: 0.35rem 0.9rem;
-    overflow-x: auto;
-    border-bottom: 1px solid color-mix(in srgb, var(--color-border, #334155) 68%, transparent);
-    scrollbar-width: thin;
-}
-
-.vb-file-explorer-breadcrumbs > i {
-    flex: 0 0 auto;
-    margin-inline: 0.1rem;
-    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 55%, transparent);
-    font-size: 0.55rem;
-}
-
-.vb-file-explorer-crumb {
-    max-width: 220px;
-    flex: 0 0 auto;
-    padding: 0.28rem 0.48rem;
-    overflow: hidden;
-    border: 0;
-    border-radius: 5px;
-    background: transparent;
-    color: var(--color-text-muted, #94a3b8);
-    font: 600 0.72rem/1.2 var(--vb-font-mono, ui-monospace, monospace);
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.vb-file-explorer-crumb:hover,
-.vb-file-explorer-crumb:focus-visible {
-    outline: none;
-    background: var(--color-bg-surface-hover, #2c2c2c);
-    color: var(--color-text, #f8fafc);
-}
-
-.vb-file-explorer-crumb[aria-current="page"] {
-    background: color-mix(in srgb, var(--color-primary, #3b82f6) 12%, transparent);
-    color: var(--color-primary, #3b82f6);
-}
-
-.vb-file-explorer-body {
-    display: grid;
-    grid-template-columns: 205px minmax(0, 1fr);
-    flex: 1 1 auto;
-    min-height: 0;
-    padding: 0;
-    overflow: hidden;
-}
-
-.vb-file-explorer-rail {
-    display: flex;
-    min-width: 0;
-    flex-direction: column;
-    gap: 0.45rem;
-    padding: 0.85rem 0.65rem;
-    overflow-y: auto;
-    border-right: 1px solid color-mix(in srgb, var(--color-border, #334155) 72%, transparent);
-    background: color-mix(in srgb, var(--color-bg-base, #121212) 42%, transparent);
-}
-
-.vb-file-explorer-rail-title {
-    padding: 0 0.45rem 0.35rem;
-    color: var(--color-text-muted, #94a3b8);
-    font: 700 0.62rem/1 var(--vb-font-mono, ui-monospace, monospace);
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-}
-
-.vb-file-explorer-roots {
-    display: flex;
-    flex-direction: column;
-    gap: 0.22rem;
-}
-
-.vb-file-explorer-root {
-    display: grid;
-    grid-template-columns: 24px minmax(0, 1fr);
-    width: 100%;
-    min-height: 36px;
-    align-items: center;
-    gap: 0.35rem;
-    padding: 0.4rem 0.5rem;
-    overflow: hidden;
-    border: 1px solid transparent;
-    border-radius: 7px;
-    background: transparent;
-    color: var(--color-text-muted, #94a3b8);
+    font: inherit;
     font-size: 0.76rem;
-    text-align: left;
 }
 
-.vb-file-explorer-root i {
-    color: color-mix(in srgb, var(--color-accent, #06b6d4) 82%, var(--color-text-muted, #94a3b8));
-    text-align: center;
-}
-
-.vb-file-explorer-root span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.vb-file-explorer-root:hover,
-.vb-file-explorer-root:focus-visible,
-.vb-file-explorer-root.is-current {
-    border-color: color-mix(in srgb, var(--color-primary, #3b82f6) 23%, transparent);
-    outline: none;
-    background: color-mix(in srgb, var(--color-primary, #3b82f6) 10%, transparent);
-    color: var(--color-text, #f8fafc);
-}
-
-.vb-file-explorer-root.is-current {
-    box-shadow: inset 3px 0 0 var(--color-primary, #3b82f6);
-}
-
-.vb-file-explorer-hidden-toggle {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-top: auto;
-    padding: 0.65rem 0.45rem 0.15rem;
-    border-top: 1px solid color-mix(in srgb, var(--color-border, #334155) 60%, transparent);
-    color: var(--color-text-muted, #94a3b8);
-    font-size: 0.7rem;
-    cursor: pointer;
-}
-
-.vb-file-explorer-workspace {
-    display: flex;
-    min-width: 0;
-    min-height: 0;
-    flex-direction: column;
-    background: color-mix(in srgb, var(--color-bg-surface, #1e1e1e) 92%, transparent);
-}
-
-.vb-file-explorer-workspace-head {
-    display: flex;
-    flex: 0 0 auto;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    padding: 0.65rem 0.8rem;
-    border-bottom: 1px solid color-mix(in srgb, var(--color-border, #334155) 62%, transparent);
-}
-
-.vb-file-explorer-current {
-    display: flex;
-    min-width: 0;
-    align-items: center;
-    gap: 0.6rem;
-}
-
-.vb-file-explorer-current-icon {
-    display: grid;
-    width: 30px;
-    height: 30px;
-    flex: 0 0 30px;
-    place-items: center;
-    border-radius: 7px;
-    background: color-mix(in srgb, var(--color-warning, #f59e0b) 12%, transparent);
-    color: var(--color-warning, #f59e0b);
-}
-
-.vb-file-explorer-current > div { min-width: 0; }
-
-.vb-file-explorer-current strong,
-.vb-file-explorer-current small {
-    display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.vb-file-explorer-current strong {
-    color: var(--color-text, #f8fafc);
-    font-size: 0.78rem;
-}
-
-.vb-file-explorer-current small {
-    margin-top: 0.1rem;
-    color: var(--color-text-muted, #94a3b8);
-    font: 0.62rem/1.2 var(--vb-font-mono, ui-monospace, monospace);
-}
+.vb-file-explorer-address-input[hidden] { display: none; }
 
 .vb-file-explorer-search {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
-    width: min(250px, 42%);
-    min-width: 150px;
+    height: 28px;
+    margin: 0;
     align-items: center;
-    gap: 0.45rem;
-    padding: 0.4rem 0.6rem;
+    gap: 0.4rem;
+    padding: 0 0.5rem;
     border: 1px solid var(--color-border, #334155);
-    border-radius: 7px;
-    color: var(--color-text-muted, #94a3b8);
+    border-radius: 4px;
     background: var(--color-bg-base, #121212);
+    color: var(--color-text-muted, #94a3b8);
 }
 
 .vb-file-explorer-search:focus-within {
     border-color: var(--color-primary, #3b82f6);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary, #3b82f6) 15%, transparent);
 }
+
+.vb-file-explorer-search i { font-size: 0.72rem; }
 
 .vb-file-explorer-search input {
     min-width: 0;
@@ -16023,199 +15920,407 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
     outline: 0;
     background: transparent;
     color: var(--color-text, #f8fafc);
-    font-size: 0.72rem;
+    font: inherit;
+    font-size: 0.76rem;
 }
 
-.vb-file-explorer-columns {
+/* --- Body: places sidebar + details view -------------------------------- */
+
+.vb-file-explorer-body {
     display: grid;
-    grid-template-columns: minmax(180px, 1fr) 140px 84px 150px;
-    flex: 0 0 auto;
-    gap: 0.65rem;
-    padding: 0.45rem 2.25rem 0.45rem 3.7rem;
-    border-bottom: 1px solid color-mix(in srgb, var(--color-border, #334155) 55%, transparent);
-    color: var(--color-text-muted, #94a3b8);
-    font: 700 0.58rem/1 var(--vb-font-mono, ui-monospace, monospace);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-}
-
-.vb-file-explorer-list {
+    grid-template-columns: 190px minmax(0, 1fr);
     flex: 1 1 auto;
     min-height: 0;
-    padding: 0.35rem 0.45rem;
-    overflow: auto;
-    scrollbar-color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 28%, transparent) transparent;
+    overflow: hidden;
+}
+
+.vb-file-explorer-sidebar {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 0.6rem;
+    padding: 0.5rem 0.35rem;
+    overflow-y: auto;
+    border-right: 1px solid var(--vb-fx-border, #334155);
+    background: var(--color-bg-elevated, #232323);
     scrollbar-width: thin;
 }
 
-.vb-file-explorer-entry {
-    display: grid;
-    grid-template-columns: 38px minmax(180px, 1fr) 140px 84px 150px 18px;
-    min-height: 48px;
-    align-items: center;
-    gap: 0.65rem;
-    padding: 0.38rem 0.55rem;
-    border: 1px solid transparent;
-    border-radius: 7px;
-    color: var(--color-text, #f8fafc);
-    cursor: default;
-    user-select: none;
-    transition: background-color 120ms ease, border-color 120ms ease, transform 120ms ease;
-}
-
-.vb-file-explorer-entry + .vb-file-explorer-entry {
-    margin-top: 0.12rem;
-}
-
-.vb-file-explorer-entry:hover,
-.vb-file-explorer-entry:focus-visible {
-    border-color: color-mix(in srgb, var(--color-border, #334155) 72%, transparent);
-    outline: none;
-    background: var(--color-bg-surface-hover, #2c2c2c);
-}
-
-.vb-file-explorer-entry.is-selected {
-    border-color: color-mix(in srgb, var(--color-primary, #3b82f6) 58%, transparent);
-    background: color-mix(in srgb, var(--color-primary, #3b82f6) 13%, var(--color-bg-surface, #1e1e1e));
-    box-shadow: inset 3px 0 0 var(--color-primary, #3b82f6);
-}
-
-.vb-file-explorer-entry.is-hidden { opacity: 0.66; }
-
-.vb-file-explorer-entry.is-link-blocked {
-    opacity: 0.7;
-    cursor: not-allowed;
-}
-
-.vb-file-explorer-entry.is-link-blocked .vb-file-explorer-entry-open {
-    color: var(--color-warning, #f59e0b);
-}
-
-.vb-file-explorer-entry-icon {
-    display: grid;
-    width: 34px;
-    height: 34px;
-    place-items: center;
-    border-radius: 7px;
-    background: color-mix(in srgb, var(--color-text-muted, #94a3b8) 8%, transparent);
-}
-
-.vb-file-explorer-entry-icon.is-folder {
-    background: color-mix(in srgb, var(--color-warning, #f59e0b) 11%, transparent);
-    color: var(--color-warning, #f59e0b);
-    font-size: 1rem;
-}
-
-.vb-file-explorer-entry-icon img {
-    width: 22px;
-    height: 22px;
-    object-fit: contain;
-}
-
-.vb-file-explorer-entry-copy { min-width: 0; }
-
-.vb-file-explorer-entry-copy strong,
-.vb-file-explorer-entry-copy small {
-    display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.vb-file-explorer-entry-copy strong {
-    color: var(--color-text, #f8fafc);
-    font-size: 0.76rem;
-    font-weight: 650;
-}
-
-.vb-file-explorer-entry-copy small {
-    margin-top: 0.12rem;
-    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 76%, transparent);
-    font: 0.58rem/1.2 var(--vb-font-mono, ui-monospace, monospace);
-}
-
-.vb-file-explorer-entry-type,
-.vb-file-explorer-entry-size,
-.vb-file-explorer-entry-modified {
-    min-width: 0;
-    overflow: hidden;
-    color: var(--color-text-muted, #94a3b8);
-    font-size: 0.66rem;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.vb-file-explorer-entry-size,
-.vb-file-explorer-entry-modified {
-    font-family: var(--vb-font-mono, ui-monospace, monospace);
-    font-size: 0.6rem;
-}
-
-.vb-file-explorer-link-badge {
-    margin-right: 0.35rem;
-    color: var(--color-accent, #06b6d4);
-    font-size: 0.58rem;
-}
-
-.vb-file-explorer-entry-open,
-.vb-file-explorer-entry-check {
-    justify-self: end;
-    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 55%, transparent);
-    font-size: 0.6rem;
-}
-
-.vb-file-explorer-entry-check { display: none; color: var(--color-primary, #3b82f6); }
-.vb-file-explorer-entry.is-selected .vb-file-explorer-entry-check { display: inline-block; }
-
-.vb-file-explorer-state {
+.vb-file-explorer-place-group {
     display: flex;
-    min-height: 250px;
-    align-items: center;
-    justify-content: center;
     flex-direction: column;
-    gap: 0.45rem;
-    padding: 2rem;
+    gap: 0.1rem;
+}
+
+.vb-file-explorer-place-heading {
+    padding: 0.15rem 0.5rem;
     color: var(--color-text-muted, #94a3b8);
+    font-size: 0.68rem;
+    font-weight: 600;
+}
+
+.vb-file-explorer-place-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.vb-file-explorer-place {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr);
+    width: 100%;
+    height: var(--vb-fx-row-height, 28px);
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0 0.5rem;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--color-text, #f8fafc);
+    font: inherit;
+    font-size: 0.76rem;
+    text-align: left;
+    cursor: default;
+    transition: background-color 80ms ease;
+}
+
+.vb-file-explorer-place i {
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 0.8rem;
     text-align: center;
 }
 
-.vb-file-explorer-state > i {
-    margin-bottom: 0.35rem;
-    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 58%, transparent);
-    font-size: 2rem;
+.vb-file-explorer-place span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
-.vb-file-explorer-state > strong { color: var(--color-text, #f8fafc); font-size: 0.85rem; }
-.vb-file-explorer-state > small { max-width: 420px; overflow-wrap: anywhere; }
-.vb-file-explorer-state .spinner-border { color: var(--color-primary, #3b82f6); }
+.vb-file-explorer-place:hover {
+    background: var(--color-bg-surface-hover, #2c2c2c);
+}
 
-.vb-file-explorer-state-error > i { color: var(--color-danger, #ef4444); }
-.vb-file-explorer-state-error .btn { margin-top: 0.55rem; }
+.vb-file-explorer-place:focus-visible {
+    outline: 2px solid var(--color-primary, #3b82f6);
+    outline-offset: -2px;
+}
+
+.vb-file-explorer-place.is-current {
+    background: color-mix(in srgb, var(--color-primary, #3b82f6) 22%, transparent);
+}
+
+.vb-file-explorer-place.is-current i { color: var(--color-primary, #3b82f6); }
+
+.vb-file-explorer-place-empty {
+    padding: 0.5rem;
+    color: var(--color-text-muted, #94a3b8);
+}
+
+.vb-file-explorer-main {
+    display: flex;
+    min-width: 0;
+    min-height: 0;
+    flex-direction: column;
+    background: var(--color-bg-surface, #1e1e1e);
+}
+
+.vb-file-explorer-view {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    outline: none;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 28%, transparent) transparent;
+}
+
+/* The view is only a keyboard parking spot while rows are re-rendered (or the folder is empty),
+   so its focus ring stays quiet; the focused row carries the visible ring. */
+.vb-file-explorer-view:focus-visible {
+    outline: 1px solid color-mix(in srgb, var(--color-primary, #3b82f6) 45%, transparent);
+    outline-offset: -1px;
+}
+
+.vb-file-explorer-grid { min-width: 100%; }
+
+.vb-file-explorer-columns {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    border-bottom: 1px solid var(--vb-fx-border, #334155);
+    background: var(--color-bg-surface, #1e1e1e);
+}
+
+.vb-file-explorer-columns-row,
+.vb-file-explorer-entry {
+    display: grid;
+    grid-template-columns: var(--vb-fx-columns, minmax(160px, 1fr) 150px 130px 88px);
+    align-items: center;
+    column-gap: 0.5rem;
+    padding: 0 0.6rem;
+}
+
+.vb-file-explorer-column { min-width: 0; }
+
+.vb-file-explorer-column button {
+    display: flex;
+    width: 100%;
+    height: 26px;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0 0.3rem;
+    border: 0;
+    background: transparent;
+    color: var(--color-text-muted, #94a3b8);
+    font: inherit;
+    font-size: 0.72rem;
+    text-align: left;
+    cursor: default;
+}
+
+.vb-file-explorer-column button > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vb-file-explorer-column.is-size button {
+    justify-content: flex-end;
+    text-align: right;
+}
+
+.vb-file-explorer-column button:hover {
+    background: var(--color-bg-surface-hover, #2c2c2c);
+    color: var(--color-text, #f8fafc);
+}
+
+.vb-file-explorer-column button:focus-visible {
+    outline: 2px solid var(--color-primary, #3b82f6);
+    outline-offset: -2px;
+}
+
+.vb-file-explorer-column.is-sorted button { color: var(--color-text, #f8fafc); }
+
+.vb-file-explorer-sort-icon {
+    font-size: 0.55rem;
+    opacity: 0;
+}
+
+.vb-file-explorer-column.is-sorted .vb-file-explorer-sort-icon { opacity: 1; }
+
+.vb-file-explorer-list { padding: 2px 0; }
+
+.vb-file-explorer-entry {
+    height: var(--vb-fx-row-height, 28px);
+    color: var(--color-text, #f8fafc);
+    cursor: default;
+    user-select: none;
+    transition: background-color 80ms ease;
+}
+
+.vb-file-explorer-entry:hover {
+    background: var(--color-bg-surface-hover, #2c2c2c);
+}
+
+.vb-file-explorer-entry:focus-visible {
+    outline: 1px solid var(--color-primary, #3b82f6);
+    outline-offset: -1px;
+}
+
+.vb-file-explorer-entry.is-selected {
+    background: color-mix(in srgb, var(--color-primary, #3b82f6) 32%, var(--color-bg-surface, #1e1e1e));
+}
+
+.vb-file-explorer-entry.is-selected:hover {
+    background: color-mix(in srgb, var(--color-primary, #3b82f6) 40%, var(--color-bg-surface, #1e1e1e));
+}
+
+.vb-file-explorer-entry.is-hidden,
+.vb-file-explorer-entry.is-muted { opacity: 0.55; }
+
+.vb-file-explorer-entry.is-link-blocked {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.vb-file-explorer-cell {
+    min-width: 0;
+    overflow: hidden;
+    font-size: 0.76rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vb-file-explorer-cell.is-name {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.vb-file-explorer-cell.is-modified,
+.vb-file-explorer-cell.is-type,
+.vb-file-explorer-cell.is-size {
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 0.72rem;
+}
+
+.vb-file-explorer-cell.is-modified,
+.vb-file-explorer-cell.is-size { font-variant-numeric: tabular-nums; }
+
+.vb-file-explorer-cell.is-size { text-align: right; }
+
+.vb-file-explorer-entry-icon {
+    display: inline-grid;
+    width: 18px;
+    height: 18px;
+    flex: 0 0 18px;
+    place-items: center;
+}
+
+.vb-file-explorer-entry-icon.is-folder {
+    color: var(--color-warning, #f59e0b);
+    font-size: 0.95rem;
+}
+
+.vb-file-explorer-entry-icon img {
+    width: 16px;
+    height: 16px;
+    object-fit: contain;
+    /* The bundled file-type SVGs are monochrome black; the app whitens them the same way. */
+    filter: brightness(0) invert(1);
+    opacity: 0.85;
+}
+
+.vb-file-explorer-entry-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.vb-file-explorer-link-badge {
+    flex: 0 0 auto;
+    color: var(--color-accent, #06b6d4);
+    font-size: 0.6rem;
+}
+
+/* Loading / error / empty, inline under the column header. */
+.vb-file-explorer-state { padding: 0.25rem 0.6rem; }
+
+.vb-file-explorer-message {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.8rem 0.4rem;
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 0.76rem;
+}
+
+.vb-file-explorer-message.is-error { color: var(--color-danger, #ef4444); }
+.vb-file-explorer-message .spinner-border { color: var(--color-primary, #3b82f6); }
+
+.vb-file-explorer-message .btn {
+    margin-left: 0.25rem;
+    padding: 0.05rem 0.5rem;
+    font-size: 0.7rem;
+}
 
 .vb-file-explorer-notice {
     display: flex;
     flex: 0 0 auto;
+    min-height: 30px;
     align-items: center;
     gap: 0.45rem;
-    padding: 0.5rem 0.75rem;
-    border-top: 1px solid color-mix(in srgb, var(--color-warning, #f59e0b) 26%, transparent);
-    background: color-mix(in srgb, var(--color-warning, #f59e0b) 8%, transparent);
-    color: var(--color-warning, #f59e0b);
-    font-size: 0.68rem;
+    padding: 0.2rem 0.6rem;
+    border-top: 1px solid var(--vb-fx-border, #334155);
+    background: var(--color-bg-elevated, #232323);
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 0.72rem;
 }
 
-.vb-file-explorer-notice > span { min-width: 0; }
+.vb-file-explorer-notice > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 
 .vb-file-explorer-notice .btn {
     flex: 0 0 auto;
     margin-left: auto;
+    padding: 0.05rem 0.5rem;
+    font-size: 0.7rem;
     white-space: nowrap;
 }
 
-.vb-file-explorer-notice.is-error {
-    border-top-color: color-mix(in srgb, var(--color-danger, #ef4444) 30%, transparent);
-    background: color-mix(in srgb, var(--color-danger, #ef4444) 8%, transparent);
+.vb-file-explorer-notice.is-error { color: var(--color-danger, #ef4444); }
+
+/* --- File name row + footer --------------------------------------------- */
+
+.vb-file-explorer-namerow {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem 0.25rem;
+    border-top: 1px solid var(--vb-fx-border, #334155);
+    background: var(--color-bg-elevated, #232323);
+}
+
+.vb-file-explorer-namerow-label {
+    margin: 0;
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 0.76rem;
+    white-space: nowrap;
+}
+
+.vb-file-explorer-filename {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.vb-file-explorer-filename-input {
+    display: block;
+    width: 100%;
+    height: 28px;
+    min-width: 0;
+    padding: 0 0.5rem;
+    border: 1px solid var(--color-border, #334155);
+    border-radius: 4px;
+    background: var(--color-bg-base, #121212);
+    color: var(--color-text, #f8fafc);
+    font: inherit;
+    font-size: 0.76rem;
+}
+
+.vb-file-explorer-filename-input:focus {
+    border-color: var(--color-primary, #3b82f6);
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary, #3b82f6) 25%, transparent);
+}
+
+.vb-file-explorer-filename-input.is-invalid { border-color: var(--color-danger, #ef4444); }
+
+.vb-file-explorer-filename-hint {
+    flex: 0 0 auto;
     color: var(--color-danger, #ef4444);
+    font-size: 0.7rem;
+    white-space: nowrap;
+}
+
+.vb-file-explorer-filter {
+    width: auto;
+    min-width: 150px;
+    max-width: 240px;
+    height: 28px;
+    padding: 0 1.75rem 0 0.5rem;
+    border-radius: 4px;
+    font-size: 0.76rem;
 }
 
 .vb-file-explorer-footer {
@@ -16224,98 +16329,136 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
     align-items: center;
     justify-content: space-between;
     gap: 0.75rem;
-    padding: 0.72rem 0.9rem;
+    padding: 0.4rem 0.75rem 0.6rem;
+    background: var(--color-bg-elevated, #232323);
+}
+
+.vb-file-explorer-footer-info {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 0.9rem;
 }
 
 .vb-file-explorer-status {
     min-width: 0;
     overflow: hidden;
     color: var(--color-text-muted, #94a3b8);
-    font: 0.68rem/1.3 var(--vb-font-mono, ui-monospace, monospace);
+    font-size: 0.72rem;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.vb-file-explorer-hidden-toggle {
+    display: inline-flex;
+    margin: 0;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 0.72rem;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.vb-file-explorer-hidden-toggle .form-check-input {
+    width: 0.9rem;
+    height: 0.9rem;
+    margin: 0;
 }
 
 .vb-file-explorer-actions {
     display: flex;
     flex: 0 0 auto;
-    align-items: center;
-    gap: 0.45rem;
+    gap: 0.4rem;
 }
 
 .vb-file-explorer-actions .btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.42rem;
-    min-width: 104px;
+    min-width: 92px;
+    padding: 0.25rem 0.75rem;
+    border-radius: 4px;
+    font-size: 0.76rem;
 }
+
+/* --- Responsive ----------------------------------------------------------- */
 
 @media (max-width: 860px) {
     .vb-file-explorer-modal .modal-dialog {
         width: calc(100vw - 1rem);
-        height: calc(100dvh - 1rem);
         margin: 0.5rem auto;
     }
+
+    .vb-file-explorer-modal .vb-file-explorer-dialog { height: calc(100dvh - 1rem); }
 
     .vb-file-explorer-body {
         grid-template-columns: minmax(0, 1fr);
         grid-template-rows: auto minmax(0, 1fr);
     }
 
-    .vb-file-explorer-rail {
+    /* The sidebar collapses to a horizontal chip strip. */
+    .vb-file-explorer-sidebar {
         flex-direction: row;
         align-items: center;
-        gap: 0.45rem;
-        padding: 0.45rem 0.65rem;
+        gap: 0.35rem;
+        padding: 0.35rem 0.5rem;
         overflow-x: auto;
+        overflow-y: hidden;
         border-right: 0;
-        border-bottom: 1px solid color-mix(in srgb, var(--color-border, #334155) 72%, transparent);
+        border-bottom: 1px solid var(--vb-fx-border, #334155);
     }
 
-    .vb-file-explorer-rail-title { display: none; }
-    .vb-file-explorer-roots { flex-direction: row; }
-    .vb-file-explorer-root { width: auto; min-width: 110px; }
-
-    .vb-file-explorer-hidden-toggle {
+    .vb-file-explorer-place-group {
         flex: 0 0 auto;
-        margin: 0 0 0 auto;
-        padding: 0.45rem;
-        border-top: 0;
-        border-left: 1px solid color-mix(in srgb, var(--color-border, #334155) 60%, transparent);
-        white-space: nowrap;
+        flex-direction: row;
+        align-items: center;
+        gap: 0.25rem;
     }
+
+    .vb-file-explorer-place-group + .vb-file-explorer-place-group {
+        padding-left: 0.35rem;
+        border-left: 1px solid var(--vb-fx-border, #334155);
+    }
+
+    .vb-file-explorer-place-heading { display: none; }
+    .vb-file-explorer-place-list { flex-direction: row; gap: 0.25rem; }
+    .vb-file-explorer-place-list > li { flex: 0 0 auto; }
+
+    .vb-file-explorer-place {
+        width: auto;
+        height: 26px;
+        padding: 0 0.55rem;
+        border: 1px solid var(--vb-fx-border, #334155);
+        border-radius: 999px;
+    }
+
+    .vb-file-explorer-place span { max-width: 120px; }
 }
 
 @media (max-width: 640px) {
-    .vb-file-explorer-heading p { display: none; }
-    .vb-file-explorer-toolbar { grid-template-columns: minmax(0, 1fr); }
-    .vb-file-explorer-nav-buttons { justify-content: space-between; }
-    .vb-file-explorer-nav-buttons .btn { flex: 1 1 auto; width: auto; }
-    .vb-file-explorer-breadcrumbs { min-height: 34px; padding-inline: 0.5rem; }
-    .vb-file-explorer-workspace-head { align-items: stretch; flex-direction: column; gap: 0.55rem; }
-    .vb-file-explorer-search { width: 100%; min-width: 0; }
-    .vb-file-explorer-columns { display: none; }
+    .vb-file-explorer-toolbar { grid-template-columns: auto minmax(0, 1fr) auto; }
+    .vb-file-explorer-search { grid-column: 1 / -1; }
+    .vb-file-explorer-modal .vb-file-explorer-dialog { --vb-fx-columns: minmax(0, 1fr); }
 
-    .vb-file-explorer-entry {
-        grid-template-columns: 38px minmax(0, 1fr) 18px;
-        min-height: 52px;
-    }
+    .vb-file-explorer-column.is-modified,
+    .vb-file-explorer-column.is-type,
+    .vb-file-explorer-column.is-size,
+    .vb-file-explorer-cell.is-modified,
+    .vb-file-explorer-cell.is-type,
+    .vb-file-explorer-cell.is-size { display: none; }
 
-    .vb-file-explorer-entry-type,
-    .vb-file-explorer-entry-size,
-    .vb-file-explorer-entry-modified { display: none; }
+    .vb-file-explorer-namerow { grid-template-columns: auto minmax(0, 1fr); }
+    .vb-file-explorer-filter { grid-column: 1 / -1; width: 100%; max-width: none; }
 
     .vb-file-explorer-footer { align-items: stretch; flex-direction: column; }
-    .vb-file-explorer-status { width: 100%; text-align: center; }
+    .vb-file-explorer-footer-info { justify-content: space-between; }
     .vb-file-explorer-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .vb-file-explorer-actions .btn { width: 100%; min-width: 0; }
-    .vb-file-explorer-actions [data-file-explorer-action="select-current"] { grid-column: 1 / -1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
     .vb-file-explorer-entry,
-    .vb-file-explorer-address-form { transition: none; }
+    .vb-file-explorer-tool,
+    .vb-file-explorer-place,
+    .vb-file-explorer-crumb { transition: none; }
 }
 
 /* ============================================================
@@ -16380,10 +16523,24 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
     background: var(--color-bg-surface-hover, #2c2c2c);
 }
 
-.automation-launch-item > .fa-play {
+.automation-launch-item > .fa-play,
+.automation-launch-item > .fa-python,
+.automation-launch-item > .spinner-border {
     flex: 0 0 auto;
     font-size: 0.7rem;
     color: var(--color-success, #10b981);
+}
+
+.automation-launch-item > .fa-python {
+    font-size: 0.85rem;
+}
+
+/* A script with a run in flight (see PythonScriptsController.runningNames). */
+.automation-launch-item > .spinner-border {
+    width: 0.8rem;
+    height: 0.8rem;
+    border-width: 0.12em;
+    color: var(--color-text-muted, #94a3b8);
 }
 
 .automation-launch-item-label {
@@ -16391,6 +16548,27 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* Unsigned scripts are listed (so hide/order prefs still apply) but cannot be run. */
+.automation-launch-item:disabled {
+    cursor: default;
+    color: var(--color-text-muted, #94a3b8);
+}
+
+.automation-launch-item:disabled:hover {
+    background: transparent;
+}
+
+.automation-launch-item:disabled > .fa-python {
+    color: inherit;
+}
+
+.automation-launch-item-note {
+    flex: 0 0 auto;
+    margin-left: auto;
+    font-size: 0.72rem;
+    color: var(--color-text-muted, #94a3b8);
 }
 
 .automation-launch-flyout-empty {
@@ -16522,7 +16700,10 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
-    flex: 0 0 auto;
+    /* Shrinkable so Run / Sign / ⋮ wrap inside the row on a 320px viewport instead
+       of pushing the page wider than the screen. */
+    flex: 0 1 auto;
+    min-width: 0;
 }
 
 .python-script-output {
@@ -16553,7 +16734,7 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
     z-index: 1070;
 }
 
-/* --- Script authoring: row identity, row menu, drop target, editor modal ---
+/* --- Script authoring: row identity, row menu, drop target ---
    Same rule as the rest of this section: nothing here may impose an unbreakable
    minimum width, and every color carries an explicit fallback. */
 
@@ -16683,69 +16864,457 @@ button.python-script-name:focus-visible > i {
     margin-top: 10px;
 }
 
-/* Monaco needs an explicitly sized flex container; app.showModal's auto-height
-   dialog would collapse it to 0px (same reason as .vb-terminal-editor-modal). */
-.vb-python-editor-modal .modal-dialog {
-    max-width: min(1040px, 88vw);
-    height: 82vh;
-    margin: 9vh auto;
-}
+/* ============================================================
+   Python script workbench (view 'python-script')
+   Back bar + script identity, a Monaco editor with a rail of all
+   scripts, and the agent terminal docked with a draggable split:
+   BESIDE the editor on wide windows (>= 1180px, the terminal is the
+   right column) and UNDERNEATH it on narrower ones. Rides on the
+   .vb-rules-workspace-active flowing shell (viewport-filling, footer
+   hidden, page scrolls when the panes need more room) and reuses
+   .rules-section / .rules-pane-terminal / .rules-terminal-host /
+   .python-script-menu. Every var() below carries a fallback (enforced
+   by the env-steps test).
+   ============================================================ */
 
-.vb-python-editor-modal .modal-content {
-    height: 100%;
+.python-workbench {
+    /* Stacked layout: terminal pane height. Side by side: terminal column width.
+       The splitter rewrites the one that applies, inline (persisted per browser). */
+    --python-workbench-terminal-height: max(240px, 34dvh);
+    --python-workbench-terminal-width: 46%;
     display: flex;
+    flex: 1 1 auto;
     flex-direction: column;
-    background-color: #1a1a22;
-    border: 1px solid var(--color-border, #334155);
-}
-
-.vb-python-editor-modal .modal-header,
-.vb-python-editor-modal .modal-footer {
-    background-color: #1e1e24;
-    flex-shrink: 0;
-}
-
-.vb-python-editor-modal .modal-header {
-    border-bottom: 1px solid #2b2b36;
-    align-items: flex-start;
-}
-
-.vb-python-editor-modal .modal-footer {
-    border-top: 1px solid #2b2b36;
-}
-
-.vb-python-editor-modal .modal-body {
-    flex: 1;
-    display: flex;
-    min-height: 0;
-    padding: 0;
-    overflow: hidden;
-}
-
-.vb-python-editor-heading {
     min-width: 0;
+    gap: 0.75rem;
 }
 
-.vb-python-editor-subhead {
+/* ── Top bar ─────────────────────────────────────────────────────────── */
+.python-workbench-topbar {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 10px;
-    margin-top: 4px;
+    gap: 0.6rem 1rem;
 }
 
-.vb-python-editor-subhead code {
-    font-size: 0.72rem;
+.python-workbench-identity {
+    display: flex;
+    flex: 1 1 240px;
+    min-width: 0;
+    align-items: center;
+    gap: 0.65rem;
+}
+
+.python-workbench-identity > i {
+    flex: 0 0 auto;
+    font-size: 1.35rem;
     color: var(--color-text-muted, #94a3b8);
+}
+
+.python-workbench-identity-copy {
+    min-width: 0;
+}
+
+.python-workbench-title-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 0.75rem;
+}
+
+.python-workbench-title {
+    margin: 0;
+    color: var(--color-text, #f8fafc);
+    font-size: 1.1rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.25;
     overflow-wrap: anywhere;
 }
 
-.vb-python-editor-host {
-    flex: 1;
+.python-workbench-dirty-mark {
+    margin-left: 0.3rem;
+    color: var(--color-warning, #f59e0b);
+}
+
+.python-workbench-dirty-mark[hidden] {
+    display: none;
+}
+
+.python-workbench-meta {
+    margin: 0.1rem 0 0;
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 0.74rem;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.python-workbench-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+/* ── The split: editor card above, terminal below ────────────────────── */
+.python-workbench-panes {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
     min-width: 0;
     min-height: 0;
 }
 
-.vb-python-editor-hint {
+/* Fills whatever the terminal leaves; never below a height you can edit in.
+   (Top bar ~44px + 260px + splitter + 240px terminal fits a 640px webview.) */
+.python-workbench-editor-card {
+    flex: 1 1 auto;
+    min-height: 260px;
+}
+
+.python-workbench-editor-header {
+    padding: 0.5rem 0.8rem;
+}
+
+.python-workbench-editor-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.python-workbench-body {
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+}
+
+/* Left rail: every script, current one highlighted, "+ New script" last. The list is
+   absolutely filled (like the Monaco mount below) so a long list scrolls inside the
+   rail instead of growing the page: nothing above this view has a definite height,
+   only min-heights, so any intrinsic height here would push the terminal off-screen. */
+.python-workbench-rail {
+    position: relative;
+    flex: 0 0 200px;
+    min-width: 0;
+    border-right: 1px solid color-mix(in srgb, var(--color-border, #334155) 60%, transparent);
+    background: var(--color-bg-base, #121212);
+}
+
+.python-workbench-rail-list {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    padding: 6px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    list-style: none;
+}
+
+.python-workbench-rail-item {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    color: var(--color-text, #f8fafc);
+    font-size: 0.8rem;
+    text-align: left;
+    cursor: pointer;
+}
+
+.python-workbench-rail-item:hover,
+.python-workbench-rail-item:focus-visible {
+    background: var(--color-bg-surface-hover, #2c2c2c);
+}
+
+.python-workbench-rail-item:focus-visible {
+    outline: 2px solid var(--color-primary, #3b82f6);
+    outline-offset: -2px;
+}
+
+.python-workbench-rail-item[aria-current="page"] {
+    background: color-mix(in srgb, var(--color-primary, #3b82f6) 20%, transparent);
+    font-weight: 600;
+}
+
+.python-workbench-rail-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.python-workbench-rail-dot {
+    flex: 0 0 auto;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-text-muted, #94a3b8);
+}
+
+.python-workbench-rail-dot[data-tone="success"] {
+    background: var(--color-success, #10b981);
+}
+
+.python-workbench-rail-dot[data-tone="warning"] {
+    background: var(--color-warning, #f59e0b);
+}
+
+.python-workbench-rail-new {
+    margin-top: 4px;
+    padding-top: 8px;
+    border-top: 1px solid color-mix(in srgb, var(--color-border, #334155) 60%, transparent);
+    border-radius: 0;
+    color: var(--color-text-muted, #94a3b8);
+}
+
+.python-workbench-rail-new > i {
+    width: 8px;
+    text-align: center;
+    font-size: 0.7rem;
+}
+
+/* Monaco measures its container: an explicitly sized, absolutely filled host keeps
+   the editor from growing the page (a flex-basis of 0 ignores content size). */
+.python-workbench-editor-host {
+    position: relative;
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--color-bg-base, #121212);
+}
+
+.python-workbench-editor-mount {
+    position: absolute;
+    inset: 0;
+}
+
+.python-workbench-editor-state {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 1rem;
+    background: var(--color-bg-surface, #1e1e1e);
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 0.85rem;
+    text-align: center;
+}
+
+.python-workbench-editor-state[hidden] {
+    display: none;
+}
+
+/* Inline notice: file changed on disk / save refused / file deleted. */
+.python-workbench-banner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+    padding: 8px 12px;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-warning, #f59e0b) 45%, transparent);
+    background: color-mix(in srgb, var(--color-warning, #f59e0b) 14%, transparent);
+    color: var(--color-text, #f8fafc);
+    font-size: 0.8rem;
+}
+
+.python-workbench-banner > i {
+    color: var(--color-warning, #f59e0b);
+}
+
+.python-workbench-banner > span {
+    min-width: 0;
+    flex: 1 1 200px;
     overflow-wrap: anywhere;
+}
+
+.python-workbench-banner[hidden] {
+    display: none;
+}
+
+.python-workbench-banner-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-left: auto;
+}
+
+/* Last-run drawer under the editor (shares .python-script-output's pre styling). */
+.python-workbench-output {
+    flex: 0 0 auto;
+    margin: 0;
+    padding: 6px 12px 8px;
+    border-top: 1px solid color-mix(in srgb, var(--color-border, #334155) 60%, transparent);
+}
+
+.python-workbench-output[hidden] {
+    display: none;
+}
+
+.python-workbench-output > pre {
+    max-height: 180px;
+}
+
+/* ── Splitter ────────────────────────────────────────────────────────── */
+.python-workbench-splitter {
+    position: relative;
+    flex: 0 0 auto;
+    height: 12px;
+    margin: 1px 0;
+    border-radius: 6px;
+    cursor: row-resize;
+    touch-action: none;
+}
+
+.python-workbench-splitter::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 56px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--color-border, #334155);
+    transform: translate(-50%, -50%);
+    transition: background-color 0.12s ease;
+}
+
+.python-workbench-splitter:hover::before,
+.python-workbench-splitter:focus-visible::before,
+.python-workbench-resizing .python-workbench-splitter::before {
+    background: var(--color-primary, #3b82f6);
+}
+
+.python-workbench-splitter:focus-visible {
+    outline: 2px solid var(--color-primary, #3b82f6);
+    outline-offset: 0;
+}
+
+.python-workbench-resizing {
+    cursor: row-resize;
+    user-select: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .python-workbench-splitter::before {
+        transition: none;
+    }
+}
+
+/* ── Terminal pane ───────────────────────────────────────────────────── */
+/* Fixed to the splitter's height instead of .rules-pane-terminal's grow-to-fill:
+   the editor is the pane that takes the slack here. */
+.python-workbench .python-workbench-terminal {
+    flex: 0 0 auto;
+    height: var(--python-workbench-terminal-height, 34dvh);
+    min-height: 240px;
+}
+
+/* ── Wide windows: editor and terminal side by side ──────────────────── */
+/* Rob: "the terminal is too small… do them side by side". From 1180px up the
+   editor takes the left column and the terminal the right one, both the full
+   working height, and the splitter turns vertical (it moves the terminal's
+   width). The panes claim most of the viewport as a MINIMUM height, so a short
+   window scrolls the page instead of squeezing either pane — a terminal you
+   can actually drive an agent in beats one that fits. */
+@media (min-width: 1180px) {
+    .python-workbench-panes {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 12px var(--python-workbench-terminal-width, 46%);
+        grid-template-rows: minmax(0, 1fr);
+        align-items: stretch;
+        min-height: clamp(560px, calc(100dvh - 168px), 1400px);
+    }
+
+    /* The row sizes both panes; the stacked floors would only fight the grid. */
+    .python-workbench-editor-card {
+        min-height: 0;
+    }
+
+    .python-workbench-splitter {
+        width: 12px;
+        height: auto;
+        margin: 0 1px;
+        cursor: col-resize;
+    }
+
+    .python-workbench-splitter::before {
+        width: 4px;
+        height: 56px;
+    }
+
+    .python-workbench-resizing {
+        cursor: col-resize;
+    }
+
+    .python-workbench .python-workbench-terminal {
+        height: auto;
+        min-width: 0;
+        min-height: 0;
+    }
+}
+
+/* ── Short viewports: fewer terminal rows, more code lines ───────────── */
+/* A docked VS Code webview or a maximised panel on a laptop is often under 720px
+   tall; a 240px terminal there leaves ~5 lines of code above it. The floor and the
+   default share both drop, and python-script-workbench.js (terminalMinHeight,
+   threshold 720) mirrors them so the splitter's clamp agrees with what CSS renders. */
+@media (max-height: 720px) and (max-width: 1179.98px) {
+    .python-workbench {
+        --python-workbench-terminal-height: clamp(180px, 30dvh, 34dvh);
+    }
+
+    .python-workbench .python-workbench-terminal {
+        min-height: 180px;
+    }
+}
+
+/* ── Narrow layouts: the rail becomes a chip strip above the editor ─── */
+@media (max-width: 900px) {
+    .python-workbench-body {
+        flex-direction: column;
+    }
+
+    .python-workbench-rail {
+        flex: 0 0 auto;
+        border-right: 0;
+        border-bottom: 1px solid color-mix(in srgb, var(--color-border, #334155) 60%, transparent);
+    }
+
+    /* Back in flow: one row of chips is the rail's own height. */
+    .python-workbench-rail-list {
+        position: static;
+        flex-direction: row;
+        gap: 4px;
+        padding: 6px 8px;
+        overflow-x: auto;
+        overflow-y: hidden;
+    }
+
+    .python-workbench-rail-item {
+        width: auto;
+        flex: 0 0 auto;
+        max-width: 200px;
+        padding: 4px 10px;
+        border-radius: 999px;
+    }
+
+    .python-workbench-rail-new {
+        margin-top: 0;
+        padding-top: 4px;
+        border-top: 0;
+        border-radius: 999px;
+    }
 }

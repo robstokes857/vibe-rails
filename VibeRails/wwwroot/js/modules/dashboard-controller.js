@@ -23,6 +23,10 @@ export class DashboardController {
             }
         }
 
+        // A navigation that happened while the fetches above were in flight owns the
+        // page now; painting the dashboard over it would clobber that view.
+        if (!['dashboard', 'agents'].includes(this.app.currentView)) return;
+
         const content = document.getElementById('app-content');
         if (!content) return;
 

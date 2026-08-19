@@ -532,6 +532,14 @@ tools (security review 2026-07-02).
   scripts folder (root-dashboard backend only, like the filesystem picker; network/device
   paths and links are rejected)
 
+**Nav Automation launcher** (the nav "Launch" flyout; preferences persist per install in GlobalCache):
+- `GET /api/v1/automation-nav/preferences` - Catalog of the current project's automations
+  (`job:{id}`) plus every Python script (`script:{name}`, with its signing `status`), each
+  with its saved order and show/hide state
+- `PUT /api/v1/automation-nav/preferences` - Save order/visibility; the body must be the full
+  current catalog (400 when it no longer matches, e.g. an automation was renamed meanwhile)
+- `DELETE /api/v1/automation-nav/preferences` - Reset the current catalog's entries to defaults
+
 **Session Logging**:
 - `GET /api/v1/sessions/{sessionId}/logs` - Get session logs
 - `GET /api/v1/sessions/recent` - Recent sessions

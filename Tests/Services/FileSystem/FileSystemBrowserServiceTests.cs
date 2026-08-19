@@ -419,6 +419,171 @@ public sealed class FileSystemBrowserServiceTests : IDisposable
         Assert.Equal(FileSystemBrowseError.InvalidPath, ancestorException.Error);
     }
 
+    [Theory]
+    [InlineData("C:", null, "Local Disk (C:)")]
+    [InlineData("C:", "", "Local Disk (C:)")]
+    [InlineData("C:", "   ", "Local Disk (C:)")]
+    [InlineData("D:", " Data ", "Data (D:)")]
+    public void FormatDriveLabel_UsesTheVolumeLabel_OrLocalDisk(string rootLabel, string? volumeLabel, string expected)
+    {
+        Assert.Equal(expected, FileSystemBrowserService.FormatDriveLabel(rootLabel, volumeLabel));
+    }
+
+    [Fact]
+    public void Browse_LabelsRootsLikeExplorer_ButKeepsBreadcrumbRootsShort()
+    {
+        var response = _service.Browse(
+            _browseRoot,
+            _browseRoot,
+            includeHidden: false,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var currentRoot = Normalize(Path.GetPathRoot(_browseRoot)!);
+        var root = Assert.Single(response.Roots, item => string.Equals(item.Path, currentRoot, StringComparison.OrdinalIgnoreCase));
+        var breadcrumbRoot = response.Breadcrumbs[0];
+        Assert.Equal(currentRoot, breadcrumbRoot.Path, ignoreCase: true);
+
+        // Roots list in drive-letter (path) order regardless of what the volumes are called.
+        Assert.Equal(
+            response.Roots.Select(item => item.Path).OrderBy(path => path, StringComparer.OrdinalIgnoreCase),
+            response.Roots.Select(item => item.Path));
+
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Equal(root.Path, root.Label);
+            Assert.Equal(root.Path, breadcrumbRoot.Label);
+            return;
+        }
+
+        var shortLabel = currentRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        Assert.Equal(shortLabel, breadcrumbRoot.Label);
+        var expected = FileSystemBrowserService.FormatDriveLabel(shortLabel, new DriveInfo(currentRoot).VolumeLabel);
+        Assert.Equal(expected, root.Label);
+        Assert.All(response.Roots, item => Assert.Matches(@"^.+ \([A-Za-z]:\)$", item.Label));
+    }
+
+    [Fact]
+    public void Browse_ReturnsSidebarPlaces_ThatAreExistingLocalDirectoriesWithoutDuplicates()
+    {
+        var response = _service.Browse(
+            _browseRoot,
+            _browseRoot,
+            includeHidden: false,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(response.Places);
+        Assert.All(response.Places, place =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(place.Label));
+            Assert.Contains(place.Kind, new[] { "home", "desktop", "documents", "downloads" });
+            Assert.True(Path.IsPathFullyQualified(place.Path));
+            Assert.True(Directory.Exists(place.Path));
+            Assert.Equal(Normalize(place.Path), place.Path);
+        });
+
+        var comparer = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
+        Assert.Equal(
+            response.Places.Count,
+            response.Places.Select(place => place.Path).Distinct(comparer).Count());
+        Assert.Equal(
+            response.Places.Count,
+            response.Places.Select(place => place.Kind).Distinct().Count());
+    }
+
+    [Fact]
+    public void GetPlaces_ListsOnlyExistingFolders_InSidebarOrder_AndDeDuplicatesByPath()
+    {
+        var homeDirectory = Path.Combine(_testRoot, "home");
+        Directory.CreateDirectory(Path.Combine(homeDirectory, "Downloads"));
+
+        var places = FileSystemBrowserService.GetPlaces(
+            folder => folder switch
+            {
+                Environment.SpecialFolder.UserProfile => homeDirectory,
+                Environment.SpecialFolder.DesktopDirectory => Path.Combine(_testRoot, "missing-desktop"),
+                // Documents resolves to the home folder itself (Linux does this): a duplicate path
+                // spelled with a trailing separator must collapse onto Home.
+                Environment.SpecialFolder.MyDocuments => homeDirectory + Path.DirectorySeparatorChar,
+                _ => null
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(["home", "downloads"], places.Select(place => place.Kind));
+        Assert.Equal(["Home", "Downloads"], places.Select(place => place.Label));
+        Assert.Equal(Normalize(homeDirectory), places[0].Path);
+        Assert.Equal(Normalize(Path.Combine(homeDirectory, "Downloads")), places[1].Path);
+    }
+
+    [Fact]
+    public void GetPlaces_SkipsUnsetRelativeNetworkAndFailingSpecialFolders_WithoutThrowing()
+    {
+        var documentsDirectory = Path.Combine(_testRoot, "documents");
+        Directory.CreateDirectory(documentsDirectory);
+
+        var places = FileSystemBrowserService.GetPlaces(
+            folder => folder switch
+            {
+                Environment.SpecialFolder.UserProfile => throw new UnauthorizedAccessException("no profile"),
+                Environment.SpecialFolder.DesktopDirectory => "relative/desktop",
+                Environment.SpecialFolder.MyDocuments => documentsDirectory,
+                _ => string.Empty
+            },
+            TestContext.Current.CancellationToken);
+        var networkOnly = FileSystemBrowserService.GetPlaces(
+            folder => folder == Environment.SpecialFolder.MyDocuments
+                ? @"\\server\share\documents"
+                : "   ",
+            TestContext.Current.CancellationToken);
+        var unsupported = FileSystemBrowserService.GetPlaces(
+            _ => throw new PlatformNotSupportedException(),
+            TestContext.Current.CancellationToken);
+
+        var documents = Assert.Single(places);
+        Assert.Equal("documents", documents.Kind);
+        Assert.Equal(Normalize(documentsDirectory), documents.Path);
+        Assert.Empty(networkOnly);
+        Assert.Empty(unsupported);
+    }
+
+    [Fact]
+    public void GetPlaces_SkipsFoldersReachedThroughSymbolicLinks()
+    {
+        var targetDirectory = Path.Combine(_testRoot, "linked-desktop-target");
+        var linkPath = Path.Combine(_testRoot, "linked-desktop");
+        var realDirectory = Path.Combine(_testRoot, "real-home");
+        Directory.CreateDirectory(targetDirectory);
+        Directory.CreateDirectory(realDirectory);
+
+        try
+        {
+            Directory.CreateSymbolicLink(linkPath, targetDirectory);
+            _directoryLinks.Add(linkPath);
+        }
+        catch (Exception ex) when (ex is IOException
+                                   or UnauthorizedAccessException
+                                   or PlatformNotSupportedException
+                                   or NotSupportedException)
+        {
+            Assert.Skip("This platform does not permit creating directory symbolic links.");
+            return;
+        }
+
+        var places = FileSystemBrowserService.GetPlaces(
+            folder => folder switch
+            {
+                Environment.SpecialFolder.UserProfile => realDirectory,
+                Environment.SpecialFolder.DesktopDirectory => linkPath,
+                _ => null
+            },
+            TestContext.Current.CancellationToken);
+
+        var home = Assert.Single(places);
+        Assert.Equal("home", home.Kind);
+        Assert.Equal(Normalize(realDirectory), home.Path);
+    }
+
     private static string Normalize(string path) =>
         Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
 

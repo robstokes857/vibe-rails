@@ -187,20 +187,26 @@ public sealed class AutomationNavPreferenceServiceTests : IDisposable
         Assert.Equal(["job:1", "script:Backup.py", "script:tidy.py"], defaults.Items.Select(item => item.Key));
         Assert.Equal(["automation", "script", "script"], defaults.Items.Select(item => item.Kind));
         Assert.Equal(["Job one", "Backup.py", "tidy.py"], defaults.Items.Select(item => item.Label));
+        // Every script surfaces, signed or not; the status lets the launcher disable the
+        // unsigned ones instead of listing them as launchable. Automations carry none.
+        Assert.Equal([null, "approved", "unapproved"], defaults.Items.Select(item => item.Status));
 
         var reordered = new List<AutomationNavPreferenceItem>
         {
             defaults.Items.Single(item => item.Key == "script:Backup.py") with { Order = 0 },
-            defaults.Items.Single(item => item.Key == "job:1") with { Order = 1 },
-            defaults.Items.Single(item => item.Key == "script:tidy.py") with { Order = 2, Enabled = false }
+            // A stale status echoed back by a client is replaced by the live catalog's.
+            defaults.Items.Single(item => item.Key == "job:1") with { Order = 1, Status = "approved" },
+            defaults.Items.Single(item => item.Key == "script:tidy.py") with { Order = 2, Enabled = false, Status = null }
         };
-        await service.SaveAsync(
+        var saved = await service.SaveAsync(
             new UpdateAutomationNavPreferencesRequest(reordered),
             TestContext.Current.CancellationToken);
         var loaded = await service.GetAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(["script:Backup.py", "job:1", "script:tidy.py"], loaded.Items.Select(item => item.Key));
         Assert.False(loaded.Items.Single(item => item.Key == "script:tidy.py").Enabled);
+        Assert.Equal(["approved", null, "unapproved"], saved.Items.Select(item => item.Status));
+        Assert.Equal(["approved", null, "unapproved"], loaded.Items.Select(item => item.Status));
     }
 
     private static AutomationNavPreferenceService NewService(

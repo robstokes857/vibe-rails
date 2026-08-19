@@ -346,14 +346,17 @@ namespace VibeRails.DTOs
 
     // Nav Automation launcher preferences. Keys are job:{id} / script:{name} so saved
     // ordering survives renames; labels are resolved from the live catalogs. Kind is
-    // "automation" (a Job) or "script" (a signed Python script; JobId is 0).
+    // "automation" (a Job) or "script" (any Python script in the scripts folder, signed
+    // or not; JobId is 0). Status carries the script's signing status (approved |
+    // modified | unapproved) so the launcher only offers signed ones; null for automations.
     public record AutomationNavPreferenceItem(
         string Key,
         string Kind,
         string Label,
         long JobId,
         bool Enabled,
-        int Order
+        int Order,
+        string? Status = null
     );
 
     public record AutomationNavPreferencesResponse(
@@ -1419,6 +1422,8 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(List<FileSystemLocationResponse>))]
     [JsonSerializable(typeof(FileSystemEntryResponse))]
     [JsonSerializable(typeof(List<FileSystemEntryResponse>))]
+    [JsonSerializable(typeof(FileSystemPlaceResponse))]
+    [JsonSerializable(typeof(List<FileSystemPlaceResponse>))]
     [JsonSerializable(typeof(FileSystemBrowseResponse))]
     // Agent File DTOs
     [JsonSerializable(typeof(RuleWithEnforcementResponse))]
