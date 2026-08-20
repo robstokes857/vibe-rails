@@ -341,7 +341,23 @@ export class VibeControlApp {
             console.warn(`Template not found: ${id}`);
             return document.createDocumentFragment();
         }
-        return template.content.cloneNode(true);
+        const fragment = template.content.cloneNode(true);
+        // Hoist any <style> blocks out of the clone into <head>, once per template.
+        // Re-inserting a <style> node on every view entry rebuilds the CSSOM and
+        // forces a full-document style recalc each time (the Vibe AI template alone
+        // carries ~78KB of CSS). The blocks are namespaced under their view's root
+        // class, so they are inert while that view is unmounted. Head placement
+        // keeps them after the style.css link, preserving the old cascade order.
+        fragment.querySelectorAll('style').forEach((style, index) => {
+            const hoistId = `vb-template-style-${id}-${index}`;
+            if (document.getElementById(hoistId)) {
+                style.remove();
+            } else {
+                style.id = hoistId;
+                document.head.appendChild(style);
+            }
+        });
+        return fragment;
     }
 
     bindAction(container, selector, handler) {
@@ -901,9 +917,17 @@ export class VibeControlApp {
 
         const loadFunc = views[view];
         if (loadFunc) {
+            const navStartedAt = performance.now();
             const loadResult = loadFunc();
             Promise.resolve(loadResult).finally(() => {
                 this.queueScrollPageToTop();
+                // [NavPerf] probe: view switches should feel instant. When one doesn't,
+                // this line plus the slow-API log in apiCall separates "backend was slow"
+                // from "rendering was slow" straight from the webview devtools console.
+                const elapsedMs = Math.round(performance.now() - navStartedAt);
+                if (elapsedMs >= 1000) {
+                    console.info(`[NavPerf] view '${view}' took ${elapsedMs}ms to load`);
+                }
             });
         } else {
             this.showError('View not found: ' + view);
@@ -1343,6 +1367,7 @@ export class VibeControlApp {
         if (showLoadingOverlay) {
             this.beginLoadingOverlay();
         }
+        const apiStartedAt = performance.now();
         try {
             const tabToken = sessionStorage.getItem('viberails_tab');
             const options = {
@@ -1395,6 +1420,13 @@ export class VibeControlApp {
             console.error('API Error:', error);
             throw error;
         } finally {
+            // [NavPerf] probe: attribute slow view switches to the specific backend
+            // call. In the VS Code webview every request also crosses the port-mapping
+            // proxy, so this measures what the front-end actually experienced.
+            const apiElapsedMs = Math.round(performance.now() - apiStartedAt);
+            if (apiElapsedMs >= 1000) {
+                console.info(`[NavPerf] slow API ${method} ${endpoint} took ${apiElapsedMs}ms`);
+            }
             if (showLoadingOverlay) {
                 this.endLoadingOverlay();
             }
@@ -1406,8 +1438,11 @@ export class VibeControlApp {
     // ============================================ 
 
     async refreshDashboardData() {
-        try {
-            // Fetch environments (global, always available)
+        // The four data sources below are independent, so they fetch concurrently:
+        // a view switch pays for the slowest call instead of the sum of all of them.
+        // Each task still owns its error handling — one failing source must not
+        // block or blank the others.
+        const environmentsTask = (async () => {
             try {
                 const envResponse = await this.apiCall('/api/v1/environments', 'GET', null, { showLoading: false });
                 // Keep one normalization path for environment records. In particular, this
@@ -1419,10 +1454,16 @@ export class VibeControlApp {
                 await this.llmPickerController.refreshFromEnvironments(envResponse.environments || []);
             } catch (error) {
                 console.error('Failed to fetch environments:', error);
-                this.data.environments = [];
+                // Keep the last known-good catalog. Environment references are durable
+                // configuration, and a transient list failure must not make mounted
+                // pickers or editor drafts behave as though those environments were
+                // deleted. A cold start already begins with an empty array.
             }
+        })();
 
-            if (this.data.isInGit) {
+        const gitTasks = [];
+        if (this.data.isInGit) {
+            gitTasks.push((async () => {
                 try {
                     const agentsResponse = await this.apiCall('/api/v1/agents', 'GET', null, { showLoading: false });
                     this.data.agents = (agentsResponse.agents || []).map((agent, index) => ({
@@ -1440,7 +1481,9 @@ export class VibeControlApp {
                     console.error('Failed to fetch agents:', error);
                     this.data.agents = [];
                 }
+            })());
 
+            gitTasks.push((async () => {
                 try {
                     const rulesResponse = await this.apiCall('/api/v1/rules/details', 'GET', null, { showLoading: false });
                     this.data.availableRulesWithDescriptions = rulesResponse.rules || [];
@@ -1448,22 +1491,22 @@ export class VibeControlApp {
                     console.error('Failed to fetch available rules:', error);
                     this.data.availableRulesWithDescriptions = [];
                 }
+            })());
 
-                // Fetch sandboxes (local context only)
+            gitTasks.push((async () => {
                 try {
                     await this.sandboxController.refreshSandboxes();
                 } catch (error) {
                     console.error('Failed to fetch sandboxes:', error);
                     this.data.sandboxes = [];
                 }
-            } else {
-                this.data.agents = [];
-                this.data.sandboxes = [];
-            }
-
-        } catch (error) {
-            console.error('Failed to refresh dashboard data:', error);
+            })());
+        } else {
+            this.data.agents = [];
+            this.data.sandboxes = [];
         }
+
+        await Promise.all([environmentsTask, ...gitTasks]);
     }
 
     // Escape inside a terminal or Monaco is never ours: Claude Code interrupts on Esc,

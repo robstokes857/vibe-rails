@@ -2879,15 +2879,12 @@ export class TerminalController {
     }
 
     async loadTerminalFocusView(data = {}) {
-        await this.app.refreshDashboardData();
-        // The user may have navigated on while that refresh was in flight (e.g. clicking
-        // Automation right after the app booted into this view). Rendering now would paint
-        // the terminal over the newer view, so the newer view wins and this load stands down.
-        if (this.app.currentView !== 'terminal-focus') return;
-
         const content = document.getElementById('app-content');
         if (!content) return;
 
+        // Paint the workspace shell before any data fetch so the view switch is
+        // instant even when the backend is slow; the refresh below fills in the
+        // LLM picker and tab strip once it lands.
         content.innerHTML = `
             <div class="view vb-terminal-focus-view" data-view="terminal-focus">
                 <div class="vb-terminal-focus-layout">
@@ -2902,12 +2899,33 @@ export class TerminalController {
         if (!terminalContent) return;
 
         terminalContent.innerHTML = this.renderTerminalPanel({ focusView: true });
+        // The shell is visible immediately, but its controls are not safe to use until
+        // the manager has mounted and bound them below. `inert` prevents a fast click
+        // during the dashboard refresh from being silently lost while still letting the
+        // user see that navigation succeeded.
+        terminalContent.inert = true;
+        terminalContent.setAttribute('aria-busy', 'true');
+
+        await this.app.refreshDashboardData();
+        // The user may have navigated on while that refresh was in flight (e.g. clicking
+        // Automation right after the app booted into this view). Binding now would revive
+        // the terminal under the newer view, so the newer view wins and this load stands
+        // down. `isConnected` also covers a re-entry to THIS view: the newer load replaced
+        // #app-content, so our shell is detached and only the newer load may bind.
+        if (this.app.currentView !== 'terminal-focus' || !terminalContent.isConnected) return;
+
         await this.bindTerminalActions(terminalContent, data.preselectedEnvId || null, {
             focusView: true,
             preferredSelection: data.preferredSelection || null,
             preferredTabId: data.preferredTabId || null
         });
 
+        // Re-check after the bind await: if a newer load replaced our shell while the
+        // manager was initializing, attaching our (detached) sidebar would clobber the
+        // newer load's sidebar reference on the shared controller.
+        if (this.app.currentView !== 'terminal-focus' || !root.isConnected) return;
+        terminalContent.inert = false;
+        terminalContent.removeAttribute('aria-busy');
         this._initChatHistorySidebar(root);
     }
 

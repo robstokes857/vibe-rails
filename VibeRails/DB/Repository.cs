@@ -38,6 +38,34 @@ namespace VibeRails.DB
 
         public void InitializeDatabase() => EnsureInitialized();
 
+        /// <summary>
+        /// Opens a connection with a busy timeout, matching every other store in DB/
+        /// (TokenSavingsStore, JobStore, CodeAnalyzerIgnoreStore…). Without it, hitting
+        /// state.db while a concurrent writer holds the lock (background jobs, a second
+        /// vb process, a stuck migration) surfaces as an immediate "database is locked"
+        /// instead of a short wait — the classic state.db contention failure mode.
+        /// </summary>
+        private async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken = default)
+        {
+            var connection = new SqliteConnection(_connectionString);
+            try
+            {
+                await connection.OpenAsync(cancellationToken);
+                using var pragma = connection.CreateCommand();
+                pragma.CommandText = "PRAGMA busy_timeout = 5000;";
+                await pragma.ExecuteNonQueryAsync(cancellationToken);
+                return connection;
+            }
+            catch
+            {
+                // The caller cannot own a connection that this helper never returned.
+                // In particular, cancellation between OpenAsync and the PRAGMA must not
+                // leave an open native SQLite handle waiting for finalization.
+                await connection.DisposeAsync();
+                throw;
+            }
+        }
+
         private static bool IsBenignMigrationError(SqliteException ex)
         {
             // SQLite error messages we expect on re-run: "duplicate column name",
@@ -60,6 +88,15 @@ namespace VibeRails.DB
 
                 using var connection = new SqliteConnection(_connectionString);
                 connection.Open();
+
+                // Wait out concurrent writers instead of failing migrations with
+                // "database is locked" (which the benign-error filter below would
+                // otherwise let masquerade as a skipped migration).
+                using (var busyCmd = connection.CreateCommand())
+                {
+                    busyCmd.CommandText = "PRAGMA busy_timeout = 5000;";
+                    busyCmd.ExecuteNonQuery();
+                }
 
                 using (var walCmd = connection.CreateCommand())
                 {
@@ -283,8 +320,7 @@ namespace VibeRails.DB
 
         public async Task<LLM_Environment?> GetEnvironmentByIdAsync(int id, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectEnvironmentById;
@@ -301,8 +337,7 @@ namespace VibeRails.DB
 
         public async Task<LLM_Environment?> GetEnvironmentByNameAndLlmAsync(string name, LLM llm, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectEnvironmentByNameAndLlm;
@@ -320,8 +355,7 @@ namespace VibeRails.DB
 
         public async Task<LLM_Environment?> FindEnvironmentByNameAsync(string name, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectEnvironmentByName;
@@ -338,8 +372,7 @@ namespace VibeRails.DB
 
         public async Task<LLM_Environment?> FindEnvironmentByNameIgnoreCaseAsync(string name, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectEnvironmentByNameNoCase;
@@ -388,8 +421,7 @@ namespace VibeRails.DB
 
         public async Task<LLM_Environment> SaveEnvironmentAsync(LLM_Environment environment, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.InsertEnvironment;
@@ -413,8 +445,7 @@ namespace VibeRails.DB
 
         public async Task UpdateEnvironmentAsync(LLM_Environment environment, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.UpdateEnvironment;
@@ -436,8 +467,7 @@ namespace VibeRails.DB
 
         public async Task TouchEnvironmentLastUsedAsync(int environmentId, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.TouchEnvironmentLastUsed;
@@ -449,8 +479,7 @@ namespace VibeRails.DB
 
         public async Task DeleteEnvironmentAsync(int id, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.DeleteEnvironment;
@@ -465,8 +494,7 @@ namespace VibeRails.DB
 
         public async Task<Sandbox> SaveSandboxAsync(Sandbox sandbox, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.InsertSandbox;
@@ -489,8 +517,7 @@ namespace VibeRails.DB
         {
             var sandboxes = new List<Sandbox>();
 
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectSandboxesByProject;
@@ -507,8 +534,7 @@ namespace VibeRails.DB
 
         public async Task<Sandbox?> GetSandboxByIdAsync(int id, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectSandboxById;
@@ -525,8 +551,7 @@ namespace VibeRails.DB
 
         public async Task<Sandbox?> GetSandboxByNameAndProjectAsync(string name, string projectPath, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectSandboxByNameAndProject;
@@ -546,8 +571,7 @@ namespace VibeRails.DB
         {
             var sandboxes = new List<Sandbox>();
 
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectSandboxesByEnvironmentId;
@@ -564,8 +588,7 @@ namespace VibeRails.DB
 
         public async Task OrphanSandboxesForEnvironmentAsync(int environmentId, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.OrphanSandboxesByEnvironmentId;
@@ -581,8 +604,7 @@ namespace VibeRails.DB
 
             var normalized = Path.TrimEndingDirectorySeparator(directory);
 
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.CountOpenSessionsUnderDirectory;
@@ -606,8 +628,7 @@ namespace VibeRails.DB
 
         public async Task DeleteSandboxAsync(int id, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.DeleteSandbox;
@@ -626,8 +647,7 @@ namespace VibeRails.DB
         {
             var steps = new List<EnvironmentStep>();
 
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectStepsByEnvironmentId;
@@ -656,8 +676,7 @@ namespace VibeRails.DB
                 return result;
             }
 
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
 
@@ -697,8 +716,7 @@ namespace VibeRails.DB
         {
             var steps = new List<EnvironmentStep>();
 
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectEnabledStepsByEnvironmentIdAndPhase;
@@ -724,8 +742,7 @@ namespace VibeRails.DB
             string stepId,
             CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectStepByIdAndEnvironmentId;
@@ -745,8 +762,7 @@ namespace VibeRails.DB
             EnvironmentStepPhase phase,
             CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.CountStepsByEnvironmentIdAndPhase;
@@ -767,8 +783,7 @@ namespace VibeRails.DB
             IReadOnlyList<EnvironmentStep> steps,
             CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(
                 System.Data.IsolationLevel.Serializable,
@@ -856,8 +871,7 @@ namespace VibeRails.DB
 
         public async Task<string?> GetAgentCustomNameAsync(string path, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectAgentMetadataByPath;
@@ -874,8 +888,7 @@ namespace VibeRails.DB
 
         public async Task SetAgentCustomNameAsync(string path, string customName, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.UpsertAgentMetadata;
@@ -891,8 +904,7 @@ namespace VibeRails.DB
 
         public async Task<string?> GetProjectCacheValueAsync(string projectPath, string key, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectProjectCacheByKey;
@@ -905,8 +917,7 @@ namespace VibeRails.DB
 
         public async Task SetProjectCacheValueAsync(string projectPath, string key, string value, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.UpsertProjectCache;
@@ -922,8 +933,7 @@ namespace VibeRails.DB
         {
             var result = new Dictionary<string, string>();
 
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectAllProjectCache;
@@ -940,8 +950,7 @@ namespace VibeRails.DB
 
         public async Task RemoveProjectCacheValueAsync(string projectPath, string key, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.DeleteProjectCacheByKey;
@@ -957,8 +966,7 @@ namespace VibeRails.DB
 
         public async Task<string?> GetGlobalCacheValueAsync(string key, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectGlobalCacheByKey;
@@ -970,8 +978,7 @@ namespace VibeRails.DB
 
         public async Task SetGlobalCacheValueAsync(string key, string value, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.UpsertGlobalCache;
@@ -986,8 +993,7 @@ namespace VibeRails.DB
         {
             var result = new Dictionary<string, string>();
 
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectAllGlobalCache;
@@ -1003,8 +1009,7 @@ namespace VibeRails.DB
 
         public async Task RemoveGlobalCacheValueAsync(string key, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.DeleteGlobalCacheByKey;
@@ -1019,8 +1024,7 @@ namespace VibeRails.DB
             IReadOnlyDictionary<int, bool> environmentHidden,
             CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
             await using var transaction =
                 (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
 
@@ -1074,8 +1078,7 @@ namespace VibeRails.DB
 
         public async Task<ChatSummary> SaveChatSummaryAsync(ChatSummary chatSummary, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.UpsertChatSummary;
@@ -1090,8 +1093,7 @@ namespace VibeRails.DB
 
         public async Task<ChatSummary?> GetChatSummaryByIdAsync(int id, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectChatSummaryById;
@@ -1110,8 +1112,7 @@ namespace VibeRails.DB
         {
             var summaries = new List<ChatSummary>();
 
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectChatSummariesBySession;
@@ -1130,8 +1131,7 @@ namespace VibeRails.DB
         {
             var summaries = new List<ChatSummary>();
 
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectAllChatSummaries;
@@ -1147,8 +1147,7 @@ namespace VibeRails.DB
 
         public async Task DeleteChatSummaryAsync(int id, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.DeleteChatSummary;
@@ -1159,8 +1158,7 @@ namespace VibeRails.DB
 
         public async Task DeleteChatSummaryBySessionAsync(string sessionId, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.DeleteChatSummaryBySession;
@@ -1177,8 +1175,7 @@ namespace VibeRails.DB
         {
             var environments = new List<LLM_Environment>();
 
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = sql;
@@ -1265,8 +1262,7 @@ namespace VibeRails.DB
 
         public async Task CreateSessionAsync(string sessionId, string cli, string? envName, string workDir, int ownerPid, string? jobRunId = null)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            await using var connection = await OpenConnectionAsync();
 
             var normalizedWorkDir = NormalizeWorkingDirectory(workDir);
             var projectDisplayName = await GetLatestProjectDisplayNameByWorkingDirectoryAsync(connection, normalizedWorkDir)
@@ -1293,8 +1289,7 @@ namespace VibeRails.DB
         {
             var normalizedPath = NormalizeWorkingDirectory(path);
 
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             var projectDisplayName = await GetLatestProjectDisplayNameByWorkingDirectoryAsync(connection, normalizedPath, cancellationToken);
             return !string.IsNullOrWhiteSpace(projectDisplayName)
@@ -1306,8 +1301,7 @@ namespace VibeRails.DB
         {
             var normalizedPath = NormalizeWorkingDirectory(path);
 
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.UpdateLatestProjectDisplayNameByWorkingDirectory;
@@ -1320,8 +1314,7 @@ namespace VibeRails.DB
 
         public async Task<(string? Cli, string? DisplayName)> GetSessionDisplayInfoAsync(string sessionId)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            await using var connection = await OpenConnectionAsync();
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectSessionDisplayInfo;
@@ -1339,8 +1332,7 @@ namespace VibeRails.DB
 
         public async Task SetParentSessionIdAsync(string sessionId, string parentSessionId)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            await using var connection = await OpenConnectionAsync();
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SetParentSessionId;
@@ -1351,8 +1343,7 @@ namespace VibeRails.DB
 
         public async Task SetSessionDisplayNameAsync(string sessionId, string displayName)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            await using var connection = await OpenConnectionAsync();
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SetSessionDisplayName;
@@ -1363,8 +1354,7 @@ namespace VibeRails.DB
 
         public async Task LogSessionOutputAsync(string sessionId, byte[] content, bool isError = false)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            await using var connection = await OpenConnectionAsync();
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.InsertSessionLog;
@@ -1379,8 +1369,7 @@ namespace VibeRails.DB
 
         public async Task InsertTerminalSessionLogAsync(string sessionId, int sequence, byte[] data, bool isAlternateScreen, int cols, int rows)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            await using var connection = await OpenConnectionAsync();
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.InsertTerminalSessionLog;
@@ -1400,8 +1389,7 @@ namespace VibeRails.DB
         {
             var logs = new List<TerminalSessionLogRecord>();
 
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectTerminalSessionLogsBySession;
@@ -1426,8 +1414,7 @@ namespace VibeRails.DB
 
         public async Task CompleteSessionAsync(string sessionId, int exitCode)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            await using var connection = await OpenConnectionAsync();
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.UpdateSessionEnd;
@@ -1445,8 +1432,7 @@ namespace VibeRails.DB
 
         public async Task<SessionResponse?> GetSessionByIdAsync(string sessionId, CancellationToken cancellationToken)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var sessionCmd = connection.CreateCommand();
             sessionCmd.CommandText = SqlStrings.SelectSessionById;
@@ -1469,8 +1455,7 @@ namespace VibeRails.DB
 
         public async Task<SessionWithLogsResponse?> GetSessionWithLogsAsync(string sessionId, CancellationToken cancellationToken)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var sessionCmd = connection.CreateCommand();
             sessionCmd.CommandText = SqlStrings.SelectSessionById;
@@ -1522,8 +1507,7 @@ namespace VibeRails.DB
         {
             var sessions = new List<SessionResponse>();
 
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectRecentSessions;
@@ -1548,8 +1532,7 @@ namespace VibeRails.DB
 
         public async Task<SessionOutputDetailResponse?> GetSessionOutputAsync(string sessionId, CancellationToken cancellationToken)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectSessionOutput;
@@ -1575,8 +1558,7 @@ namespace VibeRails.DB
         {
             var sessionIds = new List<string>();
 
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectEndedUnprocessedSessions;
@@ -1595,8 +1577,7 @@ namespace VibeRails.DB
         {
             var chunks = new List<SessionLogChunkRecord>();
 
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectSessionLogChunks;
@@ -1618,8 +1599,7 @@ namespace VibeRails.DB
         {
             var inputs = new List<UserInputRecord>();
 
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectUserInputsBySession;
@@ -1643,8 +1623,7 @@ namespace VibeRails.DB
 
         public async Task SaveSessionOutputAndMarkProcessedAsync(string sessionId, string text, CancellationToken cancellationToken)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
 
             try
@@ -1677,8 +1656,7 @@ namespace VibeRails.DB
 
         public async Task<List<OpenSessionCleanupCandidate>> GetOpenSessionCleanupCandidatesAsync(DateTime trackedCutoff, DateTime untrackedCutoff, CancellationToken cancellationToken)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectOpenSessionCleanupCandidates;
@@ -1703,8 +1681,7 @@ namespace VibeRails.DB
 
         public async Task<ChatHistoryItem?> GetChatHistoryItemAsync(string sessionId, CancellationToken cancellationToken)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectChatHistoryBySessionId;
@@ -1721,8 +1698,7 @@ namespace VibeRails.DB
 
         public async Task<List<ChatHistoryItem>> GetChatHistoryPageAsync(int limit, int offset, string? preferredWorkingDirectory, string? sortBy, string? sortDirection, CancellationToken cancellationToken)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             var items = new List<ChatHistoryItem>();
             await using var cmd = connection.CreateCommand();
@@ -1745,8 +1721,7 @@ namespace VibeRails.DB
 
         public async Task<bool> UpdateChatHistorySessionNameAsync(string sessionId, string sessionDisplayName, CancellationToken cancellationToken)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.UpdateSessionDisplayName;
@@ -1759,8 +1734,7 @@ namespace VibeRails.DB
 
         public async Task<bool> DeleteChatHistorySessionAsync(string sessionId, CancellationToken cancellationToken)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
 
             try
@@ -1920,8 +1894,7 @@ namespace VibeRails.DB
 
         public async Task<UserInputRecord?> GetLastUserInputAsync(string sessionId)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            await using var connection = await OpenConnectionAsync();
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectLastUserInput;
@@ -1944,8 +1917,7 @@ namespace VibeRails.DB
 
         public async Task<long> InsertUserInputAsync(string sessionId, int sequence, string inputText, string? gitCommitHash)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            await using var connection = await OpenConnectionAsync();
 
             // The canonical INSERT runs as its own implicit transaction — never coupled
             // to the best-effort FTS write below. A poisoned FTS statement used to
@@ -2001,8 +1973,7 @@ namespace VibeRails.DB
         {
             if (changes.Count == 0) return;
 
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            await using var connection = await OpenConnectionAsync();
 
             await using var transaction = await connection.BeginTransactionAsync();
             try
@@ -2032,8 +2003,7 @@ namespace VibeRails.DB
 
         public async Task<string?> GetSessionWorkingDirectoryAsync(string sessionId, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectSessionWorkingDirectory;
@@ -2044,8 +2014,7 @@ namespace VibeRails.DB
 
         public async Task ReplaceFileChangesAsync(long userInputId, List<FileChangeInfo> changes, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
             try
@@ -2129,8 +2098,7 @@ namespace VibeRails.DB
 
         public async Task<UserInputRecord?> GetUserInputByIdAsync(long userInputId, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectUserInputById;
@@ -2153,8 +2121,7 @@ namespace VibeRails.DB
 
         public async Task<List<UnembeddedUserInputRow>> GetUnembeddedUserInputsAsync(int batchSize, CancellationToken cancellationToken)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectUnembeddedUserInputs;
@@ -2177,8 +2144,7 @@ namespace VibeRails.DB
         {
             if (userInputIds.Count == 0) return;
 
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
             await using var cmd = connection.CreateCommand();
@@ -2200,8 +2166,7 @@ namespace VibeRails.DB
         {
             if (userInputIds.Count == 0) return;
 
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
             await using var cmd = connection.CreateCommand();
@@ -2220,8 +2185,7 @@ namespace VibeRails.DB
 
         public async Task<List<string>> GetUnaggregatedEndedSessionIdsAsync(int batchSize, CancellationToken cancellationToken)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectUnaggregatedEndedSessionIds;
@@ -2238,8 +2202,7 @@ namespace VibeRails.DB
 
         public async Task<List<string>> GetUserInputTextsForSessionAsync(string sessionId, CancellationToken cancellationToken)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectUserInputTextsForSessionInOrder;
@@ -2258,8 +2221,7 @@ namespace VibeRails.DB
         {
             if (sessionIds.Count == 0) return;
 
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
             await using var cmd = connection.CreateCommand();
@@ -2281,8 +2243,7 @@ namespace VibeRails.DB
         {
             if (sessionIds.Count == 0) return;
 
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
             await using var cmd = connection.CreateCommand();
@@ -2301,8 +2262,7 @@ namespace VibeRails.DB
 
         public async Task<string> GetTextForInputIdOrRawAsync(long inputId, int? maxChars = null, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectTextForInputIdOrRaw;
@@ -2315,8 +2275,7 @@ namespace VibeRails.DB
 
         public async Task<string> GetFirstInputTextForSessionOrRawAsync(string sessionId, int? maxChars = null, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectFirstInputTextForSessionOrRaw;

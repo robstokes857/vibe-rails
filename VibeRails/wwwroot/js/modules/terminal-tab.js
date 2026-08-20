@@ -709,6 +709,10 @@ export class TerminalTab {
             let replayFocusDone = false;
             let pendingChunks = [];
             let flushQueued = false;
+            // [NavPerf] probe: bytes received before the first post-replay render.
+            // A huge number here means reconnect replays are what makes navigating
+            // back to a terminal view slow on weak machines.
+            let replayBytesBeforeFirstRender = 0;
 
             const flushPendingChunks = () => {
                 flushQueued = false;
@@ -727,6 +731,9 @@ export class TerminalTab {
                     data = merged;
                 }
                 pendingChunks = [];
+                if (!replayFocusDone) {
+                    replayBytesBeforeFirstRender += data.byteLength;
+                }
 
                 // Cursor suppression is CODEX-ONLY (TERMINAL.md "## 2026-06-11").
                 // Codex's repaints briefly park a visible cursor on its status line,
@@ -749,6 +756,9 @@ export class TerminalTab {
                 // render rAF can steal focus, causing "paste works, keys don't".
                 if (!replayFocusDone && this.isActive) {
                     replayFocusDone = true;
+                    if (replayBytesBeforeFirstRender >= 128 * 1024) {
+                        console.info(`[NavPerf] terminal tab ${this.state.id} initial replay was ${Math.round(replayBytesBeforeFirstRender / 1024)}KB`);
+                    }
                     requestAnimationFrame(() => {
                         if (this.socket === socket && this.isActive) {
                             this.manager?.updateFocusContainerHeight?.();

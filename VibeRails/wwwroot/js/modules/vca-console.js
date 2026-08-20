@@ -162,11 +162,21 @@ export class VcaConsole {
     write(value, { append = false } = {}) {
         if (!this.output) return;
         const text = normalizeVcaConsoleText(value);
-        if (append && this.output.textContent) {
-            const separator = this.output.textContent.endsWith('\n') ? '' : '\n';
-            this.output.textContent = `${this.output.textContent}${separator}${text}`;
+        if (append && this.output.firstChild) {
+            // Append a text node instead of reassigning textContent: rebuilding the
+            // string re-reads and re-writes the ENTIRE console for every streamed
+            // line — O(n²) over a long preflight run. _tailChar tracks the last
+            // written character so the newline separator logic stays identical
+            // without re-reading the accumulated text.
+            if (this._tailChar === undefined) {
+                this._tailChar = this.output.textContent.slice(-1);
+            }
+            const appended = `${this._tailChar === '\n' ? '' : '\n'}${text}`;
+            this.output.appendChild(document.createTextNode(appended));
+            if (appended.length > 0) this._tailChar = appended.slice(-1);
         } else {
             this.output.textContent = text;
+            this._tailChar = text.slice(-1);
         }
         this.output.scrollTop = this.output.scrollHeight;
     }

@@ -119,15 +119,69 @@ namespace VibeRails.Services
 
             var root = await _gitService.GetRootPathAsync(cancellationToken);
 
+            // Enumerate through git instead of walking the tree: the raw recursive walk
+            // visits .git, bin/obj, node_modules and every other ignored directory —
+            // tens of thousands of entries per call on a warm repo, seconds on a laptop
+            // with AV — and it surfaced stale AGENTS.md copies inside build output that
+            // the Git hook never enforces. Tracked + untracked-unignored is exactly the
+            // hook's universe, so the Rules page and the hook now agree.
+            var viaGit = await TryGetAgentFilesViaGitAsync(root, cancellationToken);
+            if (viaGit is not null)
+                return viaGit;
+
+            // Fallback (git missing or timed out): the original full walk, so the Rules
+            // page still works rather than reading an error or an empty list.
             return Directory.EnumerateFiles(root, "*.md", SearchOption.AllDirectories)
-                .Where(f =>
-                {
-                    var name = Path.GetFileName(f);
-                    return name.Equals("agent.md", StringComparison.OrdinalIgnoreCase) ||
-                           name.Equals("agents.md", StringComparison.OrdinalIgnoreCase);
-                })
+                .Where(f => IsAgentFileName(Path.GetFileName(f)))
                 .Select(Path.GetFullPath)
                 .ToList();
+        }
+
+        private static bool IsAgentFileName(string name)
+        {
+            return name.Equals("agent.md", StringComparison.OrdinalIgnoreCase)
+                || name.Equals("agents.md", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static async Task<List<string>?> TryGetAgentFilesViaGitAsync(string root, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(root))
+                return null;
+
+            try
+            {
+                var result = await GitProcessRunner.RunRawAsync(
+                    ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+                    root,
+                    TimeSpan.FromSeconds(10),
+                    cancellationToken);
+
+                if (result.TimedOut || result.ExitCode != 0)
+                    return null;
+
+                var files = new List<string>();
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var relative in result.StdOut.Split('\0', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (!IsAgentFileName(Path.GetFileName(relative)))
+                        continue;
+
+                    var fullPath = Path.GetFullPath(Path.Combine(root, relative));
+                    // --cached also lists files deleted from disk but still in the index.
+                    if (File.Exists(fullPath) && seen.Add(fullPath))
+                        files.Add(fullPath);
+                }
+
+                return files;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         public async Task CreateAgentFileAsync(string path, CancellationToken cancellationToken, params string[] rules)

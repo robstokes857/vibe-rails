@@ -519,6 +519,16 @@ export class ChatHistorySidebar {
             return false;
         }
 
+        // Collapsed (or not yet laid out): clientHeight is 0, so the fill check
+        // below would be 0 <= 0 and auto-pagination would walk the ENTIRE chat
+        // history — one serial request per page — every time the terminal view
+        // mounts with the sidebar closed. The body ResizeObserver re-triggers
+        // _loadNextPage when the sidebar opens and gets real height, so
+        // returning false here just defers filling until it's actually visible.
+        if (this.body.clientHeight <= 0) {
+            return false;
+        }
+
         // If content doesn't fill the container, load more to fill it
         if (this.body.scrollHeight <= this.body.clientHeight) {
             return true;

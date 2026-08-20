@@ -1215,7 +1215,16 @@ function renderFileRail(documentRef, model, selectedFile, onSelect, ignoredFiles
             }
         }
     };
-    input.addEventListener?.('input', paintList);
+    // Debounced: paintList rebuilds every row in the rail, and doing that on each
+    // keystroke makes typing in the filter feel sticky on large scans / slow machines.
+    let filterPaintTimer = null;
+    input.addEventListener?.('input', () => {
+        if (filterPaintTimer) clearTimeout(filterPaintTimer);
+        filterPaintTimer = setTimeout(() => {
+            filterPaintTimer = null;
+            paintList();
+        }, 120);
+    });
     for (const button of filterButtons) {
         button.addEventListener?.('click', () => {
             activeFilter = button.dataset.filter;

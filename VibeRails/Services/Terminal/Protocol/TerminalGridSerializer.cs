@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 using TerminalEmulator;
 
@@ -123,7 +124,41 @@ internal static class TerminalGridSerializer
         sb.Append(cursorShape);
         sb.Append(" q");
 
-        return Encoding.UTF8.GetBytes(sb.ToString());
+        return EncodeUtf8(sb);
+    }
+
+    /// <summary>
+    /// UTF-8 encodes the builder without materializing a flat string first. For a full
+    /// 20k-line scrollback snapshot, sb.ToString() alone is tens of MB on the large
+    /// object heap — allocated while the PTY read loop is blocked behind the
+    /// subscriber lock. The builder is copied into ONE contiguous pooled buffer and
+    /// encoded in a single stateless pass. Do NOT rewrite this as per-chunk Encoder
+    /// calls: StringBuilder chunks can split a surrogate pair (emoji in TUI output),
+    /// and Encoder.GetByteCount does not carry pair state across calls, so a chunked
+    /// count pass disagrees with the GetBytes pass by a byte and encoding throws
+    /// mid-snapshot. Contiguous input has no chunk boundaries and no encoder state.
+    /// </summary>
+    internal static byte[] EncodeUtf8(StringBuilder sb)
+    {
+        int length = sb.Length;
+        if (length == 0)
+        {
+            return Array.Empty<byte>();
+        }
+
+        char[] rented = ArrayPool<char>.Shared.Rent(length);
+        try
+        {
+            sb.CopyTo(0, rented.AsSpan(0, length), length);
+            var chars = rented.AsSpan(0, length);
+            var bytes = new byte[Encoding.UTF8.GetByteCount(chars)];
+            Encoding.UTF8.GetBytes(chars, bytes);
+            return bytes;
+        }
+        finally
+        {
+            ArrayPool<char>.Shared.Return(rented);
+        }
     }
 
     private static void AppendSnapshotResetPrologue(StringBuilder sb)

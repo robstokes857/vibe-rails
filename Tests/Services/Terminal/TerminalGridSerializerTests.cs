@@ -242,6 +242,57 @@ public sealed class TerminalGridSerializerTests
         Assert.False(t.BracketedPasteActive);
     }
 
+    [Fact]
+    public void EncodeUtf8_SurrogatePairStraddlingChunkBoundary_EncodesLosslessly()
+    {
+        // Regression for the 2026-08-19 encode rewrite: a per-chunk Encoder
+        // implementation undercounts a surrogate pair whose high half ends one
+        // StringBuilder chunk and whose low half opens the next —
+        // Encoder.GetByteCount carries no pair state across calls — so the byte
+        // buffer comes up short and GetBytes throws mid-snapshot, failing the
+        // reconnect. Build with a tiny initial capacity so the pair is guaranteed
+        // to straddle the first chunk boundary.
+        var sb = new StringBuilder(4);
+        sb.Append("abc");                       // fills 3 of the 4-slot first chunk
+        sb.Append("\U0001F600");                // high surrogate takes slot 4, low opens chunk 2
+        sb.Append("tail\x1b[38;5;196m\U0001F601\U0001F602");
+
+        var bytes = TerminalGridSerializer.EncodeUtf8(sb);
+
+        Assert.Equal(Encoding.UTF8.GetBytes(sb.ToString()), bytes);
+    }
+
+    [Fact]
+    public void SnapshotReplay_EmojiAndColorHeavyScrollback_SurvivesByteExact()
+    {
+        // Rows of per-glyph color changes serialize far past the StringBuilder's
+        // 4-chars-per-cell capacity estimate, so the builder spans multiple chunks
+        // with supplementary-plane glyphs throughout — the shape that would hit any
+        // chunk-boundary encoding bug in real Claude/Codex output.
+        var server = new TerminalEmulator.Terminal(cols: 20, rows: 5, scrollbackSize: 400);
+        for (int line = 0; line < 120; line++)
+        {
+            var row = new StringBuilder();
+            for (int glyph = 0; glyph < 10; glyph++)
+            {
+                row.Append($"\x1b[38;5;{(line + glyph) % 230 + 1}m\U0001F600");
+            }
+            row.Append("\x1b[0m\r\n");
+            server.Write(row.ToString());
+        }
+
+        var snapshot = Serialize(server);
+
+        var text = Encoding.UTF8.GetString(snapshot);
+        Assert.False(text.Contains('�'), "snapshot must not contain replacement characters (split surrogate pair)");
+        Assert.Equal(Encoding.UTF8.GetBytes(text), snapshot); // lossless byte round-trip
+        Assert.Contains("\U0001F600", text);
+
+        var client = new TerminalEmulator.Terminal(cols: 20, rows: 5, scrollbackSize: 400);
+        client.Write(snapshot.AsSpan());
+        Assert.Contains(client.GetScreenText(), rowText => rowText.Contains("\U0001F600"));
+    }
+
     private static byte[] Serialize(TerminalEmulator.Terminal terminal)
         => TerminalGridSerializer.Serialize(
             terminal.GetScrollback(),
