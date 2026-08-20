@@ -271,6 +271,73 @@ public sealed class GitStagedSnapshotProviderTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CaptureWorkingTreeAsync_SharesOnlyTheActiveCapture_ThenReleasesIt()
+    {
+        var captureStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseCapture = new TaskCompletionSource<GitStagedSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var captureCount = 0;
+        var provider = new GitStagedSnapshotProvider(
+            maximumUnpushedSnapshotBytes: 64,
+            workingTreeCaptureOverride: (_, cancellationToken) =>
+            {
+                Interlocked.Increment(ref captureCount);
+                captureStarted.TrySetResult();
+                return releaseCapture.Task.WaitAsync(cancellationToken);
+            });
+
+        var first = provider.CaptureWorkingTreeAsync(_repository, CancellationToken.None);
+        await captureStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+        var second = provider.CaptureWorkingTreeAsync(_repository, CancellationToken.None);
+
+        Assert.Equal(1, Volatile.Read(ref captureCount));
+        Assert.Equal(1, provider.ActiveWorkingTreeFlightCount);
+
+        releaseCapture.SetResult(new GitStagedSnapshot(_repository, [], []));
+        await Task.WhenAll(first, second);
+
+        Assert.Equal(0, provider.ActiveWorkingTreeFlightCount);
+    }
+
+    [Fact]
+    public async Task CaptureWorkingTreeAsync_CancelsCaptureAfterTheLastWaiterLeaves()
+    {
+        var captureStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var captureCancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var provider = new GitStagedSnapshotProvider(
+            maximumUnpushedSnapshotBytes: 64,
+            workingTreeCaptureOverride: async (_, cancellationToken) =>
+            {
+                captureStarted.TrySetResult();
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                    throw new InvalidOperationException("The test capture should be cancelled.");
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    captureCancelled.TrySetResult();
+                    throw;
+                }
+            });
+        using var firstCancellation = new CancellationTokenSource();
+        using var secondCancellation = new CancellationTokenSource();
+
+        var first = provider.CaptureWorkingTreeAsync(_repository, firstCancellation.Token);
+        await captureStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+        var second = provider.CaptureWorkingTreeAsync(_repository, secondCancellation.Token);
+
+        firstCancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await first);
+        Assert.False(captureCancelled.Task.IsCompleted);
+
+        secondCancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await second);
+        await captureCancelled.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, provider.ActiveWorkingTreeFlightCount);
+    }
+
+    [Fact]
     public async Task CaptureAsync_ReadsAgentInstructionsFromIndex()
     {
         await File.WriteAllTextAsync(

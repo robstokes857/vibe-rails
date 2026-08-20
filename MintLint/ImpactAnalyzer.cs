@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading.Tasks;
 
 namespace MintLint;
 
@@ -51,47 +52,77 @@ public static class ImpactAnalyzer
         List<string> files = candidateFiles is null
             ? MintLintAnalyzer.EnumerateSourceFiles(fullRoot, fullRoot, options)
             : ResolveCandidateFiles(fullRoot, candidateFiles);
-        int scanned = 0;
-        foreach (string file in files)
+
+        // The stat + full read + identifier scan of up to MaxScannedFiles files dominates
+        // wall time (this runs inside a request on every code-quality scan), so the
+        // per-file work fans out across cores. The count merge stays sequential and the
+        // scanned-file set is exactly the first MaxScannedFiles entries, so the resulting
+        // numbers are identical to the old single-threaded pass — parallelism here is an
+        // I/O strategy, not a grading change.
+        int scanCount = Math.Min(files.Count, MaxScannedFiles);
+        var referencedTargets = new List<string>?[scanCount];
+        Parallel.For(0, scanCount, index =>
         {
-            if (++scanned > MaxScannedFiles)
-            {
-                break;
-            }
+            referencedTargets[index] = ScanFileForReferencedTargets(fullRoot, files[index], lookups);
+        });
 
-            string relative;
-            try
-            {
-                if (new FileInfo(file).Length > MaxFileBytes)
-                {
-                    continue;
-                }
-
-                relative = Path.GetRelativePath(fullRoot, file).Replace('\\', '/');
-            }
-            catch (IOException)
+        foreach (List<string>? targetsHit in referencedTargets)
+        {
+            if (targetsHit is null)
             {
                 continue;
             }
 
-            string text;
-            try
+            foreach (string targetFile in targetsHit)
             {
-                text = File.ReadAllText(file);
+                counts[targetFile]++;
             }
-            catch (IOException)
-            {
-                continue;
-            }
-            catch (UnauthorizedAccessException)
-            {
-                continue;
-            }
-
-            CountSourceReferences(relative, text, lookups, counts);
         }
 
         return counts;
+    }
+
+    /// <summary>
+    /// The per-file half of <see cref="CountReferencingFiles"/>: stat, read, and match one
+    /// candidate file against the targets. Returns the target files it references, or null
+    /// when the file is skipped (oversized, unreadable) — the same skip rules the old
+    /// sequential loop applied inline.
+    /// </summary>
+    private static List<string>? ScanFileForReferencedTargets(
+        string fullRoot,
+        string file,
+        List<(string File, HashSet<string> Names)> lookups)
+    {
+        string relative;
+        try
+        {
+            if (new FileInfo(file).Length > MaxFileBytes)
+            {
+                return null;
+            }
+
+            relative = Path.GetRelativePath(fullRoot, file).Replace('\\', '/');
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+
+        string text;
+        try
+        {
+            text = File.ReadAllText(file);
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+
+        return MatchReferencedTargets(relative, text, lookups);
     }
 
     /// <summary>
@@ -209,7 +240,20 @@ public static class ImpactAnalyzer
         IReadOnlyList<(string File, HashSet<string> Names)> lookups,
         Dictionary<string, int> counts)
     {
+        foreach (string targetFile in MatchReferencedTargets(relativePath, text, lookups))
+        {
+            counts[targetFile]++;
+        }
+    }
+
+    /// <summary>Which target files does this source text reference (self excluded)?</summary>
+    private static List<string> MatchReferencedTargets(
+        string relativePath,
+        string text,
+        IReadOnlyList<(string File, HashSet<string> Names)> lookups)
+    {
         HashSet<string> identifiers = ExtractIdentifiers(text);
+        List<string> matched = [];
         foreach ((string targetFile, HashSet<string> names) in lookups)
         {
             if (PathsEqual(relativePath, targetFile))
@@ -221,11 +265,13 @@ public static class ImpactAnalyzer
             {
                 if (identifiers.Contains(name))
                 {
-                    counts[targetFile]++;
+                    matched.Add(targetFile);
                     break;
                 }
             }
         }
+
+        return matched;
     }
 
     private static void AddName(HashSet<string> names, string name)

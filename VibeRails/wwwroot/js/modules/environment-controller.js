@@ -75,9 +75,10 @@ export class EnvironmentController {
         const content = document.getElementById('app-content');
         if (!content) return;
 
-        // Fetch environments from API
-        await this.refreshEnvironments();
-        // Also refresh sandboxes data
+        // One concurrent refresh covers everything this page renders: environments
+        // (including the LLM picker catalog re-resolve) plus sandboxes. Calling
+        // refreshEnvironments() first duplicated the environments fetch and the
+        // picker refresh, serially, on every visit.
         await this.app.refreshDashboardData();
 
         content.innerHTML = '';
@@ -2134,7 +2135,14 @@ export class EnvironmentController {
     toggleStepOutputMenu(button, textarea, getSteps, onInserted) {
         const existing = document.querySelector('.env-step-output-menu');
         if (existing) {
-            existing.remove();
+            // Close through the menu's own close() so the two capture-phase document
+            // listeners registered on open are removed; a bare .remove() leaked them
+            // (and their closures) on every toggle-closed.
+            if (typeof existing._vbCloseMenu === 'function') {
+                existing._vbCloseMenu();
+            } else {
+                existing.remove();
+            }
             return;
         }
 
@@ -2154,6 +2162,7 @@ export class EnvironmentController {
             document.removeEventListener('click', onDocClick, true);
             document.removeEventListener('keydown', onKeydown, true);
         };
+        menu._vbCloseMenu = close;
         const onDocClick = event => {
             if (!menu.contains(event.target) && !button.contains(event.target)) close();
         };

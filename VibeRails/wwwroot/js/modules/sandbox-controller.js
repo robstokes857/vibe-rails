@@ -7,15 +7,48 @@ export class SandboxController {
     constructor(app) {
         this.app = app;
         this._diffEditor = null;
+        this._diffEscapeCleanup = null;
         this._pickerDisposers = [];
     }
 
     unload() {
         this._disposePickers();
+        this._disposeDiffEditor();
     }
 
     _disposePickers() {
         this._pickerDisposers.splice(0).forEach((dispose) => dispose?.());
+    }
+
+    // Monaco diff editors do NOT dispose externally-set models with the editor, and
+    // app.closeModal() just blanks the container — without this, every diff view
+    // leaked a live DiffEditor (automaticLayout observer included) plus two
+    // TextModels holding the full before/after text of the last file shown.
+    _disposeDiffEditor() {
+        this._diffEscapeCleanup?.();
+        this._diffEscapeCleanup = null;
+        const editor = this._diffEditor;
+        if (!editor) return;
+        this._diffEditor = null;
+        let model = null;
+        try { model = editor.getModel(); } catch (_) {}
+        try { editor.dispose(); } catch (_) {}
+        try { model?.original?.dispose(); } catch (_) {}
+        try { model?.modified?.dispose(); } catch (_) {}
+    }
+
+    _installDiffEscapeCleanup() {
+        this._diffEscapeCleanup?.();
+        const onKeydown = (event) => {
+            if (event.key !== 'Escape' || event.defaultPrevented) return;
+            // Monaco owns Escape for its own widgets, and app.js deliberately leaves
+            // those events alone. For every Escape that the app will use to dismiss
+            // the modal, tear down the editor first.
+            if (event.target?.closest?.('.monaco-editor')) return;
+            this._disposeDiffEditor();
+        };
+        document.addEventListener('keydown', onKeydown, true);
+        this._diffEscapeCleanup = () => document.removeEventListener('keydown', onKeydown, true);
     }
 
     // Fetch sandboxes from API
@@ -537,15 +570,17 @@ export class SandboxController {
             <div class="modal-backdrop fade show"></div>
         `;
 
-        // Bind close button (CSP-safe, this modal isn't created via showModal)
+        // Bind close button (CSP-safe, this modal isn't created via showModal).
+        // Dispose the editor on close — closeModal alone leaves it (and its two
+        // full-text models) alive behind the blanked container.
         modalContainer.querySelectorAll('[data-action="close-modal"]')
-            .forEach(btn => btn.addEventListener('click', () => this.app.closeModal()));
+            .forEach(btn => btn.addEventListener('click', () => {
+                this._disposeDiffEditor();
+                this.app.closeModal();
+            }));
 
-        // Dispose any previous diff editor before creating a new one
-        if (this._diffEditor) {
-            try { this._diffEditor.dispose(); } catch (_) {}
-            this._diffEditor = null;
-        }
+        // Dispose any previous diff editor (and its models) before creating a new one
+        this._disposeDiffEditor();
 
         // Create diff editor
         const editorContainer = document.getElementById('sandbox-diff-editor');
@@ -567,6 +602,7 @@ export class SandboxController {
         });
 
         this._diffEditor = diffEditor;
+        this._installDiffEscapeCleanup();
 
         // Load first file
         this._loadFileInDiff(diffEditor, monacoInstance, files[0]);

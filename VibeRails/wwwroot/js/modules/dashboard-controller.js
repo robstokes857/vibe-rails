@@ -4,24 +4,25 @@ export class DashboardController {
     }
 
     async loadDashboard(data = {}) {
-        await this.app.refreshDashboardData();
-
-        // Fetch custom project name if in local context. app.js reads
+        // Fetch custom project name concurrently with the dashboard data refresh —
+        // it only depends on configs.rootPath, which is already loaded. app.js reads
         // _customProjectName for the window/tab title, so keep this fresh.
-        if (this.app.data.isInGit) {
+        const nameTask = (async () => {
+            if (!this.app.data.isInGit) return;
             const path = this.app.data.configs?.rootPath;
-            if (path) {
-                try {
-                    const result = await this.app.apiCall(`/api/v1/projects/name?path=${encodeURIComponent(path)}`);
-                    this._customProjectName = result.customName || null;
-                    if (this._customProjectName) {
-                        this.app.data.projectDisplayName = this._customProjectName;
-                    }
-                } catch {
-                    this._customProjectName = null;
+            if (!path) return;
+            try {
+                const result = await this.app.apiCall(`/api/v1/projects/name?path=${encodeURIComponent(path)}`, 'GET', null, { showLoading: false });
+                this._customProjectName = result.customName || null;
+                if (this._customProjectName) {
+                    this.app.data.projectDisplayName = this._customProjectName;
                 }
+            } catch {
+                this._customProjectName = null;
             }
-        }
+        })();
+
+        await Promise.all([this.app.refreshDashboardData(), nameTask]);
 
         // A navigation that happened while the fetches above were in flight owns the
         // page now; painting the dashboard over it would clobber that view.

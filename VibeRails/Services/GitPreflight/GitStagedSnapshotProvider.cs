@@ -36,9 +36,32 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
     /// </summary>
     private const int MaximumPatchBytes = 32 * 1024 * 1024;
     private readonly long _maximumUnpushedSnapshotBytes;
+
+    /// <summary>
+    /// Single-flight state for <see cref="CaptureWorkingTreeAsync"/>. The dashboard fires
+    /// the VCA preview and the code analyzer concurrently and each captures the same
+    /// working tree — ~7 git process spawns plus a read of every changed file, twice.
+    /// Concurrent callers for the same directory share one capture instead. The entry is
+    /// only ever reused while still in flight, so this is concurrency dedupe, never a
+    /// stale cache.
+    /// </summary>
+    private readonly object _workingTreeFlightGate = new();
+    private readonly Dictionary<string, WorkingTreeCaptureFlight> _workingTreeFlights = new(PathComparer);
+    private readonly Func<string, CancellationToken, Task<GitStagedSnapshot>>? _workingTreeCaptureOverride;
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows()
         ? StringComparer.OrdinalIgnoreCase
         : StringComparer.Ordinal;
+
+    private sealed class WorkingTreeCaptureFlight(
+        string key,
+        CancellationTokenSource cancellation,
+        Task<GitStagedSnapshot> task)
+    {
+        public string Key { get; } = key;
+        public CancellationTokenSource Cancellation { get; } = cancellation;
+        public Task<GitStagedSnapshot> Task { get; } = task;
+        public int WaiterCount { get; set; }
+    }
 
     /// <summary>Index mode of a submodule (gitlink) entry.</summary>
     private const string GitLinkMode = "160000";
@@ -48,10 +71,22 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
     {
     }
 
-    internal GitStagedSnapshotProvider(long maximumUnpushedSnapshotBytes)
+    internal GitStagedSnapshotProvider(
+        long maximumUnpushedSnapshotBytes,
+        Func<string, CancellationToken, Task<GitStagedSnapshot>>? workingTreeCaptureOverride = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(maximumUnpushedSnapshotBytes);
         _maximumUnpushedSnapshotBytes = maximumUnpushedSnapshotBytes;
+        _workingTreeCaptureOverride = workingTreeCaptureOverride;
+    }
+
+    internal int ActiveWorkingTreeFlightCount
+    {
+        get
+        {
+            lock (_workingTreeFlightGate)
+                return _workingTreeFlights.Count;
+        }
     }
 
     public async Task<GitStagedSnapshot> CaptureAsync(
@@ -198,7 +233,107 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
     /// This deliberately does not replace <see cref="CaptureAsync"/>: commit preflight must
     /// continue to validate the exact staged index snapshot.
     /// </summary>
-    public async Task<GitStagedSnapshot> CaptureWorkingTreeAsync(
+    public Task<GitStagedSnapshot> CaptureWorkingTreeAsync(
+        string workingDirectory,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        cancellationToken.ThrowIfCancellationRequested();
+        var flightKey = Path.TrimEndingDirectorySeparator(Path.GetFullPath(workingDirectory));
+        WorkingTreeCaptureFlight flight;
+        lock (_workingTreeFlightGate)
+        {
+            if (_workingTreeFlights.TryGetValue(flightKey, out var inFlight)
+                && !inFlight.Task.IsCompleted)
+            {
+                flight = inFlight;
+            }
+            else
+            {
+                var flightCancellation = new CancellationTokenSource();
+                Task<GitStagedSnapshot> task;
+                try
+                {
+                    task = _workingTreeCaptureOverride is null
+                        ? CaptureWorkingTreeCoreAsync(flightKey, flightCancellation.Token)
+                        : _workingTreeCaptureOverride(flightKey, flightCancellation.Token);
+                }
+                catch (Exception ex)
+                {
+                    task = Task.FromException<GitStagedSnapshot>(ex);
+                }
+
+                flight = new WorkingTreeCaptureFlight(flightKey, flightCancellation, task);
+                _workingTreeFlights[flightKey] = flight;
+            }
+
+            flight.WaiterCount++;
+        }
+
+        return AwaitWorkingTreeFlightAsync(flight, cancellationToken);
+    }
+
+    private async Task<GitStagedSnapshot> AwaitWorkingTreeFlightAsync(
+        WorkingTreeCaptureFlight flight,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await flight.Task.WaitAsync(cancellationToken);
+        }
+        finally
+        {
+            bool cancelCapture = false;
+            bool disposeCancellation = false;
+            lock (_workingTreeFlightGate)
+            {
+                flight.WaiterCount--;
+                if (flight.WaiterCount == 0)
+                {
+                    if (_workingTreeFlights.TryGetValue(flight.Key, out var current)
+                        && ReferenceEquals(current, flight))
+                    {
+                        _workingTreeFlights.Remove(flight.Key);
+                    }
+
+                    cancelCapture = !flight.Task.IsCompleted;
+                    disposeCancellation = !cancelCapture;
+                }
+            }
+
+            if (cancelCapture)
+            {
+                // The shared operation outlives any one request, but not all of them.
+                // Once the final waiter leaves, stop its git processes/file reads and
+                // dispose the CTS after the core task has observed cancellation.
+                flight.Cancellation.Cancel();
+                _ = DisposeFlightCancellationWhenCompleteAsync(flight);
+            }
+            else if (disposeCancellation)
+            {
+                flight.Cancellation.Dispose();
+            }
+        }
+    }
+
+    private static async Task DisposeFlightCancellationWhenCompleteAsync(WorkingTreeCaptureFlight flight)
+    {
+        try
+        {
+            await flight.Task;
+        }
+        catch
+        {
+            // The original waiter observes the capture failure/cancellation. This
+            // cleanup task exists only to release the CTS after callbacks finish.
+        }
+        finally
+        {
+            flight.Cancellation.Dispose();
+        }
+    }
+
+    private async Task<GitStagedSnapshot> CaptureWorkingTreeCoreAsync(
         string workingDirectory,
         CancellationToken cancellationToken)
     {

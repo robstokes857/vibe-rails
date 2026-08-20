@@ -237,10 +237,17 @@ export class SettingsController {
             }
 
             this._initSettingsDirtyTracking(root);
-            await this._initPinSection(root);
         }
 
+        // Attach before the PIN status round-trip: #app-content was blanked above,
+        // and awaiting a network call before appending left the page empty for a
+        // full RTT on every Settings visit. The PIN section just pops in when its
+        // status lands.
         content.appendChild(fragment);
+
+        if (root) {
+            await this._initPinSection(root);
+        }
     }
 
     async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, openCodeLlmProxyEnabled, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, tokenSaverCaptureEnabled, removeCoAuthorTrailers, routeThroughVibeRailsAi, clearApiKey = false) {

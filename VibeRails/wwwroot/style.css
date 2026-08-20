@@ -369,7 +369,8 @@ code {
     justify-content: space-between;
     background: rgba(22, 22, 28, 0.98);
     border-bottom: 1px solid var(--color-border);
-    backdrop-filter: blur(12px);
+    /* backdrop-filter removed: at 98% opaque the blur was imperceptible, but a
+       sticky full-width backdrop root re-blurs on every scrolled frame. */
     position: sticky;
     top: 0;
     z-index: 1019;
@@ -2054,7 +2055,9 @@ code {
 /* Cards */
 .card {
     background: var(--color-bg-surface);
-    backdrop-filter: blur(12px);
+    /* No backdrop-filter here: the surface color is fully opaque, so a blur is
+       invisible — but it still made every card a compositor backdrop root, which
+       is brutally expensive on machines without GPU acceleration. */
     border: 1px solid var(--color-border);
     border-radius: var(--border-radius);
     box-shadow: var(--shadow-soft);
@@ -2103,7 +2106,7 @@ code {
     position: relative;
     overflow: hidden;
     background: var(--color-bg-surface);
-    backdrop-filter: blur(4px);
+    /* backdrop-filter removed: opaque background made it invisible, pure cost. */
     border: 1px solid var(--color-border);
     transition: all var(--transition-speed) ease;
 }
@@ -17317,4 +17320,79 @@ button.python-script-name:focus-visible > i {
         border-top: 0;
         border-radius: 999px;
     }
+}
+
+/* ── Performance mode ─────────────────────────────────────────────────────────
+   body.performance-mode is set by js/performance-mode.js. Until now the toggle
+   only stopped the background particle canvas; the rules below make it a real
+   low-end-machine switch. It targets the two things that dominate paint cost on
+   laptops without GPU acceleration (VS Code webviews often composite in
+   software):
+
+   1. backdrop-filter — every use forces a compositor "backdrop root" that
+      re-blurs on any change behind it. One transparent fixed sidebar alone
+      re-blurred 240px × viewport at animation rate.
+   2. Infinite decorative animations — each one keeps repainting its layer
+      forever, even when the app is idle.
+
+   Functional motion is kept: spinners (.vb-spinner, refresh spin) still turn,
+   status text still changes — only the decorative glow/shimmer/pulse layers and
+   the blurs go. */
+
+body.performance-mode .card,
+body.performance-mode .menu-card,
+body.performance-mode .app-subnav,
+body.performance-mode .app-sidebar,
+body.performance-mode .context-header-card,
+body.performance-mode .vb-terminal-log,
+body.performance-mode .modal-content,
+body.performance-mode .loading-overlay,
+body.performance-mode .vb-term-toast,
+body.performance-mode .ch-llm-filter-badge,
+body.performance-mode .vb-terminal-pin-overlay,
+body.performance-mode .settings-save-bar,
+body.performance-mode .notAToastxrayOverlay,
+body.performance-mode .ch-context-menu,
+body.performance-mode .git-guard-focus-bar {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+/* The sidebar has no background of its own — it normally shows the blurred page
+   behind it. With the blur off it needs a solid coat (matches .app-subnav). */
+body.performance-mode .app-sidebar {
+    background: #16161c;
+    box-shadow: none;
+}
+
+body.performance-mode .card {
+    box-shadow: none;
+}
+
+/* Decorative always-running animations off; spinners stay. */
+body.performance-mode .brand-text-sm,
+body.performance-mode .text-gradient,
+body.performance-mode .status-indicator.online,
+body.performance-mode .badge.bg-success,
+body.performance-mode #vb-terminal-panel .vb-terminal-tab-item[data-progress="indeterminate"]::before,
+body.performance-mode #vb-terminal-panel .tab-busy .vb-terminal-tab-status,
+body.performance-mode #vb-terminal-panel .tab-status-thinking .vb-tab-status-text,
+body.performance-mode #vb-terminal-panel .tab-status-waiting .vb-tab-status-icon i,
+body.performance-mode .ch-item.ch-item-active::before,
+body.performance-mode .ch-live-dot::before,
+body.performance-mode .vca-console-card.is-running .vca-console-pulse {
+    animation: none !important;
+}
+
+/* Shimmer/gradient text needs a readable static fill once its animation stops. */
+body.performance-mode #vb-terminal-panel .tab-busy .vb-terminal-tab-status,
+body.performance-mode #vb-terminal-panel .tab-status-thinking .vb-tab-status-text {
+    background: none;
+    -webkit-background-clip: initial;
+    background-clip: initial;
+    color: #cdd6f4;
+}
+
+body.performance-mode .brand-text-sm {
+    filter: none;
 }
