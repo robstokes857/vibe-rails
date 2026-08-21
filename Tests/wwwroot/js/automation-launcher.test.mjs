@@ -15,8 +15,6 @@ const { AutomationNavLauncher, normalizeLauncherItems, isLauncherItemRunnable } 
     await import(pathToFileURL(modulePath).href);
 const { PythonScriptsController } = await import(pathToFileURL(scriptsModulePath).href);
 
-const OUTPUT_HINT = 'open Automation to see the output';
-
 function createApp() {
     const app = {
         calls: [],
@@ -180,7 +178,7 @@ test('clicking an automation launches it through JobController; a script goes to
     assert.equal(launcher.flyout, null, 'launching an automation closes the flyout (its tab is the feedback)');
 });
 
-test('_runScript delegates to the shared controller with the "where to look" hint and no optimistic toast', async () => {
+test('_runScript delegates the interactive launch to the shared controller', async () => {
     const app = createApp();
     const launcher = launcherWith(CATALOG, app);
     launcher._renderFlyoutItems();
@@ -188,20 +186,17 @@ test('_runScript delegates to the shared controller with the "where to look" hin
     await launcher._runScript('backup.py', 1);
 
     assert.deepEqual(app.jobController.pythonScripts.runs, [
-        { name: 'backup.py', button: null, options: { outputHint: OUTPUT_HINT } }
+        { name: 'backup.py', button: undefined, options: undefined }
     ]);
-    assert.deepEqual(app.toasts, [], 'the outcome toast belongs to PythonScriptsController.run');
-    assert.doesNotMatch(readFileSync(modulePath, 'utf8'), /Script started/);
+    assert.deepEqual(app.toasts, [], 'the launch toast belongs to PythonScriptsController.run');
 });
 
-test('a failed nav run toasts the exit code and where the output is, via the one shared helper', async () => {
-    // End to end through the real controller: the flyout run records the result for the
-    // Automation page's drawer and the failure toast points there.
+test('a nav script launch opens the returned interactive terminal through the shared controller', async () => {
     const app = createApp();
     app.apiCall = async (url, method = 'GET', body = null) => {
         app.calls.push({ url, method, body });
-        if (url === '/api/v1/python-scripts/run') {
-            return { exitCode: 1, timedOut: false, durationMs: 12, standardOutput: '', standardError: 'boom' };
+        if (url === '/api/v1/python-scripts/run/interactive') {
+            return { name: 'backup.py', tabId: 'python-tab', message: 'started' };
         }
         return { pinConfigured: true, scriptsDirectory: '/scripts', scripts: [] };
     };
@@ -211,24 +206,15 @@ test('a failed nav run toasts the exit code and where the output is, via the one
 
     await launcher._runScript('backup.py', 1);
 
-    assert.deepEqual(app.calls[0], { url: '/api/v1/python-scripts/run', method: 'POST', body: { name: 'backup.py' } });
+    assert.deepEqual(app.calls[0], { url: '/api/v1/python-scripts/run/interactive', method: 'POST', body: { name: 'backup.py' } });
     assert.deepEqual(app.toasts, [{
-        title: 'Script failed',
-        message: `backup.py: exit 1 — ${OUTPUT_HINT}.`,
-        tone: 'error'
+        title: 'Script started',
+        message: 'backup.py is running in an interactive terminal.',
+        tone: 'success'
     }]);
-    assert.equal(scripts.lastRunByName.get('backup.py').standardError, 'boom');
-    assert.equal(scripts.lastRunByName.get('backup.py').open, true);
+    assert.equal(app.navigations.at(-1), 'terminal-focus');
+    assert.equal(scripts.lastRunByName.has('backup.py'), false);
     assert.equal(scripts.runningNames.size, 0);
-
-    // The section's own toast is the same sentence minus the hint.
-    scripts.notifyRunResult('backup.py', { exitCode: 0 });
-    scripts.notifyRunResult('backup.py', { exitCode: 2, timedOut: true });
-    assert.deepEqual(app.toasts.slice(1), [
-        { title: 'Script finished', message: 'backup.py: exit 0.', tone: 'success' },
-        { title: 'Script failed', message: 'backup.py: exit 2 (timed out).', tone: 'error' }
-    ]);
-    // Only one place computes ok/toast for a run.
     assert.equal((readFileSync(scriptsModulePath, 'utf8').match(/'Script finished'/g) || []).length, 1);
     assert.doesNotMatch(readFileSync(modulePath, 'utf8'), /'Script finished'|'Script failed'/);
 });

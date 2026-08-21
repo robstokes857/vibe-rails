@@ -1,5 +1,6 @@
 using VibeRails.DTOs;
 using VibeRails.Services.PythonScripts;
+using VibeRails.Services.Terminal;
 
 namespace VibeRails.Routes;
 
@@ -42,6 +43,32 @@ public static class PythonScriptRoutes
             CancellationToken cancellationToken) =>
             ExecuteAsync(() => service.RunAsync(request.Name, cancellationToken)))
             .WithName("RunPythonScript");
+
+        if (isActiveRootBackend)
+        {
+            app.MapPost("/api/v1/python-scripts/run/interactive", async (
+                ITerminalTabHostService tabHost,
+                PythonScriptRunRequest request,
+                CancellationToken cancellationToken) =>
+            {
+                try
+                {
+                    var tab = await tabHost.CreatePythonScriptTabAsync(request.Name ?? string.Empty, cancellationToken);
+                    return Results.Ok(new PythonScriptInteractiveRunResponse(
+                        request.Name?.Trim() ?? string.Empty,
+                        tab.TabId,
+                        "Python script started in an interactive terminal."));
+                }
+                catch (PythonScriptValidationException exception)
+                {
+                    return Results.BadRequest(new ErrorResponse(exception.Message));
+                }
+                catch (InvalidOperationException exception)
+                {
+                    return Results.BadRequest(new ErrorResponse(exception.Message));
+                }
+            }).WithName("RunPythonScriptInteractive");
+        }
 
         app.MapGet("/api/v1/python-scripts/runs", (IPythonScriptService service) =>
             Results.Ok(service.GetRunHistory()))

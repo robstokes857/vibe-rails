@@ -371,6 +371,22 @@ Flow:
 5. Closing/stopping the tab sets the run's cancellation flag and gives `JobRunner` time to record
    `Cancelled` before the parent uses its normal hard-kill fallback.
 
+### 4) Interactive signed Python script
+
+Entry:
+- `POST /api/v1/python-scripts/run/interactive` in `Routes/PythonScriptRoutes.cs`
+
+Flow:
+1. `TerminalTabHostService.CreatePythonScriptTabAsync` validates that the saved script still matches
+   its signature before consuming tab capacity.
+2. It creates an ordinary tab child, starts a plain `shell` session in the scripts directory, and
+   submits only `vb --run-python-script <validated-name>` (quoted for PowerShell/POSIX) to the PTY.
+3. `PythonScriptRunProcessHost` revalidates the signature, copies the exact approved bytes to a
+   temporary file, and starts the discovered Python interpreter with inherited stdin/stdout/stderr.
+   The browser therefore gets live output, `input()` prompts, and Ctrl+C through the normal terminal
+   WebSocket without exposing an API that accepts arbitrary command text.
+4. The helper deletes the verified copy when Python exits; the shell remains usable in the tab.
+
 ## Local API Surface
 From `Routes/TerminalRoutes.cs`:
 - `GET /api/v1/terminal/status`

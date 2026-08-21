@@ -11,6 +11,7 @@ using VibeRails.Interfaces;
 using VibeRails.Services.AgentTools;
 using VibeRails.Services.Jobs;
 using VibeRails.Services.LlmClis.Launchers;
+using VibeRails.Services.PythonScripts;
 using VibeRails.Services.Workspaces;
 using VibeRails.Utils;
 
@@ -213,6 +214,81 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             }
             throw;
         }
+    }
+
+    /// <summary>
+    /// Opens a plain shell tab and starts VibeRails' narrowly scoped interactive-script helper
+    /// inside it. The helper performs the final signature/hash check and launches the verified
+    /// bytes attached to the PTY; no generic command text crosses the browser API.
+    /// </summary>
+    public async Task<TerminalTabStatusResponse> CreatePythonScriptTabAsync(
+        string name,
+        CancellationToken cancellationToken = default)
+    {
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var scripts = scope.ServiceProvider.GetRequiredService<IPythonScriptService>();
+        var canonicalName = await scripts.ValidateRunnableAsync(name, cancellationToken);
+        var scriptsDirectory = scripts.GetScriptsDirectory();
+        var executable = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(executable))
+            throw new InvalidOperationException("Unable to determine the VibeRails executable path.");
+
+        TerminalTabStatusResponse? tab = null;
+        try
+        {
+            tab = await CreateTabCoreAsync(
+                childArguments: null,
+                automationRunId: null,
+                waitForActiveSession: false,
+                cancellationToken);
+
+            var session = await StartSessionAsync(
+                tab.TabId,
+                new StartTerminalRequest(
+                    WorkingDirectory: scriptsDirectory,
+                    Cli: "shell",
+                    Title: $"{canonicalName} · Python"),
+                cancellationToken);
+
+            await SendInputAsync(
+                tab.TabId,
+                new TerminalInputRequest(
+                    BuildPythonScriptRunCommand(executable, canonicalName),
+                    Submit: true),
+                cancellationToken);
+
+            return new TerminalTabStatusResponse(
+                tab.TabId,
+                tab.CreatedUTC,
+                session.HasActiveSession,
+                session.SessionId,
+                session.Cli,
+                session.WorkingDirectory);
+        }
+        catch
+        {
+            if (tab is not null)
+            {
+                try { await DeleteTabAsync(tab.TabId, CancellationToken.None); }
+                catch (Exception ex)
+                {
+                    Log.Debug(ex, "[TerminalTabs] Failed to clean up Python script tab {TabId}", tab.TabId);
+                }
+            }
+            throw;
+        }
+    }
+
+    internal static string BuildPythonScriptRunCommand(string executable, string name)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            static string QuotePowerShell(string value) => $"'{value.Replace("'", "''", StringComparison.Ordinal)}'";
+            return $"& {QuotePowerShell(executable)} {PythonScriptRunProcessHost.Flag} {QuotePowerShell(name)}";
+        }
+
+        static string QuotePosix(string value) => $"'{value.Replace("'", "'\"'\"'", StringComparison.Ordinal)}'";
+        return $"{QuotePosix(executable)} {PythonScriptRunProcessHost.Flag} {QuotePosix(name)}";
     }
 
     internal static string[] BuildAutomationChildArguments(

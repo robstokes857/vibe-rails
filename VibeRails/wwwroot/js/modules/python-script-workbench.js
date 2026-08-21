@@ -1137,10 +1137,6 @@ export class PythonScriptWorkbench {
         }
         if (name !== this.name) return result;
         this._renderIdentity();
-        if (result) {
-            this.lastRun = { ...result, open: true };
-            this._renderOutput();
-        }
         return result;
     }
 
