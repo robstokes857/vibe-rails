@@ -1068,7 +1068,7 @@ test('Delete hands off to the shared flow and leaves without the unsaved-changes
     assert.equal(workbench._mutating, false);
 });
 
-test('Run goes through the shared flow only when signed and opens the last-run drawer', async () => {
+test('Run goes through the shared interactive-terminal flow only when signed', async () => {
     // The drawer's summary/body are looked up from the <details> element itself.
     const details = fakeElement();
     const root = fakeRoot({ '[data-workbench-output]': details });
@@ -1078,7 +1078,7 @@ test('Run goes through the shared flow only when signed and opens the last-run d
     const runs = [];
     scripts.run = async (name, button) => {
         runs.push({ name, button, running: workbench._running });
-        return { exitCode: 0, durationMs: 12.4, timedOut: false, standardOutput: 'ok\n', standardError: '' };
+        return { name, tabId: 'python-tab', message: 'started' };
     };
 
     workbench.status = 'unapproved';
@@ -1096,14 +1096,9 @@ test('Run goes through the shared flow only when signed and opens the last-run d
     const button = fakeElement();
     const result = await workbench.run(button);
     assert.deepEqual(runs, [{ name: 'nightly.py', button, running: true }]);
-    assert.equal(result.exitCode, 0);
+    assert.equal(result.tabId, 'python-tab');
     assert.equal(workbench._running, false);
-    assert.equal(workbench.lastRun.open, true);
-    const drawer = root.el('[data-workbench-output]');
-    assert.equal(drawer.hidden, false);
-    assert.equal(drawer.open, true);
-    assert.equal(root.el('[data-workbench-output-summary]').textContent, 'Last run: exit 0 · 12 ms');
-    assert.match(root.el('[data-workbench-output-body]').textContent, /ok/);
+    assert.equal(workbench.lastRun, null);
 });
 
 test('Re-create writes the editor text back through the shared create flow and clears the deleted state', async () => {

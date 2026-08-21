@@ -797,13 +797,12 @@ export class PythonScriptsController {
     }
 
     /**
-     * Runs a signed script and remembers the result in lastRunByName. `button` (optional,
-     * the workbench's own) shows a spinner while the run is in flight; the section's rows
-     * follow runningNames instead. `outputHint` is appended to a failure toast raised away
-     * from the Automation page (the nav launcher), where the output drawer is not on
-     * screen. Resolves with the run result, or null (also when a run is already in flight).
+     * Starts a signed script in a backend-created interactive terminal tab. `button`
+     * (optional, the workbench's own) shows a spinner until that tab is ready; section rows
+     * follow runningNames. Resolves with the launch response, or null when a launch is already
+     * in flight.
      */
-    async run(name, button = null, { outputHint = '' } = {}) {
+    async run(name, button = null) {
         if (!name || this.runningNames.has(name)) return null;
         const original = button?.innerHTML;
         if (button) {
@@ -814,10 +813,27 @@ export class PythonScriptsController {
         this._render();
         let result = null;
         try {
-            result = await this.app.apiCall(`${API}/run`, 'POST', { name },
+            result = await this.app.apiCall(`${API}/run/interactive`, 'POST', { name },
                 { showLoading: false, preferErrorResponseMessage: true });
-            this.recordRun(name, result);
-            this.notifyRunResult(name, result, { outputHint });
+            const tabId = String(result?.tabId || '').trim();
+            if (!tabId) throw new Error('The interactive terminal did not return a tab id.');
+
+            this.app.terminalController?.rememberTabLaunch?.(tabId, {
+                selection: 'base:shell',
+                label: name,
+                title: `${name} · Python`,
+                icon: '🐍',
+                taskKey: `python-script:${name}`,
+                workingDirectory: this.state?.scriptsDirectory || null
+            });
+            this.app.showToast(
+                'Script started',
+                `${name} is running in an interactive terminal.`,
+                'success');
+            this.app.navigate?.('terminal-focus', {
+                preferredSelection: 'base:shell',
+                preferredTabId: tabId
+            });
         } catch (error) {
             this.app.showError(error?.message || `Could not run ${name}.`);
         } finally {

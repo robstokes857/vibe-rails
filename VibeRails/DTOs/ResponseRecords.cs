@@ -451,6 +451,12 @@ namespace VibeRails.DTOs
         string StartedUtc
     );
 
+    public record PythonScriptInteractiveRunResponse(
+        string Name,
+        string TabId,
+        string Message
+    );
+
     public record PythonScriptRunRecord(
         string Name,
         string StartedUtc,
@@ -1521,6 +1527,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(PythonScriptImportRequest))]
     [JsonSerializable(typeof(PythonScriptRenameRequest))]
     [JsonSerializable(typeof(PythonScriptRunResponse))]
+    [JsonSerializable(typeof(PythonScriptInteractiveRunResponse))]
     [JsonSerializable(typeof(PythonScriptRunRecord))]
     [JsonSerializable(typeof(List<PythonScriptRunRecord>))]
     [JsonSerializable(typeof(PythonScriptRunHistoryResponse))]

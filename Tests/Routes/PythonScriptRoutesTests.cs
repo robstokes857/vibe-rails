@@ -4,9 +4,11 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Moq;
 using VibeRails.DTOs;
 using VibeRails.Routes;
 using VibeRails.Services.PythonScripts;
+using VibeRails.Services.Terminal;
 using Xunit;
 
 namespace Tests.Routes;
@@ -165,6 +167,51 @@ public sealed class PythonScriptRoutesTests : IDisposable
         });
     }
 
+    [Fact]
+    public async Task InteractiveRunCreatesATerminalTabAndReturnsItsIdOnlyOnTheRootBackend()
+    {
+        var tabHost = new Mock<ITerminalTabHostService>(MockBehavior.Strict);
+        tabHost
+            .Setup(host => host.CreatePythonScriptTabAsync(
+                "prompt.py",
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TerminalTabStatusResponse(
+                "python-tab",
+                DateTime.UtcNow,
+                true,
+                "session-1",
+                "shell",
+                ScriptPath(".")));
+
+        await WithHostAsync(async baseUri =>
+        {
+            using var response = await PostAsync(
+                baseUri,
+                "/api/v1/python-scripts/run/interactive",
+                new PythonScriptRunRequest("prompt.py"),
+                AppJsonSerializerContext.Default.PythonScriptRunRequest);
+            var body = await response.Content.ReadFromJsonAsync(
+                AppJsonSerializerContext.Default.PythonScriptInteractiveRunResponse,
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("prompt.py", body!.Name);
+            Assert.Equal("python-tab", body.TabId);
+        }, tabHost: tabHost.Object);
+
+        tabHost.VerifyAll();
+
+        await WithHostAsync(async baseUri =>
+        {
+            using var response = await PostAsync(
+                baseUri,
+                "/api/v1/python-scripts/run/interactive",
+                new PythonScriptRunRequest("prompt.py"),
+                AppJsonSerializerContext.Default.PythonScriptRunRequest);
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }, isActiveRootBackend: false);
+    }
+
     private static Task<HttpResponseMessage> PostAsync<TRequest>(
         Uri baseUri,
         string path,
@@ -175,13 +222,18 @@ public sealed class PythonScriptRoutesTests : IDisposable
             JsonContent.Create(request, typeInfo),
             TestContext.Current.CancellationToken);
 
-    private async Task WithHostAsync(Func<Uri, Task> test, bool isActiveRootBackend = true)
+    private async Task WithHostAsync(
+        Func<Uri, Task> test,
+        bool isActiveRootBackend = true,
+        ITerminalTabHostService? tabHost = null)
     {
         var builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Services.AddSingleton<IPythonScriptService>(
             new PythonScriptService(pythonRunner: null, installDirectory: _installDirectory));
+        if (tabHost is not null)
+            builder.Services.AddSingleton(tabHost);
         builder.Services.ConfigureHttpJsonOptions(options =>
         {
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonSerializerContext.Default);

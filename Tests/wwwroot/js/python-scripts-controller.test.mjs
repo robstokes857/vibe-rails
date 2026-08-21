@@ -430,13 +430,13 @@ test('The VS Code bridge is a one-way postMessage the dashboard feature-detects'
     assert.match(source, /typeof host\.__viberails_openFile__ === 'function'/);
 });
 
-test('A running script keeps its Run button busy across list rebuilds, and cannot start twice', async () => {
+test('An interactive script launch stays busy until its terminal tab is ready, and cannot start twice', async () => {
     const app = createApp();
     let releaseRun;
     const runResponse = new Promise((resolve) => { releaseRun = resolve; });
     app.apiCall = async (url, method = 'GET', body = null) => {
         app.calls.push({ url, method, body });
-        if (url === '/api/v1/python-scripts/run') return runResponse;
+        if (url === '/api/v1/python-scripts/run/interactive') return runResponse;
         return { pinConfigured: true, scriptsDirectory: '/scripts', scripts: [SCRIPT] };
     };
     const controller = controllerWith([SCRIPT], app);
@@ -458,7 +458,7 @@ test('A running script keeps its Run button busy across list rebuilds, and canno
     assert.match(controller._renderRow(SCRIPT), /nightly\.py is running/);
     // A second click (or a nav launch) while in flight is a no-op, not a second POST.
     assert.equal(await controller.run('nightly.py'), null);
-    assert.equal(app.calls.filter((call) => call.url === '/api/v1/python-scripts/run').length, 1);
+    assert.equal(app.calls.filter((call) => call.url === '/api/v1/python-scripts/run/interactive').length, 1);
 
     // Background refreshes stand down while a run is in flight.
     const originalDocument = globalThis.document;
@@ -472,21 +472,29 @@ test('A running script keeps its Run button busy across list rebuilds, and canno
         globalThis.document = originalDocument;
     }
 
-    releaseRun({ exitCode: 0, timedOut: false, durationMs: 5, standardOutput: 'ok', standardError: '' });
+    releaseRun({ name: 'nightly.py', tabId: 'python-tab', message: 'started' });
     const result = await first;
-    assert.equal(result.exitCode, 0);
+    assert.equal(result.tabId, 'python-tab');
     assert.equal(controller.runningNames.size, 0);
     assert.doesNotMatch(listHtml, /Running…/);
-    assert.match(listHtml, /Last run: exit 0/);
-    assert.deepEqual(app.toasts.at(-1), { title: 'Script finished', message: 'nightly.py: exit 0.', tone: 'success' });
-    // The workbench passes its own button; it is restored after the run.
+    assert.deepEqual(app.toasts.at(-1), {
+        title: 'Script started',
+        message: 'nightly.py is running in an interactive terminal.',
+        tone: 'success'
+    });
+    assert.deepEqual(app.navigations.at(-1), {
+        view: 'terminal-focus',
+        data: { preferredSelection: 'base:shell', preferredTabId: 'python-tab' },
+        options: {}
+    });
+    // The workbench passes its own button; it is restored after the launch.
     const button = { disabled: false, innerHTML: '<i></i>Run' };
-    app.apiCall = async (url) => (url === '/api/v1/python-scripts/run'
-        ? { exitCode: 1, timedOut: false, durationMs: 1, standardOutput: '', standardError: 'x' }
+    app.apiCall = async (url) => (url === '/api/v1/python-scripts/run/interactive'
+        ? { name: 'nightly.py', tabId: 'second-tab', message: 'started' }
         : { pinConfigured: true, scriptsDirectory: '/scripts', scripts: [SCRIPT] });
     await controller.run('nightly.py', button);
     assert.deepEqual(button, { disabled: false, innerHTML: '<i></i>Run' });
-    assert.deepEqual(app.toasts.at(-1), { title: 'Script failed', message: 'nightly.py: exit 1.', tone: 'error' });
+    assert.equal(app.navigations.at(-1).data.preferredTabId, 'second-tab');
 });
 
 test('The last-run drawer remembers whether it was open when the list is rebuilt', () => {

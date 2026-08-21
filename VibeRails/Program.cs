@@ -146,6 +146,14 @@ if (JobTriggerProcessHost.IsRequested(args))
     return;
 }
 
+// Approved Python script launched inside an existing Web UI terminal PTY. This helper owns no
+// web server; its Python child inherits the PTY so stdin/stdout remain fully interactive.
+if (PythonScriptRunProcessHost.IsRequested(args))
+{
+    Environment.ExitCode = await PythonScriptRunProcessHost.RunAsync(args);
+    return;
+}
+
 // Code-sign helper: `vb --sign-script <name>.py`. Approves a Python script with the
 // user's signing PIN. File-based state only — no Kestrel, no browser, no auth.
 if (PythonScriptSignProcessHost.IsRequested(args))

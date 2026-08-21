@@ -278,7 +278,11 @@ See also: [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for back
 - **Shared flows**: signing (PIN prompt), revoke, rename, delete, duplicate, copy path,
   run and `saveContent` are public methods on `PythonScriptsController`
   (`app.jobController.pythonScripts`) that work unmounted; the workbench follows list
-  updates through `onStateChange`.
+  updates through `onStateChange`. Run calls `/api/v1/python-scripts/run/interactive`; the
+  backend verifies the signature, creates a shell tab, and invokes the verified-byte helper
+  inside its PTY. The controller records the tab metadata and opens `terminal-focus`, so Python
+  stdin, prompts, live output, and Ctrl+C remain interactive. The older captured-output `/run`
+  endpoint remains available to non-UI callers.
 - **Ask agent**: with a live session (open socket) the brief naming the absolute script
   path is pasted with `injectText` **without submitting** (`…\n\nChange: `); otherwise
   `startTerminalWithOptions` starts the panel's picked CLI (default `claude`) in the

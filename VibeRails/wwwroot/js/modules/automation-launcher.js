@@ -2,10 +2,6 @@ import { escapeHtml, isConfirmDialogOpen } from './utils.js';
 
 const PREFERENCES_ENDPOINT = '/api/v1/automation-nav/preferences';
 
-// Where to look when a script launched from the nav fails: the row's output drawer
-// lives on the Automation page, not here.
-const OUTPUT_HINT = 'open Automation to see the output';
-
 /**
  * Shapes the server's launcher catalog into what the flyout and the customize modal
  * render: one entry per automation (`jobId`) or Python script (`status` = approved |
@@ -46,7 +42,7 @@ function launcherItemIcon(item) {
  * open, so there is no client cache to invalidate. Automation launches delegate to
  * JobController.launchFromNav so nav runs land in a terminal tab exactly like the
  * Automation page's own "Run now"; script runs go through PythonScriptsController.run so
- * the result lands in the same "Last run" drawer as a run from the page.
+ * they open the same interactive terminal surface as a run from the page.
  *
  * The customization modal intentionally reuses the llm-picker-* modal CSS classes so
  * both "order and show/hide" dialogs stay visually identical.
@@ -225,18 +221,13 @@ export class AutomationNavLauncher {
         target?.focus?.();
     }
 
-    /**
-     * Runs a Python script through the shared controller, so the result lands in the
-     * Automation page's "Last run" drawer and the toast wording is the section's. The row
-     * stays on screen showing a busy state until the run returns; there is no optimistic
-     * "started" toast because the outcome is what matters and it arrives in one piece.
-     */
+    /** Runs a Python script through the shared controller in a new interactive terminal tab. */
     async _runScript(name, index = null) {
         const scripts = this.app.jobController?.pythonScripts;
         if (!scripts || !name) return;
         // run() registers the name in runningNames before its first await, so the rows
         // drawn right after it starts already show this one busy.
-        const pending = scripts.run(name, null, { outputHint: OUTPUT_HINT });
+        const pending = scripts.run(name);
         this._renderFlyoutItems({ focusIndex: index });
         try {
             await pending;

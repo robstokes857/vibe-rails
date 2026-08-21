@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -19,6 +20,7 @@ public interface IPythonScriptService
     Task<PythonScriptListResponse> RevokeAsync(
         PythonScriptApprovalRequest request, CancellationToken cancellationToken = default);
     Task<PythonScriptRunResponse> RunAsync(string? name, CancellationToken cancellationToken = default);
+    Task<string> ValidateRunnableAsync(string? name, CancellationToken cancellationToken = default);
     PythonScriptRunHistoryResponse GetRunHistory();
     string GetScriptsDirectory();
 
@@ -290,42 +292,9 @@ public sealed class PythonScriptService : IPythonScriptService
                 "Python execution is not available in this process.");
         }
 
-        var name = ValidateScriptName(requestedName);
-        var scriptPath = ResolveScriptPath(name);
-        if (!File.Exists(scriptPath))
-        {
-            throw new PythonScriptValidationException($"Script '{name}' was not found.");
-        }
-
-        // Match the approval that was keyed to the file's real on-disk name.
-        name = CanonicalOnDiskName(scriptPath) ?? name;
-
-        // Read once; verify and execute these exact bytes. Never re-read the (still
-        // writable) original path after the hash check.
-        var content = ReadScriptBytes(scriptPath);
-        var hash = ComputeCanonicalHash(name, content);
-
-        await _documentLock.WaitAsync(cancellationToken);
-        try
-        {
-            var document = ReadDocument();
-            var approval = document.Approvals.FirstOrDefault(entry => NameEquals(entry.Name, name));
-            if (approval == null)
-            {
-                throw new PythonScriptValidationException(
-                    $"Script '{name}' is not signed. Approve it with your PIN before running it.");
-            }
-
-            if (!string.Equals(approval.Hash, hash, StringComparison.Ordinal))
-            {
-                throw new PythonScriptValidationException(
-                    $"Script '{name}' has changed since it was signed. Re-approve it with your PIN to run the new version.");
-            }
-        }
-        finally
-        {
-            _documentLock.Release();
-        }
+        var verified = await ReadVerifiedScriptAsync(requestedName, cancellationToken);
+        var name = verified.Name;
+        var content = verified.Content;
 
         var startedUtc = DateTime.UtcNow;
         var verifiedCopy = Path.Combine(
@@ -370,6 +339,109 @@ public sealed class PythonScriptService : IPythonScriptService
         }
         finally
         {
+            try { File.Delete(verifiedCopy); }
+            catch (Exception ex) { Log.Debug(ex, "[PythonScripts] Temp cleanup failed for {Path}", verifiedCopy); }
+        }
+    }
+
+    /// <summary>
+    /// Checks the same name/hash approval contract as a real run without launching Python. The
+    /// interactive terminal route uses this before reserving a tab; the helper process verifies
+    /// again immediately before it executes, so a file change in between still fails closed.
+    /// </summary>
+    public async Task<string> ValidateRunnableAsync(
+        string? requestedName,
+        CancellationToken cancellationToken = default)
+    {
+        var verified = await ReadVerifiedScriptAsync(requestedName, cancellationToken);
+        return verified.Name;
+    }
+
+    /// <summary>
+    /// Runs approved bytes with Python attached to this process's inherited console/PTY. This is
+    /// intentionally concrete-service-only: the dashboard reaches it through the narrowly scoped
+    /// <c>--run-python-script</c> helper process, never through an API that accepts a command.
+    /// </summary>
+    public async Task<int> RunInteractiveAsync(
+        string? requestedName,
+        CancellationToken cancellationToken = default)
+    {
+        if (_pythonRunner == null)
+        {
+            throw new PythonScriptValidationException(
+                "Python execution is not available in this process.");
+        }
+
+        var verified = await ReadVerifiedScriptAsync(requestedName, cancellationToken);
+        var verifiedCopy = Path.Combine(
+            Path.GetTempPath(),
+            $"viberails-script-{Guid.NewGuid():N}.py");
+        var startedUtc = DateTime.UtcNow;
+        var stopwatch = Stopwatch.StartNew();
+
+        try
+        {
+            await File.WriteAllBytesAsync(verifiedCopy, verified.Content, cancellationToken);
+
+            var options = ClonedRunnerOptions();
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = options.PythonExecutable,
+                WorkingDirectory = GetScriptsDirectory(),
+                UseShellExecute = false,
+                RedirectStandardInput = false,
+                RedirectStandardOutput = false,
+                RedirectStandardError = false,
+                CreateNoWindow = false
+            };
+            startInfo.ArgumentList.Add(verifiedCopy);
+            ApplyPythonEnvironment(startInfo, options);
+
+            using var process = new Process { StartInfo = startInfo };
+            try
+            {
+                if (!process.Start())
+                    throw new InvalidOperationException("Python did not start.");
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Log.Warning(ex, "[PythonScripts] Interactive Python failed to launch for {Name}", verified.Name);
+                throw new PythonScriptValidationException(
+                    "Python could not be started. Make sure a Python interpreter is installed and on your PATH.");
+            }
+
+            try
+            {
+                await process.WaitForExitAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                try
+                {
+                    if (!process.HasExited) process.Kill(entireProcessTree: true);
+                }
+                catch (Exception ex)
+                {
+                    Log.Debug(ex, "[PythonScripts] Interactive Python cleanup failed for {Name}", verified.Name);
+                }
+                throw;
+            }
+
+            stopwatch.Stop();
+            RecordRun(
+                verified.Name,
+                startedUtc,
+                process.ExitCode,
+                timedOut: false,
+                durationMs: stopwatch.Elapsed.TotalMilliseconds);
+            Log.Information(
+                "[PythonScripts] Interactive run finished for {Name}: exit={ExitCode} durationMs={Duration}",
+                verified.Name, process.ExitCode, Math.Round(stopwatch.Elapsed.TotalMilliseconds));
+            return process.ExitCode;
+        }
+        finally
+        {
+            stopwatch.Stop();
             try { File.Delete(verifiedCopy); }
             catch (Exception ex) { Log.Debug(ex, "[PythonScripts] Temp cleanup failed for {Path}", verifiedCopy); }
         }
@@ -673,6 +745,48 @@ public sealed class PythonScriptService : IPythonScriptService
         }
     }
 
+    private async Task<(string Name, byte[] Content)> ReadVerifiedScriptAsync(
+        string? requestedName,
+        CancellationToken cancellationToken)
+    {
+        var name = ValidateScriptName(requestedName);
+        var scriptPath = ResolveScriptPath(name);
+        if (!File.Exists(scriptPath))
+        {
+            throw new PythonScriptValidationException($"Script '{name}' was not found.");
+        }
+
+        // Match the approval keyed to the file's real on-disk name, then read once. Every caller
+        // executes or copies this byte array; none re-read the writable original after approval.
+        name = CanonicalOnDiskName(scriptPath) ?? name;
+        var content = ReadScriptBytes(scriptPath);
+        var hash = ComputeCanonicalHash(name, content);
+
+        await _documentLock.WaitAsync(cancellationToken);
+        try
+        {
+            var document = ReadDocument();
+            var approval = document.Approvals.FirstOrDefault(entry => NameEquals(entry.Name, name));
+            if (approval == null)
+            {
+                throw new PythonScriptValidationException(
+                    $"Script '{name}' is not signed. Approve it with your PIN before running it.");
+            }
+
+            if (!string.Equals(approval.Hash, hash, StringComparison.Ordinal))
+            {
+                throw new PythonScriptValidationException(
+                    $"Script '{name}' has changed since it was signed. Re-approve it with your PIN to run the new version.");
+            }
+        }
+        finally
+        {
+            _documentLock.Release();
+        }
+
+        return (name, content);
+    }
+
     // --- internals ---
 
     /// <summary>
@@ -700,6 +814,37 @@ public sealed class PythonScriptService : IPythonScriptService
         }
 
         return clone;
+    }
+
+    private static void ApplyPythonEnvironment(
+        ProcessStartInfo startInfo,
+        PythonRunnerOptions options)
+    {
+        if (options.UseUnbufferedOutput)
+            startInfo.Environment["PYTHONUNBUFFERED"] = "1";
+
+        if (options.UseUtf8Io)
+        {
+            startInfo.Environment["PYTHONIOENCODING"] = "utf-8";
+            startInfo.Environment["PYTHONUTF8"] = "1";
+        }
+
+        foreach (var (key, value) in options.EnvironmentVariables)
+        {
+            if (value is null)
+                startInfo.Environment.Remove(key);
+            else
+                startInfo.Environment[key] = value;
+        }
+
+        if (options.AdditionalPathEntries.Count > 0)
+        {
+            startInfo.Environment.TryGetValue("PATH", out var basePath);
+            var prepend = string.Join(Path.PathSeparator, options.AdditionalPathEntries);
+            startInfo.Environment["PATH"] = string.IsNullOrEmpty(basePath)
+                ? prepend
+                : prepend + Path.PathSeparator + basePath;
+        }
     }
 
     private void RecordRun(string name, DateTime startedUtc, int exitCode, bool timedOut, double durationMs)
