@@ -3298,6 +3298,10 @@
                 .mcp-view .mcp-body::-webkit-scrollbar { width:8px; height:8px; }
                 .mcp-view .mcp-body::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.1); border-radius:4px; }
                 .mcp-view .mcp-tool-list { display:grid; gap:0.5rem; }
+                .mcp-view .mcp-tool-group-heading { display:flex; align-items:center; justify-content:space-between; gap:0.5rem; margin-top:0.45rem; padding:0.35rem 0.2rem; color:var(--color-text-muted); font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; }
+                .mcp-view .mcp-tool-group-heading:first-child { margin-top:0; }
+                .mcp-view .mcp-tool-group-heading span { display:inline-flex; align-items:center; gap:0.45rem; }
+                .mcp-view .mcp-tool-group-heading strong { padding:0.05rem 0.4rem; border:1px solid var(--color-border); border-radius:999px; color:var(--color-text); font-size:0.68rem; }
                 .mcp-view .mcp-tool-item {
                     width:100%;
                     min-height:70px;
@@ -3331,6 +3335,7 @@
                 .mcp-view .mcp-detail-head { display:flex; justify-content:space-between; gap:1rem; align-items:flex-start; margin-bottom:1rem; }
                 .mcp-view .mcp-detail-head h5 { margin:0; color:var(--mcp-accent); font-size:1rem; line-height:1.25; overflow-wrap:anywhere; }
                 .mcp-view .mcp-detail-head p { margin:0.35rem 0 0; color:var(--color-text-muted); font-size:0.84rem; line-height:1.5; }
+                .mcp-view .mcp-source { display:inline-flex; align-items:center; gap:0.4rem; margin-top:0.45rem; padding:0.2rem 0.45rem; border:1px solid var(--color-border); border-radius:999px; color:var(--color-text-muted); font-size:0.72rem; }
                 .mcp-view .mcp-detail-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:1rem; }
                 .mcp-view .mcp-section { min-width:0; display:grid; gap:0.45rem; align-content:start; }
                 .mcp-view .mcp-textarea { min-height:230px; resize:vertical; font-family:'JetBrains Mono', 'Fira Code', monospace; font-size:0.8rem; }

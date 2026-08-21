@@ -91,8 +91,16 @@ public static class McpStdioHost
         services.AddScoped<TokenSaverTool>();
         // Signed-Python-script guidance. File-based state only (no DB, no interpreter
         // probe on construction), so it is safe in this stdio child process too.
-        services.AddSingleton<VibeRails.Services.PythonScripts.IPythonScriptService>(
-            new VibeRails.Services.PythonScripts.PythonScriptService());
+        services.AddSingleton<VibeRails.Services.PythonScripts.IPythonScriptService>(sp =>
+            new VibeRails.Services.PythonScripts.PythonScriptService(
+                mcpConfigurationStore: sp.GetRequiredService<
+                    VibeRails.Services.PythonScripts.IPythonScriptMcpConfigurationStore>(),
+                pythonRunnerProvider: () => new PyBridge.PythonRunner(
+                    PyBridge.PythonRunnerOptions.Discover())));
+        services.AddSingleton<VibeRails.Services.PythonScripts.IPythonScriptMcpConfigurationStore,
+            VibeRails.Services.PythonScripts.PythonScriptMcpConfigurationStore>();
+        services.AddSingleton<VibeRails.Services.PythonScripts.IPythonScriptMcpService,
+            VibeRails.Services.PythonScripts.PythonScriptMcpService>();
         services.AddScoped<PythonScriptTool>();
         // HostShellTools (run_shell_command) and WebResearchTools (web_search/web_fetch) are
         // intentionally not exposed for now (security review 2026-07-02); mirrors MapRegisterServices.
@@ -107,6 +115,7 @@ public static class McpStdioHost
             .WithTools<RulesTool>()
             .WithTools<SessionSearchTool>()
             .WithTools<TokenSaverTool>()
-            .WithTools<PythonScriptTool>();
+            .WithTools<PythonScriptTool>()
+            .WithPythonScriptTools();
     }
 }

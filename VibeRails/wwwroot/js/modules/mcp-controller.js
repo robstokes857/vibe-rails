@@ -161,12 +161,26 @@ export class McpController {
             return;
         }
 
-        this.nodes.toolList.innerHTML = tools.map(tool => `
-            <button class="mcp-tool-item${this.state.localSelected === tool.name ? ' selected' : ''}" data-tool="${esc(tool.name)}" type="button">
-                <span class="mcp-tool-name">${esc(tool.name)}</span>
-                <span class="mcp-tool-desc">${esc(tool.title || tool.description || 'No description')}</span>
-            </button>
-        `).join('');
+        const renderGroup = (label, icon, groupTools) => {
+            if (!groupTools.length) return '';
+            return `
+                <div class="mcp-tool-group-heading">
+                    <span><i class="${icon}" aria-hidden="true"></i>${esc(label)}</span>
+                    <strong>${groupTools.length}</strong>
+                </div>
+                ${groupTools.map(tool => `
+                    <button class="mcp-tool-item${this.state.localSelected === tool.name ? ' selected' : ''}" data-tool="${esc(tool.name)}" type="button">
+                        <span class="mcp-tool-name">${esc(tool.name)}</span>
+                        <span class="mcp-tool-desc">${esc(tool.sourceName || tool.title || tool.description || 'No description')}</span>
+                    </button>
+                `).join('')}`;
+        };
+        const pythonTools = tools.filter(tool => tool.category === 'python-script');
+        const builtInTools = tools.filter(tool => tool.category !== 'python-script');
+        this.nodes.toolList.innerHTML = [
+            renderGroup('Built-in tools', 'fa-solid fa-cubes', builtInTools),
+            renderGroup('Python script tools', 'fa-brands fa-python', pythonTools)
+        ].join('');
     }
 
     renderLocalToolDetail() {
@@ -190,8 +204,9 @@ export class McpController {
         detail.innerHTML = `
             <div class="mcp-detail-head">
                 <div>
-                    <div class="mcp-kicker">Tool</div>
+                    <div class="mcp-kicker">${tool.category === 'python-script' ? 'Python script tool' : 'Tool'}</div>
                     <h5>${esc(tool.name)}</h5>
+                    ${tool.sourceName ? `<div class="mcp-source"><i class="fa-brands fa-python" aria-hidden="true"></i>${esc(tool.sourceName)}</div>` : ''}
                     <p>${esc(tool.description || tool.title || 'No description')}</p>
                 </div>
                 <button class="mcp-button primary" data-mcp-call type="button"><i class="fas fa-play"></i><span>Call</span></button>

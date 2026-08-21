@@ -17,6 +17,7 @@ using VibeRails.Services.Environments;
 using VibeRails.Services.Environments.Steps;
 using VibeRails.Services.FileSystem;
 using VibeRails.Services.LlmProxy;
+using VibeRails.Services.Mcp;
 using VibeRails.Services.Mcp.HostShell;
 using VibeRails.Services.Mcp.Tools;
 using VibeRails.Services.Mcp.WebResearch;
@@ -184,12 +185,18 @@ namespace VibeRails
             // Python script signing: file-based state + a lazily-probed interpreter. Singleton so
             // the run-history and the signing-file lock live in one place. Factory form on
             // purpose: Discover() probes the filesystem/PATH for an interpreter, and that must
-            // happen on the first python-scripts call, not during startup of every vb process
-            // (terminal tab children register services too).
-            serviceCollection.AddSingleton<PyBridge.IPythonRunner>(_ =>
-                new PyBridge.PythonRunner(PyBridge.PythonRunnerOptions.Discover()));
+            // happen on the first actual run (not list/sign/MCP discovery), nor during startup of
+            // every vb process (terminal tab children register services too).
             serviceCollection.AddSingleton<Services.PythonScripts.IPythonScriptService>(sp =>
-                new Services.PythonScripts.PythonScriptService(sp.GetRequiredService<PyBridge.IPythonRunner>()));
+                new Services.PythonScripts.PythonScriptService(
+                    mcpConfigurationStore: sp.GetRequiredService<
+                        Services.PythonScripts.IPythonScriptMcpConfigurationStore>(),
+                    pythonRunnerProvider: () => new PyBridge.PythonRunner(
+                        PyBridge.PythonRunnerOptions.Discover())));
+            serviceCollection.AddSingleton<Services.PythonScripts.IPythonScriptMcpConfigurationStore,
+                Services.PythonScripts.PythonScriptMcpConfigurationStore>();
+            serviceCollection.AddSingleton<Services.PythonScripts.IPythonScriptMcpService,
+                Services.PythonScripts.PythonScriptMcpService>();
             serviceCollection.AddScoped<IGetUserText, GetUserText>();
             serviceCollection.AddScoped<IProjectCache, ProjectCache>();
             serviceCollection.AddScoped<IGlobalCache, GlobalCache>();
@@ -280,7 +287,8 @@ namespace VibeRails
                     .WithTools<RulesTool>()
                     .WithTools<SessionSearchTool>()
                     .WithTools<TokenSaverTool>()
-                    .WithTools<PythonScriptTool>();
+                    .WithTools<PythonScriptTool>()
+                    .WithPythonScriptTools();
             }
 
             // Claude Agent Sync Service (syncs CLAUDE.md to AGENTS.md on session lifecycle)
@@ -428,5 +436,3 @@ namespace VibeRails
 
     }
 }
-
-

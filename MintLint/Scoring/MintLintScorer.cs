@@ -4,60 +4,45 @@ using System.Collections.Generic;
 namespace MintLint;
 
 /// <summary>
-/// Turns raw <see cref="FileMetrics"/> into interpreted <see cref="FileScore"/>s: a flat map
-/// of raw metric values, a concern score and rating per smell category, and an overall
-/// roll-up. Each raw value is normalized to a 0–100 concern scale via the
-/// <see cref="ScoringProfile"/>, so unrelated metrics become comparable.
+/// Measurement-to-grading bridge. Extracts each file's raw metric values from
+/// <see cref="FileMetrics"/> (worst function/class per metric, declaration attribution, the
+/// LCOM stateless-class guard) and hands them to an <see cref="IScoreCalculator"/> to grade.
+/// No grading math lives here — the complete algorithm is in <see cref="ScoreCalculator"/>.
 /// </summary>
 public static class MintLintScorer
 {
-    // Each category names the raw metrics that feed it.
-    private static readonly CategoryDefinition[] Categories =
-    [
-        new("Complexity", ["cyclomatic_complexity", "cognitive_complexity", "npath_complexity", "nesting_depth"]),
-        new("Size", ["lines_of_code", "method_count", "field_count", "parameter_count"]),
-        new("Cohesion", ["lack_of_cohesion"]),
-        new("Coupling", ["fan_out", "hard_coded_dependencies"]),
-        new("Testability", ["hard_coded_dependencies", "ambient_dependencies"]),
-        new("Duplication", ["duplication"]),
-        new("Maintainability", ["maintainability_index", "halstead_difficulty"]),
-    ];
-
     /// <summary>Scores a single file's metrics.</summary>
-    public static FileScore Score(FileMetrics file, ScoringProfile? profile = null)
+    /// <param name="file">The measured file.</param>
+    /// <param name="profile">Scoring knob values; <see cref="ScoringProfile.Default"/> when null.</param>
+    /// <param name="calculator">Grading algorithm; <see cref="ScoreCalculator.Instance"/> when null.</param>
+    public static FileScore Score(FileMetrics file, ScoringProfile? profile = null, IScoreCalculator? calculator = null)
     {
         ArgumentNullException.ThrowIfNull(file);
-        profile ??= ScoringProfile.Default;
-
-        Dictionary<string, double> metrics = ExtractMetrics(file);
-        Dictionary<string, MetricOrigin> origins = ExtractOrigins(file);
-
-        List<CategoryScore> categories = [];
-        foreach (CategoryDefinition definition in Categories)
-        {
-            categories.Add(ScoreCategory(definition, metrics, origins, profile));
-        }
-
-        OverallScore overall = RollUp(categories, profile);
-        return new FileScore(file.File, metrics, categories, overall);
+        return (calculator ?? ScoreCalculator.Instance)
+            .ScoreFile(ToMeasuredFile(file), profile ?? ScoringProfile.Default);
     }
 
     /// <summary>
     /// Scores a set of files and returns them worst-first, with an overall roll-up across them.
     /// </summary>
-    public static ScanResult Score(IReadOnlyList<FileMetrics> files, ScoringProfile? profile = null)
+    /// <param name="files">The measured files.</param>
+    /// <param name="profile">Scoring knob values; <see cref="ScoringProfile.Default"/> when null.</param>
+    /// <param name="calculator">Grading algorithm; <see cref="ScoreCalculator.Instance"/> when null.</param>
+    public static ScanResult Score(IReadOnlyList<FileMetrics> files, ScoringProfile? profile = null, IScoreCalculator? calculator = null)
     {
         ArgumentNullException.ThrowIfNull(files);
-        profile ??= ScoringProfile.Default;
+        IScoreCalculator effectiveCalculator = calculator ?? ScoreCalculator.Instance;
+        ScoringProfile effectiveProfile = profile ?? ScoringProfile.Default;
 
         List<FileScore> scored = [];
-        double sum = 0;
         foreach (FileMetrics file in files)
         {
-            FileScore score = Score(file, profile);
-            scored.Add(score);
-            sum += score.Overall.Score;
+            scored.Add(effectiveCalculator.ScoreFile(ToMeasuredFile(file), effectiveProfile));
         }
+
+        // Compute the scan overall BEFORE sorting so the floating-point summation order
+        // matches the pre-refactor implementation exactly (input order, not sorted order).
+        OverallScore overall = effectiveCalculator.ScoreScan(scored);
 
         scored.Sort(static (left, right) =>
         {
@@ -73,8 +58,12 @@ public static class MintLintScorer
                 : string.Compare(left.File, right.File, StringComparison.Ordinal);
         });
 
-        double mean = scored.Count == 0 ? 0 : Math.Round(sum / scored.Count, 1);
-        return new ScanResult(scored, new OverallScore(mean, RatingFor(mean)));
+        return new ScanResult(scored, overall);
+    }
+
+    private static MeasuredFile ToMeasuredFile(FileMetrics file)
+    {
+        return new MeasuredFile(file.File, ExtractMetrics(file), ExtractOrigins(file));
     }
 
     private static Dictionary<string, double> ExtractMetrics(FileMetrics file)
@@ -124,8 +113,6 @@ public static class MintLintScorer
             ["field_count"] = maxFieldCount,
         };
     }
-
-    private sealed record MetricOrigin(string Source, int Line);
 
     /// <summary>
     /// Pins each function/class-scoped metric maximum to the declaration it came from, so a
@@ -198,157 +185,4 @@ public static class MintLintScorer
 
         return origins;
     }
-
-    private static CategoryScore ScoreCategory(
-        CategoryDefinition definition,
-        IReadOnlyDictionary<string, double> metrics,
-        IReadOnlyDictionary<string, MetricOrigin> origins,
-        ScoringProfile profile)
-    {
-        // Worst signal wins: a category should light up if any of its metrics is concerning,
-        // rather than being averaged back down by the metrics that happen to be fine.
-        double score = 0;
-        List<MetricScore> scoredMetrics = [];
-        foreach (string key in definition.Metrics)
-        {
-            if (metrics.TryGetValue(key, out double raw) && profile.Thresholds.TryGetValue(key, out MetricThreshold? threshold))
-            {
-                double normalized = Normalize(raw, threshold);
-                MetricOrigin? origin = origins.GetValueOrDefault(key);
-                scoredMetrics.Add(new MetricScore(
-                    key,
-                    raw,
-                    Math.Round(normalized, 1),
-                    threshold.Warn,
-                    threshold.Critical,
-                    threshold.HigherIsBetter,
-                    origin?.Source,
-                    origin?.Line,
-                    threshold.HigherIsBetter ? MetricDirection.HB : MetricDirection.LB));
-                score = Math.Max(score, normalized);
-            }
-        }
-
-        double weight = profile.CategoryWeights.TryGetValue(definition.Name, out double configured) ? configured : 1.0;
-        return new CategoryScore(
-            definition.Name,
-            Math.Round(score, 1),
-            weight,
-            scoredMetrics,
-            SharedDirection(scoredMetrics));
-    }
-
-    /// <summary>
-    /// A category reads one way only when every scored metric in it reads that way;
-    /// a mixed or empty category is <see cref="MetricDirection.NA"/>.
-    /// </summary>
-    private static MetricDirection SharedDirection(IReadOnlyList<MetricScore> scoredMetrics)
-    {
-        MetricDirection shared = MetricDirection.NA;
-        foreach (MetricScore metric in scoredMetrics)
-        {
-            if (metric.Direction == MetricDirection.NA)
-            {
-                return MetricDirection.NA;
-            }
-
-            if (shared == MetricDirection.NA)
-            {
-                shared = metric.Direction;
-            }
-            else if (shared != metric.Direction)
-            {
-                return MetricDirection.NA;
-            }
-        }
-
-        return shared;
-    }
-
-    private static double Normalize(double raw, MetricThreshold threshold)
-    {
-        double score;
-        if (!threshold.HigherIsBetter)
-        {
-            if (raw <= 0 || threshold.Warn <= 0)
-            {
-                return raw > 0 ? 100.0 : 0.0;
-            }
-
-            if (raw <= threshold.Warn)
-            {
-                score = raw / threshold.Warn * 50.0;
-            }
-            else if (raw < threshold.Critical && threshold.Critical > threshold.Warn)
-            {
-                score = 50.0 + (raw - threshold.Warn) / (threshold.Critical - threshold.Warn) * 50.0;
-            }
-            else
-            {
-                score = 100.0;
-            }
-        }
-        else
-        {
-            if (raw >= threshold.Warn)
-            {
-                score = 0.0;
-            }
-            else if (raw >= threshold.Critical && threshold.Warn > threshold.Critical)
-            {
-                score = (threshold.Warn - raw) / (threshold.Warn - threshold.Critical) * 50.0;
-            }
-            else
-            {
-                score = threshold.Critical > 0 ? 50.0 + (threshold.Critical - raw) / threshold.Critical * 50.0 : 100.0;
-            }
-        }
-
-        return Math.Clamp(score, 0.0, 100.0);
-    }
-
-    private static OverallScore RollUp(IReadOnlyList<CategoryScore> categories, ScoringProfile profile)
-    {
-        // Breadth-gated roll-up: the overall is the BreadthRank-th worst (weight-adjusted)
-        // category, so a file only rates badly when several independent smell dimensions are
-        // severe at once. Categories individually saturate easily (worst metric wins inside
-        // each one), so "worst category wins" here made nearly every real file AtRisk — and
-        // when everything is bad, nothing is. The DepthFloor keeps a single catastrophic
-        // category from vanishing entirely: it caps how far breadth gating can discount the
-        // worst dimension. Weights below 1.0 de-emphasize less critical smells.
-        List<double> weighted = new(categories.Count);
-        foreach (CategoryScore category in categories)
-        {
-            weighted.Add(category.Score * category.Weight);
-        }
-
-        weighted.Sort(static (left, right) => right.CompareTo(left));
-
-        double score = 0;
-        if (weighted.Count > 0)
-        {
-            int rank = Math.Clamp(profile.BreadthRank, 1, weighted.Count);
-            score = Math.Max(weighted[rank - 1], weighted[0] * profile.DepthFloor);
-        }
-
-        score = Math.Round(Math.Clamp(score, 0, 100), 1);
-        return new OverallScore(score, RatingFor(score));
-    }
-
-    private static string RatingFor(double score)
-    {
-        if (score < 30)
-        {
-            return "Clean";
-        }
-
-        if (score < 55)
-        {
-            return "Okay";
-        }
-
-        return score < 75 ? "NeedsWork" : "AtRisk";
-    }
-
-    private sealed record CategoryDefinition(string Name, string[] Metrics);
 }

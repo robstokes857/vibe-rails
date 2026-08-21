@@ -18,7 +18,7 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | [js/modules/dashboard-controller.js](js/modules/dashboard-controller.js) | Dashboard layout with state passing for preselection |
 | [js/modules/code-analyzer-dashboard.js](js/modules/code-analyzer-dashboard.js) | Interactive MintLint scan dashboard with Monaco code evidence for the Rules page |
 | [js/modules/jobs-controller.js](js/modules/jobs-controller.js) | Automation page: automation CRUD + inline editor, run history, "Run now" into a terminal tab (`launchFromNav` for the nav launcher); owns the shared `PythonScriptsController` |
-| [js/modules/python-scripts-controller.js](js/modules/python-scripts-controller.js) | "Python scripts" section of the Automation page + the shared sign/revoke/rename/delete/duplicate/run flows (PIN modal, `runningNames`, `lastRunByName`) the workbench and the nav launcher reuse |
+| [js/modules/python-scripts-controller.js](js/modules/python-scripts-controller.js) | "Python scripts" section of the Automation page + shared lifecycle flows; also owns the PIN-gated MCP switch/configurator and typed parameter-to-argv mapping fields |
 | [js/modules/python-script-workbench.js](js/modules/python-script-workbench.js) | `python-script` view: Monaco editor over a docked agent terminal for one script (see "Python script workbench" below) |
 | [js/modules/automation-launcher.js](js/modules/automation-launcher.js) | Nav "Launch" flyout (automations + Python scripts, unsigned ones disabled) and its order/show-hide customize modal over `/api/v1/automation-nav/preferences` |
 
@@ -283,6 +283,11 @@ See also: [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for back
   inside its PTY. The controller records the tab metadata and opens `terminal-focus`, so Python
   stdin, prompts, live output, and Ctrl+C remain interactive. The older captured-output `/run`
   endpoint remains available to non-UI callers.
+- **MCP exposure**: each script row has an MCP switch. Enabling/editing opens a PIN-gated dialog
+  for tool name, usage description, and zero or more typed parameters (required/default plus
+  positional or named-option argv mapping). Enabled tools render under a separate **Python script
+  tools** heading in the local MCP Explorer; disabling needs no PIN. Backend validation and the
+  signed hash remain authoritative.
 - **Ask agent**: with a live session (open socket) the brief naming the absolute script
   path is pasted with `injectText` **without submitting** (`…\n\nChange: `); otherwise
   `startTerminalWithOptions` starts the panel's picked CLI (default `claude`) in the

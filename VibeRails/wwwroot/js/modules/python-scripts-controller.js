@@ -10,6 +10,12 @@ const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._ -]{0,120}\.py$/;
 const REFRESH_THROTTLE_MS = 2000;
 const MAX_SCRIPT_BYTES = 5 * 1024 * 1024;
 
+export function defaultPythonMcpToolName(scriptName) {
+    const stem = String(scriptName || '').replace(/\.py$/i, '').toLowerCase();
+    const slug = stem.replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '') || 'script';
+    return `python_${slug}`.slice(0, 64);
+}
+
 // One Run button while its script is in flight, wherever it is rendered.
 const RUNNING_BUTTON_HTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Running…';
 
@@ -62,6 +68,7 @@ export class PythonScriptsController {
         this.app = app;
         this.root = null;
         this.state = null;
+        this.mcpConfigurations = [];
         this.lastRunByName = new Map();
         // Scripts with a run in flight (from this section, the workbench or the nav
         // launcher). Rows render their Run button from this, so a background rebuild
@@ -141,7 +148,15 @@ export class PythonScriptsController {
 
     async refresh({ quiet = false } = {}) {
         try {
-            this._applyState(await this.app.apiCall(API, 'GET', null, { showLoading: false }));
+            const state = await this.app.apiCall(API, 'GET', null, { showLoading: false });
+            try {
+                const mcp = await this.app.apiCall(`${API}/mcp`, 'GET', null, { showLoading: false });
+                this.mcpConfigurations = Array.isArray(mcp?.configurations) ? mcp.configurations : [];
+            } catch (error) {
+                console.error('Could not load Python MCP configuration:', error);
+                this.mcpConfigurations = [];
+            }
+            this._applyState(state);
         } catch (error) {
             this._applyState(null);
             if (!quiet) this.app.showError(error?.message || 'Could not load Python scripts.');
@@ -189,6 +204,11 @@ export class PythonScriptsController {
 
     scriptByName(name) {
         return (this.state?.scripts || []).find((script) => script.name === name) || null;
+    }
+
+    mcpConfigurationByScript(name) {
+        return this.mcpConfigurations.find((configuration) =>
+            configuration.scriptName === name) || null;
     }
 
     _render() {
@@ -240,6 +260,9 @@ export class PythonScriptsController {
         const canRun = script.status === 'approved' && !running;
         const lastRun = this.lastRunByName.get(script.name);
         const approveLabel = script.status === 'approved' ? 'Re-sign' : 'Sign';
+        const mcpConfiguration = this.mcpConfigurationByScript(script.name);
+        const mcpEnabled = Boolean(mcpConfiguration);
+        const canEnableMcp = script.status === 'approved';
         const details = [
             formatFileExplorerSize(script.sizeBytes),
             script.modifiedUtc ? `edited ${formatRelativeTime(script.modifiedUtc).toLowerCase()}` : '',
@@ -264,6 +287,16 @@ export class PythonScriptsController {
                     </span>
                 </div>
                 <div class="python-script-actions">
+                    <div class="python-script-mcp-control" title="${escapeHtml(mcpEnabled
+                        ? `Disable ${mcpConfiguration.toolName} on the VibeRails MCP server`
+                        : canEnableMcp ? `Configure ${name} as an MCP tool` : 'Sign the script before adding it to MCP')}">
+                        <span>MCP</span>
+                        <button class="python-script-mcp-switch" type="button" role="switch"
+                                aria-checked="${mcpEnabled ? 'true' : 'false'}"
+                                aria-label="Expose ${name} as an MCP tool"
+                                data-python-scripts-action="mcp-toggle" data-name="${name}"
+                                ${mcpEnabled || canEnableMcp ? '' : 'disabled'}><span></span></button>
+                    </div>
                     <button class="btn btn-sm btn-outline-primary python-script-edit" type="button" data-python-scripts-action="edit"
                             data-name="${name}" title="Open ${name} in the editor with an agent terminal beside it">
                         <i class="fa-solid fa-pen-to-square me-1" aria-hidden="true"></i>Edit
@@ -310,6 +343,9 @@ export class PythonScriptsController {
             item('duplicate', 'fa-copy', 'Duplicate…'),
             item('rename', 'fa-i-cursor', 'Rename…'),
             item('copy-path', 'fa-clipboard', 'Copy full path'),
+            this.mcpConfigurationByScript(script.name)
+                ? item('mcp-configure', 'fa-plug', 'Edit MCP tool…')
+                : '',
             script.status === 'unapproved' ? '' : item('revoke', 'fa-ban', 'Remove signature'),
             item('delete', 'fa-trash', 'Delete…', 'python-script-menu-item-danger')
         ].filter(Boolean).join('');
@@ -353,6 +389,12 @@ export class PythonScriptsController {
         if (action === 'copy-path') return void this.copyPath(name);
         if (action === 'approve') return void this.approve(name);
         if (action === 'revoke') return void this.revoke(name);
+        if (action === 'mcp-toggle') {
+            return void (this.mcpConfigurationByScript(name)
+                ? this.disableMcp(name)
+                : this.configureMcp(name));
+        }
+        if (action === 'mcp-configure') return void this.configureMcp(name);
         if (action === 'delete') return void this.deleteScript(name);
         if (action === 'run') return void this.run(name, button);
     }
@@ -585,9 +627,14 @@ export class PythonScriptsController {
 
         const newName = values.name.trim();
         try {
-            this._applyState(await this.app.apiCall(`${API}/rename`, 'POST',
+            const nextState = await this.app.apiCall(`${API}/rename`, 'POST',
                 { name, newName },
-                { showLoading: false, preferErrorResponseMessage: true }));
+                { showLoading: false, preferErrorResponseMessage: true });
+            this.mcpConfigurations = this.mcpConfigurations.map((configuration) =>
+                configuration.scriptName === name
+                    ? { ...configuration, scriptName: newName }
+                    : configuration);
+            this._applyState(nextState);
             this.lastRunByName.delete(name);
             this.app.showToast('Script renamed', `${name} is now ${newName}.`, 'success');
             return newName;
@@ -612,9 +659,12 @@ export class PythonScriptsController {
         if (!confirmed) return false;
 
         try {
-            this._applyState(await this.app.apiCall(
+            const nextState = await this.app.apiCall(
                 `${API}?name=${encodeURIComponent(name)}`, 'DELETE', null,
-                { showLoading: false, preferErrorResponseMessage: true }));
+                { showLoading: false, preferErrorResponseMessage: true });
+            this.mcpConfigurations = this.mcpConfigurations.filter((configuration) =>
+                configuration.scriptName !== name);
+            this._applyState(nextState);
             this.lastRunByName.delete(name);
             this.app.showToast('Script deleted', `${name} is gone.`, 'info');
             return true;
@@ -750,6 +800,266 @@ export class PythonScriptsController {
     }
 
     // --- signing and running ---
+
+    async configureMcp(name) {
+        const script = this.scriptByName(name);
+        const existing = this.mcpConfigurationByScript(name);
+        if (!script) return this.app.showError(`Script '${name}' was not found.`);
+        if (script.status !== 'approved') {
+            return this.app.showToast('Sign first', 'Sign this exact script version before adding it to MCP.', 'warning');
+        }
+
+        const request = await this._openMcpConfigurationModal(script, existing);
+        if (!request) return;
+        try {
+            const response = await this.app.apiCall(`${API}/mcp`, 'PUT', request);
+            this.mcpConfigurations = Array.isArray(response?.configurations) ? response.configurations : [];
+            this._lastListHtml = null;
+            this._render();
+            this.app.showToast(
+                existing ? 'MCP tool updated' : 'Added to MCP',
+                `${request.toolName} now runs ${name} through the signed-script gate.`,
+                'success');
+        } catch (error) {
+            this.app.showError(error?.message || 'Could not save the MCP tool.');
+        }
+    }
+
+    async disableMcp(name) {
+        const configuration = this.mcpConfigurationByScript(name);
+        if (!configuration) return;
+        try {
+            const response = await this.app.apiCall(
+                `${API}/mcp?name=${encodeURIComponent(name)}`,
+                'DELETE');
+            this.mcpConfigurations = Array.isArray(response?.configurations) ? response.configurations : [];
+            this._lastListHtml = null;
+            this._render();
+            this.app.showToast('Removed from MCP', `${configuration.toolName} is no longer exposed.`, 'success');
+        } catch (error) {
+            this.app.showError(error?.message || 'Could not remove the MCP tool.');
+        }
+    }
+
+    _openMcpConfigurationModal(script, existing) {
+        this._closeModal();
+        const parameters = Array.isArray(existing?.parameters) ? existing.parameters : [];
+        const layer = document.createElement('div');
+        layer.className = 'python-scripts-modal-layer';
+        layer.innerHTML = `
+            <div class="modal fade show d-block python-scripts-pin-modal" tabindex="-1" role="dialog"
+                 aria-modal="true" aria-labelledby="python-mcp-config-title">
+                <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                    <form class="modal-content" data-python-mcp-form>
+                        <div class="modal-header">
+                            <div>
+                                <h5 class="modal-title" id="python-mcp-config-title">${existing ? 'Edit' : 'Add'} MCP tool</h5>
+                                <div class="text-muted small mt-1">Signed script: <code>${escapeHtml(script.name)}</code></div>
+                            </div>
+                            <button type="button" class="btn-close" data-python-mcp-cancel aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body python-mcp-config-body">
+                            <div class="alert alert-danger d-none" data-python-mcp-error role="alert"></div>
+                            <div class="python-mcp-config-grid">
+                                <div>
+                                    <label class="form-label" for="python-mcp-tool-name">Tool name</label>
+                                    <input class="form-control" id="python-mcp-tool-name" data-python-mcp-field="toolName"
+                                           value="${escapeHtml(existing?.toolName || defaultPythonMcpToolName(script.name))}"
+                                           maxlength="64" autocomplete="off" required>
+                                    <div class="form-text">The name agents call. Letters, numbers, <code>_</code>, <code>-</code>, and <code>.</code>.</div>
+                                </div>
+                                <div>
+                                    <label class="form-label" for="python-mcp-pin">Signing PIN</label>
+                                    <input class="form-control" id="python-mcp-pin" data-python-mcp-field="pin"
+                                           type="password" autocomplete="current-password" required>
+                                    <div class="form-text">Required each time MCP exposure is enabled or edited. Never stored here.</div>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="form-label" for="python-mcp-description">When should an agent use this?</label>
+                                <textarea class="form-control" id="python-mcp-description" data-python-mcp-field="description"
+                                          rows="3" maxlength="500" required>${escapeHtml(existing?.description || '')}</textarea>
+                            </div>
+                            <div class="python-mcp-parameters-head">
+                                <div>
+                                    <strong>Script parameters</strong>
+                                    <div class="form-text">Each input becomes MCP JSON and is safely passed in the script's argv array. Positional values use the order shown.</div>
+                                </div>
+                                <button class="btn btn-sm btn-outline-primary" type="button" data-python-mcp-add-parameter>
+                                    <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>Add parameter
+                                </button>
+                            </div>
+                            <div class="python-mcp-parameters" data-python-mcp-parameters></div>
+                            <div class="python-mcp-no-parameters" data-python-mcp-empty ${parameters.length ? 'hidden' : ''}>
+                                No parameters. The MCP tool will run the script without extra command-line arguments.
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-python-mcp-cancel>Cancel</button>
+                            <button type="submit" class="btn btn-primary">${existing ? 'Save MCP tool' : 'Add to MCP'}</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <div class="modal-backdrop fade show"></div>`;
+        document.body.appendChild(layer);
+
+        const container = layer.querySelector('[data-python-mcp-parameters]');
+        const empty = layer.querySelector('[data-python-mcp-empty]');
+        const appendParameter = (parameter = null) => {
+            container.insertAdjacentHTML('beforeend', this._renderMcpParameterEditor(parameter));
+            empty.hidden = true;
+            this._syncMcpParameterRows(container);
+        };
+        parameters.forEach((parameter) => appendParameter(parameter));
+
+        return new Promise((resolve) => {
+            const finish = (value) => {
+                if (this.modal?.layer === layer) this.modal = null;
+                document.removeEventListener('keydown', onKeydown, true);
+                layer.remove();
+                resolve(value);
+            };
+            const onKeydown = (event) => {
+                if (isConfirmDialogOpen() || event.key !== 'Escape') return;
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                finish(null);
+            };
+            document.addEventListener('keydown', onKeydown, true);
+            layer.querySelectorAll('[data-python-mcp-cancel]')
+                .forEach((button) => button.addEventListener('click', () => finish(null)));
+            layer.querySelector('[data-python-mcp-add-parameter]')
+                ?.addEventListener('click', () => appendParameter());
+            container.addEventListener('click', (event) => {
+                const remove = event.target.closest('[data-python-mcp-remove-parameter]');
+                if (!remove) return;
+                remove.closest('[data-python-mcp-parameter]')?.remove();
+                empty.hidden = container.children.length > 0;
+                this._syncMcpParameterRows(container);
+            });
+            container.addEventListener('change', () => this._syncMcpParameterRows(container));
+            layer.querySelector('[data-python-mcp-form]')?.addEventListener('submit', (event) => {
+                event.preventDefault();
+                const result = this._collectMcpConfiguration(layer, script.name);
+                const alert = layer.querySelector('[data-python-mcp-error]');
+                if (result.error) {
+                    alert.textContent = result.error;
+                    alert.classList.remove('d-none');
+                    return;
+                }
+                finish(result.value);
+            });
+            this.modal = { layer, close: () => finish(null) };
+            requestAnimationFrame(() => layer.querySelector('[data-python-mcp-field="toolName"]')?.focus());
+        });
+    }
+
+    _renderMcpParameterEditor(parameter = null) {
+        const type = parameter?.type || 'string';
+        const mode = parameter?.argumentMode || 'positional';
+        const hasDefault = parameter?.defaultValue !== null && parameter?.defaultValue !== undefined;
+        const selected = (value, actual) => value === actual ? 'selected' : '';
+        return `
+            <div class="python-mcp-parameter" data-python-mcp-parameter>
+                <div class="python-mcp-parameter-head">
+                    <strong data-python-mcp-parameter-title>Parameter</strong>
+                    <button class="btn btn-sm btn-outline-danger" type="button" data-python-mcp-remove-parameter
+                            aria-label="Remove parameter" title="Remove parameter"><i class="fa-solid fa-trash" aria-hidden="true"></i></button>
+                </div>
+                <div class="python-mcp-parameter-grid">
+                    <div>
+                        <label class="form-label">MCP input name</label>
+                        <input class="form-control" data-python-mcp-param="name" value="${escapeHtml(parameter?.name || '')}" maxlength="64" placeholder="output_path">
+                    </div>
+                    <div>
+                        <label class="form-label">Type</label>
+                        <select class="form-select" data-python-mcp-param="type">
+                            <option value="string" ${selected(type, 'string')}>Text</option>
+                            <option value="integer" ${selected(type, 'integer')}>Integer</option>
+                            <option value="number" ${selected(type, 'number')}>Number</option>
+                            <option value="boolean" ${selected(type, 'boolean')}>True / false</option>
+                        </select>
+                    </div>
+                    <div class="python-mcp-parameter-description">
+                        <label class="form-label">Description</label>
+                        <input class="form-control" data-python-mcp-param="description" value="${escapeHtml(parameter?.description || '')}" maxlength="300" placeholder="What the agent should provide">
+                    </div>
+                    <div>
+                        <label class="form-label">Pass to Python as</label>
+                        <select class="form-select" data-python-mcp-param="argumentMode">
+                            <option value="positional" ${selected(mode, 'positional')}>Positional value</option>
+                            <option value="option" ${selected(mode, 'option')}>Named option</option>
+                        </select>
+                    </div>
+                    <div data-python-mcp-param-flag-wrap ${mode === 'option' ? '' : 'hidden'}>
+                        <label class="form-label">Python flag</label>
+                        <input class="form-control" data-python-mcp-param="flag" value="${escapeHtml(parameter?.flag || '')}" placeholder="--output">
+                    </div>
+                </div>
+                <div class="python-mcp-parameter-checks">
+                    <label><input class="form-check-input" type="checkbox" data-python-mcp-param="required" ${parameter?.required ? 'checked' : ''}> Required</label>
+                    <label><input class="form-check-input" type="checkbox" data-python-mcp-param="defaultEnabled" ${hasDefault ? 'checked' : ''}> Use default</label>
+                    <input class="form-control form-control-sm" data-python-mcp-param="defaultValue"
+                           value="${escapeHtml(hasDefault ? parameter.defaultValue : '')}" placeholder="Default value" ${hasDefault ? '' : 'disabled'}>
+                </div>
+            </div>`;
+    }
+
+    _syncMcpParameterRows(container) {
+        container.querySelectorAll('[data-python-mcp-parameter]').forEach((row, index) => {
+            const name = row.querySelector('[data-python-mcp-param="name"]')?.value.trim();
+            row.querySelector('[data-python-mcp-parameter-title]').textContent = name || `Parameter ${index + 1}`;
+            const option = row.querySelector('[data-python-mcp-param="argumentMode"]')?.value === 'option';
+            row.querySelector('[data-python-mcp-param-flag-wrap]').hidden = !option;
+            const defaultEnabled = row.querySelector('[data-python-mcp-param="defaultEnabled"]')?.checked;
+            row.querySelector('[data-python-mcp-param="defaultValue"]').disabled = !defaultEnabled;
+        });
+    }
+
+    _collectMcpConfiguration(layer, scriptName) {
+        const value = (key) => layer.querySelector(`[data-python-mcp-field="${key}"]`)?.value ?? '';
+        const toolName = value('toolName').trim();
+        const description = value('description').trim();
+        const pin = value('pin');
+        if (!/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/.test(toolName)) {
+            return { error: 'Enter a valid MCP tool name (1-64 letters, numbers, underscores, periods, or hyphens).' };
+        }
+        if (!description) return { error: 'Describe when an agent should use this tool.' };
+        if (!pin) return { error: 'Enter your signing PIN to approve MCP exposure.' };
+
+        const parameters = [];
+        for (const row of layer.querySelectorAll('[data-python-mcp-parameter]')) {
+            const field = (key) => row.querySelector(`[data-python-mcp-param="${key}"]`);
+            const name = field('name')?.value.trim() || '';
+            const parameterDescription = field('description')?.value.trim() || '';
+            const argumentMode = field('argumentMode')?.value || 'positional';
+            const flag = field('flag')?.value.trim() || null;
+            const required = Boolean(field('required')?.checked);
+            const defaultEnabled = Boolean(field('defaultEnabled')?.checked);
+            if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(name)) {
+                return { error: 'Every parameter needs a unique Python-style MCP input name.' };
+            }
+            if (!parameterDescription) return { error: `Describe the '${name}' parameter.` };
+            if (argumentMode === 'option' && !/^--?[A-Za-z0-9][A-Za-z0-9-]*$/.test(flag || '')) {
+                return { error: `The Python flag for '${name}' must look like --output or -o.` };
+            }
+            if (required && defaultEnabled) return { error: `'${name}' cannot be required and have a default.` };
+            parameters.push({
+                name,
+                description: parameterDescription,
+                type: field('type')?.value || 'string',
+                required,
+                defaultValue: defaultEnabled ? field('defaultValue')?.value ?? '' : null,
+                argumentMode,
+                flag: argumentMode === 'option' ? flag : null
+            });
+        }
+        if (new Set(parameters.map((parameter) => parameter.name)).size !== parameters.length) {
+            return { error: 'Parameter names must be unique.' };
+        }
+        return { value: { scriptName, toolName, description, parameters, pin } };
+    }
 
     /** PIN-gated approval of the script's current bytes. Resolves true once signed. */
     async approve(name) {
