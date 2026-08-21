@@ -68,7 +68,7 @@ public static class MintLintAnalyzer
     /// <summary>
     /// Analyzes a path and scores the results in one call: the convenience entry point for
     /// the "where should I look?" scan. Equivalent to <see cref="AnalyzePath"/> followed by
-    /// <see cref="MintLintScorer.Score(IReadOnlyList{FileMetrics}, ScoringProfile?)"/>.
+    /// <see cref="MintLintScorer.Score(IReadOnlyList{FileMetrics}, ScoringProfile?, IScoreCalculator?)"/>.
     /// </summary>
     /// <param name="path">A file or directory path.</param>
     /// <param name="options">Analysis options; <see cref="MintLintOptions.Default"/> when null.</param>
@@ -131,7 +131,7 @@ public static class MintLintAnalyzer
     /// <summary>
     /// Analyzes and scores in-memory source files in one call. Equivalent to
     /// <see cref="AnalyzeSources"/> followed by
-    /// <see cref="MintLintScorer.Score(IReadOnlyList{FileMetrics}, ScoringProfile?)"/>.
+    /// <see cref="MintLintScorer.Score(IReadOnlyList{FileMetrics}, ScoringProfile?, IScoreCalculator?)"/>.
     /// </summary>
     public static ScanResult ScanSources(
         IReadOnlyList<SourceInput> sources,

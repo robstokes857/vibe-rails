@@ -15,13 +15,13 @@ natural one:
 vb.exe — Native AOT, two MCP entry points sharing the same tool classes
 │
 ├── HTTP (dashboard's Kestrel, root backend only)
-│     MapRegisterServices: AddMcpServer().WithHttpTransport().WithTools<Rules/SessionSearch/TokenSaver>()
+│     MapRegisterServices: static WithTools<...>() + dynamic signed-Python list/call handlers
 │     Program.cs:          app.MapMcp("/mcp")
 │     CookieAuthMiddleware in front of /mcp     ← viberails_session + viberails_tab tokens required
 │
 └── stdio (`vb mcp`, McpStdioHost.cs)
       Program.cs branches BEFORE the web host:  if (McpStdioHost.IsRequested(args)) …
-      AddMcpServer().WithStdioServerTransport().WithTools<Rules/SessionSearch/TokenSaver>()
+      AddMcpServer().WithStdioServerTransport() + the same static and dynamic tools
       No web server, no port, no auth           ← inherently scoped to the spawning CLI
 ```
 
@@ -56,8 +56,17 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 | `pause_token_saver` | `TokenSaverTool.PauseTokenSaver` | Turns VibeRails' token compression off for 5 minutes for this terminal tab, so an agent can read elided output verbatim. |
 | `resume_token_saver` | `TokenSaverTool.ResumeTokenSaver` | Restores token compression immediately, ending an active pause early. |
 | `get_token_saver_status` | `TokenSaverTool.GetTokenSaverStatus` | Reports whether compression is active and whether a pause window is open. |
+| `python_script_signing_help` | `PythonScriptTool.PythonScriptSigningHelp` | Explains signing and lists scripts plus explicit MCP exposure. |
+| user-defined | `PythonScriptMcpService` dynamic handler | Runs one user-configured, still-signed Python script with its declared typed inputs mapped to argv. |
 
 > The wire names are what tool callers use. Calling `SearchHistory` (PascalCase) returns "Unknown tool".
+
+Dynamic Python tools are stored in `~/.vibe_rails/python_script_mcp.json`. They are appended to the
+static tool collection through `WithPythonScriptTools()` in both transports. List and call handlers
+read the document per request; a call still goes through `PythonScriptService.RunAsync`, which
+re-checks the signed content hash before launch. Enabling or editing exposure requires the user's
+signing PIN in the dashboard, but neither the PIN nor an approval operation is exposed through MCP.
+See [`../PythonScripts/AGENTS.md`](../PythonScripts/AGENTS.md) for the complete contract.
 
 > **Not currently exposed (security review 2026-07-02):** `run_shell_command` / `get_shell_command_status` /
 > `cancel_shell_command` (`HostShellTools`) and `web_search` / `web_fetch` (`WebResearchTools`) are kept in the
@@ -183,9 +192,10 @@ case; the add step is intentionally not quiet.
 
 - `Tests/Services/Mcp/McpServerHttpTests.cs` — hosts the real `AddMcpServer().WithHttpTransport()
   + MapMcp` wiring on a loopback Kestrel and drives it through `McpClientService` over Streamable
-  HTTP; asserts the exact five-tool list (`validate_vca`, `search_history`, `pause_token_saver`,
-  `resume_token_saver`, `get_token_saver_status`), tool execution, and that the DI-injected
-  `SessionSearchTool` resolves (with a deterministic fake `IUnifiedSearchService`).
+  HTTP; asserts the static tool list plus a dynamic Python tool, tool execution, and that the
+  DI-injected `SessionSearchTool` resolves (with a deterministic fake `IUnifiedSearchService`).
+- `Tests/Services/PythonScriptMcpServiceTests.cs` — pins exposure authorization, persistence,
+  generated schemas, argv mapping, and fail-closed execution after a script changes.
 - `Tests/Services/Mcp/McpStdioHostTests.cs` — pins the `vb mcp` trigger and that
   `McpStdioHost.ConfigureServices` registers the tools (`SessionSearchTool`,
   `TokenSaverTool`) and the BERT read-path. These are service-descriptor assertions only;
@@ -202,4 +212,4 @@ avoid `WithToolsFromAssembly()` (reflection scan) — it is the AOT-unsafe varia
 
 ---
 
-**Last checked**: 2026-08-06T16:53:19Z by opencode (glm-5.2)
+**Last checked**: 2026-08-21 by Codex

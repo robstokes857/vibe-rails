@@ -14,10 +14,10 @@ add a stage 0 scope gate before measurement:
 |---|---|---|
 | 0. Change scope (VibeRails Git scans only) | Build an in-memory source fragment from added (`+`) diff lines. Removed and unchanged lines do not enter grading; removal-only files are skipped. | `GitStagedSnapshotProvider`, `MintLintPreflightStep` |
 | 1. Measure | Raw metrics per function/class/file (cyclomatic, LCOM4, duplication, …) | `MintLintAnalyzer`, `MetricEngine`, `DuplicationAnalyzer`, `TestabilityAnalyzer`, `ImpactAnalyzer` |
-| 2. Normalize | Each raw value → 0–100 *concern* via warn/critical thresholds: 0→warn maps to 0–50, warn→critical maps to 50–100, ≥critical pegs at 100 | `MintLintScorer.Normalize`, thresholds in `ScoringProfile.Thresholds` |
-| 3. Category | Category concern = **worst metric** in the category (worst-signal-wins) | `MintLintScorer.ScoreCategory` |
-| 4. File roll-up | **Breadth-gated**: file concern = the `BreadthRank`-th worst weight-adjusted category, floored at `DepthFloor` × the single worst | `MintLintScorer.RollUp`, knobs in `ScoringProfile` |
-| 5. Rating | <30 Clean · <55 Okay · <75 NeedsWork · ≥75 AtRisk; scan overall = mean of file concerns | `MintLintScorer.RatingFor`, `MintLintScorer.Score(files)` |
+| 2. Normalize | Each raw value → 0–100 *concern* via warn/critical thresholds: 0→warn maps to 0–50, warn→critical maps to 50–100, ≥critical pegs at 100 | `ScoreCalculator.Normalize`, thresholds in `ScoringProfile.Thresholds` |
+| 3. Category | Category concern = **worst metric** in the category (worst-signal-wins) | `ScoreCalculator.ScoreFile` (category loop) |
+| 4. File roll-up | **Breadth-gated**: file concern = the `BreadthRank`-th worst weight-adjusted category, floored at `DepthFloor` × the single worst | `ScoreCalculator.ScoreFile` (roll-up), knobs in `ScoringProfile` |
+| 5. Rating | <30 Clean · <55 Okay · <75 NeedsWork · ≥75 AtRisk; scan overall = mean of file concerns | `ScoreCalculator.RatingFor`, `ScoreCalculator.ScoreScan` |
 
 On top of that, the VibeRails layer (not MintLint itself) computes **priority** =
 `EffectiveConcern × (1 + log10(1 + referencedBy))`. Change-scoped Git scans pass no
@@ -90,14 +90,14 @@ overall mean drops from ~90 to the mid-50s.
 
 ## The knobs, in the order to reach for them
 
-All in `MintLint/Scoring/ScoringProfile.cs` unless noted.
+Knob **values** all live in `MintLint/Scoring/ScoringProfile.cs` unless noted; the **formulas** that consume them are all in `MintLint/Scoring/ScoreCalculator.cs` (`IScoreCalculator`).
 
 1. **`BreadthRank`** (default 4) — how many bad dimensions it takes. Too many files
    flagged → raise to 5. Genuinely rotten files slipping through → lower to 3.
 2. **`DepthFloor`** (default 0.3) — how visible a single catastrophic dimension stays.
    Raise toward 0.5 if "one insane function" files feel under-reported; it only sets a
    floor, so it can never re-inflate multi-dimension scores.
-3. **Rating bands** (`MintLintScorer.RatingFor`: 30/55/75) — shift where the labels
+3. **Rating bands** (`ScoreCalculator.RatingFor`: 30/55/75) — shift where the labels
    land without changing relative ordering.
 4. **`CategoryWeights`** — de-emphasize a whole dimension (e.g. Duplication is already
    0.6 because generated/DTO code trips it).
@@ -126,6 +126,14 @@ and which one is the 4th (or that the depth floor carried). If you touch any kno
   pins the 30.0 depth-floor value.
 
 ## Change log
+
+- **2026-08-20** — Structural refactor, zero numeric change: all grading math (stages 2-5
+  — normalize, worst-metric-wins categories, breadth-gated roll-up, rating bands, scan
+  mean) now lives in ONE class, `Scoring/ScoreCalculator.cs`, behind the new
+  `IScoreCalculator` seam. `MintLintScorer` is now only the measurement-extraction facade
+  (raw-value extraction, declaration attribution, worst-first sorting) and accepts an
+  optional calculator. Thresholds, weights, rounding points, and every pinned fixture
+  number are unchanged. Tune formulas in `ScoreCalculator`, knob values in `ScoringProfile`.
 
 - **2026-07-27** — Changed the VibeRails Git integration's input scope, not MintLint's
   metric or grading formulas. Added a stage-0 Git patch gate so only added lines reach

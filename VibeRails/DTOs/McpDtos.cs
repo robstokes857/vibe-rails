@@ -10,7 +10,9 @@ public record McpToolInfo(
     string Description,
     string? Title = null,
     JsonElement? InputSchema = null,
-    JsonElement? ReturnSchema = null);
+    JsonElement? ReturnSchema = null,
+    string? Category = null,
+    string? SourceName = null);
 
 /// <summary>
 /// Request describing an MCP server to inspect.

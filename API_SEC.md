@@ -1,11 +1,14 @@
 # API authentication coverage
 
-Audit date: 2026-08-20
+Audit date: 2026-08-21
 
-Full production route/authentication reconciliation completed: 2026-08-20. All 158
+Full production route/authentication reconciliation completed: 2026-08-21. All 162
 `/api/v1` method/path surfaces, eight protected non-`/api` API surfaces, and the three
 bootstrap/page/probe mappings match the current working tree. The only middleware bypasses
 remain exact `GET /health`, exact `GET /auth/bootstrap`, and global `OPTIONS` requests.
+
+Python-script MCP inventory reconciled: 2026-08-21 (three authenticated MCP-configuration
+routes and the authenticated, active-root-only interactive-run route added to the inventory).
 
 Python-script and automation-navigation inventory reconciled: 2026-08-18 (12 authenticated
 Python-script routes and three authenticated automation-navigation preference routes added to
@@ -110,7 +113,7 @@ discovery alone is insufficient if the same feature change is allowed to expand 
 set. The production listener set is now frozen above so a new match starts as a finding, not as
 an expectation.
 
-### Repository-wide listener result — 2026-08-20
+### Repository-wide listener result — 2026-08-21
 
 - Approved serving implementation: the main Kestrel host in `VibeRails/Program.cs`.
 - Rejected and removed before merge: `GrokLoopbackBridge`'s `HttpListener`.
@@ -140,8 +143,8 @@ session-scoped browser credential (`viberails_tab`), which the implementation ca
 Authentication is enforced primarily by
 [`CookieAuthMiddleware`](VibeRails/Middleware/CookieAuthMiddleware.cs). The LLM proxy
 routes additionally use
-[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 169 mapped route
-surfaces in this inventory: 158 `/api/v1` method/path mappings, eight non-`/api` protected
+[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 173 mapped route
+surfaces in this inventory: 162 `/api/v1` method/path mappings, eight non-`/api` protected
 API surfaces, and three bootstrap/page/probe routes. Static-file middleware and the
 global `OPTIONS` behavior are noted separately because they are not finite mapped-route
 lists.
@@ -430,13 +433,17 @@ WebSocket handshakes use the session cookie/subprotocol plus the tab-token subpr
 - `GET /api/v1/projects/name`
 - `PUT /api/v1/projects/name`
 
-### Python scripts (12)
+### Python scripts (16)
 
 - `GET /api/v1/python-scripts`
 - `POST /api/v1/python-scripts/pin`
 - `POST /api/v1/python-scripts/approve`
 - `POST /api/v1/python-scripts/revoke`
 - `POST /api/v1/python-scripts/run`
+- `GET /api/v1/python-scripts/mcp`
+- `PUT /api/v1/python-scripts/mcp`
+- `DELETE /api/v1/python-scripts/mcp`
+- `POST /api/v1/python-scripts/run/interactive` — mapped only by an active root-backend process.
 - `GET /api/v1/python-scripts/runs`
 - `GET /api/v1/python-scripts/content`
 - `POST /api/v1/python-scripts/content`

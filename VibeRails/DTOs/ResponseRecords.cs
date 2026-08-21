@@ -408,6 +408,42 @@ namespace VibeRails.DTOs
         string? Name
     );
 
+    // User-approved MCP exposure for one signed script. Parameters describe both the
+    // MCP JSON schema and the argv mapping used when the tool is invoked.
+    public record PythonScriptMcpParameter(
+        string? Name,
+        string? Description,
+        string? Type,
+        bool Required,
+        string? DefaultValue,
+        string? ArgumentMode,
+        string? Flag
+    );
+
+    public record PythonScriptMcpConfiguration(
+        string ScriptName,
+        string ToolName,
+        string Description,
+        List<PythonScriptMcpParameter> Parameters
+    );
+
+    public record PythonScriptMcpConfigurationRequest(
+        string? ScriptName,
+        string? ToolName,
+        string? Description,
+        List<PythonScriptMcpParameter>? Parameters,
+        string? Pin
+    );
+
+    public record PythonScriptMcpListResponse(
+        List<PythonScriptMcpConfiguration> Configurations
+    );
+
+    public record PythonScriptMcpDocument(
+        int Version,
+        List<PythonScriptMcpConfiguration> Configurations
+    );
+
     // Script authoring (create / edit / import / rename / delete). None of these carry a
     // PIN or create an approval. Saves use the raw-byte Version as an optimistic concurrency
     // token; the signing status still comes from the separately approved canonical hash.
@@ -1521,6 +1557,13 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(SetPythonScriptPinRequest))]
     [JsonSerializable(typeof(PythonScriptApprovalRequest))]
     [JsonSerializable(typeof(PythonScriptRunRequest))]
+    [JsonSerializable(typeof(PythonScriptMcpParameter))]
+    [JsonSerializable(typeof(List<PythonScriptMcpParameter>))]
+    [JsonSerializable(typeof(PythonScriptMcpConfiguration))]
+    [JsonSerializable(typeof(List<PythonScriptMcpConfiguration>))]
+    [JsonSerializable(typeof(PythonScriptMcpConfigurationRequest))]
+    [JsonSerializable(typeof(PythonScriptMcpListResponse))]
+    [JsonSerializable(typeof(PythonScriptMcpDocument))]
     [JsonSerializable(typeof(PythonScriptContentResponse))]
     [JsonSerializable(typeof(PythonScriptSaveRequest))]
     [JsonSerializable(typeof(PythonScriptSaveResponse))]

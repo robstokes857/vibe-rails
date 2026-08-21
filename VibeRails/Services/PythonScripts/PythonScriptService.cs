@@ -20,7 +20,15 @@ public interface IPythonScriptService
     Task<PythonScriptListResponse> RevokeAsync(
         PythonScriptApprovalRequest request, CancellationToken cancellationToken = default);
     Task<PythonScriptRunResponse> RunAsync(string? name, CancellationToken cancellationToken = default);
+    Task<PythonScriptRunResponse> RunAsync(
+        string? name,
+        IReadOnlyList<string>? arguments,
+        CancellationToken cancellationToken = default);
     Task<string> ValidateRunnableAsync(string? name, CancellationToken cancellationToken = default);
+    Task<string> AuthorizeMcpExposureAsync(
+        string? name,
+        string? pin,
+        CancellationToken cancellationToken = default);
     PythonScriptRunHistoryResponse GetRunHistory();
     string GetScriptsDirectory();
 
@@ -106,8 +114,9 @@ public sealed class PythonScriptService : IPythonScriptService
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private readonly string _installDirectory;
-    private readonly IPythonRunner? _pythonRunner;
+    private readonly Lazy<IPythonRunner?> _pythonRunner;
     private readonly Func<PythonRunnerOptions, IPythonRunner> _runnerFactory;
+    private readonly IPythonScriptMcpConfigurationStore? _mcpConfigurationStore;
     private readonly SemaphoreSlim _documentLock = new(1, 1);
     private readonly object _historyLock = new();
     private readonly List<PythonScriptRunRecord> _runHistory = [];
@@ -115,11 +124,16 @@ public sealed class PythonScriptService : IPythonScriptService
     public PythonScriptService(
         IPythonRunner? pythonRunner = null,
         string? installDirectory = null,
-        Func<PythonRunnerOptions, IPythonRunner>? runnerFactory = null)
+        Func<PythonRunnerOptions, IPythonRunner>? runnerFactory = null,
+        IPythonScriptMcpConfigurationStore? mcpConfigurationStore = null,
+        Func<IPythonRunner?>? pythonRunnerProvider = null)
     {
-        _pythonRunner = pythonRunner;
+        _pythonRunner = new Lazy<IPythonRunner?>(
+            () => pythonRunner ?? pythonRunnerProvider?.Invoke(),
+            LazyThreadSafetyMode.ExecutionAndPublication);
         _installDirectory = installDirectory ?? PathConstants.GetInstallDirPath();
         _runnerFactory = runnerFactory ?? (options => new PythonRunner(options));
+        _mcpConfigurationStore = mcpConfigurationStore;
     }
 
     public string GetScriptsDirectory() => Path.Combine(_installDirectory, ScriptsSubdirectory);
@@ -286,11 +300,15 @@ public sealed class PythonScriptService : IPythonScriptService
         string? requestedName,
         CancellationToken cancellationToken = default)
     {
-        if (_pythonRunner == null)
-        {
-            throw new PythonScriptValidationException(
-                "Python execution is not available in this process.");
-        }
+        return await RunAsync(requestedName, arguments: null, cancellationToken);
+    }
+
+    public async Task<PythonScriptRunResponse> RunAsync(
+        string? requestedName,
+        IReadOnlyList<string>? arguments,
+        CancellationToken cancellationToken = default)
+    {
+        var baseRunner = GetPythonRunnerOrThrow();
 
         var verified = await ReadVerifiedScriptAsync(requestedName, cancellationToken);
         var name = verified.Name;
@@ -304,7 +322,7 @@ public sealed class PythonScriptService : IPythonScriptService
         {
             await File.WriteAllBytesAsync(verifiedCopy, content, cancellationToken);
 
-            var options = ClonedRunnerOptions();
+            var options = ClonedRunnerOptions(baseRunner);
             options.WorkingDirectory = GetScriptsDirectory();
             options.Timeout = RunTimeout;
             var runner = _runnerFactory(options);
@@ -312,7 +330,15 @@ public sealed class PythonScriptService : IPythonScriptService
             PythonResult result;
             try
             {
-                result = await runner.RunAsync([verifiedCopy], cancellationToken: cancellationToken);
+                var pythonArguments = new List<string>(1 + (arguments?.Count ?? 0))
+                {
+                    verifiedCopy
+                };
+                if (arguments is { Count: > 0 })
+                {
+                    pythonArguments.AddRange(arguments);
+                }
+                result = await runner.RunAsync(pythonArguments, cancellationToken: cancellationToken);
             }
             catch (PythonExecutionException ex)
             {
@@ -358,6 +384,35 @@ public sealed class PythonScriptService : IPythonScriptService
     }
 
     /// <summary>
+    /// Requires explicit user approval before a signed script is exposed as an MCP tool.
+    /// The script must still match its approved hash, and the PIN is checked for every
+    /// enable or configuration edit; it is never persisted in the MCP document.
+    /// </summary>
+    public async Task<string> AuthorizeMcpExposureAsync(
+        string? requestedName,
+        string? pin,
+        CancellationToken cancellationToken = default)
+    {
+        var verified = await ReadVerifiedScriptAsync(requestedName, cancellationToken);
+
+        await _documentLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (VerifyPin(ReadDocument(), pin))
+            {
+                return verified.Name;
+            }
+        }
+        finally
+        {
+            _documentLock.Release();
+        }
+
+        await Task.Delay(TimeSpan.FromMilliseconds(PinFailureDelayMs), cancellationToken);
+        throw new PythonScriptValidationException("Incorrect PIN.");
+    }
+
+    /// <summary>
     /// Runs approved bytes with Python attached to this process's inherited console/PTY. This is
     /// intentionally concrete-service-only: the dashboard reaches it through the narrowly scoped
     /// <c>--run-python-script</c> helper process, never through an API that accepts a command.
@@ -366,11 +421,7 @@ public sealed class PythonScriptService : IPythonScriptService
         string? requestedName,
         CancellationToken cancellationToken = default)
     {
-        if (_pythonRunner == null)
-        {
-            throw new PythonScriptValidationException(
-                "Python execution is not available in this process.");
-        }
+        var baseRunner = GetPythonRunnerOrThrow();
 
         var verified = await ReadVerifiedScriptAsync(requestedName, cancellationToken);
         var verifiedCopy = Path.Combine(
@@ -383,7 +434,7 @@ public sealed class PythonScriptService : IPythonScriptService
         {
             await File.WriteAllBytesAsync(verifiedCopy, verified.Content, cancellationToken);
 
-            var options = ClonedRunnerOptions();
+            var options = ClonedRunnerOptions(baseRunner);
             var startInfo = new ProcessStartInfo
             {
                 FileName = options.PythonExecutable,
@@ -688,6 +739,18 @@ public sealed class PythonScriptService : IPythonScriptService
         }
 
         Log.Information("[PythonScripts] Renamed script {Name} to {NewName}", canonicalName, newName);
+        if (_mcpConfigurationStore is not null)
+        {
+            try
+            {
+                await _mcpConfigurationStore.RenameAsync(canonicalName, newName, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "[PythonScripts] Could not move MCP configuration from {Name} to {NewName}",
+                    canonicalName, newName);
+            }
+        }
         return await GetStatusAsync(CancellationToken.None);
     }
 
@@ -734,6 +797,17 @@ public sealed class PythonScriptService : IPythonScriptService
         }
 
         Log.Information("[PythonScripts] Deleted script {Name}", canonicalName);
+        if (_mcpConfigurationStore is not null)
+        {
+            try
+            {
+                await _mcpConfigurationStore.DeleteAsync(canonicalName, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "[PythonScripts] Could not remove MCP configuration for {Name}", canonicalName);
+            }
+        }
         return await GetStatusAsync(CancellationToken.None);
     }
 
@@ -793,9 +867,29 @@ public sealed class PythonScriptService : IPythonScriptService
     /// A fresh options object per run so the per-run WorkingDirectory/Timeout never mutate
     /// the injected runner's shared configuration.
     /// </summary>
-    private PythonRunnerOptions ClonedRunnerOptions()
+    private IPythonRunner GetPythonRunnerOrThrow()
     {
-        var source = _pythonRunner!.Options;
+        try
+        {
+            return _pythonRunner.Value
+                ?? throw new PythonScriptValidationException(
+                    "Python execution is not available in this process.");
+        }
+        catch (PythonScriptValidationException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "[PythonScripts] Python interpreter discovery failed");
+            throw new PythonScriptValidationException(
+                "Python could not be started. Make sure a Python interpreter is installed and on your PATH.");
+        }
+    }
+
+    private static PythonRunnerOptions ClonedRunnerOptions(IPythonRunner pythonRunner)
+    {
+        var source = pythonRunner.Options;
         var clone = new PythonRunnerOptions
         {
             PythonExecutable = source.PythonExecutable,

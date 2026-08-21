@@ -11,7 +11,7 @@ const webviewPanelPath = path.resolve('vscode-viberails/src/webview-panel.ts');
 const stylePath = path.resolve('VibeRails/wwwroot/style.css');
 const wwwrootPath = path.resolve('VibeRails/wwwroot');
 
-const { PythonScriptsController, formatPythonRunOutput, PYTHON_SCRIPT_STATUS_META } =
+const { PythonScriptsController, defaultPythonMcpToolName, formatPythonRunOutput, PYTHON_SCRIPT_STATUS_META } =
     await import(pathToFileURL(modulePath).href);
 
 function createApp() {
@@ -280,8 +280,47 @@ test('The shared flows fetch the list themselves when nothing is mounted', async
     assert.equal(app.calls[0].url, '/api/v1/python-scripts');
     // Cached afterwards: a second call is free.
     await controller.ensureState();
-    assert.equal(app.calls.length, 1);
+    assert.equal(app.calls.length, 2);
+    assert.equal(app.calls[1].url, '/api/v1/python-scripts/mcp');
     assert.equal(controller.scriptByName('nightly.py').path, '/scripts/nightly.py');
+});
+
+test('A signed script has an MCP switch and configured tools can be edited separately', () => {
+    const controller = controllerWith([SCRIPT]);
+    assert.equal(defaultPythonMcpToolName('Nightly Report.py'), 'python_nightly_report');
+
+    let html = controller._renderRow(SCRIPT);
+    assert.match(html, /role="switch"[\s\S]*?aria-checked="false"[\s\S]*?data-python-scripts-action="mcp-toggle"/);
+    assert.doesNotMatch(html, /data-python-scripts-action="mcp-configure"/);
+
+    controller.mcpConfigurations = [{
+        scriptName: 'nightly.py',
+        toolName: 'python_nightly',
+        description: 'Run nightly.',
+        parameters: []
+    }];
+    html = controller._renderRow(SCRIPT);
+    assert.match(html, /role="switch"[\s\S]*?aria-checked="true"/);
+    assert.match(html, /data-python-scripts-action="mcp-configure"[\s\S]*?Edit MCP tool/);
+});
+
+test('MCP parameter editor captures schema fields and argv mapping fields', () => {
+    const controller = controllerWith([SCRIPT]);
+    const html = controller._renderMcpParameterEditor({
+        name: 'output_path',
+        description: 'Where to write the report.',
+        type: 'string',
+        required: true,
+        defaultValue: null,
+        argumentMode: 'option',
+        flag: '--output'
+    });
+
+    assert.match(html, /data-python-mcp-param="name" value="output_path"/);
+    assert.match(html, /data-python-mcp-param="description" value="Where to write the report\."/);
+    assert.match(html, /value="option" selected/);
+    assert.match(html, /data-python-mcp-param="flag" value="--output"/);
+    assert.match(html, /data-python-mcp-param="required" checked/);
 });
 
 test('Suggested names are sanitised, extended to .py, and made unique', () => {

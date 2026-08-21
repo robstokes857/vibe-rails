@@ -4,6 +4,7 @@ using System.Net;
 using System.Text.Json;
 using VibeRails.DTOs;
 using VibeRails.Services.Mcp;
+using VibeRails.Services.PythonScripts;
 
 namespace VibeRails.Routes;
 
@@ -33,13 +34,29 @@ public static class McpRoutes
         }).WithName("GetMcpStatus");
 
         // Lists the tools the in-process MCP server exposes.
-        app.MapGet("/api/v1/mcp/tools", async (HttpContext ctx, CancellationToken cancellationToken) =>
+        app.MapGet("/api/v1/mcp/tools", async (
+            HttpContext ctx,
+            IPythonScriptMcpService pythonScriptMcpService,
+            CancellationToken cancellationToken) =>
         {
             try
             {
                 await using var client = await ConnectAsync(ctx, null, null, cancellationToken);
                 var tools = await client.GetAvailableToolsAsync(cancellationToken);
-                var toolInfos = tools.Select(ToToolInfo).ToList();
+                var pythonToolSources = new Dictionary<string, string>(StringComparer.Ordinal);
+                foreach (var pythonTool in await pythonScriptMcpService.ListToolsAsync(cancellationToken))
+                {
+                    var sourceName = pythonTool.Meta?["scriptName"]?.GetValue<string>();
+                    if (!string.IsNullOrWhiteSpace(sourceName))
+                    {
+                        pythonToolSources.TryAdd(pythonTool.Name, sourceName);
+                    }
+                }
+                var toolInfos = tools.Select(tool =>
+                {
+                    pythonToolSources.TryGetValue(tool.Name, out var sourceName);
+                    return ToToolInfo(tool, sourceName);
+                }).ToList();
                 return Results.Ok(toolInfos);
             }
             catch (Exception ex)
@@ -64,7 +81,7 @@ public static class McpRoutes
                     ServerAvailable: true,
                     Endpoint: endpoint.ToString(),
                     Message: "Connected",
-                    Tools: tools.Select(ToToolInfo).ToList()));
+                    Tools: tools.Select(tool => ToToolInfo(tool)).ToList()));
             }
             catch (Exception ex)
             {
@@ -169,14 +186,18 @@ public static class McpRoutes
         return headers;
     }
 
-    private static McpToolInfo ToToolInfo(McpClientTool tool)
+    private static McpToolInfo ToToolInfo(
+        McpClientTool tool,
+        string? pythonScriptName = null)
     {
         return new McpToolInfo(
             Name: tool.Name,
             Description: tool.Description ?? "",
             Title: tool.Title,
             InputSchema: CloneIfDefined(tool.JsonSchema),
-            ReturnSchema: CloneIfDefined(tool.ReturnJsonSchema));
+            ReturnSchema: CloneIfDefined(tool.ReturnJsonSchema),
+            Category: pythonScriptName is null ? "built-in" : "python-script",
+            SourceName: pythonScriptName);
     }
 
     private static JsonElement? CloneIfDefined(JsonElement element)
