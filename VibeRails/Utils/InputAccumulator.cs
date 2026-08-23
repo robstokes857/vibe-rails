@@ -25,6 +25,7 @@ public sealed class InputAccumulator : IAsyncDisposable, IDisposable
     private readonly StringBuilder _lineBuffer = new();
     private readonly StringBuilder _csiParams = new();
     private readonly Func<string, Task> _onInputComplete;
+    private readonly bool _lineFeedInsertsNewline;
     private readonly object _lock = new();
     private readonly Channel<string> _completedLines = Channel.CreateUnbounded<string>(
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
@@ -33,11 +34,15 @@ public sealed class InputAccumulator : IAsyncDisposable, IDisposable
     private EscapeParseState _escapeState = EscapeParseState.None;
     private bool _escapeStringSawEsc;
     private bool _inBracketedPaste;
+    private bool _coalesceLineFeedAfterCarriageReturn;
     private bool _disposed;
 
-    public InputAccumulator(Func<string, Task> onInputComplete)
+    public InputAccumulator(
+        Func<string, Task> onInputComplete,
+        bool lineFeedInsertsNewline = false)
     {
         _onInputComplete = onInputComplete ?? throw new ArgumentNullException(nameof(onInputComplete));
+        _lineFeedInsertsNewline = lineFeedInsertsNewline;
         _worker = Task.Run(ProcessCompletedLinesAsync);
     }
 
@@ -57,6 +62,18 @@ public sealed class InputAccumulator : IAsyncDisposable, IDisposable
 
             foreach (var c in input)
             {
+                // Codex submit is CR while its modified-Enter/newline action is LF. If a
+                // transport gives us a conventional CRLF submit, consume the LF as part of
+                // that same submit instead of leaving it at the start of the next prompt.
+                // This state intentionally survives Append calls because WebSocket/PTY
+                // chunking may split the two bytes.
+                if (_coalesceLineFeedAfterCarriageReturn)
+                {
+                    _coalesceLineFeedAfterCarriageReturn = false;
+                    if (c == '\n')
+                        continue;
+                }
+
                 // First consume any active escape sequence state. ConsumeEscapeSequenceChar
                 // may flip _inBracketedPaste on ESC[200~ / ESC[201~ and enqueue a completed
                 // line when a paste block closes.
@@ -71,6 +88,9 @@ public sealed class InputAccumulator : IAsyncDisposable, IDisposable
 
                 if (c == '\r' || c == '\n')
                 {
+                    if (c == '\r' && _lineFeedInsertsNewline)
+                        _coalesceLineFeedAfterCarriageReturn = true;
+
                     if (_inBracketedPaste)
                     {
                         // Inside a paste — preserve the newline as a literal character so the
@@ -87,6 +107,18 @@ public sealed class InputAccumulator : IAsyncDisposable, IDisposable
                             if (!string.IsNullOrEmpty(forced))
                                 completed.Add(forced);
                         }
+                        continue;
+                    }
+
+                    // VibeRails represents Codex's modified-Enter action as LF for
+                    // input history, while CR remains plain Enter / submit. On Windows,
+                    // TerminalIoRouter rewrites the PTY-bound LF to a real ConPTY
+                    // Shift+Enter record. Buffer the logical LF here so one multiline
+                    // prompt remains one history row. Other CLIs retain the established
+                    // behavior where either byte completes a line.
+                    if (c == '\n' && _lineFeedInsertsNewline)
+                    {
+                        TryAppend('\n');
                         continue;
                     }
 
@@ -147,6 +179,7 @@ public sealed class InputAccumulator : IAsyncDisposable, IDisposable
             _escapeState = EscapeParseState.None;
             _escapeStringSawEsc = false;
             _inBracketedPaste = false;
+            _coalesceLineFeedAfterCarriageReturn = false;
         }
     }
 
@@ -237,9 +270,10 @@ public sealed class InputAccumulator : IAsyncDisposable, IDisposable
                 {
                     // Bracketed-paste markers: ESC[200~ opens, ESC[201~ closes.
                     // Paste content is kept in the same line buffer; closing the paste does NOT
-                    // flush. Callers that submit a paste standalone will follow it with \r or \n,
-                    // which flushes normally. Callers that paste inline (autocomplete) keep typing,
-                    // and the subsequent Enter still flushes the combined buffer as one line.
+                    // flush. Callers that submit a paste standalone follow it with the session's
+                    // submit byte (normally CR; LF also completes default-mode sessions). Callers
+                    // that paste inline (autocomplete) keep typing, and the subsequent Enter still
+                    // flushes the combined buffer as one line.
                     if (c == '~')
                     {
                         var parameters = _csiParams.ToString();

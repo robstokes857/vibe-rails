@@ -63,10 +63,16 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         outputWriter.Initialize(sessionId, initialCols, initialRows);
         lock (s_stateLock)
         {
-            s_inputAccumulators[sessionId] = new InputAccumulator(async inputText =>
-            {
-                await _repository.RecordUserInputAsync(sessionId, inputText, _gitService, ct);
-            });
+            s_inputAccumulators[sessionId] = new InputAccumulator(
+                async inputText =>
+                {
+                    await _repository.RecordUserInputAsync(sessionId, inputText, _gitService, ct);
+                },
+                // VibeRails records Codex modified-Enter as LF and plain Enter as CR.
+                // Keep LF buffered until CR so a multiline prompt is one history row.
+                // This is session-specific; every other TUI retains its existing
+                // input-recording semantics.
+                lineFeedInsertsNewline: LlmParser.ParseValue(cli) == LLM.Codex);
             s_outputWriters[sessionId] = outputWriter;
             s_sessionActivity[sessionId] = new SessionActivityState(now, cli);
         }
@@ -142,22 +148,27 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         var __lagSw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
+        InputAccumulator? accumulator;
+        string? cli;
+        lock (s_stateLock)
+        {
+            s_inputAccumulators.TryGetValue(sessionId, out accumulator);
+            cli = s_sessionActivity.TryGetValue(sessionId, out var activity)
+                ? activity.Cli
+                : null;
+        }
+
         var now = DateTimeOffset.UtcNow;
         _ioObserverService.Publish(new TerminalIoEvent(
             sessionId,
             TerminalIoDirection.Input,
             source,
             input,
-            now));
+            now,
+            cli));
         var busyInputEvent = MarkInputActivity(sessionId, now);
         if (busyInputEvent.HasValue)
             _ioObserverService.PublishSessionBusy(busyInputEvent.Value);
-
-        InputAccumulator? accumulator;
-        lock (s_stateLock)
-        {
-            s_inputAccumulators.TryGetValue(sessionId, out accumulator);
-        }
 
         if (accumulator != null)
             accumulator.Append(input);

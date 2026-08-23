@@ -214,7 +214,11 @@ export class TerminalTab {
                 && !event.metaKey
                 && (event.shiftKey || event.ctrlKey);
 
-            if (!isModifiedEnter || !this.vibeTerminal?.isBracketedPasteModeEnabled()) {
+            const isCodex = (this.state.cli || '').toLowerCase() === 'codex';
+            const canInsertNewline = isCodex
+                || this.vibeTerminal?.isBracketedPasteModeEnabled();
+
+            if (!isModifiedEnter || !canInsertNewline) {
                 return true;
             }
 
@@ -223,17 +227,26 @@ export class TerminalTab {
             }
 
             // xterm invokes custom handlers for both keydown and keypress.
-            // Paste once on keydown, then suppress the follow-up keypress so
+            // Inject once on keydown, then suppress the follow-up keypress so
             // Enter does not still submit the prompt.
             event.preventDefault();
             event.stopPropagation();
 
-            if (event.type === 'keydown'
-                && this.socket
-                && this.socket.readyState === WebSocket.OPEN) {
-                const payload = this.vibeTerminal?.createBracketedPastePayload('\n');
-                if (payload) {
-                    this.socket.send(payload);
+            if (event.type === 'keydown') {
+                if (isCodex) {
+                    // Codex treats a one-character bracketed paste as pasted whitespace,
+                    // not as its insert-newline action. Feed one logical LF through
+                    // xterm's public input/onData path. On Windows, TerminalIoRouter
+                    // rewrites that token to ConPTY win32-input Shift+Enter; history keeps
+                    // the LF. Plain Enter remains CR and therefore still submits.
+                    this.vibeTerminal?.input('\n', true);
+                } else if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                    // Other TUIs (including OpenCode) already handle a bracketed LF as
+                    // multiline input. Preserve that established path and its ?2004 gate.
+                    const payload = this.vibeTerminal?.createBracketedPastePayload('\n');
+                    if (payload) {
+                        this.socket.send(payload);
+                    }
                 }
             }
 

@@ -197,6 +197,7 @@ public class TerminalRunner
                     title: sessionTitle,
                     ct: ct);
             }
+            terminal.EncodeBareLineFeedAsWin32ShiftEnter = CodexWindowsInputRewriter.ShouldRewrite(llm);
             if (preparedSession.OpenCodeProxyActive)
             {
                 var lease = _llmProxySessionState.ActivateOpenCodeProxy();
@@ -840,7 +841,11 @@ public class TerminalRunner
             // Console input loop (blocks until cancelled or PTY exits)
             try
             {
-                await ConsoleInputLoopAsync(terminal, sessionId, ct);
+                await ConsoleInputLoopAsync(
+                    terminal,
+                    sessionId,
+                    modifiedEnterAsLineFeed: llm == LLM.Codex,
+                    ct);
             }
             catch (OperationCanceledException) { }
             catch (Exception ex)
@@ -927,7 +932,11 @@ public class TerminalRunner
 
             try
             {
-                await ConsoleInputLoopAsync(terminal, sessionId, ct);
+                await ConsoleInputLoopAsync(
+                    terminal,
+                    sessionId,
+                    modifiedEnterAsLineFeed: llm == LLM.Codex,
+                    ct);
             }
             catch (OperationCanceledException) { }
             catch (Exception ex)
@@ -975,7 +984,11 @@ public class TerminalRunner
     /// <summary>
     /// Console.ReadKey → PTY write loop for CLI path.
     /// </summary>
-    private async Task ConsoleInputLoopAsync(Terminal terminal, string sessionId, CancellationToken ct)
+    private async Task ConsoleInputLoopAsync(
+        Terminal terminal,
+        string sessionId,
+        bool modifiedEnterAsLineFeed,
+        CancellationToken ct)
     {
         // Seeded from the geometry the PTY was actually created at, not from null. An unseeded
         // first comparison always differs, so every native session opened with a resize it did not
@@ -1037,7 +1050,7 @@ public class TerminalRunner
             }
 
             var key = Console.ReadKey(intercept: true);
-            var input = KeyTranslator.TranslateKey(key);
+            var input = KeyTranslator.TranslateKey(key, modifiedEnterAsLineFeed);
             if (!string.IsNullOrEmpty(input))
             {
                 await TerminalIoRouter.RouteInputAsync(

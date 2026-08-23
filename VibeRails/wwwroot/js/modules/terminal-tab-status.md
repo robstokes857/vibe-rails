@@ -93,8 +93,12 @@ submit has reached the PTY.
 ### `onTerminalData(data)`
 
 1. A newline-only submit (`'\r'`, `'\n'`, or `'\r\n'`) while in
-   `CONNECTED` / `READY` / `WAITING`
-   → `THINKING`.
+   `CONNECTED` / `READY` / `WAITING` → `THINKING`, except that Codex uses a
+   bare `'\n'` as VibeRails' logical modified-Enter/insert-newline token. That
+   Codex-only LF follows the composing path instead: it leaves the resting
+   state unchanged (or moves `WAITING` → `CONNECTED`) and sets
+   `_userComposing = true`. Codex `\r` / `\r\n`, and every non-Codex LF,
+   retain the submit behavior.
 2. `data === '\x1b'` (bare Escape) while in `THINKING` → `CONNECTED`
    (treated as abort).
 3. A single printable byte (0x20–0x7E) while in `WAITING` → `CONNECTED`.
@@ -104,11 +108,11 @@ submit has reached the PTY.
    wrappers, and clipboard pastes all arrive as multi-byte chunks and are
    excluded — re-introducing the false positives that retired the ACTIVE
    state would defeat the purpose.
-4. A single printable byte (0x20–0x7E) while in `CONNECTED` / `READY` sets
-   `_userComposing = true` (state itself is unchanged — typing at a resting
-   tab is still inert). This is the *only* effect typing has outside `WAITING`;
-   `THINKING` deliberately ignores it (type-ahead while the agent works must
-   not arm the guard).
+4. A single printable byte (0x20–0x7E), or the Codex-only composer LF, while
+   in `CONNECTED` / `READY` sets `_userComposing = true` (state itself is
+   unchanged — typing at a resting tab is still inert). This is the *only*
+   effect composing has outside `WAITING`; `THINKING` deliberately ignores it
+   (type-ahead while the agent works must not arm the guard).
 5. Everything else is ignored. Typed characters during `THINKING`, arrow
    keys, function keys, and xterm auto-responses to server queries all flow
    through without changing the state.
@@ -126,7 +130,9 @@ published without raw input:
 4. Other kinds are ignored. The backend deliberately publishes only submit
    events today so ordinary typing does not become app-event WebSocket traffic;
    CSI sequences, bracketed-paste payloads, DSR auto-replies, and raw text are
-   never published.
+   never published. `SessionStateEventObserver` has the same Codex exception as
+   the local path: a Codex bare LF is not published as `submit`, while Codex CR /
+   CRLF and non-Codex LF still are.
 
 On that same submit boundary, `WaitingForUserInputObserver` clears Codex's
 pre-submit rolling output window. Without that reset, idle repaint frames from

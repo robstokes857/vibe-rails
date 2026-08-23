@@ -1,8 +1,8 @@
 # API authentication coverage
 
-Audit date: 2026-08-21
+Audit date: 2026-08-22
 
-Full production route/authentication reconciliation completed: 2026-08-21. All 162
+Full production route/authentication reconciliation completed: 2026-08-22. All 162
 `/api/v1` method/path surfaces, eight protected non-`/api` API surfaces, and the three
 bootstrap/page/probe mappings match the current working tree. The only middleware bypasses
 remain exact `GET /health`, exact `GET /auth/bootstrap`, and global `OPTIONS` requests.
@@ -113,7 +113,7 @@ discovery alone is insufficient if the same feature change is allowed to expand 
 set. The production listener set is now frozen above so a new match starts as a finding, not as
 an expectation.
 
-### Repository-wide listener result — 2026-08-21
+### Repository-wide listener result — 2026-08-22
 
 - Approved serving implementation: the main Kestrel host in `VibeRails/Program.cs`.
 - Rejected and removed before merge: `GrokLoopbackBridge`'s `HttpListener`.

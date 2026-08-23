@@ -6,8 +6,21 @@ namespace VibeRails.Services.Terminal;
 /// </summary>
 public static class KeyTranslator
 {
-    public static string TranslateKey(ConsoleKeyInfo key)
+    public static string TranslateKey(
+        ConsoleKeyInfo key,
+        bool modifiedEnterAsLineFeed = false)
     {
+        if (modifiedEnterAsLineFeed
+            && key.Key == ConsoleKey.Enter
+            && (key.Modifiers & (ConsoleModifiers.Shift | ConsoleModifiers.Control)) != 0)
+        {
+            // Preserve modified Enter as a distinct logical token for Codex.
+            // TerminalIoRouter records this LF in prompt history, then on Windows
+            // rewrites it to a ConPTY win32-input Shift+Enter record. CR remains
+            // plain Enter/submit. The caller enables this only for Codex sessions.
+            return "\n";
+        }
+
         return key.Key switch
         {
             ConsoleKey.UpArrow => "\x1B[A",

@@ -29,7 +29,12 @@ public sealed class LlmParser : ILlmParser
 
     public IReadOnlyList<LLM> All => AllValues;
 
-    public LLM Parse(string? value)
+    public LLM Parse(string? value) => ParseValue(value);
+
+    // Static counterpart of ToWireName below, for callers without an ILlmParser injected.
+    // Comparing the parsed enum (== LLM.Codex) is the one sanctioned way to test a wire
+    // string for a specific CLI — hand-rolled string compares drift when wire names change.
+    public static LLM ParseValue(string? value)
     {
         var trimmed = value?.Trim();
         if (string.IsNullOrEmpty(trimmed))
