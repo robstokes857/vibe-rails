@@ -450,6 +450,18 @@ export class VibeTerminal {
         };
     }
 
+    input(data, wasUserInput = true) {
+        if (!this._terminal || typeof data !== 'string' || data.length === 0) {
+            return false;
+        }
+
+        // Public xterm.js API: feed programmatic user input through the same
+        // onData pipeline as physical keyboard input. TerminalTab owns the one
+        // onData subscription that forwards bytes to the PTY/WebSocket.
+        this._terminal.input(data, wasUserInput);
+        return true;
+    }
+
     paste(text) {
         if (!this._terminal || typeof text !== 'string' || text.length === 0) {
             return;

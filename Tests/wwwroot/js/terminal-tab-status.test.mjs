@@ -328,6 +328,43 @@ test('LF and CRLF submit variants leave WAITING on the first Enter', () => {
     }
 });
 
+test('Codex LF stays in the composer and does not enter THINKING', () => {
+    const { controller } = makeController({ cliKey: 'codex', isActiveTab: () => true });
+    controller.onSocketOpen();
+
+    controller.onTerminalData('\n');
+
+    assert.equal(controller._status, TAB_STATUS.CONNECTED);
+    assert.equal(controller._userComposing, true,
+        'a Codex composer newline must arm the composing guard');
+    assert.equal(controller._awaitingFirstIdle, false,
+        'a composer newline must not arm turn-completion tracking');
+});
+
+test('Codex CR and CRLF remain submit boundaries', () => {
+    for (const submit of ['\r', '\r\n']) {
+        const { controller } = makeController({ cliKey: 'codex', isActiveTab: () => true });
+        controller.onSocketOpen();
+
+        controller.onTerminalData(submit);
+
+        assert.equal(
+            controller._status,
+            TAB_STATUS.THINKING,
+            `${JSON.stringify(submit)} must submit the Codex composer`,
+        );
+    }
+});
+
+test('non-Codex LF keeps the established submit behavior', () => {
+    const { controller } = makeController({ cliKey: 'opencode', isActiveTab: () => true });
+    controller.onSocketOpen();
+
+    controller.onTerminalData('\n');
+
+    assert.equal(controller._status, TAB_STATUS.THINKING);
+});
+
 test('backend submit input from WAITING → THINKING when local xterm did not send onData', () => {
     // Session f8b906d9: a Codex tab was in WAITING, the user pressed Enter
     // through a path that did not update this tab's local onData-driven status,

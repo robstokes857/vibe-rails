@@ -22,7 +22,7 @@ public sealed class SessionStateEventObserver : ITerminalIoObserver
         if (ioEvent.Direction != TerminalIoDirection.Input)
             return ValueTask.CompletedTask;
 
-        var kind = ClassifyUserInput(ioEvent.Text);
+        var kind = ClassifyUserInput(ioEvent.Text, ioEvent.Cli);
         if (kind is null)
             return ValueTask.CompletedTask;
 
@@ -37,9 +37,12 @@ public sealed class SessionStateEventObserver : ITerminalIoObserver
         return ValueTask.CompletedTask;
     }
 
-    private static string? ClassifyUserInput(string input)
+    private static string? ClassifyUserInput(string input, string? cli)
     {
-        if (input is "\r" or "\n" or "\r\n")
+        if (input is "\r" or "\r\n")
+            return "submit";
+
+        if (input == "\n" && !string.Equals(cli, "Codex", StringComparison.OrdinalIgnoreCase))
             return "submit";
 
         return null;

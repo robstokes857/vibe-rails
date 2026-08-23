@@ -52,6 +52,90 @@ public class InputAccumulatorTests
     }
 
     [Fact]
+    public async Task Append_LineFeedInsertMode_BuffersMultilinePromptUntilCarriageReturn()
+    {
+        var capture = new CaptureCallback();
+        await using var acc = new InputAccumulator(
+            capture.AsCallback,
+            lineFeedInsertsNewline: true);
+
+        acc.Append("line one\nline two");
+
+        Assert.Equal("line one\nline two", acc.CurrentBuffer);
+        Assert.Empty(await DrainAsync(acc, capture, expected: 0));
+
+        acc.Append("\r");
+
+        var lines = await DrainAsync(acc, capture, expected: 1);
+        Assert.Single(lines);
+        Assert.Equal("line one\nline two", lines[0]);
+    }
+
+    [Fact]
+    public async Task Append_LineFeedInsertMode_CoalescesCrLfSubmitInOneAppend()
+    {
+        var capture = new CaptureCallback();
+        await using var acc = new InputAccumulator(
+            capture.AsCallback,
+            lineFeedInsertsNewline: true);
+
+        acc.Append("foo\r\n");
+
+        var lines = await DrainAsync(acc, capture, expected: 1);
+        Assert.Equal(["foo"], lines);
+        Assert.Empty(acc.CurrentBuffer);
+    }
+
+    [Fact]
+    public async Task Append_LineFeedInsertMode_CoalescesCrLfSubmitAcrossAppends()
+    {
+        var capture = new CaptureCallback();
+        await using var acc = new InputAccumulator(
+            capture.AsCallback,
+            lineFeedInsertsNewline: true);
+
+        acc.Append("foo\r");
+        acc.Append("\n");
+
+        var lines = await DrainAsync(acc, capture, expected: 1);
+        Assert.Equal(["foo"], lines);
+        Assert.Empty(acc.CurrentBuffer);
+    }
+
+    [Fact]
+    public async Task Append_LineFeedInsertMode_NonLfClearsPendingCrLfCoalescing()
+    {
+        var capture = new CaptureCallback();
+        await using var acc = new InputAccumulator(
+            capture.AsCallback,
+            lineFeedInsertsNewline: true);
+
+        acc.Append("first\rsecond");
+        acc.Append("\nthird\r");
+
+        var lines = await DrainAsync(acc, capture, expected: 2);
+        Assert.Equal(["first", "second\nthird"], lines);
+        Assert.Empty(acc.CurrentBuffer);
+    }
+
+    [Fact]
+    public async Task Clear_LineFeedInsertMode_ClearsPendingCrLfCoalescing()
+    {
+        var capture = new CaptureCallback();
+        await using var acc = new InputAccumulator(
+            capture.AsCallback,
+            lineFeedInsertsNewline: true);
+
+        acc.Append("\r");
+        acc.Clear();
+        acc.Append("\nnext\r");
+
+        var lines = await DrainAsync(acc, capture, expected: 1);
+        Assert.Equal(["\nnext"], lines);
+        Assert.Empty(acc.CurrentBuffer);
+    }
+
+    [Fact]
     public async Task Append_BracketedPaste_BuffersEmbeddedNewlines_AsSingleBlock()
     {
         var capture = new CaptureCallback();

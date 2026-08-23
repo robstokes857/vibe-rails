@@ -49,6 +49,40 @@ public sealed class SessionStateEventObserverTests
     }
 
     [Theory]
+    [InlineData("Codex", "\n", false)]
+    [InlineData("Codex", "\r", true)]
+    [InlineData("Codex", "\r\n", true)]
+    [InlineData("OpenCode", "\n", true)]
+    public async Task InputSubmit_UsesCliSpecificLineFeedSemantics(
+        string cli,
+        string input,
+        bool shouldPublish)
+    {
+        var bus = new AppEventBus();
+        var events = new List<AppEvent>();
+        using var sub = bus.Subscribe(events.Add);
+        var observer = new SessionStateEventObserver(bus);
+
+        await observer.OnTerminalIoAsync(new TerminalIoEvent(
+            "session-1",
+            TerminalIoDirection.Input,
+            TerminalIoSource.LocalWebUi,
+            input,
+            DateTimeOffset.UtcNow,
+            cli), TestContext.Current.CancellationToken);
+
+        if (!shouldPublish)
+        {
+            Assert.Empty(events);
+            return;
+        }
+
+        var appEvent = Assert.Single(events);
+        Assert.Equal("session_input", appEvent.Type);
+        Assert.Equal("submit", appEvent.Payload.GetProperty("kind").GetString());
+    }
+
+    [Theory]
     [InlineData("\x1b[B")]
     [InlineData("\x1b[24;80R")]
     [InlineData("\x1b[200~pasted\x1b[201~")]

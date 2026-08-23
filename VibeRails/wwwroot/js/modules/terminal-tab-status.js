@@ -216,9 +216,13 @@ export class TabStatusController {
 
     onTerminalData(data) {
         // xterm normally emits CR for Enter, but attached/remote input paths
-        // can surface LF or CRLF. Treat all newline-only variants as the same
-        // submit boundary so WAITING clears on the first Enter everywhere.
-        const isSubmit = data === '\r' || data === '\n' || data === '\r\n';
+        // can surface LF or CRLF. Codex is the one exception: its composer uses
+        // a bare LF for insert-newline, while CR and CRLF remain submit bytes.
+        // Every other CLI keeps the established LF-or-CR submit behavior.
+        const cliKey = (this._options.getCliKey?.() || '').toLowerCase();
+        const isCodexComposerLineFeed = cliKey === 'codex' && data === '\n';
+        const isSubmit = data === '\r' || data === '\r\n' ||
+            (data === '\n' && !isCodexComposerLineFeed);
         if (isSubmit &&
             (this._status === TAB_STATUS.CONNECTED ||
              this._status === TAB_STATUS.READY ||
@@ -230,9 +234,10 @@ export class TabStatusController {
             this._transitionTo(TAB_STATUS.CONNECTED);
             return;
         }
-        // Recognise a single printable byte (0x20–0x7E) as the user typing a
-        // character. Narrowly scoped to avoid re-introducing the ACTIVE-state
-        // false positives that motivated its retirement:
+        // Recognise a single printable byte (0x20–0x7E), plus the Codex-only
+        // composer LF above, as the user composing input. Keep the printable
+        // test narrowly scoped to avoid re-introducing the ACTIVE-state false
+        // positives that motivated its retirement:
         //   - CSI sequences (arrow keys "\x1b[B", function keys, focus
         //     reports "\x1b[I/O", DSR auto-replies "\x1b[24;80R") have
         //     length > 1 and start with ESC — excluded.
@@ -248,12 +253,13 @@ export class TabStatusController {
         // responses, which is exactly the ACTIVE-state failure mode this avoids.
         const code = data.length === 1 ? data.charCodeAt(0) : -1;
         const isPrintableKeystroke = code >= 0x20 && code <= 0x7e;
-        if (!isPrintableKeystroke) {
+        if (!isPrintableKeystroke && !isCodexComposerLineFeed) {
             return;
         }
 
-        // In a resting state, a typed character means the user is composing an
-        // unsent message. Mark it so a backend "waiting for user input" event
+        // In a resting state, a typed character or Codex composer newline means
+        // the user is composing an unsent message. Mark it so a backend
+        // "waiting for user input" event
         // (which can false-fire on the composer repainting per keystroke —
         // session dd6819b6) doesn't flip the tab to WAITING mid-sentence. The
         // flag clears on submit (→ THINKING), so a genuine prompt — which only
@@ -264,8 +270,8 @@ export class TabStatusController {
             return;
         }
 
-        // If we were parked in WAITING, a typed character means the user is
-        // already engaging — the "Codex is waiting for you" signal is stale.
+        // If we were parked in WAITING, composing input means the user is already
+        // engaging — the "Codex is waiting for you" signal is stale.
         // Clear back to CONNECTED so the indicator reflects reality.
         if (this._status === TAB_STATUS.WAITING) {
             this._transitionTo(TAB_STATUS.CONNECTED);

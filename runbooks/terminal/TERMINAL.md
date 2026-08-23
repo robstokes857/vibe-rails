@@ -1,5 +1,20 @@
 # TERMINAL.md
 
+> ## 🟡 Fixed, awaiting Rob's test — Codex Shift+Enter still a no-op after the LF attempt (2026-08-22)
+>
+> Session `52795214` falsified the 2026-08-21 "raw LF = Ctrl+J = insert_newline"
+> fix. Eleven bare LFs reached the PTY (`UserInputs` = `\n`×11 + `sss`) while
+> `?2004` stayed on; Codex's composer never grew and submitted trimmed `sss`.
+> ConPTY's input parser turns C0 LF into **Ctrl+Enter**, which Codex 0.149 does
+> not bind. `insert_newline` is Shift/Alt+Enter or Ctrl+J as a *key event*.
+> Direct WT→codex works because WT injects `VK_RETURN + SHIFT`.
+>
+> Fix: keep sending/recording bare LF on the Codex web+native paths, then on
+> Windows only rewrite those LFs (not paste LFs, not `\r\n`) to ConPTY
+> win32-input `ESC[13;28;0;1;16;1_` at `TerminalIoRouter`. OpenCode's
+> bracketed-paste path is unchanged. Full entry:
+> **"## 2026-08-22 Codex Shift+Enter…"** below.
+
 > ## 🔴 Open — tab-activation resize shred ("cursor messed up", session b92fb476) = the 2026-05-15 xterm.js render race with a new trigger (2026-08-10)
 >
 > **Where we left off (end of 2026-08-10 session).** Root cause is settled
@@ -198,6 +213,183 @@
 > nothing. Harmless to leave in (and may help once Claude Code's
 > wrapping is fixed upstream), but it's belt-only — not the
 > suspenders. Full triage below.
+
+## 2026-08-22 Codex Shift+Enter still a no-op: raw LF is ConPTY Ctrl+Enter
+
+**Status:** 🟡 **FIXED IN THE WINDOWS PTY WRITE PATH — AWAITING ROB'S TEST.**
+Needs a rebuilt `vb.exe` / VS Code extension. Session `cba081aa` (typed `hi`,
+no submit) and `52795214` (submitted `sss`) are the evidence.
+
+### What the 2026-08-21 LF fix actually delivered
+
+Web + native Codex paths now send raw LF (`0x0A`) for Shift/Ctrl+Enter. That
+part is no longer in doubt:
+
+| Session | Path | Recorded input | Composer |
+|---|---|---|---|
+| `a58c0929` | Web, first paste workaround | `\n\nhi   \n\n\n\n\n\n\n` | submitted trimmed `hi` |
+| `c6471e33` | Native, pre-LF KeyTranslator | `hi ` | submitted immediately (CR) |
+| `52795214` | Web, post-LF fix | `\n`×11 + `sss` + `\n\n` | stayed `› sss`, then submitted `sss` |
+| `cba081aa` | Web, post-LF fix | none (never submitted) | typed `hi`; Shift+Enter did not grow the draft |
+
+`52795214` chunk 54999852 paints `› sss` on one line after the LFs. The bytes
+we wrote did not invoke `editor.insert_newline`.
+
+### Why LF cannot work on Windows ConPTY
+
+Codex 0.149's default `insert_newline` bindings are Ctrl+J, Ctrl+M,
+plain/Shift/Alt+Enter. `ctrl-j` *does* match a `KeyCode::Char('\n')` event
+with empty modifiers. That is not what ConPTY produces from a host-written
+LF. Microsoft's `InputStateMachineEngine::_DoControlCharacter` treats C0
+`0x0A` as Ctrl+(char) and synthesizes **Ctrl+Enter**. Codex does not bind
+Ctrl+Enter. Result: the key is ignored, leading/trailing LFs are trimmed on
+submit, and Shift+Enter looks like a no-op.
+
+Windows Terminal works because it injects a real `KEY_EVENT` with
+`VK_RETURN + SHIFT_PRESSED`. Codex on Windows also *disables*
+`ENABLE_VIRTUAL_TERMINAL_INPUT` and reads those records.
+
+Kitty `\x1b[>7u` never appears in these sessions — the enhancement probe is
+a no-op inside our inner ConPTY — so we cannot rely on xterm emitting CSI-u
+either.
+
+### Fix
+
+Keep the 2026-08-21 interception (Codex Shift/Ctrl+Enter → one recorded LF;
+plain Enter stays CR; OpenCode keeps `ESC[200~ LF ESC[201~`). On Windows
+only, `TerminalIoRouter` rewrites bare LFs to ConPTY win32-input mode:
+
+```
+ESC [ 13 ; 28 ; 0 ; 1 ; 16 ; 1 _
+```
+
+(`Vk=VK_RETURN`, `Kd=keydown`, `Cs=SHIFT_PRESSED`, `Uc=0` so crossterm
+reports `KeyCode::Enter + SHIFT`, not `Char('\n') + SHIFT`). Bracketed-paste
+LFs and `\r\n` pairs are left alone. History still records the original LF.
+
+The PTY write path stays byte-native: `TerminalIoRouter` decodes a separate
+semantic copy for history but forwards the original WebSocket bytes. A
+per-terminal rewriter carries CRLF and bracketed-paste parser state across
+arbitrary chunk boundaries, and the state transition plus physical PTY write
+share one gate so concurrent local/remote input cannot reorder them. Raw writes
+use the same gate and invalidate partial CR/CSI adjacency while retaining an
+already-active paste region.
+
+`Terminal.EncodeBareLineFeedAsWin32ShiftEnter` is set only for Codex sessions
+on Windows at `TerminalRunner.CreateSessionAsync`.
+
+### Regression coverage
+
+`CodexWindowsInputRewriterTests` pin the exact Win32-input bytes and exercise
+CRLF split across calls, paste markers split at every byte boundary, invalid and
+split UTF-8, multiple independent terminal instances, raw-write state breaks,
+the byte-identical non-Codex path, and concurrent rewrite/write ordering (18/18).
+Codex history/status coverage proves bare LF remains composing content while CR
+and CRLF submit, including split CRLF and `InputAccumulator.Clear()` (22/22
+focused .NET tests; 45/45 tab-status Node tests).
+
+The broader terminal/history filter passes 211/211. The real Chromium/xterm
+terminal-multitab suite passes 8/8, including Codex with `?2004` both disabled
+and enabled plus the OpenCode-backed bracketed-paste control. Release build:
+0 warnings, 0 errors.
+
+### Rob's check
+
+Same as the 2026-08-21 steps: type `line one`, Shift+Enter, `line two`. Pass
+= one two-line draft, not submitted. Plain Enter then records one
+`line one\nline two` row. Repeat in Chrome, the VS Code webview, and a
+VibeRails native Codex terminal. Spot-check OpenCode unchanged.
+
+## 2026-08-21 Codex Shift+Enter submits instead of inserting a newline
+
+**Status:** 🟠 **SUPERSEDED by 2026-08-22.** The web/native LF mapping and
+Codex `InputAccumulator` behavior remain; sending LF to ConPTY does not
+invoke Codex `insert_newline` (session `52795214`). Chrome and the VS Code webview share the xterm modules; VibeRails-owned
+native terminals use the repaired console-to-PTY translator.
+
+### Symptom and control case
+
+In a Codex Web UI terminal, Shift+Enter either appeared to do nothing or
+submitted instead of invoking the composer's newline action. Chrome reproduced
+it, ruling out a VS Code-only keybinding problem. **Open in text editor** worked
+because a multi-line paste is valid content, but that does not make a
+one-character newline paste equivalent to a newline key event.
+
+Rob then supplied the decisive native comparison: direct `pwsh.exe → codex`
+worked, while `VibeRails native console → inner ConPTY → codex` did not. Other
+TUIs, including OpenCode, already worked and are compatibility controls.
+
+### Root cause
+
+There were two distinct lossy translations:
+
+1. **Web:** xterm's normal keyboard encoder cannot represent Shift+Enter here;
+   it collapses it to CR (`0x0D`), which Codex reads as plain Enter/submit. The
+   first workaround intercepted it but sent `ESC[200~ LF ESC[201~`. Session
+   `a58c0929-b459-4faf-9ba3-6465e2342e5f` proves the current frontend loaded and
+   delivered nine such LFs while `?2004` remained enabled. They were
+   leading/trailing paste whitespace around `hi`; Codex's submission trim sent
+   exactly `hi` to the Responses API. A one-character paste never invoked the
+   editor's actual `insert_newline` action.
+2. **Native:** `Console.ReadKey` retained the modifier, but `KeyTranslator`
+   unconditionally mapped every `ConsoleKey.Enter` to CR. Session `c6471e33`
+   recorded no LF at all; Shift+Enter immediately submitted `hi`.
+
+Codex 0.149's own default keymap makes the terminal-native distinction explicit:
+Ctrl+J, Ctrl+M, Shift+Enter, and Alt+Enter are `editor.insert_newline` aliases,
+while the composer owns plain Enter for submit. In a byte stream, LF (`0x0A`)
+is the unambiguous Ctrl+J alias and CR is plain Enter.
+
+The working control `5503cca1-a2dd-4029-95f9-2befc5a75142` (GLM 5.3 via
+OpenCode) received bracketed LFs, negotiated `?2027`/modifyOtherKeys in addition
+to `?2004`, and visibly produced multiline input. That path is intentionally
+unchanged.
+
+### Fix
+
+1. Keep the interception at xterm's public `attachCustomKeyEventHandler`.
+2. Consume Codex Shift/Ctrl+Enter on keydown (and suppress the matching
+   keypress) regardless of xterm's local `?2004` bit.
+3. Feed one raw LF through public `Terminal.input(data, true)`. It reaches the
+   existing xterm `onData` subscriber and then the WebSocket exactly like normal
+   keyboard input; no private xterm state or socket bypass is involved.
+4. In the native console path, enable the same modified-Enter → LF mapping only
+   when `llm == LLM.Codex`. Plain Enter and every other CLI keep their old bytes.
+5. Configure only Codex's `InputAccumulator` so LF is literal multiline content
+   and CR completes the recorded prompt. This prevents one prompt from splitting
+   into premature history rows.
+6. Keep editor/clipboard injection and non-Codex modified Enter on the existing
+   bracketed-paste path.
+
+Non-Codex CLIs retain the old guard: modified Enter is only synthesized when
+their xterm instance reports bracketed-paste mode enabled. Their native
+`KeyTranslator` and accumulator behavior are also unchanged.
+
+### Regression coverage
+
+`UITests/tests/terminal-multitab.spec.js` now drives a real Chromium/xterm
+instance, launches the fake Codex PTY, toggles xterm with `CSI ?2004l` and
+`CSI ?2004h`, dispatches Shift+Enter, and captures the WebSocket input. Both
+states must emit exactly one raw LF and never CR. That Codex spec exercises
+`Terminal.input()` → `onData` → WebSocket. A separate OpenCode-backed control
+must still bypass `Terminal.input()` and send exactly one
+`ESC[200~ LF ESC[201~` through its established direct WebSocket path.
+
+`KeyTranslatorTests` prove Codex-mode modified Enter becomes LF while default
+and plain Enter remain CR. `InputAccumulatorTests` prove Codex-mode LF buffers a
+two-line prompt until CR. Verification: focused .NET tests 13/13; full Chromium
+terminal-multitab suite 8/8; Release build succeeded.
+
+### Rob's check
+
+1. Rebuild/reinstall VibeRails and open Codex in Chrome.
+2. Type `line one`, press Shift+Enter, then type `line two`.
+3. **Pass:** Codex shows one two-line draft and has not submitted it.
+4. Submit with plain Enter. Confirm session history contains one `line one\nline
+   two` input, not two rows.
+5. Repeat in the VS Code webview, a VibeRails-launched native Codex terminal,
+   and once after a tab reconnect/reload. Spot-check OpenCode still behaves as
+   before.
 
 ## 2026-08-10 Tab-activation resize shred — stranded cursor + broken input-box chrome (session b92fb476; formerly titled "Passive-viewer resize shreds the webview")
 

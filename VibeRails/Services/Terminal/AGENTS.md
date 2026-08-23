@@ -9,7 +9,7 @@ This folder owns PTY lifecycle, session tracking hooks, local WebSocket viewer h
 Primary files (reorg'd into subdirectories):
 - `Services/Terminal/Pty/Terminal.cs`, `KeyTranslator.cs`, `ShellCommandBuilder.cs`
 - `Services/Terminal/Core/TerminalRunner.cs`, `TerminalSessionService.cs`, `TerminalStateService.cs`, `TerminalTabHostService.cs`, `ChildParentWatchdogService.cs`, `NativeConsoleGeometry.cs`
-- `Services/Terminal/Protocol/TerminalIoRouter.cs`, `TerminalControlProtocol.cs`, `TerminalGridSerializer.cs`, `TerminalTextSanitizer.cs`, `TerminalTextWithControlPart.cs`
+- `Services/Terminal/Protocol/TerminalIoRouter.cs`, `CodexWindowsInputRewriter.cs`, `TerminalControlProtocol.cs`, `TerminalGridSerializer.cs`, `TerminalTextSanitizer.cs`, `TerminalTextWithControlPart.cs`
 - `Services/Terminal/Remote/RemoteTerminalConnection.cs`
 - `Services/Terminal/Consumers/*.cs`
 - `Services/Terminal/Observers/*.cs`
@@ -242,7 +242,10 @@ Interface:
 
 Notes:
 - Uses static dictionaries for session accumulators and remote connections (shared across scoped instances).
-- Uses `InputAccumulator` for input recording.
+- Uses `InputAccumulator` for input recording. Codex sessions opt into its
+  LF-as-literal mode because VibeRails records modified Enter as LF and plain
+  Enter/submit as CR. On Windows the router rewrites that PTY-bound LF to a real
+  ConPTY Shift+Enter record; other CLIs retain the default LF-or-CR completion behavior.
 - On complete: closes remote connection and deregisters remote active terminal.
 - Accepts source metadata in `RecordInput`/`LogOutput`.
 - Publishes terminal I/O events through `ITerminalIoObserverService`.
@@ -252,9 +255,11 @@ Single I/O funnel and hook point.
 
 Responsibilities:
 - `RouteInputAsync(...)`:
-  - decodes input text
-  - calls `ITerminalStateService.RecordInput(...)`
-  - writes bytes to PTY
+  - decodes a semantic copy for `ITerminalStateService.RecordInput(...)`, so Codex history still records LF
+  - forwards the caller's original byte memory to `Terminal.WriteInputBytesAsync(...)`; PTY-bound input is never decoded and re-encoded
+  - when `Terminal.EncodeBareLineFeedAsWin32ShiftEnter` is set (Codex on Windows), the terminal's per-session `CodexWindowsInputRewriter` rewrites bare LFs before the PTY write
+  - preserves CRLF and bracketed-paste boundaries split across WebSocket/console chunks; rewrite state and the physical PTY write share the same gate so concurrent input cannot reorder them
+  - raw `Terminal.WriteBytesAsync(...)` calls share that gate and break partial CR/CSI adjacency without ending an already-active paste
 - `RouteOutput(...)`:
   - decodes output text
   - calls `ITerminalStateService.LogOutput(...)`
@@ -309,10 +314,11 @@ Owns session preparation (`PrepareSessionAsync`) — builds the `PreparedTermina
   `ILlmProxySessionState` for per-tab proxy gate state.)
 
 ### `Pty/` additional files
-- `KeyTranslator.cs` — translates `Console.ReadKey` results to ANSI escape sequences for the CLI terminal path.
+- `KeyTranslator.cs` — translates `Console.ReadKey` results to ANSI escape sequences for the CLI terminal path. Its optional modified-Enter mode maps Shift/Ctrl+Enter to LF and is enabled by `TerminalRunner` only for Codex; all other CLIs keep CR. On Windows, `TerminalIoRouter` then rewrites that bare LF to a ConPTY win32-input Shift+Enter (`CSI 13;28;0;1;16;1_`) so Codex sees `KeyCode::Enter + SHIFT` instead of ConPTY's Ctrl+Enter translation of raw LF.
 - `ShellCommandBuilder.cs` — builds a chain of setup commands joined with `;` followed by the CLI launch command.
 
 ### `Protocol/` additional files
+- `CodexWindowsInputRewriter.cs` — byte-safe, stateful rewrite for Codex on Windows. It maps only bare LF outside bracketed paste to ConPTY's win32-input Shift+Enter record, leaves CRLF/paste/invalid UTF-8 bytes exact, and returns the caller's original memory when no rewrite is needed.
 - `TerminalGridSerializer.cs` — converts a `TerminalEmulator` snapshot (scrollback + current screen) into an ANSI byte stream that xterm.js renders instantly on reconnect.
 - `TerminalTextSanitizer.cs` — strips ANSI escape/control sequences and non-printable characters from raw terminal text to produce plain text.
 - `TerminalTextWithControlPart.cs` — enum and helpers classifying common ANSI/control sequence types in PTY streams.

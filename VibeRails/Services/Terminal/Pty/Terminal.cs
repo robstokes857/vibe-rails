@@ -25,6 +25,8 @@ public sealed class Terminal : IAsyncDisposable
 
     private readonly IPtyConnection _pty;
     private readonly CancellationTokenSource _cts = new();
+    private readonly SemaphoreSlim _stdinWriteGate = new(1, 1);
+    private readonly CodexWindowsInputRewriter _codexWindowsInputRewriter = new();
     private readonly Lock _subscriberLock = new();
     private readonly List<ITerminalConsumer> _consumers = [];
     private readonly TerminalEmulator.Terminal _emulator;
@@ -40,6 +42,7 @@ public sealed class Terminal : IAsyncDisposable
     public int Cols => _cols;
     public int Rows => _rows;
     public bool HasExited => Volatile.Read(ref _hasExited) == 1;
+    public bool EncodeBareLineFeedAsWin32ShiftEnter { get; set; }
     public bool IsSyncOutputActive
     {
         get
@@ -71,7 +74,7 @@ public sealed class Terminal : IAsyncDisposable
     /// </summary>
     public event EventHandler<int>? Exited;
 
-    private Terminal(IPtyConnection pty, int cols, int rows)
+    internal Terminal(IPtyConnection pty, int cols, int rows)
     {
         _pty = pty;
         _emulator = new TerminalEmulator.Terminal(cols: cols, rows: rows, scrollbackSize: EmulatorScrollbackLines);
@@ -290,6 +293,47 @@ public sealed class Terminal : IAsyncDisposable
     public async Task WriteBytesAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default)
     {
         if (buffer.IsEmpty) return;
+
+        await _stdinWriteGate.WaitAsync(ct);
+        try
+        {
+            // This write did not pass through the routed-input parser. It therefore
+            // breaks CR adjacency and any partial paste marker, while an established
+            // bracketed-paste region remains active until its routed ESC[201~ arrives.
+            _codexWindowsInputRewriter.BreakInputSequence();
+            await WriteBytesCoreAsync(buffer, ct);
+        }
+        finally
+        {
+            _stdinWriteGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Writes semantic user input to the PTY. The stateful Codex byte rewrite and
+    /// the physical stream write share one gate, so concurrent local/remote input
+    /// cannot advance parser state in a different order than bytes reach ConPTY.
+    /// </summary>
+    internal async Task WriteInputBytesAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default)
+    {
+        if (buffer.IsEmpty) return;
+
+        await _stdinWriteGate.WaitAsync(ct);
+        try
+        {
+            var ptyBytes = EncodeBareLineFeedAsWin32ShiftEnter
+                ? _codexWindowsInputRewriter.Rewrite(buffer)
+                : buffer;
+            await WriteBytesCoreAsync(ptyBytes, ct);
+        }
+        finally
+        {
+            _stdinWriteGate.Release();
+        }
+    }
+
+    private async Task WriteBytesCoreAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct)
+    {
         await _pty.WriterStream.WriteAsync(buffer, ct);
         await _pty.WriterStream.FlushAsync(ct);
     }

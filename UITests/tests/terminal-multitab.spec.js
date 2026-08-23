@@ -22,17 +22,28 @@ async function navigateToRules(page) {
     await expect(page.locator('#terminal-header-select')).toBeAttached({ timeout: 15_000 });
     await expect(page.locator('#terminal-start-btn')).toBeVisible({ timeout: 15_000 });
     // The controls render before the manager finishes restoring/creating its
-    // initial blank tab. Wait for that lifecycle boundary so updateUi() cannot
-    // overwrite the selection made by the test.
+    // initial blank tab. Wait for that lifecycle boundary and the mounted picker
+    // so updateUi() cannot overwrite the selection made by the test.
     await expect(page.locator(selectors.tabItems)).toHaveCount(1, { timeout: 15_000 });
+    await expect.poll(() => page.evaluate(() =>
+        !!document.querySelector('#terminal-header-select')?.tomselect
+    ), { timeout: 15_000 }).toBe(true);
 }
 
 async function launchWebTerminal(page, cli) {
     const selector = page.locator('#terminal-header-select');
-    await selector.selectOption(`base:${cli}`);
-    await expect(selector).toHaveValue(`base:${cli}`);
+    const selection = `base:${cli}`;
+    await selector.evaluate((select, value) => {
+        window.app?.llmPickerController?.setValue(select, value);
+    }, selection);
+    await expect.poll(() => selector.evaluate(select =>
+        select.tomselect?.getValue?.() || select.value
+    )).toBe(selection);
     await page.locator('#terminal-start-btn').click();
     await expect(page.locator(selectors.tabItems)).toHaveCount(1, { timeout: 10_000 });
+    await expect.poll(() => page.evaluate(() =>
+        window.app?.terminalController?.manager?.getActiveTab()?.state?.hasActiveSession === true
+    ), { timeout: 15_000 }).toBe(true);
 }
 
 async function waitForFakeCliReady(page, tabId) {
@@ -45,6 +56,49 @@ async function readTerminalText(page, tabId) {
         const tab = window.app?.terminalController?.manager?.tabs?.get(id);
         return tab?.instance?.vibeTerminal?.getPlainText?.() || '';
     }, tabId);
+}
+
+async function captureShiftEnterPayload(page, tabId, bracketedPasteEnabled) {
+    return page.evaluate(async ({ id, enabled }) => {
+        const tab = window.app?.terminalController?.manager?.tabs?.get(id);
+        const instance = tab?.instance;
+        const terminal = instance?.vibeTerminal;
+        const socket = instance?.socket;
+        if (!terminal || !socket) {
+            throw new Error('Active terminal session was not available.');
+        }
+
+        await terminal.writeAsync(enabled ? '\x1b[?2004h' : '\x1b[?2004l');
+        const payloads = [];
+        const xtermInputs = [];
+        const originalSend = socket.send;
+        const originalInput = terminal.input;
+        socket.send = (data) => payloads.push(data);
+        terminal.input = (data, wasUserInput) => {
+            xtermInputs.push({ data, wasUserInput });
+            return originalInput.call(terminal, data, wasUserInput);
+        };
+        try {
+            for (const type of ['keydown', 'keypress']) {
+                terminal.textarea.dispatchEvent(new KeyboardEvent(type, {
+                    key: 'Enter',
+                    code: 'Enter',
+                    shiftKey: true,
+                    bubbles: true,
+                    cancelable: true,
+                }));
+            }
+        } finally {
+            terminal.input = originalInput;
+            socket.send = originalSend;
+        }
+
+        return {
+            bracketedPasteEnabled: terminal.isBracketedPasteModeEnabled(),
+            xtermInputs,
+            payloads,
+        };
+    }, { id: tabId, enabled: bracketedPasteEnabled });
 }
 
 test.describe('terminal-multitab', () => {
@@ -68,6 +122,45 @@ test.describe('terminal-multitab', () => {
         expect(tabId, 'first tab should have a data-tab-id').toBeTruthy();
 
         await waitForFakeCliReady(page, /** @type {string} */(tabId));
+    });
+
+    test('Codex Shift+Enter emits raw LF through xterm regardless of bracketed-paste state', async ({ page }) => {
+        await navigateToRules(page);
+        await launchWebTerminal(page, 'codex');
+
+        const tabId = /** @type {string} */ (
+            await page.locator(selectors.tabItems).first().getAttribute('data-tab-id')
+        );
+        await waitForFakeCliReady(page, tabId);
+
+        const withoutBracketedPaste = await captureShiftEnterPayload(page, tabId, false);
+        expect(withoutBracketedPaste.bracketedPasteEnabled).toBe(false);
+        expect(withoutBracketedPaste.xtermInputs).toEqual([
+            { data: '\n', wasUserInput: true },
+        ]);
+        expect(withoutBracketedPaste.payloads).toEqual(['\n']);
+
+        const withBracketedPaste = await captureShiftEnterPayload(page, tabId, true);
+        expect(withBracketedPaste.bracketedPasteEnabled).toBe(true);
+        expect(withBracketedPaste.xtermInputs).toEqual([
+            { data: '\n', wasUserInput: true },
+        ]);
+        expect(withBracketedPaste.payloads).toEqual(['\n']);
+    });
+
+    test('OpenCode-backed Shift+Enter keeps its bracketed-paste newline path', async ({ page }) => {
+        await navigateToRules(page);
+        await launchWebTerminal(page, 'glm-5.3');
+
+        const tabId = /** @type {string} */ (
+            await page.locator(selectors.tabItems).first().getAttribute('data-tab-id')
+        );
+        await waitForFakeCliReady(page, tabId);
+
+        const withBracketedPaste = await captureShiftEnterPayload(page, tabId, true);
+        expect(withBracketedPaste.bracketedPasteEnabled).toBe(true);
+        expect(withBracketedPaste.xtermInputs).toEqual([]);
+        expect(withBracketedPaste.payloads).toEqual(['\x1b[200~\n\x1b[201~']);
     });
 
     test('the in-strip + button opens a second tab independent of the first', async ({ page }) => {

@@ -23,7 +23,8 @@ public readonly record struct TerminalIoEvent(
     TerminalIoDirection Direction,
     TerminalIoSource Source,
     string Text,
-    DateTimeOffset TimestampUtc)
+    DateTimeOffset TimestampUtc,
+    string? Cli = null)
 {
     /// <summary>
     /// Text normalized for analysis/logging (ANSI/control codes removed).
@@ -126,7 +127,10 @@ public static class TerminalIoRouter
             return;
 
         stateService.RecordInput(sessionId, input, source);
-        await terminal.WriteBytesAsync(inputBytes, ct);
+        // History/observer analysis above uses decoded text, but the PTY path must
+        // retain the caller's original bytes. Terminal owns both the stateful Codex
+        // rewrite and write serialization across local, remote, and tool sources.
+        await terminal.WriteInputBytesAsync(inputBytes, ct);
     }
 
     public static void RouteOutput(
