@@ -524,6 +524,11 @@ class TerminalManager {
             return null;
         }
 
+        // Adoption and restore can race (a run adopted while restoreTabs' GET was in
+        // flight): the same backend tab must never get two chips in the strip.
+        const existing = this.tabs.get(tabInfo?.tabId);
+        if (existing) return existing;
+
         const selection = options.selection || DEFAULT_SELECTION;
         const meta = this.getSelectionMeta(selection);
         const workingDirectory = cleanString(options.workingDirectory) || cleanString(tabInfo.workingDirectory);
@@ -2381,8 +2386,7 @@ class TerminalManager {
         if (this.focusBtn) {
             this.focusBtn.classList.remove('active');
             this.focusBtn.setAttribute('aria-pressed', 'false');
-            this.focusBtn.title = 'Open terminal in focused page view';
-            setLabel(this.focusBtn, 'Open In Fullscreen');
+            this.focusBtn.title = 'Open in full screen';
         }
     }
 
@@ -2669,6 +2673,75 @@ export class TerminalController {
         } catch { /* sessionStorage is best-effort (private browsing / webview policies). */ }
     }
 
+    /**
+     * Brings a backend-created tab (a Python script run, an automation run) on screen
+     * in whatever terminal panel the current view is already showing, instead of
+     * navigating away to the Terminals page. Reads back the metadata rememberTabLaunch
+     * just persisted. Returns false when no live panel is mounted — callers then
+     * navigate to 'terminal-focus' exactly as before.
+     */
+    async adoptLaunchedTab(tabId) {
+        const id = cleanString(tabId);
+        let manager = this.manager;
+        if (!id || !manager || manager.isDestroyed() || !manager.container?.isConnected) return false;
+        // A navigation mid-await can install a NEW manager with its own init still in
+        // flight; loop until none is pending so we never touch a manager whose
+        // restoreTabs hasn't landed (adding the tab then would double it).
+        while (this.managerInitPromise) {
+            const pending = this.managerInitPromise;
+            try { await pending; } catch { /* init failures surface elsewhere */ }
+            if (this.managerInitPromise === pending) break;
+        }
+        manager = this.manager;
+        if (!manager || manager.isDestroyed() || !manager.container?.isConnected) return false;
+        if (!manager.tabs.has(id)) {
+            // Backend-created tabs already have a real session by the time their launch
+            // endpoint returns. Read that authoritative state so the adopted TerminalTab
+            // gets the CLI/session identity normally supplied by restoreTabs; without it,
+            // CLI-specific input handling (Codex modified Enter, OpenCode wheel routing)
+            // remains disabled until a page reload. If the status read races shutdown or
+            // briefly fails, the remembered picker selection still supplies the CLI.
+            let status = null;
+            try {
+                status = await this.app.apiCall(
+                    `/api/v1/terminal/tabs/${encodeURIComponent(id)}/status`,
+                    'GET',
+                    null,
+                    { showLoading: false }
+                );
+            } catch { /* The remembered selection below is the best-effort fallback. */ }
+
+            // The status request can outlive the panel that initiated it. Never attach
+            // the tab to a manager replaced by navigation, and honour a restore that may
+            // have populated the new manager while the request was in flight.
+            manager = this.manager;
+            if (!manager || manager.isDestroyed() || !manager.container?.isConnected) return false;
+            if (manager.tabs.has(id)) return manager.focusTab(id, { connectIfNeeded: true });
+
+            const metadata = manager.getTabMetaFromStorage(id);
+            const selection = manager.getTabSelectionFromStorage(id);
+            const rememberedCli = manager.getSelectionMeta(selection)?.cli || null;
+            const authoritative = cleanString(status?.tabId) === id ? status : null;
+            const tab = manager.addLocalTab({
+                tabId: id,
+                hasActiveSession: authoritative?.hasActiveSession !== false,
+                sessionId: authoritative?.sessionId || null,
+                cli: authoritative?.cli || rememberedCli,
+                workingDirectory: authoritative?.workingDirectory || null
+            }, {
+                selection,
+                title: manager.getTabTitleFromStorage(id),
+                label: metadata?.label || null,
+                icon: metadata?.icon || null,
+                taskKey: metadata?.taskKey || null,
+                customLabel: metadata?.customLabel === true,
+                workingDirectory: authoritative?.workingDirectory || metadata?.workingDirectory || null
+            });
+            if (!tab) return false;
+        }
+        return manager.focusTab(id, { connectIfNeeded: true });
+    }
+
     resetLayoutStateForNavigation() {
         this.managerGeneration += 1;
         this.managerInitPromise = null;
@@ -2945,9 +3018,8 @@ export class TerminalController {
     renderTerminalPanel(options = {}) {
         const isFocusView = options.focusView === true;
         const focusButtonHtml = isFocusView ? '' : `
-                            <button type="button" class="vb-terminal-control-btn icon-btn" id="terminal-popout-btn" title="Open in fullscreen" aria-label="Open in fullscreen">
+                            <button type="button" class="vb-terminal-control-btn icon-btn" id="terminal-popout-btn" title="Open in full screen" aria-label="Open in full screen">
                                 <i class="fa-solid fa-up-right-and-down-left-from-center"></i>
-                                <span class="vb-terminal-control-text">Open In Fullscreen</span>
                             </button>
         `;
 

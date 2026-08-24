@@ -4168,6 +4168,11 @@ code {
     font-weight: 600;
 }
 
+/* Icon-only fullscreen button — label lives in the title tooltip */
+#vb-terminal-panel #terminal-popout-btn {
+    padding: 0.4rem 0.55rem;
+}
+
 /* Body */
 #vb-terminal-panel #terminal-container {
     background: var(--terminal-body-bg);
@@ -8436,6 +8441,18 @@ input.form-control:disabled {
 .notAToasttoast-container.top-right>div {
     width: 100%;
     max-width: 100%;
+}
+
+/* The toast strip floats over the page's top-right action bars (the Python
+   workbench's Run/Sign row sits exactly there). Only the toast cards themselves
+   may take a click — the container must never swallow clicks aimed at the
+   buttons beneath it while a toast is up. */
+.notAToasttoast-container {
+    pointer-events: none !important;
+}
+
+.notAToasttoast-container > div {
+    pointer-events: auto;
 }
 
 .notAToastxrayOverlay {
@@ -14548,11 +14565,20 @@ body.git-guard-focus-active #app-content {
 
 .job-card-actions {
     justify-content: flex-end;
-    flex-wrap: wrap;
+    /* One deliberate row — Enabled | Run now | Edit | More. Accidental mid-cluster
+       wrapping ("2 buttons with 1 underneath") reads as a mistake; below 960px the
+       whole cluster drops under the card body instead (see the media rule). */
+    flex-wrap: nowrap;
     gap: 0.4rem;
 }
 
 .job-card-actions .btn { min-height: 40px; }
+
+/* The switch lives in the same row as the buttons; a hair of extra space keeps
+   the state pill from reading as just another button. */
+.job-card-actions .job-switch {
+    margin-right: 0.35rem;
+}
 
 .job-icon-action {
     display: inline-grid;
@@ -15130,6 +15156,18 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
     html.nav-layout-side .app-sidebar .sidebar-toggle-icon {
         transform: rotate(180deg);
     }
+
+    /* The 64px rail is icon-only, same as the user-collapsed rail: the Automation
+       entry's play half hides (launching stays one click away on the Automation
+       page) and the lone icon gets its full rounding back. */
+    html.nav-layout-side .app-sidebar .app-subnav-split-trigger {
+        display: none;
+    }
+
+    html.nav-layout-side .app-sidebar .app-subnav-split .app-subnav-link {
+        border-top-right-radius: 8px;
+        border-bottom-right-radius: 8px;
+    }
 }
 
 
@@ -15464,6 +15502,7 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
 
     .job-card-actions {
         justify-content: flex-start;
+        flex-wrap: wrap;
         padding-top: 0.7rem;
         border-top: 1px solid var(--color-border);
     }
@@ -15486,6 +15525,7 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
     .job-card-title { align-items: flex-start; flex-direction: column; gap: 0.25rem; }
     .job-card-meta { align-items: flex-start; flex-direction: column; }
     .job-card-meta > span { width: 100%; }
+    .job-card-actions .job-switch { margin-right: 0; }
     .job-card-actions .btn-primary { flex: 1 1 100%; }
     .job-card-actions .btn:not(.btn-primary),
     .job-card-actions .job-more { flex: 1 1 0; }
@@ -16471,6 +16511,67 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
    Nav Automation launcher (flyout on the "Launch" nav button)
    ============================================================ */
 
+/* One nav item, two halves: the main half navigates to the Automation page, the
+   play half opens the launch flyout. Replaces the old separate "Launch" entry. */
+.app-subnav-split {
+    display: inline-flex;
+    align-items: stretch;
+}
+
+.app-subnav-split .app-subnav-link {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.app-subnav-split-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.4rem 0.55rem;
+    border: none;
+    border-left: 1px solid color-mix(in srgb, var(--color-border, #334155) 70%, transparent);
+    border-radius: 0 6px 6px 0;
+    background: none;
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 0.7rem;
+    cursor: pointer;
+    transition: color 0.18s ease, background 0.18s ease;
+}
+
+.app-subnav-split-trigger:hover,
+.app-subnav-split-trigger:focus-visible {
+    color: var(--color-success, #22c55e);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+/* Sidebar variant: the pair fills the rail's width like every other entry. */
+.app-sidebar .app-subnav-split {
+    display: flex;
+    width: 100%;
+}
+
+.app-sidebar .app-subnav-split .app-subnav-link {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.app-sidebar .app-subnav-split-trigger {
+    flex: 0 0 34px;
+    border-radius: 0 8px 8px 0;
+}
+
+/* The collapsed rail is icon-only: the play half hides; launching stays one
+   click away on the Automation page itself. With the trigger gone the link is
+   the whole entry again, so it gets its full rounding back. */
+html.sidebar-collapsed .app-sidebar .app-subnav-split-trigger {
+    display: none;
+}
+
+html.sidebar-collapsed .app-sidebar .app-subnav-split .app-subnav-link {
+    border-top-right-radius: 8px;
+    border-bottom-right-radius: 8px;
+}
+
 .automation-launch-btn.is-flyout-open {
     background: var(--color-bg-surface-hover, #2c2c2c);
     color: var(--color-text, #f8fafc);
@@ -16704,12 +16805,25 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
 
 .python-script-actions {
     display: flex;
-    flex-wrap: wrap;
+    align-items: center;
+    /* One deliberate row, right-aligned. The cluster never line-breaks mid-sequence
+       ("MCP Edit Run" with a stray ⋮ underneath); when the row runs out of room the
+       WHOLE cluster drops below the name via the row's own wrap, and only truly tiny
+       viewports let it wrap internally (media rule below). */
+    flex-wrap: nowrap;
+    justify-content: flex-end;
     gap: 6px;
-    /* Shrinkable so Run / Sign / ⋮ wrap inside the row on a 320px viewport instead
-       of pushing the page wider than the screen. */
-    flex: 0 1 auto;
-    min-width: 0;
+    flex: 0 0 auto;
+    margin-left: auto;
+}
+
+@media (max-width: 520px) {
+    /* A 320px viewport cannot fit the cluster on one line at all — let it wrap
+       rather than push the page wider than the screen. */
+    .python-script-actions {
+        flex-wrap: wrap;
+        justify-content: flex-start;
+    }
 }
 
 .python-script-mcp-control {
@@ -16791,6 +16905,14 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
 
 .python-scripts-pin-modal {
     z-index: 1070;
+}
+
+/* PIN inputs are CSS-masked text fields, NOT type=password: Chromium offers to
+   save any password field in a form that submits and closes (autocomplete="off"
+   is ignored for that heuristic), and a signing PIN must never end up in the
+   browser's saved passwords. Same approach as .pin-digit above. */
+.python-scripts-pin-modal .python-pin-input {
+    -webkit-text-security: disc;
 }
 
 .python-mcp-config-body {

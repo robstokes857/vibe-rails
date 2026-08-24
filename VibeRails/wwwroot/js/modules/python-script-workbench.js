@@ -1147,7 +1147,12 @@ export class PythonScriptWorkbench {
         const previous = this.name;
         if (!previous || !scripts) return null;
         const newName = await this._whileMutating(() => scripts.rename(previous));
-        if (!newName || newName === previous || previous !== this.name || !this.root) return newName;
+        if (!newName || newName === previous) return newName;
+        // The agent tab follows the script identity. Otherwise the exact task-key
+        // lookup in askAgent can no longer find the live session after a rename and
+        // starts a duplicate agent for the same workbench.
+        this._migrateAgentTaskKey(previous, newName);
+        if (previous !== this.name || !this.root) return newName;
         // Same bytes under a new name: the editor (and any unsaved edits) stays; only the
         // identity, the status (renaming clears a signature) and the stack entry move.
         this.name = newName;
@@ -1228,20 +1233,52 @@ export class PythonScriptWorkbench {
         const host = this.root?.querySelector('[data-terminal-content]');
         const pasteBrief = `${buildAskAgentBrief({ name, path })}\n\nChange: `;
 
-        // Only a live AGENT tab can take the brief; a plain shell would just echo it, so a
-        // shell (the wire name is "Shell", hence the case-insensitive compare) falls
-        // through to starting an agent tab instead.
-        const active = controller?.manager?.getActiveTab?.();
-        const activeCli = active
-            ? String(active.state?.cli
-                || controller.manager.getSelectionMeta?.(active.state?.selection)?.cli
-                || '').toLowerCase()
-            : '';
-        if (active?.state?.hasActiveSession && activeCli && activeCli !== 'shell') {
-            if (!active.instance?.hasOpenSocket?.()) {
-                try { await active.instance?.connect?.(); } catch { /* fall through to a fresh start */ }
+        // The brief goes to THIS script's own agent session, never to whatever tab
+        // happened to be active last (that used to paste the brief into completely
+        // unrelated sessions). The script's task tab wins; failing that, an agent the
+        // user started from this panel — no task key, working in the scripts folder —
+        // is the one the button's tooltip promises. Anything else falls through to
+        // reusing/starting the dedicated task tab below. A plain shell never receives
+        // the brief (it would just echo it; the wire name is "Shell", hence the
+        // case-insensitive compare).
+        const taskKey = `python-script:${name}`;
+        const manager = controller?.manager;
+        const tabCli = (tab) => String(tab?.state?.cli
+            || manager?.getSelectionMeta?.(tab?.state?.selection)?.cli
+            || '').toLowerCase();
+        let taskTab = manager?.findTabByTaskKey?.(taskKey) || null;
+        // A pre-rename build tagged RUN shell tabs with the agent key; pasting the
+        // brief into a running python process is never right. Migrate the stale key
+        // so the fresh-start path below cannot re-adopt that tab by key either.
+        if (taskTab && tabCli(taskTab) === 'shell') {
+            manager?.updateTabMetadata?.(taskTab, { taskKey: `python-script-run:${name}` });
+            taskTab = null;
+        }
+        const active = manager?.getActiveTab?.();
+        const activeCli = active ? tabCli(active) : '';
+        const activeIsAgent = active?.state?.hasActiveSession === true && activeCli && activeCli !== 'shell';
+        const activeBelongsHere = activeIsAgent && (active.state?.taskKey === taskKey
+            || (!active.state?.taskKey && this._isScriptsDirectory(active.state?.workingDirectory)));
+        const target = taskTab?.state?.hasActiveSession ? taskTab : (activeBelongsHere ? active : null);
+        if (target) {
+            if (manager?.activeTabId !== target.state.id) {
+                try { await manager.activateTab(target.state.id, { connectIfNeeded: true }); } catch { /* fall through to a fresh start */ }
+            } else if (!target.instance?.hasOpenSocket?.()) {
+                try { await target.instance?.connect?.(); } catch { /* fall through to a fresh start */ }
             }
-            if (this._injectBrief(active, pasteBrief)) return { mode: 'inject' };
+            // Still no socket after the connect attempt: the session died under a flag
+            // that never clears itself (an /exit'd agent, a vb restart) and the server
+            // refused the WS. Mark the tab sessionless so the fresh start below reuses
+            // it by task key and launches a NEW session in it — the alternative is a
+            // silent dead-end (reuse dead tab, inject fails, nothing happens, forever).
+            if (!target.instance?.hasOpenSocket?.()) {
+                target.state.hasActiveSession = false;
+                target.state.sessionId = null;
+                target.state.status = 'not-started';
+                manager?.updateUi?.();
+            } else if (this._injectBrief(target, pasteBrief)) {
+                return { mode: 'inject' };
+            }
         }
 
         if (!host || typeof controller?.startTerminalWithOptions !== 'function') {
@@ -1250,7 +1287,6 @@ export class PythonScriptWorkbench {
         }
 
         // The panel's picker decides which agent; nothing (or the plain shell) means Claude.
-        const manager = controller.manager;
         const selection = manager?.getLaunchSelection?.() || null;
         const meta = selection && typeof manager?.getSelectionMeta === 'function'
             ? manager.getSelectionMeta(selection)
@@ -1285,11 +1321,33 @@ export class PythonScriptWorkbench {
     }
 
     _injectBrief(tab, text) {
+        // Defense in depth: only a known agent tab may take the brief. A shell would
+        // echo it — or feed a running script's stdin — no matter which caller slipped
+        // it through, so the promise "a shell never receives the brief" lives here.
+        const cli = String(tab?.state?.cli
+            || this.app.terminalController?.manager?.getSelectionMeta?.(tab?.state?.selection)?.cli
+            || '').toLowerCase();
+        if (!cli || cli === 'shell') return false;
         if (!tab?.instance?.injectText?.(text)) return false;
         tab.instance.focusInput?.();
         tab.instance.focus?.();
         this.app.showToast('Brief pasted', 'Describe the change and press Enter.', 'info', { compact: true });
         return true;
+    }
+
+    /** True when `path` is the scripts folder (case-insensitive, separator-agnostic). */
+    _isScriptsDirectory(path) {
+        const normalize = (value) => String(value || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+        const scriptsDir = normalize(this.scriptsDirectory);
+        return Boolean(scriptsDir) && normalize(path) === scriptsDir;
+    }
+
+    /** Moves the dedicated agent tab from a script's old name to its new name. */
+    _migrateAgentTaskKey(previousName, nextName) {
+        const manager = this.app.terminalController?.manager;
+        const tab = manager?.findTabByTaskKey?.(`python-script:${previousName}`);
+        if (!tab) return;
+        manager.updateTabMetadata?.(tab, { taskKey: `python-script:${nextName}` });
     }
 
     // --- splitter ---

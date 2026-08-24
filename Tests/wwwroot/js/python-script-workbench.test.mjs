@@ -385,7 +385,8 @@ test('Ask agent pastes the brief without submitting when a session socket is ope
     const injected = [];
     const started = [];
     const tab = {
-        state: { hasActiveSession: true },
+        // Belongs to this script: askAgent only pastes into the script's own agent tab.
+        state: { hasActiveSession: true, taskKey: 'python-script:nightly.py' },
         instance: {
             hasOpenSocket: () => true,
             injectText: (text) => { injected.push(text); return true; },
@@ -418,10 +419,12 @@ test('Ask agent reconnects a dropped agent socket before pasting, and pastes int
         const { workbench, app } = mountedWorkbench();
         const order = [];
         const tab = {
-            state: { hasActiveSession: true, cli: 'claude' },
+            // No task key, but parked in the scripts folder: the panel's own agent.
+            state: { hasActiveSession: true, cli: 'claude', workingDirectory: '/scripts' },
             instance: {
-                hasOpenSocket: () => false,
-                async connect() { order.push('connect'); },
+                _open: false,
+                hasOpenSocket() { return this._open; },
+                async connect() { order.push('connect'); this._open = true; },
                 injectText: (text) => { order.push(`inject:${text.slice(0, 6)}`); return true; },
                 focusInput() {},
                 focus() {}
@@ -454,6 +457,80 @@ test('Ask agent reconnects a dropped agent socket before pasting, and pastes int
         assert.match(injected[0], /Change: $/);
         assert.doesNotMatch(app.toasts.map((toast) => toast.title).join(), /Agent started/);
     }
+});
+test('Ask agent never pastes into an unrelated active agent tab', async () => {
+    // The pre-2026-08-24 behavior — brief goes to whatever tab is active — pasted
+    // into completely unrelated sessions. An active agent that neither carries this
+    // script's task key nor lives in the scripts folder must be left alone.
+    const { workbench, app } = mountedWorkbench();
+    const injected = [];
+    const started = [];
+    const unrelated = {
+        state: { hasActiveSession: true, cli: 'claude', taskKey: 'automation:deploy', workingDirectory: 'C:/source/project' },
+        instance: { hasOpenSocket: () => true, injectText: (text) => { injected.push(text); return true; }, focusInput() {}, focus() {} }
+    };
+    app.terminalController = {
+        manager: { getActiveTab: () => unrelated, getLaunchSelection: () => null, getSelectionMeta: () => null },
+        async startTerminalWithOptions(options) { started.push(options); return { started: true }; }
+    };
+
+    const result = await workbench.askAgent();
+
+    assert.equal(result.mode, 'start');
+    assert.equal(injected.length, 0, 'the unrelated session must not receive the brief');
+    assert.equal(started.length, 1);
+    assert.equal(started[0].taskKey, 'python-script:nightly.py');
+});
+test('Ask agent activates the script task tab and pastes into it, even when another tab is active', async () => {
+    const { workbench, app } = mountedWorkbench();
+    const injected = [];
+    const activations = [];
+    const taskTab = {
+        state: { id: 'task-1', hasActiveSession: true, cli: 'claude' },
+        instance: { hasOpenSocket: () => true, injectText: (text) => { injected.push(text); return true; }, focusInput() {}, focus() {} }
+    };
+    app.terminalController = {
+        manager: {
+            activeTabId: 'other-tab',
+            findTabByTaskKey: (key) => (key === 'python-script:nightly.py' ? taskTab : null),
+            async activateTab(tabId, options) { activations.push({ tabId, options }); this.activeTabId = tabId; },
+            getActiveTab: () => null,
+            getLaunchSelection: () => null,
+            getSelectionMeta: () => null
+        },
+        async startTerminalWithOptions() { throw new Error('the live task tab must be reused, not restarted'); }
+    };
+
+    assert.deepEqual(await workbench.askAgent(), { mode: 'inject' });
+    assert.deepEqual(activations, [{ tabId: 'task-1', options: { connectIfNeeded: true } }]);
+    assert.equal(injected.length, 1);
+});
+test('Ask agent re-keys a stale shell task tab instead of pasting into it', async () => {
+    // A pre-rename build tagged RUN shell tabs with the agent key; the brief must
+    // never feed a running python process, and the key moves to python-script-run:.
+    const { workbench, app } = mountedWorkbench();
+    const rekeys = [];
+    const started = [];
+    const shellTab = {
+        state: { id: 'run-1', hasActiveSession: true, cli: 'Shell', taskKey: 'python-script:nightly.py' },
+        instance: { hasOpenSocket: () => true, injectText: () => { throw new Error('must not inject into the shell'); } }
+    };
+    app.terminalController = {
+        manager: {
+            findTabByTaskKey: (key) => (key === 'python-script:nightly.py' ? shellTab : null),
+            updateTabMetadata: (tab, metadata) => { rekeys.push({ ...metadata }); Object.assign(tab.state, metadata); },
+            getActiveTab: () => shellTab,
+            getLaunchSelection: () => null,
+            getSelectionMeta: () => null
+        },
+        async startTerminalWithOptions(options) { started.push(options); return { started: true }; }
+    };
+
+    const result = await workbench.askAgent();
+
+    assert.deepEqual(rekeys, [{ taskKey: 'python-script-run:nightly.py' }]);
+    assert.equal(result.mode, 'start');
+    assert.equal(started.length, 1, 'a fresh agent starts once the stale key is out of the way');
 });
 
 test('Ask agent never pastes into a plain shell tab: it starts Claude instead', async () => {
@@ -1025,6 +1102,19 @@ test('Rename hands off to the shared flow, holds the poll, and moves the identit
     const { workbench, app, editor, root } = mountedWorkbench();
     const scripts = app.jobController.pythonScripts;
     const renamed = [];
+    const taskKeyUpdates = [];
+    const agentTab = { state: { taskKey: 'python-script:nightly.py' } };
+    app.terminalController = {
+        manager: {
+            findTabByTaskKey(key) {
+                return key === agentTab.state.taskKey ? agentTab : null;
+            },
+            updateTabMetadata(tab, metadata) {
+                taskKeyUpdates.push({ tab, metadata });
+                Object.assign(tab.state, metadata);
+            }
+        }
+    };
     editor.value = 'print(1)\nprint("unsaved")\n';
     scripts.rename = async (name) => {
         renamed.push({ name, mutating: workbench._mutating });
@@ -1043,6 +1133,10 @@ test('Rename hands off to the shared flow, holds the poll, and moves the identit
     assert.deepEqual(app.viewData, [{ name: 'weekly.py' }]);
     assert.equal(root.el('[data-workbench-name]').textContent, 'weekly.py');
     assert.equal(root.el('[data-workbench-approve-label]').textContent, 'Sign');
+    assert.deepEqual(taskKeyUpdates, [{
+        tab: agentTab,
+        metadata: { taskKey: 'python-script:weekly.py' }
+    }], 'the dedicated agent tab follows the renamed script');
 
     // Cancelled: nothing moves.
     scripts.rename = async () => null;
