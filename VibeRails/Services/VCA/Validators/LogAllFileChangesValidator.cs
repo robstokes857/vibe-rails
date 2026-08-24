@@ -3,7 +3,7 @@ using VibeRails.Services;
 namespace VibeRails.Services.VCA.Validators
 {
     /// <summary>
-    /// Validates that changed files are documented in AGENTS.md Files section
+    /// Validates that changed files are documented in vc.rules.md Files section
     /// </summary>
     public class LogAllFileChangesValidator : IRuleValidator
     {
@@ -28,7 +28,7 @@ namespace VibeRails.Services.VCA.Validators
             ValidationContext? context = null,
             CancellationToken ct = default)
         {
-            // Get documented files from the AGENTS.md Files section
+            // Get documented files from the vc.rules.md Files section
             var documentedFiles = await _agentFileService.GetDocumentedFilesAsync(sourceFile, ct);
 
             // Normalize paths for comparison

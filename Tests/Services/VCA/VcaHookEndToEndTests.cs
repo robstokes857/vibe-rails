@@ -47,13 +47,13 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
     [Fact]
     public async Task PreCommit_BlocksStopViolation_FromRealStagedFiles()
     {
-        await WriteAsync("AGENTS.md", """
+        await WriteAsync("vc.rules.md", """
             # Agent Instructions
             ## Vibe Rails Rules
             - Log all file changes (STOP)
             """);
         await WriteAsync("src/app.cs", "class App { }\n");
-        await RunGitAsync("add", "AGENTS.md", "src/app.cs");
+        await RunGitAsync("add", "vc.rules.md", "src/app.cs");
 
         var result = await RunHookAsync("pre-commit");
 
@@ -67,16 +67,16 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
     [Fact]
     public async Task PreCommit_PassesWhenDocumentedFilesSatisfyRule()
     {
-        await WriteAsync("AGENTS.md", """
+        await WriteAsync("vc.rules.md", """
             # Agent Instructions
             ## Vibe Rails Rules
             - Log all file changes (STOP)
             ## Files
-            - AGENTS.md
+            - vc.rules.md
             - src/app.cs
             """);
         await WriteAsync("src/app.cs", "class App { }\n");
-        await RunGitAsync("add", "AGENTS.md", "src/app.cs");
+        await RunGitAsync("add", "vc.rules.md", "src/app.cs");
 
         var result = await RunHookAsync("pre-commit");
 
@@ -89,12 +89,12 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
     [Fact]
     public async Task NestedStopRule_DoesNotApplyOutsideItsDirectory()
     {
-        await WriteAsync("restricted/AGENTS.md", """
+        await WriteAsync("restricted/vc.rules.md", """
             # Restricted Agent Instructions
             ## Vibe Rails Rules
             - Log all file changes (STOP)
             """);
-        await RunGitAsync("add", "restricted/AGENTS.md");
+        await RunGitAsync("add", "restricted/vc.rules.md");
         await RunGitAsync("commit", "-m", "Add nested policy");
         await WriteAsync("outside.txt", "outside change\n");
         await RunGitAsync("add", "outside.txt");
@@ -108,16 +108,16 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
     [Fact]
     public async Task PreCommit_UsesStagedAgentRulesAndFileContent_NotUnstagedWorkingTree()
     {
-        await WriteAsync("AGENTS.md", """
+        await WriteAsync("vc.rules.md", """
             # Agent Instructions
             ## Vibe Rails Rules
             - Cyclomatic complexity < 2 (STOP)
             """);
         await WriteAsync("src/app.cs", "class App { void Run() { if (true) { } if (false) { } } }\n");
-        await RunGitAsync("add", "AGENTS.md", "src/app.cs");
+        await RunGitAsync("add", "vc.rules.md", "src/app.cs");
 
         // These working-tree edits must not change what the pre-commit hook validates.
-        await WriteAsync("AGENTS.md", "# Agent Instructions\n");
+        await WriteAsync("vc.rules.md", "# Agent Instructions\n");
         await WriteAsync("src/app.cs", "class App { }\n");
 
         var result = await RunHookAsync("pre-commit");
@@ -130,16 +130,16 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
     [Fact]
     public async Task NestedFilesEntries_AreRelativeToNestedAgentDirectory()
     {
-        await WriteAsync("nested/AGENTS.md", """
+        await WriteAsync("nested/vc.rules.md", """
             # Nested Agent Instructions
             ## Vibe Rails Rules
             - Log all file changes (STOP)
             ## Files
-            - AGENTS.md
+            - vc.rules.md
             - app.cs
             """);
         await WriteAsync("nested/app.cs", "class App { }\n");
-        await RunGitAsync("add", "nested/AGENTS.md", "nested/app.cs");
+        await RunGitAsync("add", "nested/vc.rules.md", "nested/app.cs");
 
         var result = await RunHookAsync("pre-commit");
 
@@ -150,15 +150,15 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
     [Fact]
     public async Task ChangedLinesRule_UsesStagedDelta_NotWorkingTreeLengthOrUnstagedEdits()
     {
-        await WriteAsync("AGENTS.md", """
+        await WriteAsync("vc.rules.md", """
             # Agent Instructions
             ## Vibe Rails Rules
             - Log file changes > 5 lines (STOP)
             ## Files
-            - AGENTS.md
+            - vc.rules.md
             """);
         await WriteAsync("src/app.cs", string.Join('\n', Enumerable.Range(1, 10).Select(i => $"// line {i}")) + "\n");
-        await RunGitAsync("add", "AGENTS.md", "src/app.cs");
+        await RunGitAsync("add", "vc.rules.md", "src/app.cs");
         await RunGitAsync("commit", "-m", "Add baseline");
 
         await WriteAsync("src/app.cs", "// staged change\n" + string.Join('\n', Enumerable.Range(2, 9).Select(i => $"// line {i}")) + "\n");
@@ -177,14 +177,14 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
     [Fact]
     public async Task CoveragePercentageRule_IsExplicitlyUnsupportedAndDoesNotSilentlyPass()
     {
-        await WriteAsync("AGENTS.md", """
+        await WriteAsync("vc.rules.md", """
             # Agent Instructions
             ## Vibe Rails Rules
             - Require test coverage minimum 80% (STOP)
             """);
         await WriteAsync("src/app.go", "package main\n");
         await WriteAsync("tests/app_test.go", "package tests\n");
-        await RunGitAsync("add", "AGENTS.md", "src/app.go", "tests/app_test.go");
+        await RunGitAsync("add", "vc.rules.md", "src/app.go", "tests/app_test.go");
 
         var result = await RunHookAsync("pre-commit");
 
@@ -195,13 +195,13 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
     [Fact]
     public async Task CoveragePercentageRule_IsNotApplicableWhenOnlyTestsAreStaged()
     {
-        await WriteAsync("AGENTS.md", """
+        await WriteAsync("vc.rules.md", """
             # Agent Instructions
             ## Vibe Rails Rules
             - Require test coverage minimum 80% (STOP)
             """);
         await WriteAsync("tests/app.test.cs", "class AppTests { }\n");
-        await RunGitAsync("add", "AGENTS.md", "tests/app.test.cs");
+        await RunGitAsync("add", "vc.rules.md", "tests/app.test.cs");
 
         var result = await RunHookAsync("pre-commit");
 
@@ -212,13 +212,13 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
     [Fact]
     public async Task CommitMessageRule_DefersAtPreCommitAndRunsAtCommitMessage()
     {
-        await WriteAsync("AGENTS.md", """
+        await WriteAsync("vc.rules.md", """
             # Agent Instructions
             ## Vibe Rails Rules
             - Check commit message for: wip, temporary (STOP)
             """);
         await WriteAsync("src/app.cs", "class App { }\n");
-        await RunGitAsync("add", "AGENTS.md", "src/app.cs");
+        await RunGitAsync("add", "vc.rules.md", "src/app.cs");
 
         var preCommit = await RunHookAsync("pre-commit");
         Assert.Equal(0, preCommit.ExitCode);
@@ -245,13 +245,13 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
     [Fact]
     public async Task CommitMessageRule_RunsForMessageOnlyCommitWithNoStagedDiff()
     {
-        await WriteAsync("AGENTS.md", """
+        await WriteAsync("vc.rules.md", """
             # Agent Instructions
             ## Vibe Rails Rules
             - Check commit message for: wip (STOP)
             """);
         await WriteAsync("src/app.cs", "class App { }\n");
-        await RunGitAsync("add", "AGENTS.md", "src/app.cs");
+        await RunGitAsync("add", "vc.rules.md", "src/app.cs");
         await RunGitAsync("commit", "-m", "Add baseline");
 
         var messagePath = Path.Combine(_repositoryPath, "COMMIT_EDITMSG");
@@ -270,7 +270,7 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
     [Fact]
     public async Task StagedSpecialFilename_IsParsedAsOneGitPath()
     {
-        await WriteAsync("AGENTS.md", """
+        await WriteAsync("vc.rules.md", """
             # Agent Instructions
             ## Vibe Rails Rules
             - Cyclomatic complexity disabled (WARN)
@@ -279,7 +279,7 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
             ? "src/quoted ü file.cs"
             : "src/line\nbreak.cs";
         await WriteAsync(specialPath, "class App { }\n");
-        await RunGitAsync("add", "AGENTS.md", specialPath);
+        await RunGitAsync("add", "vc.rules.md", specialPath);
 
         var result = await RunHookAsync("pre-commit");
 
@@ -290,19 +290,19 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
     [Fact]
     public async Task CommitViolation_RequiresTokenAndNonEmptyReason()
     {
-        await WriteAsync("AGENTS.md", """
+        await WriteAsync("vc.rules.md", """
             # Agent Instructions
             ## Vibe Rails Rules
             - Log all file changes (COMMIT)
             """);
         await WriteAsync("src/app.cs", "class App { }\n");
-        await RunGitAsync("add", "AGENTS.md", "src/app.cs");
+        await RunGitAsync("add", "vc.rules.md", "src/app.cs");
 
         var preCommit = await RunHookAsync("pre-commit");
         Assert.Equal(0, preCommit.ExitCode);
         Assert.Contains("VCA requires commit-message acknowledgment", preCommit.Output);
 
-        const string token = "[VCA:AGENTS.md:log-all-file-changes]";
+        const string token = "[VCA:vc.rules.md:log-all-file-changes]";
         var messagePath = Path.Combine(_repositoryPath, "COMMIT_EDITMSG");
         await RunGitAsync("config", "core.commentChar", ";");
         await File.WriteAllTextAsync(
@@ -338,13 +338,13 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
     [Fact]
     public async Task PackageRule_BlocksStagedDependencyFile()
     {
-        await WriteAsync("AGENTS.md", """
+        await WriteAsync("vc.rules.md", """
             # Agent Instructions
             ## Vibe Rails Rules
             - Package file changes (STOP)
             """);
         await WriteAsync("package.json", "{}\n");
-        await RunGitAsync("add", "AGENTS.md", "package.json");
+        await RunGitAsync("add", "vc.rules.md", "package.json");
 
         var result = await RunHookAsync("pre-commit");
 
@@ -355,17 +355,17 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
     [Fact]
     public async Task FileLock_BlocksARealStagedModification()
     {
-        await WriteAsync("AGENTS.md", "# Agent Instructions\n");
+        await WriteAsync("vc.rules.md", "# Agent Instructions\n");
         await WriteAsync("src/app.cs", "class App { }\n");
-        await RunGitAsync("add", "AGENTS.md", "src/app.cs");
+        await RunGitAsync("add", "vc.rules.md", "src/app.cs");
         await RunGitAsync("commit", "-m", "Add baseline");
 
-        await WriteAsync("AGENTS.md", """
+        await WriteAsync("vc.rules.md", """
             # Agent Instructions
             ## Vibe Rails Rules
             - File Lock('src/app.cs') (STOP)
             """);
-        await RunGitAsync("add", "AGENTS.md");
+        await RunGitAsync("add", "vc.rules.md");
         await RunGitAsync("commit", "-m", "Lock app file");
 
         await WriteAsync("src/app.cs", "class App { public int Changed => 1; }\n");
@@ -381,17 +381,17 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
     [Fact]
     public async Task DirectoryLock_BlocksRealStagedAddsAndDeletes()
     {
-        await WriteAsync("AGENTS.md", "# Agent Instructions\n");
+        await WriteAsync("vc.rules.md", "# Agent Instructions\n");
         await WriteAsync("locked/existing.txt", "baseline\n");
-        await RunGitAsync("add", "AGENTS.md", "locked/existing.txt");
+        await RunGitAsync("add", "vc.rules.md", "locked/existing.txt");
         await RunGitAsync("commit", "-m", "Add locked directory baseline");
 
-        await WriteAsync("AGENTS.md", """
+        await WriteAsync("vc.rules.md", """
             # Agent Instructions
             ## Vibe Rails Rules
             - Directory Lock('locked') (STOP)
             """);
-        await RunGitAsync("add", "AGENTS.md");
+        await RunGitAsync("add", "vc.rules.md");
         await RunGitAsync("commit", "-m", "Lock directory");
 
         File.Delete(Path.Combine(_repositoryPath, "locked", "existing.txt"));
@@ -409,17 +409,17 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
     [Fact]
     public async Task DirectoryLock_BlocksARenameOutOfTheLockedDirectory()
     {
-        await WriteAsync("AGENTS.md", "# Agent Instructions\n");
+        await WriteAsync("vc.rules.md", "# Agent Instructions\n");
         await WriteAsync("locked/moved.txt", "baseline\n");
-        await RunGitAsync("add", "AGENTS.md", "locked/moved.txt");
+        await RunGitAsync("add", "vc.rules.md", "locked/moved.txt");
         await RunGitAsync("commit", "-m", "Add rename baseline");
 
-        await WriteAsync("AGENTS.md", """
+        await WriteAsync("vc.rules.md", """
             # Agent Instructions
             ## Vibe Rails Rules
             - Directory Lock('locked') (STOP)
             """);
-        await RunGitAsync("add", "AGENTS.md");
+        await RunGitAsync("add", "vc.rules.md");
         await RunGitAsync("commit", "-m", "Lock directory");
 
         Directory.CreateDirectory(Path.Combine(_repositoryPath, "outside"));
@@ -434,13 +434,13 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
     [Fact]
     public async Task AttachedPopup_ClosesWithoutEnter_WhenOnlyWarningsWereFound()
     {
-        await WriteAsync("AGENTS.md", """
+        await WriteAsync("vc.rules.md", """
             # Agent Instructions
             ## Vibe Rails Rules
             - Log all file changes (WARN)
             """);
         await WriteAsync("src/app.cs", "class App { }\n");
-        await RunGitAsync("add", "AGENTS.md", "src/app.cs");
+        await RunGitAsync("add", "vc.rules.md", "src/app.cs");
 
         using var transcript = new StringWriter();
         using var input = new NeverCompletingTextReader();
@@ -472,13 +472,13 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
     [Fact]
     public async Task AttachedPopup_StaysOpenToBeRead_WhenTheCommitIsBlocked()
     {
-        await WriteAsync("AGENTS.md", """
+        await WriteAsync("vc.rules.md", """
             # Agent Instructions
             ## Vibe Rails Rules
             - Log all file changes (STOP)
             """);
         await WriteAsync("src/app.cs", "class App { }\n");
-        await RunGitAsync("add", "AGENTS.md", "src/app.cs");
+        await RunGitAsync("add", "vc.rules.md", "src/app.cs");
 
         using var transcript = new StringWriter();
         using var input = new StringReader(Environment.NewLine);

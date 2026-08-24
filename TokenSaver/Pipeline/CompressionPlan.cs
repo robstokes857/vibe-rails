@@ -20,6 +20,7 @@ public sealed record CompressionPlan(
     IReadOnlyList<string> AnthropicAllowlist,
     IReadOnlyList<string> CodexAllowlist,
     IReadOnlyList<string> ZaiAllowlist,
+    IReadOnlyList<string> GrokAllowlist,
     IReadOnlySet<string> EnabledIds)
 {
     /// <summary>Compatibility bridge for callers that still provide the original loose flags and
@@ -29,7 +30,8 @@ public sealed record CompressionPlan(
         CondenseOptions condense,
         IReadOnlyList<string>? anthropicAllowlist = null,
         IReadOnlyList<string>? codexAllowlist = null,
-        IReadOnlyList<string>? zaiAllowlist = null) =>
+        IReadOnlyList<string>? zaiAllowlist = null,
+        IReadOnlyList<string>? grokAllowlist = null) =>
         new(
             flags,
             condense,
@@ -37,6 +39,7 @@ public sealed record CompressionPlan(
             anthropicAllowlist ?? [],
             codexAllowlist ?? [],
             zaiAllowlist ?? [],
+            grokAllowlist ?? [],
             new HashSet<string>(StringComparer.Ordinal));
 
     /// <summary>

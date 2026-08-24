@@ -18,11 +18,30 @@ public sealed class LlmProxySettingsServiceTests
         ClaudeLlmProxyEnabled = true,
         CodexLlmProxyEnabled = true,
         OpenCodeLlmProxyEnabled = true,
+        GrokLlmProxyEnabled = true,
         ClaudeTokenSaverEnabled = true,
         CodexTokenSaverEnabled = true,
         OpenCodeTokenSaverEnabled = true,
+        GrokTokenSaverEnabled = true,
         TokenSaverStageOverride = stageOverride,
     };
+
+    [Fact]
+    public void Resolve_GrokSaverTurnsOnWithoutOpenCodeProxy()
+    {
+        var settings = new Settings
+        {
+            GrokLlmProxyEnabled = true,
+            OpenCodeLlmProxyEnabled = false,
+            ClaudeTokenSaverEnabled = true,
+            OpenCodeTokenSaverEnabled = true
+        };
+
+        var resolved = LlmProxySettingsService.Resolve(settings);
+
+        Assert.True(resolved.GrokTokenSaverEnabled);
+        Assert.False(resolved.OpenCodeTokenSaverEnabled);
+    }
 
     [Fact]
     public void Resolve_EachProviderSaverTogglesIndependently()
@@ -215,6 +234,7 @@ public sealed class LlmProxySettingsServiceTests
     [InlineData(LlmProxyProvider.Claude)]
     [InlineData(LlmProxyProvider.Codex)]
     [InlineData(LlmProxyProvider.OpenCode)]
+    [InlineData(LlmProxyProvider.Grok)]
     public void IsConfiguredOn_IsFalseWhenOnlyThisProvidersSaverIsOff(LlmProxyProvider provider)
     {
         var settings = ProxyOn();
@@ -222,6 +242,7 @@ public sealed class LlmProxySettingsServiceTests
         {
             case LlmProxyProvider.Claude: settings.ClaudeTokenSaverEnabled = false; break;
             case LlmProxyProvider.Codex: settings.CodexTokenSaverEnabled = false; break;
+            case LlmProxyProvider.Grok: settings.GrokTokenSaverEnabled = false; break;
             default: settings.OpenCodeTokenSaverEnabled = false; break;
         }
 
@@ -234,12 +255,14 @@ public sealed class LlmProxySettingsServiceTests
     [InlineData(LlmProxyProvider.Claude)]
     [InlineData(LlmProxyProvider.Codex)]
     [InlineData(LlmProxyProvider.OpenCode)]
+    [InlineData(LlmProxyProvider.Grok)]
     public void IsConfiguredOn_IsTrueWhenThisProvidersSaverIsTheOnlyOneOn(LlmProxyProvider provider)
     {
         var settings = ProxyOn();
         settings.ClaudeTokenSaverEnabled = provider == LlmProxyProvider.Claude;
         settings.CodexTokenSaverEnabled = provider == LlmProxyProvider.Codex;
         settings.OpenCodeTokenSaverEnabled = provider == LlmProxyProvider.OpenCode;
+        settings.GrokTokenSaverEnabled = provider == LlmProxyProvider.Grok;
 
         var configured = LlmProxySettingsService.Resolve(settings);
 

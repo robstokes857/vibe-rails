@@ -621,7 +621,7 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
             return loaded;
         }
 
-        // Rules are part of the snapshot's meaning, so reserve memory for HEAD's agent files before
+        // Rules are part of the snapshot's meaning, so reserve memory for HEAD's rule files before
         // lower-priority baselines and impact-only sources consume the aggregate budget.
         var agentFiles = new List<GitIndexTextFile>();
         foreach (var entry in headEntries.Where(entry => entry.Type == "blob" && IsAgentFile(entry.RelativePath)))
@@ -735,9 +735,9 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
 
     /// <summary>
     /// Rules for the working-tree snapshot come from the working tree itself: an unstaged
-    /// AGENTS.md edit — or a brand-new untracked AGENTS.md — applies to this preview, even
+    /// vc.rules.md edit — or a brand-new untracked vc.rules.md — applies to this preview, even
     /// though the commit hooks keep reading rules from the index. By the same principle, an
-    /// AGENTS.md deleted from the working tree contributes no rules here.
+    /// vc.rules.md deleted from the working tree contributes no rules here.
     /// </summary>
     private static async Task<IReadOnlyList<GitIndexTextFile>> ReadWorkingTreeAgentFilesAsync(
         string repositoryPath,
@@ -1704,8 +1704,7 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
     private static bool IsAgentFile(string relativePath)
     {
         var name = Path.GetFileName(relativePath);
-        return name.Equals("AGENT.md", StringComparison.OrdinalIgnoreCase)
-            || name.Equals("AGENTS.md", StringComparison.OrdinalIgnoreCase);
+        return name.Equals("vc.rules.md", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string NormalizePath(string path)

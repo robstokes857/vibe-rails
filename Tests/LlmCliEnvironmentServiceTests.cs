@@ -29,6 +29,7 @@ public class LlmCliEnvironmentServiceTests
             Mock.Of<IAntigravityLlmCliEnvironment>(),
             Mock.Of<ICopilotLlmCliEnvironment>(),
             Mock.Of<IOpencodeLlmCliEnvironment>(),
+            Mock.Of<IGrokLlmCliEnvironment>(),
             Mock.Of<IFileService>());
         var environment = new LLM_Environment
         {
@@ -365,11 +366,10 @@ public class LlmCliEnvironmentServiceTests
     }
 
     [Fact]
-    public void GetEnvironmentVariables_Grok46UsesIsolatedXdgConfigRoot()
+    public void GetEnvironmentVariables_Grok46DoesNotSetGrokHomeOrXdg()
     {
         var originalEnvPath = ParserConfigs.GetEnvPath();
         var configuredEnvRoot = Path.Combine(Path.GetTempPath(), $"viberails-grok-{Guid.NewGuid():N}");
-        var expectedPath = Path.GetFullPath(Path.Combine(configuredEnvRoot, "review"));
         var service = CreateService(Mock.Of<IFileService>());
 
         ParserConfigs.SetEnvPath(configuredEnvRoot);
@@ -378,8 +378,9 @@ public class LlmCliEnvironmentServiceTests
         {
             var variables = service.GetEnvironmentVariables("review", LLM.Grok46);
 
-            Assert.Equal(expectedPath, variables["XDG_CONFIG_HOME"]);
-            Assert.DoesNotContain("OPENCODE_CONFIG_DIR", variables.Keys);
+            Assert.Empty(variables);
+            Assert.DoesNotContain("GROK_HOME", variables.Keys);
+            Assert.DoesNotContain("XDG_CONFIG_HOME", variables.Keys);
             Assert.DoesNotContain("XDG_DATA_HOME", variables.Keys);
         }
         finally
@@ -444,6 +445,7 @@ public class LlmCliEnvironmentServiceTests
             new AntigravityLlmCliEnvironment(fileService),
             new CopilotLlmCliEnvironment(fileService),
             new OpencodeLlmCliEnvironment(fileService),
+            new GrokLlmCliEnvironment(fileService),
             fileService);
     }
 }

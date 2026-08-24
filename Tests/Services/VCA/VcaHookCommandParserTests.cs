@@ -163,7 +163,7 @@ public class VcaHookValidationAnalyzerTests
         Assert.True(analyzer.ShouldBlockPreCommit(Summary(hasError: true)));
         // COMMIT-level violations are acknowledged in the commit message, not blocked here.
         Assert.False(analyzer.ShouldBlockPreCommit(
-            Summary(hasCommitViolations: true, requiredAcknowledgments: "[VCA:AGENTS.md:log-all-file-changes]")));
+            Summary(hasCommitViolations: true, requiredAcknowledgments: "[VCA:vc.rules.md:log-all-file-changes]")));
     }
 
     [Fact]
@@ -172,22 +172,22 @@ public class VcaHookValidationAnalyzerTests
         var analyzer = new VcaHookValidationAnalyzer();
         var required = new[]
         {
-            "[VCA:AGENTS.md:log-all-file-changes]",
-            "[VCA:DB-AGENTS.md:package-file-changes]"
+            "[VCA:vc.rules.md:log-all-file-changes]",
+            "[VCA:DB-vc.rules.md:package-file-changes]"
         };
 
         var missing = analyzer.GetMissingAcknowledgments(
-            "[vca:agents.md:log-all-file-changes] reason: reviewed and accepted",
+            "[vca:vc.rules.md:log-all-file-changes] reason: reviewed and accepted",
             required);
 
-        Assert.Equal(new[] { "[VCA:DB-AGENTS.md:package-file-changes]" }, missing);
+        Assert.Equal(new[] { "[VCA:DB-vc.rules.md:package-file-changes]" }, missing);
     }
 
     [Fact]
     public void GetMissingAcknowledgments_RejectsTokenWithoutReason()
     {
         var analyzer = new VcaHookValidationAnalyzer();
-        const string token = "[VCA:AGENTS.md:log-all-file-changes]";
+        const string token = "[VCA:vc.rules.md:log-all-file-changes]";
 
         var missing = analyzer.GetMissingAcknowledgments(token, [token]);
 

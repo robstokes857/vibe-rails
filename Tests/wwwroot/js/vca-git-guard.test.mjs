@@ -267,7 +267,7 @@ test('VCA STOP findings explain why the commit is blocked and how to fix it', ()
                 enforcement: 'STOP',
                 rule: 'Tests must accompany behavior changes',
                 reason: 'src/widget.cs changed without a matching test file.',
-                sourcePath: 'AGENTS.md',
+                sourcePath: 'vc.rules.md',
                 guidance: 'Add or update the relevant test, then stage it.'
             }]
         }

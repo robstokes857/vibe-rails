@@ -75,7 +75,7 @@ namespace VibeRails.Services
                     Rule.FileLock or Rule.DirectoryLock => ValidatePathLock(
                         files,
                         rule,
-                        Path.Combine(rootPath, "AGENTS.md"),
+                        Path.Combine(rootPath, "vc.rules.md"),
                         rootPath),
                     _ => new ValidationResult(rule.RuleText, rule.Enforcement, true, "Rule not implemented for pre-commit")
                 };
@@ -107,7 +107,7 @@ namespace VibeRails.Services
                     continue;
                 }
 
-                // Scope files to the agent's directory — an AGENTS.md only governs
+                // Scope files to the rule file's directory — a vc.rules.md file only governs
                 // files in its own directory and subdirectories.
                 var scopedFiles = GetScopedFiles(files, sourceFile, rootPath);
 
@@ -144,7 +144,7 @@ namespace VibeRails.Services
             List<string> files, RuleWithEnforcement rule, string sourceFile, string rootPath,
             CancellationToken cancellationToken)
         {
-            // Get documented files from the AGENTS.md Files section
+            // Get documented files from the vc.rules.md Files section
             var documentedFiles = await _agentFileService.GetDocumentedFilesAsync(sourceFile, cancellationToken);
 
             // Normalize paths for comparison
@@ -163,7 +163,7 @@ namespace VibeRails.Services
                     rule.RuleText,
                     rule.Enforcement,
                     false,
-                    $"{undocumentedFiles.Count} changed file(s) not documented in AGENTS.md Files section",
+                    $"{undocumentedFiles.Count} changed file(s) not documented in vc.rules.md Files section",
                     undocumentedFiles);
             }
 
@@ -179,7 +179,7 @@ namespace VibeRails.Services
             List<string> files, string rootPath, int threshold,
             RuleWithEnforcement rule, string sourceFile, CancellationToken cancellationToken)
         {
-            // Get documented files from the AGENTS.md Files section
+            // Get documented files from the vc.rules.md Files section
             var documentedFiles = await _agentFileService.GetDocumentedFilesAsync(sourceFile, cancellationToken);
 
             var normalizedDocumented = documentedFiles
@@ -211,7 +211,7 @@ namespace VibeRails.Services
                     rule.RuleText,
                     rule.Enforcement,
                     false,
-                    $"{violations.Count} large file(s) (>{threshold} lines) not documented in AGENTS.md",
+                    $"{violations.Count} large file(s) (>{threshold} lines) not documented in vc.rules.md",
                     violations);
             }
 
@@ -220,16 +220,16 @@ namespace VibeRails.Services
         }
 
         /// <summary>
-        /// Returns only the changed files that fall within the agent file's directory (and subdirectories).
-        /// An AGENTS.md at "VibeRails/DB/AGENTS.md" only governs files under "VibeRails/DB/".
-        /// An AGENTS.md at the repo root governs all files.
+        /// Returns only the changed files that fall within the rule file's directory (and subdirectories).
+        /// A vc.rules.md file at "VibeRails/DB/vc.rules.md" only governs files under "VibeRails/DB/".
+        /// A vc.rules.md file at the repo root governs all files.
         /// </summary>
         private static List<string> GetScopedFiles(List<string> files, string sourceFile, string rootPath)
         {
             var agentDir = Path.GetDirectoryName(Path.GetFullPath(sourceFile)) ?? "";
             var rootFull = Path.GetFullPath(rootPath);
 
-            // Get relative path of the agent's directory from the repo root
+            // Get the rule file directory's path relative to the repo root
             var relativeAgentDir = Path.GetRelativePath(rootFull, agentDir)
                 .Replace('\\', '/');
 
@@ -265,7 +265,7 @@ namespace VibeRails.Services
         {
             // A lock that cannot be parsed or resolved is inert, not violated. It has no path to
             // compare against, so failing it would report on every file of every commit — and at
-            // STOP enforcement that blocks all work until the AGENTS.md is hand-edited, possibly
+            // STOP enforcement that blocks all work until the vc.rules.md is hand-edited, possibly
             // the very file the lock covers. The message still names the problem so a hand-edited
             // typo is visible in the hook output instead of silently disabling the lock.
             if (!PathLockRule.TryParse(rule.RuleText, out var pathLock))

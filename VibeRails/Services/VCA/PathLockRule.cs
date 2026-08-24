@@ -10,7 +10,7 @@ public sealed record PathLockSpecification(PathLockKind Kind, string RelativePat
 
 /// <summary>
 /// Syntax, resolution, and matching for VCA's parameterized path-lock rules.
-/// Paths are relative to the directory containing the declaring AGENTS.md and may not escape it.
+/// Paths are relative to the directory containing the declaring vc.rules.md and may not escape it.
 /// </summary>
 public static class PathLockRule
 {
@@ -56,7 +56,7 @@ public static class PathLockRule
 
         if (IsAbsoluteOnAnySupportedPlatform(requestedPath))
         {
-            error = "the lock path must be relative to the declaring AGENTS.md";
+            error = "the lock path must be relative to the declaring vc.rules.md";
             return false;
         }
 
@@ -73,7 +73,7 @@ public static class PathLockRule
             var relativeToSource = Path.GetRelativePath(sourceDirectory, target);
             if (EscapesBase(relativeToSource))
             {
-                error = "the lock path may not escape the declaring AGENTS.md directory";
+                error = "the lock path may not escape the declaring vc.rules.md directory";
                 return false;
             }
 
@@ -90,7 +90,7 @@ public static class PathLockRule
             if (specification.Kind == PathLockKind.File
                 && target.Equals(source, comparison))
             {
-                error = "a File Lock cannot target its own declaring AGENTS.md";
+                error = "a File Lock cannot target its own declaring vc.rules.md";
                 return false;
             }
 
@@ -118,7 +118,7 @@ public static class PathLockRule
             ? null
             : NormalizeGitPath(previousRepositoryPath);
 
-        // The policy file must remain editable, especially for STOP locks. Other AGENTS.md files
+        // The policy file must remain editable, especially for STOP locks. Other vc.rules.md files
         // inside a locked directory are ordinary content and remain protected.
         var currentMatches = !currentPath.Equals(sourcePath, comparison)
             && MatchesPath(specification.Kind, lockedRepositoryPath, currentPath, comparison);
@@ -151,7 +151,7 @@ public static class PathLockRule
             return false;
         }
 
-        // A rule occupies exactly one line of AGENTS.md. Text carrying a line break is written back
+        // A rule occupies exactly one line of vc.rules.md. Text carrying a line break is written back
         // as two lines, and a second line starting with '#' closes the rules section — which
         // silently unenforces every rule below it in both the Git hook and the Rules page, because
         // they share a reader. Refused here rather than only at the API boundary so the writer and

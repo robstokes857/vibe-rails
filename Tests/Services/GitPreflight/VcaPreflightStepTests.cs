@@ -14,7 +14,7 @@ public sealed class VcaPreflightStepTests
             "WARN",
             "Package file changes",
             "package.json changed",
-            "AGENTS.md",
+            "vc.rules.md",
             "Review this finding before committing.");
         var validation = new VcaHookValidationResult(
             "WARNINGS:\n  [WARN] Package file changes: package.json changed",

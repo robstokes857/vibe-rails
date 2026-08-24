@@ -3,7 +3,10 @@ namespace VibeRails.Services
     public static class STRINGS
     {
         public const string INIT_AGENT_FILE_CONTENT =
-@$"# {AGENT_FILE_HEADER}
+@$"# VibeRails Rules
+
+Rules VibeRails enforces on every commit. Each rule is a list item under the
+rules heading below; the optional Files section lists files covered here.
 
 ## Vibe Rails Rules
 
@@ -13,15 +16,10 @@ namespace VibeRails.Services
 
 
         public const string AGENT_FILE_HEADER =
-            @"# Repository Guidelines
+            @"# VibeRails Rules
 
-This file provides instructions and context for humans and AI coding assistants working in this codebase.
-
-## Development Guidelines
-- Read AGENTS.md for detailed agent instructions and information about this project
-- Follow the rules and guidelines specified in this file exactly
-- Follow existing code patterns and conventions in the codebase
-- Keep changes focused and minimal";
+Rules VibeRails enforces on every commit. Each rule is a list item under the rules heading
+below; the optional Files section lists files covered by this policy.";
 
 
 

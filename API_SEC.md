@@ -1,9 +1,9 @@
 # API authentication coverage
 
-Audit date: 2026-08-22
+Audit date: 2026-08-23
 
-Full production route/authentication reconciliation completed: 2026-08-22. All 162
-`/api/v1` method/path surfaces, eight protected non-`/api` API surfaces, and the three
+Full production route/authentication reconciliation completed: 2026-08-23. All 162
+`/api/v1` method/path surfaces, nine protected non-`/api` API surfaces, and the three
 bootstrap/page/probe mappings match the current working tree. The only middleware bypasses
 remain exact `GET /health`, exact `GET /auth/bootstrap`, and global `OPTIONS` requests.
 
@@ -36,6 +36,12 @@ Route inventory updated: 2026-08-15 (`ANY /llm/xai/{**rest}` added as a fourth K
 LLM proxy tree for OpenCode's xAI/Grok provider). This is not the rejected `/llm/grok`
 sidecar. The frozen three-case middleware bypass remains otherwise
 unchanged.
+
+Route inventory updated: 2026-08-23 (`ANY /llm/cli-chat/{**rest}` added as a fifth
+Kestrel-mapped LLM proxy tree for the native Grok Build CLI). Upstream is
+`cli-chat-proxy.grok.com` (subscription / `grok login`) or `api.x.ai` (API key),
+selected by `GrokLlmProxyMode`. This is not `/llm/grok` and not a second listener.
+The frozen three-case middleware bypass remains unchanged.
 
 Listener topology re-checked: 2026-08-18. The only approved production request listener
 is the main Kestrel host. An uncommitted Grok integration's second `HttpListener` was
@@ -113,7 +119,7 @@ discovery alone is insufficient if the same feature change is allowed to expand 
 set. The production listener set is now frozen above so a new match starts as a finding, not as
 an expectation.
 
-### Repository-wide listener result — 2026-08-22
+### Repository-wide listener result — 2026-08-23
 
 - Approved serving implementation: the main Kestrel host in `VibeRails/Program.cs`.
 - Rejected and removed before merge: `GrokLoopbackBridge`'s `HttpListener`.
@@ -143,8 +149,8 @@ session-scoped browser credential (`viberails_tab`), which the implementation ca
 Authentication is enforced primarily by
 [`CookieAuthMiddleware`](VibeRails/Middleware/CookieAuthMiddleware.cs). The LLM proxy
 routes additionally use
-[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 173 mapped route
-surfaces in this inventory: 162 `/api/v1` method/path mappings, eight non-`/api` protected
+[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 174 mapped route
+surfaces in this inventory: 162 `/api/v1` method/path mappings, nine non-`/api` protected
 API surfaces, and three bootstrap/page/probe routes. Static-file middleware and the
 global `OPTIONS` behavior are noted separately because they are not finite mapped-route
 lists.
@@ -224,6 +230,9 @@ There are **no mapped business `/api/v1` endpoints** in this category.
 - `ANY /llm/xai/{**rest}` — same shape as Claude/Codex: real OpenCode requests use
   `/llm/xai/v1/chat/completions`, which contains no `/api/` segment, so the middleware
   enforces the session credential only. The in-handler proxy gate then requires both.
+- `ANY /llm/cli-chat/{**rest}` — same shape: native Grok uses
+  `/llm/cli-chat/v1/chat/completions` (no `/api/`), so the middleware enforces the
+  session credential only. The in-handler proxy gate then requires both.
 
 No `/llm` path is on the middleware skip list, so a valid `viberails_session` credential
 (sent as a header by the CLIs) is always required before the handler runs. The
@@ -247,7 +256,7 @@ Unless a proxy-specific note says otherwise, every route in this section is prot
 `viberails_session` cookie (or same-named header) plus the `viberails_tab` header.
 WebSocket handshakes use the session cookie/subprotocol plus the tab-token subprotocol.
 
-### Non-`/api/v1` API surfaces (8)
+### Non-`/api/v1` API surfaces (9)
 
 - `MCP /mcp` — the Streamable HTTP MCP endpoint. The middleware also protects `/mcp/**`.
 - `ANY /llm/openai/{**rest}` — `CookieAuthMiddleware` checks the session credential
@@ -264,6 +273,9 @@ WebSocket handshakes use the session cookie/subprotocol plus the tab-token subpr
   middleware checks the session credential (the real path is `/llm/xai/v1/...`, no
   `/api/`); when enabled, the proxy gate requires both headers. This is a main-host
   Kestrel mapping, not the rejected `GrokLoopbackBridge` / `/llm/grok` sidecar.
+- `ANY /llm/cli-chat/{**rest}` — same shape for native Grok (`/llm/cli-chat/v1/...`).
+  Grok's `Authorization` / `X-XAI-Token-Auth` are forwarded; VibeRails session/tab
+  headers are stripped. Not `/llm/grok` and not a second listener.
 - `POST /llm/control/token-saver/pause` — both headers are required by the control
   handler's proxy auth gate.
 - `POST /llm/control/token-saver/resume` — both headers are required by the control
@@ -281,7 +293,7 @@ WebSocket handshakes use the session cookie/subprotocol plus the tab-token subpr
 - `GET /api/v1/agent-tools/terminal/{tabId}/snapshot`
 - `WS /api/v1/agent-tools/ws`
 
-### Agent files and rules (12)
+### Rule files and rules (12)
 
 - `GET /api/v1/agents`
 - `POST /api/v1/agents`
@@ -499,7 +511,7 @@ WebSocket handshakes use the session cookie/subprotocol plus the tab-token subpr
   `viberails_tab`.
 - The normal `/api/v1/**` invariant is strong and simple: every mapped HTTP and WebSocket
   API is behind both session and tab validation before its handler runs.
-- As of 2026-08-05, no `/llm` path bypasses `CookieAuthMiddleware`. All four proxy trees
+- As of 2026-08-05, no `/llm` path bypasses `CookieAuthMiddleware`. All five proxy trees
   clear the middleware with the same header-borne credentials the in-handler gate checks,
   making the gate defense in depth rather than the only line. The feature-disabled `404`
   is now observable only by callers that already hold valid credentials; unauthenticated

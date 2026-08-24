@@ -55,7 +55,7 @@ namespace VibeRails.Services
         }
 
         /// <summary>
-        /// Rejects rule text AGENTS.md cannot hold on a single line.
+        /// Rejects rule text vc.rules.md cannot hold on a single line.
         ///
         /// Every writer below emits the rule as one "- {rule}" list item, so a line break in the
         /// text becomes two real lines on disk. A second line beginning with '#' closes the rules
@@ -75,7 +75,7 @@ namespace VibeRails.Services
         /// <summary>
         /// Rejects rule text the validator will not be able to parse later.
         ///
-        /// This is the only place that can stop malformed rule text from reaching AGENTS.md, so it
+        /// This is the only place that can stop malformed rule text from reaching vc.rules.md, so it
         /// fails closed: text that merely looks like a path lock but does not parse — a missing
         /// argument, an empty path, an embedded line break — is refused rather than written.
         /// Persisting it instead would leave a rule the Git hook can see, cannot resolve, and
@@ -122,7 +122,7 @@ namespace VibeRails.Services
             // Enumerate through git instead of walking the tree: the raw recursive walk
             // visits .git, bin/obj, node_modules and every other ignored directory —
             // tens of thousands of entries per call on a warm repo, seconds on a laptop
-            // with AV — and it surfaced stale AGENTS.md copies inside build output that
+            // with AV — and it surfaced stale vc.rules.md copies inside build output that
             // the Git hook never enforces. Tracked + untracked-unignored is exactly the
             // hook's universe, so the Rules page and the hook now agree.
             var viaGit = await TryGetAgentFilesViaGitAsync(root, cancellationToken);
@@ -139,8 +139,7 @@ namespace VibeRails.Services
 
         private static bool IsAgentFileName(string name)
         {
-            return name.Equals("agent.md", StringComparison.OrdinalIgnoreCase)
-                || name.Equals("agents.md", StringComparison.OrdinalIgnoreCase);
+            return name.Equals("vc.rules.md", StringComparison.OrdinalIgnoreCase);
         }
 
         private static async Task<List<string>?> TryGetAgentFilesViaGitAsync(string root, CancellationToken cancellationToken)
@@ -205,13 +204,13 @@ namespace VibeRails.Services
         }
         public async Task<string> GetAgentFileContentAsync(string path, CancellationToken cancellationToken)
         {
-            // Validate this is actually an agent file
+            // Validate this is actually a rule file
             var agentFiles = await GetAgentFiles(cancellationToken);
             var normalizedPath = Path.GetFullPath(path);
 
             if (!agentFiles.Any(f => Path.GetFullPath(f).Equals(normalizedPath, StringComparison.OrdinalIgnoreCase)))
             {
-                throw new UnauthorizedAccessException($"Path is not a valid agent file: {path}");
+                throw new UnauthorizedAccessException($"Path is not a valid rule file: {path}");
             }
 
             return await File.ReadAllTextAsync(normalizedPath, cancellationToken);
@@ -224,7 +223,7 @@ namespace VibeRails.Services
         }
 
         /// <summary>
-        /// Rules this agent file declares, read through <see cref="AgentRuleSectionReader"/> — the
+        /// Rules this rule file declares, read through <see cref="AgentRuleSectionReader"/> — the
         /// same reader the Git hook uses.
         ///
         /// Unrecognized rule text is returned rather than dropped. Silently hiding a rule the hook

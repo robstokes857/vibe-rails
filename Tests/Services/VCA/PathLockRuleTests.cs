@@ -30,7 +30,7 @@ public class PathLockRuleTests
     }
 
     /// <summary>
-    /// A lock path is the one place arbitrary caller text reaches AGENTS.md — every other rule has
+    /// A lock path is the one place arbitrary caller text reaches vc.rules.md — every other rule has
     /// to match a known name exactly. A line break in it would be written back as two lines, and a
     /// second line opening with '#' closes the rules section, dropping every rule below it from
     /// both the hook and the Rules page. Path.GetFullPath carries newlines through without
@@ -55,7 +55,7 @@ public class PathLockRuleTests
     public void TryResolveRepositoryPath_UsesTheDeclaringAgentDirectory()
     {
         var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "path-lock-root"));
-        var source = Path.Combine(root, "nested", "AGENTS.md");
+        var source = Path.Combine(root, "nested", "vc.rules.md");
         var specification = new PathLockSpecification(PathLockKind.File, @"config\settings.json");
 
         var resolved = PathLockRule.TryResolveRepositoryPath(
@@ -76,7 +76,7 @@ public class PathLockRuleTests
     public void TryResolveRepositoryPath_RejectsAbsoluteAndEscapingPaths(string requestedPath)
     {
         var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "path-lock-root"));
-        var source = Path.Combine(root, "nested", "AGENTS.md");
+        var source = Path.Combine(root, "nested", "vc.rules.md");
 
         var resolved = PathLockRule.TryResolveRepositoryPath(
             new PathLockSpecification(PathLockKind.File, requestedPath),
@@ -93,17 +93,17 @@ public class PathLockRuleTests
     public void TryResolveRepositoryPath_RejectsLockingTheDeclaringAgentFile()
     {
         var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "path-lock-root"));
-        var source = Path.Combine(root, "AGENTS.md");
+        var source = Path.Combine(root, "vc.rules.md");
 
         var resolved = PathLockRule.TryResolveRepositoryPath(
-            new PathLockSpecification(PathLockKind.File, "AGENTS.md"),
+            new PathLockSpecification(PathLockKind.File, "vc.rules.md"),
             source,
             root,
             out _,
             out var error);
 
         Assert.False(resolved);
-        Assert.Contains("own declaring AGENTS.md", error);
+        Assert.Contains("own declaring vc.rules.md", error);
     }
 
     [Fact]
@@ -116,14 +116,14 @@ public class PathLockRuleTests
             "locked.txt",
             "moved.txt",
             "locked.txt",
-            "AGENTS.md",
+            "vc.rules.md",
             StringComparison.Ordinal));
         Assert.False(PathLockRule.Matches(
             specification,
             "locked.txt",
             "other.txt",
             null,
-            "AGENTS.md",
+            "vc.rules.md",
             StringComparison.Ordinal));
     }
 
@@ -133,11 +133,11 @@ public class PathLockRuleTests
         var specification = new PathLockSpecification(PathLockKind.Directory, "src/locked");
 
         Assert.True(PathLockRule.Matches(
-            specification, "src/locked", "src/locked/file.cs", null, "AGENTS.md", StringComparison.Ordinal));
+            specification, "src/locked", "src/locked/file.cs", null, "vc.rules.md", StringComparison.Ordinal));
         Assert.True(PathLockRule.Matches(
-            specification, "src/locked", "src/locked/nested/file.cs", null, "AGENTS.md", StringComparison.Ordinal));
+            specification, "src/locked", "src/locked/nested/file.cs", null, "vc.rules.md", StringComparison.Ordinal));
         Assert.False(PathLockRule.Matches(
-            specification, "src/locked", "src/locked-old/file.cs", null, "AGENTS.md", StringComparison.Ordinal));
+            specification, "src/locked", "src/locked-old/file.cs", null, "vc.rules.md", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -146,8 +146,8 @@ public class PathLockRuleTests
         var specification = new PathLockSpecification(PathLockKind.Directory, ".");
 
         Assert.False(PathLockRule.Matches(
-            specification, ".", "AGENTS.md", null, "AGENTS.md", StringComparison.Ordinal));
+            specification, ".", "vc.rules.md", null, "vc.rules.md", StringComparison.Ordinal));
         Assert.True(PathLockRule.Matches(
-            specification, ".", "src/app.cs", null, "AGENTS.md", StringComparison.Ordinal));
+            specification, ".", "src/app.cs", null, "vc.rules.md", StringComparison.Ordinal));
     }
 }

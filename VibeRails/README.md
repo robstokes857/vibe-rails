@@ -16,7 +16,7 @@
 - **Few Shot Prompting** - Get Antigravity or codex to code like Claude for code that has been done before with few shot prompting... Making them up to 20% better (research paper and eval data coming soon.)
 - **Rule Enforcement** - Define and enforce coding standards like test coverage, cyclomatic complexity, logging practices, and more. LLMs fix their errors before code can be pushed or before the tech debt get astronomical.
 - **Token Savings** - Learn your codebase and how you describe it, providing LLMs with smart file hints to reduce token usage and costs
-- **AGENTS.md Management** - Create and manage agent instruction files following the [agents.md specification](https://agents.md/)
+- **Rule Files (`vc.rules.md`)** - Create and manage VibeRails rule files that gate every commit with WARN/COMMIT/STOP enforcement
 
 ---
 
@@ -80,7 +80,7 @@ Press `F5` to launch the extension in development mode, then click the VibeRails
 
 ### First Steps
 
-1. **Create an agent file** in your repository root named `agent.md`
+1. **Create a rule file** in your repository root named `vc.rules.md`
 2. **Add coding rules** with enforcement levels:
    ```markdown
    ## Vibe Rails Rules
@@ -151,7 +151,7 @@ The core ASP.NET application providing:
 
 | Service | Purpose |
 |---------|---------|
-| `AgentFileService` | Find and manage agent.md files |
+| `AgentFileService` | Find and manage vc.rules.md files |
 | `RulesService` | Define and validate 14 built-in coding rules |
 | `Repository` | SQLite data access (state.db) |
 | `GitService` | Git repository interactions |
@@ -162,7 +162,7 @@ The core ASP.NET application providing:
 
 Single-page application with:
 
-- **Agent Files View** - Browse and manage coding rules
+- **Rule Files View** - Browse and manage coding rules
 - **Dashboard View** - Quick actions for launching CLIs
 - **Session History** - Recent CLI sessions with terminal playback
 - **Configuration** - API keys and environment settings
@@ -177,7 +177,7 @@ wwwroot/
 │   ├── rule-controller.js         (~70KB)   # Rule management
 │   ├── code-analyzer-dashboard.js (~67KB)   # Code quality scan UI
 │   ├── jobs-controller.js         (~84KB)   # Automated jobs
-│   ├── agent-controller.js        (~64KB)   # Agent file management
+│   ├── agent-controller.js        (~64KB)   # Rule file management
 │   ├── chat-history-sidebar.js    (~59KB)   # Session chat history
 │   ├── vibe-rails-ai-controller.js(~56KB)   # Vibe AI inspector
 │   ├── sandbox-controller.js      (~32KB)   # Sandbox CRUD + launch
@@ -211,7 +211,7 @@ Tools (snake_case wire names):
 
 | Tool | Purpose |
 |------|---------|
-| `validate_vca` | Validate staged git files against AGENTS.md enforcement rules |
+| `validate_vca` | Validate staged git files against vc.rules.md enforcement rules |
 | `search_history` | Semantic + keyword search over captured agent history (real BGE/sqlite-vec/RRF — the same `IUnifiedSearchService` as the "Vibe AI" inspector) |
 | `pause_token_saver` / `resume_token_saver` / `get_token_saver_status` | Control the LLM-proxy token saver |
 
@@ -336,16 +336,16 @@ vb --git-guard
 - VCA is the only preflight stage that can block a commit
 - The native pre-commit hook uses the same shared pipeline
 
-### Managing Agent Files
+### Managing Rule Files
 
-#### Create Agent File
+#### Create Rule File
 
 ```bash
 # Via CLI (in repository root)
-echo "## Vibe Rails Rules\n- WARN: log_files_changed" > agent.md
+echo "## Vibe Rails Rules\n- WARN: log_files_changed" > vc.rules.md
 
 # Via Web UI
-# Navigate to Agents → Create New Agent
+# Navigate to RULES → New vc.rules.md
 ```
 
 #### Add Rules
@@ -354,7 +354,7 @@ echo "## Vibe Rails Rules\n- WARN: log_files_changed" > agent.md
 
 | Rule (display text) | Description |
 |------|-------------|
-| Log all file changes | Document every changed file in AGENTS.md |
+| Log all file changes | Document every changed file in vc.rules.md |
 | Log file changes > 5 lines | Document files with > 5 changed lines |
 | Log file changes > 10 lines | Document files with > 10 changed lines |
 | Cyclomatic complexity < 20 | Enforce complexity under 20 |
@@ -374,10 +374,10 @@ echo "## Vibe Rails Rules\n- WARN: log_files_changed" > agent.md
 - `COMMIT` - Require explanation/acknowledgment in commit or PR message
 - `STOP` - Block the commit/PR
 
-#### Example agent.md
+#### Example vc.rules.md
 
 ```markdown
-# Development Agent
+# VibeRails Rules
 
 ## Vibe Rails Rules
 - Cyclomatic complexity < 20 (COMMIT)
@@ -641,18 +641,18 @@ http://localhost:<auto-detected-port>/api/v1/
 
 > The full surface lives in [`VibeRails/Routes/`](Routes/) (30 route files). The major groups:
 
-#### Agent & Rule Management
+#### Rule File Management
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/agents` | List all agent files |
-| GET | `/agents/rules?path={path}` | Get rules from agent file |
-| GET | `/agents/content` / `/agents/files` | Agent file content / file tree |
-| POST | `/agents` | Create agent file |
-| POST | `/agents/rules` | Add rule to agent |
-| POST | `/agents/validate` | Validate agent file |
+| GET | `/agents` | List all rule files |
+| GET | `/agents/rules?path={path}` | Get rules from a rule file |
+| GET | `/agents/content` / `/agents/files` | Rule file content / file tree |
+| POST | `/agents` | Create a rule file |
+| POST | `/agents/rules` | Add a rule to a rule file |
+| POST | `/agents/validate` | Validate a rule file |
 | PUT | `/agents/rules/enforcement` | Update rule enforcement level |
-| PUT | `/agents/name` | Rename agent file |
+| PUT | `/agents/name` | Set a rule file's display name |
 | DELETE | `/agents/rules` | Delete rules |
 | GET | `/rules` / `/rules/details` | List available rule definitions |
 
@@ -751,7 +751,7 @@ http://localhost:<auto-detected-port>/api/v1/
 
 ### Example Requests
 
-#### Create Agent File
+#### Create Rule File
 
 ```http
 POST /api/v1/agents
@@ -776,7 +776,7 @@ POST /api/v1/agents/rules
 Content-Type: application/json
 
 {
-  "agentPath": "/path/to/agent.md",
+  "agentPath": "/path/to/vc.rules.md",
   "ruleName": "min_coverage",
   "ruleValue": "80",
   "enforcement": "STOP"
@@ -854,9 +854,9 @@ dotnet run
 
 ### Common Issues
 
-**Issue: Agent files not found**
-- **Cause**: Not in git repository or agent.md not at repo root
-- **Solution**: Run from git repository root, create `agent.md` file
+**Issue: Rule files not found**
+- **Cause**: Not in git repository or vc.rules.md not at repo root
+- **Solution**: Run from git repository root, create `vc.rules.md` file
 
 **Issue: LLM CLI not launching**
 - **Cause**: CLI not in PATH or incorrect environment configuration

@@ -89,7 +89,7 @@ public class VcaConsoleHookPresenterTests
                 HasError: false,
                 HasStopViolation: true,
                 HasCommitViolations: true,
-                RequiredAcknowledgments: ["[VCA:AGENTS.md:complexity]"],
+                RequiredAcknowledgments: ["[VCA:vc.rules.md:complexity]"],
                 Findings:
                 [
                     new VcaRuleFinding(
@@ -97,22 +97,22 @@ public class VcaConsoleHookPresenterTests
                         "WARN",
                         "Log all file changes",
                         "3 file(s) not documented.",
-                        "AGENTS.md",
+                        "vc.rules.md",
                         "Review this finding before committing."),
                     new VcaRuleFinding(
                         VcaRuleFindingKind.AcknowledgmentRequired,
                         "COMMIT",
                         "Cyclomatic complexity < 20",
                         "Relay.cs estimated complexity 44 exceeds 20",
-                        "AGENTS.md",
+                        "vc.rules.md",
                         "Fix the issue, or include the shown acknowledgment token.",
-                        "[VCA:AGENTS.md:complexity]"),
+                        "[VCA:vc.rules.md:complexity]"),
                     new VcaRuleFinding(
                         VcaRuleFindingKind.Blocked,
                         "STOP",
                         "Require test coverage minimum 80%",
                         "UNSUPPORTED: no coverage report for the staged snapshot.",
-                        "AGENTS.md",
+                        "vc.rules.md",
                         "Fix the issue and run validation again.")
                 ]));
 
@@ -121,7 +121,7 @@ public class VcaConsoleHookPresenterTests
         Assert.Contains("STOP · Require test coverage minimum 80%", text);
         Assert.Contains("COMMIT · Cyclomatic complexity < 20", text);
         Assert.Contains("WARN · Log all file changes", text);
-        Assert.Contains("[VCA:AGENTS.md:complexity] Reason: <your explanation>", text);
+        Assert.Contains("[VCA:vc.rules.md:complexity] Reason: <your explanation>", text);
 
         // Worst first: a STOP the user cannot bypass outranks an acknowledgeable COMMIT,
         // which outranks a warning that does not block at all.
@@ -162,7 +162,7 @@ public class VcaConsoleHookPresenterTests
                         "STOP",
                         "Require test coverage minimum 80%",
                         reason,
-                        "AGENTS.md",
+                        "vc.rules.md",
                         "Fix the issue and run validation again.")
                 ]));
 
@@ -208,7 +208,7 @@ public class VcaConsoleHookPresenterTests
                         "STOP",
                         "Check commit message for: wip",
                         "Evaluated by the commit-msg hook.",
-                        "AGENTS.md",
+                        "vc.rules.md",
                         "No pre-commit action is required.")
                 ]));
 

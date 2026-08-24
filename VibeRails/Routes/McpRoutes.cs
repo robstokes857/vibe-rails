@@ -190,6 +190,7 @@ public static class McpRoutes
         McpClientTool tool,
         string? pythonScriptName = null)
     {
+        var annotations = tool.ProtocolTool.Annotations;
         return new McpToolInfo(
             Name: tool.Name,
             Description: tool.Description ?? "",
@@ -197,7 +198,12 @@ public static class McpRoutes
             InputSchema: CloneIfDefined(tool.JsonSchema),
             ReturnSchema: CloneIfDefined(tool.ReturnJsonSchema),
             Category: pythonScriptName is null ? "built-in" : "python-script",
-            SourceName: pythonScriptName);
+            SourceName: pythonScriptName,
+            Annotations: annotations is null ? null : new McpToolAnnotationsInfo(
+                ReadOnly: annotations.ReadOnlyHint,
+                Destructive: annotations.DestructiveHint,
+                Idempotent: annotations.IdempotentHint,
+                OpenWorld: annotations.OpenWorldHint));
     }
 
     private static JsonElement? CloneIfDefined(JsonElement element)

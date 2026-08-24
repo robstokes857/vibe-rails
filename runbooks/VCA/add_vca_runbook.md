@@ -11,7 +11,7 @@ Before editing, write down:
 - Canonical display/syntax, including any parameters.
 - What constitutes a pass and a violation.
 - Which Git changes count: add, modify, delete, rename, copy, or only a subset.
-- Path scope: repository root, declaring AGENTS.md directory, or another explicit base.
+- Path scope: repository root, declaring vc.rules.md directory, or another explicit base.
 - WARN, COMMIT, and STOP behavior. Normally all three use the shared enforcement pipeline.
 - Whether the rule runs at pre-commit or must be deferred to commit-msg.
 - What an invalid or unevaluable rule reports. Do not silently pass a recognized rule.
@@ -23,7 +23,7 @@ If any item materially changes the meaning of the rule, resolve it with the requ
 The production path is:
 
 ```text
-AGENTS.md
+vc.rules.md
   -> AgentRuleSectionReader (one discovery contract)
   -> RulesTool.ValidateVcaReportAsync (active validator)
   -> VcaPreflightStep / Git hooks / validate_vca MCP tool
@@ -36,7 +36,7 @@ tested. A new rule should cover all three unless that legacy layer fundamentally
 the rule; document any deliberate omission.
 
 `AgentRuleSectionReader` remains the only rule-discovery implementation. Never add a second regex
-that scans AGENTS.md independently. Fenced examples, legacy headings, and section boundaries must
+that scans vc.rules.md independently. Fenced examples, legacy headings, and section boundaries must
 continue to mean the same thing to the UI and Git hooks.
 
 ## Implementation checklist
@@ -86,7 +86,7 @@ The POST/PUT/DELETE routes already return the updated agent. Preserve that respo
 Edit `VibeRails/Services/Mcp/Tools/RulesTool.cs`, inside `ValidateRuleAsync` or a focused helper:
 
 - Evaluate `GitStagedSnapshot`, never unstaged working-tree contents during a commit hook.
-- Use the files already scoped by the declaring AGENTS.md.
+- Use the files already scoped by the declaring vc.rules.md.
 - Consider deleted paths (`ExistsInIndex == false`).
 - For rename-sensitive rules, check both `RelativePath` and `PreviousRelativePath`.
 - Return `Pass`, `Violation`, `Deferred`, or `Unrecognized` accurately.
@@ -95,13 +95,13 @@ Edit `VibeRails/Services/Mcp/Tools/RulesTool.cs`, inside `ValidateRuleAsync` or 
   (coverage with no report) is a `Violation`, so the declared level still gates. A malformed
   *argument* that leaves the rule with nothing to compare against (a path lock whose path will
   not parse or resolve) is `Unrecognized` — a violation there fires on every commit regardless
-  of what changed, and at `STOP` blocks all work until `AGENTS.md` is hand-edited. Validate
+  of what changed, and at `STOP` blocks all work until `vc.rules.md` is hand-edited. Validate
   argument syntax on the write path instead, where the user can still fix it.
 - Do not implement WARN/COMMIT/STOP branching in the validator. Return one violation and let the
   shared finding pipeline apply enforcement consistently.
 - Include actionable target paths in the reason.
 
-If a rename can cross an AGENTS.md scope boundary, ensure `GetScopedFiles` considers the previous
+If a rename can cross a vc.rules.md scope boundary, ensure `GetScopedFiles` considers the previous
 path as well as the new path.
 
 ### 5. Implement Rules-page validation
@@ -109,7 +109,7 @@ path as well as the new path.
 Edit `VibeRails/Services/RuleValidationService.cs`:
 
 - Add the enum case to both `ValidateAsync` and `ValidateWithSourceAsync` when applicable.
-- Prefer `ValidateWithSourceAsync` semantics; it knows the declaring AGENTS.md.
+- Prefer `ValidateWithSourceAsync` semantics; it knows the declaring vc.rules.md.
 - Return affected files for UI evidence.
 - Use the same shared parameter parser and path-resolution helper as Git Guard.
 
@@ -128,8 +128,8 @@ Static rules need no special frontend work. Parameterized rules do. Update
 `VibeRails/wwwroot/js/modules/agent-controller.js` in all three flows:
 
 1. Inline Rule files editor (`showInlineAddRule`).
-2. Full agent editor (`addRule` before `showEnforcementPicker`).
-3. New AGENTS.md wizard (`renderStep2Rules` and its selected-rule state).
+2. Full rule-file editor (`addRule` before `showEnforcementPicker`).
+3. New vc.rules.md wizard (`renderStep2Rules` and its selected-rule state).
 
 Requirements:
 
@@ -143,7 +143,7 @@ Requirements:
 
 ### 8. Update documentation
 
-- Update the rule count and list in the repository `AGENTS.md`.
+- Update the rule count and list in the repository `vc.rules.md`.
 - Update `VibeRails/Services/VCA/AGENTS.md` for new discovery/enforcement semantics.
 - Add any unusual operational notes to this runbook.
 
@@ -192,13 +192,13 @@ rules:
 - Directory Lock('generated') (STOP)
 ```
 
-- Paths are relative to the directory containing the declaring AGENTS.md.
+- Paths are relative to the directory containing the declaring vc.rules.md.
 - Absolute paths and `..` escapes are rejected.
 - File Lock matches one exact Git path.
 - Directory Lock matches the directory path and every descendant, with a real path boundary.
 - Additions, modifications, deletions, and both sides of renames count.
-- The declaring AGENTS.md is excluded from its own lock so the policy can be changed or removed.
-- Other AGENTS.md files inside a locked directory are ordinary locked content.
+- The declaring vc.rules.md is excluded from its own lock so the policy can be changed or removed.
+- Other vc.rules.md files inside a locked directory are ordinary locked content.
 - Targets do not need to exist when the rule is created; the rule can prevent a future addition.
 
 ## Common incomplete implementations
@@ -210,7 +210,7 @@ rules:
 - Treating a directory as a string prefix: `src/locked-old` falsely matches `src/locked`.
 - Letting the UI submit a placeholder template literally.
 - Filtering a parameterized catalog entry after its first instance, preventing multiple targets.
-- Parsing AGENTS.md with a new regex and reintroducing UI/hook disagreement.
+- Parsing vc.rules.md with a new regex and reintroducing UI/hook disagreement.
 - Silently passing malformed recognized rules.
 
 ## Definition of done

@@ -158,6 +158,7 @@ export class VibeRailsAiController {
             // 'session-browse' = single-column capture list for one session.
             mode: 'idle',
             sessionBrowseId: null,
+            tokenSaverTotals: null,
         };
         // Incremented on each runSearch — used to drop responses from stale
         // in-flight searches when the user fires a newer one.
@@ -405,7 +406,7 @@ export class VibeRailsAiController {
         // CLI breakdown from the most recent sample we already fetched.
         // captureCount weights each session by how active it was, which approximates
         // turn share better than raw session counts.
-        const cliBuckets = { codex: 0, claude: 0, antigravity: 0, copilot: 0, opencode: 0, other: 0 };
+        const cliBuckets = { codex: 0, claude: 0, antigravity: 0, copilot: 0, opencode: 0, grok: 0, other: 0 };
         for (const sess of (this.state.recentSessions || [])) {
             const cli = String(sess.cli || '').toLowerCase();
             const w = Math.max(1, sess.captureCount || 1);
@@ -413,7 +414,8 @@ export class VibeRailsAiController {
             else if (cli.includes('claude')) cliBuckets.claude += w;
             else if (cli.includes('antigravity')) cliBuckets.antigravity += w;
             else if (cli.includes('copilot') || cli.includes('ghc')) cliBuckets.copilot += w;
-            else if (cli.includes('opencode') || cli.includes('glm-5.2') || cli.includes('glm-5.3') || cli.includes('grok-4.6')) cliBuckets.opencode += w;
+            else if (cli.includes('grok')) cliBuckets.grok += w;
+            else if (cli.includes('opencode') || cli.includes('glm-5.2') || cli.includes('glm-5.3')) cliBuckets.opencode += w;
             else if (cli) cliBuckets.other += w;
         }
         const cliEntries = [
@@ -421,6 +423,7 @@ export class VibeRailsAiController {
             { key: 'claude',  name: 'Claude',  count: cliBuckets.claude },
             { key: 'antigravity', name: 'Antigravity', count: cliBuckets.antigravity },
             { key: 'copilot', name: 'Copilot', count: cliBuckets.copilot },
+            { key: 'grok', name: 'Grok', count: cliBuckets.grok },
             { key: 'opencode', name: 'OpenCode', count: cliBuckets.opencode },
         ];
         if (cliBuckets.other > 0) cliEntries.push({ key: 'other', name: 'Other', count: cliBuckets.other });
@@ -469,11 +472,15 @@ export class VibeRailsAiController {
             sessionChunks * PER_SESSION_TOKENS * SESSION_REUSE_FACTOR
         );
 
+        const tokenSaverSaved = Number(this.state.tokenSaverTotals?.tokensSaved);
+        const tokenSaverTokensSaved = Number.isFinite(tokenSaverSaved) ? tokenSaverSaved : 0;
+
         return {
             sessions, messages, sessionChunks,
             distinctClis, cliEntries, maxCli,
             composite, pct, score, tier,
             tokensSaved,
+            tokenSaverTokensSaved,
         };
     }
 
@@ -500,6 +507,8 @@ export class VibeRailsAiController {
         const meterPct = Math.max(2, Math.min(100, snap.pct));
         const tokensDisplay = this._formatTokensSaved(snap.tokensSaved);
         const tokensExact = snap.tokensSaved.toLocaleString();
+        const tokenSaverDisplay = this._formatTokensSaved(snap.tokenSaverTokensSaved);
+        const tokenSaverExact = snap.tokenSaverTokensSaved.toLocaleString();
 
         const llmsHtml = snap.cliEntries.map(e => {
             const w = Math.max(2, (e.count / snap.maxCli) * 100);
@@ -534,10 +543,15 @@ export class VibeRailsAiController {
                             <div class="v">${snap.distinctClis}<span style="font-size:0.7rem;color:var(--color-text-muted);font-weight:500"> / 4</span></div>
                             <div class="vsub">${snap.distinctClis === 0 ? 'no captures yet' : snap.distinctClis === 1 ? 'single-agent corpus' : snap.distinctClis >= 4 ? 'full coverage' : 'multi-agent corpus'}</div>
                         </div>
-                        <div class="insp-learn-stat" title="${esc(tokensExact)} tokens">
-                            <div class="k">Tokens Saved</div>
+                        <div class="insp-learn-stat" title="${esc(tokensExact)} tokens saved the LLM via retrieval reuse, not counting Token Saver">
+                            <div class="k">LLM tokens saved</div>
                             <div class="v">${esc(tokensDisplay)}</div>
-                            <div class="vsub">est. retrieval reuse vs. cold context</div>
+                            <div class="vsub">est. retrieval reuse — excludes Token Saver</div>
+                        </div>
+                        <div class="insp-learn-stat" title="${esc(tokenSaverExact)} tokens Token Saver kept off the wire">
+                            <div class="k">Token Saver</div>
+                            <div class="v">${esc(tokenSaverDisplay)}</div>
+                            <div class="vsub">all-time tokens kept off the LLM</div>
                         </div>
                     </div>
                     <div class="insp-learn-llms">${llmsHtml}</div>
@@ -906,12 +920,21 @@ export class VibeRailsAiController {
         this._renderRecent();
     }
 
+    async loadTokenSaverTotals() {
+        try {
+            this.state.tokenSaverTotals = await this._fetchJson('/api/v1/token-savings');
+        } catch {
+            this.state.tokenSaverTotals = null;
+        }
+    }
+
     async refreshAll(options = {}) {
         const silent = options?.silent === true;
         this.setBusy(true);
         try {
             await this.loadStatus();
             await this.loadRecent();
+            await this.loadTokenSaverTotals();
             // Refresh the idle learning card now that stats + recent sample have
             // landed, but only when no search results are currently displayed.
             if (!this.state.searchGroups || this.state.searchGroups.length === 0) {

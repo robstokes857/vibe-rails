@@ -80,7 +80,7 @@ public class RulesTool
         bool TimedOut);
 
     [McpServerTool]
-    [Description("Validates staged files against VCA rules defined in AGENTS.md files. Supports '- [WARN] Rule' and '- Rule (WARN)' formats. Call this BEFORE attempting to commit changes. Returns validation results with any COMMIT-level violations that require acknowledgment.")]
+    [Description("Validates staged files against VCA rules defined in vc.rules.md files. Supports '- [WARN] Rule' and '- Rule (WARN)' formats. Call this BEFORE attempting to commit changes. Returns validation results with any COMMIT-level violations that require acknowledgment.")]
     public static async Task<string> ValidateVca(
         [Description("Optional working directory. If not provided, uses current directory.")] string? workingDirectory = null)
     {
@@ -134,7 +134,7 @@ public class RulesTool
                     stagedFileCount: 0);
             }
 
-            // Find AGENTS.md files
+            // Find vc.rules.md files
             var agentFiles = stagedSnapshot == null
                 ? await GetAgentFilesFromIndexAsync(gitRoot, indexPaths, cancellationToken)
                 : stagedSnapshot.AgentFiles.Select(file => new AgentFileSnapshot(
@@ -144,11 +144,11 @@ public class RulesTool
             if (agentFiles.Count == 0)
             {
                 return VcaToolValidationReport.Pass(
-                    "PASS: No AGENTS.md files found. No VCA rules to check.",
+                    "PASS: No vc.rules.md files found. No VCA rules to check.",
                     stagedFiles.Count);
             }
 
-            // Parse rules from AGENTS.md files
+            // Parse rules from vc.rules.md files
             var allRules = new List<VcaRuleSnapshot>();
             foreach (var agentFile in agentFiles)
             {
@@ -159,7 +159,7 @@ public class RulesTool
             if (allRules.Count == 0)
             {
                 return VcaToolValidationReport.Pass(
-                    "PASS: No VCA rules defined in AGENTS.md files.",
+                    "PASS: No VCA rules defined in vc.rules.md files.",
                     stagedFiles.Count);
             }
 
@@ -222,7 +222,7 @@ public class RulesTool
 
                 // A rule no validator understands is a problem with the rule, not with the commit.
                 // It is reported so it cannot rot unnoticed, and reported as a warning so a typo
-                // in AGENTS.md can never stand between the user and a commit — the enforcement
+                // in vc.rules.md can never stand between the user and a commit — the enforcement
                 // level on the line describes a check that is not actually running.
                 if (validation.State == RuleValidationState.Unrecognized)
                 {
@@ -394,7 +394,7 @@ public class RulesTool
     }
 
     /// <summary>
-    /// Rules declared by one AGENTS.md, deduplicated. Discovery itself lives in
+    /// Rules declared by one vc.rules.md, deduplicated. Discovery itself lives in
     /// <see cref="AgentRuleSectionReader"/> so the Rules page and this hook cannot disagree about
     /// what a file declares — they did, and the hook ended up enforcing fenced documentation
     /// examples that the page could not show.
@@ -553,8 +553,7 @@ public class RulesTool
     private static bool IsAgentFilePath(string relativePath)
     {
         var name = Path.GetFileName(relativePath);
-        return name.Equals("AGENTS.md", StringComparison.OrdinalIgnoreCase)
-            || name.Equals("AGENT.md", StringComparison.OrdinalIgnoreCase);
+        return name.Equals("vc.rules.md", StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task<string> ReadIndexFileAsync(
@@ -585,7 +584,7 @@ public class RulesTool
         {
             // Unrecognized, not Violation. A lock that will not parse or resolve has no path to
             // compare the staged files against, so a violation here fires on every commit
-            // regardless of what changed — and at STOP that blocks all work until AGENTS.md is
+            // regardless of what changed — and at STOP that blocks all work until vc.rules.md is
             // hand-edited, possibly the very file the lock covers. Unrecognized still surfaces
             // the rule (with UNSUPPORTED: guidance) but only ever as a warning.
             if (!PathLockRule.TryParse(ruleText, out var pathLock))
@@ -646,7 +645,7 @@ public class RulesTool
                     ? $" and {undocumentedFiles.Count - 3} more"
                     : string.Empty;
                 return RuleValidationResult.Violation(
-                    $"{undocumentedFiles.Count} file(s) not documented in AGENTS.md Files section: {fileList}{suffix}");
+                    $"{undocumentedFiles.Count} file(s) not documented in vc.rules.md Files section: {fileList}{suffix}");
             }
 
             return RuleValidationResult.Pass($"All {stagedFiles.Count} changed file(s) are documented");
@@ -820,7 +819,7 @@ public class RulesTool
         {
             try
             {
-                // AGENTS.md paths are relative to the directory containing that AGENTS.md.
+                // vc.rules.md paths are relative to the directory containing that vc.rules.md.
                 var fullPath = Path.GetFullPath(Path.Combine(
                     sourceDirectory,
                     line.Replace('/', Path.DirectorySeparatorChar)));

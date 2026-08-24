@@ -31,6 +31,7 @@ public class CommandServiceTests : IDisposable
 {
     private readonly string? _originalFakeCliFlag;
     private readonly string? _originalOpenCodeConfig;
+    private readonly string? _originalGrokProxyUrl;
     private readonly string _originalEnvPath;
 
     public CommandServiceTests()
@@ -40,8 +41,11 @@ public class CommandServiceTests : IDisposable
         _originalFakeCliFlag = Environment.GetEnvironmentVariable("VIBERAILS_TEST_FAKE_CLI");
         _originalOpenCodeConfig = Environment.GetEnvironmentVariable(
             LlmProxyZaiConfig.ConfigContentVariable);
+        _originalGrokProxyUrl = Environment.GetEnvironmentVariable(
+            LlmProxyGrokConfig.ChatProxyBaseUrlVariable);
         Environment.SetEnvironmentVariable("VIBERAILS_TEST_FAKE_CLI", null);
         Environment.SetEnvironmentVariable(LlmProxyZaiConfig.ConfigContentVariable, null);
+        Environment.SetEnvironmentVariable(LlmProxyGrokConfig.ChatProxyBaseUrlVariable, null);
 
         // The env-name launch tests resolve GetEnvironmentVariables -> ParserConfigs.GetEnvPath(),
         // a process-global that is empty unless startup set it. Pin it to a temp root here so those
@@ -58,6 +62,9 @@ public class CommandServiceTests : IDisposable
         Environment.SetEnvironmentVariable(
             LlmProxyZaiConfig.ConfigContentVariable,
             _originalOpenCodeConfig);
+        Environment.SetEnvironmentVariable(
+            LlmProxyGrokConfig.ChatProxyBaseUrlVariable,
+            _originalGrokProxyUrl);
         ParserConfigs.SetEnvPath(_originalEnvPath);
     }
 
@@ -236,7 +243,6 @@ public class CommandServiceTests : IDisposable
     [Theory]
     [InlineData(LLM.OpenCode)]
     [InlineData(LLM.Glm52)]
-    [InlineData(LLM.Grok46)]
     [InlineData(LLM.Glm53)]
     public async Task PrepareSession_OpenCodeBackedClis_AddVibeRailsMcpBeforeLaunch(LLM llm)
     {
@@ -395,45 +401,81 @@ public class CommandServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task PrepareSession_Grok46_UsesOpencodeExecutableWithPinnedModel()
+    public async Task PrepareSession_Grok46_UsesGrokExecutableWithPinnedModel()
     {
         var service = CreateService();
 
-        // Grok 4.6 is a pseudo-CLI backed by OpenCode. The binary is `opencode` (not `grok46`),
-        // and base CLI launches inject --model=xai/grok-4.6 so the session picks the right model.
         var prepared = await service.PrepareSessionAsync(LLM.Grok46, envName: null, extraArgs: null);
 
-        Assert.Equal("opencode --model=xai/grok-4.6", prepared.LaunchCommand);
+        Assert.Equal("grok --model=grok-4.6", prepared.LaunchCommand);
+        Assert.Equal("grok", prepared.Executable);
     }
 
     [Fact]
-    public async Task PrepareSession_Grok46_PassesPromptViaPromptFlag()
+    public async Task PrepareSession_Grok46_PassesPromptAsTrailingPositional()
     {
         var service = CreateService();
 
         var prepared = await service.PrepareSessionAsync(
             LLM.Grok46, envName: null, extraArgs: null, initialPrompt: "hello world");
 
-        Assert.StartsWith("opencode --model=xai/grok-4.6 --prompt=", prepared.LaunchCommand);
+        Assert.DoesNotContain("--prompt=", prepared.LaunchCommand);
+        Assert.DoesNotContain(" -p ", prepared.LaunchCommand);
+        Assert.StartsWith("grok --model=grok-4.6 ", prepared.LaunchCommand);
+        Assert.Contains("hello world", prepared.LaunchCommand);
+        Assert.Equal("hello world", prepared.Argv?[^1]);
     }
 
     [Fact]
-    public async Task PrepareSession_Grok46_InjectsXaiProxyConfig()
+    public async Task PrepareSession_Grok46_AddsVibeRailsMcpBeforeLaunch()
     {
-        var service = CreateService(openCodeLlmProxyEnabled: true);
+        var service = CreateService();
+
+        var prepared = await service.PrepareSessionAsync(LLM.Grok46, envName: null, extraArgs: null);
+
+        Assert.Equal(2, prepared.SetupCommands.Count);
+        Assert.Contains("grok mcp remove viberails-mcp", prepared.SetupCommands[0]);
+        Assert.StartsWith("grok mcp add --scope user viberails-mcp -- ", prepared.SetupCommands[1]);
+    }
+
+    [Fact]
+    public async Task PrepareSession_Grok46_InjectsXaiProxyEnvAndMergesHeaders()
+    {
+        var service = CreateService(grokLlmProxyEnabled: true);
 
         var prepared = await service.PrepareSessionAsync(LLM.Grok46, envName: null, extraArgs: null);
 
         Assert.True(prepared.OpenCodeProxyActive);
+        Assert.False(prepared.Environment.ContainsKey(LlmProxyZaiConfig.ConfigContentVariable));
+        Assert.Equal(
+            "http://127.0.0.1:4321/llm/cli-chat/v1",
+            prepared.Environment[LlmProxyGrokConfig.ChatProxyBaseUrlVariable]);
+        Assert.False(prepared.Environment.ContainsKey(LlmProxyGrokConfig.ModelsBaseUrlVariable));
         Assert.Equal(
             "test-session-token",
             prepared.Environment[LocalLlmProxyContext.SessionTokenVariable]);
         Assert.Equal(
             "test-tab-token",
             prepared.Environment[LocalLlmProxyContext.TabTokenVariable]);
-        var config = prepared.Environment[LlmProxyZaiConfig.ConfigContentVariable];
-        Assert.Contains("http://127.0.0.1:4321/llm/xai/v1", config);
-        Assert.Contains("http://127.0.0.1:4321/llm/zai/api/paas/v4", config);
+        Assert.DoesNotContain("test-session-token", prepared.LaunchCommand);
+        Assert.DoesNotContain("GROK_HOME", prepared.Environment.Keys);
+    }
+
+    [Fact]
+    public async Task PrepareSession_Grok46_ApiModeAlsoSetsModelsBaseUrl()
+    {
+        var service = CreateService(
+            grokLlmProxyEnabled: true,
+            grokLlmProxyMode: CodexLlmProxySettings.ModeApi);
+
+        var prepared = await service.PrepareSessionAsync(LLM.Grok46, envName: null, extraArgs: null);
+
+        Assert.Equal(
+            "http://127.0.0.1:4321/llm/cli-chat/v1",
+            prepared.Environment[LlmProxyGrokConfig.ChatProxyBaseUrlVariable]);
+        Assert.Equal(
+            "http://127.0.0.1:4321/llm/cli-chat/v1",
+            prepared.Environment[LlmProxyGrokConfig.ModelsBaseUrlVariable]);
     }
 
     [Fact]
@@ -444,25 +486,43 @@ public class CommandServiceTests : IDisposable
         var prepared = await service.PrepareSessionAsync(
             LLM.Grok46,
             envName: "my-grok-env",
-            extraArgs: ["--model=xai/grok-4.6", "--auto"]);
+            extraArgs: ["-m=grok-4.6", "--yolo"]);
 
-        Assert.Equal("opencode --model=xai/grok-4.6 --auto", prepared.LaunchCommand);
+        Assert.Equal("grok -m=grok-4.6 --yolo", prepared.LaunchCommand);
         Assert.Equal(
             1,
-            prepared.LaunchCommand.Split(' ').Count(tok => tok.StartsWith("--model")));
+            prepared.LaunchCommand.Split(' ').Count(tok => tok.StartsWith("-m") || tok.StartsWith("--model")));
     }
 
     [Fact]
-    public async Task PrepareSession_Grok46_SetsXdgConfigHomeForEnvIsolation()
+    public async Task PrepareSession_Grok46_DoesNotSetGrokHomeOrXdgConfigHome()
     {
         var service = CreateService();
 
         var prepared = await service.PrepareSessionAsync(
             LLM.Grok46, envName: "my-grok-env", extraArgs: null);
 
-        Assert.True(
-            prepared.Environment.ContainsKey("XDG_CONFIG_HOME"),
-            "Grok 4.6 must share OpenCode's XDG_CONFIG_HOME env isolation.");
+        Assert.False(prepared.Environment.ContainsKey("XDG_CONFIG_HOME"));
+        Assert.False(prepared.Environment.ContainsKey("GROK_HOME"));
+    }
+
+    [Fact]
+    public async Task PrepareSession_Grok46_SkipsProxyWhenChatProxyUrlAlreadySet()
+    {
+        Environment.SetEnvironmentVariable(LlmProxyGrokConfig.ChatProxyBaseUrlVariable, "http://example.test/v1");
+        try
+        {
+            var service = CreateService(grokLlmProxyEnabled: true);
+
+            var prepared = await service.PrepareSessionAsync(LLM.Grok46, envName: null, extraArgs: null);
+
+            Assert.False(prepared.OpenCodeProxyActive);
+            Assert.False(prepared.Environment.ContainsKey(LlmProxyGrokConfig.ChatProxyBaseUrlVariable));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(LlmProxyGrokConfig.ChatProxyBaseUrlVariable, null);
+        }
     }
 
     [Fact]
@@ -565,17 +625,34 @@ public class CommandServiceTests : IDisposable
         bool codexLlmProxyEnabled = false,
         bool claudeLlmProxyEnabled = false,
         bool openCodeLlmProxyEnabled = false,
+        bool grokLlmProxyEnabled = false,
+        string grokLlmProxyMode = CodexLlmProxySettings.ModeSubscription,
         string codexLlmProxyMode = CodexLlmProxySettings.ModeSubscription,
         ILlmProxySessionState? sessionState = null)
     {
-        var fileService = new Mock<IFileService>().Object;
+        var fileService = new Mock<IFileService>();
+        fileService.Setup(x => x.GetUserProfilePath()).Returns(Path.Combine(Path.GetTempPath(), "viberails-grok-tests"));
+        fileService.Setup(x => x.FileExists(It.IsAny<string>())).Returns(false);
+        fileService.Setup(x => x.DirectoryExists(It.IsAny<string>())).Returns(false);
+        fileService
+            .Setup(x => x.WriteAllTextAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<FileMode>(),
+                It.IsAny<FileShare>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        fileService
+            .Setup(x => x.ReadAllTextAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(string.Empty);
         var envService = new LlmCliEnvironmentService(
-            new ClaudeLlmCliEnvironment(fileService),
-            new CodexLlmCliEnvironment(fileService),
-            new AntigravityLlmCliEnvironment(fileService),
-            new CopilotLlmCliEnvironment(fileService),
-            new OpencodeLlmCliEnvironment(fileService),
-            fileService);
+            new ClaudeLlmCliEnvironment(fileService.Object),
+            new CodexLlmCliEnvironment(fileService.Object),
+            new AntigravityLlmCliEnvironment(fileService.Object),
+            new CopilotLlmCliEnvironment(fileService.Object),
+            new OpencodeLlmCliEnvironment(fileService.Object),
+            new GrokLlmCliEnvironment(fileService.Object),
+            fileService.Object);
         var proxyContext = new Mock<ILocalLlmProxyContext>();
         proxyContext.Setup(x => x.ApiBaseUrl).Returns("http://127.0.0.1:4321");
         proxyContext.Setup(x => x.SessionToken).Returns("test-session-token");
@@ -586,12 +663,18 @@ public class CommandServiceTests : IDisposable
                 CodexLlmProxyEnabled: codexLlmProxyEnabled,
                 CodexLlmProxyMode: codexLlmProxyMode,
                 ClaudeLlmProxyEnabled: claudeLlmProxyEnabled,
-                OpenCodeLlmProxyEnabled: openCodeLlmProxyEnabled));
+                OpenCodeLlmProxyEnabled: openCodeLlmProxyEnabled,
+                GrokLlmProxyEnabled: grokLlmProxyEnabled,
+                GrokLlmProxyMode: grokLlmProxyMode)
+            {
+                GrokLlmProxyLaunchEnabled = grokLlmProxyEnabled
+            });
         return new CommandService(
             envService,
             proxyContext.Object,
             proxySettings.Object,
-            sessionState ?? new LlmProxySessionState());
+            sessionState ?? new LlmProxySessionState(),
+            fileService.Object);
     }
 
     private static string ExpectedQuietRedirect() =>

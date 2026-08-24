@@ -16,12 +16,12 @@ public sealed class GitServiceTests : IDisposable
         Directory.CreateDirectory(_repositoryPath);
         await RunGitAsync("init");
 
-        var agentPath = Path.Combine(_repositoryPath, "AGENTS.md");
+        var agentPath = Path.Combine(_repositoryPath, "vc.rules.md");
         await File.WriteAllTextAsync(
             agentPath,
             "## Vibe Rails Rules\n- Log all file changes (STOP)\n",
             TestContext.Current.CancellationToken);
-        await RunGitAsync("add", "--", "AGENTS.md");
+        await RunGitAsync("add", "--", "vc.rules.md");
 
         await File.WriteAllTextAsync(
             agentPath,
@@ -36,10 +36,10 @@ public sealed class GitServiceTests : IDisposable
         await service.StageFileAsync(agentPath, TestContext.Current.CancellationToken);
 
         var stagedFiles = await RunGitAsync("diff", "--cached", "--name-only");
-        var stagedAgent = await RunGitAsync("show", ":AGENTS.md");
+        var stagedAgent = await RunGitAsync("show", ":vc.rules.md");
         var status = await RunGitAsync("status", "--short");
 
-        Assert.Equal("AGENTS.md", stagedFiles.Trim());
+        Assert.Equal("vc.rules.md", stagedFiles.Trim());
         Assert.Equal("## Vibe Rails Rules", stagedAgent.Trim());
         Assert.Contains("?? unrelated.txt", status);
     }

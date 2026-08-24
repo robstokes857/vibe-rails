@@ -228,6 +228,12 @@ public sealed partial class PythonScriptMcpService : IPythonScriptMcpService
     public const string TypeNumber = "number";
     public const string TypeBoolean = "boolean";
 
+    // What the script author says running the tool does. The four MCP annotation hints are
+    // derived from this plus RepeatSafe/ReachesNetwork; see BuildAnnotations.
+    public const string BehaviorReadOnly = "read-only";
+    public const string BehaviorAdditive = "additive";
+    public const string BehaviorDestructive = "destructive";
+
     private const int MaxParameters = 32;
     private static readonly HashSet<string> ReservedToolNames = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -287,13 +293,16 @@ public sealed partial class PythonScriptMcpService : IPythonScriptMcpService
             .Select(script => script.Name)
             .ToHashSet(StringComparer.Ordinal);
 
+        var scriptsDirectory = _pythonScriptService.GetScriptsDirectory();
         var tools = new List<Tool>();
         foreach (var configuration in document.Configurations.Where(configuration =>
             existingNames.Contains(configuration.ScriptName)))
         {
             try
             {
-                tools.Add(ToTool(ValidateStoredConfiguration(configuration, document.Configurations)));
+                tools.Add(ToTool(
+                    ValidateStoredConfiguration(configuration, document.Configurations),
+                    scriptsDirectory));
             }
             catch (PythonScriptValidationException ex)
             {
@@ -367,6 +376,13 @@ public sealed partial class PythonScriptMcpService : IPythonScriptMcpService
                 "Describe when the agent should run this script (1-500 characters).");
         }
 
+        var behavior = (request.Behavior ?? string.Empty).Trim().ToLowerInvariant();
+        if (behavior is not (BehaviorReadOnly or BehaviorAdditive or BehaviorDestructive))
+        {
+            throw new PythonScriptValidationException(
+                "Declare what the script does: 'read-only', 'additive', or 'destructive'.");
+        }
+
         var requestedParameters = request.Parameters ?? [];
         if (requestedParameters.Count > MaxParameters)
         {
@@ -434,7 +450,12 @@ public sealed partial class PythonScriptMcpService : IPythonScriptMcpService
             canonicalScriptName,
             toolName,
             description,
-            parameters);
+            parameters,
+            behavior,
+            // Nothing changes, so re-running changes nothing more. The author does not get to
+            // claim otherwise, and does not have to think about it.
+            behavior == BehaviorReadOnly || request.RepeatSafe,
+            request.ReachesNetwork);
     }
 
     private static PythonScriptMcpConfiguration ValidateStoredConfiguration(
@@ -447,32 +468,52 @@ public sealed partial class PythonScriptMcpService : IPythonScriptMcpService
                 configuration.ToolName,
                 configuration.Description,
                 configuration.Parameters,
+                configuration.Behavior,
+                configuration.RepeatSafe,
+                configuration.ReachesNetwork,
                 Pin: null),
             configuration.ScriptName,
             existing);
     }
 
-    private static Tool ToTool(PythonScriptMcpConfiguration configuration)
+    private static Tool ToTool(PythonScriptMcpConfiguration configuration, string scriptsDirectory)
     {
+        var scriptPath = Path.Combine(scriptsDirectory, configuration.ScriptName);
         return new Tool
         {
             Name = configuration.ToolName,
             Title = configuration.ScriptName,
-            Description = configuration.Description,
+            // Tell the caller where the source is and invite it to read it. An agent that can see
+            // what a script does before running it is a stronger gate than any hint we ship.
+            Description = configuration.Description
+                + "\n\nSource: " + scriptPath
+                + "\nRead this file to verify what it does before relying on it.",
             InputSchema = BuildInputSchema(configuration.Parameters),
-            Annotations = new ToolAnnotations
-            {
-                Title = configuration.ScriptName,
-                DestructiveHint = true,
-                IdempotentHint = false,
-                OpenWorldHint = true,
-                ReadOnlyHint = false
-            },
+            Annotations = BuildAnnotations(configuration),
             Meta = new JsonObject
             {
                 ["viberailsCategory"] = "python-script",
-                ["scriptName"] = configuration.ScriptName
+                ["scriptName"] = configuration.ScriptName,
+                ["scriptPath"] = scriptPath
             }
+        };
+    }
+
+    /// <summary>
+    /// The author's declaration mapped onto MCP's four behavior hints. All four are sent
+    /// explicitly: an unspecified <c>destructiveHint</c> means "assume destructive" and an
+    /// unspecified <c>idempotentHint</c> means "assume not idempotent", so omitting them would
+    /// misrepresent a read-only tool to any client that does not also read <c>readOnlyHint</c>.
+    /// </summary>
+    private static ToolAnnotations BuildAnnotations(PythonScriptMcpConfiguration configuration)
+    {
+        return new ToolAnnotations
+        {
+            Title = configuration.ScriptName,
+            ReadOnlyHint = configuration.Behavior == BehaviorReadOnly,
+            DestructiveHint = configuration.Behavior == BehaviorDestructive,
+            IdempotentHint = configuration.RepeatSafe,
+            OpenWorldHint = configuration.ReachesNetwork
         };
     }
 

@@ -24,19 +24,22 @@ namespace VibeRails.Services.LlmClis
         private readonly IAntigravityLlmCliLauncher _antigravityLauncher;
         private readonly ICopilotLlmCliLauncher _copilotLauncher;
         private readonly IOpencodeLlmCliLauncher _opencodeLauncher;
+        private readonly IGrokLlmCliLauncher _grokLauncher;
 
         public LaunchLLMService(
             IClaudeLlmCliLauncher claudeLauncher,
             ICodexLlmCliLauncher codexLauncher,
             IAntigravityLlmCliLauncher antigravityLauncher,
             ICopilotLlmCliLauncher copilotLauncher,
-            IOpencodeLlmCliLauncher opencodeLauncher)
+            IOpencodeLlmCliLauncher opencodeLauncher,
+            IGrokLlmCliLauncher grokLauncher)
         {
             _claudeLauncher = claudeLauncher;
             _codexLauncher = codexLauncher;
             _antigravityLauncher = antigravityLauncher;
             _copilotLauncher = copilotLauncher;
             _opencodeLauncher = opencodeLauncher;
+            _grokLauncher = grokLauncher;
         }
 
         public IBaseLlmCliLauncher GetLauncher(LLM llm)
@@ -47,9 +50,10 @@ namespace VibeRails.Services.LlmClis
                 LLM.Codex => _codexLauncher,
                 LLM.Antigravity => _antigravityLauncher,
                 LLM.Copilot => _copilotLauncher,
-                // Glm52 / Grok46 / Glm53 are OpenCode-backed pseudo-CLIs — they reuse the OpenCode
+                LLM.Grok46 => _grokLauncher,
+                // Glm52 / Glm53 are OpenCode-backed pseudo-CLIs — they reuse the OpenCode
                 // launcher (the --model pin is injected by CommandService.PrepareSession).
-                LLM.OpenCode or LLM.Glm52 or LLM.Grok46 or LLM.Glm53 => _opencodeLauncher,
+                LLM.OpenCode or LLM.Glm52 or LLM.Glm53 => _opencodeLauncher,
                 _ => throw new ArgumentException($"Unsupported LLM type: {llm}")
             };
         }

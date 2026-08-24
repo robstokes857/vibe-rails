@@ -22,6 +22,7 @@ public sealed class PythonScriptMcpServiceTests : IDisposable
             .ReturnsAsync("report.py");
         scripts.Setup(service => service.GetStatusAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(ScriptState("report.py"));
+        scripts.Setup(service => service.GetScriptsDirectory()).Returns(ScriptsDirectory);
 
         IReadOnlyList<string>? capturedArguments = null;
         scripts.Setup(service => service.RunAsync(
@@ -44,7 +45,10 @@ public sealed class PythonScriptMcpServiceTests : IDisposable
                 new("limit", "Maximum rows to include.", "integer", false, "5", "option", "--limit"),
                 new("verbose", "Include verbose diagnostics.", "boolean", false, null, "option", "--verbose")
             ],
-            "2468"), TestContext.Current.CancellationToken);
+            PythonScriptMcpService.BehaviorAdditive,
+            RepeatSafe: false,
+            ReachesNetwork: false,
+            Pin: "2468"), TestContext.Current.CancellationToken);
 
         Assert.Equal("python_create_report", Assert.Single(saved.Configurations).ToolName);
         var tool = Assert.Single(await service.ListToolsAsync(TestContext.Current.CancellationToken));
@@ -85,13 +89,21 @@ public sealed class PythonScriptMcpServiceTests : IDisposable
         var service = new PythonScriptMcpService(scripts.Object, store);
 
         await service.SaveAsync(new PythonScriptMcpConfigurationRequest(
-            "safe.py", "python_safe", "Run the approved safe task.", [], "secret-pin"),
+            "safe.py", "python_safe", "Run the approved safe task.", [],
+            PythonScriptMcpService.BehaviorAdditive,
+            RepeatSafe: false,
+            ReachesNetwork: false,
+            Pin: "secret-pin"),
             TestContext.Current.CancellationToken);
 
         var document = File.ReadAllText(Path.Combine(
             _installDirectory,
             PythonScriptMcpConfigurationStore.FileName));
         Assert.DoesNotContain("secret-pin", document, StringComparison.Ordinal);
+        // Stored in the product's vocabulary, not MCP hint names, so a new protocol hint
+        // is a mapping change rather than a stored-schema migration.
+        Assert.Contains("\"behavior\"", document, StringComparison.Ordinal);
+        Assert.DoesNotContain("destructiveHint", document, StringComparison.Ordinal);
         scripts.VerifyAll();
     }
 
@@ -108,7 +120,11 @@ public sealed class PythonScriptMcpServiceTests : IDisposable
 
         await Assert.ThrowsAsync<PythonScriptValidationException>(() => service.SaveAsync(
             new PythonScriptMcpConfigurationRequest(
-                "job.py", "search_history", "Collision.", [], "1234"),
+                "job.py", "search_history", "Collision.", [],
+                PythonScriptMcpService.BehaviorAdditive,
+                RepeatSafe: false,
+                ReachesNetwork: false,
+                Pin: "1234"),
             TestContext.Current.CancellationToken));
 
         await Assert.ThrowsAsync<PythonScriptValidationException>(() => service.SaveAsync(
@@ -118,7 +134,10 @@ public sealed class PythonScriptMcpServiceTests : IDisposable
                     new("maybe", "Optional first value.", "string", false, null, "positional", null),
                     new("later", "Later required value.", "string", true, null, "positional", null)
                 ],
-                "1234"),
+                PythonScriptMcpService.BehaviorAdditive,
+                RepeatSafe: false,
+                ReachesNetwork: false,
+                Pin: "1234"),
             TestContext.Current.CancellationToken));
     }
 
@@ -137,7 +156,11 @@ public sealed class PythonScriptMcpServiceTests : IDisposable
             scripts.Object,
             new PythonScriptMcpConfigurationStore(_installDirectory));
         await service.SaveAsync(new PythonScriptMcpConfigurationRequest(
-            "job.py", "python_job", "Run the approved job.", [], "1234"),
+            "job.py", "python_job", "Run the approved job.", [],
+            PythonScriptMcpService.BehaviorAdditive,
+            RepeatSafe: false,
+            ReachesNetwork: false,
+            Pin: "1234"),
             TestContext.Current.CancellationToken);
 
         var result = await service.CallAsync(
@@ -152,7 +175,10 @@ public sealed class PythonScriptMcpServiceTests : IDisposable
     {
         var store = new PythonScriptMcpConfigurationStore(_installDirectory);
         await store.SaveAsync(new PythonScriptMcpConfiguration(
-            "old.py", "python_old", "Run old.", []), TestContext.Current.CancellationToken);
+            "old.py", "python_old", "Run old.", [],
+            PythonScriptMcpService.BehaviorAdditive,
+            RepeatSafe: false,
+            ReachesNetwork: false), TestContext.Current.CancellationToken);
 
         var renamed = await store.RenameAsync(
             "old.py", "new.py", TestContext.Current.CancellationToken);
@@ -172,7 +198,10 @@ public sealed class PythonScriptMcpServiceTests : IDisposable
         var discoveryCalls = 0;
         var store = new PythonScriptMcpConfigurationStore(_installDirectory);
         await store.SaveAsync(new PythonScriptMcpConfiguration(
-            "list-only.py", "python_list_only", "List without launching Python.", []),
+            "list-only.py", "python_list_only", "List without launching Python.", [],
+            PythonScriptMcpService.BehaviorAdditive,
+            RepeatSafe: false,
+            ReachesNetwork: false),
             TestContext.Current.CancellationToken);
         var scripts = new PythonScriptService(
             installDirectory: _installDirectory,
@@ -189,6 +218,99 @@ public sealed class PythonScriptMcpServiceTests : IDisposable
         Assert.Equal("python_list_only", Assert.Single(tools).Name);
         Assert.Equal(0, discoveryCalls);
     }
+
+    [Theory]
+    [InlineData(PythonScriptMcpService.BehaviorReadOnly, true, false)]
+    [InlineData(PythonScriptMcpService.BehaviorAdditive, false, false)]
+    [InlineData(PythonScriptMcpService.BehaviorDestructive, false, true)]
+    public async Task DeclaredBehaviorDrivesTheAdvertisedAnnotationsAndDisclosesTheSource(
+        string behavior, bool expectedReadOnly, bool expectedDestructive)
+    {
+        var scripts = new Mock<IPythonScriptService>(MockBehavior.Strict);
+        scripts.Setup(service => service.AuthorizeMcpExposureAsync(
+                "task.py", "1234", It.IsAny<CancellationToken>()))
+            .ReturnsAsync("task.py");
+        scripts.Setup(service => service.GetStatusAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ScriptState("task.py"));
+        scripts.Setup(service => service.GetScriptsDirectory()).Returns(ScriptsDirectory);
+        var service = new PythonScriptMcpService(
+            scripts.Object,
+            new PythonScriptMcpConfigurationStore(_installDirectory));
+
+        await service.SaveAsync(new PythonScriptMcpConfigurationRequest(
+            "task.py", "python_task", "Do the task.", [],
+            behavior,
+            RepeatSafe: false,
+            ReachesNetwork: true,
+            Pin: "1234"), TestContext.Current.CancellationToken);
+
+        var tool = Assert.Single(await service.ListToolsAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(expectedReadOnly, tool.Annotations!.ReadOnlyHint!.Value);
+        Assert.Equal(expectedDestructive, tool.Annotations.DestructiveHint!.Value);
+        // A script that changes nothing is idempotent whatever the author ticked; the other two
+        // take the checkbox, which this request left off.
+        Assert.Equal(expectedReadOnly, tool.Annotations.IdempotentHint!.Value);
+        Assert.True(tool.Annotations.OpenWorldHint);
+
+        // Callers are told where the source lives so they can read it before trusting the tool.
+        var scriptPath = Path.Combine(ScriptsDirectory, "task.py");
+        Assert.Contains(scriptPath, tool.Description!, StringComparison.Ordinal);
+        Assert.Equal(scriptPath, tool.Meta!["scriptPath"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task ExposureRequiresAnExplicitBehaviorDeclaration()
+    {
+        var scripts = new Mock<IPythonScriptService>(MockBehavior.Strict);
+        scripts.Setup(service => service.AuthorizeMcpExposureAsync(
+                "task.py", "1234", It.IsAny<CancellationToken>()))
+            .ReturnsAsync("task.py");
+        var service = new PythonScriptMcpService(
+            scripts.Object,
+            new PythonScriptMcpConfigurationStore(_installDirectory));
+
+        foreach (var behavior in new string?[] { null, "", "mostly-harmless" })
+        {
+            await Assert.ThrowsAsync<PythonScriptValidationException>(() => service.SaveAsync(
+                new PythonScriptMcpConfigurationRequest(
+                    "task.py", "python_task", "Do the task.", [],
+                    behavior,
+                    RepeatSafe: false,
+                    ReachesNetwork: false,
+                    Pin: "1234"),
+                TestContext.Current.CancellationToken));
+        }
+    }
+
+    [Fact]
+    public async Task StoredDeclarationsSurviveTheListRoundTrip()
+    {
+        Directory.CreateDirectory(ScriptsDirectory);
+        File.WriteAllText(Path.Combine(ScriptsDirectory, "safe.py"), "print('ok')\n");
+        var store = new PythonScriptMcpConfigurationStore(_installDirectory);
+        await store.SaveAsync(new PythonScriptMcpConfiguration(
+            "safe.py", "python_safe", "Report on the current state.", [],
+            PythonScriptMcpService.BehaviorReadOnly,
+            RepeatSafe: true,
+            ReachesNetwork: false), TestContext.Current.CancellationToken);
+        var scripts = new PythonScriptService(
+            installDirectory: _installDirectory,
+            mcpConfigurationStore: store,
+            pythonRunnerProvider: () => throw new InvalidOperationException("Discovery must be lazy."));
+
+        var tool = Assert.Single(await new PythonScriptMcpService(scripts, store)
+            .ListToolsAsync(TestContext.Current.CancellationToken));
+
+        // Every list rebuilds a request from the stored record, so a field that round trip forgets
+        // to carry is silently dropped from the advertised tool.
+        Assert.True(tool.Annotations!.ReadOnlyHint);
+        Assert.False(tool.Annotations.DestructiveHint);
+        Assert.True(tool.Annotations.IdempotentHint);
+        Assert.False(tool.Annotations.OpenWorldHint);
+    }
+
+    private string ScriptsDirectory =>
+        Path.Combine(_installDirectory, PythonScriptService.ScriptsSubdirectory);
 
     private PythonScriptListResponse ScriptState(string name) => new(
         true,

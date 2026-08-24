@@ -67,6 +67,8 @@ public class McpServerHttpTests : IAsyncLifetime
                 [new PythonScriptInfo(
                     "http-smoke.py", PythonScriptService.StatusApproved, null, null, 1,
                     Path.Combine(_pythonMcpDirectory, "http-smoke.py"))]));
+        pythonScripts.Setup(service => service.GetScriptsDirectory())
+            .Returns(_pythonMcpDirectory);
         pythonScripts.Setup(service => service.RunAsync(
                 "http-smoke.py",
                 It.IsAny<IReadOnlyList<string>?>(),
@@ -79,7 +81,10 @@ public class McpServerHttpTests : IAsyncLifetime
             "http-smoke.py",
             "python_http_smoke",
             "Run the dynamic Python MCP HTTP smoke test.",
-            []));
+            [],
+            PythonScriptMcpService.BehaviorAdditive,
+            RepeatSafe: false,
+            ReachesNetwork: false));
         builder.Services.AddSingleton(pythonScripts.Object);
         builder.Services.AddSingleton<IPythonScriptMcpConfigurationStore>(pythonStore);
         builder.Services.AddSingleton<IPythonScriptMcpService, PythonScriptMcpService>();

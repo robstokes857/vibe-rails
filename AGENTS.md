@@ -11,7 +11,7 @@
 **Live Site**: [https://viberails.ai/](https://viberails.ai/)
 
 ### Core Capabilities
-- **Agent File Management** - Create and manage `agent.md` files with customizable coding rules
+- **Rule File Management** - Create and manage `vc.rules.md` files with customizable coding rules
 - **Rule Enforcement** - Define standards with three enforcement levels (WARN/COMMIT/STOP)
 - **Multi-LLM Support** - Unified interface for Claude, Codex, Antigravity, Copilot, and OpenCode CLIs
 - **Environment Management** - Configure separate environments for different LLM providers with custom args and prompts. Launch environments directly in the Web UI terminal with the "Web UI" button or select from the terminal's environment dropdown
@@ -53,14 +53,14 @@ vibe-rails/
 │   ├── CliLoop.cs                  # CLI interaction loop
 │   ├── Routes/                     # API endpoint definitions (split by domain)
 │   │   ├── Routes.cs               # Aggregator that maps all route modules
-│   │   ├── AgentRoutes.cs          # Agent file management
+│   │   ├── AgentRoutes.cs          # Rule file management
 │   │   ├── TerminalRoutes.cs       # Web terminal session endpoints
 │   │   ├── LlmSettingsRoutes.cs    # Claude/Codex per-env settings
 │   │   ├── McpRoutes.cs            # MCP tool inspection/calling
 │   │   └── ...                     # (SandboxRoutes, SessionRoutes, etc.)
 │   │
 │   ├── Services/                   # Business logic layer
-│   │   ├── AgentFileService.cs    # Agent file management
+│   │   ├── AgentFileService.cs    # Rule file management
 │   │   ├── FileService.cs         # File system abstraction
 │   │   ├── GitService.cs          # Git repository interaction
 │   │   ├── RulesService.cs        # Rule parsing and enforcement
@@ -191,7 +191,7 @@ The old CLI management commands (`vb env`, `vb validate`, `vb hooks`, etc.) are 
 
 ### Component Interaction Flow
 
-#### Agent Rule Management Flow
+#### Rule File Management Flow
 ```
 Browser (app.js)
   ↓ [GET /api/v1/agents]
@@ -199,7 +199,7 @@ ASP.NET Route Handler (Routes/AgentRoutes.cs)
   ↓ DI injects IAgentFileService
 AgentFileService
   ↓ Uses IGitService to find repository root
-  ↓ Scans for agent.md/agents.md files
+  ↓ Scans for vc.rules.md files
   ↓ Uses IRulesService to parse and validate rules
   ↓ Optional: Repository for project tracking
 Response [AgentFileListResponse]
@@ -316,19 +316,19 @@ See [VibeRails/Services/Mcp/AGENTS.md](VibeRails/Services/Mcp/AGENTS.md) for the
 ### Services Layer
 
 #### AgentFileService ([Services/AgentFileService.cs](VibeRails/Services/AgentFileService.cs))
-**Purpose**: Manage agent.md files with rule definitions
+**Purpose**: Manage vc.rules.md rule files with rule definitions
 
 **Key Methods**:
-- `GetAgentFilesAsync()` - Scan repository for agent files
-- `GetAgentFileRulesAsync(path)` - Parse rules from specific agent file
-- `CreateAgentFileAsync()` - Create new agent file
+- `GetAgentFilesAsync()` - Scan repository for rule files
+- `GetAgentFileRulesAsync(path)` - Parse rules from a specific rule file
+- `CreateAgentFileAsync()` - Create a new rule file
 - `AddRuleAsync()` - Add rule with enforcement level
 - `UpdateRuleEnforcementAsync()` - Change enforcement level (WARN/COMMIT/STOP)
-- `DeleteRulesAsync()` - Remove rules from agent file
+- `DeleteRulesAsync()` - Remove rules from a rule file
 
 **Rule Format** (full contract: [Services/VCA/AGENTS.md](VibeRails/Services/VCA/AGENTS.md)):
 ```markdown
-# Agent Instructions
+# VibeRails Rules
 
 ## Vibe Rails Rules
 - Cyclomatic complexity < 20 (COMMIT)
@@ -456,7 +456,7 @@ var result = await service.CallToolAsync("search_history", args);
 The MCP server is hosted inside `vb.exe` over HTTP at `/mcp` (root backend only). There is no
 separate process. Full design: [VibeRails/Services/Mcp/AGENTS.md](VibeRails/Services/Mcp/AGENTS.md).
 
-**Tools** (snake_case wire names): `validate_vca` (staged-file AGENTS.md rule validation),
+**Tools** (snake_case wire names): `validate_vca` (staged-file vc.rules.md rule validation),
 `search_history` (semantic + keyword search over captured agent history via the real
 `IUnifiedSearchService` — BGE/sqlite-vec/RRF), and the token-saver controls
 `pause_token_saver`, `resume_token_saver`, `get_token_saver_status`.
@@ -498,10 +498,10 @@ tools (security review 2026-07-02).
 #### Routes ([Routes/Routes.cs](VibeRails/Routes/Routes.cs))
 **Purpose**: REST API endpoint definitions (split across domain-specific modules in `Routes/`)
 
-**Agent Management**:
-- `GET /api/v1/agents` - List agent files
-- `GET /api/v1/agents/rules?path={path}` - Get agent rules
-- `POST /api/v1/agents` - Create agent file
+**Rule File Management**:
+- `GET /api/v1/agents` - List rule files
+- `GET /api/v1/agents/rules?path={path}` - Get rules from a rule file
+- `POST /api/v1/agents` - Create a rule file
 - `POST /api/v1/agents/rules` - Add rule
 - `PUT /api/v1/agents/rules/enforcement` - Update enforcement
 - `DELETE /api/v1/agents/rules` - Delete rules
@@ -563,7 +563,7 @@ tools (security review 2026-07-02).
 ```javascript
 const state = {
     currentView: 'agents',  // Current active view
-    agents: [],             // Agent files list
+    agents: [],             // Rule files list
     environments: [],       // LLM environments
     sessions: [],           // CLI sessions
     mcpTools: [],          // Available MCP tools
@@ -573,10 +573,10 @@ const state = {
 ```
 
 **Key Functions**:
-- `loadAgents()` - Fetch and render agent files
+- `loadAgents()` - Fetch and render rule files
 - `loadEnvironments()` - Fetch environment configurations
 - `loadSessions()` - Fetch recent CLI sessions
-- `createAgent()` - Create new agent file
+- `createAgent()` - Create a new rule file
 - `addRule()` - Add rule to agent
 - `updateEnforcement()` - Change rule enforcement level
 - `launchCli()` - Start LLM CLI session
@@ -597,7 +597,7 @@ const state = {
 - XTerm.js terminal integration for session logs
 
 **Views**:
-1. **Agents View** - Agent file management
+1. **Rule Files View** - Rule file management
 2. **Environments View** - LLM environment configuration
 3. **Sessions View** - CLI session history and logs
 4. **MCP View** - MCP tool management and execution
@@ -656,7 +656,7 @@ Different LLM CLI environments implement `IBaseLlmCliEnvironment` with specific 
 ```
 project-root/
 ├── .git/
-├── agent.md                        # or agents.md
+├── vc.rules.md                      # VibeRails rule files (nested ones scope to their subtree)
 ├── .vibe_rails/                  # Optional project-specific config (no per-project database)
 └── src/
 ```
@@ -704,7 +704,7 @@ MyNewRule,
 { Rule.MyNewRule, "Description of the rule" },
 ```
 
-2. **Update agent.md files**:
+2. **Update vc.rules.md files**:
 ```markdown
 ## Vibe Rails Rules
 - My new rule display text (COMMIT)
@@ -802,17 +802,17 @@ Project includes Docker support configured for Linux target OS.
 
 ## Common Tasks for AI Agents
 
-### Task: Find all agent files in repository
+### Task: Find all rule files in repository
 ```csharp
 // Use: AgentFileService.GetAgentFilesAsync()
 var agentFiles = await agentFileService.GetAgentFilesAsync();
 ```
 
-### Task: Add rule to agent file
+### Task: Add rule to a rule file
 ```csharp
 // Use: AgentFileService.AddRuleAsync()
 await agentFileService.AddRuleAsync(
-    agentPath: "/path/to/agent.md",
+    agentPath: "/path/to/vc.rules.md",
     ruleName: "Cyclomatic complexity < 20",
     ruleValue: "20",
     enforcement: "COMMIT"
@@ -851,9 +851,9 @@ See "Adding a New MCP Tool" above: add a `[McpServerToolType]` class under
 
 ### Common Issues
 
-**Issue**: Agent files not found
-- **Cause**: Not in git repository or agent.md not at repo root
-- **Solution**: Run from git repository root, create agent.md file
+**Issue**: Rule files not found
+- **Cause**: Not in git repository or no vc.rules.md in the repo
+- **Solution**: Run from git repository root, create a vc.rules.md file
 
 **Issue**: LLM CLI not launching
 - **Cause**: CLI not in PATH or incorrect environment configuration
@@ -1232,9 +1232,6 @@ Current implementation:
 **Last Updated**: 2026-08-06
 **Version**: 1.9.11
 **Maintained By**: Robert Stokes
-
-## Vibe Rails Rules
-- Log all file changes (WARN)
 
 ---
 

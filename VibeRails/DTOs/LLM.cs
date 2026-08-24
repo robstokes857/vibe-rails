@@ -23,6 +23,10 @@ namespace VibeRails.Services
         // injected server-side. Enum names can't contain hyphens/periods, so LlmParser
         // special-cases the hyphenated wire names to these values.
         Glm52,
+
+        // Native Grok Build CLI. Binary is `grok` (not the lowercased enum `grok46`).
+        // LlmParser still special-cases the wire name "grok-4.6". Do not route this
+        // through OpenCode — see GROK_HARNES.md.
         Grok46,
         Glm53
     }

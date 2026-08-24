@@ -2,7 +2,7 @@ using System.Text.RegularExpressions;
 
 namespace VibeRails.Services.VCA;
 
-/// <summary>One rule line as written in an AGENTS.md rules section.</summary>
+/// <summary>One rule line as written in a vc.rules.md rules section.</summary>
 /// <param name="RuleText">The rule as the user wrote it, with any enforcement marker removed.</param>
 /// <param name="Enforcement">Upper-case enforcement token; <c>WARN</c> when the line declared none.</param>
 public sealed record AgentRuleLine(string RuleText, string Enforcement);
@@ -24,7 +24,7 @@ internal sealed record AgentRuleDocument(
     List<LocatedAgentRuleLine> Rules);
 
 /// <summary>
-/// The one answer to "which rules does this AGENTS.md declare".
+/// The one answer to "which rules does this vc.rules.md declare".
 ///
 /// There used to be two answers. The Rules page read a heading-scoped section and showed what it
 /// found; the Git hook regex-scanned the entire file and enforced what it found. On a file that

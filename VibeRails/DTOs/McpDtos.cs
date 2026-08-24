@@ -12,7 +12,19 @@ public record McpToolInfo(
     JsonElement? InputSchema = null,
     JsonElement? ReturnSchema = null,
     string? Category = null,
-    string? SourceName = null);
+    string? SourceName = null,
+    McpToolAnnotationsInfo? Annotations = null);
+
+/// <summary>
+/// The behavior hints a tool advertises. Read back off the wire rather than out of local
+/// configuration, so the Explorer shows what a caller would actually be told. Every field is
+/// nullable because the protocol lets a server leave any hint unspecified.
+/// </summary>
+public record McpToolAnnotationsInfo(
+    bool? ReadOnly,
+    bool? Destructive,
+    bool? Idempotent,
+    bool? OpenWorld);
 
 /// <summary>
 /// Request describing an MCP server to inspect.

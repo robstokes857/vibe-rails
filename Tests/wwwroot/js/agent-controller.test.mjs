@@ -43,13 +43,13 @@ function createWorkspaceRoot(host) {
     };
 }
 
-test('Agent wizard trims a manually entered directory before appending AGENTS.md', () => {
-    assert.equal(buildAgentFilePath('  C:\\repo\\  '), 'C:\\repo/AGENTS.md');
-    assert.equal(buildAgentFilePath('  /repo/  '), '/repo/AGENTS.md');
+test('Rule-file wizard trims a manually entered directory before appending vc.rules.md', () => {
+    assert.equal(buildAgentFilePath('  C:\\repo\\  '), 'C:\\repo/vc.rules.md');
+    assert.equal(buildAgentFilePath('  /repo/  '), '/repo/vc.rules.md');
     assert.equal(buildAgentFilePath('   '), null);
 });
 
-test('Agent rule cards escape rule text and enforcement values', () => {
+test('Rule-file cards escape rule text and enforcement values', () => {
     const controller = new AgentController(createApp());
     const html = controller.renderAgentRules({
         rules: [{
@@ -81,7 +81,7 @@ test('Enforcement picker escapes a rule read back from a data attribute', (t) =>
     assert.match(modalHtml, /&lt;svg onload=&quot;alert\(1\)&quot;&gt;/);
 });
 
-test('Agent wizard review normalizes enforcement before using it in badge markup', (t) => {
+test('Rule-file wizard review normalizes enforcement before using it in badge markup', (t) => {
     const originalDocument = globalThis.document;
     t.after(() => { globalThis.document = originalDocument; });
     globalThis.document = {
@@ -107,9 +107,9 @@ test('Agent wizard review normalizes enforcement before using it in badge markup
 
 test('Inline rule editor escapes rule text and drives the row tone from a normalized level', () => {
     const app = createApp();
-    app.getAgentFileViewModel = () => ({ displayName: 'repo/Agent', relativePath: 'AGENTS.md' });
+    app.getAgentFileViewModel = () => ({ displayName: 'repo/Rules', relativePath: 'vc.rules.md' });
     app.data.agents = [{
-        path: 'C:\\repo\\AGENTS.md',
+        path: 'C:\\repo\\vc.rules.md',
         rules: [
             { text: '<img src=x onerror="alert(1)">', enforcement: 'STOP' },
             { text: 'Tests accompany behavior changes', enforcement: 'bogus" data-owned="yes' }
@@ -117,7 +117,7 @@ test('Inline rule editor escapes rule text and drives the row tone from a normal
     }];
 
     const controller = new AgentController(app);
-    controller.selectedAgentPath = 'C:\\repo\\AGENTS.md';
+    controller.selectedAgentPath = 'C:\\repo\\vc.rules.md';
     const host = createRuleEditorHost();
     controller.renderInlineRuleEditor(createWorkspaceRoot(host));
 
@@ -132,11 +132,11 @@ test('Inline rule editor escapes rule text and drives the row tone from a normal
 
 test('Inline rule editor shows an empty state for a rule file that enforces nothing', () => {
     const app = createApp();
-    app.getAgentFileViewModel = () => ({ displayName: 'repo/Agent', relativePath: 'Tests/AGENTS.md' });
-    app.data.agents = [{ path: 'C:\\repo\\Tests\\AGENTS.md', rules: [] }];
+    app.getAgentFileViewModel = () => ({ displayName: 'repo/Rules', relativePath: 'Tests/vc.rules.md' });
+    app.data.agents = [{ path: 'C:\\repo\\Tests\\vc.rules.md', rules: [] }];
 
     const controller = new AgentController(app);
-    controller.selectedAgentPath = 'C:\\repo\\Tests\\AGENTS.md';
+    controller.selectedAgentPath = 'C:\\repo\\Tests\\vc.rules.md';
     const host = createRuleEditorHost();
     controller.renderInlineRuleEditor(createWorkspaceRoot(host));
 
@@ -195,7 +195,7 @@ test('Path lock templates reject absolute and escaping paths', () => {
         /single quote/);
 });
 
-// A rule is one line of AGENTS.md. A line break in the path is written back as two lines, and a
+// A rule is one line of vc.rules.md. A line break in the path is written back as two lines, and a
 // second line opening with '#' ends the rules section — silently unenforcing every rule below it
 // in both the Git hook and this page. Rejected server-side too; this is the readable error.
 test('Path lock templates reject a path carrying a line break', () => {
@@ -218,7 +218,7 @@ test('Path lock paths round-trip through the editor even across a line break', (
         'x\n## Injected');
 });
 
-test('Validate Agent renders successful API responses without a missing renderer call', async (t) => {
+test('Validate rule file renders successful API responses without a missing renderer call', async (t) => {
     const originalDocument = globalThis.document;
     t.after(() => { globalThis.document = originalDocument; });
 
@@ -252,7 +252,7 @@ test('Validate Agent renders successful API responses without a missing renderer
     });
     const controller = new AgentController(app);
 
-    await controller.validateAgent({ path: 'C:\\repo\\AGENTS.md' });
+    await controller.validateAgent({ path: 'C:\\repo\\vc.rules.md' });
 
     assert.equal(section.style.display, 'block');
     assert.match(resultsContainer.innerHTML, /Validation &lt;passed&gt;/);

@@ -28,7 +28,7 @@ namespace Tests.Services.VCA
             var documentedFiles = new List<string> { "src/MyClass.cs", "src/MyOtherClass.cs" };
 
             _mockAgentFileService
-                .Setup(x => x.GetDocumentedFilesAsync("AGENTS.md", It.IsAny<CancellationToken>()))
+                .Setup(x => x.GetDocumentedFilesAsync("vc.rules.md", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(documentedFiles);
 
             _mockPathNormalizer
@@ -38,7 +38,7 @@ namespace Tests.Services.VCA
             var rule = new RuleWithEnforcement("Log all file changes", Enforcement.WARN);
 
             // Act
-            var result = await _validator.ValidateAsync("src/MyClass.cs", rule, "AGENTS.md", "/root", null, CancellationToken.None);
+            var result = await _validator.ValidateAsync("src/MyClass.cs", rule, "vc.rules.md", "/root", null, CancellationToken.None);
 
             // Assert
             Assert.True(result.IsValid);
@@ -51,7 +51,7 @@ namespace Tests.Services.VCA
             var documentedFiles = new List<string> { "src/MyClass.cs" };
 
             _mockAgentFileService
-                .Setup(x => x.GetDocumentedFilesAsync("AGENTS.md", It.IsAny<CancellationToken>()))
+                .Setup(x => x.GetDocumentedFilesAsync("vc.rules.md", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(documentedFiles);
 
             _mockPathNormalizer
@@ -61,12 +61,12 @@ namespace Tests.Services.VCA
             var rule = new RuleWithEnforcement("Log all file changes", Enforcement.COMMIT);
 
             // Act
-            var result = await _validator.ValidateAsync("src/UndocumentedFile.cs", rule, "AGENTS.md", "/root", null, CancellationToken.None);
+            var result = await _validator.ValidateAsync("src/UndocumentedFile.cs", rule, "vc.rules.md", "/root", null, CancellationToken.None);
 
             // Assert
             Assert.False(result.IsValid);
             Assert.Contains("not documented", result.Message);
-            Assert.Contains("AGENTS.md", result.Message);
+            Assert.Contains("vc.rules.md", result.Message);
         }
 
         [Fact]
@@ -76,7 +76,7 @@ namespace Tests.Services.VCA
             var documentedFiles = new List<string> { "src/myclass.cs" };
 
             _mockAgentFileService
-                .Setup(x => x.GetDocumentedFilesAsync("AGENTS.md", It.IsAny<CancellationToken>()))
+                .Setup(x => x.GetDocumentedFilesAsync("vc.rules.md", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(documentedFiles);
 
             _mockPathNormalizer
@@ -86,7 +86,7 @@ namespace Tests.Services.VCA
             var rule = new RuleWithEnforcement("Log all file changes", Enforcement.WARN);
 
             // Act
-            var result = await _validator.ValidateAsync("src/MyClass.cs", rule, "AGENTS.md", "/root", null, CancellationToken.None);
+            var result = await _validator.ValidateAsync("src/MyClass.cs", rule, "vc.rules.md", "/root", null, CancellationToken.None);
 
             // Assert
             Assert.True(result.IsValid);

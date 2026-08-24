@@ -50,11 +50,14 @@ public static class CodexResponsesRewriter
             output);
 
     /// <summary>Rewrites with one immutable request plan, the sole runtime configuration value.</summary>
+    /// <param name="provider">Stable provider tag stored with optional captures — "openai" for
+    /// Codex itself; the Grok cli-chat route passes its own tag.</param>
     public static ToolOutputRewriteResult Rewrite(
         ReadOnlySpan<byte> utf8Body,
         CompressionPlan plan,
         IBufferWriter<byte> output,
-        ICompressionCaptureSink? captures = null)
+        ICompressionCaptureSink? captures = null,
+        string provider = "openai")
     {
         ArgumentNullException.ThrowIfNull(plan);
         var stats = new MinifyStats();
@@ -133,7 +136,8 @@ public static class CodexResponsesRewriter
                     toolAllowlist,
                     plan,
                     captures,
-                    unescaped);
+                    unescaped,
+                    provider);
             }
 
             if (qualifying.Count == 0)
@@ -200,7 +204,7 @@ public static class CodexResponsesRewriter
                         {
                             captures!.Capture(new CompressionCapture(
                                 Guid.NewGuid(),
-                                "openai",
+                                provider,
                                 item.Name ?? "shell_command",
                                 item.Command,
                                 raw.ToString(),
@@ -256,7 +260,8 @@ public static class CodexResponsesRewriter
         IReadOnlyCollection<string> toolAllowlist,
         CompressionPlan plan,
         ICompressionCaptureSink captures,
-        Span<char> unescaped)
+        Span<char> unescaped,
+        string provider)
     {
         foreach (var item in items)
         {
@@ -279,7 +284,7 @@ public static class CodexResponsesRewriter
 
                     captures.Capture(new CompressionCapture(
                         Guid.NewGuid(),
-                        "openai",
+                        provider,
                         item.Name!,
                         item.Command,
                         raw,

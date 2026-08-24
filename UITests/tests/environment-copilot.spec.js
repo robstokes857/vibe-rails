@@ -50,15 +50,20 @@ test.describe('Copilot environment form – Model field', () => {
 
         const expectedValues = [
             'claude-fable-5',
+            'claude-opus-5',
             'claude-sonnet-5',
             'claude-sonnet-4.6',
             'claude-haiku-4.5',
             'claude-opus-4.8',
             'claude-opus-4.7',
+            'gpt-5.6-sol',
+            'gpt-5.6-terra',
+            'gpt-5.6-luna',
             'gpt-5.5',
             'gpt-5.4',
             'gpt-5.4-mini',
             'gpt-5-mini',
+            'grok-4.6',
         ];
 
         for (const value of expectedValues) {

@@ -33,7 +33,7 @@ namespace Tests.Services.VCA
         {
             // Arrange
             var files = new List<string> { "src/file1.cs", "lib/file2.cs", "file3.cs" };
-            var sourceFile = "c:\\repo\\AGENTS.md";
+            var sourceFile = "c:\\repo\\vc.rules.md";
             var rootPath = "c:\\repo";
 
             // Act
@@ -51,7 +51,7 @@ namespace Tests.Services.VCA
         {
             // Arrange
             var files = new List<string> { "src/file1.cs", "lib/file2.cs", "src/sub/file3.cs" };
-            var sourceFile = "c:\\repo\\src\\AGENTS.md";
+            var sourceFile = "c:\\repo\\src\\vc.rules.md";
             var rootPath = "c:\\repo";
 
             // Act
@@ -69,7 +69,7 @@ namespace Tests.Services.VCA
         {
             // Arrange
             var files = new List<string> { "Src/File1.cs", "SRC/file2.cs" };
-            var sourceFile = "c:\\repo\\src\\AGENTS.md";
+            var sourceFile = "c:\\repo\\src\\vc.rules.md";
             var rootPath = "c:\\repo";
 
             // Act

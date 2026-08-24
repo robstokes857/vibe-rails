@@ -6,7 +6,7 @@ This describes the entire custom env option workflow but it has mainly been used
 
 This runbook explains how to change, add, or delete custom environment options
 for the managed TUI CLIs: Claude, Codex, Antigravity, Copilot, OpenCode, and the
-OpenCode-backed pseudo-CLIs GLM 5.2, GLM 5.3, and Grok 4.6.
+OpenCode-backed pseudo-CLIs GLM 5.2 and GLM 5.3, plus native Grok 4.6.
 
 Use it when editing the Environments page's create/edit modal, the per-CLI
 settings APIs, or the generated launch arguments stored in `CustomArgs`.
@@ -23,14 +23,17 @@ and launch behavior before changing generated arguments:
 - Antigravity (agy): https://antigravity.google/docs/cli-using (also `cli-getting-started`, `cli-settings`)
 - Antigravity authoritative flags: run `agy --help` (and `agy models` for the live model catalog)
 - Copilot: https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference
-- OpenCode: https://opencode.ai/docs/cli/ (also `/docs/config/`, `/docs/models/`)
+- OpenCode CLI: https://opencode.ai/docs/cli/
+- OpenCode config: https://opencode.ai/docs/config/
+- OpenCode models: https://opencode.ai/docs/models/
 
-Status checked against the upstream references above on July 2, 2026. The Codex
-catalog and pinned-list preference were refreshed from the live model picker on
-this host on July 10, 2026. agy flags were re-verified against `agy --help` on
-this host (unchanged since v1.0.8); the third-party write-ups still conflict
-with each other, so trust `--help`. OpenCode CLI/config/models were verified
-against the upstream docs on July 16, 2026.
+Status re-checked on August 23, 2026 against the upstream references above plus
+live CLIs on this host: Claude Code 2.1.241, Codex CLI 0.148.0 (`codex debug
+models`), Copilot CLI 1.0.71, agy 1.1.7 (`agy --help`), OpenCode (`opencode
+--help` / `opencode models`). The Codex pinned list stays intentionally
+narrower than the live catalog (owner request, July 10, 2026). agy third-party
+write-ups still conflict — trust `--help`. `agy models` still prints nothing
+in a non-TTY, so that catalog is still hand-copied.
 
 Important distinction: `CustomArgs` and `CustomPrompt` are VibeRails' launch
 contract. The DTO field lists below describe fields VibeRails currently
@@ -80,8 +83,9 @@ Where they live in code
 - Copilot: `renderCopilotModelOptions()`.
 - OpenCode: `renderOpencodeModelOptions()`.
 
-Current pinned values (Claude refreshed 2026-07-24; Codex 2026-07-10; all others
-2026-07-02):
+Current pinned values (Claude re-verified 2026-08-23; Codex 2026-08-23;
+Copilot 2026-08-23; OpenCode 2026-08-23; Antigravity flags 2026-08-23, models
+still last hand-copied 2026-07-02):
 
 - Claude (full model IDs): `claude-fable-5`, `claude-opus-5`, `claude-opus-4-8`,
   `claude-opus-4-7`, `claude-sonnet-5`, `claude-sonnet-4-6`,
@@ -94,11 +98,14 @@ Current pinned values (Claude refreshed 2026-07-24; Codex 2026-07-10; all others
   `claude-opus-4-8`); the `[1m]` suffix seen in Claude Code session banners is a
   context-window variant marker, NOT part of the `--model` value.
 - Codex: `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, plus an
-  empty "Default (Codex recommended)" entry. This is intentionally narrower
-  than the live catalog: at the app owner's request, all choices below 5.5 were
-  removed from the pinned dropdown on 2026-07-10, including `gpt-5.4`,
-  `gpt-5.4-mini`, and `gpt-5.3-codex-spark`. They remain usable as explicit
-  legacy/custom values. The old `gpt-5` → `gpt-5.4` alias rewrite was removed
+  empty "Default (Codex recommended)" entry. Live `codex debug models` on
+  2026-08-23 (CLI 0.148.0) still lists `gpt-5.6-sol` / `terra` / `luna`,
+  `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, and `gpt-5.3-codex-spark` as
+  `"visibility": "list"`. This dropdown stays intentionally narrower: at the
+  app owner's request, all choices below 5.5 were removed on 2026-07-10,
+  including `gpt-5.4`, `gpt-5.4-mini`, and `gpt-5.3-codex-spark`. They remain
+  usable as explicit legacy/custom values. Upstream: `gpt-5.4` / `gpt-5.4-mini`
+  retire from ChatGPT-signed Codex on 2026-08-31. The old `gpt-5` → `gpt-5.4` alias rewrite was removed
   from both `normalizeCodexModel()` and
   `CodexLlmCliEnvironment.NormalizeModel()` so unpinned saved values pass
   through unchanged and render as `… (custom)`.
@@ -110,35 +117,42 @@ Current pinned values (Claude refreshed 2026-07-24; Codex 2026-07-10; all others
   `--model "Gemini 3.5 Flash (Low)"`, not a slug. (Re-verified 2026-07-02 against
   the codelabs reference + community write-ups — the catalog is unchanged since
   v1.0.7; `agy models` prints nothing in a non-TTY, so it can't be scripted.)
-- Copilot: `claude-fable-5`, `claude-sonnet-5`, `claude-sonnet-4.6`,
-  `claude-sonnet-4.5`, `claude-haiku-4.5`, `claude-opus-4.8`,
-  `claude-opus-4.8-fast`, `claude-opus-4.7`, `claude-opus-4.6`,
-  `claude-opus-4.5`, `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`,
-  `gpt-5.3-codex`, `gpt-5-mini`, `gemini-3.5-flash`, `gemini-3.1-pro`,
-  `gemini-3-flash`, `gemini-2.5-pro`, `mai-code-1-flash`,
-  `raptor-mini`, plus an empty "Default (auto)" entry (empty omits `--model`;
-  `--model auto` is Copilot's explicit auto-selection value). Dropped
-  2026-07-02: `claude-sonnet-4`, `claude-opus-4.6-fast` (deprecated in CLI
+- Copilot: `claude-fable-5`, `claude-opus-5`, `claude-sonnet-5`,
+  `claude-sonnet-4.6`, `claude-sonnet-4.5`, `claude-haiku-4.5`,
+  `claude-opus-4.8`, `claude-opus-4.8-fast`, `claude-opus-4.7`,
+  `claude-opus-4.6`, `claude-opus-4.5`, `gpt-5.6-sol`, `gpt-5.6-terra`,
+  `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`,
+  `gpt-5.3-codex`, `gpt-5-mini`, `gemini-3.7-flash`, `gemini-3.6-flash`,
+  `gemini-3.5-flash`, `gemini-3.1-pro`, `mai-code-1.1-flash`,
+  `mai-code-1-flash`, `raptor-mini`, `kimi-k2.7-code`, `kimi-k3`, `grok-4.6`,
+  `grok-4.5`, plus an empty "Default (auto)" entry (empty omits `--model`;
+  `--model auto` is Copilot's explicit auto-selection value). Added 2026-08-23
+  from the supported-models table: `claude-opus-5`, the GPT-5.6 trio,
+  `gemini-3.6-flash`, `gemini-3.7-flash`, `mai-code-1.1-flash`,
+  `kimi-k2.7-code`, `kimi-k3`, `grok-4.5`, `grok-4.6`. Dropped 2026-08-23:
+  `gemini-3-flash`, `gemini-2.5-pro` — gone from the table. Earlier drops
+  (2026-07-02): `claude-sonnet-4`, `claude-opus-4.6-fast` (deprecated in CLI
   v1.0.66, replaced by `claude-opus-4.8-fast`), `gpt-5.2-codex`, `gpt-5.2`,
-  `gpt-5.1`, `gpt-4.1` — none are in the current supported-models table.
-  IMPORTANT: Copilot availability is plan/policy-gated, so "Model X is not
-  available" at launch does NOT mean the ID is wrong (on this host even
-  `claude-opus-4.7` is gated while `claude-sonnet-5` works). The pinned list
-  follows the docs' supported-in-CLI table, not one account's entitlements.
-- OpenCode: `anthropic/claude-opus-4-5`, `anthropic/claude-sonnet-4-5`,
-  `openai/gpt-5.2`, `openai/gpt-5.1-codex`, `google/gemini-3-pro`,
-  `zai/glm-5.2`, `zai-coding-plan/glm-5.3`, `xai/grok-4.6`,
+  `gpt-5.1`, `gpt-4.1`. IMPORTANT: Copilot availability is plan/policy-gated, so
+  "Model X is not available" at launch does NOT mean the ID is wrong. The pinned
+  list follows the docs' supported-in-CLI table, not one account's entitlements.
+- OpenCode: `anthropic/claude-opus-5`, `anthropic/claude-sonnet-5`,
+  `anthropic/claude-opus-4-5`, `anthropic/claude-sonnet-4-5`,
+  `openai/gpt-5.6`, `openai/gpt-5.5`, `openai/gpt-5.2`, `openai/gpt-5.1-codex`,
+  `google/gemini-3-pro`, `zai/glm-5.2`, `zai-coding-plan/glm-5.3`, `xai/grok-4.6`,
   `opencode/gpt-5.1-codex` (Zen), plus an empty "Default (OpenCode recommended)" entry.
   OpenCode model IDs are `provider/model` (the format `--model` and `opencode models` use).
   Refresh via `opencode models` (optionally `--refresh` to update the cache from models.dev).
   Added 2026-07-16 alongside the OpenCode CLI integration; `zai/glm-5.2` added 2026-07-17;
-  `xai/grok-4.6` added 2026-08-15; `zai-coding-plan/glm-5.3` added 2026-08-16 (verified live
-  via `opencode models` — glm-5.3 ships ONLY under the `zai-coding-plan` provider in the
-  current catalog, not plain `zai`).
-  `zai/glm-5.2`, `zai-coding-plan/glm-5.3`, and `xai/grok-4.6` are also exposed as first-class
-  base CLIs and custom env types (see the "GLM 5.2", "GLM 5.3", and "Grok 4.6" sections below)
-  — each launches `opencode` with the model pinned via `--model`, so users get a dedicated
-  dropdown entry instead of picking the model from the OpenCode list.
+  `xai/grok-4.6` added 2026-08-15; `zai-coding-plan/glm-5.3` added 2026-08-16;
+  `anthropic/claude-opus-5`, `anthropic/claude-sonnet-5`, `openai/gpt-5.6`, and
+  `openai/gpt-5.5` added 2026-08-23.
+  Re-verified live via `opencode models` on 2026-08-23: `xai/grok-4.6` is still the Grok
+  coding model; glm-5.3 still ships ONLY under `zai-coding-plan` (plain `zai` still tops
+  out at `zai/glm-5.2`). Do not pin `zai/glm-5.3`.
+  `zai/glm-5.2` and `zai-coding-plan/glm-5.3` are also exposed as OpenCode-backed first-class
+  base CLIs (see the "GLM 5.2" and "GLM 5.3" sections). Grok 4.6 is a native `grok` CLI, not
+  an OpenCode pin — OpenCode still lists `xai/grok-4.6` for its own sessions.
 
 The rule:
 
@@ -170,6 +184,10 @@ How to verify what's current:
   You can positively confirm an ID with
   `copilot -p "Reply with just: ok" --model <id>` (a reply proves the ID), but a
   "not available" error is inconclusive — it also fires for plan-gated models.
+- OpenCode (including GLM 5.2 / GLM 5.3 / Grok 4.6): CLI flags at
+  https://opencode.ai/docs/cli/, config at https://opencode.ai/docs/config/,
+  model IDs at https://opencode.ai/docs/models/. Refresh the pinned list with
+  `opencode models` (optionally `--refresh` to update the cache from models.dev).
 
 ## Initial Message placeholders
 
@@ -279,7 +297,7 @@ stripped on save: `prompt`, `yolo`, `full_auto`, `no_alt_screen`, `oss`,
 
 Antigravity is **launch-flag-only** — no settings file, so it is managed exactly
 like Copilot (everything rides in `CustomArgs` / `CustomPrompt`). The flags below
-are verified against `agy --help` (v1.0.8), not third-party docs.
+are verified against `agy --help` (v1.1.7 on 2026-08-23), not third-party docs.
 
 - Initial Message: stored in `CustomPrompt`; sent as
   `agy --prompt-interactive=<text>` (agy has no positional-prompt form — `--print`/`-p`
@@ -292,7 +310,9 @@ are verified against `agy --help` (v1.0.8), not third-party docs.
 - YOLO Mode: `--dangerously-skip-permissions` — auto-approves every tool
   permission request. This is the only permission control.
 - Additional Arguments: preserved in `CustomArgs` for advanced agy flags not
-  modeled by VibeRails (e.g. `--add-dir <dir>`, `--conversation <id>`).
+  modeled by VibeRails (e.g. `--add-dir <dir>`, `--conversation <id>`). Live
+  `agy --help` on v1.1.7 also lists `--agent`, `--effort` (`low|medium|high`),
+  and `--mode` (`accept-edits`, `plan`); those stay additional-args only.
 
 There is no `AntigravitySettingsDto`, no settings file, and no
 `/api/v1/antigravity/settings` route: agy is launch-flag-only, and its
@@ -320,7 +340,9 @@ UI-managed launch and prompt settings:
   for all permissions (`--allow-all` equivalent).
 - Don't Ask User: `--no-ask-user`.
 - Additional Arguments: preserved in `CustomArgs` for advanced Copilot flags not
-  modeled by VibeRails.
+  modeled by VibeRails. Live Copilot CLI 1.0.71 also lists `--effort` /
+  `--reasoning-effort` (`none|minimal|low|medium|high|xhigh|max`); that stays
+  additional-args only.
 
 Legacy flags still read:
 
@@ -343,8 +365,8 @@ Credentials are NOT isolated: VibeRails leaves `XDG_DATA_HOME` unchanged, so `op
 login` continues to use the user's global OpenCode data directory (normally
 `~/.local/share/opencode/auth.json`).
 
-UI-managed launch and prompt settings (verified against https://opencode.ai/docs/cli/ on
-2026-07-16; `--pure` toggle added 2026-07-19):
+UI-managed launch and prompt settings (re-verified against https://opencode.ai/docs/cli/
+and live `opencode --help` on 2026-08-23; `--pure` toggle added 2026-07-19):
 
 - Initial Message: stored in `CustomPrompt`; sent as `--prompt=<text>`. The TUI treats a
   positional arg as the `[project]` path, not a prompt, so this flag is mandatory for prompts.
@@ -357,7 +379,10 @@ UI-managed launch and prompt settings (verified against https://opencode.ai/docs
   isolated/reproducible environments where third-party plugin behavior would otherwise leak in.
   Verified against `opencode --help` on 2026-07-19.
 - Additional Arguments: preserved in `CustomArgs` for advanced opencode flags not modeled by
-  VibeRails (e.g. `--continue`, `--session`, `--fork`).
+  VibeRails (e.g. `--continue`, `--session`, `--fork`, `--mini`). Live `opencode --help` on
+  2026-08-23 also lists `--mini` (minimal interactive UI), `--no-replay`, and `--replay-limit`;
+  those stay additional-args only — do not add first-class toggles unless a UI control fully
+  owns them.
 
 There is no `OpencodeSettingsDto`, no settings file, and no `/api/v1/opencode/settings` route.
 
@@ -403,49 +428,49 @@ UI-managed launch and prompt settings (same as OpenCode, with Model pinned):
 
 Frontend helpers (environment-controller.js) — shared by all three pseudo-CLIs:
 
-- `isOpencodeBackedCli(cli)` returns true for `opencode`, `glm-5.2`, `glm-5.3`, `grok-4.6` —
+- `isOpencodeBackedCli(cli)` returns true for `opencode`, `glm-5.2`, `glm-5.3` —
   use this instead of `=== 'opencode'` when routing to the OpenCode settings form / arg builder.
+  Native Grok 4.6 is **not** OpenCode-backed (`isNativeGrokCli`).
 - `pinnedModelForCli(cli)` returns `'zai/glm-5.2'` for `glm-5.2`,
-  `'zai-coding-plan/glm-5.3'` for `glm-5.3`, `'xai/grok-4.6'` for `grok-4.6`, and `null` for
-  plain OpenCode.
+  `'zai-coding-plan/glm-5.3'` for `glm-5.3`, and `null` for plain OpenCode.
 
 ### Grok 4.6
 
-Grok 4.6 is an **OpenCode-backed pseudo-CLI**: it launches `opencode` with `--model=xai/grok-4.6`
-pinned. It exists as a first-class base CLI (dropdown entry in the terminal launcher) and as a
-custom env type, so users get a dedicated entry instead of picking `xai/grok-4.6` from the
-OpenCode model list every time.
+Grok 4.6 is a **native Grok Build CLI**: it launches `grok` with `--model=grok-4.6` pinned.
+It exists as a first-class base CLI (dropdown entry in the terminal launcher) and as a
+custom env type. OpenCode can still offer `xai/grok-4.6` in its own model list — that is a
+different CLI.
 
-Backend wiring (added 2026-08-15):
+Backend wiring (native harness, 2026-08-23; replaces the 2026-08-15 OpenCode-backed slice):
 
 - Enum: `LLM.Grok46` (value 8). C# enum names can't contain hyphens/periods, so `LlmParser`
   special-cases the string `"grok-4.6"` → `LLM.Grok46` via a `SpecialCaseMap` dictionary.
-- Executable: `opencode` (mapped in `CommandService.PrepareSessionAsync`, like `agy` for
-  Antigravity and `opencode` for GLM 5.2). The enum name lowercased (`grok46`) is NOT the executable.
+- Executable: `grok` (mapped in `CommandService.PrepareSessionAsync`, like `agy` for
+  Antigravity). The enum name lowercased (`grok46`) is NOT the executable.
 - Model injection: for **base CLI launches** (no envName), `CommandService` prepends
-  `--model=xai/grok-4.6` to the launch args. For **custom env launches**, the model is already
-  in `CustomArgs` (emitted by `buildOpencodeCustomArgs`), so no injection happens — this avoids
-  a duplicate `--model` flag.
-- Prompt convention: `--prompt=<text>` (same as OpenCode).
-- Proxy: the OpenCode Token Saver proxy (`OpenCodeLlmProxyLaunchEnabled`) applies. Grok is the
-  `xai` provider; `OPENCODE_CONFIG_CONTENT` remaps `xai.options.baseURL` to
-  `{apiBase}/llm/xai/v1` and `LlmXaiProxyRoutes` relays to `https://api.x.ai`. Auth stays
-  OpenCode's native xAI connection (`/connect` → xAI, stored in the user's global
-  `auth.json`). Do **not** add a second `HttpListener`, a `/llm/grok` sidecar, or a
-  middleware skip-list entry (rejected 2026-08-15; see `API_SEC.md`).
-- Env isolation: `XDG_CONFIG_HOME` (same as OpenCode).
-- Launcher: `IOpencodeLlmCliLauncher` (reused from OpenCode).
+  `--model=grok-4.6` to the launch args. For **custom env launches**, the model is already
+  in `CustomArgs` (emitted by `buildGrokCustomArgs` as `-m grok-4.6`), so no injection happens.
+- Prompt convention: trailing positional (TUI first turn). Do **not** use `-p` / `--single`
+  (headless; the process exits).
+- Proxy: the OpenCode Token Saver flag (`OpenCodeLlmProxyLaunchEnabled`) also covers native
+  Grok's use of `/llm/xai`. `GROK_CLI_CHAT_PROXY_BASE_URL` and `GROK_MODELS_BASE_URL` point
+  at `{apiBase}/llm/xai/v1`. `viberails_session` / `viberails_tab` ride `env_http_headers`
+  in `~/.grok/config.toml` (header names and env-var names only). Auth is `XAI_API_KEY` or
+  `grok login`. Do **not** set `GROK_HOME`. Do **not** add a second `HttpListener`, a
+  `/llm/grok` sidecar, or a middleware skip-list entry (rejected 2026-08-15; see `API_SEC.md`).
+- Env isolation: none. Launch-flag-only.
+- Launcher: `IGrokLlmCliLauncher` (`CliExecutable = "grok"`).
+- MCP: `grok mcp remove viberails-mcp` then `grok mcp add --scope user viberails-mcp -- {vb} mcp`.
 - `getLlmName()` (frontend) maps `8` → `'Grok 4.6'`.
 
-UI-managed launch and prompt settings (same as OpenCode, with Model pinned):
+UI-managed launch and prompt settings:
 
-- Initial Message: stored in `CustomPrompt`; sent as `--prompt=<text>`.
-- Model: **pinned to `xai/grok-4.6`** — the model field is a read-only display, not a dropdown.
-  To use a different model, create a plain OpenCode env instead.
-- Agent: `--agent <name>`; free text.
-- YOLO Mode: `--auto`.
-- Run Without Plugins: `--pure`.
+- Initial Message: stored in `CustomPrompt`; sent as a trailing positional.
+- Model: **pinned to `grok-4.6`** — the model field is a read-only display, not a dropdown.
+- YOLO Mode: `--yolo`.
 - Additional Arguments: preserved in `CustomArgs`.
+- Leftover OpenCode flags (`--model=xai/grok-4.6`, `--auto`, `--pure`, `--agent`) are rewritten
+  or dropped on the next env save.
 
 ### GLM 5.3
 
@@ -502,15 +527,16 @@ Custom environments have two layers:
 The important rule: a visible control is not enough. Every CLI option must
 round-trip through render, read, save, parse existing args, and launch.
 
-GLM 5.2, GLM 5.3, and Grok 4.6 are **OpenCode-backed pseudo-CLIs**: they reuse OpenCode's settings
+GLM 5.2 and GLM 5.3 are **OpenCode-backed pseudo-CLIs**: they reuse OpenCode's settings
 form, arg builder, env isolation (`XDG_CONFIG_HOME`), and launcher, but pin `--model` to a specific
 provider/model. In the frontend, `isOpencodeBackedCli(cli)` routes them to the OpenCode branch;
 in the backend, `CommandService.PrepareSession` maps the enum to `opencode` and injects the
-pinned `--model` for base CLI launches.
+pinned `--model` for base CLI launches. Native Grok 4.6 is a separate `grok` binary
+(`isNativeGrokCli`).
 
 The OpenCode Token Saver proxy remaps both the `zai` and `xai` providers via
-`OPENCODE_CONFIG_CONTENT` (plain OpenCode + GLM 5.2 + Grok 4.6 + GLM 5.3). GLM rides `/llm/zai` →
-`api.z.ai`; Grok rides `/llm/xai` → `api.x.ai`. Both are Kestrel routes on the main host.
+`OPENCODE_CONFIG_CONTENT` (plain OpenCode + GLM 5.2 + GLM 5.3). GLM rides `/llm/zai` →
+`api.z.ai`; OpenCode-xAI and native Grok ride `/llm/xai` → `api.x.ai`. Both are Kestrel routes on the main host.
 **GLM 5.3 is the exception:** its pinned `zai-coding-plan` provider is not remapped, so its
 traffic goes direct to Z.AI (no token-saver capture) — deliberate, see the GLM 5.3 section.
 Auth stays in OpenCode's global `auth.json`. Do not add a second listener or a `/llm/grok`
@@ -795,18 +821,17 @@ GLM 5.2 :
 
 Grok 4.6 :
 
-- Pseudo-CLI backed by OpenCode. Enum `LLM.Grok46` (8); `LlmParser` special-cases `"grok-4.6"`.
-- Executable is `opencode` (remapped in `CommandService.PrepareSession` — the enum name
-  lowercased `grok46` is NOT the executable). `--model=xai/grok-4.6` is injected for base CLI
-  launches; custom envs carry it in `CustomArgs`.
-- Settings form reuses OpenCode's (`isOpencodeBackedCli()` routes `grok-4.6` to the OpenCode
-  branch); the Model field is a read-only display pinned to `xai/grok-4.6`.
-- The OpenCode Token Saver proxy applies. Grok is the `xai` provider; traffic goes through
-  `/llm/xai` on the main Kestrel host (not a second listener). Auth stays in OpenCode's
-  native xAI credentials (`~/.local/share/opencode/auth.json`). Do not reintroduce
+- Native Grok Build CLI. Enum `LLM.Grok46` (8); `LlmParser` special-cases `"grok-4.6"`.
+- Executable is `grok` (remapped in `CommandService.PrepareSession` — the enum name
+  lowercased `grok46` is NOT the executable). `--model=grok-4.6` is injected for base CLI
+  launches; custom envs carry `-m grok-4.6` in `CustomArgs`.
+- Settings form is launch-flag-only (`isNativeGrokCli()`); the Model field is a read-only
+  display pinned to `grok-4.6`. YOLO is `--yolo`.
+- Token Saver reuses `/llm/xai` on the main Kestrel host (gated by the OpenCode proxy
+  flag). Auth is `XAI_API_KEY` / `grok login`. Do not set `GROK_HOME`. Do not reintroduce
   `GrokLoopbackBridge` or `/llm/grok`.
-- `customPrompt` is populated from the initial message.
-- No MCP auto-registration (inherited from OpenCode).
+- `customPrompt` is populated from the initial message and sent as a trailing positional.
+- MCP auto-registration: `grok mcp remove` + `grok mcp add --scope user`.
 
 GLM 5.3 :
 

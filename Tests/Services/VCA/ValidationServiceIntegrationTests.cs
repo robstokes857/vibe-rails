@@ -49,7 +49,7 @@ namespace Tests.Services.VCA
                 {
                     new VcaRuleWithSource(
                         new RuleWithEnforcement("Log all file changes", Enforcement.WARN),
-                        "AGENTS.md")
+                        "vc.rules.md")
                 }
             };
 
@@ -80,7 +80,7 @@ namespace Tests.Services.VCA
                 {
                     new VcaRuleWithSource(
                         new RuleWithEnforcement("Package file changes", Enforcement.STOP),
-                        "AGENTS.md")
+                        "vc.rules.md")
                 }
             };
 
@@ -105,7 +105,7 @@ namespace Tests.Services.VCA
             Assert.Equal("package.json", violation.FilePath);
             Assert.Equal("Package file changes", violation.RuleName);
             Assert.Equal(Enforcement.STOP, violation.Enforcement);
-            Assert.Equal("AGENTS.md", violation.SourceFile);
+            Assert.Equal("vc.rules.md", violation.SourceFile);
         }
 
         [Fact]
@@ -116,12 +116,12 @@ namespace Tests.Services.VCA
             {
                 ["test1.cs"] = new List<VcaRuleWithSource>
                 {
-                    new VcaRuleWithSource(new RuleWithEnforcement("Rule 1", Enforcement.WARN), "AGENTS.md"),
-                    new VcaRuleWithSource(new RuleWithEnforcement("Rule 2", Enforcement.COMMIT), "AGENTS.md")
+                    new VcaRuleWithSource(new RuleWithEnforcement("Rule 1", Enforcement.WARN), "vc.rules.md"),
+                    new VcaRuleWithSource(new RuleWithEnforcement("Rule 2", Enforcement.COMMIT), "vc.rules.md")
                 },
                 ["test2.cs"] = new List<VcaRuleWithSource>
                 {
-                    new VcaRuleWithSource(new RuleWithEnforcement("Rule 3", Enforcement.STOP), "src/AGENTS.md")
+                    new VcaRuleWithSource(new RuleWithEnforcement("Rule 3", Enforcement.STOP), "src/vc.rules.md")
                 }
             };
 
@@ -178,9 +178,9 @@ namespace Tests.Services.VCA
             {
                 ["test.cs"] = new List<VcaRuleWithSource>
                 {
-                    new VcaRuleWithSource(new RuleWithEnforcement("Rule A", Enforcement.WARN), "AGENTS.md"),
-                    new VcaRuleWithSource(new RuleWithEnforcement("Rule B", Enforcement.WARN), "AGENTS.md"),
-                    new VcaRuleWithSource(new RuleWithEnforcement("Rule C", Enforcement.WARN), "AGENTS.md")
+                    new VcaRuleWithSource(new RuleWithEnforcement("Rule A", Enforcement.WARN), "vc.rules.md"),
+                    new VcaRuleWithSource(new RuleWithEnforcement("Rule B", Enforcement.WARN), "vc.rules.md"),
+                    new VcaRuleWithSource(new RuleWithEnforcement("Rule C", Enforcement.WARN), "vc.rules.md")
                 }
             };
 

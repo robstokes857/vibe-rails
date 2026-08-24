@@ -30,7 +30,10 @@ public sealed record LlmProxySettings(
     bool CodexTokenSaverEnabled = false,
     bool OpenCodeTokenSaverEnabled = false,
     CompressionPlan? TokenSaverPlan = null,
-    bool TokenSaverCaptureEnabled = false)
+    bool TokenSaverCaptureEnabled = false,
+    bool GrokLlmProxyEnabled = false,
+    string GrokLlmProxyMode = CodexLlmProxySettings.ModeSubscription,
+    bool GrokTokenSaverEnabled = false)
 {
     /// <summary>
     /// The persisted setting that controls whether a newly launched OpenCode process receives the
@@ -40,6 +43,11 @@ public sealed record LlmProxySettings(
     /// session-stable routing.
     /// </summary>
     public bool OpenCodeLlmProxyLaunchEnabled { get; init; } = OpenCodeLlmProxyEnabled;
+
+    /// <summary>
+    /// Same launch-vs-lease split as <see cref="OpenCodeLlmProxyLaunchEnabled"/> for native Grok.
+    /// </summary>
+    public bool GrokLlmProxyLaunchEnabled { get; init; } = GrokLlmProxyEnabled;
 
     /// <summary>
     /// The resolved stage selection (see <see cref="Pipeline.CompressionCatalog"/>), or a no-op

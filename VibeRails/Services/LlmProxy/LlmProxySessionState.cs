@@ -10,7 +10,8 @@ public enum LlmProxyProvider
     None = 0,
     Claude,
     Codex,
-    OpenCode
+    OpenCode,
+    Grok
 }
 
 /// <summary>

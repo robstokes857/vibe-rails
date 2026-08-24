@@ -9,7 +9,8 @@ internal static class LlmPromptArgvBuilder
     /// Copilot consumes the prompt via <c>--interactive=&lt;text&gt;</c>; Antigravity (agy)
     /// via <c>--prompt-interactive=&lt;text&gt;</c> (it has no positional-prompt form); OpenCode
     /// via <c>--prompt=&lt;text&gt;</c> (its TUI treats a positional arg as the project path);
-    /// every other CLI takes the prompt as a trailing positional argument.
+    /// native Grok and every other CLI take the prompt as a trailing positional argument
+    /// (Grok's <c>-p</c> is headless and must not be used for a TUI tab).
     ///
     /// Called only from CommandService.PrepareSessionAsync (whose shell-string branch mirrors
     /// the same switch). Spawning routes deliberately stopped appending the prompt themselves:
@@ -24,7 +25,7 @@ internal static class LlmPromptArgvBuilder
             argv.Add($"--interactive={prompt}");
         else if (llm == LLM.Antigravity)
             argv.Add($"--prompt-interactive={prompt}");
-        else if (llm == LLM.OpenCode || llm == LLM.Glm52 || llm == LLM.Grok46 || llm == LLM.Glm53)
+        else if (llm == LLM.OpenCode || llm == LLM.Glm52 || llm == LLM.Glm53)
             argv.Add($"--prompt={prompt}");
         else
             argv.Add(prompt);

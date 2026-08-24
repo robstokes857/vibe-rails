@@ -519,7 +519,15 @@ export class VibeControlApp {
             ...settings
         });
         this.applyVsCodeThemePreference();
+        this.applyVibeAiNavVisibility();
         this.terminalTokenCompression?.setEnabledSources(getTokenSaverEnabledSources(this.appSettings));
+    }
+
+    applyVibeAiNavVisibility() {
+        const show = this.appSettings?.showVibeAiUi === true;
+        document.querySelectorAll('.app-subnav-link[data-view="vibe-rails-ai"]').forEach(link => {
+            link.hidden = !show;
+        });
     }
 
     _normalizeAppSettings(settings = {}) {
@@ -538,6 +546,7 @@ export class VibeControlApp {
             codexTokenSaverEnabled: true,
             openCodeTokenSaverEnabled: true,
             machineName: '',
+            showVibeAiUi: false,
             ...settings
         };
     }
@@ -818,7 +827,7 @@ export class VibeControlApp {
 
     updateActiveSubNav(view) {
         // Two nav families: the Code quality page (home) owns the checks, the RULES
-        // entry owns the AGENTS.md editing views. The Python script workbench is a
+        // entry owns the vc.rules.md editing views. The Python script workbench is a
         // detail view of the Automation page, so Automation stays highlighted.
         const highlightView = ['agents', 'code-quality'].includes(view)
             ? 'dashboard'
@@ -976,9 +985,9 @@ export class VibeControlApp {
             ? agentPath.slice(rootPrefix.length)
             : agentPath.split('/').pop();
         const pathParts = String(relativePath || '').split('/').filter(Boolean);
-        const fileName = pathParts.pop() || agent.name || 'AGENTS.md';
+        const fileName = pathParts.pop() || agent.name || 'vc.rules.md';
         const projectName = this.getCurrentProjectDisplayName();
-        const scopeLeaf = agent.customName || 'Agent';
+        const scopeLeaf = agent.customName || 'Rules';
         const scopeName = [projectName, ...pathParts, scopeLeaf].filter(Boolean).join('/');
         const ruleCount = Number(agent.ruleCount) || agent.rules?.length || 0;
 
@@ -1007,9 +1016,9 @@ export class VibeControlApp {
                     </span>
                 </button>
                 <button type="button" class="btn btn-sm btn-link text-muted p-1 agent-file-tree-rename"
-                    data-agent-rename="${item.index}" title="Set a custom name">
+                    data-agent-rename="${item.index}" title="Set display name">
                     <i class="fa-solid fa-pen" aria-hidden="true"></i>
-                    <span class="visually-hidden">Rename ${this.escapeHtml(item.displayName)}</span>
+                    <span class="visually-hidden">Set display name for ${this.escapeHtml(item.displayName)}</span>
                 </button>
                 <span class="agent-file-tree-badge${item.hasRules ? ' agent-file-tree-badge--active' : ''}">${ruleLabel}</span>
             </div>`;
@@ -1026,7 +1035,7 @@ export class VibeControlApp {
                             <path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5zm-3 0V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5z"/>
                         </svg>
                     </div>
-                    <p class="text-muted small">No agent files found in this project.</p>
+                    <p class="text-muted small">No rule files found in this project.</p>
                 </div>
             `;
         }
@@ -1041,14 +1050,14 @@ export class VibeControlApp {
                     <div class="agent-files-group-heading">
                         <div>
                             <h3 id="configured-agent-files-title">Configured</h3>
-                            <p>Agent files currently enforcing one or more rules.</p>
+                            <p>Rule files currently enforcing one or more rules.</p>
                         </div>
                         <span>${configured.length}</span>
                     </div>
                     <div class="agent-files-list">
                         ${configured.length > 0
                             ? configured.map(item => this.renderAgentFileItem(item)).join('')
-                            : '<p class="agent-files-group-empty">No agent files have rules yet.</p>'}
+                            : '<p class="agent-files-group-empty">No rule files have rules yet.</p>'}
                     </div>
                 </section>
 
@@ -1060,7 +1069,7 @@ export class VibeControlApp {
                             </span>
                             <span class="agent-files-disclosure-copy">
                                 <strong>Without rules</strong>
-                                <small>Available agent files that are not currently enforcing anything.</small>
+                                <small>Available rule files that are not currently enforcing anything.</small>
                             </span>
                             <span class="agent-files-disclosure-count">${empty.length}</span>
                         </summary>

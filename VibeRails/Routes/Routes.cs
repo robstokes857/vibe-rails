@@ -33,6 +33,7 @@ public static class RouteExtensions
         LlmAnthropicProxyRoutes.Map(app);
         LlmZaiProxyRoutes.Map(app);
         LlmXaiProxyRoutes.Map(app);
+        LlmCliChatProxyRoutes.Map(app);
         TokenSaverPauseRoutes.Map(app);
         TokenSavingsRoutes.Map(app);
         CompressionCaptureRoutes.Map(app);

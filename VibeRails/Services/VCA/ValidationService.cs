@@ -91,7 +91,7 @@ namespace VibeRails.Services.VCA
         /// </summary>
         /// <param name="filePath">The file to validate</param>
         /// <param name="rule">The rule to check</param>
-        /// <param name="sourceFile">The AGENTS.md file where this rule came from (for context-aware validation)</param>
+        /// <param name="sourceFile">The vc.rules.md file where this rule came from (for context-aware validation)</param>
         /// <param name="rootPath">The repository root path</param>
         /// <param name="context">Optional validation context (e.g., commit message)</param>
         /// <param name="cancellation">Cancellation token</param>
@@ -111,12 +111,12 @@ namespace VibeRails.Services.VCA
         /// <param name="rootPath">Repository root path</param>
         /// <param name="stagedOnly">If true, only get staged files (pre-commit). If false, get all changed files.</param>
         /// <param name="cancellationToken">Cancellation token</param>
-        /// <returns>Dictionary where key=file path, value=list of rules with source AGENTS.md file</returns>
+        /// <returns>Dictionary where key=file path, value=list of rules with source vc.rules.md file</returns>
         public Task<Dictionary<string, List<RuleWithSource>>> GetFilesAndRulesAsync(string rootPath, bool stagedOnly, CancellationToken cancellationToken);
     }
 
     /// <summary>
-    /// Rule with its source AGENTS.md file for context-aware validation
+    /// Rule with its source vc.rules.md file for context-aware validation
     /// </summary>
     public record RuleWithSource(RuleWithEnforcement Rule, string SourceFile);
 }
