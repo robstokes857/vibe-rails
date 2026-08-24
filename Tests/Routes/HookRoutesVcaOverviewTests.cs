@@ -13,13 +13,13 @@ public sealed class HookRoutesVcaOverviewTests
             HasError: false,
             HasStopViolation: true,
             HasCommitViolations: true,
-            RequiredAcknowledgments: ["[VCA:AGENTS.md:package-changes]"],
+            RequiredAcknowledgments: ["[VCA:vc.rules.md:package-changes]"],
             StagedFileCount: 3,
             ApplicableRuleCount: 4,
             Findings:
             [
                 Finding(VcaRuleFindingKind.Blocked, "STOP"),
-                Finding(VcaRuleFindingKind.AcknowledgmentRequired, "COMMIT", "[VCA:AGENTS.md:package-changes]"),
+                Finding(VcaRuleFindingKind.AcknowledgmentRequired, "COMMIT", "[VCA:vc.rules.md:package-changes]"),
                 Finding(VcaRuleFindingKind.Warning, "WARN"),
                 Finding(VcaRuleFindingKind.Deferred, "STOP")
             ]);
@@ -72,7 +72,7 @@ public sealed class HookRoutesVcaOverviewTests
             enforcement,
             "Example rule",
             "Example reason",
-            "AGENTS.md",
+            "vc.rules.md",
             "Example guidance",
             acknowledgment);
 }

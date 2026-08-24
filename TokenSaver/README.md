@@ -425,14 +425,14 @@ TokenSaver/
 ├─ LlmProxyRoutes.cs             ← Codex proxy endpoints.
 ├─ LlmAnthropicProxyRoutes.cs    ← Claude proxy endpoints.
 ├─ LlmZaiProxyRoutes.cs          ← zai/Z.AI (GLM) proxy endpoints (via OpenCode).
-├─ LlmXaiProxyRoutes.cs          ← xai (Grok) proxy endpoints (via OpenCode).
+├─ LlmXaiProxyRoutes.cs          ← xai proxy endpoints (OpenCode xai + native Grok).
 ├─ ILlmProxySettingsService.cs   ← Settings seam (impl lives in VibeRails).
 ├─ ILlmProxyEventSink.cs         ← Telemetry seam. Counts only, never content.
 ├─ ILlmProxyExchangeSink.cs      ← Whole-request/response exchange log seam.
 ├─ ICompressionCaptureSink.cs    ← Capture seam. Content, deliberately.
 ├─ ILlmProxyAuthGate.cs
 ├─ ILlmProxyBodyTransform.cs
-└─ LlmProxyBaseUrl.cs / LlmProxyClaudeConfig.cs / LlmProxyCodexConfig.cs / LlmProxyZaiConfig.cs / LlmProxyXaiConfig.cs
+└─ LlmProxyBaseUrl.cs / LlmProxyClaudeConfig.cs / LlmProxyCodexConfig.cs / LlmProxyZaiConfig.cs / LlmProxyXaiConfig.cs / LlmProxyGrokConfig.cs
 ```
 
 Host-side implementations live in `VibeRails/`:

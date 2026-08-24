@@ -204,7 +204,7 @@ namespace VibeRails
             serviceCollection.AddSingleton<ISessionOutputParser, SessionParseV4>();
             serviceCollection.AddScoped<IGitService, GitService>();
 
-            // Rules and Agent File services
+            // Rules and rule-file services
             serviceCollection.AddScoped<IRulesService, RulesService>();
             serviceCollection.AddScoped<IAgentFileService, AgentFileService>();
 
@@ -237,6 +237,7 @@ namespace VibeRails
             serviceCollection.AddScoped<IAntigravityLlmCliEnvironment, AntigravityLlmCliEnvironment>();
             serviceCollection.AddScoped<ICopilotLlmCliEnvironment, CopilotLlmCliEnvironment>();
             serviceCollection.AddScoped<IOpencodeLlmCliEnvironment, OpencodeLlmCliEnvironment>();
+            serviceCollection.AddScoped<IGrokLlmCliEnvironment, GrokLlmCliEnvironment>();
             serviceCollection.AddScoped<LlmCliEnvironmentService>();
 
             // Sandbox service, and the workspace resolution that reuses it to back an
@@ -250,6 +251,7 @@ namespace VibeRails
             serviceCollection.AddScoped<IAntigravityLlmCliLauncher, AntigravityLlmCliLauncher>();
             serviceCollection.AddScoped<ICopilotLlmCliLauncher, CopilotLlmCliLauncher>();
             serviceCollection.AddScoped<IOpencodeLlmCliLauncher, OpencodeLlmCliLauncher>();
+            serviceCollection.AddScoped<IGrokLlmCliLauncher, GrokLlmCliLauncher>();
             serviceCollection.AddScoped<ILaunchLLMService, LaunchLLMService>();
             serviceCollection.AddScoped<IEnvironmentLaunchService, EnvironmentLaunchService>();
 

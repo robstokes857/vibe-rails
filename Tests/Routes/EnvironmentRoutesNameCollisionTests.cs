@@ -135,6 +135,7 @@ public sealed class EnvironmentRoutesNameCollisionTests
             new Mock<IAntigravityLlmCliEnvironment>(MockBehavior.Strict).Object,
             new Mock<ICopilotLlmCliEnvironment>(MockBehavior.Strict).Object,
             new Mock<IOpencodeLlmCliEnvironment>(MockBehavior.Strict).Object,
+            new Mock<IGrokLlmCliEnvironment>(MockBehavior.Strict).Object,
             new Mock<IFileService>(MockBehavior.Strict).Object));
 
         var app = builder.Build();

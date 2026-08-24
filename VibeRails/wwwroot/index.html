@@ -82,7 +82,7 @@
                 <span>Terminals</span>
             </button>
             <button class="app-subnav-link" data-action="navigate" data-view="rule-files"
-                title="The AGENTS.md rules this project enforces">
+                title="The vc.rules.md rules this project enforces">
                 <i class="fa-solid fa-list-check me-1"></i>
                 <span>RULES</span>
             </button>
@@ -97,7 +97,7 @@
                 <span>ENVS</span>
             </button>
             <button class="app-subnav-link" data-action="navigate" data-view="vibe-rails-ai"
-                title="Vibe Rails AI — query and inspect captures">
+                title="Vibe Rails AI — query and inspect captures" hidden>
                 <i class="fa-solid fa-brain me-1"></i>
                 <span>Vibe AI</span>
             </button>
@@ -155,7 +155,7 @@
                     <span class="nav-label">Terminals</span>
                 </button>
                 <button class="app-subnav-link" data-action="navigate" data-view="rule-files"
-                    title="The AGENTS.md rules this project enforces">
+                    title="The vc.rules.md rules this project enforces">
                     <i class="fa-solid fa-list-check nav-icon"></i>
                     <span class="nav-label">RULES</span>
                 </button>
@@ -170,7 +170,7 @@
                     <span class="nav-label">ENVIRONMENTS</span>
                 </button>
                 <button class="app-subnav-link" data-action="navigate" data-view="vibe-rails-ai"
-                    title="Vibe Rails AI — query and inspect captures">
+                    title="Vibe Rails AI — query and inspect captures" hidden>
                     <i class="fa-solid fa-brain nav-icon"></i>
                     <span class="nav-label">Vibe AI</span>
                 </button>
@@ -332,7 +332,7 @@
          One surface, no local tabs: Git Guard, the VCA validation results for your
          uncommitted changes, and the compact scan brief — with the agent terminal
          docked below so a fix is one keystroke away. The full file-by-file workbench
-         is its own view (code-quality-template); the AGENTS.md rules those checks
+         is its own view (code-quality-template); the vc.rules.md rules those checks
          enforce live on the separate RULES page (rule-files-template).
          Every data-* hook below is bound by RuleController / AgentController —
          keep the attributes even when the surrounding markup moves. -->
@@ -388,7 +388,7 @@
                             <div class="rules-section-heading">
                                 <h2>Validation results</h2>
                                 <span class="rules-section-note">Your uncommitted changes, checked against
-                                    your AGENTS.md rules</span>
+                                    your vc.rules.md rules</span>
                             </div>
                             <div class="rules-section-actions" aria-label="Validation result actions">
                                 <span class="rules-check-running" data-vca-console-spinner hidden aria-hidden="true">
@@ -597,7 +597,7 @@
         </div>
     </template>
 
-    <!-- The RULES page: the AGENTS.md list and the inline rule editor, full page.
+    <!-- The RULES page: the vc.rules.md list and the inline rule editor, full page.
          Its own top-level nav destination. AgentController.loadRuleFiles renders it. -->
     <template id="rule-files-template">
         <div class="view rules-subpage" data-view="rule-files">
@@ -605,7 +605,7 @@
                 <header class="rules-section-header">
                     <div class="rules-section-heading">
                         <h2 id="rules-files-title">Rule files</h2>
-                        <span class="rules-section-note">The AGENTS.md policies every check enforces</span>
+                        <span class="rules-section-note">The vc.rules.md policies every check enforces</span>
                     </div>
                     <div class="rules-section-actions">
                         <button class="btn btn-sm btn-outline-secondary rules-icon-btn" type="button"
@@ -614,9 +614,9 @@
                             <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
                         </button>
                         <button class="btn btn-sm btn-primary d-inline-flex align-items-center gap-2"
-                            type="button" data-action="create-agent-file" title="Create a new AGENTS.md file">
+                            type="button" data-action="create-agent-file" title="Create a new vc.rules.md file">
                             <i class="fa-solid fa-plus" aria-hidden="true"></i>
-                            New AGENTS.md
+                            New vc.rules.md
                         </button>
                     </div>
                 </header>
@@ -655,7 +655,7 @@
                 </div>
             </div>
 
-            <!-- Files affected - shown at top, always expanded -->
+            <!-- Files in scope - shown at top, always expanded -->
             <div class="row mb-4">
                 <div class="col-12">
                     <div class="card agent-edit-card">
@@ -667,7 +667,7 @@
                                     <path
                                         d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
                                 </svg>
-                                <span>Files affected by this agent</span>
+                                <span>Files covered by this rule file</span>
                                 <span class="badge bg-secondary" data-agent-file-count></span>
                             </div>
                         </div>
@@ -779,7 +779,7 @@
                             style="cursor: pointer;" data-agent-content-toggle>
                             <div class="d-flex align-items-center gap-2">
                                 <span>&#x1F4C4;</span>
-                                <span class="fw-bold">Full Agent File Content</span>
+                                <span class="fw-bold">Full Rule File Content</span>
                             </div>
                             <span class="toggle-icon">&#x25BC;</span>
                         </div>
@@ -810,7 +810,7 @@
 
             <div class="row">
                 <div class="col-12">
-                    <h2 class="mb-4">Create New Agent</h2>
+                    <h2 class="mb-4">Create New Rule File</h2>
                 </div>
             </div>
 
@@ -1032,7 +1032,7 @@
                     <div class="card-header git-preflight-step-header">
                         <div class="git-preflight-step-title">
                             <span class="git-preflight-step-number">1</span>
-                            <div><strong>VCA rules</strong><small>AGENTS.md policy validation</small></div>
+                            <div><strong>VCA rules</strong><small>vc.rules.md policy validation</small></div>
                         </div>
                         <div class="git-preflight-step-meta">
                             <span data-preflight-step-duration hidden></span>
@@ -1040,7 +1040,7 @@
                         </div>
                     </div>
                     <div class="card-body">
-                        <p data-preflight-step-message>Validate staged changes against repository AGENTS.md rules.</p>
+                        <p data-preflight-step-message>Validate staged changes against repository vc.rules.md rules.</p>
                         <pre data-preflight-step-output hidden></pre>
                     </div>
                 </article>
@@ -1390,6 +1390,42 @@
                     </div>
                 </div>
             </div>
+            <div class="row justify-content-center">
+                <div class="col-md-8 col-lg-6 mb-4">
+                    <div class="sandbox-item-card text-start">
+                        <div class="mb-3">
+                            <span class="sandbox-item-name">Grok Settings</span>
+                        </div>
+                        <div class="mb-4">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="setting-grok-llm-proxy-enabled">
+                                <label class="form-check-label" for="setting-grok-llm-proxy-enabled">Enable Grok proxy</label>
+                            </div>
+                            <small class="form-text text-muted">Route newly launched native Grok sessions through the local VibeRails proxy. Required for the Token Saver to act on Grok traffic. Grok's own login or API key is forwarded and is never overwritten.</small>
+                        </div>
+                        <div class="mb-3">
+                            <div class="form-label mb-2">Grok auth type</div>
+                            <div class="form-check mb-3">
+                                <input class="form-check-input" type="radio" name="setting-grok-llm-proxy-mode"
+                                    id="setting-grok-llm-proxy-mode-subscription" value="subscription">
+                                <label class="form-check-label" for="setting-grok-llm-proxy-mode-subscription">
+                                    Subscription plan
+                                </label>
+                                <small class="form-text text-muted d-block">Use this when Grok is signed in with <code>grok login</code>. Traffic goes to <code>cli-chat-proxy.grok.com</code>.</small>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="setting-grok-llm-proxy-mode"
+                                    id="setting-grok-llm-proxy-mode-api" value="api">
+                                <label class="form-check-label" for="setting-grok-llm-proxy-mode-api">
+                                    API usage
+                                </label>
+                                <small class="form-text text-muted d-block">Use this when Grok is billed through an <code>XAI_API_KEY</code> on <code>api.x.ai</code>. Run <code>grok logout</code> first &mdash; a signed-in <code>grok login</code> session outranks the API key and its token is not valid on <code>api.x.ai</code>.</small>
+                            </div>
+                        </div>
+                        <small class="form-text text-muted">Changes apply the next time a Grok terminal starts.</small>
+                    </div>
+                </div>
+            </div>
             <div class="row justify-content-center" data-project-identity-card hidden>
                 <div class="col-md-8 col-lg-6 mb-4">
                     <div class="sandbox-item-card project-identity-card text-start">
@@ -1453,10 +1489,16 @@
                                 <label class="form-check-label" for="setting-token-saver-codex">Codex</label>
                             </div>
                         </div>
-                        <div class="mb-4">
+                        <div class="mb-3">
                             <div class="form-check form-switch">
                                 <input class="form-check-input" type="checkbox" id="setting-token-saver-opencode">
                                 <label class="form-check-label" for="setting-token-saver-opencode">OpenCode</label>
+                            </div>
+                        </div>
+                        <div class="mb-4">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="setting-token-saver-grok">
+                                <label class="form-check-label" for="setting-token-saver-grok">Grok</label>
                             </div>
                         </div>
 
@@ -1497,6 +1539,14 @@
                                 </div>
                                 <small class="form-text text-muted">Disable background animations to reduce CPU
                                     usage</small>
+                            </div>
+                            <div class="mb-4">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="setting-show-vibe-ai-ui">
+                                    <label class="form-check-label" for="setting-show-vibe-ai-ui">Show Vibe AI UI</label>
+                                </div>
+                                <small class="form-text text-muted">Show the Vibe AI inspector in the navigation bar.
+                                    Off by default.</small>
                             </div>
                             <div class="mb-4">
                                 <label class="form-label" for="setting-api-key">API Key</label>
@@ -3336,6 +3386,10 @@
                 .mcp-view .mcp-detail-head h5 { margin:0; color:var(--mcp-accent); font-size:1rem; line-height:1.25; overflow-wrap:anywhere; }
                 .mcp-view .mcp-detail-head p { margin:0.35rem 0 0; color:var(--color-text-muted); font-size:0.84rem; line-height:1.5; }
                 .mcp-view .mcp-source { display:inline-flex; align-items:center; gap:0.4rem; margin-top:0.45rem; padding:0.2rem 0.45rem; border:1px solid var(--color-border); border-radius:999px; color:var(--color-text-muted); font-size:0.72rem; }
+                .mcp-view .mcp-badges { display:flex; flex-wrap:wrap; gap:0.35rem; margin-top:0.45rem; }
+                .mcp-view .mcp-badge { padding:0.2rem 0.5rem; border:1px solid var(--color-border); border-radius:999px; color:var(--color-text-muted); font-size:0.7rem; font-weight:700; }
+                .mcp-view .mcp-badge.ok { border-color:var(--mcp-ok); color:var(--mcp-ok); }
+                .mcp-view .mcp-badge.bad { border-color:var(--mcp-bad); color:var(--mcp-bad); }
                 .mcp-view .mcp-detail-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:1rem; }
                 .mcp-view .mcp-section { min-width:0; display:grid; gap:0.45rem; align-content:start; }
                 .mcp-view .mcp-textarea { min-height:230px; resize:vertical; font-family:'JetBrains Mono', 'Fira Code', monospace; font-size:0.8rem; }

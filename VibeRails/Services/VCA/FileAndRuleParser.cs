@@ -3,7 +3,7 @@ using VibeRails.Services;
 namespace VibeRails.Services.VCA
 {
     /// <summary>
-    /// Builds the mapping of files to rules by combining git changes with AGENTS.md rules
+    /// Builds the mapping of files to rules by combining git changes with vc.rules.md rules
     /// </summary>
     public class FileAndRuleParser : IFileAndRuleParser
     {
@@ -35,7 +35,7 @@ namespace VibeRails.Services.VCA
                 return new Dictionary<string, List<RuleWithSource>>();
             }
 
-            // Get all AGENTS.md files and their rules
+            // Get all vc.rules.md files and their rules
             var agentFiles = await _agentFileService.GetAgentFiles(cancellationToken);
             if (agentFiles.Count == 0)
             {
@@ -51,7 +51,7 @@ namespace VibeRails.Services.VCA
                 if (rules.Count == 0)
                     continue;
 
-                // Get files that are in scope for this agent
+                // Get files that are in scope for this rule file
                 var scopedFiles = _pathNormalizer.GetScopedFiles(changedFiles, agentFile, rootPath);
 
                 // Add rules to each scoped file

@@ -2519,7 +2519,7 @@ code {
     min-width: 0;
 }
 
-/* Agent Files Tree */
+/* Rule Files Tree */
 
 .cli-logo {
     width: 32px;
@@ -5477,7 +5477,7 @@ h6 {
     transform: rotate(180deg);
 }
 
-/* Agent Files Tree Enhanced Styling */
+/* Rule Files Tree Enhanced Styling */
 .agent-files-tree {
     display: flex;
     flex-direction: column;
@@ -5715,7 +5715,7 @@ h6 {
     }
 }
 
-/* Empty state for agent files */
+/* Empty state for rule files */
 .agent-files-empty {
     text-align: center;
     padding: 2rem;
@@ -5728,7 +5728,7 @@ h6 {
     opacity: 0.5;
 }
 
-/* File Summary Grid for Agent Files */
+/* File Summary Grid for Rule Files */
 .file-summary-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -9631,7 +9631,7 @@ kbd:not(.ch-search-kbd) {
 }
 .vibe-rails-ai-view .insp-learn-stats {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 0.6rem;
 }
 .vibe-rails-ai-view .insp-learn-stat {
@@ -9714,6 +9714,9 @@ kbd:not(.ch-search-kbd) {
 .vibe-rails-ai-view .insp-learn-foot b {
     color: var(--color-text);
     font-weight: 600;
+}
+@media (max-width: 1100px) {
+    .vibe-rails-ai-view .insp-learn-stats { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 720px) {
     .vibe-rails-ai-view .insp-learn { grid-template-columns: 1fr; }
@@ -10241,8 +10244,8 @@ button.git-guard-menu-button:focus-visible {
    code-quality workbench, the rule-file manager) behind a local tab strip.
    Now: this page owns the checks — Git Guard, the VCA validation results,
    the compact scan brief — with the agent terminal filling the rest of the
-   viewport. The file-by-file workbench is its own view, and the AGENTS.md
-   manager is the separate top-level RULES page (both .rules-subpage). */
+    viewport. The file-by-file workbench is its own view, and the vc.rules.md
+    manager is the separate top-level RULES page (both .rules-subpage). */
 
 /* Flowing shell. app.js adds .vb-rules-workspace-active while this page is
    mounted. The page scrolls naturally when the validation report is long;
@@ -16795,14 +16798,104 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
     gap: 18px;
 }
 
-.python-mcp-config-grid,
+.python-mcp-section {
+    display: grid;
+    gap: 12px;
+    padding-top: 16px;
+    border-top: 1px solid var(--color-border, #334155);
+}
+
+.python-mcp-section:first-of-type {
+    padding-top: 0;
+    border-top: 0;
+}
+
+.python-mcp-section-title {
+    margin: 0;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-text-muted, #94a3b8);
+}
+
+/* One choice maps to readOnly/destructive; the two checkboxes below map to
+   idempotent and openWorld. Kept as plain rows so the dialog stays calm. */
+.python-mcp-behavior {
+    display: grid;
+    gap: 8px;
+}
+
+.python-mcp-behavior-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border, #334155);
+    border-radius: 8px;
+    background: var(--color-bg-base, #121212);
+    cursor: pointer;
+}
+
+.python-mcp-behavior-option:hover {
+    border-color: var(--color-primary, #3b82f6);
+}
+
+.python-mcp-behavior-option:has(input:checked) {
+    border-color: var(--color-primary, #3b82f6);
+    background: var(--color-bg-surface-hover, #2c2c2c);
+}
+
+.python-mcp-behavior-option input {
+    flex: none;
+    margin-top: 3px;
+}
+
+.python-mcp-behavior-copy {
+    display: grid;
+    gap: 2px;
+}
+
+.python-mcp-behavior-copy .form-text {
+    margin: 0;
+}
+
+.python-mcp-behavior-checks {
+    display: grid;
+    gap: 8px;
+}
+
+.python-mcp-behavior-checks label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    font-size: 0.85rem;
+}
+
+.python-mcp-behavior-checks label:has(input:disabled) {
+    opacity: 0.65;
+}
+
+.python-mcp-parameter-head-controls {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 8px;
+}
+
+.python-mcp-parameter-head-controls .form-select {
+    width: auto;
+}
+
 .python-mcp-parameter-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
 }
 
-.python-mcp-parameters-head,
+.python-mcp-section-head,
 .python-mcp-parameter-head {
     display: flex;
     align-items: flex-start;
@@ -16852,7 +16945,6 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
 }
 
 @media (max-width: 720px) {
-    .python-mcp-config-grid,
     .python-mcp-parameter-grid,
     .python-mcp-parameter-checks {
         grid-template-columns: 1fr;

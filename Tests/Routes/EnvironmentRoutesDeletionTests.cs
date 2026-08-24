@@ -403,6 +403,7 @@ public sealed class EnvironmentRoutesDeletionTests
         new AntigravityLlmCliEnvironment(fileService),
         new CopilotLlmCliEnvironment(fileService),
         new OpencodeLlmCliEnvironment(fileService),
+        new GrokLlmCliEnvironment(fileService),
         fileService);
 
     private static void CreateEnvironmentTable(string connectionString)

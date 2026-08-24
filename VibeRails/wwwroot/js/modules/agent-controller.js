@@ -24,7 +24,7 @@ const PATH_LOCK_RULES = [
 export function buildAgentFilePath(rawDirectory) {
     const directory = String(rawDirectory ?? '').trim();
     if (!directory) return null;
-    return `${directory.replace(/[\\/]+$/, '')}/AGENTS.md`;
+    return `${directory.replace(/[\\/]+$/, '')}/vc.rules.md`;
 }
 
 export class AgentController {
@@ -32,7 +32,7 @@ export class AgentController {
         this.app = app;
         this.currentAgent = null;
         this.selectedRuleIndex = null;
-        // Path of the AGENTS.md open in the Rule files view's inline editor.
+        // Path of the vc.rules.md open in the Rule files view's inline editor.
         this.selectedAgentPath = null;
 
         // Wizard state for agent creation
@@ -77,12 +77,12 @@ export class AgentController {
             throw new Error(`${definition.label} is required.`);
         }
         if (/^(?:[a-z]:[\\/]|[\\/])/i.test(enteredPath)) {
-            throw new Error(`${definition.label} must be relative to the AGENTS.md directory.`);
+            throw new Error(`${definition.label} must be relative to the vc.rules.md directory.`);
         }
         if (enteredPath.includes("'")) {
             throw new Error(`${definition.label} cannot contain a single quote.`);
         }
-        // A rule is one line of AGENTS.md. A line break here would be written back as two lines,
+        // A rule is one line of vc.rules.md. A line break here would be written back as two lines,
         // and a second line starting with '#' ends the rules section, dropping every rule below it
         // from both the hook and this page. The server refuses it too; this is the readable error.
         if (/[\r\n\0]/.test(enteredPath)) {
@@ -92,7 +92,7 @@ export class AgentController {
         let normalizedPath = enteredPath.replaceAll('\\', '/');
         while (normalizedPath.startsWith('./')) normalizedPath = normalizedPath.slice(2);
         if (normalizedPath.split('/').includes('..')) {
-            throw new Error(`${definition.label} cannot leave the AGENTS.md directory.`);
+            throw new Error(`${definition.label} cannot leave the vc.rules.md directory.`);
         }
         if (!normalizedPath || (definition.kind === 'file' && normalizedPath === '.')) {
             throw new Error(`${definition.label} must identify a file.`);
@@ -112,7 +112,7 @@ export class AgentController {
 
         this.app.showModal(`Configure ${definition.kind} lock`, `
             <form id="path-lock-rule-form">
-                <p class="text-muted">Enter a path relative to the directory containing this AGENTS.md.</p>
+                <p class="text-muted">Enter a path relative to the directory containing this vc.rules.md.</p>
                 <div class="mb-3">
                     <label class="form-label" for="path-lock-rule-path">${definition.label}</label>
                     <input class="form-control" id="path-lock-rule-path" type="text"
@@ -141,7 +141,7 @@ export class AgentController {
     }
 
     // ============================================
-    // Agent Files & Rules View
+    // Rule Files & Rules View
     // ============================================
 
     loadAgents() {
@@ -167,7 +167,7 @@ export class AgentController {
         return root;
     }
 
-    // The RULES page: the AGENTS.md list plus the inline rule editor, full page.
+    // The RULES page: the vc.rules.md list plus the inline rule editor, full page.
     // Heavier markdown editing still goes to 'agent-edit'.
     async loadRuleFiles() {
         const content = document.getElementById('app-content');
@@ -213,9 +213,9 @@ export class AgentController {
                 }
             });
         } else if (this.app.data.isInGit) {
-            fileTree.innerHTML = '<p class="rules-files-rail-empty">No AGENTS.md files in this project yet.</p>';
+            fileTree.innerHTML = '<p class="rules-files-rail-empty">No vc.rules.md files in this project yet.</p>';
         } else {
-            fileTree.innerHTML = '<p class="rules-files-rail-empty">Agent files are only available in local project context.</p>';
+            fileTree.innerHTML = '<p class="rules-files-rail-empty">Rule files are only available in local project context.</p>';
         }
 
         this.renderInlineRuleEditor(view);
@@ -252,7 +252,7 @@ export class AgentController {
     }
 
     // ============================================
-    // Inline AGENTS.md rule CRUD (Rules workspace)
+    // Inline vc.rules.md rule CRUD (Rules workspace)
     // ============================================
 
     // The detail half of the Rule files section. Everything happens in place so the user
@@ -275,7 +275,7 @@ export class AgentController {
                 <div class="rules-files-detail-empty">
                     <span aria-hidden="true"><i class="fa-solid fa-scale-balanced"></i></span>
                     <strong>No rule file selected</strong>
-                    <p>Create an AGENTS.md to start enforcing rules on every commit.</p>
+                    <p>Create a vc.rules.md file to start enforcing rules on every commit.</p>
                 </div>`;
             return;
         }
@@ -317,11 +317,12 @@ export class AgentController {
                 </div>
                 <div class="rules-files-detail-actions">
                     <button class="btn btn-sm btn-outline-secondary rules-icon-btn" type="button"
-                        data-rule-editor-rename title="Rename this rule file" aria-label="Rename this rule file">
+                        data-rule-editor-rename title="Set this rule file's display name"
+                        aria-label="Set this rule file's display name">
                         <i class="fa-solid fa-pen" aria-hidden="true"></i>
                     </button>
                     <button class="btn btn-sm btn-outline-secondary" type="button" data-rule-editor-open
-                        title="Open the full editor with the files this agent covers">
+                        title="Open the full editor with the files this rule file covers">
                         Full editor
                     </button>
                     <button class="btn btn-sm btn-primary d-inline-flex align-items-center gap-2" type="button"
@@ -384,7 +385,7 @@ export class AgentController {
     showInlineAddRule(agent, root) {
         const available = this.app.data.availableRulesWithDescriptions || [];
         const existing = new Set((agent.rules || []).map(rule => rule.text));
-        // Parameterized locks stay available so one AGENTS.md can protect multiple paths.
+        // Parameterized locks stay available so one vc.rules.md can protect multiple paths.
         const unused = available.filter(rule =>
             this.isPathLockTemplate(rule.name) || !existing.has(rule.name));
 
@@ -417,7 +418,7 @@ export class AgentController {
                     <input class="form-control" id="inline-path-lock-path" name="inline-path-lock-path"
                         type="text" autocomplete="off">
                     <small class="form-text text-muted">
-                        Relative to this AGENTS.md directory. Directory locks include every descendant.
+                        Relative to this vc.rules.md directory. Directory locks include every descendant.
                     </small>
                 </div>
                 <div class="form-label mt-3 mb-2">Enforcement</div>
@@ -632,7 +633,7 @@ export class AgentController {
 
     renderAgentRules(agent) {
         if (!agent.rules || agent.rules.length === 0) {
-            return '<div class="alert alert-secondary border-0"><i class="me-2">ℹ️</i>No rules configured for this agent.</div>';
+            return '<div class="alert alert-secondary border-0"><i class="me-2">ℹ️</i>No rules configured for this rule file.</div>';
         }
 
         const getEnforcementBadge = (level) => {
@@ -681,7 +682,7 @@ export class AgentController {
                 element.textContent = 'No content available';
             }
         } catch (error) {
-            console.error('Failed to load agent file content:', error);
+            console.error('Failed to load rule file content:', error);
             element.textContent = `Error loading file content: ${error.message || 'Unknown error'}`;
         }
     }
@@ -704,10 +705,10 @@ export class AgentController {
                 if (countBadge) {
                     countBadge.textContent = '0 files';
                 }
-                listElement.innerHTML = '<p class="text-muted mb-0">No files found in this agent\'s scope.</p>';
+                listElement.innerHTML = '<p class="text-muted mb-0">No files found in this rule file\'s scope.</p>';
             }
         } catch (error) {
-            console.error('Failed to load agent files:', error);
+            console.error('Failed to load rule-file scope:', error);
             const errorMsg = this.app.escapeHtml(error.message || 'Unknown error');
             listElement.innerHTML = `<p class="text-danger mb-0">Error loading files: ${errorMsg}</p>`;
         }
@@ -823,7 +824,7 @@ export class AgentController {
                 this.app.showToast('Validation Failed', response.message, 'error');
             }
         } catch (error) {
-            console.error('Failed to validate agent:', error);
+            console.error('Failed to validate rule file:', error);
             const errorMsg = this.app.escapeHtml(error.message || 'Unknown error');
             resultsContainer.innerHTML = `<p class="text-danger">Error: ${errorMsg}</p>`;
             this.app.showError('Validation failed');
@@ -909,7 +910,7 @@ export class AgentController {
         `).join('');
 
         this.app.showModal('Add Rule', `
-            <p class="text-muted mb-3">Select a rule to add to this agent file:</p>
+            <p class="text-muted mb-3">Select a rule to add to this rule file:</p>
             <div class="list-group">
                 ${ruleOptions}
             </div>
@@ -1025,9 +1026,9 @@ export class AgentController {
                         <path d="M11 1.5v1h3.5a.5.5 0 0 1 0 1h-.538l-.853 10.66A2 2 0 0 1 11.115 16h-6.23a2 2 0 0 1-1.994-1.84L2.038 3.5H1.5a.5.5 0 0 1 0-1H5v-1A1.5 1.5 0 0 1 6.5 0h3A1.5 1.5 0 0 1 11 1.5m-5 0v1h4v-1a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5M4.5 5.029l.5 8.5a.5.5 0 1 0 .998-.06l-.5-8.5a.5.5 0 1 0-.998.06m6.53-.06a.5.5 0 0 0-.515.479l-.5 8.5a.5.5 0 1 0 .998.06l.5-8.5a.5.5 0 0 0-.484-.539M8 5.5a.5.5 0 0 0-.5.5v8.5a.5.5 0 0 0 1 0V6a.5.5 0 0 0-.5-.5"/>
                     </svg>
                 </div>
-                <h5>Remove rule from agent?</h5>
+                <h5>Remove rule from rule file?</h5>
                 <p>Are you sure you want to remove <strong>"${this.app.escapeHtml(rule.text)}"</strong>?</p>
-                <p class="text-muted small px-4">This rule will be removed from the agent file. You can add it back later if needed.</p>
+                <p class="text-muted small px-4">This rule will be removed from the rule file. You can add it back later if needed.</p>
             </div>
             <div class="d-flex gap-2 justify-content-end">
                 <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>
@@ -1069,12 +1070,12 @@ export class AgentController {
     showAgentCustomNameModal(agent, { onSaved = null } = {}) {
         const currentName = agent.customName || agent.name;
 
-        this.app.showModal('Set Custom Agent Name', `
+        this.app.showModal('Set Rule File Display Name', `
             <form id="agent-custom-name-form">
                 <div class="mb-3">
                     <label class="form-label">Custom Name</label>
                     <input type="text" class="form-control" id="agent-custom-name" value="${this.app.escapeHtml(currentName)}" placeholder="${this.app.escapeHtml(currentName)}" required>
-                    <small class="form-text text-muted">Enter a friendly name to identify this agent file.</small>
+                    <small class="form-text text-muted">Enter a friendly display name for this rule file.</small>
                 </div>
                 <div class="d-flex gap-2 justify-content-end">
                     <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>
@@ -1097,7 +1098,7 @@ export class AgentController {
                     path: agent.path,
                     customName: newName
                 });
-                this.app.showToast('Success', `Agent name updated to "${newName}"`, 'success');
+                this.app.showToast('Success', `Rule file name updated to "${newName}"`, 'success');
                 this.app.closeModal();
                 // Refresh data, then let the caller decide how to re-render. The
                 // list passes onSaved to stay on the list; the editor view falls
@@ -1112,7 +1113,7 @@ export class AgentController {
                     }
                 }
             } catch (error) {
-                this.app.showError('Failed to update agent name');
+                this.app.showError('Failed to update rule file name');
             }
         });
     }
@@ -1198,7 +1199,7 @@ export class AgentController {
         container.innerHTML = `
             <h5 class="mb-4">Step 1: Select Directory</h5>
             <div class="mb-4">
-                <label class="form-label" for="agent-directory">Directory for AGENTS.md</label>
+                <label class="form-label" for="agent-directory">Directory for vc.rules.md</label>
                 <div class="input-group">
                     <input type="text" class="form-control" id="agent-directory"
                            placeholder="/path/to/directory"
@@ -1210,7 +1211,7 @@ export class AgentController {
                     </button>
                 </div>
                 <small class="form-text text-muted">
-                    Enter the directory where <code>AGENTS.md</code> will be created.
+                    Enter the directory where <code>vc.rules.md</code> will be created.
                 </small>
             </div>
             ${rootPath ? `
@@ -1237,7 +1238,7 @@ export class AgentController {
             const result = await this.app.pickFileSystemEntry({
                 mode: 'directory',
                 initialPath: requestedPath,
-                title: 'Choose AGENTS.md Directory',
+                title: 'Choose vc.rules.md Directory',
                 triggerElement: browseButton
             });
             if (result.canceled || !directoryInput?.isConnected) return;
@@ -1285,7 +1286,7 @@ export class AgentController {
                                 data-path-lock-index="${index}" type="text"
                                 value="${this.app.escapeHtml(lockPath)}"
                                 placeholder="${lockDefinition.placeholder}" autocomplete="off">
-                            <small class="form-text text-muted">Relative to this AGENTS.md directory.</small>
+                            <small class="form-text text-muted">Relative to this vc.rules.md directory.</small>
                         </div>` : ''}
                 </div>
             `;
@@ -1293,7 +1294,7 @@ export class AgentController {
 
         container.innerHTML = `
             <h5 class="mb-4">Step 2: Choose Rules</h5>
-            <p class="text-muted mb-3">Select the rules you want to include in this agent file:</p>
+            <p class="text-muted mb-3">Select the rules you want to include in this rule file:</p>
             <div class="card mb-4">
                 <div class="card-body" style="max-height: 400px; overflow-y: auto;">
                     ${ruleCheckboxes || '<p class="text-muted">No rules available</p>'}
@@ -1480,7 +1481,7 @@ export class AgentController {
         container.innerHTML = `
             <h5 class="mb-4">Step 4: Review & Create</h5>
             <div class="card mb-4">
-                <div class="card-header">Agent File Details</div>
+                <div class="card-header">Rule File Details</div>
                 <div class="card-body">
                     <dl class="row mb-0">
                         <dt class="col-sm-3">File Path</dt>
@@ -1507,7 +1508,7 @@ export class AgentController {
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
                         <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0m-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z"/>
                     </svg>
-                    Create Agent File
+                    Create Rule File
                 </button>
             </div>
         `;
@@ -1524,7 +1525,7 @@ export class AgentController {
 
     async createAgent() {
         try {
-            // First create the agent file with just the rules (text only for the initial creation)
+            // First create the rule file with just the rules (text only for the initial creation)
             const ruleTexts = this.wizardState.selectedRules.map(r => r.text);
 
             await this.app.apiCall('/api/v1/agents', 'POST', {
@@ -1547,7 +1548,7 @@ export class AgentController {
                 }
             }
 
-            this.app.showToast('Success', 'Agent file created successfully!', 'success');
+            this.app.showToast('Success', 'Rule file created successfully!', 'success');
 
             // Refresh data and navigate to the new agent
             await this.app.refreshDashboardData();
@@ -1559,8 +1560,8 @@ export class AgentController {
                 this.app.navigate('dashboard', {}, { resetStack: true });
             }
         } catch (error) {
-            console.error('Failed to create agent:', error);
-            this.app.showError('Failed to create agent file. ' + (error.message || ''));
+            console.error('Failed to create rule file:', error);
+            this.app.showError('Failed to create rule file. ' + (error.message || ''));
         }
     }
 }

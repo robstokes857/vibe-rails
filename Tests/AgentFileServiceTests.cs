@@ -32,7 +32,7 @@ public class AgentFileServiceTests : IDisposable
 
     private async Task<string> CreateTestAgentFile(string content)
     {
-        var filePath = Path.Combine(_testDirectory, "agent.md");
+        var filePath = Path.Combine(_testDirectory, "vc.rules.md");
         await File.WriteAllTextAsync(filePath, content);
         return filePath;
     }
@@ -265,7 +265,7 @@ public class AgentFileServiceTests : IDisposable
     {
         var nestedDirectory = Path.Combine(_testDirectory, "nested");
         Directory.CreateDirectory(nestedDirectory);
-        var filePath = Path.Combine(nestedDirectory, "AGENTS.md");
+        var filePath = Path.Combine(nestedDirectory, "vc.rules.md");
         await File.WriteAllTextAsync(
             filePath,
             "## Vibe Rails Rules\n",
@@ -282,7 +282,7 @@ public class AgentFileServiceTests : IDisposable
     }
 
     /// <summary>
-    /// The lock path is the only place caller-supplied text reaches AGENTS.md verbatim — every
+    /// The lock path is the only place caller-supplied text reaches vc.rules.md verbatim — every
     /// other rule must match a known name exactly. Left unchecked, a line break in it is written
     /// back as two lines, and the second one opening with '#' closes the rules section: every rule
     /// below stops being enforced by the hook AND stops being listed here, so the tampering shows

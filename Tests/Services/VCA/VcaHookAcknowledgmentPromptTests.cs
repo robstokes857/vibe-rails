@@ -16,7 +16,7 @@ public class VcaHookAcknowledgmentPromptTests
 
         try
         {
-            var token = "[VCA:AGENTS.md:log-all-file-changes]";
+            var token = "[VCA:vc.rules.md:log-all-file-changes]";
             var presenter = new TestPresenter("Documented in issue 123");
             var validationService = new TestValidationService(token);
             var runner = new VcaHookRunner(
@@ -74,7 +74,7 @@ public class VcaHookAcknowledgmentPromptTests
                 HasError: false,
                 HasStopViolation: false,
                 HasCommitViolations: true,
-                RequiredAcknowledgments: ["[VCA:AGENTS.md:rule]"]);
+                RequiredAcknowledgments: ["[VCA:vc.rules.md:rule]"]);
             var runner = new VcaHookRunner(
                 new CancelAfterPreflightPipeline(cancellation, tempDir, summary),
                 new VcaHookValidationAnalyzer(),

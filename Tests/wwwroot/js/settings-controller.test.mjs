@@ -18,6 +18,18 @@ test('settings page exposes the default-on co-author removal control', () => {
     assert.match(source, /removeCoAuthorTrailers:\s*true/);
 });
 
+test('settings page exposes the default-off Vibe AI nav control', () => {
+    const html = readFileSync(indexPath, 'utf8');
+    const source = readFileSync(modulePath, 'utf8');
+    const appSource = readFileSync(path.resolve('VibeRails/wwwroot/app.js'), 'utf8');
+
+    assert.match(html, /id="setting-show-vibe-ai-ui"/);
+    assert.match(html, /Show Vibe AI UI/);
+    assert.match(source, /showVibeAiUi:\s*false/);
+    assert.match(appSource, /applyVibeAiNavVisibility/);
+    assert.match(html, /data-view="vibe-rails-ai"[\s\S]{0,80}hidden/);
+});
+
 test('saving settings sends the co-author removal choice', async () => {
     globalThis.window = { VibeRailsPerformance: null };
     const calls = [];
@@ -33,26 +45,31 @@ test('saving settings sends the co-author removal choice', async () => {
     const controller = new SettingsController(app);
 
     await controller.saveSettings(
-        false,
-        '',
-        false,
-        true,
-        '',
-        false,
-        'subscription',
-        false,
-        false,
-        true,
-        true,
-        true,
-        false,
-        false,
-        false);
+        /* remoteAccess */ false,
+        /* apiKey */ '',
+        /* useVsCodeTheme */ false,
+        /* mcpEnabled */ true,
+        /* computerName */ '',
+        /* codexLlmProxyEnabled */ false,
+        /* codexLlmProxyMode */ 'subscription',
+        /* claudeLlmProxyEnabled */ false,
+        /* openCodeLlmProxyEnabled */ false,
+        /* grokLlmProxyEnabled */ false,
+        /* grokLlmProxyMode */ 'subscription',
+        /* claudeTokenSaverEnabled */ true,
+        /* codexTokenSaverEnabled */ true,
+        /* openCodeTokenSaverEnabled */ true,
+        /* grokTokenSaverEnabled */ true,
+        /* tokenSaverCaptureEnabled */ false,
+        /* removeCoAuthorTrailers */ false,
+        /* routeThroughVibeRailsAi */ false,
+        /* showVibeAiUi */ false);
 
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, '/api/v1/settings');
     assert.equal(calls[0].method, 'POST');
     assert.equal(calls[0].body.removeCoAuthorTrailers, false);
+    assert.equal(calls[0].body.showVibeAiUi, false);
 });
 
 test('a dirty settings form blocks navigation, asks in-app, and replays on yes', async () => {

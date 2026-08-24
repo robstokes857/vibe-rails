@@ -17,7 +17,7 @@ public class RulesToolTests
             - [disabled] Cyclomatic complexity disabled
             """;
 
-        var rules = RulesTool.ParseRules(content, "AGENTS.md");
+        var rules = RulesTool.ParseRules(content, "vc.rules.md");
 
         Assert.Contains(rules, r => r.RuleText == "Log all file changes" && r.Enforcement == "WARN");
         Assert.Contains(rules, r => r.RuleText == "Package file changes" && r.Enforcement == "STOP");
@@ -33,7 +33,7 @@ public class RulesToolTests
             - Log all file changes (COMMIT)
             """;
 
-        var rules = RulesTool.ParseRules(content, "AGENTS.md");
+        var rules = RulesTool.ParseRules(content, "vc.rules.md");
 
         Assert.Single(rules);
         Assert.Equal("Log all file changes", rules[0].RuleText);
@@ -48,7 +48,7 @@ public class RulesToolTests
             - [WARN] Log all file changes (STOP)
             """;
 
-        var rules = RulesTool.ParseRules(content, "AGENTS.md");
+        var rules = RulesTool.ParseRules(content, "vc.rules.md");
 
         Assert.Single(rules);
         Assert.Equal("Log all file changes (STOP)", rules[0].RuleText);
@@ -71,7 +71,7 @@ public class RulesToolTests
             - Cyclomatic complexity < 20 (STOP)
             """;
 
-        var rules = RulesTool.ParseRules(content, "AGENTS.md");
+        var rules = RulesTool.ParseRules(content, "vc.rules.md");
 
         Assert.Single(rules);
         Assert.Equal("Log all file changes", rules[0].RuleText);
@@ -80,7 +80,7 @@ public class RulesToolTests
     [Fact]
     public void ParseRules_IgnoresExamplesInsideFencedCodeBlocks()
     {
-        // This is the AGENTS.md pattern that blocked a real commit: a fenced example of how to
+        // This is the vc.rules.md pattern that blocked a real commit: a fenced example of how to
         // write rules was read as three live rules, one of them an unbypassable STOP.
         const string content = """
             ## Vibe Rails Rules
@@ -95,7 +95,7 @@ public class RulesToolTests
             ```
             """;
 
-        var rules = RulesTool.ParseRules(content, "AGENTS.md");
+        var rules = RulesTool.ParseRules(content, "vc.rules.md");
 
         Assert.Single(rules);
         Assert.Equal("Log all file changes", rules[0].RuleText);
@@ -112,7 +112,7 @@ public class RulesToolTests
             - Log all file changes
             """;
 
-        var rules = RulesTool.ParseRules(content, "AGENTS.md");
+        var rules = RulesTool.ParseRules(content, "vc.rules.md");
 
         Assert.Single(rules);
         Assert.Equal("Log all file changes", rules[0].RuleText);
@@ -123,13 +123,13 @@ public class RulesToolTests
     public async Task ValidateVcaReportAsync_UnrecognizedRule_WarnsInsteadOfBlocking()
     {
         var snapshot = CreateSnapshot(
-            "AGENTS.md",
+            "vc.rules.md",
             """
             # Agent Instructions
             ## Vibe Rails Rules
             - My new rule display text (STOP)
             ## Files
-            - AGENTS.md
+            - vc.rules.md
             - src/app.cs
             """,
             "src/app.cs");
@@ -152,13 +152,13 @@ public class RulesToolTests
     public async Task ValidateVcaReportAsync_ReturnsStructuredStopFinding()
     {
         var snapshot = CreateSnapshot(
-            "AGENTS.md",
+            "vc.rules.md",
             """
             # Agent Instructions
             ## Vibe Rails Rules
             - Log all file changes (STOP)
             ## Files
-            - AGENTS.md
+            - vc.rules.md
             """,
             "src/app.cs");
 
@@ -173,7 +173,7 @@ public class RulesToolTests
         Assert.Equal(VcaRuleFindingKind.Blocked, finding.Kind);
         Assert.Equal("STOP", finding.Enforcement);
         Assert.Equal("Log all file changes", finding.Rule);
-        Assert.Equal("AGENTS.md", finding.SourcePath);
+        Assert.Equal("vc.rules.md", finding.SourcePath);
         Assert.Contains("src/app.cs", finding.Reason);
         Assert.Contains("cannot be acknowledged", finding.Guidance, StringComparison.OrdinalIgnoreCase);
         Assert.Null(finding.Acknowledgment);
@@ -183,7 +183,7 @@ public class RulesToolTests
     public async Task ValidateVcaReportAsync_ReturnsNestedCommitFindingWithAcknowledgment()
     {
         var snapshot = CreateSnapshot(
-            "nested/AGENTS.md",
+            "nested/vc.rules.md",
             """
             # Nested instructions
             ## Vibe Rails Rules
@@ -199,9 +199,9 @@ public class RulesToolTests
         var finding = Assert.Single(report.Findings);
         Assert.Equal(VcaRuleFindingKind.AcknowledgmentRequired, finding.Kind);
         Assert.Equal("COMMIT", finding.Enforcement);
-        Assert.Equal("nested/AGENTS.md", finding.SourcePath);
+        Assert.Equal("nested/vc.rules.md", finding.SourcePath);
         Assert.Contains("nested/package.json", finding.Reason);
-        Assert.StartsWith("[VCA:nested-AGENTS.md:", finding.Acknowledgment, StringComparison.Ordinal);
+        Assert.StartsWith("[VCA:nested-vc.rules.md:", finding.Acknowledgment, StringComparison.Ordinal);
         Assert.Contains(finding.Acknowledgment!, report.RequiredAcknowledgments);
     }
 
@@ -209,7 +209,7 @@ public class RulesToolTests
     public async Task ValidateVcaReportAsync_CountsSpacedBooleanOperatorsInComplexity()
     {
         var snapshot = CreateSnapshot(
-            "AGENTS.md",
+            "vc.rules.md",
             """
             # Agent Instructions
             ## Vibe Rails Rules
@@ -232,7 +232,7 @@ public class RulesToolTests
     public async Task ValidateVcaReportAsync_DoesNotCountNullableAndNullConditionalSyntaxAsComplexity()
     {
         var snapshot = CreateSnapshot(
-            "AGENTS.md",
+            "vc.rules.md",
             """
             # Agent Instructions
             ## Vibe Rails Rules
@@ -255,7 +255,7 @@ public class RulesToolTests
     public async Task ValidateVcaReportAsync_FileLockBlocksTheExactModifiedFile()
     {
         var snapshot = CreatePathLockSnapshot(
-            "AGENTS.md",
+            "vc.rules.md",
             """
             ## Vibe Rails Rules
             - File Lock('src/app.cs') (STOP)
@@ -285,7 +285,7 @@ public class RulesToolTests
         string? previousPath)
     {
         var snapshot = CreatePathLockSnapshot(
-            "AGENTS.md",
+            "vc.rules.md",
             """
             ## Vibe Rails Rules
             - Directory Lock('locked') (STOP)
@@ -308,7 +308,7 @@ public class RulesToolTests
     public async Task ValidateVcaReportAsync_DirectoryLockDoesNotMatchAPrefixSibling()
     {
         var snapshot = CreatePathLockSnapshot(
-            "AGENTS.md",
+            "vc.rules.md",
             """
             ## Vibe Rails Rules
             - Directory Lock('locked') (STOP)
@@ -328,7 +328,7 @@ public class RulesToolTests
     public async Task ValidateVcaReportAsync_PathLockIsRelativeToNestedAgentDirectory()
     {
         var snapshot = CreatePathLockSnapshot(
-            "nested/AGENTS.md",
+            "nested/vc.rules.md",
             """
             ## Vibe Rails Rules
             - File Lock('config/settings.json') (STOP)
@@ -348,7 +348,7 @@ public class RulesToolTests
     public async Task ValidateVcaReportAsync_DirectoryLockDoesNotLockItsDeclaringAgentFile()
     {
         var snapshot = CreatePathLockSnapshot(
-            "AGENTS.md",
+            "vc.rules.md",
             """
             ## Vibe Rails Rules
             - Directory Lock('.') (STOP)
@@ -368,7 +368,7 @@ public class RulesToolTests
     public async Task ValidateVcaReportAsync_WarnPathLockReportsWithoutBlocking()
     {
         var snapshot = CreatePathLockSnapshot(
-            "AGENTS.md",
+            "vc.rules.md",
             """
             ## Vibe Rails Rules
             - File Lock('src/app.cs') (WARN)
@@ -388,7 +388,7 @@ public class RulesToolTests
     public async Task ValidateVcaReportAsync_CommitPathLockRequiresAcknowledgment()
     {
         var snapshot = CreatePathLockSnapshot(
-            "AGENTS.md",
+            "vc.rules.md",
             """
             ## Vibe Rails Rules
             - Directory Lock('locked') (COMMIT)
@@ -409,7 +409,7 @@ public class RulesToolTests
     public async Task ValidateVcaReportAsync_EscapingPathLockWarnsWithoutBlockingAtStop()
     {
         var snapshot = CreatePathLockSnapshot(
-            "nested/AGENTS.md",
+            "nested/vc.rules.md",
             """
             ## Vibe Rails Rules
             - Directory Lock('../outside') (STOP)
@@ -423,7 +423,7 @@ public class RulesToolTests
 
         // A lock that will not resolve has no path to compare the staged files against, so
         // blocking on it fires on every commit regardless of what changed - and at STOP that
-        // wedges all work until AGENTS.md is hand-edited. The rule is still surfaced.
+        // wedges all work until vc.rules.md is hand-edited. The rule is still surfaced.
         Assert.False(report.HasStopViolation);
         Assert.Empty(report.RequiredAcknowledgments);
         var finding = Assert.Single(report.Findings);
@@ -435,7 +435,7 @@ public class RulesToolTests
     public async Task ValidateVcaReportAsync_MalformedPathLockWarnsWithoutBlockingAtStop()
     {
         var snapshot = CreatePathLockSnapshot(
-            "nested/AGENTS.md",
+            "nested/vc.rules.md",
             """
             ## Vibe Rails Rules
             - Directory Lock() (STOP)

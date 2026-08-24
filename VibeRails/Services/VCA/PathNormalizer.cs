@@ -21,7 +21,7 @@ namespace VibeRails.Services.VCA
             var agentDir = Path.GetDirectoryName(Path.GetFullPath(sourceFile)) ?? "";
             var rootFull = Path.GetFullPath(rootPath);
 
-            // Get relative path of the agent's directory from the repo root
+            // Get the rule file directory's path relative to the repo root
             var relativeAgentDir = Path.GetRelativePath(rootFull, agentDir)
                 .Replace('\\', '/');
 

@@ -11,11 +11,12 @@ namespace TokenSaver.Minify;
 /// </summary>
 internal sealed class CodexBodyTransform(
     Pipeline.CompressionPlan plan,
-    ICompressionCaptureSink? captures = null) : ILlmProxyBodyTransform
+    ICompressionCaptureSink? captures = null,
+    string provider = "openai") : ILlmProxyBodyTransform
 {
     internal const int MaxBufferedBodyBytes = 10 * 1024 * 1024;
 
-    public string Provider => "openai";
+    public string Provider => provider;
 
     public async ValueTask<TransformedRequestBody?> TryTransformAsync(
         HttpRequest request, ILlmProxyEventSink events, CancellationToken cancellationToken)
@@ -45,7 +46,8 @@ internal sealed class CodexBodyTransform(
                     lease.Buffered(length).Span,
                     plan,
                     lease.Output,
-                    captures);
+                    captures,
+                    provider);
             }
             catch (Exception ex)
             {

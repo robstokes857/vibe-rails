@@ -17,6 +17,9 @@ public class Settings
     // there is no saved cloud API key.
     public bool RouteThroughVibeRailsAi { get; set; } = false;
     public bool UseVsCodeTheme { get; set; } = false;
+    // Vibe AI inspector in the nav. Off by default — the page is a power-user
+    // capture/search surface, not part of the everyday workflow.
+    public bool ShowVibeAiUi { get; set; } = false;
     // Retained for settings.json/API compatibility. MCP registration is always on.
     public bool McpEnabled { get; set; } = true;
     public string ComputerName { get; set; } = string.Empty;
@@ -28,6 +31,8 @@ public class Settings
     // (see LlmProxyZaiConfig / LlmProxyXaiConfig). Off by default, like the Claude/Codex
     // proxy toggles. Launch-flag-only — no opencode.json is written.
     public bool OpenCodeLlmProxyEnabled { get; set; } = false;
+    public bool GrokLlmProxyEnabled { get; set; } = false;
+    public string GrokLlmProxyMode { get; set; } = "subscription";
     // ---- Token saver: on/off per LLM is the whole user-facing surface (2026-07-18). ----
     // When a provider's saver is on (and that provider's proxy is on), the pipeline runs
     // CompressionCatalog.DefaultSelection — the curated safe set. The per-stage picker is gone.
@@ -41,6 +46,7 @@ public class Settings
     public bool ClaudeTokenSaverEnabled { get; set; } = true;
     public bool? CodexTokenSaverEnabled { get; set; }
     public bool? OpenCodeTokenSaverEnabled { get; set; }
+    public bool? GrokTokenSaverEnabled { get; set; }
 
     // Git Guard commit-msg policy. Default-on for both new settings files and older files that
     // predate this property: System.Text.Json leaves the initializer in place when the key is

@@ -485,6 +485,13 @@ export class EnvironmentController {
             }
             this.mergeCopilotSettingsFromCustomArgs(cliSettings, env.customArgs || '');
         }
+        if (this.isNativeGrokCli(cliLower)) {
+            if (env.customPrompt) {
+                cliSettings.initialMessage = env.customPrompt;
+            }
+            this.mergeGrokSettingsFromCustomArgs(cliSettings, env.customArgs || '');
+            cliSettings.model = 'grok-4.6';
+        }
         if (this.isOpencodeBackedCli(cliLower)) {
             if (env.customPrompt) {
                 cliSettings.initialMessage = env.customPrompt;
@@ -851,12 +858,17 @@ export class EnvironmentController {
         return null;
     }
 
-    // GLM 5.2, GLM 5.3, and Grok 4.6 are OpenCode-backed pseudo-CLIs: they launch `opencode`
+    // GLM 5.2 and GLM 5.3 are OpenCode-backed pseudo-CLIs: they launch `opencode`
     // with a pinned --model flag. They share the OpenCode settings form, env handling, and arg
     // builder, so most call sites route through this helper instead of checking === 'opencode'.
+    // Native Grok 4.6 is NOT OpenCode-backed — use isNativeGrokCli.
     isOpencodeBackedCli(cli) {
         const cliLower = (cli || '').toLowerCase();
-        return cliLower === 'opencode' || cliLower === 'glm-5.2' || cliLower === 'glm-5.3' || cliLower === 'grok-4.6';
+        return cliLower === 'opencode' || cliLower === 'glm-5.2' || cliLower === 'glm-5.3';
+    }
+
+    isNativeGrokCli(cli) {
+        return (cli || '').toLowerCase() === 'grok-4.6';
     }
 
     // Returns the pinned provider/model ID for a pseudo-CLI, or null for plain OpenCode
@@ -865,12 +877,12 @@ export class EnvironmentController {
         const cliLower = (cli || '').toLowerCase();
         if (cliLower === 'glm-5.2') return 'zai/glm-5.2';
         if (cliLower === 'glm-5.3') return 'zai-coding-plan/glm-5.3';
-        if (cliLower === 'grok-4.6') return 'xai/grok-4.6';
         return null;
     }
 
     usesManagedCustomArgs(cli) {
         return this.isOpencodeBackedCli(cli)
+            || this.isNativeGrokCli(cli)
             || (cli || '').toLowerCase() === 'codex'
             || (cli || '').toLowerCase() === 'claude'
             || (cli || '').toLowerCase() === 'antigravity'
@@ -927,6 +939,14 @@ export class EnvironmentController {
             return {
                 customArgs: this.buildCopilotCustomArgs(copilotSettings),
                 customPrompt: copilotSettings?.initialMessage ?? ''
+            };
+        }
+
+        if (this.isNativeGrokCli(cliLower)) {
+            const grokSettings = settingsPayload || this.extractCliSettingsPayload(cli);
+            return {
+                customArgs: this.buildGrokCustomArgs(grokSettings),
+                customPrompt: grokSettings?.initialMessage ?? ''
             };
         }
 
@@ -1292,6 +1312,7 @@ export class EnvironmentController {
         const options = [
             ['', 'Default (auto)'],
             ['claude-fable-5', 'claude-fable-5'],
+            ['claude-opus-5', 'claude-opus-5'],
             ['claude-sonnet-5', 'claude-sonnet-5'],
             ['claude-sonnet-4.6', 'claude-sonnet-4.6'],
             ['claude-sonnet-4.5', 'claude-sonnet-4.5'],
@@ -1301,18 +1322,26 @@ export class EnvironmentController {
             ['claude-opus-4.7', 'claude-opus-4.7'],
             ['claude-opus-4.6', 'claude-opus-4.6'],
             ['claude-opus-4.5', 'claude-opus-4.5'],
+            ['gpt-5.6-sol', 'gpt-5.6-sol'],
+            ['gpt-5.6-terra', 'gpt-5.6-terra'],
+            ['gpt-5.6-luna', 'gpt-5.6-luna'],
             ['gpt-5.5', 'gpt-5.5'],
             ['gpt-5.4', 'gpt-5.4'],
             ['gpt-5.4-mini', 'gpt-5.4-mini'],
             ['gpt-5.4-nano', 'gpt-5.4-nano'],
             ['gpt-5.3-codex', 'gpt-5.3-codex'],
             ['gpt-5-mini', 'gpt-5-mini'],
+            ['gemini-3.7-flash', 'gemini-3.7-flash'],
+            ['gemini-3.6-flash', 'gemini-3.6-flash'],
             ['gemini-3.5-flash', 'gemini-3.5-flash'],
             ['gemini-3.1-pro', 'gemini-3.1-pro'],
-            ['gemini-3-flash', 'gemini-3-flash'],
-            ['gemini-2.5-pro', 'gemini-2.5-pro'],
+            ['mai-code-1.1-flash', 'mai-code-1.1-flash'],
             ['mai-code-1-flash', 'mai-code-1-flash'],
             ['raptor-mini', 'raptor-mini'],
+            ['kimi-k2.7-code', 'kimi-k2.7-code'],
+            ['kimi-k3', 'kimi-k3'],
+            ['grok-4.6', 'grok-4.6'],
+            ['grok-4.5', 'grok-4.5'],
         ];
         const known = new Set(options.map(([value]) => value));
         const rendered = options.map(([value, label]) =>
@@ -1451,8 +1480,12 @@ export class EnvironmentController {
         // unknown saved values survive via the `(custom)` fallback below.
         const options = [
             ['', 'Default (OpenCode recommended)'],
+            ['anthropic/claude-opus-5', 'anthropic/claude-opus-5'],
+            ['anthropic/claude-sonnet-5', 'anthropic/claude-sonnet-5'],
             ['anthropic/claude-opus-4-5', 'anthropic/claude-opus-4-5'],
             ['anthropic/claude-sonnet-4-5', 'anthropic/claude-sonnet-4-5'],
+            ['openai/gpt-5.6', 'openai/gpt-5.6'],
+            ['openai/gpt-5.5', 'openai/gpt-5.5'],
             ['openai/gpt-5.2', 'openai/gpt-5.2'],
             ['openai/gpt-5.1-codex', 'openai/gpt-5.1-codex'],
             ['google/gemini-3-pro', 'google/gemini-3-pro'],
@@ -1542,6 +1575,69 @@ export class EnvironmentController {
 
             // Initial message rides on --prompt at launch (see LlmPromptArgvBuilder); preserve
             // it if a user hand-wrote --prompt into the saved args.
+            if (arg.startsWith('--prompt=')) {
+                settings.initialMessage ||= arg.slice('--prompt='.length);
+                continue;
+            }
+
+            if (arg === '--prompt' && next) {
+                settings.initialMessage ||= next;
+                i++;
+                continue;
+            }
+
+            additionalArgs.push(arg);
+        }
+
+        if (additionalArgs.length > 0) {
+            settings.additionalArgs = additionalArgs.map(arg => this.quoteCustomArg(arg)).join(' ');
+        }
+
+        return settings;
+    }
+
+    buildGrokCustomArgs(settings) {
+        const s = settings || {};
+        const args = ['-m', 'grok-4.6'];
+
+        if (s.yoloMode) {
+            args.push('--yolo');
+        }
+
+        args.push(...this.parseArgString(s.additionalArgs || ''));
+
+        return args.map(arg => this.quoteCustomArg(arg)).join(' ');
+    }
+
+    mergeGrokSettingsFromCustomArgs(settings, customArgs) {
+        const args = this.parseArgString(customArgs);
+        if (args.length === 0) return settings;
+
+        const additionalArgs = [];
+
+        for (let i = 0; i < args.length; i++) {
+            const arg = args[i];
+            const next = args[i + 1];
+
+            if (arg === '--yolo' || arg === '--always-approve' || arg === '--auto') {
+                settings.yoloMode = true;
+                continue;
+            }
+
+            if (arg === '-m' || arg === '--model') {
+                if (next) i++;
+                continue;
+            }
+
+            if (arg.startsWith('-m=') || arg.startsWith('--model=')) {
+                continue;
+            }
+
+            if (arg === '--pure' || arg.startsWith('--agent=') || arg === '--agent') {
+                if (arg === '--agent' && next) i++;
+                continue;
+            }
+
             if (arg.startsWith('--prompt=')) {
                 settings.initialMessage ||= arg.slice('--prompt='.length);
                 continue;
@@ -1751,6 +1847,13 @@ export class EnvironmentController {
                 additionalArgs: document.getElementById('copilot-additional-args').value
             };
         }
+        if (this.isNativeGrokCli(cliLower)) {
+            return {
+                initialMessage,
+                yoloMode: document.getElementById('grok-yolo').checked,
+                additionalArgs: document.getElementById('grok-additional-args').value
+            };
+        }
         if (this.isOpencodeBackedCli(cliLower)) {
             return {
                 initialMessage,
@@ -1900,6 +2003,31 @@ export class EnvironmentController {
                 <div class="mb-3">
                     <label class="form-label">Additional Arguments</label>
                     <input type="text" class="form-control" id="copilot-additional-args" value="${additionalArgs}" placeholder="Optional extra Copilot flags">
+                    <small class="form-text text-muted">Preserves advanced flags not covered above</small>
+                </div>
+            `;
+        }
+
+        if (this.isNativeGrokCli(cliLower)) {
+            const additionalArgs = this.app.escapeHtml(s.additionalArgs || '');
+            return `
+                <hr class="my-4">
+                <h6 class="text-muted mb-3">Grok 4.6 CLI Settings</h6>
+                <div class="mb-3">
+                    <label class="form-label">Model</label>
+                    <input type="text" class="form-control" id="grok-model" value="grok-4.6" disabled>
+                    <small class="form-text text-muted">Pinned to <code>grok-4.6</code> — launched as <code>-m grok-4.6</code>. OpenCode still offers <code>xai/grok-4.6</code> in its own model list.</small>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="grok-yolo" ${s.yoloMode ? 'checked' : ''}>
+                        <label class="form-check-label" for="grok-yolo">YOLO Mode</label>
+                    </div>
+                    <small class="form-text text-muted text-warning">Launches with <code>--yolo</code>, auto-approving tool executions</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Additional Arguments</label>
+                    <input type="text" class="form-control" id="grok-additional-args" value="${additionalArgs}" placeholder="Optional extra grok flags">
                     <small class="form-text text-muted">Preserves advanced flags not covered above</small>
                 </div>
             `;

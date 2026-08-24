@@ -12,6 +12,7 @@ namespace VibeRails.Services.LlmClis
         private readonly IAntigravityLlmCliEnvironment _antigravityLlmCliEnvironment;
         private readonly ICopilotLlmCliEnvironment _copilotLlmCliEnvironment;
         private readonly IOpencodeLlmCliEnvironment _opencodeLlmCliEnvironment;
+        private readonly IGrokLlmCliEnvironment _grokLlmCliEnvironment;
         private readonly IFileService _fileService;
 
         public LlmCliEnvironmentService(
@@ -20,6 +21,7 @@ namespace VibeRails.Services.LlmClis
             IAntigravityLlmCliEnvironment antigravityLlmCliEnvironment,
             ICopilotLlmCliEnvironment copilotLlmCliEnvironment,
             IOpencodeLlmCliEnvironment opencodeLlmCliEnvironment,
+            IGrokLlmCliEnvironment grokLlmCliEnvironment,
             IFileService fileService)
         {
             _claudeLlmCliEnvironment = claudeLlmCliEnvironment;
@@ -27,6 +29,7 @@ namespace VibeRails.Services.LlmClis
             _antigravityLlmCliEnvironment = antigravityLlmCliEnvironment;
             _copilotLlmCliEnvironment = copilotLlmCliEnvironment;
             _opencodeLlmCliEnvironment = opencodeLlmCliEnvironment;
+            _grokLlmCliEnvironment = grokLlmCliEnvironment;
             _fileService = fileService;
         }
 
@@ -57,11 +60,13 @@ namespace VibeRails.Services.LlmClis
                 case LLM.Copilot:
                     await _copilotLlmCliEnvironment.SaveEnvironment(environment, cancellationToken);
                     break;
+                case LLM.Grok46:
+                    await _grokLlmCliEnvironment.SaveEnvironment(environment, cancellationToken);
+                    break;
                 case LLM.OpenCode:
-                // Glm52 / Grok46 / Glm53 are OpenCode-backed pseudo-CLIs — delegate to the OpenCode
+                // Glm52 / Glm53 are OpenCode-backed pseudo-CLIs — delegate to the OpenCode
                 // environment so they share XDG_CONFIG_HOME isolation and config layout.
                 case LLM.Glm52:
-                case LLM.Grok46:
                 case LLM.Glm53:
                     await _opencodeLlmCliEnvironment.SaveEnvironment(environment, cancellationToken);
                     break;
@@ -269,11 +274,15 @@ namespace VibeRails.Services.LlmClis
                 // env var, so (like Copilot) we inject none.
                 LLM.Antigravity => new Dictionary<string, string>(),
                 LLM.Copilot => new Dictionary<string, string>(),
+                // Native Grok is launch-flag-only. Do not set GROK_HOME — that relocates
+                // auth.json and isolates credentials the way setting OpenCode's XDG_DATA_HOME
+                // would, which we deliberately do not do.
+                LLM.Grok46 => new Dictionary<string, string>(),
                 // OPENCODE_CONFIG_DIR is an additive overlay and still loads the user's global
                 // config. Point OpenCode's XDG config root at the environment root instead;
                 // OpenCode then resolves its config under the existing "opencode" subdirectory.
                 // XDG_DATA_HOME stays untouched so credentials remain shared.
-                LLM.OpenCode or LLM.Glm52 or LLM.Grok46 or LLM.Glm53 => new Dictionary<string, string>
+                LLM.OpenCode or LLM.Glm52 or LLM.Glm53 => new Dictionary<string, string>
                 {
                     ["XDG_CONFIG_HOME"] = envPath
                 },

@@ -809,10 +809,33 @@ export class PythonScriptsController {
             return this.app.showToast('Sign first', 'Sign this exact script version before adding it to MCP.', 'warning');
         }
 
-        const request = await this._openMcpConfigurationModal(script, existing);
-        if (!request) return;
-        try {
-            const response = await this.app.apiCall(`${API}/mcp`, 'PUT', request);
+        // The PIN approves the finished tool, so it is asked for last, in its own prompt.
+        // A cancelled or rejected PIN reopens the form on what the user already filled in.
+        let prefill = existing;
+        while (true) {
+            const request = await this._openMcpConfigurationModal(script, existing, prefill);
+            if (!request) return;
+            prefill = request;
+
+            const pin = await this._promptPin({
+                title: existing ? `Update ${request.toolName}` : `Expose ${name} as ${request.toolName}`,
+                body: 'Exposing a signed script lets agents run it with arguments they choose.'
+                    + ' Enter your signing PIN to approve. It is never stored.',
+                submitLabel: existing ? 'Save MCP tool' : 'Add to MCP'
+            });
+            if (pin === null) continue;
+
+            // Only the request is guarded: once it lands the tool is saved, and a
+            // rendering failure must not send the user back to the form.
+            let response;
+            try {
+                response = await this.app.apiCall(`${API}/mcp`, 'PUT', { ...request, pin },
+                    { preferErrorResponseMessage: true });
+            } catch (error) {
+                this.app.showError(error?.message || 'Could not save the MCP tool.');
+                continue;
+            }
+
             this.mcpConfigurations = Array.isArray(response?.configurations) ? response.configurations : [];
             this._lastListHtml = null;
             this._render();
@@ -820,8 +843,7 @@ export class PythonScriptsController {
                 existing ? 'MCP tool updated' : 'Added to MCP',
                 `${request.toolName} now runs ${name} through the signed-script gate.`,
                 'success');
-        } catch (error) {
-            this.app.showError(error?.message || 'Could not save the MCP tool.');
+            return;
         }
     }
 
@@ -841,9 +863,14 @@ export class PythonScriptsController {
         }
     }
 
-    _openMcpConfigurationModal(script, existing) {
+    /**
+     * Collects the tool shape only. `existing` is the saved configuration (it decides
+     * "Add" vs "Edit" wording); `prefill` is what the fields start from, so a rejected
+     * PIN can reopen the form with the user's work intact instead of a blank slate.
+     */
+    _openMcpConfigurationModal(script, existing, prefill = existing) {
         this._closeModal();
-        const parameters = Array.isArray(existing?.parameters) ? existing.parameters : [];
+        const parameters = Array.isArray(prefill?.parameters) ? prefill.parameters : [];
         const layer = document.createElement('div');
         layer.className = 'python-scripts-modal-layer';
         layer.innerHTML = `
@@ -860,39 +887,44 @@ export class PythonScriptsController {
                         </div>
                         <div class="modal-body python-mcp-config-body">
                             <div class="alert alert-danger d-none" data-python-mcp-error role="alert"></div>
-                            <div class="python-mcp-config-grid">
+
+                            <section class="python-mcp-section">
+                                <h6 class="python-mcp-section-title">Identity</h6>
                                 <div>
                                     <label class="form-label" for="python-mcp-tool-name">Tool name</label>
                                     <input class="form-control" id="python-mcp-tool-name" data-python-mcp-field="toolName"
-                                           value="${escapeHtml(existing?.toolName || defaultPythonMcpToolName(script.name))}"
+                                           value="${escapeHtml(prefill?.toolName || defaultPythonMcpToolName(script.name))}"
                                            maxlength="64" autocomplete="off" required>
                                     <div class="form-text">The name agents call. Letters, numbers, <code>_</code>, <code>-</code>, and <code>.</code>.</div>
                                 </div>
                                 <div>
-                                    <label class="form-label" for="python-mcp-pin">Signing PIN</label>
-                                    <input class="form-control" id="python-mcp-pin" data-python-mcp-field="pin"
-                                           type="password" autocomplete="current-password" required>
-                                    <div class="form-text">Required each time MCP exposure is enabled or edited. Never stored here.</div>
+                                    <label class="form-label" for="python-mcp-description">When should an agent use this?</label>
+                                    <textarea class="form-control" id="python-mcp-description" data-python-mcp-field="description"
+                                              rows="3" maxlength="500" required>${escapeHtml(prefill?.description || '')}</textarea>
                                 </div>
-                            </div>
-                            <div>
-                                <label class="form-label" for="python-mcp-description">When should an agent use this?</label>
-                                <textarea class="form-control" id="python-mcp-description" data-python-mcp-field="description"
-                                          rows="3" maxlength="500" required>${escapeHtml(existing?.description || '')}</textarea>
-                            </div>
-                            <div class="python-mcp-parameters-head">
-                                <div>
-                                    <strong>Script parameters</strong>
-                                    <div class="form-text">Each input becomes MCP JSON and is safely passed in the script's argv array. Positional values use the order shown.</div>
+                            </section>
+
+                            <section class="python-mcp-section">
+                                <h6 class="python-mcp-section-title">Behavior</h6>
+                                <div class="form-text">Callers see this as the tool's MCP annotations. Declare it honestly: agents read it to decide whether to check with you before running.</div>
+                                ${this._renderMcpBehaviorSection(prefill)}
+                            </section>
+
+                            <section class="python-mcp-section">
+                                <div class="python-mcp-section-head">
+                                    <div>
+                                        <h6 class="python-mcp-section-title">Parameters</h6>
+                                        <div class="form-text">Each input becomes MCP JSON and is safely passed in the script's argv array. Positional values use the order shown.</div>
+                                    </div>
+                                    <button class="btn btn-sm btn-outline-primary" type="button" data-python-mcp-add-parameter>
+                                        <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>Add parameter
+                                    </button>
                                 </div>
-                                <button class="btn btn-sm btn-outline-primary" type="button" data-python-mcp-add-parameter>
-                                    <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>Add parameter
-                                </button>
-                            </div>
-                            <div class="python-mcp-parameters" data-python-mcp-parameters></div>
-                            <div class="python-mcp-no-parameters" data-python-mcp-empty ${parameters.length ? 'hidden' : ''}>
-                                No parameters. The MCP tool will run the script without extra command-line arguments.
-                            </div>
+                                <div class="python-mcp-parameters" data-python-mcp-parameters></div>
+                                <div class="python-mcp-no-parameters" data-python-mcp-empty ${parameters.length ? 'hidden' : ''}>
+                                    No parameters. The MCP tool will run the script without extra command-line arguments.
+                                </div>
+                            </section>
                         </div>
                         <div class="modal-footer">
                             <button type="button" class="btn btn-secondary" data-python-mcp-cancel>Cancel</button>
@@ -931,6 +963,8 @@ export class PythonScriptsController {
                 .forEach((button) => button.addEventListener('click', () => finish(null)));
             layer.querySelector('[data-python-mcp-add-parameter]')
                 ?.addEventListener('click', () => appendParameter());
+            layer.querySelectorAll('[data-python-mcp-field="behavior"]').forEach((radio) =>
+                radio.addEventListener('change', () => this._syncMcpBehaviorChecks(layer)));
             container.addEventListener('click', (event) => {
                 const remove = event.target.closest('[data-python-mcp-remove-parameter]');
                 if (!remove) return;
@@ -955,6 +989,52 @@ export class PythonScriptsController {
         });
     }
 
+    /**
+     * The author's declaration of what running the script does. The server maps it onto MCP's
+     * four annotation hints, which is the only thing a calling agent ever sees.
+     */
+    _renderMcpBehaviorSection(prefill) {
+        const behavior = prefill?.behavior || '';
+        const choice = (value, title, hint) => `
+                <label class="python-mcp-behavior-option">
+                    <input class="form-check-input" type="radio" name="python-mcp-behavior"
+                           data-python-mcp-field="behavior" value="${value}"
+                           ${behavior === value ? 'checked' : ''} required>
+                    <span class="python-mcp-behavior-copy">
+                        <strong>${title}</strong>
+                        <span class="form-text">${hint}</span>
+                    </span>
+                </label>`;
+        const readOnly = behavior === 'read-only';
+        return `
+            <div class="python-mcp-behavior" role="radiogroup" aria-label="What this script does">
+                ${choice('read-only', 'Reads and reports only', 'Changes nothing on this machine.')}
+                ${choice('additive', 'Creates or updates', 'Writes files or records, but destroys nothing.')}
+                ${choice('destructive', 'Overwrites or deletes', 'Can destroy data. Callers should assume the worst.')}
+            </div>
+            <div class="python-mcp-behavior-checks">
+                <label>
+                    <input class="form-check-input" type="checkbox" data-python-mcp-field="repeatSafe"
+                           ${readOnly || prefill?.repeatSafe ? 'checked' : ''} ${readOnly ? 'disabled' : ''}>
+                    Running it again with the same inputs changes nothing more
+                </label>
+                <label>
+                    <input class="form-check-input" type="checkbox" data-python-mcp-field="reachesNetwork"
+                           ${prefill?.reachesNetwork ? 'checked' : ''}>
+                    Reaches the network or outside services
+                </label>
+            </div>`;
+    }
+
+    /** A script that changes nothing is idempotent by definition, so don't make the author say so. */
+    _syncMcpBehaviorChecks(layer) {
+        const readOnly = layer.querySelector('[data-python-mcp-field="behavior"]:checked')?.value === 'read-only';
+        const repeatSafe = layer.querySelector('[data-python-mcp-field="repeatSafe"]');
+        if (!repeatSafe) return;
+        if (readOnly) repeatSafe.checked = true;
+        repeatSafe.disabled = readOnly;
+    }
+
     _renderMcpParameterEditor(parameter = null) {
         const type = parameter?.type || 'string';
         const mode = parameter?.argumentMode || 'positional';
@@ -964,8 +1044,15 @@ export class PythonScriptsController {
             <div class="python-mcp-parameter" data-python-mcp-parameter>
                 <div class="python-mcp-parameter-head">
                     <strong data-python-mcp-parameter-title>Parameter</strong>
-                    <button class="btn btn-sm btn-outline-danger" type="button" data-python-mcp-remove-parameter
-                            aria-label="Remove parameter" title="Remove parameter"><i class="fa-solid fa-trash" aria-hidden="true"></i></button>
+                    <div class="python-mcp-parameter-head-controls">
+                        <select class="form-select form-select-sm" data-python-mcp-param="argumentMode"
+                                aria-label="How this value reaches Python">
+                            <option value="positional" ${selected(mode, 'positional')}>Positional value</option>
+                            <option value="option" ${selected(mode, 'option')}>Named option</option>
+                        </select>
+                        <button class="btn btn-sm btn-outline-danger" type="button" data-python-mcp-remove-parameter
+                                aria-label="Remove parameter" title="Remove parameter"><i class="fa-solid fa-trash" aria-hidden="true"></i></button>
+                    </div>
                 </div>
                 <div class="python-mcp-parameter-grid">
                     <div>
@@ -981,20 +1068,13 @@ export class PythonScriptsController {
                             <option value="boolean" ${selected(type, 'boolean')}>True / false</option>
                         </select>
                     </div>
-                    <div class="python-mcp-parameter-description">
-                        <label class="form-label">Description</label>
-                        <input class="form-control" data-python-mcp-param="description" value="${escapeHtml(parameter?.description || '')}" maxlength="300" placeholder="What the agent should provide">
-                    </div>
-                    <div>
-                        <label class="form-label">Pass to Python as</label>
-                        <select class="form-select" data-python-mcp-param="argumentMode">
-                            <option value="positional" ${selected(mode, 'positional')}>Positional value</option>
-                            <option value="option" ${selected(mode, 'option')}>Named option</option>
-                        </select>
-                    </div>
                     <div data-python-mcp-param-flag-wrap ${mode === 'option' ? '' : 'hidden'}>
                         <label class="form-label">Python flag</label>
                         <input class="form-control" data-python-mcp-param="flag" value="${escapeHtml(parameter?.flag || '')}" placeholder="--output">
+                    </div>
+                    <div class="python-mcp-parameter-description">
+                        <label class="form-label">Description</label>
+                        <input class="form-control" data-python-mcp-param="description" value="${escapeHtml(parameter?.description || '')}" maxlength="300" placeholder="What the agent should provide">
                     </div>
                 </div>
                 <div class="python-mcp-parameter-checks">
@@ -1021,12 +1101,17 @@ export class PythonScriptsController {
         const value = (key) => layer.querySelector(`[data-python-mcp-field="${key}"]`)?.value ?? '';
         const toolName = value('toolName').trim();
         const description = value('description').trim();
-        const pin = value('pin');
         if (!/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/.test(toolName)) {
             return { error: 'Enter a valid MCP tool name (1-64 letters, numbers, underscores, periods, or hyphens).' };
         }
         if (!description) return { error: 'Describe when an agent should use this tool.' };
-        if (!pin) return { error: 'Enter your signing PIN to approve MCP exposure.' };
+
+        const behavior = layer.querySelector('[data-python-mcp-field="behavior"]:checked')?.value || '';
+        if (!behavior) return { error: 'Say what this script does so callers know what they are running.' };
+        const checked = (key) => Boolean(layer.querySelector(`[data-python-mcp-field="${key}"]`)?.checked);
+        const reachesNetwork = checked('reachesNetwork');
+        // Read-only implies it, and that box is disabled rather than cleared.
+        const repeatSafe = behavior === 'read-only' || checked('repeatSafe');
 
         const parameters = [];
         for (const row of layer.querySelectorAll('[data-python-mcp-parameter]')) {
@@ -1058,7 +1143,9 @@ export class PythonScriptsController {
         if (new Set(parameters.map((parameter) => parameter.name)).size !== parameters.length) {
             return { error: 'Parameter names must be unique.' };
         }
-        return { value: { scriptName, toolName, description, parameters, pin } };
+        return {
+            value: { scriptName, toolName, description, parameters, behavior, repeatSafe, reachesNetwork }
+        };
     }
 
     /** PIN-gated approval of the script's current bytes. Resolves true once signed. */

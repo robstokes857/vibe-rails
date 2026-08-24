@@ -21,7 +21,7 @@ public sealed class GitStagedSnapshotProviderTests : IAsyncLifetime
             "class Original { }\n",
             TestContext.Current.CancellationToken);
         await File.WriteAllTextAsync(
-            Path.Combine(_repository, "AGENTS.md"),
+            Path.Combine(_repository, "vc.rules.md"),
             "# Agent\n\n## Rules\n",
             TestContext.Current.CancellationToken);
         await GitAsync("add", ".");
@@ -341,12 +341,12 @@ public sealed class GitStagedSnapshotProviderTests : IAsyncLifetime
     public async Task CaptureAsync_ReadsAgentInstructionsFromIndex()
     {
         await File.WriteAllTextAsync(
-            Path.Combine(_repository, "AGENTS.md"),
+            Path.Combine(_repository, "vc.rules.md"),
             "# Staged instructions\n",
             TestContext.Current.CancellationToken);
-        await GitAsync("add", "AGENTS.md");
+        await GitAsync("add", "vc.rules.md");
         await File.WriteAllTextAsync(
-            Path.Combine(_repository, "AGENTS.md"),
+            Path.Combine(_repository, "vc.rules.md"),
             "# Unstaged instructions\n",
             TestContext.Current.CancellationToken);
 
@@ -361,21 +361,21 @@ public sealed class GitStagedSnapshotProviderTests : IAsyncLifetime
     [Fact]
     public async Task CaptureWorkingTreeAsync_ReadsAgentRulesFromTheWorkingTree()
     {
-        // An unstaged AGENTS.md edit and a brand-new untracked AGENTS.md both govern the
+        // An unstaged vc.rules.md edit and a brand-new untracked vc.rules.md both govern the
         // working-tree preview, even though the commit hooks keep reading the index.
         await File.WriteAllTextAsync(
-            Path.Combine(_repository, "AGENTS.md"),
+            Path.Combine(_repository, "vc.rules.md"),
             "# Staged instructions\n",
             TestContext.Current.CancellationToken);
-        await GitAsync("add", "AGENTS.md");
+        await GitAsync("add", "vc.rules.md");
         await File.WriteAllTextAsync(
-            Path.Combine(_repository, "AGENTS.md"),
+            Path.Combine(_repository, "vc.rules.md"),
             "# Unstaged instructions\n",
             TestContext.Current.CancellationToken);
         var nested = Path.Combine(_repository, "src");
         Directory.CreateDirectory(nested);
         await File.WriteAllTextAsync(
-            Path.Combine(nested, "AGENTS.md"),
+            Path.Combine(nested, "vc.rules.md"),
             "# Untracked instructions\n",
             TestContext.Current.CancellationToken);
 
@@ -384,9 +384,9 @@ public sealed class GitStagedSnapshotProviderTests : IAsyncLifetime
             TestContext.Current.CancellationToken);
 
         Assert.Equal(2, snapshot.AgentFiles.Count);
-        var root = Assert.Single(snapshot.AgentFiles, file => file.RelativePath == "AGENTS.md");
+        var root = Assert.Single(snapshot.AgentFiles, file => file.RelativePath == "vc.rules.md");
         Assert.Equal("# Unstaged instructions\n", root.Content);
-        var untracked = Assert.Single(snapshot.AgentFiles, file => file.RelativePath == "src/AGENTS.md");
+        var untracked = Assert.Single(snapshot.AgentFiles, file => file.RelativePath == "src/vc.rules.md");
         Assert.Equal("# Untracked instructions\n", untracked.Content);
     }
 
@@ -668,7 +668,7 @@ public sealed class GitStagedSnapshotProviderTests : IAsyncLifetime
     public async Task CaptureUnpushedAsync_EnforcesAggregateBlobBudget()
     {
         await ConfigureUpstreamAtHeadAsync();
-        await GitAsync("rm", "AGENTS.md");
+        await GitAsync("rm", "vc.rules.md");
         await File.WriteAllTextAsync(
             Path.Combine(_repository, "first.cs"),
             "public class FirstHeadSource { }\n",

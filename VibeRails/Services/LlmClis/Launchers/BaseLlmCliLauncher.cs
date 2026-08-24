@@ -117,8 +117,9 @@ namespace VibeRails.Services.LlmClis.Launchers
         {
             // Base-CLI launches pass the requested LLM's wire name as --env (that's what the
             // bootstrap resolves), NOT the selected launcher's type or executable. These coincide
-            // for most CLIs, but Antigravity's binary is `agy` and the OpenCode-backed pseudo-CLIs
-            // reuse an OpenCode launcher while retaining wire names such as `grok-4.6`.
+            // for most CLIs, but Antigravity's binary is `agy`, native Grok's is `grok` (wire
+            // name `grok-4.6`), and the OpenCode-backed GLM pseudo-CLIs reuse an OpenCode
+            // launcher while retaining hyphenated wire names.
             var envValue = !string.IsNullOrEmpty(envName)
                 ? envName
                 : LlmParser.ToWireName(launchLlm).ToLowerInvariant();

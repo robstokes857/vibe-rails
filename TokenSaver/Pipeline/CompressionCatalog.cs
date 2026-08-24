@@ -51,6 +51,7 @@ public sealed record CompressionScopeInfo(
     IReadOnlyList<string> AnthropicTools,
     IReadOnlyList<string> CodexTools,
     IReadOnlyList<string> OpenCodeTools,
+    IReadOnlyList<string> GrokTools,
     bool OnByDefault,
     string? Warning = null);
 
@@ -205,6 +206,9 @@ public static class CompressionCatalog
             // classifies a CommandShape, so only minify + condense ever run on exec output.
             CodexTools: ["shell_command", "exec_command", "exec"],
             OpenCodeTools: ["bash"],
+            // Native Grok's shell tool wire name (config section [toolset.bash], wire name
+            // run_terminal_command — read from a live /responses body, grok 1.0.5).
+            GrokTools: ["run_terminal_command"],
             OnByDefault: true),
 
         new(ScopeShellBackground, "Background shell output",
@@ -214,6 +218,8 @@ public static class CompressionCatalog
             // (plan_1A A2, 2026-08-16). Its arguments carry no command, so shapes never fire.
             CodexTools: ["write_stdin", "wait"],
             OpenCodeTools: [],
+            // Reads background command/subagent output — Grok's BashOutput equivalent.
+            GrokTools: ["get_command_or_subagent_output"],
             OnByDefault: true),
 
         new(ScopeRead, "File reads",
@@ -221,6 +227,7 @@ public static class CompressionCatalog
             AnthropicTools: ["Read"],
             CodexTools: [],
             OpenCodeTools: ["read"],
+            GrokTools: ["read_file"],
             OnByDefault: false,
             Warning: "The model builds Edit old_string values from Read output. Rewriting it can "
                    + "cause failed edits, not just smaller savings. Off by default on purpose."),
@@ -230,6 +237,7 @@ public static class CompressionCatalog
             AnthropicTools: ["Grep"],
             CodexTools: [],
             OpenCodeTools: ["grep"],
+            GrokTools: ["grep"],
             OnByDefault: false,
             Warning: "Lower risk than Read, but the model still navigates by these line numbers. "
                    + "Verify against captures before trusting it."),
@@ -294,6 +302,7 @@ public static class CompressionCatalog
             AnthropicAllowlist: ToolsFor(enabled, s => s.AnthropicTools),
             CodexAllowlist: ToolsFor(enabled, s => s.CodexTools),
             ZaiAllowlist: ToolsFor(enabled, s => s.OpenCodeTools),
+            GrokAllowlist: ToolsFor(enabled, s => s.GrokTools),
             EnabledIds: enabled);
     }
 

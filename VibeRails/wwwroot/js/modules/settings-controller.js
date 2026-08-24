@@ -46,6 +46,7 @@ export class SettingsController {
             openCodeTokenSaverEnabled: true,
             tokenSaverCaptureEnabled: false,
             removeCoAuthorTrailers: true,
+            showVibeAiUi: false,
             machineName: ''
         };
         const dataExportSizePromise = this._loadDataExportSize();
@@ -94,11 +95,16 @@ export class SettingsController {
             const codexLlmProxyModeApi = root.querySelector('#setting-codex-llm-proxy-mode-api');
             const claudeLlmProxyEnabledToggle = root.querySelector('#setting-claude-llm-proxy-enabled');
             const opencodeLlmProxyEnabledToggle = root.querySelector('#setting-opencode-llm-proxy-enabled');
+            const grokLlmProxyEnabledToggle = root.querySelector('#setting-grok-llm-proxy-enabled');
+            const grokLlmProxyModeSubscription = root.querySelector('#setting-grok-llm-proxy-mode-subscription');
+            const grokLlmProxyModeApi = root.querySelector('#setting-grok-llm-proxy-mode-api');
             const claudeTokenSaverToggle = root.querySelector('#setting-token-saver-claude');
             const codexTokenSaverToggle = root.querySelector('#setting-token-saver-codex');
             const opencodeTokenSaverToggle = root.querySelector('#setting-token-saver-opencode');
+            const grokTokenSaverToggle = root.querySelector('#setting-token-saver-grok');
             const tokenSaverCaptureToggle = root.querySelector('#setting-token-saver-capture');
             const removeCoAuthorTrailersToggle = root.querySelector('#setting-remove-co-author-trailers');
+            const showVibeAiUiToggle = root.querySelector('#setting-show-vibe-ai-ui');
 
             if (remoteAccessToggle) {
                 remoteAccessToggle.checked = settings.remoteAccess || false;
@@ -161,6 +167,12 @@ export class SettingsController {
             if (opencodeLlmProxyEnabledToggle) {
                 opencodeLlmProxyEnabledToggle.checked = settings.openCodeLlmProxyEnabled === true;
             }
+            if (grokLlmProxyEnabledToggle) {
+                grokLlmProxyEnabledToggle.checked = settings.grokLlmProxyEnabled === true;
+            }
+            const grokLlmProxyMode = settings.grokLlmProxyMode === 'api' ? 'api' : 'subscription';
+            if (grokLlmProxyModeSubscription) grokLlmProxyModeSubscription.checked = grokLlmProxyMode === 'subscription';
+            if (grokLlmProxyModeApi) grokLlmProxyModeApi.checked = grokLlmProxyMode === 'api';
             // `!== false` so a server that predates the per-LLM split (key absent) renders the
             // default-on state the proxy actually runs with.
             if (claudeTokenSaverToggle) {
@@ -172,12 +184,18 @@ export class SettingsController {
             if (opencodeTokenSaverToggle) {
                 opencodeTokenSaverToggle.checked = settings.openCodeTokenSaverEnabled !== false;
             }
+            if (grokTokenSaverToggle) {
+                grokTokenSaverToggle.checked = settings.grokTokenSaverEnabled !== false;
+            }
             if (tokenSaverCaptureToggle) {
                 tokenSaverCaptureToggle.checked = settings.tokenSaverCaptureEnabled === true;
             }
             if (removeCoAuthorTrailersToggle) {
                 // Missing on older servers/settings files means the documented default: enabled.
                 removeCoAuthorTrailersToggle.checked = settings.removeCoAuthorTrailers !== false;
+            }
+            if (showVibeAiUiToggle) {
+                showVibeAiUiToggle.checked = settings.showVibeAiUi === true;
             }
 
             const form = root.querySelector('#app-settings-form');
@@ -217,12 +235,16 @@ export class SettingsController {
                             this._getCodexLlmProxyMode(root),
                             claudeLlmProxyEnabledToggle?.checked || false,
                             opencodeLlmProxyEnabledToggle?.checked || false,
+                            grokLlmProxyEnabledToggle?.checked || false,
+                            this._getGrokLlmProxyMode(root),
                             claudeTokenSaverToggle?.checked ?? true,
                             codexTokenSaverToggle?.checked ?? true,
                             opencodeTokenSaverToggle?.checked ?? true,
+                            grokTokenSaverToggle?.checked ?? true,
                             tokenSaverCaptureToggle?.checked ?? false,
                             removeCoAuthorTrailersToggle?.checked ?? true,
                             routeThroughVibeRailsAiToggle?.checked ?? false,
+                            showVibeAiUiToggle?.checked === true,
                             clearApiKey
                         );
                         if (savedSettings) {
@@ -250,7 +272,7 @@ export class SettingsController {
         }
     }
 
-    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, openCodeLlmProxyEnabled, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, tokenSaverCaptureEnabled, removeCoAuthorTrailers, routeThroughVibeRailsAi, clearApiKey = false) {
+    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, openCodeLlmProxyEnabled, grokLlmProxyEnabled, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, tokenSaverCaptureEnabled, removeCoAuthorTrailers, routeThroughVibeRailsAi, showVibeAiUi = false, clearApiKey = false) {
         try {
             const savedSettings = await this.app.apiCall('/api/v1/settings', 'POST', {
                 remoteAccess: remoteAccess,
@@ -262,12 +284,16 @@ export class SettingsController {
                 codexLlmProxyMode: codexLlmProxyMode,
                 claudeLlmProxyEnabled: claudeLlmProxyEnabled,
                 openCodeLlmProxyEnabled: openCodeLlmProxyEnabled,
+                grokLlmProxyEnabled: grokLlmProxyEnabled,
+                grokLlmProxyMode: grokLlmProxyMode,
                 claudeTokenSaverEnabled: claudeTokenSaverEnabled,
                 codexTokenSaverEnabled: codexTokenSaverEnabled,
                 openCodeTokenSaverEnabled: openCodeTokenSaverEnabled,
+                grokTokenSaverEnabled: grokTokenSaverEnabled,
                 tokenSaverCaptureEnabled: tokenSaverCaptureEnabled,
                 removeCoAuthorTrailers: removeCoAuthorTrailers,
                 routeThroughVibeRailsAi: routeThroughVibeRailsAi,
+                showVibeAiUi: showVibeAiUi,
                 clearApiKey: clearApiKey
             });
             this.app.setAppSettings(savedSettings);
@@ -368,11 +394,15 @@ export class SettingsController {
             'input[name="setting-codex-llm-proxy-mode"]',
             '#setting-claude-llm-proxy-enabled',
             '#setting-opencode-llm-proxy-enabled',
+            '#setting-grok-llm-proxy-enabled',
+            'input[name="setting-grok-llm-proxy-mode"]',
             '#setting-token-saver-claude',
             '#setting-token-saver-codex',
             '#setting-token-saver-opencode',
+            '#setting-token-saver-grok',
             '#setting-token-saver-capture',
-            '#setting-remove-co-author-trailers'
+            '#setting-remove-co-author-trailers',
+            '#setting-show-vibe-ai-ui'
         ].join(',');
     }
 
@@ -390,11 +420,15 @@ export class SettingsController {
             codexLlmProxyMode: this._getCodexLlmProxyMode(root),
             claudeLlmProxyEnabled: isChecked('#setting-claude-llm-proxy-enabled'),
             openCodeLlmProxyEnabled: isChecked('#setting-opencode-llm-proxy-enabled'),
+            grokLlmProxyEnabled: isChecked('#setting-grok-llm-proxy-enabled'),
+            grokLlmProxyMode: this._getGrokLlmProxyMode(root),
             claudeTokenSaverEnabled: isChecked('#setting-token-saver-claude'),
             codexTokenSaverEnabled: isChecked('#setting-token-saver-codex'),
             openCodeTokenSaverEnabled: isChecked('#setting-token-saver-opencode'),
+            grokTokenSaverEnabled: isChecked('#setting-token-saver-grok'),
             tokenSaverCaptureEnabled: isChecked('#setting-token-saver-capture'),
-            removeCoAuthorTrailers: isChecked('#setting-remove-co-author-trailers')
+            removeCoAuthorTrailers: isChecked('#setting-remove-co-author-trailers'),
+            showVibeAiUi: isChecked('#setting-show-vibe-ai-ui')
         });
     }
 
@@ -446,6 +480,9 @@ export class SettingsController {
         const codexLlmProxyModeApi = root.querySelector('#setting-codex-llm-proxy-mode-api');
         const claudeLlmProxyEnabledToggle = root.querySelector('#setting-claude-llm-proxy-enabled');
         const opencodeLlmProxyEnabledToggle = root.querySelector('#setting-opencode-llm-proxy-enabled');
+        const grokLlmProxyEnabledToggle = root.querySelector('#setting-grok-llm-proxy-enabled');
+        const grokLlmProxyModeSubscription = root.querySelector('#setting-grok-llm-proxy-mode-subscription');
+        const grokLlmProxyModeApi = root.querySelector('#setting-grok-llm-proxy-mode-api');
 
         if (remoteAccessToggle) remoteAccessToggle.checked = settings.remoteAccess === true;
         if (apiKeyInput) {
@@ -471,19 +508,28 @@ export class SettingsController {
         if (codexLlmProxyModeApi) codexLlmProxyModeApi.checked = codexLlmProxyMode === 'api';
         if (claudeLlmProxyEnabledToggle) claudeLlmProxyEnabledToggle.checked = settings.claudeLlmProxyEnabled === true;
         if (opencodeLlmProxyEnabledToggle) opencodeLlmProxyEnabledToggle.checked = settings.openCodeLlmProxyEnabled === true;
+        if (grokLlmProxyEnabledToggle) grokLlmProxyEnabledToggle.checked = settings.grokLlmProxyEnabled === true;
+        const grokLlmProxyMode = settings.grokLlmProxyMode === 'api' ? 'api' : 'subscription';
+        if (grokLlmProxyModeSubscription) grokLlmProxyModeSubscription.checked = grokLlmProxyMode === 'subscription';
+        if (grokLlmProxyModeApi) grokLlmProxyModeApi.checked = grokLlmProxyMode === 'api';
 
         const claudeTokenSaverToggle = root.querySelector('#setting-token-saver-claude');
         const codexTokenSaverToggle = root.querySelector('#setting-token-saver-codex');
         const opencodeTokenSaverToggle = root.querySelector('#setting-token-saver-opencode');
+        const grokTokenSaverToggle = root.querySelector('#setting-token-saver-grok');
         if (claudeTokenSaverToggle) claudeTokenSaverToggle.checked = settings.claudeTokenSaverEnabled !== false;
         if (codexTokenSaverToggle) codexTokenSaverToggle.checked = settings.codexTokenSaverEnabled !== false;
         if (opencodeTokenSaverToggle) opencodeTokenSaverToggle.checked = settings.openCodeTokenSaverEnabled !== false;
+        if (grokTokenSaverToggle) grokTokenSaverToggle.checked = settings.grokTokenSaverEnabled !== false;
 
         const tokenSaverCaptureToggle = root.querySelector('#setting-token-saver-capture');
         if (tokenSaverCaptureToggle) tokenSaverCaptureToggle.checked = settings.tokenSaverCaptureEnabled === true;
 
         const removeCoAuthorTrailersToggle = root.querySelector('#setting-remove-co-author-trailers');
         if (removeCoAuthorTrailersToggle) removeCoAuthorTrailersToggle.checked = settings.removeCoAuthorTrailers !== false;
+
+        const showVibeAiUiToggle = root.querySelector('#setting-show-vibe-ai-ui');
+        if (showVibeAiUiToggle) showVibeAiUiToggle.checked = settings.showVibeAiUi === true;
 
         this._updateDataExportAvailability(root);
     }
@@ -602,6 +648,11 @@ export class SettingsController {
 
     _getCodexLlmProxyMode(root) {
         const selected = root.querySelector('input[name="setting-codex-llm-proxy-mode"]:checked');
+        return selected?.value === 'api' ? 'api' : 'subscription';
+    }
+
+    _getGrokLlmProxyMode(root) {
+        const selected = root.querySelector('input[name="setting-grok-llm-proxy-mode"]:checked');
         return selected?.value === 'api' ? 'api' : 'subscription';
     }
 

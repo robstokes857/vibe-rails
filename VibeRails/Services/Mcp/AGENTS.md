@@ -51,7 +51,7 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 
 | Wire name (snake_case) | Method | Description |
 |------------------------|--------|-------------|
-| `validate_vca` | `RulesTool.ValidateVca` | Validates the staged Git index snapshot against `- [ENFORCEMENT] …` rules from the indexed AGENTS.md files. |
+| `validate_vca` | `RulesTool.ValidateVca` | Validates the staged Git index snapshot against `- [ENFORCEMENT] …` rules from the indexed vc.rules.md files. |
 | `search_history` | `SessionSearchTool.SearchHistory` | Semantic + keyword search over the developer's captured agent history. |
 | `pause_token_saver` | `TokenSaverTool.PauseTokenSaver` | Turns VibeRails' token compression off for 5 minutes for this terminal tab, so an agent can read elided output verbatim. |
 | `resume_token_saver` | `TokenSaverTool.ResumeTokenSaver` | Restores token compression immediately, ending an active pause early. |
@@ -170,14 +170,17 @@ agy    mcp add viberails-mcp -- "<path-to-vb>" mcp
 copilot mcp remove viberails-mcp         # output suppressed by CommandService
 copilot mcp add viberails-mcp -- "<path-to-vb>" mcp
 opencode mcp add viberails-mcp -- "<path-to-vb>" mcp
+grok mcp remove viberails-mcp            # output suppressed by CommandService
+grok mcp add --scope user viberails-mcp -- "<path-to-vb>" mcp
 ```
 
 OpenCode 1.18.8 supports the non-interactive local-command form shown above. It has no matching
 `mcp remove` command, but adding the same name replaces that entry, so OpenCode and the
-OpenCode-backed pseudo-CLIs (GLM 5.2 / GLM 5.3 / Grok 4.6)
+OpenCode-backed pseudo-CLIs (GLM 5.2 / GLM 5.3)
 launches run one add command immediately before launch. On Windows, `CommandService` invokes
 the npm `opencode.cmd` shim because PowerShell consumes the `--` separator when routing through
-`opencode.ps1`; Unix launches use `opencode`.
+`opencode.ps1`; Unix launches use `opencode`. Native Grok uses remove-first plus
+`grok mcp add --scope user`.
 
 At launch time `CommandService` resolves the server command as either the published executable
 (`Environment.ProcessPath`, e.g. `vb.exe mcp`) or `dotnet <path-to-vb.dll> mcp` for

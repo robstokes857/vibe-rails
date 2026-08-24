@@ -1,12 +1,12 @@
 # VCA — Vibe Control Automation
 
 VCA is the rule engine behind Git Guard. It answers one question: **given a set of changed files,
-which rules in the repository's `AGENTS.md` files apply, and does anything about this change
+which rules in the repository's `vc.rules.md` files apply, and does anything about this change
 violate them?**
 
-Rules are declared in Markdown, by humans, in files that are also ordinary project documentation.
-That is the whole source of difficulty in this directory, and most of what follows exists to keep
-documentation from becoming policy by accident.
+Rules are declared in Markdown, by humans, in `vc.rules.md` files. The file may also carry
+ordinary documentation (the `## Files` section), and it may contain fenced examples of rules —
+most of what follows exists to keep that documentation from becoming policy by accident.
 
 ## Who asks
 
@@ -78,8 +78,8 @@ Enforcement tokens are case-insensitive: `WARN`, `COMMIT`, `STOP`, `SKIP`, `DISA
 
 ### 5. Scope
 
-A rule applies to changed files under the directory of the `AGENTS.md` that declares it. A nested
-`AGENTS.md` governs its own subtree and nothing above it (`GetScopedFiles`). Rules with no changed
+A rule applies to changed files under the directory of the `vc.rules.md` that declares it. A nested
+`vc.rules.md` governs its own subtree and nothing above it (`GetScopedFiles`). Rules with no changed
 files in scope are not evaluated and do not count toward "applicable rule(s)".
 
 Duplicate rules from the same source file are collapsed (`RulesTool.AddRuleIfNew`).
@@ -88,12 +88,12 @@ Duplicate rules from the same source file are collapsed (`RulesTool.AddRuleIfNew
 
 `File Lock('path/to/file')` protects one exact Git path. `Directory Lock('path/to/directory')`
 protects the directory and every descendant. Paths are relative to the directory containing the
-declaring AGENTS.md; absolute paths and `..` escapes are invalid. Additions, modifications,
+declaring vc.rules.md; absolute paths and `..` escapes are invalid. Additions, modifications,
 deletions, and both sides of renames count as changes. Matching uses Git path boundaries, so a lock
 on `src/locked` does not match `src/locked-old`.
 
-The declaring AGENTS.md is excluded from its own lock. This is the control-plane escape hatch that
-keeps a STOP rule editable and removable; other AGENTS.md files beneath a directory lock remain
+The declaring vc.rules.md is excluded from its own lock. This is the control-plane escape hatch that
+keeps a STOP rule editable and removable; other vc.rules.md files beneath a directory lock remain
 ordinary protected content.
 
 ## Enforcement levels
@@ -121,7 +121,7 @@ passed is worse than blocking.
 **Unrecognized** — no validator matches the rule text at all
 (`RuleValidationState.Unrecognized`). This says nothing about the staged code; it says the rule is
 unenforceable as written. It is always reported as a **warning regardless of declared level**.
-Blocking a commit over a typo in `AGENTS.md` would enforce nothing while costing the user the
+Blocking a commit over a typo in `vc.rules.md` would enforce nothing while costing the user the
 commit, and the level on the line describes a check that is not running.
 
 **Recognized but with an unusable argument** — the path locks are the live example. A lock whose
@@ -129,7 +129,7 @@ path will not parse, escapes the declaring directory, or escapes the repository 
 compare the staged files against. That is not the coverage case: a coverage rule with no report
 still describes a real gate over the staged files, while a lock with no path describes nothing,
 so a violation would fire on *every* commit regardless of what changed. At `STOP` that wedges all
-work until `AGENTS.md` is hand-edited — possibly the very file the lock covers. These report
+work until `vc.rules.md` is hand-edited — possibly the very file the lock covers. These report
 `UNSUPPORTED:` through `RuleValidationState.Unrecognized`, so they warn and never block.
 
 The write path is where lock syntax is actually enforced: `AgentFileService` rejects
@@ -149,8 +149,8 @@ There used to be two readers with different contracts, and they disagreed in eve
 - **The Git hook** (`RulesTool.ParseRules`) regex-scanned the **entire file**, with no concept of
   headings, sections, or code fences.
 
-On this repository's own `AGENTS.md` that produced a commit that could not be made and could not be
-explained. A fenced example under `**Rule Format**:` —
+On this repository's own rules file (then `AGENTS.md`, before the `vc.rules.md` rename) that
+produced a commit that could not be made and could not be explained. A fenced example under `**Rule Format**:` —
 
 ````markdown
 ```markdown
@@ -184,7 +184,7 @@ author junk. Reads no longer filter, so hand-edited junk is shown rather than hi
 | `../RuleValidationService.cs` | Active working-tree validation for the Rules page (`/api/v1/agents/validate`). |
 | `Hooks/` | Git-hook host, runner, console presenter. See `Hooks/` for the console UI. |
 | `../Mcp/Tools/RulesTool.cs` | `ValidateVcaReportAsync` — the validation the hooks actually run. |
-| `../AgentFileService.cs` | Rules-page CRUD over `AGENTS.md` files. |
+| `../AgentFileService.cs` | Rules-page CRUD over `vc.rules.md` files. |
 | `PathLockRule.cs` | Shared File Lock / Directory Lock syntax, safe path resolution, and matching. |
 | `../GitPreflight/` | Step pipeline (VCA → MintLint → automated workflows) and its event stream. |
 

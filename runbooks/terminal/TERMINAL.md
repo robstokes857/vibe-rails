@@ -1255,7 +1255,7 @@ Suite status: `TerminalEmulator.Tests` 164 passed / 9 skipped,
    `terminal-tab.js` and read what the wheel produces:
    - `\e[<64;…M` → mouse tracking IS restored; you're hitting the *other* variant
      (2026-07-21 upstream hit-test) and the PageUp translation should be handling
-     it — check `state.cli` is one of `opencode`/`glm-5.2`/`grok-4.6`.
+      it — check `state.cli` is one of `opencode`/`glm-5.2`/`glm-5.3`.
    - `\e[A` / `\eOA` → mouse tracking still lost; this fix didn't take.
 7. Worth also re-checking Shift+Enter → newline in the same reconnected tab, since
    it rides the adjacent `?2004` restore in the same serializer block.
@@ -1320,8 +1320,8 @@ arrow-key sequences — which hit the focused textarea and cycle input history
 upstream issue and the opentui renderer source.)
 
 **Fix (VibeRails-side, `terminal-tab.js`):** for OpenCode tabs (and the
-OpenCode-backed pseudo-CLIs Glm52 / Grok46, whose `LlmParser.ToWireName()`
-wire names are `'glm-5.2'` / `'grok-4.6'` — with a hyphen, not the enum name),
+OpenCode-backed pseudo-CLIs Glm52 / Glm53, whose `LlmParser.ToWireName()`
+wire names are `'glm-5.2'` / `'glm-5.3'` — with a hyphen, not the enum name),
 translate SGR mouse wheel events to PageUp/PageDown in the `onData` input path,
 before `socket.send`. OpenCode binds PageUp/PageDown to
 `messages_page_up`/`messages_page_down` (and `dialog.select.page_up`/`page_down`
@@ -1331,7 +1331,7 @@ opentui's hit-test routes the mouse event.
 ```js
 _translateOpenCodeMouseWheel(data) {
     const cli = (this.state.cli || '').toLowerCase();
-    if (cli !== 'opencode' && cli !== 'glm-5.2' && cli !== 'grok-4.6') {
+    if (cli !== 'opencode' && cli !== 'glm-5.2' && cli !== 'glm-5.3') {
         return data;
     }
     if (typeof data !== 'string' || data.indexOf('\x1b[<6') === -1) {
@@ -1344,14 +1344,14 @@ _translateOpenCodeMouseWheel(data) {
 ```
 
 **Scope/guardrails:**
-- **OpenCode / Glm52 / Grok46 only.** Other CLIs (Claude, Codex, Copilot,
-  Antigravity) handle mouse wheel correctly; do not extend this to them. Gated
+- **OpenCode / Glm52 / Glm53 only.** Other CLIs (Claude, Codex, Copilot,
+  Antigravity, native Grok) handle mouse wheel correctly; do not extend this to them. Gated
   on `state.cli` lowercase, same pattern as the Codex cursor-suppression gate
   (`terminal-tab.js:691`).
 - **Wire name gotcha (bit us once):** `state.cli` carries the
   `LlmParser.ToWireName()` value, not the enum name. Glm52 serializes as
-  `'glm-5.2'` (with a hyphen), NOT `'glm52'`; Grok46 serializes as
-  `'grok-4.6'`, NOT `'grok46'`. The first
+  `'glm-5.2'` (with a hyphen), NOT `'glm52'`. Native Grok 4.6 serializes as
+  `'grok-4.6'` but is **not** in this OpenCode wheel translation. The first
   iteration of this fix checked the enum names and silently no-op'd for every
   GLM 5.2 session (e.g. `00e400f8-4f4d-4071-92c3-73b556d22e68`). Always check
   the wire names — see `LlmParser.cs`.

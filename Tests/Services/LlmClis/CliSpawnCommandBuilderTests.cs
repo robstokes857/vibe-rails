@@ -206,7 +206,8 @@ public class CliSpawnCommandBuilderTests
             new CodexLlmCliLauncher(),
             new AntigravityLlmCliLauncher(),
             new CopilotLlmCliLauncher(),
-            new OpencodeLlmCliLauncher());
+            new OpencodeLlmCliLauncher(),
+            new GrokLlmCliLauncher());
 
         Assert.Equal(launchService.GetLauncher(llm).CliExecutable, CommandService.ResolveCliExecutable(llm));
     }

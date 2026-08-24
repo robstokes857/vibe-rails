@@ -94,7 +94,7 @@ namespace VibeRails.DTOs
 
     public record GitOpenDirectoryResponse(string Url);
 
-    // Agent File DTOs
+    // Rule file DTOs
     public record RuleWithEnforcementResponse(
         string Text,
         string Enforcement
@@ -420,11 +420,18 @@ namespace VibeRails.DTOs
         string? Flag
     );
 
+    // Behavior is the script author's declaration of what running the tool does, in the
+    // product's own vocabulary: "read-only", "additive", or "destructive". The four MCP
+    // annotation hints are derived from it plus RepeatSafe and ReachesNetwork, so adding a
+    // protocol hint later is a mapping change rather than a stored-schema change.
     public record PythonScriptMcpConfiguration(
         string ScriptName,
         string ToolName,
         string Description,
-        List<PythonScriptMcpParameter> Parameters
+        List<PythonScriptMcpParameter> Parameters,
+        string Behavior,
+        bool RepeatSafe,
+        bool ReachesNetwork
     );
 
     public record PythonScriptMcpConfigurationRequest(
@@ -432,6 +439,9 @@ namespace VibeRails.DTOs
         string? ToolName,
         string? Description,
         List<PythonScriptMcpParameter>? Parameters,
+        string? Behavior,
+        bool RepeatSafe,
+        bool ReachesNetwork,
         string? Pin
     );
 
@@ -990,7 +1000,14 @@ namespace VibeRails.DTOs
         bool? RemoveCoAuthorTrailers = null,
         // HTTP-over-WSS proof toggle. Nullable on requests so a cached client that predates the
         // field leaves the persisted choice untouched. Responses always contain an explicit value.
-        bool? RouteThroughVibeRailsAi = null
+        bool? RouteThroughVibeRailsAi = null,
+        // Vibe AI nav visibility. Off by default. Nullable on requests so a cached client that
+        // predates the field cannot flip a later-enabled inspector back off on an unrelated save.
+        bool? ShowVibeAiUi = null,
+        // Native Grok proxy. Same stale-client nullable guard as the other proxy fields.
+        bool? GrokLlmProxyEnabled = null,
+        string? GrokLlmProxyMode = null,
+        bool? GrokTokenSaverEnabled = null
     );
     // Append new fields at the END of this record, with a default. Inserting one in the middle
     // shifts every positional argument after it: call sites only fail to compile when the types
@@ -1449,6 +1466,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(FileChangeInfo))]
     [JsonSerializable(typeof(List<FileChangeInfo>))]
     // MCP DTOs
+    [JsonSerializable(typeof(McpToolAnnotationsInfo))]
     [JsonSerializable(typeof(McpToolInfo))]
     [JsonSerializable(typeof(List<McpToolInfo>))]
     [JsonSerializable(typeof(McpServerTargetRequest))]
@@ -1467,7 +1485,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(FileSystemPlaceResponse))]
     [JsonSerializable(typeof(List<FileSystemPlaceResponse>))]
     [JsonSerializable(typeof(FileSystemBrowseResponse))]
-    // Agent File DTOs
+    // Rule file DTOs
     [JsonSerializable(typeof(RuleWithEnforcementResponse))]
     [JsonSerializable(typeof(List<RuleWithEnforcementResponse>))]
     [JsonSerializable(typeof(AgentFileResponse))]

@@ -116,9 +116,9 @@ test('opens the terminal workspace by default', async ({ page }) => {
 });
 
 // RULES and Code quality are two separate nav destinations: RULES is the full-page
-// AGENTS.md manager; the Code quality page (home) owns Git Guard, the validation
+// vc.rules.md manager; the Code quality page (home) owns Git Guard, the validation
 // results, the compact scan brief, and the terminal dock.
-test('can navigate to Agent Files', async ({ page }) => {
+test('can navigate to Rule Files', async ({ page }) => {
   await page.goto('/');
 
   // The RULES entry goes straight to the rule-files manager.
@@ -138,7 +138,7 @@ test('can navigate to Agent Files', async ({ page }) => {
 
   const configuredFiles = container.locator('.agent-files-configured .agent-file-tree-item');
   await expect(configuredFiles.first()).toBeVisible();
-  await expect(configuredFiles.first().locator('.agent-file-tree-name')).toContainText('/Agent');
+  await expect(configuredFiles.first().locator('.agent-file-tree-name')).toContainText('/Rules');
   await expect(configuredFiles.first().locator('.agent-file-tree-badge')).toHaveText(/[1-9]\d* rules?/);
 
   const filesWithoutRules = container.locator('[data-agent-empty-group]');
@@ -177,6 +177,27 @@ test('can navigate to Agent Files', async ({ page }) => {
     return Boolean(checks && terminal && (checks.compareDocumentPosition(terminal) & Node.DOCUMENT_POSITION_FOLLOWING));
   });
   expect(checksPrecedeTerminal).toBe(true);
+});
+
+test('rule-file workflows use policy terminology', async ({ page }) => {
+  await page.goto('/');
+
+  await page.locator('.app-subnav-link[data-view="rule-files"]:visible').click();
+  await page.getByRole('button', { name: 'New vc.rules.md' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Create New Rule File' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Create New Agent' })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Back' }).click();
+  const configuredFile = page.locator(
+    '[data-agent-file-tree] .agent-files-configured .agent-file-tree-item'
+  ).first();
+  await configuredFile.locator('.agent-file-tree-open').click();
+  await page.locator('[data-agent-rule-editor]').getByRole('button', { name: 'Full editor' }).click();
+
+  await expect(page.getByText('Files covered by this rule file', { exact: true })).toBeVisible();
+  await expect(page.getByText('Full Rule File Content', { exact: true })).toBeVisible();
+  await expect(page.getByText('Full Agent File Content', { exact: true })).toHaveCount(0);
 });
 
 test('the code quality page docks a substantial console at the bottom and lets the page scroll', async ({ page }) => {

@@ -77,6 +77,10 @@ public static class AppSettingsRoutes
                 settings.ClaudeLlmProxyEnabled = settingsDto.ClaudeLlmProxyEnabled.Value;
             if (settingsDto.OpenCodeLlmProxyEnabled.HasValue)
                 settings.OpenCodeLlmProxyEnabled = settingsDto.OpenCodeLlmProxyEnabled.Value;
+            if (settingsDto.GrokLlmProxyEnabled.HasValue)
+                settings.GrokLlmProxyEnabled = settingsDto.GrokLlmProxyEnabled.Value;
+            if (settingsDto.GrokLlmProxyMode is not null)
+                settings.GrokLlmProxyMode = LlmProxyCliChatConfig.NormalizeMode(settingsDto.GrokLlmProxyMode);
             // Per-LLM saver toggles, same stale-client guard. Writing an explicit Codex/OpenCode
             // value deliberately severs the pre-split inheritance from the legacy master switch
             // (see Settings) — from then on each LLM stands on its own value.
@@ -86,6 +90,8 @@ public static class AppSettingsRoutes
                 settings.CodexTokenSaverEnabled = settingsDto.CodexTokenSaverEnabled.Value;
             if (settingsDto.OpenCodeTokenSaverEnabled.HasValue)
                 settings.OpenCodeTokenSaverEnabled = settingsDto.OpenCodeTokenSaverEnabled.Value;
+            if (settingsDto.GrokTokenSaverEnabled.HasValue)
+                settings.GrokTokenSaverEnabled = settingsDto.GrokTokenSaverEnabled.Value;
             if (settingsDto.TokenSaverCaptureEnabled.HasValue)
                 settings.TokenSaverCaptureEnabled = settingsDto.TokenSaverCaptureEnabled.Value;
             if (settingsDto.RemoveCoAuthorTrailers.HasValue)
@@ -102,6 +108,8 @@ public static class AppSettingsRoutes
             }
             if (string.IsNullOrWhiteSpace(settings.ApiKey))
                 settings.RouteThroughVibeRailsAi = false;
+            if (settingsDto.ShowVibeAiUi.HasValue)
+                settings.ShowVibeAiUi = settingsDto.ShowVibeAiUi.Value;
 
             // Save back to settings.json
             Config.Save(settings);
@@ -176,7 +184,11 @@ public static class AppSettingsRoutes
                 configuration[DataExportService.ExportUrlSettingKey],
                 out _),
             RemoveCoAuthorTrailers: settings.RemoveCoAuthorTrailers,
-            RouteThroughVibeRailsAi: settings.RouteThroughVibeRailsAi
+            RouteThroughVibeRailsAi: settings.RouteThroughVibeRailsAi,
+            ShowVibeAiUi:             settings.ShowVibeAiUi,
+            settings.GrokLlmProxyEnabled,
+            LlmProxyCliChatConfig.NormalizeMode(settings.GrokLlmProxyMode),
+            settings.GrokTokenSaverEnabled ?? settings.OpenCodeTokenSaverEnabled ?? settings.ClaudeTokenSaverEnabled
         );
     }
 

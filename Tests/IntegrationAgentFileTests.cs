@@ -18,7 +18,7 @@ public class IntegrationAgentFileTests
 
         // Path to the template file copied to output directory
         _templatePath = Path.Combine(AppContext.BaseDirectory, "test_agent.txt");
-        _agentFilePath = Path.Combine(_testDirectory, "AGENTS.md");
+        _agentFilePath = Path.Combine(_testDirectory, "vc.rules.md");
 
         var rulesService = new RulesService();
         var gitService = new MockGitService(_testDirectory);
@@ -100,8 +100,8 @@ public class IntegrationAgentFileTests
 
         // Verify file structure
         var content = await File.ReadAllTextAsync(_agentFilePath, TestContext.Current.CancellationToken);
-        Assert.Contains("# Repository Guidelines", content);
-        Assert.Contains("## Development Guidelines", content);
+        Assert.Contains("# VibeRails Rules", content);
+        Assert.Contains("Rules VibeRails enforces on every commit", content);
         Assert.Contains("## Vibe Rails Rules", content);
         Assert.Contains("## Files", content);
         Assert.Contains("## Prompts", content);

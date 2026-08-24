@@ -73,7 +73,7 @@ The extension ships the whole VibeRails backend inside the VSIX — there is **n
 - Roughly 50–100 MB installed, depending on platform. You only ever download the build for your own platform.
 - The backend binds a **dynamic port on the loopback interface only**. Nothing listens on an external address, and the dashboard talks to it over `localhost`.
 - Every request is authenticated with a session and tab token minted at startup; the dashboard runs in a VS Code webview under a strict Content Security Policy.
-- Environment configuration, session history, and crash dumps live under `~/.vibe_rails/`. (Agent instruction files — `agent.md`/`agents.md` and their rules — live in the project repository root, not under `~/.vibe_rails/`.)
+- Environment configuration, session history, and crash dumps live under `~/.vibe_rails/`. (Rule files — `vc.rules.md` — live in the project repository, not under `~/.vibe_rails/`.)
 
 ## Settings
 

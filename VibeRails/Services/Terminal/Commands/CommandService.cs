@@ -1,5 +1,6 @@
 using Serilog;
 using TokenSaver;
+using VibeRails.Interfaces;
 using VibeRails.Services.Environments;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.LlmProxy;
@@ -37,6 +38,7 @@ public class CommandService : ICommandService
     private readonly ILocalLlmProxyContext _llmProxyContext;
     private readonly ILlmProxySettingsService _llmProxySettings;
     private readonly ILlmProxySessionState _llmProxySessionState;
+    private readonly IFileService _fileService;
     private const string VibeRailsMcpServerName = "viberails-mcp";
 
     /// <summary>
@@ -68,15 +70,17 @@ public class CommandService : ICommandService
         LlmCliEnvironmentService envService,
         ILocalLlmProxyContext llmProxyContext,
         ILlmProxySettingsService llmProxySettings,
-        ILlmProxySessionState llmProxySessionState)
+        ILlmProxySessionState llmProxySessionState,
+        IFileService fileService)
     {
         _envService = envService;
         _llmProxyContext = llmProxyContext;
         _llmProxySettings = llmProxySettings;
         _llmProxySessionState = llmProxySessionState;
+        _fileService = fileService;
     }
 
-    public Task<PreparedTerminalSession> PrepareSessionAsync(
+    public async Task<PreparedTerminalSession> PrepareSessionAsync(
         LLM llm, string? envName, string[]? extraArgs, string? initialPrompt = null, string summary = "")
     {
         if (Environment.GetEnvironmentVariable("VIBERAILS_TEST_FAKE_CLI") == "1")
@@ -97,7 +101,7 @@ public class CommandService : ICommandService
                 ["LC_ALL"] = "en_US.UTF-8",
                 ["PYTHONIOENCODING"] = "utf-8"
             };
-            return Task.FromResult(new PreparedTerminalSession(fakeCmd, fakeCmd, Array.Empty<string>(), fakeEnv));
+            return new PreparedTerminalSession(fakeCmd, fakeCmd, Array.Empty<string>(), fakeEnv);
         }
 
         // Plain shell: no agent, no custom environment, no prompt/args. The PTY already
@@ -112,7 +116,7 @@ public class CommandService : ICommandService
                 ["LC_ALL"] = "en_US.UTF-8",
                 ["PYTHONIOENCODING"] = "utf-8"
             };
-            return Task.FromResult(new PreparedTerminalSession(string.Empty, string.Empty, Array.Empty<string>(), shellEnv));
+            return new PreparedTerminalSession(string.Empty, string.Empty, Array.Empty<string>(), shellEnv);
         }
 
         var cli = ResolveCliExecutable(llm);
@@ -124,7 +128,7 @@ public class CommandService : ICommandService
             extraArgs = llm switch
             {
                 LLM.Glm52 => WithPinnedModel(extraArgs, "zai/glm-5.2"),
-                LLM.Grok46 => WithPinnedModel(extraArgs, "xai/grok-4.6"),
+                LLM.Grok46 => WithPinnedModel(extraArgs, "grok-4.6"),
                 LLM.Glm53 => WithPinnedModel(extraArgs, "zai-coding-plan/glm-5.3"),
                 _ => extraArgs
             };
@@ -151,8 +155,9 @@ public class CommandService : ICommandService
                 LLM.Antigravity => $"{cliCommand} --prompt-interactive={quoted}",
                 // OpenCode's TUI treats a positional arg as the [project] path, not a prompt,
                 // so the initial prompt must ride on --prompt (never the default branch).
-                // Glm52 / Grok46 / Glm53 are OpenCode under the hood and share the --prompt convention.
-                LLM.OpenCode or LLM.Glm52 or LLM.Grok46 or LLM.Glm53 => $"{cliCommand} --prompt={quoted}",
+                // Glm52 / Glm53 are OpenCode under the hood and share the --prompt convention.
+                // Native Grok takes a trailing positional as the first TUI turn; -p is headless.
+                LLM.OpenCode or LLM.Glm52 or LLM.Glm53 => $"{cliCommand} --prompt={quoted}",
                 _ => $"{cliCommand} {quoted}"
             };
 
@@ -227,19 +232,19 @@ public class CommandService : ICommandService
             AddProxyContactDetails(environment, LlmProxyProvider.Claude);
         }
 
-        // If OpenCode proxying is enabled, route OpenCode's zai (Z.AI/GLM) and xai (Grok)
+        // If OpenCode proxying is enabled, route OpenCode's zai (Z.AI/GLM) and xai
         // provider traffic through the local LLM proxy. Like the Claude path this is
         // env-var-only — no opencode.json is written: OPENCODE_CONFIG_CONTENT carries an inline
         // JSON override of both providers' baseURL + auth headers (see LlmProxyZaiConfig).
         // Skip if the caller already set OPENCODE_CONFIG_CONTENT, so an explicit value is
-        // respected rather than clobbered. Glm52, Grok46, and Glm53 are included because they
+        // respected rather than clobbered. Glm52 and Glm53 are included because they
         // are OpenCode-backed pseudo-CLIs. Note the injected config only remaps the zai/xai
         // providers, so Glm53's pinned zai-coding-plan model is NOT proxied — it talks to
         // Z.AI directly (deliberate; see runbooks/custom_envs/CLI_OPTIONS.md "GLM 5.3").
         var inheritedOpenCodeConfig = Environment.GetEnvironmentVariable(
             LlmProxyZaiConfig.ConfigContentVariable);
         var openCodeProxyActive = proxySettings.OpenCodeLlmProxyLaunchEnabled
-            && (llm == LLM.OpenCode || llm == LLM.Glm52 || llm == LLM.Grok46 || llm == LLM.Glm53)
+            && (llm == LLM.OpenCode || llm == LLM.Glm52 || llm == LLM.Glm53)
             && !environment.ContainsKey(LlmProxyZaiConfig.ConfigContentVariable)
             && string.IsNullOrEmpty(inheritedOpenCodeConfig);
         if (openCodeProxyActive)
@@ -251,6 +256,29 @@ public class CommandService : ICommandService
                 _llmProxyContext.TabToken);
         }
 
+        // Native Grok uses /llm/cli-chat. Subscription keeps grok login (no GROK_MODELS_BASE_URL);
+        // API mode also sets GROK_MODELS_BASE_URL so the upstream is api.x.ai. Skip if the
+        // chat-proxy URL is already set. Do not overwrite Grok's Authorization / login headers.
+        // Note grok's credential order (verified 1.0.5): a signed-in grok login session still
+        // outranks XAI_API_KEY even in API mode, and session tokens are minted for the
+        // cli-chat-proxy — so API mode only authenticates upstream after `grok logout`.
+        var inheritedGrokProxy = Environment.GetEnvironmentVariable(
+            LlmProxyGrokConfig.ChatProxyBaseUrlVariable);
+        var grokProxyActive = proxySettings.GrokLlmProxyLaunchEnabled
+            && llm == LLM.Grok46
+            && !environment.ContainsKey(LlmProxyGrokConfig.ChatProxyBaseUrlVariable)
+            && string.IsNullOrEmpty(inheritedGrokProxy);
+        if (grokProxyActive)
+        {
+            var grokProxyEnv = LlmProxyGrokConfig.BuildGrokProxyEnvironment(
+                _llmProxyContext.ApiBaseUrl,
+                proxySettings.GrokLlmProxyMode);
+            foreach (var kvp in grokProxyEnv)
+                environment[kvp.Key] = kvp.Value;
+            AddProxyContactDetails(environment, LlmProxyProvider.Grok);
+            await EnsureGrokProxyHeadersAsync();
+        }
+
         LogMcpSetup(llm, envName, setupCommands);
 
         // The same launch expressed as argv rather than a shell string. Built unconditionally
@@ -258,14 +286,15 @@ public class CommandService : ICommandService
         var directArgv = new List<string>(launchArgs);
         LlmPromptArgvBuilder.AppendInitialPrompt(directArgv, llm, prompt);
 
-        return Task.FromResult(new PreparedTerminalSession(
+        return new PreparedTerminalSession(
             builder.Build(),
             cliCommand,
             setupCommands.AsReadOnly(),
             environment,
-            OpenCodeProxyActive: openCodeProxyActive,
+            // Grok rides /llm/cli-chat; the OpenCode lease also keeps that route up.
+            OpenCodeProxyActive: openCodeProxyActive || grokProxyActive,
             Executable: cli,
-            Argv: directArgv));
+            Argv: directArgv);
     }
 
     /// <summary>
@@ -297,8 +326,48 @@ public class CommandService : ICommandService
     }
 
     /// <summary>
-    /// Every CLI's enum name lowercased is its executable — except Antigravity (binary <c>agy</c>)
-    /// and the OpenCode-backed pseudo-CLIs Glm52 / Grok46 / Glm53 (binary <c>opencode</c>).
+    /// One-time merge of <c>env_http_headers</c> into the user's <c>~/.grok/config.toml</c>
+    /// (or <c>$GROK_HOME/config.toml</c>). Header <i>names</i> and env-var <i>names</i> only —
+    /// token values stay out of the file. Best-effort: a failed write must not abort the launch.
+    /// </summary>
+    private async Task EnsureGrokProxyHeadersAsync()
+    {
+        try
+        {
+            var path = LlmProxyGrokConfig.ResolveUserConfigPath(
+                _fileService.GetUserProfilePath(),
+                Environment.GetEnvironmentVariable("GROK_HOME"));
+            if (path is null)
+                return;
+
+            var existing = _fileService.FileExists(path)
+                ? await _fileService.ReadAllTextAsync(path, CancellationToken.None)
+                : string.Empty;
+            var merged = LlmProxyGrokConfig.MergeEnvHttpHeaders(existing);
+            if (string.Equals(merged, existing, StringComparison.Ordinal))
+                return;
+
+            var directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(directory) && !_fileService.DirectoryExists(directory))
+                _fileService.CreateDirectory(directory);
+
+            await _fileService.WriteAllTextAsync(
+                path,
+                merged,
+                FileMode.Create,
+                FileShare.Read,
+                CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "[Grok] Failed to merge env_http_headers into user config.toml");
+        }
+    }
+
+    /// <summary>
+    /// Every CLI's enum name lowercased is its executable — except Antigravity (binary <c>agy</c>),
+    /// native Grok (binary <c>grok</c>, not <c>grok46</c>), and the OpenCode-backed
+    /// pseudo-CLIs Glm52 / Glm53 (binary <c>opencode</c>).
     ///
     /// Must stay in step with <c>IBaseLlmCliLauncher.CliExecutable</c>, which is the same mapping
     /// expressed per-launcher for the native-terminal path. The two agree today; Antigravity is the
@@ -307,7 +376,8 @@ public class CommandService : ICommandService
     public static string ResolveCliExecutable(LLM llm) => llm switch
     {
         LLM.Antigravity => "agy",
-        LLM.Glm52 or LLM.Grok46 or LLM.Glm53 => "opencode",
+        LLM.Grok46 => "grok",
+        LLM.Glm52 or LLM.Glm53 => "opencode",
         _ => llm.ToString().ToLower()
     };
 
@@ -456,7 +526,10 @@ public class CommandService : ICommandService
             LLM.Copilot => (
                 SuppressCommandOutput($"copilot mcp remove {VibeRailsMcpServerName}"),
                 $"copilot mcp add {VibeRailsMcpServerName} -- {serverCommand}"),
-            LLM.OpenCode or LLM.Glm52 or LLM.Grok46 or LLM.Glm53 => (
+            LLM.Grok46 => (
+                SuppressCommandOutput($"grok mcp remove {VibeRailsMcpServerName}"),
+                $"grok mcp add --scope user {VibeRailsMcpServerName} -- {serverCommand}"),
+            LLM.OpenCode or LLM.Glm52 or LLM.Glm53 => (
                 null,
                 $"{openCodeExecutable} mcp add {VibeRailsMcpServerName} -- {serverCommand}"),
             _ => (null, null)

@@ -161,14 +161,15 @@ public class LlmProxyClaudeConfigTests : IDisposable
 
     private static CommandService CreateService(bool codexLlmProxyEnabled = false, bool claudeLlmProxyEnabled = false)
     {
-        var fileService = new Mock<IFileService>().Object;
+        var fileService = CreateFileService();
         var envService = new LlmCliEnvironmentService(
-            new ClaudeLlmCliEnvironment(fileService),
-            new CodexLlmCliEnvironment(fileService),
-            new AntigravityLlmCliEnvironment(fileService),
-            new CopilotLlmCliEnvironment(fileService),
-            new OpencodeLlmCliEnvironment(fileService),
-            fileService);
+            new ClaudeLlmCliEnvironment(fileService.Object),
+            new CodexLlmCliEnvironment(fileService.Object),
+            new AntigravityLlmCliEnvironment(fileService.Object),
+            new CopilotLlmCliEnvironment(fileService.Object),
+            new OpencodeLlmCliEnvironment(fileService.Object),
+            new GrokLlmCliEnvironment(fileService.Object),
+            fileService.Object);
         var proxyContext = new Mock<ILocalLlmProxyContext>();
         proxyContext.Setup(x => x.ApiBaseUrl).Returns("http://127.0.0.1:4321");
         proxyContext.Setup(x => x.SessionToken).Returns("test-session-token");
@@ -180,6 +181,27 @@ public class LlmProxyClaudeConfigTests : IDisposable
             envService,
             proxyContext.Object,
             proxySettings.Object,
-            new LlmProxySessionState());
+            new LlmProxySessionState(),
+            fileService.Object);
+    }
+
+    private static Mock<IFileService> CreateFileService()
+    {
+        var fileService = new Mock<IFileService>();
+        fileService.Setup(x => x.GetUserProfilePath()).Returns(Path.Combine(Path.GetTempPath(), "viberails-grok-tests"));
+        fileService.Setup(x => x.FileExists(It.IsAny<string>())).Returns(false);
+        fileService.Setup(x => x.DirectoryExists(It.IsAny<string>())).Returns(false);
+        fileService
+            .Setup(x => x.WriteAllTextAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<FileMode>(),
+                It.IsAny<FileShare>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        fileService
+            .Setup(x => x.ReadAllTextAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(string.Empty);
+        return fileService;
     }
 }

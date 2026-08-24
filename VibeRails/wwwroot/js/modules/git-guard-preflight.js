@@ -1,5 +1,5 @@
 export const GIT_PREFLIGHT_STEPS = Object.freeze([
-    Object.freeze({ id: 'vca', label: 'VCA rules', description: 'Validate staged changes against repository AGENTS.md rules.' }),
+    Object.freeze({ id: 'vca', label: 'VCA rules', description: 'Validate staged changes against repository vc.rules.md rules.' }),
     Object.freeze({ id: 'mintlint', label: 'MintLint', description: 'Grade added staged code and surface maintainability findings.' }),
     Object.freeze({ id: 'automated-workflows', label: 'Automated workflows', description: 'Run repository-defined commit safeguards.' })
 ]);

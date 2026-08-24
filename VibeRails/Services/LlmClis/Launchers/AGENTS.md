@@ -17,8 +17,8 @@ All launchers build commands using the unified `--env` flag:
 Only `--env` is supported for environment bootstrap mode. `ILlmParser.Parse()` does steps 1–2
 and returns `LLM.NotSet` for anything else; the caller (`CliLoop.RunTerminalWithWebAsync`) then
 performs step 3:
-1. The special-case strings `"glm-5.2"` / `"grok-4.6"` / `"glm-5.3"` (can't be a C# enum name) → OpenCode-backed
-   pseudo-CLI base launch
+1. The special-case strings `"glm-5.2"` / `"grok-4.6"` / `"glm-5.3"` (can't be a C# enum name) →
+   GLM 5.2 / GLM 5.3 are OpenCode-backed pseudo-CLI base launches; `"grok-4.6"` is the native Grok Build CLI
 2. If it matches an LLM enum name (claude/codex/antigravity/copilot/shell/opencode, case-insensitive)
    → base CLI launch
 3. Otherwise → custom environment name, looked up in DB via `FindEnvironmentByNameAsync()`
@@ -36,18 +36,20 @@ IBaseLlmCliLauncher (Interface)
     │       ├── CodexLlmCliLauncher    → CODEX_HOME
     │       ├── AntigravityLlmCliLauncher → (none — launch-flag-only)
     │       ├── CopilotLlmCliLauncher  → (none — launch-flag-only)
+    │       ├── GrokLlmCliLauncher     → (none — launch-flag-only; never GROK_HOME)
     │       └── OpencodeLlmCliLauncher → XDG_CONFIG_HOME
     │
     └── LaunchLLMService (Orchestrator - selects launcher by LLM type)
 ```
 
-> **Pseudo-CLIs:** `LLM.Glm52`, `LLM.Grok46`, and `LLM.Glm53` (OpenCode launched with a pinned `--model` flag)
+> **Pseudo-CLIs:** `LLM.Glm52` and `LLM.Glm53` (OpenCode launched with a pinned `--model` flag)
 > reuse `IOpencodeLlmCliLauncher`. Their binary is `opencode` (mapped in
-> `CommandService.PrepareSessionAsync`), and the model arg is injected server-side. `LLM.Shell` is a
-> plain shell terminal with no launcher (handled specially in `CommandService.PrepareSessionAsync`).
-> Grok 4.6 attaches the OpenCode Token Saver proxy: `OPENCODE_CONFIG_CONTENT` remaps the
-> `xai` provider to `/llm/xai` on the main Kestrel host (not a second listener). Auth stays
-> in OpenCode's global `auth.json`.
+> `CommandService.PrepareSessionAsync`), and the model arg is injected server-side. `LLM.Grok46`
+> is the native Grok Build CLI (`GrokLlmCliLauncher`, binary `grok`, pin `-m`/`--model=grok-4.6`).
+> `LLM.Shell` is a plain shell terminal with no launcher (handled specially in
+> `CommandService.PrepareSessionAsync`). Native Grok attaches the existing `/llm/xai` Token Saver
+> route via `GROK_CLI_CHAT_PROXY_BASE_URL` + `env_http_headers` (not a second listener, not
+> `/llm/grok`). Auth stays in the user's global `~/.grok/auth.json` / `XAI_API_KEY`.
 
 ## Launcher Implementations
 
@@ -66,6 +68,14 @@ IBaseLlmCliLauncher (Interface)
 - **Config Env Var**: none — agy is launch-flag-only. There is no verified per-environment
   config-dir env var (the Node-era Gemini CLI used XDG; the Go-based agy exposes no documented
   equivalent), so `GetEnvironmentVariables` returns an empty dictionary, like Copilot.
+
+### GrokLlmCliLauncher
+- **Executable**: `grok` (not the lowercased enum `grok46`; same special case as `agy`)
+- **Config Env Var**: none — launch-flag-only. Do **not** set `GROK_HOME` (that isolates `auth.json`).
+- **Proxy**: `GROK_CLI_CHAT_PROXY_BASE_URL` + `GROK_MODELS_BASE_URL` → `{apiBase}/llm/xai/v1`.
+  Session/tab headers via `env_http_headers` in `~/.grok/config.toml` (names only).
+- **YOLO**: `--yolo`. **Model pin**: `--model=grok-4.6`. **Initial prompt**: trailing positional
+  (never `-p`, which is headless). **MCP**: `grok mcp remove` + `grok mcp add --scope user`.
 
 ### OpencodeLlmCliLauncher
 - **Executable**: `opencode` (== enum name lowercased; no remap needed, unlike `agy`)

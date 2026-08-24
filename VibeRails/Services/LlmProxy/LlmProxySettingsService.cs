@@ -53,6 +53,9 @@ public sealed class LlmProxySettingsService(
             LlmProxyProvider.Claude => configured.ClaudeTokenSaverEnabled,
             LlmProxyProvider.Codex => configured.CodexTokenSaverEnabled,
             LlmProxyProvider.OpenCode => configured.OpenCodeTokenSaverEnabled,
+            // Native Grok minify runs the cli-chat composite (Responses + Chat Completions
+            // shapes) against the plan's GrokAllowlist.
+            LlmProxyProvider.Grok => configured.GrokTokenSaverEnabled,
             // No proxied launch in this process. Reachable in the root/dashboard backend, which
             // hosts no tab's relay: report "on" if anything is configured on, since the honest
             // answer is that this process is not the one compressing anything.
@@ -79,10 +82,12 @@ public sealed class LlmProxySettingsService(
         var claudeSaver = settings.ClaudeTokenSaverEnabled;
         var codexSaver = settings.CodexTokenSaverEnabled ?? settings.ClaudeTokenSaverEnabled;
         var openCodeSaver = settings.OpenCodeTokenSaverEnabled ?? settings.ClaudeTokenSaverEnabled;
+        var grokSaver = settings.GrokTokenSaverEnabled ?? openCodeSaver;
         // Launch injection is a per-session decision. Once an OpenCode terminal has received the
         // local base URL, keep its authenticated relay alive until that terminal exits even if the
         // global launch toggle changes in the meantime. A later terminal still reads the new value.
         var openCodeProxyEnabled = settings.OpenCodeLlmProxyEnabled || openCodeProxyActive;
+        var grokProxyEnabled = settings.GrokLlmProxyEnabled || openCodeProxyActive;
 
         // A pause suppresses only the saver, never the relay: the proxy must keep routing,
         // authenticating and exchange-logging exactly as before, and a paused request is simply
@@ -97,9 +102,13 @@ public sealed class LlmProxySettingsService(
             CodexTokenSaverEnabled: !tokenSaverPaused && settings.CodexLlmProxyEnabled && codexSaver,
             OpenCodeTokenSaverEnabled: !tokenSaverPaused && openCodeProxyEnabled && openCodeSaver,
             TokenSaverPlan: plan,
-            TokenSaverCaptureEnabled: settings.TokenSaverCaptureEnabled)
+            TokenSaverCaptureEnabled: settings.TokenSaverCaptureEnabled,
+            GrokLlmProxyEnabled: grokProxyEnabled,
+            GrokLlmProxyMode: LlmProxyCliChatConfig.NormalizeMode(settings.GrokLlmProxyMode),
+            GrokTokenSaverEnabled: !tokenSaverPaused && grokProxyEnabled && grokSaver)
         {
-            OpenCodeLlmProxyLaunchEnabled = settings.OpenCodeLlmProxyEnabled
+            OpenCodeLlmProxyLaunchEnabled = settings.OpenCodeLlmProxyEnabled,
+            GrokLlmProxyLaunchEnabled = settings.GrokLlmProxyEnabled
         };
     }
 }

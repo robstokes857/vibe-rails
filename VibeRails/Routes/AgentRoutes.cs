@@ -9,10 +9,10 @@ namespace VibeRails.Routes;
 public static class AgentRoutes
 {
     /// <summary>
-    /// Stages an agent file after a rule edit, best-effort.
+    /// Stages a rule file after a rule edit, best-effort.
     ///
     /// The edit is already durable on disk by the time this runs, so a staging problem must
-    /// never fail the request: a non-Git project, or an agent file outside the repository, is
+    /// never fail the request: a non-Git project, or a rule file outside the repository, is
     /// an ordinary setup rather than a client error, and reporting one as a failure would
     /// leave the caller showing a rule it had in fact already removed.
     ///
@@ -44,7 +44,7 @@ public static class AgentRoutes
 
     public static void Map(WebApplication app)
     {
-        // PUT /api/v1/agents/name - Update agent custom name
+        // PUT /api/v1/agents/name - Update a rule file's custom display name
         app.MapPut("/api/v1/agents/name", async (
             IRepository repository,
             UpdateAgentNameRequest request,
@@ -62,7 +62,7 @@ public static class AgentRoutes
 
             if (!File.Exists(request.Path))
             {
-                return Results.NotFound(new ErrorResponse($"Agent file not found: {request.Path}"));
+                return Results.NotFound(new ErrorResponse($"Rule file not found: {request.Path}"));
             }
 
             await repository.SetAgentCustomNameAsync(request.Path, request.CustomName, cancellationToken);
@@ -70,7 +70,7 @@ public static class AgentRoutes
             return Results.Ok(new UpdateAgentNameResponse(request.Path, request.CustomName));
         }).WithName("UpdateAgentName");
 
-        // GET /api/v1/agents - List all agent files with their rules
+        // GET /api/v1/agents - List all rule files with their rules
         app.MapGet("/api/v1/agents", async (
             IAgentFileService agentService,
             IRepository repository,
@@ -96,7 +96,7 @@ public static class AgentRoutes
             return Results.Ok(new AgentFileListResponse(agents));
         }).WithName("GetAgents");
 
-        // GET /api/v1/agents/rules?path={path} - Get a specific agent's rules
+        // GET /api/v1/agents/rules?path={path} - Get a specific rule file's rules
         app.MapGet("/api/v1/agents/rules", async (
             IAgentFileService agentService,
             IRepository repository,
@@ -105,7 +105,7 @@ public static class AgentRoutes
         {
             if (string.IsNullOrEmpty(path) || !File.Exists(path))
             {
-                return Results.NotFound(new ErrorResponse($"Agent file not found: {path}"));
+                return Results.NotFound(new ErrorResponse($"Rule file not found: {path}"));
             }
 
             var rules = await agentService.GetRulesWithEnforcementAsync(path, cancellationToken);
@@ -120,18 +120,18 @@ public static class AgentRoutes
             ));
         }).WithName("GetAgentRules");
 
-        // POST /api/v1/agents - Create new agent file
+        // POST /api/v1/agents - Create a new rule file
         app.MapPost("/api/v1/agents", async (
             IAgentFileService agentService,
             CreateAgentRequest request,
             CancellationToken cancellationToken) =>
         {
-            // Agent files are git-gated for now (listing via GetAgentFiles already is),
+            // Rule files are git-gated for now (listing via GetAgentFiles already is),
             // so block creation when not in a git repo to avoid orphan files the UI
             // then refuses to display.
             if (!Utils.ParserConfigs.GetIsInGit())
             {
-                return Results.BadRequest(new ErrorResponse("Agent files require a git repository"));
+                return Results.BadRequest(new ErrorResponse("Rule files require a git repository"));
             }
 
             if (string.IsNullOrEmpty(request.Path))
@@ -141,7 +141,7 @@ public static class AgentRoutes
 
             if (File.Exists(request.Path))
             {
-                return Results.BadRequest(new ErrorResponse("Agent file already exists at this path"));
+                return Results.BadRequest(new ErrorResponse("Rule file already exists at this path"));
             }
 
             try
@@ -171,7 +171,7 @@ public static class AgentRoutes
             ));
         }).WithName("CreateAgent");
 
-        // POST /api/v1/agents/rules - Add rule with enforcement to agent file
+        // POST /api/v1/agents/rules - Add a rule with enforcement to a rule file
         app.MapPost("/api/v1/agents/rules", async (
             IAgentFileService agentService,
             IGitService gitService,
@@ -181,7 +181,7 @@ public static class AgentRoutes
         {
             if (string.IsNullOrEmpty(request.Path) || !File.Exists(request.Path))
             {
-                return Results.NotFound(new ErrorResponse($"Agent file not found: {request.Path}"));
+                return Results.NotFound(new ErrorResponse($"Rule file not found: {request.Path}"));
             }
 
             try
@@ -210,7 +210,7 @@ public static class AgentRoutes
             }
         }).WithName("AddAgentRules");
 
-        // DELETE /api/v1/agents/rules - Delete rules from agent file
+        // DELETE /api/v1/agents/rules - Delete rules from a rule file
         app.MapDelete("/api/v1/agents/rules", async (
             IAgentFileService agentService,
             IGitService gitService,
@@ -220,7 +220,7 @@ public static class AgentRoutes
         {
             if (string.IsNullOrEmpty(request.Path) || !File.Exists(request.Path))
             {
-                return Results.NotFound(new ErrorResponse($"Agent file not found: {request.Path}"));
+                return Results.NotFound(new ErrorResponse($"Rule file not found: {request.Path}"));
             }
 
             // Decided before the edit: afterwards our own change is an unstaged difference.
@@ -249,7 +249,7 @@ public static class AgentRoutes
         {
             if (string.IsNullOrEmpty(request.Path) || !File.Exists(request.Path))
             {
-                return Results.NotFound(new ErrorResponse($"Agent file not found: {request.Path}"));
+                return Results.NotFound(new ErrorResponse($"Rule file not found: {request.Path}"));
             }
 
             var enforcement = EnforcementParser.Parse(request.Enforcement);
@@ -267,7 +267,7 @@ public static class AgentRoutes
             ));
         }).WithName("UpdateRuleEnforcement");
 
-        // GET /api/v1/agents/content?path={path} - Get raw agent file content
+        // GET /api/v1/agents/content?path={path} - Get raw rule file content
         app.MapGet("/api/v1/agents/content", async (
             IAgentFileService agentService,
             string path,
@@ -280,26 +280,26 @@ public static class AgentRoutes
 
             try
             {
-                // GetAgentFileContentAsync validates path is a real agent file
+                // GetAgentFileContentAsync validates that the path is a real rule file
                 var content = await agentService.GetAgentFileContentAsync(path, cancellationToken);
                 return Results.Ok(new AgentFileContentResponse(content));
             }
             catch (UnauthorizedAccessException ex)
             {
-                return Results.BadRequest(new ErrorResponse($"Invalid agent file: {ex.Message}"));
+                return Results.BadRequest(new ErrorResponse($"Invalid rule file: {ex.Message}"));
             }
             catch (FileNotFoundException)
             {
-                return Results.NotFound(new ErrorResponse($"Agent file not found: {path}"));
+                return Results.NotFound(new ErrorResponse($"Rule file not found: {path}"));
             }
             catch (Exception ex)
             {
-                return Results.BadRequest(new ErrorResponse($"Failed to read agent file: {ex.Message}"));
+                return Results.BadRequest(new ErrorResponse($"Failed to read rule file: {ex.Message}"));
             }
         }).WithName("GetAgentFileContent");
 
-        // GET /api/v1/agents/files?path={path} - Get files on disk that this agent covers
-        // An agent.md covers all files in its directory tree, except files claimed by a deeper agent.md
+        // GET /api/v1/agents/files?path={path} - Get files on disk that this rule file covers
+        // A vc.rules.md covers all files in its directory tree, except files claimed by a deeper vc.rules.md
         app.MapGet("/api/v1/agents/files", async (
             IAgentFileService agentService,
             string path,
@@ -312,7 +312,7 @@ public static class AgentRoutes
 
             if (!File.Exists(path))
             {
-                return Results.NotFound(new ErrorResponse($"Agent file not found: {path}"));
+                return Results.NotFound(new ErrorResponse($"Rule file not found: {path}"));
             }
 
             try
@@ -323,7 +323,7 @@ public static class AgentRoutes
                     return Results.BadRequest(new ErrorResponse("Could not determine directory for the given path"));
                 }
 
-                // Find all other agent.md files to determine subdirectories that are claimed by deeper agents
+                // Find all other vc.rules.md files to determine subdirectories that are claimed by deeper rule files
                 var allAgentFiles = await agentService.GetAgentFiles(cancellationToken);
                 var deeperAgentDirs = allAgentFiles
                     .Select(a => Path.GetDirectoryName(Path.GetFullPath(a)))
@@ -333,14 +333,13 @@ public static class AgentRoutes
                     .Cast<string>()
                     .ToList();
 
-                // Enumerate all files in this agent's directory
+                // Enumerate all files in this rule file's directory
                 var allFiles = Directory.EnumerateFiles(agentDir, "*.*", SearchOption.AllDirectories)
                     .Where(f =>
                     {
                         var name = Path.GetFileName(f);
-                        // Skip agent.md files themselves
-                        if (name.Equals("agent.md", StringComparison.OrdinalIgnoreCase) ||
-                            name.Equals("agents.md", StringComparison.OrdinalIgnoreCase))
+                        // Skip vc.rules.md files themselves
+                        if (name.Equals("vc.rules.md", StringComparison.OrdinalIgnoreCase))
                             return false;
 
                         // Skip files claimed by a deeper agent
@@ -360,11 +359,11 @@ public static class AgentRoutes
             }
             catch (Exception ex)
             {
-                return Results.BadRequest(new ErrorResponse($"Failed to list agent scope files: {ex.Message}"));
+                return Results.BadRequest(new ErrorResponse($"Failed to list rule-file scope: {ex.Message}"));
             }
         }).WithName("GetAgentDocumentedFiles");
 
-        // POST /api/v1/agents/validate?path={path} - Run VCA validation for a specific agent
+        // POST /api/v1/agents/validate?path={path} - Run VCA validation for a specific rule file
         app.MapPost("/api/v1/agents/validate", async (
             IRuleValidationService validationService,
             IAgentFileService agentService,
@@ -374,7 +373,7 @@ public static class AgentRoutes
         {
             if (string.IsNullOrEmpty(path) || !File.Exists(path))
             {
-                return Results.NotFound(new ErrorResponse($"Agent file not found: {path}"));
+                return Results.NotFound(new ErrorResponse($"Rule file not found: {path}"));
             }
 
             var rootPath = await gitService.GetRootPathAsync(cancellationToken);
@@ -392,7 +391,7 @@ public static class AgentRoutes
             var rules = await agentService.GetRulesWithEnforcementAsync(path, cancellationToken);
             if (rules.Count == 0)
             {
-                return Results.Ok(new ValidationResponse(true, "No VCA rules defined in this agent", new List<ValidationResultResponse>()));
+                return Results.Ok(new ValidationResponse(true, "No VCA rules defined in this rule file", new List<ValidationResultResponse>()));
             }
 
             var rulesWithSource = rules

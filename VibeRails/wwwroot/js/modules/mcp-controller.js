@@ -183,6 +183,26 @@ export class McpController {
         ].join('');
     }
 
+    /**
+     * The behavior hints the server advertises for this tool. An unspecified hint is left out
+     * rather than filled in: the protocol's own defaults ("assume destructive", "assume not
+     * idempotent") are what a client should apply, not a claim the server actually made.
+     */
+    toolBadges(tool) {
+        const hints = tool.annotations;
+        if (!hints) return '';
+        const badges = [];
+        if (hints.readOnly === true) badges.push(['ok', 'Read-only']);
+        else if (hints.destructive === true) badges.push(['bad', 'Destructive']);
+        else if (hints.destructive === false) badges.push(['', 'Writes']);
+        if (hints.idempotent === true) badges.push(['', 'Repeat-safe']);
+        if (hints.openWorld === true) badges.push(['', 'Reaches outside']);
+        if (!badges.length) return '';
+        return `<div class="mcp-badges">${badges
+            .map(([tone, label]) => `<span class="mcp-badge ${tone}">${esc(label)}</span>`)
+            .join('')}</div>`;
+    }
+
     renderLocalToolDetail() {
         this.disposeRenderedResults();
         const detail = this.nodes.toolDetail;
@@ -207,6 +227,7 @@ export class McpController {
                     <div class="mcp-kicker">${tool.category === 'python-script' ? 'Python script tool' : 'Tool'}</div>
                     <h5>${esc(tool.name)}</h5>
                     ${tool.sourceName ? `<div class="mcp-source"><i class="fa-brands fa-python" aria-hidden="true"></i>${esc(tool.sourceName)}</div>` : ''}
+                    ${this.toolBadges(tool)}
                     <p>${esc(tool.description || tool.title || 'No description')}</p>
                 </div>
                 <button class="mcp-button primary" data-mcp-call type="button"><i class="fas fa-play"></i><span>Call</span></button>

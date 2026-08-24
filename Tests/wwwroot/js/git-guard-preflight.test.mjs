@@ -83,7 +83,7 @@ test('preflight reducer tracks staged files, fixed steps, and final commit decis
             details: { stagedFileCount: '2', stagedFiles: 'src/a.cs\nsrc/<unsafe>.js' }
         },
         { type: 'step_started', stepId: 'vca', sequence: 2, status: 'running', message: 'VCA rules' },
-        { type: 'step_output', stepId: 'vca', sequence: 3, status: 'running', message: 'Validated AGENTS.md' },
+        { type: 'step_output', stepId: 'vca', sequence: 3, status: 'running', message: 'Validated vc.rules.md' },
         {
             type: 'step_finished', stepId: 'vca', sequence: 4, status: 'passed',
             message: 'VCA passed.', durationMs: 31, blocking: true
@@ -103,7 +103,7 @@ test('preflight reducer tracks staged files, fixed steps, and final commit decis
     assert.equal(state.runId, 'run-1');
     assert.deepEqual(state.staged, { count: 2, files: ['src/a.cs', 'src/<unsafe>.js'] });
     assert.equal(state.steps.vca.status, 'passed');
-    assert.equal(state.steps.vca.output, 'Validated AGENTS.md');
+    assert.equal(state.steps.vca.output, 'Validated vc.rules.md');
     assert.equal(state.steps.mintlint.status, 'warning');
     assert.equal(state.status, 'blocked');
     assert.equal(state.commitAllowed, false);

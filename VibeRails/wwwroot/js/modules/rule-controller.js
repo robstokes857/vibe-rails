@@ -1467,7 +1467,7 @@ export class RuleController {
         const active = manager?.getActiveTab?.();
         const brief = String(this.lastVcaFixBrief || '').trim();
         const prompt = brief
-            ? `Fix the following VCA validation findings. Respect the repository's AGENTS.md instructions and run the relevant tests when finished.\n\n${brief}`
+            ? `Fix the following VCA validation findings. Respect the repository's AGENTS.md instructions and vc.rules.md policies, and run the relevant tests when finished.\n\n${brief}`
             : '';
         if (prompt && active?.instance?.injectText?.(prompt)) {
             active.instance.focusInput?.();

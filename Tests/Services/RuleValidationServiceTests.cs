@@ -44,7 +44,7 @@ namespace Tests.Services
         public async Task ValidateWithSourceAsync_FileLockUsesTheAgentDirectoryAsItsBase()
         {
             var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "rule-validation-locks"));
-            var source = Path.Combine(root, "nested", "AGENTS.md");
+            var source = Path.Combine(root, "nested", "vc.rules.md");
 
             var result = await _service.ValidateWithSourceAsync(
                 ["nested/config/settings.json", "outside.txt"],
@@ -63,7 +63,7 @@ namespace Tests.Services
         public async Task ValidateWithSourceAsync_DirectoryLockIsPathBoundaryAware()
         {
             var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "rule-validation-locks"));
-            var source = Path.Combine(root, "AGENTS.md");
+            var source = Path.Combine(root, "vc.rules.md");
 
             var result = await _service.ValidateWithSourceAsync(
                 ["locked-old/file.txt"],

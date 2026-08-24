@@ -87,7 +87,7 @@ The extension integrates with VibeRails agent system:
 - **Rules**: Per-agent behavioral rules and constraints
 - **History**: Session tracking and management
 
-Agent files (`agent.md`/`agents.md`) and their rules live in the **project (git repository) root**, not under `~/.vibe_rails/`. Environments, session history (`state.db`), and sandboxes are stored under `~/.vibe_rails/`.
+Rule files (`vc.rules.md`) live in the **project (git repository)**, not under `~/.vibe_rails/`. Environments, session history (`state.db`), and sandboxes are stored under `~/.vibe_rails/`.
 
 ---
 

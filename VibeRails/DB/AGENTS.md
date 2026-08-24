@@ -132,7 +132,7 @@ existence in another project is not itself disclosed.
 | 5 | Shell | Plain shell terminal — no AI agent; spawns a real OS shell |
 | 6 | OpenCode | Binary is `opencode`; config isolation via `XDG_CONFIG_HOME` |
 | 7 | Glm52 | Pseudo-CLI: OpenCode launched with a pinned `--model` flag. `LlmParser` special-cases the string `"glm-5.2"` |
-| 8 | Grok46 | Pseudo-CLI: OpenCode launched with `--model=xai/grok-4.6`. `LlmParser` special-cases the string `"grok-4.6"`. Token Saver rides the OpenCode proxy's <c>xai</c> override (`/llm/xai` → `api.x.ai`). |
+| 8 | Grok46 | Native Grok Build CLI. Binary is `grok` (not `grok46`). `LlmParser` special-cases the string `"grok-4.6"`. Token Saver reuses `/llm/xai` → `api.x.ai` (same OpenCode proxy flag). Do not set `GROK_HOME`. |
 | 9 | Glm53 | Pseudo-CLI: OpenCode launched with `--model=zai-coding-plan/glm-5.3` (glm-5.3 exists only under the `zai-coding-plan` provider). `LlmParser` special-cases the string `"glm-5.3"`. Traffic goes direct to Z.AI — the OpenCode proxy does not remap `zai-coding-plan`. |
 
 **Key operations:**
@@ -309,11 +309,11 @@ rows with a NULL owner, so a released workspace simply reappears there.
 
 ### Business Logic
 
-**AgentMetadata** stores user-assigned display names for agent files (e.g., `AGENTS.md` files found in repositories).
+**AgentMetadata** stores user-assigned display names for rule files (`vc.rules.md` files found in repositories).
 
 | Rule | Details |
 |---|---|
-| **Keyed by path** | Each agent file is identified by its absolute filesystem path. |
+| **Keyed by path** | Each rule file is identified by its absolute filesystem path. |
 | **Upsert behavior** | Setting a custom name for a path that already has one overwrites the previous name. |
 | **Path normalization** | Paths are normalized via `Path.GetFullPath()` before storage to ensure consistent lookups. |
 
@@ -887,8 +887,6 @@ ChatSummary               TokenSavings / CompressionCaptures
 - Most methods are `async` with `CancellationToken` support (some session/user-input methods omit it)
 - Each method opens its own `SqliteConnection` — no shared connection or unit of work
 - Reader mapping is **positional** (column index), not by column name
-
-## Vibe Rails Rules
 
 ---
 
