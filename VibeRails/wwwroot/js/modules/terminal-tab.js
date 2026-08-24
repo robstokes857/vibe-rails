@@ -1,4 +1,5 @@
 import { VibeTerminal } from './vibe-terminal.js';
+import { translateOpenCodeMouseWheel } from './terminal-opencode-wheel.js';
 
 const RESIZE_PREFIX = '__resize__:';
 
@@ -139,38 +140,11 @@ export class TerminalTab {
     }
 
     _translateOpenCodeMouseWheel(data) {
-        // OpenCode's TUI (and the OpenCode-backed Glm52 / Glm53 pseudo-CLIs)
-        // intermittently routes SGR mouse wheel events to the input history
-        // (cycling previous prompts) instead of the chat viewport. Once the
-        // textarea grabs the events, the focus sticks and the user can't
-        // scroll the chat at all. Root cause is opentui's hit-test routing
-        // (upstream bug: anomalyco/opencode#35295), with mouse tracking still
-        // on — a routing/state issue, not a mode toggle.
-        //
-        // NOTE (2026-07-26): that "mouse tracking stays on" premise holds for
-        // THIS variant only. There is a second one with identical symptoms where
-        // tracking is genuinely off (our reconnect snapshot used to disable it),
-        // so xterm.js emits cursor-up/down instead of SGR and this function is a
-        // no-op on them. Fixed server-side in TerminalGridSerializer; do not
-        // widen this translation to cover arrow keys. See TERMINAL.md
-        // "## 2026-07-26 GLM 5.2 wheel acts like a held up-arrow".
-        //
-        // Translate wheel events to PageUp/PageDown, which OpenCode
-        // binds to messages_page_up/messages_page_down — works regardless of
-        // where opentui's hit-test routes the mouse event. Only SGR wheel
-        // events (button 64/65, mode 1006) are translated; clicks/drags pass
-        // through untouched. See runbooks/terminal/TERMINAL.md "OpenCode
-        // mouse wheel" entry.
-        const cli = (this.state.cli || '').toLowerCase();
-        if (cli !== 'opencode' && cli !== 'glm-5.2' && cli !== 'glm-5.3') {
-            return data;
-        }
-        if (typeof data !== 'string' || data.indexOf('\x1b[<6') === -1) {
-            return data;
-        }
-        return data
-            .replace(/\x1b\[<64;\d+;\d+M/g, '\x1b[5~')   // wheel up  → PageUp
-            .replace(/\x1b\[<65;\d+;\d+M/g, '\x1b[6~');  // wheel down → PageDown
+        return translateOpenCodeMouseWheel(data, {
+            cli: this.state.cli,
+            cols: this.vibeTerminal?.cols ?? 0,
+            rows: this.vibeTerminal?.rows ?? 0
+        });
     }
 
     ensureTerminal() {

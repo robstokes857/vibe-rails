@@ -33,8 +33,9 @@ function launcherItemIcon(item) {
 }
 
 /**
- * Nav-bar Automation launcher: a flyout on the nav "Launch" button listing the
- * project's automations and the Python scripts (run-now on click; unsigned scripts are
+ * Nav-bar Automation launcher: a flyout on the play half of the merged Automation
+ * nav entry, listing the project's automations and the Python scripts (run-now on
+ * click; unsigned scripts are
  * shown disabled until they are signed on the Automation page), plus a customization
  * modal giving each entry an order and show/hide switch — the same treatment Custom
  * Environments get in the LLM launch pickers. Preferences are server-persisted per
@@ -125,8 +126,17 @@ export class AutomationNavLauncher {
             // A confirmDialog overlay owns Escape while it is up (see utils.js).
             if (isConfirmDialogOpen()) return;
             if (event.key === 'Escape') {
-                event.preventDefault();
-                this.closeFlyout({ restoreFocus: true });
+                // Only claim the key while the flyout (or its trigger) owns focus. A
+                // script run now adopts its tab in place and focuses the terminal with
+                // the flyout still open — Escape there is the terminal's interrupt
+                // key, so the flyout tidies itself away without stealing the keystroke
+                // or yanking focus back to the nav.
+                if (this._flyoutOwnsFocus()) {
+                    event.preventDefault();
+                    this.closeFlyout({ restoreFocus: true });
+                } else {
+                    this.closeFlyout();
+                }
                 return;
             }
             this._handleFlyoutNavigation(event);
@@ -237,7 +247,10 @@ export class AutomationNavLauncher {
     }
 
     _position(triggerElement, flyout) {
-        const rect = triggerElement?.getBoundingClientRect?.();
+        // Anchor to the whole merged Automation nav entry (the play trigger is only
+        // its narrow right half), so the flyout lines up with the item, not a sliver.
+        const anchor = triggerElement?.closest?.('.app-subnav-split') || triggerElement;
+        const rect = anchor?.getBoundingClientRect?.();
         if (!rect) return;
         const inSidebar = Boolean(triggerElement.closest?.('.app-sidebar'));
         // Measure after render so clamping uses the real size.

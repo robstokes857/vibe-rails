@@ -261,14 +261,17 @@ test('arrow keys, Home and End cycle through the rows and footer buttons', (t) =
     assert.equal(press('Tab'), false);
 });
 
-test('flyout keyboard contract: menu roles, focus hand-off, Escape restores the trigger', () => {
+test('flyout keyboard contract: menu roles, focus hand-off, Escape restores the trigger while the flyout owns focus', () => {
     const source = readFileSync(modulePath, 'utf8');
 
     // Footer buttons are part of the menu, so the arrow-key cycle reaches them.
     assert.equal((source.match(/automation-launch-footer-btn" role="menuitem"/g) || []).length, 2);
     // Opening hands focus to the first reachable item; Escape hands it back.
     assert.match(source, /await this\._loadPreferences\(\);\s*this\._renderFlyoutItems\(\);\s*\/\/[^\n]*\n\s*this\._focusFlyoutItem\(\);/);
-    assert.match(source, /if \(event\.key === 'Escape'\) \{\s*event\.preventDefault\(\);\s*this\.closeFlyout\(\{ restoreFocus: true \}\);/);
+    // Escape restores the trigger only while the flyout owns focus; when a script
+    // run has adopted its tab in place and the terminal has focus, the flyout closes
+    // without stealing the keystroke (Escape is the terminal's interrupt key there).
+    assert.match(source, /if \(this\._flyoutOwnsFocus\(\)\) \{\s*event\.preventDefault\(\);\s*this\.closeFlyout\(\{ restoreFocus: true \}\);\s*\} else \{\s*this\.closeFlyout\(\);\s*\}/);
     assert.match(source, /this\._handleFlyoutNavigation\(event\);/);
     // The confirm overlay still owns Escape while it is up.
     assert.match(source, /if \(isConfirmDialogOpen\(\)\) return;\s*if \(event\.key === 'Escape'\)/);

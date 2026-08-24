@@ -1,5 +1,19 @@
 # TERMINAL.md
 
+> ## 🟡 Fixed, awaiting Rob's test — OpenCode right-pane TUI scrollbar is inert (2026-08-24)
+>
+> The 2026-07-21 wheel→PageUp rewrite threw away SGR coordinates on **every**
+> OpenCode wheel, so opentui could not hit-test the session sidebar / other
+> right-hand scrollboxes. Chat still scrolled; the painted scrollbar on the
+> right did not. Clicks were never rewritten — if those were also dead, that
+> is the 2026-07-26 mouse-tracking-off variant, not this one.
+>
+> Fix: keep PageUp/PageDown on the left chat + bottom input rows; pass
+> through `ESC[<64/65;col;rowM` when the wheel is over the right pane
+> (col > 62% of width) and not in the bottom 8 rows. Frontend-only
+> (`terminal-opencode-wheel.js`). Full entry:
+> **"## 2026-08-24 OpenCode right-pane scrollbar…"** below.
+
 > ## 🟡 Fixed, awaiting Rob's test — Codex Shift+Enter still a no-op after the LF attempt (2026-08-22)
 >
 > Session `52795214` falsified the 2026-08-21 "raw LF = Ctrl+J = insert_newline"
@@ -213,6 +227,81 @@
 > nothing. Harmless to leave in (and may help once Claude Code's
 > wrapping is fixed upstream), but it's belt-only — not the
 > suspenders. Full triage below.
+
+## 2026-08-24 OpenCode right-pane TUI scrollbar is inert — 2026-07-21 rewrite stole its coordinates
+
+**Status:** 🟡 **FIXED IN THE OPENCODE WHEEL TRANSLATION — AWAITING ROB'S TEST.**
+Frontend-only (`terminal-tab.js` → `terminal-opencode-wheel.js`). Chrome refresh
+or webview reload is enough when `vb` is serving this tree; a published VSIX
+needs a rebuild because it ships wwwroot. Do **not** mark closed until Rob
+confirms.
+
+**This is not the 2026-07-26 click-dead variant.** That one turns mouse tracking
+off on reconnect, so xterm never emits SGR and the translation is a no-op.
+This one is the opposite: tracking is on, we *were* eating the SGR wheels.
+
+### Symptom
+
+OpenCode paints a scrollbox on the right (session sidebar, or another TUI
+screen with a scrollbar on its right edge). Wheel over that pane does not
+move it. Chat on the left still pages. Session debug will not show this —
+wheels are not `UserInputs`, and the rewrite is input-side.
+
+### Cause
+
+`_translateOpenCodeMouseWheel` (2026-07-21) rewrote every
+`ESC[<64/65;col;rowM` to PageUp/PageDown so OpenCode's
+`messages_page_up`/`page_down` would scroll the chat no matter where
+opentui's hit-test landed (upstream [anomalyco/opencode#35295](https://github.com/anomalyco/opencode/issues/35295)).
+The documented trade-off was "mouse-position-based scrolling is lost." That
+only considered chat vs the prompt textarea. The session sidebar (and any
+other right-hand scrollbox) needs the original coordinates.
+
+Clicks/drags were never rewritten. "Can't click the bar" after a reconnect
+is still 2026-07-26.
+
+### Fix
+
+Same OpenCode / `glm-5.2` / `glm-5.3` gate. Same "only buttons 64/65" gate.
+New geometry split, using xterm's live `cols`/`rows`:
+
+| Wheel is over | Action |
+|---|---|
+| Left pane (col ≤ 62% of width) | PageUp / PageDown (2026-07-21 unchanged) |
+| Bottom 8 rows, any column | PageUp / PageDown (full-width input when the sidebar is collapsed) |
+| Right pane, above the input | **pass through** the original SGR event |
+| Unknown geometry (`cols`/`rows` 0) | translate everything (old, safe default) |
+
+Clicks, drags, and non-OpenCode CLIs are still untouched. Arrow-key fallback
+is still not widened (2026-07-26 owns that). No receive-path change, no
+`setTimeout`, no output stripping.
+
+### Regression coverage
+
+`Tests/wwwroot/js/terminal-opencode-wheel.test.mjs` — left→PageUp, right
+mid-pane kept, right input-row still translated, glm wire names, Claude/Codex/
+Grok no-op, clicks/keystrokes unchanged, missing geometry falls back. Run:
+`node --test Tests/wwwroot/js/terminal-opencode-wheel.test.mjs`.
+
+### Rob's check
+
+1. Reload the OpenCode tab (Chrome refresh, or VS Code webview reload).
+2. Hover the **left** chat and wheel — chat must still page; prompt history
+   must not cycle.
+3. Hover the **right** sidebar (or any TUI screen with a right-hand scrollbar)
+   and wheel — that pane must move.
+4. If the bar is also unclickable after a tab reconnect, that is 2026-07-26
+   (still awaiting its own test), not a failure of this change.
+
+### Discriminator
+
+Wheel over the right pane and read the bytes leaving `onData`:
+
+- `\e[<65;col;rowM` with a high `col` → this fix is live.
+- `\e[6~` on that same hover → old rewrite still loaded (stale JS).
+- `\e[B` / `\eOA` → mouse tracking off; 2026-07-26, do not touch this file.
+
+---
 
 ## 2026-08-22 Codex Shift+Enter still a no-op: raw LF is ConPTY Ctrl+Enter
 
@@ -1343,6 +1432,11 @@ _translateOpenCodeMouseWheel(data) {
 }
 ```
 
+> **2026-08-24:** the live implementation is `translateOpenCodeMouseWheel` in
+> `terminal-opencode-wheel.js`. It still does this rewrite on the left/chat and
+> the bottom input rows; it no longer rewrites the right-hand TUI pane. The
+> snippet above is the 2026-07-21 original.
+
 **Scope/guardrails:**
 - **OpenCode / Glm52 / Glm53 only.** Other CLIs (Claude, Codex, Copilot,
   Antigravity, native Grok) handle mouse wheel correctly; do not extend this to them. Gated
@@ -1368,12 +1462,12 @@ _translateOpenCodeMouseWheel(data) {
   so they see the original `data` unchanged — no behavior change for typing
   detection or status transitions.
 
-**Trade-off:** mouse-position-based scrolling is lost (wheel always scrolls the
-chat, even when hovering over the input textarea). Acceptable because (a) the
-native behavior was already broken intermittently, (b) the input textarea rarely
-needs wheel scroll (multi-line inputs are the only case, and arrow keys work),
-(c) OpenCode's `messages_page_up`/`page_down` keybinds are the documented way to
-scroll the chat — we're just routing the wheel to them.
+**Trade-off (narrowed 2026-08-24):** mouse-position-based scrolling is still
+lost on the **left** chat and the bottom input rows — wheel there is still
+PageUp/PageDown. It is **no longer** lost on the right-hand TUI pane (session
+sidebar / dialog scrollbars): those SGR wheels pass through with coordinates.
+See **"## 2026-08-24 OpenCode right-pane scrollbar…"**. Do not revert to
+rewriting every wheel.
 
 **Verification:** session `8d181d25-a5b8-462e-b7dc-d9ac910d00c1` is a "good"
 session (scroll worked) — mouse tracking modes 1000/1002/1003/1006 confirmed

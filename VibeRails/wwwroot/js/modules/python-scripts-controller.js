@@ -519,7 +519,7 @@ export class PythonScriptsController {
             this.app.showError(error?.message || 'Could not create the script.');
             return null;
         }
-        this.app.showToast('Script created', `${name} is ready to edit.`, 'success');
+        this.app.showToast('Script created', `${name} is ready to edit.`, 'success', { compact: true });
         return name;
     }
 
@@ -601,7 +601,7 @@ export class PythonScriptsController {
                 `${API}/content?name=${encodeURIComponent(name)}`, 'GET', null,
                 { showLoading: false, preferErrorResponseMessage: true });
             await this.createScript(copyName, source.content);
-            this.app.showToast('Script duplicated', `${copyName} is ready to edit.`, 'success');
+            this.app.showToast('Script duplicated', `${copyName} is ready to edit.`, 'success', { compact: true });
             return copyName;
         } catch (error) {
             this.app.showError(error?.message || 'Could not duplicate the script.');
@@ -636,7 +636,7 @@ export class PythonScriptsController {
                     : configuration);
             this._applyState(nextState);
             this.lastRunByName.delete(name);
-            this.app.showToast('Script renamed', `${name} is now ${newName}.`, 'success');
+            this.app.showToast('Script renamed', `${name} is now ${newName}.`, 'success', { compact: true });
             return newName;
         } catch (error) {
             this.app.showError(error?.message || 'Could not rename the script.');
@@ -666,7 +666,7 @@ export class PythonScriptsController {
                 configuration.scriptName !== name);
             this._applyState(nextState);
             this.lastRunByName.delete(name);
-            this.app.showToast('Script deleted', `${name} is gone.`, 'info');
+            this.app.showToast('Script deleted', `${name} is gone.`, 'info', { compact: true });
             return true;
         } catch (error) {
             this.app.showError(error?.message || 'Could not delete the script.');
@@ -842,7 +842,7 @@ export class PythonScriptsController {
             this.app.showToast(
                 existing ? 'MCP tool updated' : 'Added to MCP',
                 `${request.toolName} now runs ${name} through the signed-script gate.`,
-                'success');
+                'success', { compact: true });
             return;
         }
     }
@@ -857,7 +857,7 @@ export class PythonScriptsController {
             this.mcpConfigurations = Array.isArray(response?.configurations) ? response.configurations : [];
             this._lastListHtml = null;
             this._render();
-            this.app.showToast('Removed from MCP', `${configuration.toolName} is no longer exposed.`, 'success');
+            this.app.showToast('Removed from MCP', `${configuration.toolName} is no longer exposed.`, 'success', { compact: true });
         } catch (error) {
             this.app.showError(error?.message || 'Could not remove the MCP tool.');
         }
@@ -1166,7 +1166,9 @@ export class PythonScriptsController {
         try {
             this._applyState(await this.app.apiCall(`${API}/approve`, 'POST', { name, pin },
                 { showLoading: false, preferErrorResponseMessage: true }));
-            this.app.showToast('Script signed', `${name} is approved to run.`, 'success');
+            // Compact (bottom-right): a full top-right toast sits exactly on the
+            // workbench's Run/Sign buttons — the ones wanted right after signing.
+            this.app.showToast('Script signed', `${name} is approved to run.`, 'success', { compact: true });
             return true;
         } catch (error) {
             this.app.showError(error?.message || 'Could not sign the script.');
@@ -1185,7 +1187,7 @@ export class PythonScriptsController {
         try {
             this._applyState(await this.app.apiCall(`${API}/revoke`, 'POST', { name, pin },
                 { showLoading: false, preferErrorResponseMessage: true }));
-            this.app.showToast('Signature removed', `${name} can no longer run.`, 'info');
+            this.app.showToast('Signature removed', `${name} can no longer run.`, 'info', { compact: true });
             return true;
         } catch (error) {
             this.app.showError(error?.message || 'Could not remove the signature.');
@@ -1220,17 +1222,27 @@ export class PythonScriptsController {
                 label: name,
                 title: `${name} · Python`,
                 icon: '🐍',
-                taskKey: `python-script:${name}`,
+                // NOT `python-script:${name}` — that key belongs to the script's AGENT
+                // tab (the workbench's "Ask agent"). Sharing it would make the agent
+                // flows adopt this python shell tab and paste briefs into a running script.
+                taskKey: `python-script-run:${name}`,
                 workingDirectory: this.state?.scriptsDirectory || null
             });
             this.app.showToast(
                 'Script started',
                 `${name} is running in an interactive terminal.`,
-                'success');
-            this.app.navigate?.('terminal-focus', {
-                preferredSelection: 'base:shell',
-                preferredTabId: tabId
-            });
+                'success', { compact: true });
+            // A view that already shows a terminal panel (the workbench, the Terminals
+            // page, the Code quality page) hosts the run in place — being yanked to the
+            // Terminals page with no way back was the old behavior, and from the
+            // workbench it threw the editor away. Only when no panel is on screen does
+            // the run still navigate there.
+            if (!(await this.app.terminalController?.adoptLaunchedTab?.(tabId))) {
+                this.app.navigate?.('terminal-focus', {
+                    preferredSelection: 'base:shell',
+                    preferredTabId: tabId
+                });
+            }
         } catch (error) {
             this.app.showError(error?.message || `Could not run ${name}.`);
         } finally {
@@ -1289,7 +1301,7 @@ export class PythonScriptsController {
             this._applyState(await this.app.apiCall(`${API}/pin`, 'POST',
                 { currentPin: values.currentPin || null, newPin: values.newPin },
                 { showLoading: false, preferErrorResponseMessage: true }));
-            this.app.showToast('Signing PIN saved', 'Use it to sign scripts from now on.', 'success');
+            this.app.showToast('Signing PIN saved', 'Use it to sign scripts from now on.', 'success', { compact: true });
         } catch (error) {
             this.app.showError(error?.message || 'Could not save the PIN.');
         }
@@ -1306,8 +1318,11 @@ export class PythonScriptsController {
 
     /**
      * Minimal input modal (window.prompt is banned and silently broken in the VS Code
-     * webview). Fields default to type="password" — the PIN case — and opt into "text"
-     * for names. Resolves with the field values, or null on cancel/Escape.
+     * webview). PIN fields render as CSS-masked text inputs, never type="password":
+     * Chromium offers to save any password field whose form submits and disappears
+     * (autocomplete="off" does not stop that heuristic), and the signing PIN must never
+     * land in the browser's saved passwords. Fields opt into plain "text" for names.
+     * Resolves with the field values, or null on cancel/Escape.
      */
     _promptForm({ title, body, fields, submitLabel, validate = null }) {
         this._closeModal();
@@ -1332,11 +1347,12 @@ export class PythonScriptsController {
                                     ${fields.map((field, index) => `
                                     <div class="mb-2">
                                         <label class="form-label" for="python-scripts-pin-${index}">${escapeHtml(field.label)}</label>
-                                        <input class="form-control" type="${field.type === 'text' ? 'text' : 'password'}"
+                                        <input class="form-control${field.type === 'text' ? '' : ' python-pin-input'}" type="text"
                                                id="python-scripts-pin-${index}" data-pin-field="${escapeHtml(field.key)}"
                                                value="${escapeHtml(field.value || '')}"
                                                placeholder="${escapeHtml(field.placeholder || '')}"
-                                               autocomplete="off" autocapitalize="off" spellcheck="false" required>
+                                               autocomplete="${field.type === 'text' ? 'off' : 'one-time-code'}" autocapitalize="off" spellcheck="false"
+                                               data-1p-ignore data-lpignore="true" data-bwignore required>
                                     </div>`).join('')}
                                     <div class="alert alert-danger mt-2 mb-0 d-none" role="alert" data-pin-error></div>
                                 </div>
@@ -1390,8 +1406,9 @@ export class PythonScriptsController {
             requestAnimationFrame(() => {
                 const first = layer.querySelector('[data-pin-field]');
                 first?.focus();
-                // Name fields open pre-filled with a suggestion; select it so typing replaces it.
-                if (first?.type === 'text') first.select?.();
+                // Name fields open pre-filled with a suggestion; select it so typing
+                // replaces it. Masked PIN fields are always empty — nothing to select.
+                if (first && !first.classList.contains('python-pin-input')) first.select?.();
             });
         });
     }

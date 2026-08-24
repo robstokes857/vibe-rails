@@ -388,7 +388,6 @@ export class JobController {
                                 <h3>${safeName}</h3>
                                 <span class="job-provider" data-provider="${this.escape(cli)}">${this.escape(llm)}</span>
                             </div>
-                            ${this.renderEnabledSwitch(job, jobId, safeName)}
                         </div>
                         <div class="job-card-meta">
                             <span ${environment ? '' : 'data-tone="warning"'} title="Worker"><i class="fa-solid fa-robot" aria-hidden="true"></i><span class="job-card-meta-text">${this.escape(environmentName)}</span></span>
@@ -399,6 +398,7 @@ export class JobController {
                         <p class="job-card-prompt" title="${this.escape(this.truncate(prompt, 400))}"><i class="fa-regular fa-message" aria-hidden="true"></i><span>${this.escape(prompt)}</span></p>` : ''}
                     </div>
                     <div class="job-card-actions">
+                        ${this.renderEnabledSwitch(job, jobId, safeName)}
                         <button class="btn btn-sm btn-primary" type="button" data-job-action="run" data-job-id="${jobId}" aria-label="Run ${safeName} now"><i class="fa-solid fa-play me-1" aria-hidden="true"></i>Run now</button>
                         <button class="btn btn-sm btn-outline-secondary" type="button" data-job-action="edit" data-job-id="${jobId}" aria-label="Edit ${safeName}"><i class="fa-solid fa-pen me-1" aria-hidden="true"></i>Edit</button>
                         <details class="job-more">
@@ -415,7 +415,9 @@ export class JobController {
 
     // One control carries both jobs: it reads the state (green ON / red OFF) and flips it.
     // The old pair of Pause/Enable buttons named the action instead, which meant the label
-    // said the opposite of what the automation was actually doing.
+    // said the opposite of what the automation was actually doing. It renders in the
+    // card's action row so it sits on the same line as Run now / Edit / More — floating
+    // it in the topline left it visibly off-center from the buttons it belongs with.
     renderEnabledSwitch(job, jobId, safeName) {
         const enabled = job.enabled === true;
         const title = enabled
@@ -1138,10 +1140,14 @@ export class JobController {
                 // Refresh before navigating away so the Automations list is current when the
                 // user comes back, rather than showing the run's pre-launch state.
                 await this.refreshRuns({ quiet: true });
-                this.app.navigate('terminal-focus', {
-                    preferredSelection: selection,
-                    preferredTabId: tabId
-                });
+                // A view already showing a terminal panel hosts the run in place; only
+                // when none is on screen does the run navigate to the Terminals page.
+                if (!(await this.app.terminalController?.adoptLaunchedTab?.(tabId))) {
+                    this.app.navigate('terminal-focus', {
+                        preferredSelection: selection,
+                        preferredTabId: tabId
+                    });
+                }
                 return;
             }
 
