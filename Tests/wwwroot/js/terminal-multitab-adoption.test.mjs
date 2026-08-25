@@ -14,14 +14,14 @@ function createManager({ selection = 'env:7:opencode', rememberedCli = 'opencode
         container: { isConnected: true },
         isDestroyed: () => false,
         getTabMetaFromStorage: () => ({
-            label: 'Automation',
-            taskKey: 'automation:run-1',
+            label: 'Report',
+            taskKey: 'python-script-run:report',
             customLabel: true,
             workingDirectory: 'C:/source/project'
         }),
         getTabSelectionFromStorage: () => selection,
         getSelectionMeta: () => ({ cli: rememberedCli }),
-        getTabTitleFromStorage: () => 'Automation title',
+        getTabTitleFromStorage: () => 'Report title',
         addLocalTab(tabInfo, options) {
             added.push({ tabInfo, options });
             const tab = { state: { id: tabInfo.tabId } };

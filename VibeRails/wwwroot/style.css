@@ -6634,7 +6634,7 @@ input.form-control:disabled {
 }
 
 /* Actions block — always visible at the top of the panel (not a collapsible
-   section). Hosts Multi Run / Send debug log, merged here from the old kebab. */
+   section). Hosts Multi Run, merged here from the old kebab. */
 #vb-terminal-panel .vb-terminal-settings-actions {
     display: flex;
     flex-direction: column;
@@ -16915,6 +16915,379 @@ html.sidebar-collapsed .app-sidebar .app-subnav-split .app-subnav-link {
     -webkit-text-security: disc;
 }
 
+/* ============================================================
+   The run window (python-run-window.js)
+   A signed script's inputs go in, its exit code, output and
+   return value come back — no terminal. Deliberately small: it
+   is the surface for the spaces where the full terminal panel
+   does not fit.
+
+   One idea carries the window: the COMMAND LINE. It is not a
+   picture of the run, it is the payload — .vb-run-command
+   prints the same argv array that gets posted, so what you read
+   is what runs. Cyan (--color-accent) appears there and nowhere
+   else in the window, so "the values I supplied" has exactly one
+   colour. Everything around it stays in the house greys.
+   ============================================================ */
+
+.vb-run-window .modal-dialog {
+    max-width: 640px;
+}
+
+.vb-run-window .modal-content {
+    max-height: min(88dvh, 900px);
+}
+
+.vb-run-header {
+    align-items: center;
+    padding: 0.7rem 1rem;
+}
+
+.vb-run-identity {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 0.55rem;
+}
+
+.vb-run-identity > i {
+    flex: 0 0 auto;
+    color: var(--color-text-muted, #94a3b8);
+}
+
+/* The title keeps the house treatment (uppercase mono label, see .modal-title): every
+   other dialog in the app announces itself that way, and a bespoke one here would only
+   make this window look like it came from somewhere else. */
+.vb-run-identity .modal-title {
+    overflow-wrap: anywhere;
+}
+
+.vb-run-body {
+    display: grid;
+    gap: 14px;
+    padding: 0.9rem 1rem 1rem;
+    overflow-y: auto;
+}
+
+.vb-run-problem {
+    margin: 0;
+    padding: 8px 12px;
+    font-size: 0.8rem;
+}
+
+.vb-run-section {
+    display: grid;
+    gap: 8px;
+}
+
+.vb-run-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.vb-run-section-head > h6 {
+    margin: 0;
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+}
+
+.vb-run-empty {
+    margin: 0;
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 0.8rem;
+}
+
+.vb-run-empty > code {
+    color: var(--color-text, #f8fafc);
+}
+
+/* ── Input rows ──────────────────────────────────────────────────────── */
+.vb-run-fields {
+    display: grid;
+    gap: 10px;
+}
+
+.vb-run-field {
+    display: grid;
+    gap: 4px;
+}
+
+.vb-run-field-label {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.vb-run-field-label > label {
+    margin: 0;
+    min-width: 0;
+    color: var(--color-text, #f8fafc);
+    font-size: 0.8rem;
+    font-weight: 500;
+    overflow-wrap: anywhere;
+}
+
+.vb-run-required {
+    margin-left: 2px;
+    color: var(--color-warning, #f59e0b);
+}
+
+/* How this value reaches Python: its flag, or its place in the argv order. The
+   declaration is fixed (it came from the MCP tool), so it reads, it does not edit. */
+.vb-run-shape {
+    flex: 0 0 auto;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: var(--color-bg-base, #121212);
+    color: var(--color-text-muted, #94a3b8);
+    font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+    font-size: 0.68rem;
+}
+
+.vb-run-field-hint {
+    margin: 0;
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 0.72rem;
+    line-height: 1.35;
+}
+
+.vb-run-extra-inputs {
+    display: grid;
+    grid-template-columns: minmax(0, 8rem) minmax(0, 1fr);
+    gap: 6px;
+}
+
+.vb-run-extra-flag {
+    font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+}
+
+.vb-run-remove {
+    flex: 0 0 auto;
+    padding: 0 4px;
+    border: 0;
+    background: none;
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 0.8rem;
+    line-height: 1;
+}
+
+.vb-run-remove:hover,
+.vb-run-remove:focus-visible {
+    color: var(--color-danger, #ef4444);
+}
+
+.vb-run-stdin > summary {
+    color: var(--color-text-muted, #94a3b8);
+    cursor: pointer;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+}
+
+.vb-run-stdin > textarea {
+    margin-top: 6px;
+    font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+    font-size: 0.78rem;
+}
+
+/* ── The command line ────────────────────────────────────────────────── */
+/* Pinned between the scrolling body and the footer, so the thing you are about to
+   run always sits directly above the button that runs it. */
+.vb-run-command-strip {
+    display: grid;
+    flex: 0 0 auto;
+    gap: 6px;
+    /* Opaque, with a rule above it: the body scrolls underneath, and without this the
+       last input row bleeds into the command line at the boundary. */
+    padding: 10px 1rem 2px;
+    border-top: 1px solid var(--color-border, #334155);
+    background: var(--color-bg-elevated, #232323);
+}
+
+.vb-run-command {
+    padding: 8px 10px 8px 12px;
+    border: 1px solid var(--color-border, #334155);
+    border-left: 2px solid var(--color-accent, #06b6d4);
+    border-radius: 6px;
+    background: var(--color-bg-base, #121212);
+    font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+    font-size: 0.78rem;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+
+/* A required value is still missing, so this is not yet a runnable command. */
+.vb-run-command.is-incomplete {
+    border-left-color: var(--color-warning, #f59e0b);
+    opacity: 0.72;
+}
+
+.vb-run-exec {
+    color: var(--color-text-muted, #94a3b8);
+}
+
+.vb-run-script {
+    color: var(--color-text, #f8fafc);
+}
+
+.vb-run-flag {
+    color: var(--color-text-muted, #94a3b8);
+}
+
+.vb-run-value {
+    color: var(--color-accent, #06b6d4);
+}
+
+/* ── Result ──────────────────────────────────────────────────────────── */
+.vb-run-result {
+    display: grid;
+    gap: 10px;
+}
+
+.vb-run-result:empty {
+    display: none;
+}
+
+.vb-run-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-top: 12px;
+    border-top: 1px solid var(--color-border, #334155);
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 0.76rem;
+}
+
+.vb-run-dot {
+    width: 7px;
+    height: 7px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: var(--color-text-muted, #94a3b8);
+}
+
+.vb-run-status.is-ok .vb-run-dot {
+    background: var(--color-success, #10b981);
+}
+
+.vb-run-status.is-bad .vb-run-dot {
+    background: var(--color-danger, #ef4444);
+}
+
+.vb-run-status.is-bad {
+    color: var(--color-danger, #ef4444);
+}
+
+.vb-run-status.is-waiting .vb-run-dot {
+    animation: vb-run-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes vb-run-pulse {
+    0%, 100% { opacity: 0.35; }
+    50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vb-run-status.is-waiting .vb-run-dot {
+        animation: none;
+    }
+}
+
+.vb-run-panel {
+    display: grid;
+    gap: 6px;
+}
+
+.vb-run-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.vb-run-panel-head > h6 {
+    margin: 0;
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+}
+
+.vb-run-json,
+.vb-run-output {
+    margin: 0;
+    max-height: 240px;
+    overflow: auto;
+    padding: 8px 10px;
+    border: 1px solid var(--color-border, #334155);
+    border-radius: 6px;
+    background: var(--color-bg-base, #121212);
+    font-size: 0.76rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.vb-run-output {
+    color: var(--color-text-muted, #94a3b8);
+}
+
+.vb-json-key {
+    color: var(--color-primary, #3b82f6);
+}
+
+.vb-json-number,
+.vb-json-literal {
+    color: var(--color-warning, #f59e0b);
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────── */
+.vb-run-footer {
+    gap: 8px;
+    padding: 0.6rem 1rem;
+}
+
+/* The escape hatch sits apart from the two decisions on the right. */
+.vb-run-terminal-link {
+    margin-right: auto;
+    padding-left: 0;
+    color: var(--color-text-muted, #94a3b8);
+    text-decoration: none;
+}
+
+.vb-run-terminal-link:hover,
+.vb-run-terminal-link:focus-visible {
+    color: var(--color-text, #f8fafc);
+}
+
+/* Only present when the form has arguments or stdin the PTY run cannot carry. Every colour
+   carries an explicit fallback (see the undefined-custom-property note at the top). */
+.vb-run-terminal-note {
+    margin-left: 0.35rem;
+    font-size: 0.78em;
+    font-style: italic;
+    color: var(--color-text-muted, #94a3b8);
+    opacity: 0.85;
+}
+
+@media (max-width: 540px) {
+    .vb-run-extra-inputs {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .vb-run-terminal-link {
+        margin-right: 0;
+    }
+}
+
 .python-mcp-config-body {
     display: grid;
     gap: 18px;
@@ -17207,8 +17580,9 @@ button.python-script-name:focus-visible > i {
    Python script workbench (view 'python-script')
    Back bar + script identity, a Monaco editor with a rail of all
    scripts, and the agent terminal docked with a draggable split:
-   BESIDE the editor on wide windows (>= 1180px, the terminal is the
-   right column) and UNDERNEATH it on narrower ones. Rides on the
+   BESIDE the editor (>= 880px, the terminal is the right column) and,
+   only when the window cannot hold two usable columns, UNDERNEATH it.
+   Rides on the
    .vb-rules-workspace-active flowing shell (viewport-filling, footer
    hidden, page scrolls when the panes need more room) and reuses
    .rules-section / .rules-pane-terminal / .rules-terminal-host /
@@ -17335,7 +17709,7 @@ button.python-script-name:focus-visible > i {
    only min-heights, so any intrinsic height here would push the terminal off-screen. */
 .python-workbench-rail {
     position: relative;
-    flex: 0 0 200px;
+    flex: 0 0 180px;
     min-width: 0;
     border-right: 1px solid color-mix(in srgb, var(--color-border, #334155) 60%, transparent);
     background: var(--color-bg-base, #121212);
@@ -17561,14 +17935,17 @@ button.python-script-name:focus-visible > i {
     min-height: 240px;
 }
 
-/* ── Wide windows: editor and terminal side by side ──────────────────── */
-/* Rob: "the terminal is too small… do them side by side". From 1180px up the
-   editor takes the left column and the terminal the right one, both the full
-   working height, and the splitter turns vertical (it moves the terminal's
-   width). The panes claim most of the viewport as a MINIMUM height, so a short
-   window scrolls the page instead of squeezing either pane — a terminal you
-   can actually drive an agent in beats one that fits. */
-@media (min-width: 1180px) {
+/* ── Columns: editor and terminal side by side (the default) ─────────── */
+/* Rob: "needs to be side by side and not stacked — the terminal will be too
+   small". The editor takes the left column and the terminal the right one, both
+   the full working height, and the splitter turns vertical (it moves the
+   terminal's width). 880px is the floor at which both columns still clear their
+   minimums (380 + 12 + 320), deliberately low so a docked VS Code webview gets
+   columns too; below it the panes stack. The panes claim most of the viewport as
+   a MINIMUM height, so a short window scrolls the page instead of squeezing
+   either pane — a terminal you can actually drive an agent in beats one that
+   fits. */
+@media (min-width: 880px) {
     .python-workbench-panes {
         display: grid;
         grid-template-columns: minmax(0, 1fr) 12px var(--python-workbench-terminal-width, 46%);
@@ -17610,7 +17987,7 @@ button.python-script-name:focus-visible > i {
    tall; a 240px terminal there leaves ~5 lines of code above it. The floor and the
    default share both drop, and python-script-workbench.js (terminalMinHeight,
    threshold 720) mirrors them so the splitter's clamp agrees with what CSS renders. */
-@media (max-height: 720px) and (max-width: 1179.98px) {
+@media (max-height: 720px) and (max-width: 879.98px) {
     .python-workbench {
         --python-workbench-terminal-height: clamp(180px, 30dvh, 34dvh);
     }
@@ -17620,8 +17997,11 @@ button.python-script-name:focus-visible > i {
     }
 }
 
-/* ── Narrow layouts: the rail becomes a chip strip above the editor ─── */
-@media (max-width: 900px) {
+/* ── Narrow editor column: the rail becomes a chip strip above it ───── */
+/* Not just for narrow windows: side by side, the editor is only part of the
+   width, so the vertical rail costs it 180px it cannot spare until the window
+   is comfortably wide. Below that the script list rides as one row of chips. */
+@media (max-width: 1100px) {
     .python-workbench-body {
         flex-direction: column;
     }

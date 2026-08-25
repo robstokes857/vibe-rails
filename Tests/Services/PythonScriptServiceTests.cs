@@ -772,6 +772,155 @@ public sealed class PythonScriptServiceTests : IDisposable
             () => service.DeleteAsync("../escape.py", TestContext.Current.CancellationToken));
     }
 
+    [Fact]
+    public async Task RunPassesArgumentsAndStandardInputThroughToPython()
+    {
+        var (service, runner) = await SignedService("args.py", "print('ok')\n");
+
+        IReadOnlyList<string>? executedArguments = null;
+        string? executedStandardInput = null;
+        runner
+            .Setup(item => item.RunAsync(
+                It.IsAny<IReadOnlyList<string>>(),
+                It.IsAny<string?>(),
+                It.IsAny<Action<string>?>(),
+                It.IsAny<Action<string>?>(),
+                It.IsAny<CancellationToken>()))
+            .Callback(new InvocationAction(invocation =>
+            {
+                executedArguments = (IReadOnlyList<string>)invocation.Arguments[0];
+                executedStandardInput = (string?)invocation.Arguments[1];
+            }))
+            .ReturnsAsync(Completed("ok"));
+
+        await service.RunAsync(
+            "args.py",
+            ["--out", "report.csv", "50"],
+            "piped text",
+            TestContext.Current.CancellationToken);
+
+        Assert.NotNull(executedArguments);
+        // The script path stays argv[0]; the caller's tokens follow it in order.
+        Assert.Equal(4, executedArguments.Count);
+        Assert.Equal(new[] { "--out", "report.csv", "50" }, executedArguments.Skip(1));
+        Assert.Equal("piped text", executedStandardInput);
+    }
+
+    [Fact]
+    public async Task RunSendsNoStandardInputWhenNoneWasSupplied()
+    {
+        var (service, runner) = await SignedService("quiet.py", "print('ok')\n");
+
+        string? executedStandardInput = "unset";
+        runner
+            .Setup(item => item.RunAsync(
+                It.IsAny<IReadOnlyList<string>>(),
+                It.IsAny<string?>(),
+                It.IsAny<Action<string>?>(),
+                It.IsAny<Action<string>?>(),
+                It.IsAny<CancellationToken>()))
+            .Callback(new InvocationAction(invocation =>
+                executedStandardInput = (string?)invocation.Arguments[1]))
+            .ReturnsAsync(Completed("ok"));
+
+        await service.RunAsync("quiet.py", arguments: null, standardInput: "", TestContext.Current.CancellationToken);
+
+        // An empty box must not open a pipe: a script blocking on stdin would hang the run.
+        Assert.Null(executedStandardInput);
+    }
+
+    [Fact]
+    public async Task RunRefusesOversizedArgumentsAndStandardInputBeforeLaunchingPython()
+    {
+        var (service, runner) = await SignedService("bounded.py", "print('ok')\n");
+
+        var tooMany = Enumerable.Range(0, 65).Select(index => index.ToString()).ToList();
+        await Assert.ThrowsAsync<PythonScriptValidationException>(
+            () => service.RunAsync("bounded.py", tooMany, null, TestContext.Current.CancellationToken));
+
+        await Assert.ThrowsAsync<PythonScriptValidationException>(
+            () => service.RunAsync(
+                "bounded.py", [new string('x', 8_001)], null, TestContext.Current.CancellationToken));
+
+        await Assert.ThrowsAsync<PythonScriptValidationException>(
+            () => service.RunAsync(
+                "bounded.py", null, new string('x', 256_001), TestContext.Current.CancellationToken));
+
+        // Rejected before the interpreter is touched at all.
+        runner.Verify(
+            item => item.RunAsync(
+                It.IsAny<IReadOnlyList<string>>(),
+                It.IsAny<string?>(),
+                It.IsAny<Action<string>?>(),
+                It.IsAny<Action<string>?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Theory]
+    // The whole of stdout is a return value…
+    [InlineData("{\"rows\": 2}", "{\"rows\": 2}")]
+    [InlineData("  [1, 2]  ", "[1, 2]")]
+    // …and so is the last line, so a script can log freely and still return something.
+    [InlineData("scanning\ndone\n{\"rows\": 3}\n", "{\"rows\": 3}")]
+    [InlineData("scanning\r\n{\"ok\": true}\r\n", "{\"ok\": true}")]
+    // A scalar, prose, or broken JSON is output — not a return value.
+    [InlineData("42", null)]
+    [InlineData("\"done\"", null)]
+    [InlineData("true", null)]
+    [InlineData("all finished\n", null)]
+    [InlineData("{oops", null)]
+    [InlineData("{\"a\": 1}\ntrailing prose", null)]
+    [InlineData("", null)]
+    [InlineData(null, null)]
+    public void ExtractReturnJsonTakesObjectsAndArrays(string? standardOutput, string? expected)
+    {
+        Assert.Equal(expected, PythonScriptService.ExtractReturnJson(standardOutput));
+    }
+
+    [Fact]
+    public async Task RunReportsTheScriptsReturnValueAlongsideItsOutput()
+    {
+        var (service, runner) = await SignedService("report.py", "print('x')\n");
+        runner
+            .Setup(item => item.RunAsync(
+                It.IsAny<IReadOnlyList<string>>(),
+                It.IsAny<string?>(),
+                It.IsAny<Action<string>?>(),
+                It.IsAny<Action<string>?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Completed("scanning 3 files\n{\"rows\": 3, \"path\": \"out.csv\"}\n"));
+
+        var result = await service.RunAsync("report.py", TestContext.Current.CancellationToken);
+
+        Assert.Equal("{\"rows\": 3, \"path\": \"out.csv\"}", result.ReturnJson);
+        // The log the script printed on its way there is still all there.
+        Assert.Contains("scanning 3 files", result.StandardOutput);
+    }
+
+    private static PythonResult Completed(string standardOutput) => new()
+    {
+        ExitCode = 0,
+        StandardOutput = standardOutput,
+        StandardError = "",
+        RunTime = TimeSpan.FromMilliseconds(9),
+        Executable = "python",
+        CommandLine = "python script.py"
+    };
+
+    /// <summary>A service whose <paramref name="name"/> is written, PIN-configured and signed.</summary>
+    private async Task<(PythonScriptService Service, Mock<IPythonRunner> Runner)> SignedService(
+        string name, string content)
+    {
+        var service = NewService(out var runner);
+        WriteScript(name, content);
+        await service.SetPinAsync(
+            new SetPythonScriptPinRequest(null, "1234"), TestContext.Current.CancellationToken);
+        await service.ApproveAsync(
+            new PythonScriptApprovalRequest(name, "1234"), TestContext.Current.CancellationToken);
+        return (service, runner);
+    }
+
     private PythonScriptService NewService(out Mock<IPythonRunner> runner)
     {
         runner = new Mock<IPythonRunner>(MockBehavior.Loose);

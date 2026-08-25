@@ -37,11 +37,15 @@ public static class PythonScriptRoutes
             ExecuteAsync(() => service.RevokeAsync(request, cancellationToken)))
             .WithName("RevokePythonScript");
 
+        // Captured run: argv and stdin in, exit code + output + return value out. This is
+        // what the run window drives; /run/interactive below is the same script in a PTY
+        // for the cases that need typing or Ctrl+C.
         app.MapPost("/api/v1/python-scripts/run", (
             IPythonScriptService service,
             PythonScriptRunRequest request,
             CancellationToken cancellationToken) =>
-            ExecuteAsync(() => service.RunAsync(request.Name, cancellationToken)))
+            ExecuteAsync(() => service.RunAsync(
+                request.Name, request.Arguments, request.StandardInput, cancellationToken)))
             .WithName("RunPythonScript");
 
         app.MapGet("/api/v1/python-scripts/mcp", (

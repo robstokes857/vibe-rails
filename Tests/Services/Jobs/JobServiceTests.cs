@@ -286,8 +286,11 @@ public sealed class JobServiceTests : IDisposable
             Times.Never);
     }
 
+    // A manual run must reach the SAME launcher a scheduled run does - the one that opens the
+    // Automation's own native terminal window. Reserving the row here instead (which is how the
+    // run was handed to a Web UI terminal tab) is the regression this pins.
     [Fact]
-    public async Task RunNow_ReservesTheRunForAnInteractiveTab_InsteadOfKickingNativeLauncher()
+    public async Task RunNow_QueuesForTheNativeLauncher_WithoutReservingTheRun()
     {
         _store
             .Setup(s => s.GetJobAsync(7, It.IsAny<CancellationToken>()))
@@ -295,48 +298,16 @@ public sealed class JobServiceTests : IDisposable
         _store
             .Setup(s => s.EnqueueManualRunAsync(7, It.IsAny<CancellationToken>()))
             .ReturnsAsync("manual-run");
-        _store
-            .Setup(s => s.TryMarkLaunchedAsync("manual-run", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(true);
         _executableResolver.Setup(r => r.Resolve(LLM.Claude)).Returns("claude");
 
         var response = await Service().RunNowAsync(7, TestContext.Current.CancellationToken);
 
         Assert.Equal("manual-run", response.RunId);
-        Assert.Contains("starting", response.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("queued", response.Message, StringComparison.OrdinalIgnoreCase);
+        _scheduler.Verify(s => s.Kick(), Times.Once);
         _store.Verify(
-            s => s.TryMarkLaunchedAsync("manual-run", It.IsAny<CancellationToken>()),
-            Times.Once);
-        _scheduler.Verify(s => s.Kick(), Times.Never);
-    }
-
-    [Fact]
-    public async Task RunNow_WhenInteractiveReservationFails_FinalizesTheQueuedRun()
-    {
-        _store
-            .Setup(s => s.GetJobAsync(7, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Record() with { Id = 7 });
-        _store
-            .Setup(s => s.EnqueueManualRunAsync(7, CancellationToken.None))
-            .ReturnsAsync("manual-run");
-        _store
-            .Setup(s => s.TryMarkLaunchedAsync("manual-run", CancellationToken.None))
-            .ReturnsAsync(false);
-        _executableResolver.Setup(r => r.Resolve(LLM.Claude)).Returns("claude");
-
-        var error = await Assert.ThrowsAsync<JobServiceException>(() =>
-            Service().RunNowAsync(7, TestContext.Current.CancellationToken));
-
-        Assert.Equal(409, error.StatusCode);
-        _store.Verify(
-            s => s.CompleteRunAsync(
-                "manual-run",
-                JobRunStatus.Failed,
-                null,
-                It.Is<string>(message => message.Contains("reserve", StringComparison.OrdinalIgnoreCase)),
-                CancellationToken.None),
-            Times.Once);
-        _scheduler.Verify(s => s.Kick(), Times.Never);
+            s => s.TryMarkLaunchedAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     private JobService Service() => new(

@@ -349,8 +349,7 @@ Flow:
 
 Stop:
 - `POST /api/v1/terminal/stop`
-- allowed when web-owned; an externally-owned interactive Automation maps Stop to its durable
-  Job cancellation flag, while other CLI-owned sessions still reject it
+- allowed when web-owned; CLI-owned sessions reject it
 
 ### 2) CLI-owned session with web viewer
 Entry:
@@ -361,21 +360,23 @@ Flow:
 2. `RegisterExternalTerminal(...)` exposes same PTY to local web viewer endpoint
 3. on CLI exit: `UnregisterTerminalAsync()` closes local viewer socket if connected
 
-### 3) Interactive manual Automation
+### 3) Automation (Job) run — always a native terminal window
 Entry:
-- `POST /api/v1/jobs/{id}/run` in `Routes/JobRoutes.cs`
+- `POST /api/v1/jobs/{id}/run` (manual), `POST /api/v1/jobs/runs/{runId}/retry`, or a due trigger
 
 Flow:
-1. `JobService.RunNowAsync` enqueues the manual run and marks its launch reserved so the scheduler
-   cannot race it into a native terminal.
-2. `TerminalTabHostService.CreateAutomationTabAsync` resolves the Worker's workspace and starts a
-   hidden child with `--env-id ... --job-run ... --vs-code-v1 --parent-pid ...`.
-3. The child prints its one-time bootstrap URL before entering `JobRunner`; the parent authenticates
-   and proxies the ordinary terminal-tab WebSocket.
-4. `JobRunner` still owns claim, timeout, cancellation, idle completion, session linking, and final
-   history status. The hidden child omits `ConsoleOutputConsumer`; xterm is its renderer and input.
-5. Closing/stopping the tab sets the run's cancellation flag and gives `JobRunner` time to record
-   `Cancelled` before the parent uses its normal hard-kill fallback.
+1. `JobService` enqueues the run and calls `IJobScheduler.Kick()`. It never claims the row itself.
+2. `JobSchedulerHostedService` (lease owner) drains the queue through `JobLaunchService`, which
+   claims each run and calls `IEnvironmentLaunchService.LaunchAsync` — the exact pipeline behind
+   the Environment screen's launch button, plus `--job-run <id>` and the optional `--max-runtime`.
+3. That opens a real OS terminal window running `vb --env … --job-run …`, which takes case (2)
+   above: `JobRunner` owns claim, timeout, cancellation, idle completion, session linking, and the
+   final history status, and `ConsoleOutputConsumer` renders the PTY into that window.
+
+There is deliberately no Web-UI-hosted variant. An Automation is an Environment on a timer, so it
+runs where the user can see and drive it — in its own terminal window — and `MaxConcurrentJobTerminals`
+is what bounds how many can be open at once. `TerminalTabHostService` has no Automation entry point.
+Hosting an Automation in a tab has been built once and deliberately removed; do not re-add it.
 
 ### 4) Interactive signed Python script
 

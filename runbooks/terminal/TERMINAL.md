@@ -1675,10 +1675,10 @@ interleaved echo out of the hold — not by filtering bytes.
    not be renamed or hidden. The shell carve-out lives in
    `SHELL_THINKING_TEXT` / `_statusTextFor()`; the strings are now pinned by
    unit tests. State machine untouched throughout.
-5. **Kebab (⋮) menu merged into settings.** Multi Run + Send debug log now sit
-   in an always-visible Actions block at the top of the settings panel (same
-   `terminal-multirun-btn`/`terminal-senddebug-btn` ids; Playwright specs
-   updated). `renderTerminalMenuHtml` deleted; the `TerminalMenu` class stays
+5. **Kebab (⋮) menu merged into settings.** Multi Run now sits in an
+   always-visible Actions block at the top of the settings panel (same
+   `terminal-multirun-btn` id; Playwright specs updated).
+   `renderTerminalMenuHtml` deleted; the `TerminalMenu` class stays
    (download menu still uses it).
 6. **Focus-view history sidebar: collapsed state rebuilt as a clean rail.**
    The old collapse kept the full 268px sidebar sliding under the terminal

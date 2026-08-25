@@ -17,9 +17,10 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | [js/modules/sandbox-controller.js](js/modules/sandbox-controller.js) | Sandbox CRUD + launch terminals/VS Code into sandbox dirs |
 | [js/modules/dashboard-controller.js](js/modules/dashboard-controller.js) | Dashboard layout with state passing for preselection |
 | [js/modules/code-analyzer-dashboard.js](js/modules/code-analyzer-dashboard.js) | Interactive MintLint scan dashboard with Monaco code evidence for the Rules page |
-| [js/modules/jobs-controller.js](js/modules/jobs-controller.js) | Automation page: automation CRUD + inline editor, run history, "Run now" into a terminal tab (`launchFromNav` for the nav launcher); owns the shared `PythonScriptsController` |
+| [js/modules/jobs-controller.js](js/modules/jobs-controller.js) | Automation page: automation CRUD + inline editor, run history, "Run now" (queues a native terminal run; `launchFromNav` for the nav launcher); owns the shared `PythonScriptsController` |
 | [js/modules/python-scripts-controller.js](js/modules/python-scripts-controller.js) | "Python scripts" section of the Automation page + shared lifecycle flows; also owns the PIN-gated MCP switch/configurator and typed parameter-to-argv mapping fields |
-| [js/modules/python-script-workbench.js](js/modules/python-script-workbench.js) | `python-script` view: Monaco editor over a docked agent terminal for one script (see "Python script workbench" below) |
+| [js/modules/python-script-workbench.js](js/modules/python-script-workbench.js) | `python-script` view: Monaco editor beside a docked agent terminal for one script (see "Python script workbench" below) |
+| [js/modules/python-run-window.js](js/modules/python-run-window.js) | The little run window: typed inputs + free arguments + stdin in, exit code / output / return value out, no terminal (see "Python script run window" below) |
 | [js/modules/automation-launcher.js](js/modules/automation-launcher.js) | Nav "Launch" flyout (automations + Python scripts, unsigned ones disabled) and its order/show-hide customize modal over `/api/v1/automation-nav/preferences` |
 
 ## Reusable local File Explorer
@@ -184,11 +185,10 @@ History remains unfiltered so launch preferences never hide historical sessions.
 
 Both base CLI and custom environment launches share one unified tab API; the only difference is whether `environmentName` is included in the start body.
 
-Automation's manual **Run now** also lands in this terminal surface, but the backend creates that
-tab because it must spawn a `JobRunner` child rather than an ordinary blank terminal child. The
-response carries `tabId`; `jobs-controller.js` stores the Worker's selection + Automation label in
-the normal per-tab session metadata, then navigates to `terminal-focus` with `preferredTabId`.
-Scheduled/commit/retry runs remain native background launches.
+Automations never land in this terminal surface. Every Automation run — manual **Run now**, retry,
+schedule, commit trigger — is launched by the backend scheduler into its own native OS terminal
+window, so `runNow` just POSTs, toasts and refreshes the run history. Python scripts are the
+exception that does use tabs (see the interactive-script flow).
 
 ### Flow: "Web UI" Button
 
@@ -265,24 +265,59 @@ See also: [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for back
   splitter (`role="separator"`, Arrow keys ±24px); and the agent terminal
   (`renderTerminalPanel({ workingDirectory })` + `bindTerminalActions(host, null,
   { defaultWorkingDirectory: scriptsDirectory })`, so sessions start in the **scripts
-  directory**, not the project root). **Wide windows (≥ 1180px, `isSideBySideLayout()`
-  = the CSS `@media (min-width: 1180px)`) put the terminal BESIDE the editor** as a grid
-  column whose width the (now vertical) splitter sets — `--python-workbench-terminal-width`,
-  persisted in localStorage `viberails.pythonWorkbench.terminalWidth`, ArrowLeft/Right —
-  and the panes claim most of the viewport as a minimum height so a short window scrolls
-  the page instead of squeezing either pane. **Narrower windows stack** the terminal under
-  the editor (horizontal splitter, `--python-workbench-terminal-height`, localStorage
+  directory**, not the project root). **Side by side is the layout**: from 880px up
+  (`isSideBySideLayout()` = the CSS `@media (min-width: 880px)`) the terminal is a grid
+  column BESIDE the editor, full working height, and the (vertical) splitter sets its
+  width — `--python-workbench-terminal-width`, persisted in localStorage
+  `viberails.pythonWorkbench.terminalWidth`, ArrowLeft/Right. The panes claim most of the
+  viewport as a minimum height so a short window scrolls the page instead of squeezing
+  either pane. 880px is the floor at which both columns clear their minimums
+  (`EDITOR_MIN_WIDTH` 380 + 12 + `TERMINAL_MIN_WIDTH` 320) and is deliberately low so a
+  docked VS Code webview still gets columns; **only below it do the panes stack**
+  (horizontal splitter, `--python-workbench-terminal-height`, localStorage
   `viberails.pythonWorkbench.terminalHeight`, ArrowUp/Down; the floor drops to 180px on
-  viewports ≤ 720px tall). The shell class `vb-rules-workspace-active` is applied to this
-  view too.
+  viewports ≤ 720px tall). The script rail collapses to a chip strip under 1100px, because
+  side by side the editor column cannot spare 180px for it. The shell class
+  `vb-rules-workspace-active` is applied to this view too.
 - **Shared flows**: signing (PIN prompt), revoke, rename, delete, duplicate, copy path,
   run and `saveContent` are public methods on `PythonScriptsController`
   (`app.jobController.pythonScripts`) that work unmounted; the workbench follows list
-  updates through `onStateChange`. Run calls `/api/v1/python-scripts/run/interactive`; the
-  backend verifies the signature, creates a shell tab, and invokes the verified-byte helper
-  inside its PTY. The controller records the tab metadata and opens `terminal-focus`, so Python
-  stdin, prompts, live output, and Ctrl+C remain interactive. The older captured-output `/run`
-  endpoint remains available to non-UI callers.
+  updates through `onStateChange`. There are two run paths, and both refuse an unsigned or
+  unsaved script:
+  - **Run** (primary everywhere) → `PythonScriptsController.run(name)` → the run window
+    below. Captured, no terminal.
+  - **Run in terminal…** (kebab menu, and the run window's footer) →
+    `runInTerminal(name, button)` → `/api/v1/python-scripts/run/interactive`: the backend
+    verifies the signature, creates a shell tab and invokes the verified-byte helper inside
+    its PTY, so stdin, prompts, live output and Ctrl+C stay interactive. The tab is adopted
+    in place when a terminal panel is already on screen, otherwise `terminal-focus` opens.
+
+## Python script run window
+
+- **Module** `js/modules/python-run-window.js` (`PythonRunWindow`); one instance lives on
+  `PythonScriptsController.runWindow`, so the Automation row, the workbench and the nav
+  Launch flyout all drive the same surface. Styles: the "The run window" block in
+  `style.css` (`.vb-run-*`). It is the small-space answer to the interactive tab — inputs,
+  output and return value in one modal, nothing spawned.
+- **Inputs**. A script exposed to MCP has already declared its parameters (name, type,
+  required, default, positional-or-`--flag`); those render as typed fields with a locked
+  shape chip. Any script can also take free **argument** rows (optional flag + value) and
+  a **Standard input** box. Everything typed is remembered per script in localStorage
+  `viberails.pythonRun.<name>`, so re-running is one click. A script that declares nothing
+  and remembers nothing **runs the moment the window opens**.
+- **The command line** under the inputs is the payload, not a picture of it: `resolveArgv()`
+  builds one array, the window prints it and posts it, so a preview cannot drift from what
+  runs. It mirrors `PythonScriptMcpService.BuildArguments` (positional values in order,
+  then named options; a false boolean option is the absence of its flag), so a script
+  behaves the same whether a human or an agent calls it.
+- **Output**. `POST /api/v1/python-scripts/run` with `{ name, arguments, standardInput }`
+  returns exit code, duration, stdout/stderr and `returnJson` — the JSON object or array
+  the script printed as the whole of stdout or on its last line
+  (`PythonScriptService.ExtractReturnJson`; a bare scalar is output, not a return value).
+  The window shows **Returned** (pretty-printed, copyable) only when there is one, then
+  **Output**. Argv and stdin are bounded server-side (64 args, 8k chars each, 256k stdin).
+  The result also lands in the row's last-run drawer through `recordRun`.
+- **Keys**: Escape closes, Ctrl/⌘+Enter runs from anywhere including the stdin box.
 - **MCP exposure**: each script row has an MCP switch. Enabling/editing opens a PIN-gated dialog
   for tool name, usage description, and zero or more typed parameters (required/default plus
   positional or named-option argv mapping). Enabled tools render under a separate **Python script
@@ -307,4 +342,4 @@ See also: [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for back
 
 ---
 
-*Last checked: 2026-08-11T00:00:00Z by claude (opus-5)*
+*Last checked: 2026-08-25T00:00:00Z by claude (opus-5)*

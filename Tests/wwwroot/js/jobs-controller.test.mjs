@@ -1404,21 +1404,26 @@ test('Toggling an automation flips its switch before the request and restores it
     assert.equal(button.disabled, false);
 });
 
-test('Run now opens the tracked Automation in its interactive terminal tab', async () => {
-    const remembered = [];
+// An Automation runs in its own native terminal window, never in a Web UI terminal tab, so
+// Run now must not claim a tab, adopt one into the current view, or navigate to Terminals.
+test('Run now queues the Automation without claiming a Web UI terminal tab', async () => {
+    const tabCalls = [];
     const navigations = [];
+    const toasts = [];
     const app = createApp();
     app.data = { configs: { rootPath: '/repo' }, isInGit: true };
-    app.apiCall = async () => ({
-        success: true,
-        message: 'Automation started in an interactive terminal.',
-        runId: 'run-123',
-        tabId: 'tab-456'
-    });
+    app.apiCall = async (path, method) => {
+        if (path === '/api/v1/jobs/7/run' && method === 'POST') {
+            return { success: true, message: 'Automation queued.', runId: 'run-123' };
+        }
+        return { runs: [] };
+    };
     app.terminalController = {
-        rememberTabLaunch(tabId, metadata) { remembered.push({ tabId, metadata }); }
+        rememberTabLaunch(...args) { tabCalls.push(['rememberTabLaunch', ...args]); },
+        adoptLaunchedTab(...args) { tabCalls.push(['adoptLaunchedTab', ...args]); return true; }
     };
     app.navigate = (view, data) => navigations.push({ view, data });
+    app.showToast = (title, body) => toasts.push({ title, body });
 
     const controller = new JobController(app);
     controller.jobs = [{ id: 7, name: 'Nightly review', environmentId: 42 }];
@@ -1426,14 +1431,9 @@ test('Run now opens the tracked Automation in its interactive terminal tab', asy
 
     await controller.runNow(7, null);
 
-    assert.equal(remembered.length, 1);
-    assert.equal(remembered[0].tabId, 'tab-456');
-    assert.equal(remembered[0].metadata.selection, 'env:42:codex');
-    assert.equal(remembered[0].metadata.taskKey, 'automation:run-123');
-    assert.deepEqual(navigations, [{
-        view: 'terminal-focus',
-        data: { preferredSelection: 'env:42:codex', preferredTabId: 'tab-456' }
-    }]);
+    assert.deepEqual(tabCalls, []);
+    assert.deepEqual(navigations, []);
+    assert.deepEqual(toasts, [{ title: 'Automation', body: 'Automation queued.' }]);
 });
 
 test('Environment UI groups robot-marked Workers below regular Environments', () => {

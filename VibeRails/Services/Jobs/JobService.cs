@@ -95,28 +95,17 @@ public sealed class JobService(
         if (executableResolver.Resolve(job.Llm) is null)
             throw JobServiceException.BadRequest($"The {job.Llm} CLI is not available on PATH.");
 
-        // Enqueue + reservation are one logical commit point. Once validation has completed, do
-        // not let RequestAborted split them and leave either an unreserved manual run for the
-        // native scheduler or a reserved run that the route never gets a chance to clean up.
+        // Once validation has completed, do not let RequestAborted abandon a half-enqueued run.
         cancellationToken.ThrowIfCancellationRequested();
         var runId = await store.EnqueueManualRunAsync(id, CancellationToken.None)
             ?? throw JobServiceException.Conflict("The Automation could not be queued.");
 
-        // Manual runs are handed directly to an interactive Web UI terminal by JobRoutes. Mark
-        // the launch before that potentially-slow terminal bootstrap so the background scheduler
-        // cannot race it and open a second native terminal for the same run.
-        if (!await store.TryMarkLaunchedAsync(runId, CancellationToken.None))
-        {
-            await store.CompleteRunAsync(
-                runId,
-                JobRunStatus.Failed,
-                null,
-                "The Automation could not reserve an interactive terminal.",
-                CancellationToken.None);
-            throw JobServiceException.Conflict("The Automation could not reserve an interactive terminal.");
-        }
-
-        return new JobActionResponse(true, "Automation is starting.", runId);
+        // Every Automation run - manual, retried or scheduled - is launched the same way: the
+        // scheduler claims the queued row and JobLaunchService opens a real OS terminal window for
+        // it. Kick only wakes that loop early; it deliberately does NOT reserve the run here, so
+        // there is exactly one launcher and one kind of window an Automation can run in.
+        scheduler.Kick();
+        return new JobActionResponse(true, "Automation queued.", runId);
     }
 
     public async Task<JobRunListResponse> GetRunsAsync(long? jobId, int limit, CancellationToken cancellationToken = default)

@@ -17,10 +17,6 @@ export function renderTerminalSettingsPanelHtml() {
                         <i class="fa-solid fa-layer-group" aria-hidden="true"></i>
                         <span>Multi Run</span>
                     </button>
-                    <button type="button" class="vb-terminal-settings-action-btn" id="terminal-senddebug-btn">
-                        <i class="fa-solid fa-bug" aria-hidden="true"></i>
-                        <span>Send debug log</span>
-                    </button>
                 </div>
                 <div class="vb-terminal-settings-section open" data-settings-section="theme">
                     <button type="button" class="vb-terminal-settings-section-title" id="terminal-settings-section-theme" aria-expanded="true" aria-controls="terminal-settings-section-theme-content" data-settings-toggle="theme">
@@ -190,10 +186,6 @@ export class TerminalSettings {
         this._container.querySelector('#terminal-multirun-btn')?.addEventListener('click', () => {
             this.togglePanel(false);
             this._manager._showMultiRunModal();
-        });
-        this._container.querySelector('#terminal-senddebug-btn')?.addEventListener('click', () => {
-            this.togglePanel(false);
-            this._manager._sendDebugLog();
         });
 
         this._fontSizeInput?.addEventListener('change', (e) => {

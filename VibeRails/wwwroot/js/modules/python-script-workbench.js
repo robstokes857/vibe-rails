@@ -9,12 +9,15 @@ const VIEW_NAME = 'python-script';
 export const TERMINAL_HEIGHT_STORAGE_KEY = 'viberails.pythonWorkbench.terminalHeight';
 export const TERMINAL_WIDTH_STORAGE_KEY = 'viberails.pythonWorkbench.terminalWidth';
 export const TERMINAL_MIN_HEIGHT = 240;
-// Wide windows put the editor and the terminal SIDE BY SIDE (Rob: "the terminal is too
-// small… do them side by side"): the splitter turns vertical and sets the terminal's
-// width instead. The CSS media query on .python-workbench-panes uses the same threshold.
-export const SIDE_BY_SIDE_MIN_VIEWPORT_WIDTH = 1180;
-export const TERMINAL_MIN_WIDTH = 360;
-export const EDITOR_MIN_WIDTH = 440;
+// Side by side is THE layout: editor left, terminal right, both the full working height
+// (Rob: "needs to be side by side and not stacked — the terminal will be too small").
+// Stacking is only the fallback for a window too narrow to hold two usable columns, so
+// this threshold sits just above EDITOR_MIN_WIDTH + TERMINAL_MIN_WIDTH + the splitter
+// rather than at a comfortable desktop width — a docked VS Code webview must still get
+// columns. The CSS media query on .python-workbench-panes uses the same number.
+export const SIDE_BY_SIDE_MIN_VIEWPORT_WIDTH = 880;
+export const TERMINAL_MIN_WIDTH = 320;
+export const EDITOR_MIN_WIDTH = 380;
 // Short viewports (a docked VS Code webview, a laptop with the panel maximised) trade
 // terminal rows for code lines; the CSS media query below the workbench block uses
 // the same threshold and floor so what the splitter allows matches what CSS renders.
@@ -132,6 +135,7 @@ export class PythonScriptWorkbench {
         this._running = false;
         this._generation = 0;
         this._loadToken = null;
+        this._unsubscribeRun = null;
         // The in-flight Monaco mount: overlapping loads (a rail click during the first
         // open) share it instead of each creating an editor in the same host.
         this._editorMounting = null;
@@ -218,6 +222,7 @@ export class PythonScriptWorkbench {
 
         const scripts = this.scripts;
         this._unsubscribeState = scripts?.onStateChange?.((state) => this._onSharedStateChange(state)) || null;
+        this._unsubscribeRun = scripts?.onRunChanged?.((name) => this._onRunChanged(name)) || null;
         this._removeNavigationGuard = this.app.registerNavigationGuard?.(
             (payload) => this._guardNavigation(payload)) || null;
         window.addEventListener('beforeunload', this._onBeforeUnload);
@@ -266,6 +271,8 @@ export class PythonScriptWorkbench {
         this._removeNavigationGuard = null;
         this._unsubscribeState?.();
         this._unsubscribeState = null;
+        this._unsubscribeRun?.();
+        this._unsubscribeRun = null;
         this._unwatchLayoutMedia();
         if (typeof window !== 'undefined') {
             window.removeEventListener('beforeunload', this._onBeforeUnload);
@@ -419,7 +426,8 @@ export class PythonScriptWorkbench {
         if (action !== 'menu') this._closeMenu();
         switch (action) {
             case 'menu': return this._toggleMenu(button);
-            case 'run': return void this.run(button);
+            case 'run': return void this.run();
+            case 'run-terminal': return void this.runInTerminal(button);
             case 'approve': return void this.sign();
             case 'revoke': return void this.revoke();
             case 'save': return void this.save();
@@ -522,18 +530,42 @@ export class PythonScriptWorkbench {
         if (menu) menu.innerHTML = this.renderMenuItems();
     }
 
+    /**
+     * A captured run outlives its little window — close the window mid-run and the interpreter
+     * keeps going — so the button follows the controller's runningNames, not the window. The
+     * old early-return on _running left it enabled and titled as if nothing were happening;
+     * it was only ever hidden by the modal on top of it.
+     */
     _renderRunAvailability() {
         const run = this.root?.querySelector('[data-workbench-action="run"]');
-        // The shared run flow owns the button (spinner + disabled) while a run is in flight.
-        if (!run || this._running) return;
+        if (!run) return;
+        const running = this._running || this.scripts?.runningNames?.has(this.name) === true;
         const dirty = this.isDirty;
-        const canRun = this.status === 'approved' && !dirty;
+        const canRun = this.status === 'approved' && !dirty && !running;
         run.disabled = !canRun;
-        run.title = dirty
-            ? 'Save and sign your changes before running'
-            : canRun
-                ? `Run ${this.name} now`
-                : 'Sign the script before running it';
+        run.innerHTML = running
+            ? '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Running…'
+            : '<i class="fa-solid fa-play me-1" aria-hidden="true"></i>Run';
+        run.title = running
+            ? `${this.name} is already running`
+            : dirty
+                ? 'Save and sign your changes before running'
+                : canRun
+                    ? `Run ${this.name} and read its output here`
+                    : 'Sign the script before running it';
+    }
+
+    /**
+     * A run for this script started, finished, or recorded its result. Reading lastRunByName
+     * when the window closes is too early: close it while the POST is still in flight and the
+     * result lands here afterwards, with nothing else to repaint the output panel.
+     */
+    _onRunChanged(name) {
+        if (!this.root || !name || name !== this.name) return;
+        const recorded = this.scripts?.lastRunByName?.get?.(name);
+        if (recorded) this.lastRun = recorded;
+        this._renderRunAvailability();
+        this._renderOutput();
     }
 
     renderMenuItems() {
@@ -543,6 +575,7 @@ export class PythonScriptWorkbench {
                 <i class="fa-solid ${icon}" aria-hidden="true"></i><span>${label}</span>
             </button>`;
         return [
+            this.status === 'approved' ? item('run-terminal', 'fa-terminal', 'Run in terminal…') : '',
             this.scripts?.canOpenInVsCode?.() ? item('open-vscode', 'fa-arrow-up-right-from-square', 'Open in VS Code') : '',
             item('duplicate', 'fa-copy', 'Duplicate…'),
             item('rename', 'fa-i-cursor', 'Rename…'),
@@ -1116,7 +1149,17 @@ export class PythonScriptWorkbench {
         return Boolean(await this.scripts.revoke(name));
     }
 
-    async run(button = null) {
+    /** Opens the run window over the workbench; the editor and terminal stay where they are. */
+    async run() {
+        return this._withRunnableScript((name, scripts) => scripts.run(name));
+    }
+
+    /** Hands the script to a PTY tab instead — for runs that need typing or Ctrl+C. */
+    async runInTerminal(button = null) {
+        return this._withRunnableScript((name, scripts) => scripts.runInTerminal(name, button));
+    }
+
+    async _withRunnableScript(start) {
         const name = this.name;
         const scripts = this.scripts;
         if (!name || !scripts) return null;
@@ -1128,15 +1171,21 @@ export class PythonScriptWorkbench {
             this.app.showToast('Unsaved changes', 'Save and sign the script before running it.', 'info');
             return null;
         }
+        // Covers the gap between the click and the run actually being marked running; from
+        // there on _onRunChanged drives the button, because scripts.run() resolves when the
+        // window CLOSES, which can be long before (or long after) the POST completes.
         this._running = true;
+        this._renderRunAvailability();
         let result = null;
         try {
-            result = await scripts.run(name, button);
+            result = await start(name, scripts);
         } finally {
             this._running = false;
         }
         if (name !== this.name) return result;
+        this.lastRun = scripts.lastRunByName?.get(name) || this.lastRun;
         this._renderIdentity();
+        this._renderOutput();
         return result;
     }
 

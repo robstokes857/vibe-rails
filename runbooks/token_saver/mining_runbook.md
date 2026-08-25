@@ -134,7 +134,7 @@ reproduction needed.
 
 - **This data never leaves the machine.** An exchange carries the system prompt, every user
   message, and the full contents of every file the agent read — strictly more sensitive than
-  SessionLogs. Never checked in, never off-box outside the encrypted debug bundle, and never
+  SessionLogs. Never checked in, never off-box, and never
   pasted wholesale into an LLM conversation (which is also self-defeating for a token saver).
   Reports may quote excerpts **hard-capped at ~500 chars**, and report/aggregate files live in
   gitignored locations (`*.db` and friends are already ignored repo-wide).

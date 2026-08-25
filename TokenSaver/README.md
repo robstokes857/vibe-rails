@@ -311,8 +311,7 @@ compression correct", which is not a question byte counts can answer.
   cannot make the relay retain captures without limit; overload drops diagnostics rather than
   blocking or exhausting the proxy process.
 - **Captures contain verbatim file and command output from the user's machine.** Treat
-  them exactly like `SessionLogs`: never checked in, never shipped off-box outside the
-  encrypted debug bundle.
+  them exactly like `SessionLogs`: never checked in, never shipped off-box.
 
 ## Settings
 

@@ -13,7 +13,6 @@ import { TerminalMultiRun } from './terminal-multirun.js';
 import { TerminalEditorModal } from './terminal-editor-modal.js';
 import { TerminalToast } from './terminal-toast.js';
 import { TerminalNotifications } from './terminal-notifications.js';
-import { showSendDebugLogModal } from './debug-bundle.js';
 import { resolvePromptTemplateForLaunch } from './prompt-template-modal.js';
 
 // Pending-close grace window: how long a closed tab is held in the undo
@@ -313,11 +312,6 @@ class TerminalManager {
         }
     }
 
-    _sendDebugLog() {
-        const active = this.getActiveTab();
-        showSendDebugLogModal(this.app, active?.state?.sessionId || null);
-    }
-
     bindActions() {
         this.tabAdd?.addEventListener('click', () => {
             void this.createAndActivateTab({ selection: DEFAULT_SELECTION });
@@ -364,9 +358,8 @@ class TerminalManager {
     }
 
     _mountDropdowns() {
-        // Multi Run and Send debug log moved from the old kebab (⋮) dropdown into
-        // the settings panel's Actions block — see TerminalSettings.init(), which
-        // binds them back to _showMultiRunModal / _sendDebugLog on this manager.
+        // Multi Run lives in the settings panel's Actions block — see
+        // TerminalSettings.init(), which binds it back to _showMultiRunModal.
 
         // "Open in text editor" is a top-level control button, so it gets its own
         // click handler instead of a menu item.
