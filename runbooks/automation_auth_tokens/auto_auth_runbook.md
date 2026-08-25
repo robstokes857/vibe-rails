@@ -37,7 +37,7 @@ At startup the process generates a single-use code and prints
 |---|---|---|
 | `vb` / `vb --web` / `vb --git-guard` | Human banner: `Open this URL to access the dashboard:` then the URL on its own line | Yes (`LaunchBrowser`) — waits for git detection first |
 | `vb --vs-code-v1` | Machine line, flushed immediately: `vs-code-v1=<url>` | No — best mode for scripted capture |
-| `vb --job-run … --vs-code-v1` | Same `vs-code-v1=<url>` line (child-tab bootstrap) | No |
+| `vb --job-run …` | Nothing — it goes straight into `JobRunner` in its own terminal window and never bootstraps a viewer | No |
 
 `GET` that URL **once** and the response carries everything:
 

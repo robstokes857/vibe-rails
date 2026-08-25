@@ -212,6 +212,50 @@ public sealed class PythonScriptRoutesTests : IDisposable
         }, isActiveRootBackend: false);
     }
 
+    [Fact]
+    public async Task RunCarriesArgumentsAndStandardInputThroughTheAotJsonContext()
+    {
+        // Arguments and stdin are new fields on an existing request record: they bind
+        // through the source-generated context, so a missing registration would only
+        // show up here, at runtime, as a silently empty argv.
+        var scripts = new Mock<IPythonScriptService>(MockBehavior.Loose);
+        IReadOnlyList<string>? forwardedArguments = null;
+        string? forwardedStandardInput = null;
+        scripts
+            .Setup(service => service.RunAsync(
+                It.IsAny<string?>(),
+                It.IsAny<IReadOnlyList<string>?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .Callback(new InvocationAction(invocation =>
+            {
+                forwardedArguments = (IReadOnlyList<string>?)invocation.Arguments[1];
+                forwardedStandardInput = (string?)invocation.Arguments[2];
+            }))
+            .ReturnsAsync(new PythonScriptRunResponse(
+                "report.py", 0, false, "{\"rows\": 3}", "", 12, DateTime.UtcNow.ToString("O"),
+                "{\"rows\": 3}"));
+
+        await WithHostAsync(async baseUri =>
+        {
+            using var response = await PostAsync(
+                baseUri,
+                "/api/v1/python-scripts/run",
+                new PythonScriptRunRequest("report.py", ["--out", "report.csv", "50"], "piped text"),
+                AppJsonSerializerContext.Default.PythonScriptRunRequest);
+            var body = await response.Content.ReadFromJsonAsync(
+                AppJsonSerializerContext.Default.PythonScriptRunResponse,
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            // The return value survives the round trip as its own field, not just as stdout.
+            Assert.Equal("{\"rows\": 3}", body!.ReturnJson);
+        }, pythonScripts: scripts.Object);
+
+        Assert.Equal(new[] { "--out", "report.csv", "50" }, forwardedArguments);
+        Assert.Equal("piped text", forwardedStandardInput);
+    }
+
     private static Task<HttpResponseMessage> PostAsync<TRequest>(
         Uri baseUri,
         string path,
@@ -225,13 +269,14 @@ public sealed class PythonScriptRoutesTests : IDisposable
     private async Task WithHostAsync(
         Func<Uri, Task> test,
         bool isActiveRootBackend = true,
-        ITerminalTabHostService? tabHost = null)
+        ITerminalTabHostService? tabHost = null,
+        IPythonScriptService? pythonScripts = null)
     {
         var builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
-        builder.Services.AddSingleton<IPythonScriptService>(
-            new PythonScriptService(pythonRunner: null, installDirectory: _installDirectory));
+        builder.Services.AddSingleton(pythonScripts
+            ?? new PythonScriptService(pythonRunner: null, installDirectory: _installDirectory));
         if (tabHost is not null)
             builder.Services.AddSingleton(tabHost);
         builder.Services.ConfigureHttpJsonOptions(options =>

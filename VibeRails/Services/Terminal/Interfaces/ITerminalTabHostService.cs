@@ -8,7 +8,6 @@ public interface ITerminalTabHostService
     int MaxTabs { get; }
     Task<IReadOnlyList<TerminalTabStatusResponse>> ListTabsAsync(CancellationToken cancellationToken = default);
     Task<TerminalTabStatusResponse> CreateTabAsync(CancellationToken cancellationToken = default);
-    Task<TerminalTabStatusResponse> CreateAutomationTabAsync(string runId, CancellationToken cancellationToken = default);
     Task<TerminalTabStatusResponse> CreatePythonScriptTabAsync(string name, CancellationToken cancellationToken = default);
     Task<bool> DeleteTabAsync(string tabId, CancellationToken cancellationToken = default);
     Task<TerminalStatusResponse?> GetStatusAsync(string tabId, CancellationToken cancellationToken = default);

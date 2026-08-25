@@ -172,7 +172,10 @@ test('New script and Duplicate land in the workbench for the new file', async ()
     await controller._newScriptAndOpen();
     assert.equal(app.calls[0].url, '/api/v1/python-scripts/create');
     assert.equal(app.calls[0].body.name, 'fresh.py');
-    assert.match(app.calls[0].body.content, /def main\(\)/);
+    // The starter script demonstrates both halves of the run window: argv in, and a
+    // JSON object on the last line of stdout as the return value it shows.
+    assert.match(app.calls[0].body.content, /def main\(argv: list\[str\]\) -> dict:/);
+    assert.match(app.calls[0].body.content, /print\(json\.dumps\(main\(sys\.argv\[1:\]\)\)\)/);
     assert.deepEqual(app.navigations.at(-1), { view: 'python-script', data: { name: 'fresh.py' }, options: {} });
 
     await controller._duplicateAndOpen('nightly.py');
@@ -534,7 +537,7 @@ test('The VS Code bridge is a one-way postMessage the dashboard feature-detects'
     assert.match(source, /typeof host\.__viberails_openFile__ === 'function'/);
 });
 
-test('An interactive script launch stays busy until its terminal tab is ready, and cannot start twice', async () => {
+test('Run in terminal stays busy until its tab is ready, and cannot start twice', async () => {
     const app = createApp();
     let releaseRun;
     const runResponse = new Promise((resolve) => { releaseRun = resolve; });
@@ -554,14 +557,14 @@ test('An interactive script launch stays busy until its terminal tab is ready, a
         }
     };
 
-    const first = controller.run('nightly.py');
+    const first = controller.runInTerminal('nightly.py');
     assert.ok(controller.runningNames.has('nightly.py'), 'registered before the request resolves');
     // The rebuilt row (what any background refresh would draw) is the busy one.
     assert.match(listHtml, /data-python-scripts-action="run"[^>]*disabled/);
     assert.match(listHtml, /Running…/);
     assert.match(controller._renderRow(SCRIPT), /nightly\.py is running/);
-    // A second click (or a nav launch) while in flight is a no-op, not a second POST.
-    assert.equal(await controller.run('nightly.py'), null);
+    // A second click while in flight is a no-op, not a second POST.
+    assert.equal(await controller.runInTerminal('nightly.py'), null);
     assert.equal(app.calls.filter((call) => call.url === '/api/v1/python-scripts/run/interactive').length, 1);
 
     // Background refreshes stand down while a run is in flight.
@@ -596,9 +599,51 @@ test('An interactive script launch stays busy until its terminal tab is ready, a
     app.apiCall = async (url) => (url === '/api/v1/python-scripts/run/interactive'
         ? { name: 'nightly.py', tabId: 'second-tab', message: 'started' }
         : { pinConfigured: true, scriptsDirectory: '/scripts', scripts: [SCRIPT] });
-    await controller.run('nightly.py', button);
+    await controller.runInTerminal('nightly.py', button);
     assert.deepEqual(button, { disabled: false, innerHTML: '<i></i>Run' });
     assert.equal(app.navigations.at(-1).data.preferredTabId, 'second-tab');
+});
+
+// Both run surfaces refuse over a run in flight. Silence here is what made the run window's
+// "Run in terminal" close onto nothing, and what let a reopened window start a second
+// interpreter for the same script.
+test('Neither run surface starts over a run in flight, and both say why', async () => {
+    const app = createApp();
+    const controller = controllerWith([SCRIPT], app);
+    let opened = 0;
+    controller.runWindow = { open() { opened += 1; return Promise.resolve(null); } };
+    controller.runningNames.add('nightly.py');
+
+    assert.equal(await controller.run('nightly.py'), null);
+    assert.equal(opened, 0, 'the little window never opens over a run that is still going');
+    assert.equal(app.toasts.at(-1).title, 'Already running');
+
+    assert.equal(await controller.runInTerminal('nightly.py'), null);
+    assert.equal(app.calls.filter((call) => call.url.endsWith('/run/interactive')).length, 0);
+    assert.equal(app.toasts.at(-1).title, 'Already running');
+
+    // Released, both work again.
+    controller.runningNames.delete('nightly.py');
+    await controller.run('nightly.py');
+    assert.equal(opened, 1);
+});
+
+test('markRunning/clearRunning tell every surface, including views this section cannot render', () => {
+    const controller = controllerWith([SCRIPT]);
+    const seen = [];
+    const unsubscribe = controller.onRunChanged((name) => seen.push(name));
+
+    controller.markRunning('nightly.py');
+    assert.ok(controller.runningNames.has('nightly.py'));
+    controller.recordRun('nightly.py', { exitCode: 0, timedOut: false, durationMs: 3 });
+    controller.clearRunning('nightly.py');
+    assert.equal(controller.runningNames.size, 0);
+    assert.deepEqual(seen, ['nightly.py', 'nightly.py', 'nightly.py'],
+        'start, result recorded, finish — the workbench needs all three');
+
+    unsubscribe();
+    controller.markRunning('nightly.py');
+    assert.equal(seen.length, 3, 'and it stops when the view unloads');
 });
 
 test('The last-run drawer remembers whether it was open when the list is rebuilt', () => {

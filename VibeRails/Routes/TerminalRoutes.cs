@@ -2,7 +2,6 @@ using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services;
 using VibeRails.Services.Environments;
-using VibeRails.Services.Jobs;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.Terminal;
 using VibeRails.Utils;
@@ -145,9 +144,7 @@ public static class TerminalRoutes
         }).WithName("StartTerminal");
 
         // POST /api/v1/terminal/stop - Stop the current terminal session
-        app.MapPost("/api/v1/terminal/stop", async (
-            ITerminalSessionService terminalService,
-            IJobStore jobStore) =>
+        app.MapPost("/api/v1/terminal/stop", async (ITerminalSessionService terminalService) =>
         {
             if (!terminalService.HasActiveSession)
             {
@@ -156,22 +153,6 @@ public static class TerminalRoutes
 
             if (terminalService.IsExternallyOwned)
             {
-                // Interactive manual Automations are CLI-owned inside their terminal-tab child,
-                // but their Web UI Stop control should still work. Use JobRunner's existing
-                // cooperative cancellation path so it records Cancelled before ending the child.
-                var jobRunId = ParserConfigs.GetArguments().JobRunId;
-                if (!string.IsNullOrWhiteSpace(jobRunId))
-                {
-                    if (!await jobStore.RequestCancelAsync(jobRunId))
-                        return Results.BadRequest(new ErrorResponse("This Automation run can no longer be stopped."));
-
-                    return Results.Ok(new TerminalStatusResponse(
-                        true,
-                        terminalService.ActiveSessionId,
-                        terminalService.ActiveCli,
-                        terminalService.ActiveWorkingDirectory));
-                }
-
                 return Results.BadRequest(new ErrorResponse("Terminal is controlled from CLI. Stop it from the command line."));
             }
 

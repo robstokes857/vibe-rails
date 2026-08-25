@@ -24,6 +24,11 @@ public interface IPythonScriptService
         string? name,
         IReadOnlyList<string>? arguments,
         CancellationToken cancellationToken = default);
+    Task<PythonScriptRunResponse> RunAsync(
+        string? name,
+        IReadOnlyList<string>? arguments,
+        string? standardInput,
+        CancellationToken cancellationToken = default);
     Task<string> ValidateRunnableAsync(string? name, CancellationToken cancellationToken = default);
     Task<string> AuthorizeMcpExposureAsync(
         string? name,
@@ -100,6 +105,12 @@ public sealed class PythonScriptService : IPythonScriptService
     private const int PinFailureDelayMs = 300;
     private const int MaxScriptBytes = 5 * 1024 * 1024;
     private const int MaxCapturedOutputChars = 200_000;
+    // Argv and stdin arrive from the local, authenticated UI and never touch a shell, but
+    // they are still request data: bound them so a malformed caller cannot push megabytes
+    // through the process start path.
+    private const int MaxRunArguments = 64;
+    private const int MaxRunArgumentChars = 8_000;
+    private const int MaxStandardInputChars = 256_000;
     private const int RunHistoryCap = 50;
     private const int WriteLockTimeoutMs = 10_000;
     private const int ReadRetryAttempts = 4;
@@ -308,6 +319,16 @@ public sealed class PythonScriptService : IPythonScriptService
         IReadOnlyList<string>? arguments,
         CancellationToken cancellationToken = default)
     {
+        return await RunAsync(requestedName, arguments, standardInput: null, cancellationToken);
+    }
+
+    public async Task<PythonScriptRunResponse> RunAsync(
+        string? requestedName,
+        IReadOnlyList<string>? arguments,
+        string? standardInput,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateRunInputs(arguments, standardInput);
         var baseRunner = GetPythonRunnerOrThrow();
 
         var verified = await ReadVerifiedScriptAsync(requestedName, cancellationToken);
@@ -338,7 +359,10 @@ public sealed class PythonScriptService : IPythonScriptService
                 {
                     pythonArguments.AddRange(arguments);
                 }
-                result = await runner.RunAsync(pythonArguments, cancellationToken: cancellationToken);
+                result = await runner.RunAsync(
+                    pythonArguments,
+                    standardInput: string.IsNullOrEmpty(standardInput) ? null : standardInput,
+                    cancellationToken: cancellationToken);
             }
             catch (PythonExecutionException ex)
             {
@@ -361,7 +385,8 @@ public sealed class PythonScriptService : IPythonScriptService
                 Truncate(result.StandardOutput),
                 Truncate(result.StandardError),
                 result.RunTime.TotalMilliseconds,
-                startedUtc.ToString("O"));
+                startedUtc.ToString("O"),
+                ExtractReturnJson(result.StandardOutput));
         }
         finally
         {
@@ -1524,4 +1549,86 @@ public sealed class PythonScriptService : IPythonScriptService
         value.Length <= MaxCapturedOutputChars
             ? value
             : value[..MaxCapturedOutputChars] + $"\n[... output truncated at {MaxCapturedOutputChars} characters ...]";
+
+    /// <summary>
+    /// Bounds what a caller may push into a run. Argv never reaches a shell — CliWrap hands
+    /// the tokens straight to the interpreter — so the risk here is size, not injection.
+    /// </summary>
+    private static void ValidateRunInputs(IReadOnlyList<string>? arguments, string? standardInput)
+    {
+        if (arguments is { Count: > MaxRunArguments })
+        {
+            throw new PythonScriptValidationException(
+                $"A run takes at most {MaxRunArguments} arguments.");
+        }
+
+        if (arguments is not null)
+        {
+            foreach (var argument in arguments)
+            {
+                if (argument is null)
+                {
+                    throw new PythonScriptValidationException("An argument was empty.");
+                }
+
+                if (argument.Length > MaxRunArgumentChars)
+                {
+                    throw new PythonScriptValidationException(
+                        $"An argument is longer than {MaxRunArgumentChars} characters.");
+                }
+            }
+        }
+
+        if (standardInput is { Length: > MaxStandardInputChars })
+        {
+            throw new PythonScriptValidationException(
+                $"Standard input is longer than {MaxStandardInputChars} characters.");
+        }
+    }
+
+    /// <summary>
+    /// The script's return value, by the convention the run window documents: the JSON object
+    /// or array a script printed as the whole of stdout, or on stdout's last line (so a script
+    /// can log freely and still return something). A bare number, string or boolean does not
+    /// count — those are output, and treating them as a return value would make every script
+    /// that prints "42" look like it returned one. Returns the JSON text, or null; the run
+    /// window is what pretty-prints it.
+    /// </summary>
+    internal static string? ExtractReturnJson(string? standardOutput)
+    {
+        if (string.IsNullOrWhiteSpace(standardOutput)) return null;
+
+        var whole = standardOutput.Trim();
+        if (TryReadJsonValue(whole, out var fromWhole)) return fromWhole;
+
+        var lastBreak = whole.LastIndexOfAny(['\n', '\r']);
+        if (lastBreak < 0) return null;
+
+        var lastLine = whole[(lastBreak + 1)..].Trim();
+        return TryReadJsonValue(lastLine, out var fromLastLine) ? fromLastLine : null;
+    }
+
+    private static bool TryReadJsonValue(string candidate, out string? formatted)
+    {
+        formatted = null;
+        if (candidate.Length < 2) return false;
+        if (candidate[0] is not ('{' or '[')) return false;
+        if (candidate.Length > MaxCapturedOutputChars) return false;
+
+        try
+        {
+            using var document = JsonDocument.Parse(candidate);
+            if (document.RootElement.ValueKind is not (JsonValueKind.Object or JsonValueKind.Array))
+            {
+                return false;
+            }
+
+            formatted = candidate;
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
 }

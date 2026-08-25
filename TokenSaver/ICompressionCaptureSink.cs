@@ -15,7 +15,7 @@ namespace TokenSaver;
 /// Consequences the host implementation owns, not this interface:
 ///   • Captures contain verbatim tool output — file contents, command output, paths. That is source
 ///     material from the user's machine. It is as sensitive as SessionLogs and must be treated the
-///     same way (never checked in, never shipped off-box without the debug-bundle's encryption).
+///     same way (never checked in, never shipped off-box).
 ///   • Implementations MUST return immediately and MUST NOT throw. This is called on the LLM hot
 ///     path. A lost capture is a bad afternoon; a blocked relay is a broken product.
 /// </summary>

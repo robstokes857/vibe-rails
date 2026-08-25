@@ -404,8 +404,14 @@ namespace VibeRails.DTOs
         string? Pin
     );
 
+    // Arguments are the resolved argv tokens the run window previews on its command
+    // line: what the user sees there is exactly what is sent. They never reach a shell
+    // (CliWrap passes argv straight to the interpreter), and the script itself is still
+    // gated by the signed-hash check. StandardInput is piped to the process's stdin.
     public record PythonScriptRunRequest(
-        string? Name
+        string? Name,
+        List<string>? Arguments = null,
+        string? StandardInput = null
     );
 
     // User-approved MCP exposure for one signed script. Parameters describe both the
@@ -487,6 +493,9 @@ namespace VibeRails.DTOs
         string? NewName
     );
 
+    // ReturnJson is the script's return value: the JSON object or array it printed as
+    // the whole of stdout, or on stdout's last line. Null when the script printed no
+    // such value — a bare number or a line of prose is output, not a return value.
     public record PythonScriptRunResponse(
         string Name,
         int ExitCode,
@@ -494,7 +503,8 @@ namespace VibeRails.DTOs
         string StandardOutput,
         string StandardError,
         double DurationMs,
-        string StartedUtc
+        string StartedUtc,
+        string? ReturnJson = null
     );
 
     public record PythonScriptInteractiveRunResponse(
@@ -926,17 +936,6 @@ namespace VibeRails.DTOs
         string? StatusKey = null,
         string? Tag = null,
         string? ImageBase64 = null
-    );
-
-    // Debug Bundle DTOs (remote debug-log export)
-    public record DebugBundleSendRequest(
-        string? Message
-    );
-
-    public record DebugBundleSendResponse(
-        bool Success,
-        string Status,
-        string Message
     );
 
     public record DataExportResponse(
@@ -1645,9 +1644,6 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(MessageResponse))]
     // Push Notification DTOs
     [JsonSerializable(typeof(PushSendRequest))]
-    // Debug Bundle DTOs
-    [JsonSerializable(typeof(DebugBundleSendRequest))]
-    [JsonSerializable(typeof(DebugBundleSendResponse))]
     [JsonSerializable(typeof(DataExportResponse))]
     [JsonSerializable(typeof(DataExportProgressResponse))]
     [JsonSerializable(typeof(StateDatabaseSizeResponse))]

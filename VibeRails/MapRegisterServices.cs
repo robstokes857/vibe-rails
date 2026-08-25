@@ -366,9 +366,6 @@ namespace VibeRails
             // Remote State Service (for terminal session remote registration)
             serviceCollection.AddHttpClient<IRemoteStateService, RemoteStateService>();
 
-            // Debug Bundle Service (builds + encrypts + uploads a session bundle for remote debugging)
-            serviceCollection.AddHttpClient<IDebugBundleService, DebugBundleService>();
-
             // Progress for the running export, polled by the settings modal. Singleton because a
             // process-wide gate means only one export can ever be in flight here.
             serviceCollection.AddSingleton<IDataExportProgress, DataExportProgress>();

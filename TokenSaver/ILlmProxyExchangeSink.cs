@@ -18,7 +18,7 @@ namespace TokenSaver;
 ///   • An exchange is the most sensitive artifact this codebase produces. The request body carries
 ///     the system prompt, every user message, and the full contents of every file the agent has
 ///     read. Treat it as strictly more sensitive than SessionLogs: never checked in, never shipped
-///     off-box without the debug bundle's encryption. Exchange logging is always active for
+///     off-box. Exchange logging is always active for
 ///     authenticated traffic handled by a proxy route; there is deliberately no setting that can
 ///     disable it.
 ///   • Volume is unbounded and superlinear. The CLI resends the entire conversation every turn, so

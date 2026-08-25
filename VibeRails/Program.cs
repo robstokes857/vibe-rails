@@ -435,19 +435,6 @@ if (parsedArgs.IsLMBootstrap)
 {
     if (parsedArgs.JobRunId is not null)
     {
-        if (parsedArgs.IsVsCodeMode)
-        {
-            // A manual Automation can be hosted by the same hidden child-process shape as a
-            // normal Web UI terminal tab. Emit the one-time child bootstrap before JobRunner
-            // enters its foreground lifecycle so the parent can authenticate and proxy the
-            // bidirectional terminal WebSocket while the run keeps all ordinary bookkeeping.
-            var jobTabAuth = app.Services.GetRequiredService<IAuthBootstrapService>();
-            var jobTabBootstrapCode = jobTabAuth.GenerateBootstrapCode();
-            var jobTabBootstrapUrl = $"{serverUrl}/auth/bootstrap?code={jobTabBootstrapCode}";
-            Console.WriteLine($"vs-code-v1={jobTabBootstrapUrl}");
-            Console.Out.Flush();
-        }
-
         // Automated Job run. Same interactive CLI the user would get from the Environment screen,
         // in this real terminal window — JobRunner only wraps it with run bookkeeping and the
         // opt-in deadline, and reports the outcome through the process exit code.

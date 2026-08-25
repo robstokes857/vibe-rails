@@ -41,9 +41,11 @@ function launcherItemIcon(item) {
  * Environments get in the LLM launch pickers. Preferences are server-persisted per
  * install (GET/PUT/DELETE /api/v1/automation-nav/preferences) and fetched fresh on every
  * open, so there is no client cache to invalidate. Automation launches delegate to
- * JobController.launchFromNav so nav runs land in a terminal tab exactly like the
- * Automation page's own "Run now"; script runs go through PythonScriptsController.run so
- * they open the same interactive terminal surface as a run from the page.
+ * JobController.launchFromNav, which queues the run for the scheduler exactly like the
+ * Automation page's own "Run now" — it opens in its own native terminal window, never in a
+ * Web UI terminal tab; script runs go through PythonScriptsController.run, so
+ * they open the same little run window as a run from the page — inputs, output and return
+ * value in one place, no terminal to find.
  *
  * The customization modal intentionally reuses the llm-picker-* modal CSS classes so
  * both "order and show/hide" dialogs stay visually identical.
@@ -126,9 +128,9 @@ export class AutomationNavLauncher {
             // A confirmDialog overlay owns Escape while it is up (see utils.js).
             if (isConfirmDialogOpen()) return;
             if (event.key === 'Escape') {
-                // Only claim the key while the flyout (or its trigger) owns focus. A
-                // script run now adopts its tab in place and focuses the terminal with
-                // the flyout still open — Escape there is the terminal's interrupt
+                // Only claim the key while the flyout (or its trigger) owns focus. An
+                // automation launch adopts its tab in place and focuses the terminal
+                // with the flyout still open — Escape there is the terminal's interrupt
                 // key, so the flyout tidies itself away without stealing the keystroke
                 // or yanking focus back to the nav.
                 if (this._flyoutOwnsFocus()) {
@@ -231,19 +233,18 @@ export class AutomationNavLauncher {
         target?.focus?.();
     }
 
-    /** Runs a Python script through the shared controller in a new interactive terminal tab. */
-    async _runScript(name, index = null) {
+    /**
+     * Runs a Python script through the shared controller's run window. The flyout stands
+     * down first: the window is a modal, and leaving an anchored nav flyout open behind its
+     * backdrop would leave two things claiming Escape.
+     */
+    async _runScript(name) {
         const scripts = this.app.jobController?.pythonScripts;
         if (!scripts || !name) return;
-        // run() registers the name in runningNames before its first await, so the rows
-        // drawn right after it starts already show this one busy.
-        const pending = scripts.run(name);
-        this._renderFlyoutItems({ focusIndex: index });
-        try {
-            await pending;
-        } finally {
-            this._renderFlyoutItems({ focusIndex: index });
-        }
+        const triggerElement = this.triggerElement;
+        this.closeFlyout();
+        await scripts.run(name);
+        triggerElement?.focus?.();
     }
 
     _position(triggerElement, flyout) {
@@ -322,7 +323,7 @@ export class AutomationNavLauncher {
                     const item = visible[index];
                     if (!item || !isLauncherItemRunnable(item)) return;
                     if (item.kind === 'script') {
-                        void this._runScript(item.label, index);
+                        void this._runScript(item.label);
                     } else {
                         this.closeFlyout();
                         void this.app.jobController?.launchFromNav?.(item.jobId);

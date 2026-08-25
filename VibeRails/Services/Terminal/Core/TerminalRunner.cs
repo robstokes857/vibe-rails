@@ -869,8 +869,7 @@ public class TerminalRunner
         LLM llm, string workDir, string? envName, string[]? extraArgs,
         ITerminalSessionService sessionService, bool makeRemote = false, CancellationToken ct = default,
         string? initialUserInput = null, string? initialPrompt = null, string? jobRunId = null,
-        Action<string>? onSessionCreated = null,
-        bool renderConsoleOutput = true)
+        Action<string>? onSessionCreated = null)
     {
         var (terminal, sessionId, remoteConn) = await CreateSessionAsync(
             llm,
@@ -902,12 +901,9 @@ public class TerminalRunner
 
         await using (terminal)
         {
-            // A native Environment/Automation window renders the PTY into its host console. An
-            // interactive Automation tab instead runs in a hidden child with redirected stdout;
-            // its xterm WebSocket is the renderer, and mirroring raw TUI bytes into the parent's
-            // log stream would be both noisy and wasteful.
-            if (renderConsoleOutput)
-                terminal.Subscribe(new ConsoleOutputConsumer());
+            // This path is always a real Environment/Automation window, so the PTY renders into
+            // its own host console.
+            terminal.Subscribe(new ConsoleOutputConsumer());
 
             // Automation inactivity is deliberately based only on bytes read from the PTY. This
             // subscription happens after CreateSessionAsync's synthetic title publication and

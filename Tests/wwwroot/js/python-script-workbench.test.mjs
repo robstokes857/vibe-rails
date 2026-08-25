@@ -179,12 +179,16 @@ function createApp() {
         pythonScripts: {
             state: { pinConfigured: true, scriptsDirectory: '/scripts', scripts: [] },
             lastRunByName: new Map(),
+            runningNames: new Set(),
+            runListeners: new Set(),
             refreshes: 0,
             async ensureState() { return this.state; },
             scriptByName(name) { return this.state.scripts.find((script) => script.name === name) || null; },
             async refresh() { this.refreshes += 1; },
             canOpenInVsCode() { return false; },
             onStateChange() { return () => {}; },
+            onRunChanged(listener) { this.runListeners.add(listener); return () => this.runListeners.delete(listener); },
+            emitRunChanged(name) { for (const listener of this.runListeners) listener(name); },
             async saveContent() { return { status: 'modified', version: 'v2' }; }
         }
     };
@@ -1162,37 +1166,56 @@ test('Delete hands off to the shared flow and leaves without the unsaved-changes
     assert.equal(workbench._mutating, false);
 });
 
-test('Run goes through the shared interactive-terminal flow only when signed', async () => {
+test('Run opens the run window, and both run paths refuse an unsigned or unsaved script', async () => {
     // The drawer's summary/body are looked up from the <details> element itself.
     const details = fakeElement();
     const root = fakeRoot({ '[data-workbench-output]': details });
     details.querySelector = (selector) => root.el(selector);
     const { workbench, app } = mountedWorkbench({ root });
     const scripts = app.jobController.pythonScripts;
-    const runs = [];
-    scripts.run = async (name, button) => {
-        runs.push({ name, button, running: workbench._running });
+    const windowed = [];
+    const terminal = [];
+    scripts.run = async (name) => {
+        windowed.push({ name, running: workbench._running });
+        return { name, exitCode: 0, timedOut: false, durationMs: 4, standardOutput: 'ok\n', standardError: '' };
+    };
+    scripts.runInTerminal = async (name, button) => {
+        terminal.push({ name, button, running: workbench._running });
         return { name, tabId: 'python-tab', message: 'started' };
     };
 
+    // Both gates apply to both paths — a run is a run.
     workbench.status = 'unapproved';
     assert.equal(await workbench.run(), null);
-    assert.equal(runs.length, 0);
+    assert.equal(await workbench.runInTerminal(), null);
+    assert.equal(windowed.length + terminal.length, 0);
     assert.equal(app.toasts.at(-1).title, 'Not signed');
 
     workbench.status = 'approved';
     workbench.editor.value = 'print("unsaved")\n';
     assert.equal(await workbench.run(), null);
-    assert.equal(runs.length, 0);
+    assert.equal(await workbench.runInTerminal(), null);
+    assert.equal(windowed.length + terminal.length, 0);
     assert.equal(app.toasts.at(-1).title, 'Unsaved changes');
 
+    // Run (primary) goes to the little window and never spawns a tab…
     workbench.editor.value = workbench.baseline;
-    const button = fakeElement();
-    const result = await workbench.run(button);
-    assert.deepEqual(runs, [{ name: 'nightly.py', button, running: true }]);
-    assert.equal(result.tabId, 'python-tab');
+    const result = await workbench.run();
+    assert.deepEqual(windowed, [{ name: 'nightly.py', running: true }]);
+    assert.equal(terminal.length, 0);
+    assert.equal(result.exitCode, 0);
     assert.equal(workbench._running, false);
-    assert.equal(workbench.lastRun, null);
+
+    // …and the window's result becomes the workbench's own last-run drawer.
+    scripts.lastRunByName.set('nightly.py', result);
+    await workbench.run();
+    assert.equal(workbench.lastRun, result);
+
+    // "Run in terminal" is the explicit escape hatch, and still carries the button.
+    const button = fakeElement();
+    const launched = await workbench.runInTerminal(button);
+    assert.deepEqual(terminal, [{ name: 'nightly.py', button, running: true }]);
+    assert.equal(launched.tabId, 'python-tab');
 });
 
 test('Re-create writes the editor text back through the shared create flow and clears the deleted state', async () => {
@@ -1408,7 +1431,7 @@ test('Short viewports lower the terminal floor (JS and CSS agree on threshold an
     const css = readFileSync(stylePath, 'utf8');
     const block = css.slice(css.indexOf("Python script workbench (view 'python-script')"));
     // Scoped to stacked widths: side by side the terminal column is the full row height.
-    const media = block.match(/@media \(max-height: (\d+)px\) and \(max-width: 1179\.98px\) \{([\s\S]*?)\n\}/);
+    const media = block.match(/@media \(max-height: (\d+)px\) and \(max-width: 879\.98px\) \{([\s\S]*?)\n\}/);
     assert.ok(media, 'the workbench block has a max-height media query scoped below the side-by-side threshold');
     assert.equal(Number(media[1]), COMPACT_VIEWPORT_MAX_HEIGHT);
     assert.match(media[2], /\.python-workbench \{\s*--python-workbench-terminal-height: clamp\(180px, 30dvh, 34dvh\);/);
@@ -1519,9 +1542,11 @@ test('The identity render enables Run only when signed and the kebab adapts to h
     assert.match(root.el('[data-workbench-status]').innerHTML, /Signed/);
     assert.match(root.el('[data-workbench-meta]').textContent, /\/scripts\/nightly\.py · 2\.00 KB · edited /);
     assert.equal(root.el('[data-workbench-action="run"]').disabled, false);
-    assert.equal(root.el('[data-workbench-action="run"]').title, 'Run nightly.py now');
+    assert.equal(root.el('[data-workbench-action="run"]').title, 'Run nightly.py and read its output here');
     assert.equal(root.el('[data-workbench-approve-label]').textContent, 'Re-sign');
     assert.match(root.el('[data-workbench-menu]').innerHTML, /data-workbench-action="revoke"/);
+    // Signed: the terminal escape hatch is offered in the kebab, never as a second big button.
+    assert.match(root.el('[data-workbench-menu]').innerHTML, /data-workbench-action="run-terminal"[\s\S]*Run in terminal/);
     assert.doesNotMatch(root.el('[data-workbench-menu]').innerHTML, /Open in VS Code/);
 
     workbench.editor.value = 'print("unsaved")\n';
@@ -1543,6 +1568,8 @@ test('The identity render enables Run only when signed and the kebab adapts to h
     assert.equal(root.el('[data-workbench-action="run"]').disabled, true);
     assert.equal(root.el('[data-workbench-approve-label]').textContent, 'Sign');
     assert.doesNotMatch(root.el('[data-workbench-menu]').innerHTML, /data-workbench-action="revoke"/);
+    // Unsigned: nothing can run it, so neither run entry is offered.
+    assert.doesNotMatch(root.el('[data-workbench-menu]').innerHTML, /data-workbench-action="run-terminal"/);
     assert.match(root.el('[data-workbench-menu]').innerHTML, /data-workbench-action="open-vscode"[\s\S]*Open in VS Code/);
     assert.match(root.el('[data-workbench-menu]').innerHTML, /python-script-menu-item-danger[^>]*data-workbench-action="delete"/);
 });
@@ -1702,11 +1729,11 @@ test('The workbench styles fill the viewport without overlap and carry fallbacks
     assert.match(block, /\.python-workbench \.python-workbench-terminal \{[^}]*flex: 0 0 auto;[^}]*height: var\(--python-workbench-terminal-height, 34dvh\);[^}]*min-height: 240px;/);
     assert.match(block, /--python-workbench-terminal-height: max\(240px, 34dvh\);/);
     // Short viewports: the floor and the default share both drop (see the JS mirror test).
-    assert.match(block, /@media \(max-height: 720px\) and \(max-width: 1179\.98px\) \{[\s\S]*?\.python-workbench \.python-workbench-terminal \{\s*min-height: 180px;/);
+    assert.match(block, /@media \(max-height: 720px\) and \(max-width: 879\.98px\) \{[\s\S]*?\.python-workbench \.python-workbench-terminal \{\s*min-height: 180px;/);
     // Wide windows: editor | splitter | terminal as grid columns, the terminal column width
     // on its own custom property, and a working height that lets the page scroll instead
     // of squeezing the panes (Rob: "the terminal is too small… side by side… let it scroll").
-    const wide = block.slice(block.indexOf('@media (min-width: 1180px)'));
+    const wide = block.slice(block.indexOf('@media (min-width: 880px)'));
     assert.ok(wide.length > 0, 'the workbench block has a side-by-side media query');
     assert.match(wide, /\.python-workbench-panes \{[^}]*display: grid;[^}]*grid-template-columns: minmax\(0, 1fr\) 12px var\(--python-workbench-terminal-width, 46%\);[^}]*min-height: clamp\(560px, calc\(100dvh - 168px\), 1400px\);/);
     assert.match(wide, /\.python-workbench-splitter \{[^}]*width: 12px;[^}]*height: auto;[^}]*cursor: col-resize;/);
@@ -1716,7 +1743,7 @@ test('The workbench styles fill the viewport without overlap and carry fallbacks
     assert.match(block, /\.python-workbench-splitter \{[^}]*cursor: row-resize;[^}]*touch-action: none;/);
     assert.match(block, /@media \(prefers-reduced-motion: reduce\) \{\s*\.python-workbench-splitter::before \{\s*transition: none;/);
     // The rail collapses into a chip strip on narrow layouts (CSS only).
-    const narrow = block.slice(block.indexOf('@media (max-width: 900px)'));
+    const narrow = block.slice(block.indexOf('@media (max-width: 1100px)'));
     assert.match(narrow, /\.python-workbench-body \{\s*flex-direction: column;/);
     assert.match(narrow, /\.python-workbench-rail-list \{[^}]*position: static;[^}]*flex-direction: row;[^}]*overflow-x: auto;/);
     // Desktop: the list is absolutely filled so a long rail scrolls instead of growing the page.
@@ -1758,10 +1785,10 @@ test('Side-by-side detection follows the CSS threshold and never throws without 
     const lists = withMatchMedia(t, { matches: true });
     assert.equal(isSideBySideLayout(), true);
     assert.equal(lists[0].query, `(min-width: ${SIDE_BY_SIDE_MIN_VIEWPORT_WIDTH}px)`);
-    assert.equal(SIDE_BY_SIDE_MIN_VIEWPORT_WIDTH, 1180);
+    assert.equal(SIDE_BY_SIDE_MIN_VIEWPORT_WIDTH, 880, 'side by side is the default layout, not a wide-window treat');
     // The JS threshold and the CSS media query are the same number.
     const css = readFileSync(stylePath, 'utf8');
-    assert.match(css.slice(css.indexOf("Python script workbench (view 'python-script')")), /@media \(min-width: 1180px\)/);
+    assert.match(css.slice(css.indexOf("Python script workbench (view 'python-script')")), /@media \(min-width: 880px\)/);
 });
 
 test('The terminal column is clamped between its floor and what leaves the editor its minimum width', () => {
@@ -1842,4 +1869,50 @@ test('A stored terminal width is applied on mount and the media list is watched 
     workbench._unwatchLayoutMedia();
     assert.equal(list.listeners.length, 0, 'unload releases the listener');
     assert.match(workbench.renderShell('x.py'), /aria-orientation="vertical"/);
+});
+
+// A captured run outlives its little window, so the workbench cannot learn from the window
+// closing: scripts.run() resolves on CLOSE, which may be long before the POST lands.
+test('The workbench Run button follows the actual run, not the run window being open', () => {
+    const { workbench, app } = mountedWorkbench();
+    const scripts = app.jobController.pythonScripts;  // workbench.scripts is a getter onto this
+    const button = workbench.root.el('[data-workbench-action="run"]');
+
+    workbench._renderRunAvailability();
+    assert.equal(button.disabled, false, 'a signed, saved script is runnable');
+
+    scripts.runningNames.add('nightly.py');
+    workbench._renderRunAvailability();
+    assert.equal(button.disabled, true);
+    assert.match(button.innerHTML, /Running…/);
+    assert.match(button.title, /already running/);
+
+    scripts.runningNames.delete('nightly.py');
+    workbench._renderRunAvailability();
+    assert.equal(button.disabled, false);
+    assert.match(button.innerHTML, /Run/);
+});
+
+test('A result that lands after the run window closes still reaches the workbench output', () => {
+    const { workbench, app } = mountedWorkbench();
+    const scripts = app.jobController.pythonScripts;  // workbench.scripts is a getter onto this
+    workbench._unsubscribeRun = scripts.onRunChanged((name) => workbench._onRunChanged(name));
+
+    // The window was closed while the POST was still in flight, so lastRun is empty here.
+    assert.equal(workbench.lastRun, null);
+
+    const landed = { exitCode: 0, timedOut: false, durationMs: 12, standardOutput: 'done', standardError: '' };
+    scripts.lastRunByName.set('nightly.py', landed);
+    scripts.emitRunChanged('nightly.py');
+    assert.equal(workbench.lastRun, landed);
+
+    // Another script's run leaves this view alone.
+    scripts.lastRunByName.set('other.py', { exitCode: 1 });
+    scripts.emitRunChanged('other.py');
+    assert.equal(workbench.lastRun, landed);
+
+    workbench._unsubscribeRun();
+    scripts.lastRunByName.set('nightly.py', { exitCode: 9 });
+    scripts.emitRunChanged('nightly.py');
+    assert.equal(workbench.lastRun, landed, 'and it stops listening once the view unloads');
 });

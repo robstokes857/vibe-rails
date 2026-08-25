@@ -55,12 +55,6 @@
       <Link>Models\%(RecursiveDir)%(Filename)%(Extension)</Link>
     </Content>
   </ItemGroup>
-  <!-- Copy public cert to output directory -->
-  <ItemGroup>
-    <Content Include="Certs\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest">
-      <Link>Certs\%(RecursiveDir)%(Filename)%(Extension)</Link>
-    </Content>
-  </ItemGroup>
   <!-- Copy root download scripts to output directory for post-deploy setup -->
   <ItemGroup>
     <Content Include="..\Scripts\download-bert-model.ps1" Link="Scripts\download-bert-model.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

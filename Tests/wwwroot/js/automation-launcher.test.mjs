@@ -162,13 +162,12 @@ test('clicking an automation launches it through JobController; a script goes to
     const app = createApp();
     const launcher = launcherWith(CATALOG, app);
     const scriptRuns = [];
-    launcher._runScript = async (name, index) => { scriptRuns.push({ name, index }); };
+    launcher._runScript = async (name) => { scriptRuns.push({ name }); };
     launcher._renderFlyoutItems();
     const [jobButton, scriptButton, unsignedButton] = launcher.flyout.target.buttons;
 
     await scriptButton.click();
-    assert.deepEqual(scriptRuns, [{ name: 'backup.py', index: 1 }]);
-    assert.equal(launcher.flyout?.removed, false, 'the flyout stays open so the busy row is visible');
+    assert.deepEqual(scriptRuns, [{ name: 'backup.py' }]);
 
     await unsignedButton.click();
     assert.equal(scriptRuns.length, 1, 'an unsigned script must never be sent to run');
@@ -178,45 +177,41 @@ test('clicking an automation launches it through JobController; a script goes to
     assert.equal(launcher.flyout, null, 'launching an automation closes the flyout (its tab is the feedback)');
 });
 
-test('_runScript delegates the interactive launch to the shared controller', async () => {
+test('_runScript hands the script to the shared run window and stands the flyout down', async () => {
     const app = createApp();
     const launcher = launcherWith(CATALOG, app);
     launcher._renderFlyoutItems();
+    const trigger = { focused: false, isConnected: true, focus() { this.focused = true; } };
+    launcher.triggerElement = trigger;
 
-    await launcher._runScript('backup.py', 1);
+    await launcher._runScript('backup.py');
 
     assert.deepEqual(app.jobController.pythonScripts.runs, [
         { name: 'backup.py', button: undefined, options: undefined }
     ]);
-    assert.deepEqual(app.toasts, [], 'the launch toast belongs to PythonScriptsController.run');
+    assert.deepEqual(app.toasts, [], 'a captured run reports inside its own window, not as a nav toast');
+    // The run window is a modal: an anchored nav flyout left open behind its backdrop
+    // would leave two things claiming Escape.
+    assert.equal(launcher.flyout, null, 'the flyout closes before the window opens');
+    assert.equal(trigger.focused, true, 'focus comes back to the nav button the run started from');
 });
 
-test('a nav script launch opens the returned interactive terminal through the shared controller', async () => {
+test('a nav script launch runs through PythonScriptsController, never with its own toast wording', async () => {
     const app = createApp();
-    app.apiCall = async (url, method = 'GET', body = null) => {
-        app.calls.push({ url, method, body });
-        if (url === '/api/v1/python-scripts/run/interactive') {
-            return { name: 'backup.py', tabId: 'python-tab', message: 'started' };
-        }
-        return { pinConfigured: true, scriptsDirectory: '/scripts', scripts: [] };
-    };
     const scripts = new PythonScriptsController(app);
+    const opened = [];
+    // The window owns the DOM; here we only care that the nav reaches it by the shared path.
+    scripts.runWindow = { open: async (name) => { opened.push(name); return null; } };
     app.jobController = { pythonScripts: scripts };
     const launcher = launcherWith(CATALOG, app);
 
-    await launcher._runScript('backup.py', 1);
+    await launcher._runScript('backup.py');
 
-    assert.deepEqual(app.calls[0], { url: '/api/v1/python-scripts/run/interactive', method: 'POST', body: { name: 'backup.py' } });
-    assert.deepEqual(app.toasts, [{
-        title: 'Script started',
-        message: 'backup.py is running in an interactive terminal.',
-        tone: 'success'
-    }]);
-    assert.equal(app.navigations.at(-1), 'terminal-focus');
-    assert.equal(scripts.lastRunByName.has('backup.py'), false);
+    assert.deepEqual(opened, ['backup.py'], 'nav runs and page runs share one surface');
+    assert.equal(app.calls.length, 0, 'nothing is posted until the window says Run');
+    assert.deepEqual(app.toasts, []);
     assert.equal(scripts.runningNames.size, 0);
-    assert.equal((readFileSync(scriptsModulePath, 'utf8').match(/'Script finished'/g) || []).length, 1);
-    assert.doesNotMatch(readFileSync(modulePath, 'utf8'), /'Script finished'|'Script failed'/);
+    assert.doesNotMatch(readFileSync(modulePath, 'utf8'), /'Script finished'|'Script failed'|'Script started'/);
 });
 
 test('arrow keys, Home and End cycle through the rows and footer buttons', (t) => {

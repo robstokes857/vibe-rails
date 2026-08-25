@@ -2,7 +2,6 @@ using Serilog;
 using VibeRails.DTOs;
 using VibeRails.Services;
 using VibeRails.Services.Jobs;
-using VibeRails.Services.Terminal;
 using VibeRails.Utils;
 
 namespace VibeRails.Routes;
@@ -60,31 +59,14 @@ public static class JobRoutes
             });
         }).WithName("DeleteJob");
 
-        app.MapPost("/api/v1/jobs/{id:long}/run", async (
+        // Run Now only enqueues and wakes the scheduler. The launch itself belongs to
+        // JobLaunchService, which opens the Automation's own native terminal window exactly as a
+        // scheduled or retried run does - an Automation never runs inside a Web UI terminal tab.
+        app.MapPost("/api/v1/jobs/{id:long}/run", (
             IJobService service,
-            ITerminalTabHostService tabHost,
             long id,
             CancellationToken cancellationToken) =>
-            await ExecuteAsync(async () =>
-            {
-                var queued = await service.RunNowAsync(id, cancellationToken);
-                TerminalTabStatusResponse tab;
-                try
-                {
-                    tab = await tabHost.CreateAutomationTabAsync(queued.RunId!, cancellationToken);
-                }
-                catch (InvalidOperationException ex)
-                {
-                    // Interactive launch validation (tab capacity, missing Worker/workspace,
-                    // startup failure) is actionable client input/state, not an opaque 500.
-                    throw JobServiceException.BadRequest(ex.Message);
-                }
-                return queued with
-                {
-                    Message = "Automation started in an interactive terminal.",
-                    TabId = tab.TabId
-                };
-            }))
+            ExecuteAsync(() => service.RunNowAsync(id, cancellationToken)))
             .WithName("RunJobNow");
 
         app.MapGet("/api/v1/jobs/runs", (

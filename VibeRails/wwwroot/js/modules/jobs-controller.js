@@ -1115,57 +1115,34 @@ export class JobController {
         }
     }
 
+    /**
+     * Queue the automation and let the scheduler open its own terminal window, exactly as a
+     * scheduled or retried run does. An automation deliberately never runs inside a Web UI
+     * terminal tab, so there is no tab to focus or adopt here — the toast is the whole
+     * acknowledgement, and the run then reports itself through the run history below.
+     */
     async runNow(jobId, button) {
-        const job = this.jobs.find(item => item.id === jobId);
-        const environment = this.findEnvironment(job?.environmentId);
-        return this.withBusy(button, 'Starting…', async () => {
+        return this.withBusy(button, 'Queuing…', async () => {
             const response = await this.app.apiCall(
                 `/api/v1/jobs/${jobId}/run`,
                 'POST',
                 null,
                 { preferErrorResponseMessage: true }
             );
-            const tabId = String(response?.tabId || '').trim();
-            if (tabId && job && environment) {
-                const selection = buildLlmSelectionValue(environment.cli, environment.id);
-                this.app.terminalController?.rememberTabLaunch?.(tabId, {
-                    selection,
-                    label: job.name,
-                    title: `${job.name} Automation`,
-                    icon: '🤖',
-                    taskKey: `automation:${response?.runId || jobId}`,
-                    workingDirectory: this.currentProjectPath()
-                });
-                this.app.showToast('Automation started', response?.message || 'Interactive terminal ready.', 'success');
-                // Refresh before navigating away so the Automations list is current when the
-                // user comes back, rather than showing the run's pre-launch state.
-                await this.refreshRuns({ quiet: true });
-                // A view already showing a terminal panel hosts the run in place; only
-                // when none is on screen does the run navigate to the Terminals page.
-                if (!(await this.app.terminalController?.adoptLaunchedTab?.(tabId))) {
-                    this.app.navigate('terminal-focus', {
-                        preferredSelection: selection,
-                        preferredTabId: tabId
-                    });
-                }
-                return;
-            }
-
-            this.app.showToast('Automation started', response?.message || 'The automation is running.', 'success');
+            this.app.showToast('Automation', response?.message || 'Queued.', 'success');
             await this.refreshRuns({ quiet: true });
         });
     }
 
     /**
-     * Run an automation from outside the jobs view (the nav launcher). The jobs view
-     * populates this.jobs/this.environments when it loads; from the nav they may be
-     * empty or stale, so refresh them first — runNow needs both to route the run into
-     * its interactive terminal tab instead of falling back to a bare toast.
+     * Run an automation from outside the jobs view (the nav launcher). The jobs view populates
+     * this.jobs when it loads; from the nav it may be empty or stale, and the run history the
+     * toast points at should be current when the user opens the page.
      */
     async launchFromNav(jobId) {
         const id = Number(jobId);
         if (!Number.isFinite(id)) return;
-        if (!this.jobs.some(job => Number(job.id) === id) || this.environments.length === 0) {
+        if (!this.jobs.some(job => Number(job.id) === id)) {
             await this.refreshAll({ quiet: true });
         }
         return this.runNow(id, null);

@@ -1,8 +1,8 @@
 # API authentication coverage
 
-Audit date: 2026-08-24
+Audit date: 2026-08-25
 
-Full production route/authentication reconciliation completed: 2026-08-24. All 162
+Full production route/authentication reconciliation completed: 2026-08-25. All 161
 `/api/v1` method/path surfaces, nine protected non-`/api` API surfaces, and the three
 bootstrap/page/probe mappings match the current working tree. The only middleware bypasses
 remain exact `GET /health`, exact `GET /auth/bootstrap`, and global `OPTIONS` requests.
@@ -119,7 +119,7 @@ discovery alone is insufficient if the same feature change is allowed to expand 
 set. The production listener set is now frozen above so a new match starts as a finding, not as
 an expectation.
 
-### Repository-wide listener result — 2026-08-24
+### Repository-wide listener result — 2026-08-25
 
 - Approved serving implementation: the main Kestrel host in `VibeRails/Program.cs`.
 - Rejected and removed before merge: `GrokLoopbackBridge`'s `HttpListener`.
@@ -149,8 +149,8 @@ session-scoped browser credential (`viberails_tab`), which the implementation ca
 Authentication is enforced primarily by
 [`CookieAuthMiddleware`](VibeRails/Middleware/CookieAuthMiddleware.cs). The LLM proxy
 routes additionally use
-[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 174 mapped route
-surfaces in this inventory: 162 `/api/v1` method/path mappings, nine non-`/api` protected
+[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 173 mapped route
+surfaces in this inventory: 161 `/api/v1` method/path mappings, nine non-`/api` protected
 API surfaces, and three bootstrap/page/probe routes. Static-file middleware and the
 global `OPTIONS` behavior are noted separately because they are not finite mapped-route
 lists.
@@ -390,7 +390,7 @@ WebSocket handshakes use the session cookie/subprotocol plus the tab-token subpr
 - `POST /api/v1/compression/preview`
 - `GET /api/v1/token-savings`
 
-### Git, hooks, and code analyzer (16)
+### Git, hooks, and code analyzer (15)
 
 - `POST /api/v1/git/init`
 - `POST /api/v1/git/open-directory`
@@ -407,7 +407,6 @@ WebSocket handshakes use the session cookie/subprotocol plus the tab-token subpr
 - `POST /api/v1/code-analyzer/ignores`
 - `POST /api/v1/code-analyzer/ignores/bulk`
 - `DELETE /api/v1/code-analyzer/ignores`
-- `POST /api/v1/debug-bundle/{sessionId}/send`
 
 ### Jobs (13)
 

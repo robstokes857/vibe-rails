@@ -668,6 +668,16 @@ public sealed partial class PythonScriptMcpService : IPythonScriptMcpService
             $"Exit code: {run.ExitCode}",
             $"Timed out: {run.TimedOut.ToString().ToLowerInvariant()}"
         };
+        // Ahead of stdout, and not merely because it is the answer: ReturnJson is extracted
+        // from the FULL stdout while the copy below is capped, so a chatty script's return
+        // value can be the one thing the truncation cuts. Printing it here is the difference
+        // between the caller reading a value and re-parsing a transcript that no longer has it.
+        if (!string.IsNullOrWhiteSpace(run.ReturnJson))
+        {
+            lines.Add(string.Empty);
+            lines.Add("Return value:");
+            lines.Add(run.ReturnJson);
+        }
         if (!string.IsNullOrWhiteSpace(run.StandardOutput))
         {
             lines.Add(string.Empty);
