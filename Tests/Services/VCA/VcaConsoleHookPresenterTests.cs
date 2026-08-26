@@ -66,8 +66,8 @@ public class VcaConsoleHookPresenterTests
             presenter,
             "Automated workflows",
             GitPreflightStepStatus.Skipped,
-            "Automated Jobs run after a successful commit, not during pre-commit.",
-            ["Automated Jobs run after a successful commit, not during pre-commit."]);
+            "No automations are set to run before this commit.",
+            ["No automations are set to run before this commit."]);
 
         var text = AnsiText.Strip(output.ToString());
         Assert.Contains("Automated workflows", text);

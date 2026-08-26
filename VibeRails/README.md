@@ -333,7 +333,7 @@ vb --git-guard
 - Opens the authenticated `/git-guard` focused web surface
 - Captures the exact staged Git index snapshot (including partially staged files)
 - Streams VCA, report-only MintLint, and automated-workflow stage events live to the browser via SSE (`POST /api/v1/git/preflight/stream`)
-- VCA is the only preflight stage that can block a commit
+- VCA is the only preflight stage that can block a commit; automated workflows enqueue before-commit Automations without waiting on them
 - The native pre-commit hook uses the same shared pipeline
 
 ### Managing Rule Files

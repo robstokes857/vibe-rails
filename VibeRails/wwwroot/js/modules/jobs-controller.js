@@ -42,7 +42,7 @@ export function getJobLlmForCli(cli) {
 export function getJobCliForLlm(llm) {
     return CLI_BY_LLM[Number(llm)] || null;
 }
-const TRIGGER = Object.freeze({ SCHEDULE: 0, COMMIT: 2, MANUAL: 3 });
+const TRIGGER = Object.freeze({ SCHEDULE: 0, COMMIT: 2, MANUAL: 3, PRECOMMIT: 4 });
 const SCHEDULE = Object.freeze({ INTERVAL: 0, DAILY: 1, WEEKLY: 2 });
 
 const RUN_STATUS = Object.freeze({
@@ -359,7 +359,7 @@ export class JobController {
                 <div class="jobs-empty jobs-empty-large">
                     <i class="fa-regular fa-clock" aria-hidden="true"></i>
                     <strong>No automations yet</strong>
-                    <span>Run an agent on a timer, after commits, or on demand.</span>
+                    <span>Run an agent on a timer, around commits, or on demand.</span>
                     <button class="btn btn-primary" type="button" data-job-action="new">Create your first automation</button>
                 </div>`;
         }
@@ -421,8 +421,8 @@ export class JobController {
     renderEnabledSwitch(job, jobId, safeName) {
         const enabled = job.enabled === true;
         const title = enabled
-            ? 'Enabled — scheduled and commit-triggered runs are on. Click to disable.'
-            : 'Disabled — scheduled and commit-triggered runs are off. Click to enable.';
+            ? 'Enabled — scheduled and Git-triggered runs are on. Click to disable.'
+            : 'Disabled — scheduled and Git-triggered runs are off. Click to enable.';
         return `<button class="job-switch" type="button" role="switch" aria-checked="${enabled}" data-job-action="toggle" data-job-id="${jobId}" title="${title}" aria-label="${safeName} automatic runs"><span class="job-switch-track" aria-hidden="true"><span class="job-switch-thumb"></span></span><span class="job-switch-text">${enabled ? 'Enabled' : 'Disabled'}</span></button>`;
     }
 
@@ -438,9 +438,11 @@ export class JobController {
 
         if (next) return { label: this.formatFutureTime(next), utc: next };
         if (scheduled.length > 0) return { label: 'Waiting for schedule', utc: null };
-        if (triggers.some(trigger => Number(trigger.kind) === TRIGGER.COMMIT)) {
-            return { label: 'After next commit', utc: null };
-        }
+        const hasPreCommit = triggers.some(trigger => Number(trigger.kind) === TRIGGER.PRECOMMIT);
+        const hasCommit = triggers.some(trigger => Number(trigger.kind) === TRIGGER.COMMIT);
+        if (hasPreCommit && hasCommit) return { label: 'On next commit', utc: null };
+        if (hasPreCommit) return { label: 'Before next commit', utc: null };
+        if (hasCommit) return { label: 'After next commit', utc: null };
         return { label: 'On demand', utc: null };
     }
 
@@ -747,7 +749,7 @@ export class JobController {
         const retryable = statusCode >= RUN_STATUS_CODE.FAILED;
         const runId = this.escape(run.id);
         const detail = this.runDetail(run);
-        const trigger = { 0: 'Schedule', 2: 'After commit', 3: 'Manual' }[Number(run.triggerKind)] || 'Manual';
+        const trigger = { 0: 'Schedule', 2: 'After commit', 3: 'Manual', 4: 'Before commit' }[Number(run.triggerKind)] || 'Manual';
         const watchTitle = active ? 'Watch this run live' : 'Watch this recording';
         const selected = this.historySelection.has(run.id);
         return `<tr>
@@ -809,6 +811,7 @@ export class JobController {
         const triggers = source.triggers || [];
         const scheduled = triggers.find(trigger => Number(trigger.kind) === TRIGGER.SCHEDULE);
         const hasCommit = triggers.some(trigger => Number(trigger.kind) === TRIGGER.COMMIT) || preferredTrigger === TRIGGER.COMMIT;
+        const hasPreCommit = triggers.some(trigger => Number(trigger.kind) === TRIGGER.PRECOMMIT) || preferredTrigger === TRIGGER.PRECOMMIT;
         const timezone = scheduled?.timeZoneId || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
         const scheduleKind = Number(scheduled?.scheduleKind ?? SCHEDULE.INTERVAL);
         const environment = this.findEnvironment(source.environmentId);
@@ -855,8 +858,9 @@ export class JobController {
                             <div class="col-12" data-timezone-field><label class="form-label" for="job-timezone">Time zone</label><input class="form-control" id="job-timezone" value="${this.escape(timezone)}"></div>
                         </div>
                     </div>
+                    <label class="job-trigger-option"><span><strong>Before each commit</strong><small>Queue when Git starts a commit. The commit is not delayed while the automation runs.</small></span><input class="job-switch-input" type="checkbox" id="job-trigger-precommit" ${hasPreCommit ? 'checked' : ''}></label>
                     <label class="job-trigger-option"><span><strong>After each commit</strong><small>Run after a successful Git commit in this repository.</small></span><input class="job-switch-input" type="checkbox" id="job-trigger-commit" ${hasCommit ? 'checked' : ''}></label>
-                    <div class="job-manual-note"><i class="fa-solid fa-play" aria-hidden="true"></i>You can always use Run now, even with both switches off.</div>
+                    <div class="job-manual-note"><i class="fa-solid fa-play" aria-hidden="true"></i>You can always use Run now, even with these switches off.</div>
                 </fieldset>
 
                 <div class="job-run-options">
@@ -897,6 +901,14 @@ export class JobController {
         form?.querySelectorAll('[data-job-action="cancel-editor"]')?.forEach(button => button.addEventListener('click', () => this.closeEditor()));
         form?.querySelector('#job-trigger-schedule')?.addEventListener('change', updateScheduleFields);
         form?.querySelector('#job-schedule-kind')?.addEventListener('change', updateScheduleFields);
+        const beforeCommitTrigger = form?.querySelector('#job-trigger-precommit');
+        const afterCommitTrigger = form?.querySelector('#job-trigger-commit');
+        beforeCommitTrigger?.addEventListener('change', () => {
+            if (beforeCommitTrigger.checked && afterCommitTrigger) afterCommitTrigger.checked = false;
+        });
+        afterCommitTrigger?.addEventListener('change', () => {
+            if (afterCommitTrigger.checked && beforeCommitTrigger) beforeCommitTrigger.checked = false;
+        });
         form?.addEventListener('submit', event => this.saveJob(event, job));
         updateScheduleFields();
         this.updateEditorEnvironmentPreview();
@@ -1070,7 +1082,14 @@ export class JobController {
                 timeZoneId: scheduleKind === SCHEDULE.INTERVAL ? null : form.querySelector('#job-timezone').value.trim()
             });
         }
-        if (form.querySelector('#job-trigger-commit').checked) triggers.push({ kind: TRIGGER.COMMIT });
+        const beforeCommit = form.querySelector('#job-trigger-precommit')?.checked === true;
+        const afterCommit = form.querySelector('#job-trigger-commit')?.checked === true;
+        if (validate && beforeCommit && afterCommit) {
+            this.app.showError('Choose either Before each commit or After each commit.');
+            return null;
+        }
+        if (beforeCommit) triggers.push({ kind: TRIGGER.PRECOMMIT });
+        if (afterCommit) triggers.push({ kind: TRIGGER.COMMIT });
 
         const projectPath = this.currentProjectPath();
         if (validate && !projectPath) {
@@ -1255,6 +1274,7 @@ export class JobController {
 
     formatTrigger(trigger) {
         const kind = Number(trigger.kind);
+        if (kind === TRIGGER.PRECOMMIT) return 'Before each commit';
         if (kind === TRIGGER.COMMIT) return 'After successful commit';
         if (kind !== TRIGGER.SCHEDULE) return 'Manual';
         const scheduleKind = Number(trigger.scheduleKind);
@@ -1567,7 +1587,10 @@ viberails-recipe -->
                     prompt: recipe.prompt || environment.customPrompt || '',
                     timeoutMinutes: Number(recipe.timeoutMinutes) || null,
                     enabled: false,
-                    triggers: (recipe.triggers || []).filter(t => Number(t.kind) === TRIGGER.SCHEDULE || Number(t.kind) === TRIGGER.COMMIT)
+                    triggers: (recipe.triggers || []).filter(t => {
+                        const kind = Number(t.kind);
+                        return kind === TRIGGER.SCHEDULE || kind === TRIGGER.COMMIT || kind === TRIGGER.PRECOMMIT;
+                    })
                 });
             }
             this.app.closeModal();

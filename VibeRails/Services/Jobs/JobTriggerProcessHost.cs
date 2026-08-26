@@ -29,6 +29,8 @@ public static class JobTriggerProcessHost
         try
         {
             var trigger = GetValue(args, "--job-trigger");
+            // Before-commit automations are queued in-process by AutomatedWorkflowsPreflightStep
+            // during `vb --vca-hook pre-commit`. This host is only the post-commit hook.
             if (!string.Equals(trigger, "post-commit", StringComparison.OrdinalIgnoreCase))
                 return 0;
 

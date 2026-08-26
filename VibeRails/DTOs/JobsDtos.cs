@@ -6,9 +6,10 @@ public enum JobTriggerKind
 {
     Schedule = 0,
     // 1 was the removed pre-commit VCA trigger; the value is intentionally skipped so existing
-    // Commit/Manual numeric values stay stable.
+    // Commit/Manual numeric values stay stable. Before-commit automations use PreCommit = 4.
     Commit = 2,
-    Manual = 3
+    Manual = 3,
+    PreCommit = 4
 }
 
 public enum JobScheduleKind

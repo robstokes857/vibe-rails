@@ -25,8 +25,7 @@ public class VcaHookProcessHostTests
         Assert.Contains("[1/3]", text);
         Assert.Contains("PASS: VCA hook preview completed.", text);
         Assert.Contains("MintLint code health", text);
-        // The pre-commit VCA trigger is gone; the step is a no-op that still reports itself so the
-        // hook's [n/3] progress stays accurate.
+        // The third step still reports itself so the hook's [n/3] progress stays accurate.
         Assert.Contains("Automated workflows", text);
         Assert.DoesNotContain("Queued", text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("[pass] Commit allowed", text);

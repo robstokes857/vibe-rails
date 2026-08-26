@@ -339,8 +339,8 @@ public sealed class JobStore : IJobStore
         string eventKey,
         CancellationToken cancellationToken = default)
     {
-        if (kind != JobTriggerKind.Commit)
-            throw new ArgumentOutOfRangeException(nameof(kind), kind, "Only Commit event runs are supported.");
+        if (kind is not (JobTriggerKind.Commit or JobTriggerKind.PreCommit))
+            throw new ArgumentOutOfRangeException(nameof(kind), kind, "Only Commit and PreCommit event runs are supported.");
 
         await using var connection = await OpenAsync(cancellationToken);
         var jobIds = new List<long>();
@@ -362,7 +362,8 @@ public sealed class JobStore : IJobStore
         var runIds = new List<string>(jobIds.Count);
         foreach (var jobId in jobIds)
         {
-            var runId = await EnqueueJobRunAsync(jobId, kind, $"commit:{jobId}:{eventKey}", requireEnabled: true, cancellationToken);
+            var prefix = kind == JobTriggerKind.PreCommit ? "precommit" : "commit";
+            var runId = await EnqueueJobRunAsync(jobId, kind, $"{prefix}:{jobId}:{eventKey}", requireEnabled: true, cancellationToken);
             if (runId != null)
                 runIds.Add(runId);
         }
@@ -903,8 +904,8 @@ public sealed class JobStore : IJobStore
         //
         // The NOT EXISTS clause is the self-overlap guard, and it lives here rather than in any
         // caller so that EVERY trigger path inherits it — schedule, commit, manual, and retry all
-        // funnel through this statement. Putting it in the scheduler would leave the commit path
-        // (which spawns straight from the git hook) uncapped. Because timeouts are opt-in, a run
+        // funnel through this statement. Putting it in the scheduler would leave the git-hook
+        // paths (pre-commit and post-commit) uncapped. Because timeouts are opt-in, a run
         // can legitimately live for hours; without this a 10-minute schedule on a long job would
         // stack a new terminal window every 10 minutes forever.
         //

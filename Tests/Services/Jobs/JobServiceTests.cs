@@ -191,6 +191,38 @@ public sealed class JobServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task CreateJob_AcceptsAPreCommitTrigger()
+    {
+        WithEnvironment();
+        CreateJobRequest? captured = null;
+        _store
+            .Setup(s => s.CreateJobAsync(It.IsAny<CreateJobRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<CreateJobRequest, CancellationToken>((request, _) => captured = request)
+            .ReturnsAsync(Record());
+
+        await Service().CreateJobAsync(
+            Request(triggers: [new JobTriggerRequest(JobTriggerKind.PreCommit)]),
+            TestContext.Current.CancellationToken);
+
+        Assert.NotNull(captured);
+        Assert.Equal(JobTriggerKind.PreCommit, Assert.Single(captured.Triggers).Kind);
+    }
+
+    [Fact]
+    public async Task CreateJob_WithAnUnknownTriggerKind_IsRejected()
+    {
+        WithEnvironment();
+
+        var error = await Assert.ThrowsAsync<JobServiceException>(() =>
+            Service().CreateJobAsync(
+                Request(triggers: [new JobTriggerRequest((JobTriggerKind)99)]),
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal(400, error.StatusCode);
+        Assert.Contains("Unknown trigger", error.Message);
+    }
+
+    [Fact]
     public async Task CreateJob_WithTwoTriggersOfTheSameKind_IsRejected()
     {
         WithEnvironment();
@@ -206,6 +238,24 @@ public sealed class JobServiceTests : IDisposable
 
         Assert.Equal(400, error.StatusCode);
         Assert.Contains("Only one", error.Message);
+    }
+
+    [Fact]
+    public async Task CreateJob_WithBeforeAndAfterCommitTriggers_IsRejected()
+    {
+        WithEnvironment();
+
+        var error = await Assert.ThrowsAsync<JobServiceException>(() =>
+            Service().CreateJobAsync(
+                Request(triggers:
+                [
+                    new JobTriggerRequest(JobTriggerKind.PreCommit),
+                    new JobTriggerRequest(JobTriggerKind.Commit)
+                ]),
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal(400, error.StatusCode);
+        Assert.Contains("either Before each commit or After each commit", error.Message);
     }
 
     [Fact]

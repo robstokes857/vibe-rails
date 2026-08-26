@@ -76,12 +76,12 @@ public sealed class JobScheduleCalculatorTests
             JobScheduleCalculator.ComputeNext(trigger, now));
     }
 
-    [Fact]
-    public void Validate_RejectsScheduleFieldsOnGitTrigger()
+    [Theory]
+    [InlineData(JobTriggerKind.Commit)]
+    [InlineData(JobTriggerKind.PreCommit)]
+    public void Validate_RejectsScheduleFieldsOnGitTrigger(JobTriggerKind kind)
     {
-        var trigger = new JobTriggerRequest(
-            JobTriggerKind.Commit,
-            TimeZoneId: "UTC");
+        var trigger = new JobTriggerRequest(kind, TimeZoneId: "UTC");
 
         Assert.Equal("Only schedule triggers may include schedule fields.",
             JobScheduleCalculator.Validate(trigger));

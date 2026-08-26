@@ -386,6 +386,39 @@ public sealed class JobStoreOverlapTests : IDisposable
     /// <summary>
     /// Creates the Environments row the run insert INNER JOINs against, then a Job pointing at it.
     /// </summary>
+    [Fact]
+    public async Task EnqueueEventRunsAsync_PreCommit_DoesNotEnqueueAfterCommitJobs()
+    {
+        var (store, commitJobId) = await SeedJobAsync(includeCommitTrigger: true);
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var commitJob = await store.GetJobAsync(commitJobId, cancellationToken);
+        await store.CreateJobAsync(new CreateJobRequest(
+            Name: "Before-commit review",
+            ProjectPath: Path.GetTempPath(),
+            Llm: LLM.Claude,
+            EnvironmentId: commitJob!.EnvironmentId,
+            Prompt: "Review staged changes.",
+            TimeoutMinutes: 30,
+            Enabled: true,
+            Triggers: [new JobTriggerRequest(JobTriggerKind.PreCommit)]), cancellationToken);
+
+        var preCommit = await store.EnqueueEventRunsAsync(
+            Path.GetTempPath(), JobTriggerKind.PreCommit, "preflight-run", cancellationToken);
+        var afterCommit = await store.EnqueueEventRunsAsync(
+            Path.GetTempPath(), JobTriggerKind.Commit, "commit-abc", cancellationToken);
+
+        Assert.Single(preCommit);
+        Assert.Single(afterCommit);
+        Assert.NotEqual(preCommit[0], afterCommit[0]);
+
+        var preRun = await store.GetRunAsync(preCommit[0], cancellationToken);
+        var afterRun = await store.GetRunAsync(afterCommit[0], cancellationToken);
+        Assert.Equal(JobTriggerKind.PreCommit, preRun!.TriggerKind);
+        Assert.Equal(JobTriggerKind.Commit, afterRun!.TriggerKind);
+        Assert.StartsWith("precommit:", preRun.TriggerKey, StringComparison.Ordinal);
+        Assert.StartsWith("commit:", afterRun.TriggerKey, StringComparison.Ordinal);
+    }
+
     private async Task<(JobStore Store, long JobId)> SeedJobAsync(
         int? timeoutMinutes = null,
         int? intervalMinutes = null,

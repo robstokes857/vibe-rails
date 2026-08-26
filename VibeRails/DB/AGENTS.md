@@ -715,7 +715,10 @@ CREATE TABLE IF NOT EXISTS Jobs (
 
 **Index:** `idx_jobs_project` on `(ProjectPath, Enabled, DeletedUTC)`
 
-**JobTriggers** — one or more triggers per Job (interval, scheduled, manual).
+**JobTriggers** — one or more triggers per Job (interval/daily/weekly schedule, before commit,
+after commit). Before-commit and after-commit are mutually exclusive because the per-Job overlap
+guard would otherwise discard the second event. Run now is always available and is not stored as a
+trigger.
 
 ```sql
 CREATE TABLE IF NOT EXISTS JobTriggers (

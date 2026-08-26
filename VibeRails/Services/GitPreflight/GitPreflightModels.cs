@@ -93,7 +93,8 @@ public sealed record GitPreflightRequest(
     // at a glance which scan they're reading.
     bool UnpushedChanges = false,
     // Only the standalone native pre-commit hook sets this. Browser/Rules previews use
-    // the same pipeline but must never enqueue real automation.
+    // the same pipeline and may report matching before-commit Automations, but must never
+    // enqueue real runs.
     bool EnqueueAutomatedJobs = false);
 
 public sealed record GitPreflightEvent(

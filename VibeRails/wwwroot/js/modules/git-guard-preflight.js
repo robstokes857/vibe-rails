@@ -1,7 +1,7 @@
 export const GIT_PREFLIGHT_STEPS = Object.freeze([
     Object.freeze({ id: 'vca', label: 'VCA rules', description: 'Validate staged changes against repository vc.rules.md rules.' }),
     Object.freeze({ id: 'mintlint', label: 'MintLint', description: 'Grade added staged code and surface maintainability findings.' }),
-    Object.freeze({ id: 'automated-workflows', label: 'Automated workflows', description: 'Run repository-defined commit safeguards.' })
+    Object.freeze({ id: 'automated-workflows', label: 'Automated workflows', description: 'Queue automations set to run before this commit. They do not block Git.' })
 ]);
 
 const STEP_IDS = new Set(GIT_PREFLIGHT_STEPS.map(step => step.id));

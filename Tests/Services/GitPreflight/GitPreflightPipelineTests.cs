@@ -78,11 +78,9 @@ public sealed class GitPreflightPipelineTests
     }
 
     [Fact]
-    public async Task AutomatedWorkflowStep_NeverQueuesJobs_AndCannotBlockTheCommit()
+    public async Task AutomatedWorkflowStep_WithoutAJobStore_DoesNotQueueAndCannotBlockTheCommit()
     {
         var output = new List<string>();
-        // The pre-commit VCA trigger is gone: Jobs run on a schedule, after a successful commit, or
-        // on demand. The step no longer takes a job store at all, so it cannot reach one.
         var step = new AutomatedWorkflowsPreflightStep();
 
         var result = await step.ExecuteAsync(
@@ -105,6 +103,31 @@ public sealed class GitPreflightPipelineTests
         Assert.DoesNotContain("Queued", message, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(message, result.Summary);
         Assert.Equal([message], result.Output);
+    }
+
+    [Fact]
+    public async Task AutomatedWorkflowStep_JobStoreInitializationFailure_IsAWarningAndCannotBlockTheCommit()
+    {
+        var pipeline = new GitPreflightPipeline(
+            new SnapshotProvider(),
+            new SnapshotProvider(),
+            [
+                new TestStep(VcaPreflightStep.Id, true, GitPreflightStepStatus.Passed, []),
+                new TestStep(MintLintPreflightStep.Id, false, GitPreflightStepStatus.Passed, []),
+                new AutomatedWorkflowsPreflightStep(new ThrowingJobStoreAccessor())
+            ]);
+
+        var result = await pipeline.RunAsync(
+            Request() with { EnqueueAutomatedJobs = true },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.CommitAllowed);
+        Assert.Equal(GitPreflightStepStatus.Warning, result.Status);
+        var automation = Assert.Single(
+            result.Steps,
+            step => step.StepId == AutomatedWorkflowsPreflightStep.Id);
+        Assert.Equal(GitPreflightStepStatus.Warning, automation.Status);
+        Assert.Contains("database is locked", automation.Summary, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -236,5 +259,11 @@ public sealed class GitPreflightPipelineTests
             cancellationToken.ThrowIfCancellationRequested();
             throw new InvalidOperationException("Unreachable");
         }
+    }
+
+    private sealed class ThrowingJobStoreAccessor : IJobStoreAccessor
+    {
+        public IJobStore GetRequiredStore() =>
+            throw new InvalidOperationException("database is locked");
     }
 }
