@@ -420,6 +420,7 @@ test.describe('Jobs Worker / Environments integration', () => {
         await expect(page.locator('#job-prompt')).toHaveCount(0);
         await expect(page.locator('[data-job-form]')).toContainText('Runs in');
         await expect(page.locator('[data-job-form]')).toContainText(CURRENT_REPOSITORY);
+        await expect(page.locator('[data-job-form]')).toContainText('Before each commit');
         await expect(page.locator('[data-job-form]')).toContainText('After each commit');
 
         const picker = page.locator('#job-llm-selection');
@@ -438,6 +439,11 @@ test.describe('Jobs Worker / Environments integration', () => {
 
         await picker.evaluate(element => element.tomselect.setValue('env:41:codex'));
         await page.locator('#job-name').fill('Security review after commit');
+        await page.locator('#job-trigger-precommit').check();
+        await page.locator('#job-trigger-commit').check();
+        await expect(page.locator('#job-trigger-precommit')).not.toBeChecked();
+        await page.locator('#job-trigger-precommit').check();
+        await expect(page.locator('#job-trigger-commit')).not.toBeChecked();
         await page.locator('#job-trigger-commit').check();
         await page.locator('[data-job-form] button[type="submit"]').click();
 

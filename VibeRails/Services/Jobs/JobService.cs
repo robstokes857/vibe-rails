@@ -338,11 +338,17 @@ public sealed class JobService(
         var duplicate = triggerList.GroupBy(trigger => trigger.Kind).FirstOrDefault(group => group.Count() > 1);
         if (duplicate is not null)
             throw JobServiceException.BadRequest($"Only one {duplicate.Key} trigger may be configured per Automation.");
+        if (triggerList.Any(trigger => trigger.Kind == JobTriggerKind.PreCommit)
+            && triggerList.Any(trigger => trigger.Kind == JobTriggerKind.Commit))
+        {
+            throw JobServiceException.BadRequest(
+                "Choose either Before each commit or After each commit; one Automation cannot use both.");
+        }
         foreach (var trigger in triggerList)
         {
             if (trigger.Kind == JobTriggerKind.Manual)
                 throw JobServiceException.BadRequest("Run Now is always available and is not stored as a trigger.");
-            if (trigger.Kind is not (JobTriggerKind.Schedule or JobTriggerKind.Commit))
+            if (trigger.Kind is not (JobTriggerKind.Schedule or JobTriggerKind.Commit or JobTriggerKind.PreCommit))
                 throw JobServiceException.BadRequest("Unknown trigger kind.");
             var error = JobScheduleCalculator.Validate(trigger);
             if (error is not null)

@@ -55,7 +55,9 @@ public sealed class VcaHookRunner : IVcaHookRunner
                 new GitPreflightRequest(
                     workingDirectory,
                     invocation,
-                    EnqueueAutomatedJobs: invocation.Kind == VcaHookKind.PreCommit && !invocation.DemoUi),
+                    EnqueueAutomatedJobs: invocation.Kind == VcaHookKind.PreCommit
+                        && !invocation.DemoUi
+                        && invocation.EnqueueAutomatedJobs),
                 async (preflightEvent, ct) =>
                     await _presenter.WritePreflightEventAsync(preflightEvent, ct),
                 cancellationToken);

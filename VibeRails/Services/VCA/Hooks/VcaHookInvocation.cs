@@ -28,7 +28,10 @@ public sealed record VcaHookInvocation(
     // Set by the hook script once it has run the CleanCommitMessage pass itself. Hook scripts
     // installed before that pass existed do not pass it, and those invocations still clean the
     // message inline so an un-upgraded repository keeps the policy.
-    bool CoAuthorsAlreadyCleaned = false);
+    bool CoAuthorsAlreadyCleaned = false,
+    // Only the installed pre-commit hook passes this. Manual validation and the Git Guard
+    // console reuse the pre-commit pipeline, but must remain previews that do not start agents.
+    bool EnqueueAutomatedJobs = false);
 
 public sealed record VcaHookDisplayInfo(
     string Title,

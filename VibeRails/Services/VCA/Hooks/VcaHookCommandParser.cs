@@ -40,6 +40,7 @@ public sealed class VcaHookCommandParser : IVcaHookCommandParser
         var showConsoleWindow = false;
         var consoleWindowAttached = false;
         var coAuthorsAlreadyCleaned = false;
+        var enqueueAutomatedJobs = false;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -131,6 +132,12 @@ public sealed class VcaHookCommandParser : IVcaHookCommandParser
                 continue;
             }
 
+            if (arg.Equals("--enqueue-automations", StringComparison.OrdinalIgnoreCase))
+            {
+                enqueueAutomatedJobs = true;
+                continue;
+            }
+
             if (arg.Equals("--demo-duration-ms", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
             {
                 if (int.TryParse(args[++i], out var ms) && ms > 0)
@@ -155,7 +162,8 @@ public sealed class VcaHookCommandParser : IVcaHookCommandParser
             showConsoleWindow,
             consoleWindowAttached,
             WorkingTreeScope: false,
-            CoAuthorsAlreadyCleaned: coAuthorsAlreadyCleaned);
+            CoAuthorsAlreadyCleaned: coAuthorsAlreadyCleaned,
+            EnqueueAutomatedJobs: enqueueAutomatedJobs);
     }
 
     private static VcaHookKind ParseKind(string value)

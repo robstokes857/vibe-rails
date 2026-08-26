@@ -28,6 +28,22 @@ public class VcaHookCommandParserTests
         Assert.Equal(VcaHookKind.PreCommit, invocation.Kind);
         Assert.Equal(@"C:\repo", invocation.WorkingDirectory);
         Assert.False(invocation.DemoUi);
+        Assert.False(invocation.EnqueueAutomatedJobs);
+    }
+
+    [Fact]
+    public void Parse_InstalledHookFlag_AllowsBeforeCommitAutomations()
+    {
+        var parser = new VcaHookCommandParser();
+
+        var invocation = parser.Parse([
+            "--vca-hook",
+            "pre-commit",
+            "--enqueue-automations",
+            "--workdir",
+            @"C:\repo"]);
+
+        Assert.True(invocation.EnqueueAutomatedJobs);
     }
 
     [Fact]

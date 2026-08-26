@@ -333,6 +333,7 @@ test('Automations require a saved Environment and do not retain legacy base-CLI 
 test('Automation trigger labels cover every live kind and degrade the retired VCA kind to Manual', () => {
     const controller = new JobController(createApp());
 
+    assert.equal(controller.formatTrigger({ kind: 4 }), 'Before each commit');
     assert.equal(controller.formatTrigger({ kind: 2 }), 'After successful commit');
     assert.equal(controller.formatTrigger({ kind: 3 }), 'Manual');
     assert.equal(
@@ -1314,6 +1315,73 @@ test('A time limit is optional: blank sends null and a number opts in', () => {
 
     controls.get('#job-timeout').value = '45';
     assert.equal(controller.captureEditorState(form, { validate: true }).timeoutMinutes, 45);
+});
+
+test('Before each commit is stored as its own trigger and does not block Git', async () => {
+    const app = createApp();
+    app.data = { configs: { rootPath: '/derived/current-repo' }, isInGit: true };
+    const controller = new JobController(app);
+    controller.environments = [{
+        id: 42,
+        name: 'OpenCode review',
+        cli: 'opencode',
+        customPrompt: 'Review staged changes before the commit lands.'
+    }];
+    controller.refreshAll = async () => {};
+
+    const submit = { disabled: false, textContent: '' };
+    const controls = new Map([
+        ['[type="submit"]', submit],
+        ['#job-llm-selection', { value: 'env:42:opencode' }],
+        ['#job-trigger-schedule', { checked: false }],
+        ['#job-trigger-precommit', { checked: true }],
+        ['#job-trigger-commit', { checked: false }],
+        ['#job-name', { value: 'Pre-commit review' }],
+        ['#job-timeout', { value: '' }],
+        ['#job-enabled', { checked: true }],
+        ['#job-launch-minimized', { checked: false }]
+    ]);
+    const form = {
+        querySelector(selector) { return controls.get(selector) || null; },
+        querySelectorAll() { return []; }
+    };
+
+    await controller.saveJob({ preventDefault() {}, currentTarget: form }, null);
+
+    assert.equal(app.calls.length, 1);
+    assert.deepEqual(app.calls[0].body.triggers, [{ kind: 4 }]);
+    assert.equal(controller.nextRunSummary({ enabled: true, triggers: [{ kind: 4 }] }).label, 'Before next commit');
+    assert.equal(
+        controller.nextRunSummary({ enabled: true, triggers: [{ kind: 4 }, { kind: 2 }] }).label,
+        'On next commit');
+});
+
+test('An Automation cannot save both before-commit and after-commit triggers', () => {
+    const app = createApp();
+    const errors = [];
+    app.showError = message => errors.push(message);
+    app.data = { configs: { rootPath: '/derived/current-repo' }, isInGit: true };
+    const controller = new JobController(app);
+    controller.environments = [{
+        id: 42,
+        name: 'Commit review',
+        cli: 'opencode',
+        customPrompt: 'Review the commit.'
+    }];
+
+    const controls = new Map([
+        ['#job-llm-selection', { value: 'env:42:opencode' }],
+        ['#job-trigger-schedule', { checked: false }],
+        ['#job-trigger-precommit', { checked: true }],
+        ['#job-trigger-commit', { checked: true }]
+    ]);
+    const form = {
+        querySelector(selector) { return controls.get(selector) || null; },
+        querySelectorAll() { return []; }
+    };
+
+    assert.equal(controller.captureEditorState(form, { validate: true }), null);
+    assert.deepEqual(errors, ['Choose either Before each commit or After each commit.']);
 });
 
 test('Automation rows show the next scheduled run and disabled state', () => {

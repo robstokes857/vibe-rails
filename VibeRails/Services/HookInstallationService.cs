@@ -827,7 +827,7 @@ namespace VibeRails.Services
                 {
                     "commit-msg" => "--vca-hook commit-msg",
                     "post-commit" => "--job-trigger post-commit",
-                    _ => "--vca-hook pre-commit"
+                    _ => "--vca-hook pre-commit --enqueue-automations"
                 };
                 var launchError = _launchCommand.GetValidationError();
                 if (launchError != null)

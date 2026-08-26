@@ -178,7 +178,7 @@ vb --git-guard
 - Opens the authenticated `/git-guard` focused web surface
 - Captures the exact staged Git index snapshot (including partially staged files)
 - Streams VCA, report-only MintLint, and automated-workflow stage events live to the browser
-- VCA is the only preflight stage that can block a commit; automated workflows are currently a placeholder
+- VCA is the only preflight stage that can block a commit; automated workflows enqueue before-commit Automations without waiting on them
 - The native pre-commit hook uses the same shared pipeline and console event presentation
 
 The old CLI management commands (`vb env`, `vb validate`, `vb hooks`, etc.) are no longer part of the supported surface. Use the Web UI, VS Code extension, or REST APIs for those workflows.
