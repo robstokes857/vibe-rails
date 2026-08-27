@@ -329,7 +329,7 @@ Owns session preparation (`PrepareSessionAsync`) — builds the `PreparedTermina
 
 ### Observer implementations (`Observers/`)
 - `GitDiffIdleCaptureObserver.cs` — forwards terminal idle + session-complete events to `IGitDiffCaptureService` for git diff capture.
-- `WaitingForUserInputObserver.cs` — detects when Codex is sitting at a prompt waiting for user input by analyzing PTY chunk repetition patterns.
+- `WaitingForUserInputObserver.cs` — detects when Codex is sitting at a prompt waiting for user input by analyzing PTY chunk repetition patterns, then vetoes a candidate when its per-session terminal model still visibly renders `Working (... esc to interrupt)`.
 - `SessionStateEventObserver.cs` — publishes session lifecycle state changes to `IAppEventBus` so browser clients receive real-time updates (metadata only, no raw I/O).
 - `MyTerminalObserver.cs` — debugging/development observer.
 

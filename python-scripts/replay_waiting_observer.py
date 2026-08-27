@@ -1,5 +1,5 @@
-"""Replay SessionLogs through the current WaitingForUserInputObserver
-implementation (chunk-repetition heuristic):
+"""Replay SessionLogs through WaitingForUserInputObserver's statistical
+candidate stage (chunk-repetition heuristic):
 
   - Per-session 5s rolling window of raw PTY chunks (NOT plain-text).
   - Codex's idle screen repaints the same large ANSI cursor-positioning
@@ -11,7 +11,12 @@ implementation (chunk-repetition heuristic):
       Idle:          repetitive enough — fire if gate not yet set.
   - Fire once per idle->working->idle cycle.
 
-Mirror of VibeRails/Services/Terminal/Observers/WaitingForUserInputObserver.cs.
+The production observer performs one additional check that this script cannot
+derive from an arbitrary five-second database slice: it replays the full PTY
+stream into a terminal model and vetoes a statistical candidate while the
+visible screen still contains ``Working (... esc to interrupt)``. Fires printed
+here are therefore candidates before that screen-state veto, not necessarily
+events the current application would publish.
 """
 import argparse
 import os
@@ -140,7 +145,7 @@ def replay(db_path, session_id, verbose):
                     print(f">>> FIRE at chunk {cid} @ {ts_str} {snap}")
         # 'indeterminate': leave has_fired alone
 
-    print(f"\nProcessed {chunk_count} chunks. Detected {len(fires)} fires.")
+    print(f"\nProcessed {chunk_count} chunks. Detected {len(fires)} pre-screen-veto candidates.")
     for entry in fires:
         cid, ts = entry[0], entry[1]
         snap = entry[2] if len(entry) > 2 else ""

@@ -1,5 +1,6 @@
 import { VibeTerminal } from './vibe-terminal.js';
 import { translateOpenCodeMouseWheel } from './terminal-opencode-wheel.js';
+import { createGrokPastePayload, isNativeGrokCli } from './terminal-grok-paste.js';
 
 const RESIZE_PREFIX = '__resize__:';
 
@@ -91,7 +92,7 @@ export class TerminalTab {
         if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
             return false;
         }
-        const payload = this.vibeTerminal?.createBracketedPastePayload(text) ?? text;
+        const payload = this._createPastePayload(text);
         // Defensive cap: the server closes the socket on any single message over
         // TerminalControlProtocol.MaxMessageBytes (256 KiB). Refuse to send an oversized
         // payload rather than kill the session. Callers that want a user-facing message
@@ -101,6 +102,16 @@ export class TerminalTab {
         }
         this.socket.send(payload);
         return true;
+    }
+
+    // Clipboard paste and "Open in text editor" share this so Grok cannot drift
+    // from Ctrl+V. Native Grok is force-wrapped (see terminal-grok-paste.js);
+    // every other CLI stays on xterm's ?2004 bit via createBracketedPastePayload.
+    _createPastePayload(text) {
+        if (isNativeGrokCli(this.state.cli)) {
+            return createGrokPastePayload(text);
+        }
+        return this.vibeTerminal?.createBracketedPastePayload(text) ?? text;
     }
 
     // Passive keystroke counter behind the "Open in text editor" discovery nudge.
@@ -229,8 +240,14 @@ export class TerminalTab {
 
         this.vibeTerminal.attachClipboardPaste((text) => {
             if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-                const payload = this.vibeTerminal?.createBracketedPastePayload(text) ?? text;
-                this.socket.send(payload);
+                // Reuse injectText so clipboard and editor injection share both
+                // CLI-specific wrapping and the 256 KiB WebSocket message cap.
+                // Sending an oversized clipboard payload would make the server
+                // close an otherwise healthy terminal session.
+                if (!this.injectText(text)) {
+                    this.manager?.app?.showError('Paste exceeds the 256 KiB terminal input limit.');
+                    return;
+                }
 
                 // A long paste is exactly when the editor scratchpad shines, so
                 // surface the one-time discovery nudge for pasted prompts too. The

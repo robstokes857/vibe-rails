@@ -163,6 +163,50 @@ test.describe('terminal-multitab', () => {
         expect(withBracketedPaste.payloads).toEqual(['\x1b[200~\n\x1b[201~']);
     });
 
+    test('Grok paste is always bracketed and CRLF-normalized even when ?2004 is off', async ({ page }) => {
+        await navigateToRules(page);
+        await launchWebTerminal(page, 'grok-4.6');
+
+        const tabId = /** @type {string} */ (
+            await page.locator(selectors.tabItems).first().getAttribute('data-tab-id')
+        );
+        await waitForFakeCliReady(page, tabId);
+
+        const grokPaste = await page.evaluate(async (id) => {
+            const tab = window.app?.terminalController?.manager?.tabs?.get(id);
+            const instance = tab?.instance;
+            const terminal = instance?.vibeTerminal;
+            const socket = instance?.socket;
+            if (!instance || !terminal || !socket) {
+                throw new Error('Active terminal session was not available.');
+            }
+
+            await terminal.writeAsync('\x1b[?2004l');
+            const payloads = [];
+            const originalSend = socket.send;
+            socket.send = (data) => payloads.push(data);
+            let oversizedAccepted;
+            try {
+                instance.injectText('‣ line one\r\nline two');
+                oversizedAccepted = instance.injectText('x'.repeat(256 * 1024));
+            } finally {
+                socket.send = originalSend;
+            }
+
+            return {
+                cli: tab.state.cli,
+                bracketedPasteEnabled: terminal.isBracketedPasteModeEnabled(),
+                oversizedAccepted,
+                payloads,
+            };
+        }, tabId);
+
+        expect((grokPaste.cli || '').toLowerCase()).toBe('grok-4.6');
+        expect(grokPaste.bracketedPasteEnabled).toBe(false);
+        expect(grokPaste.oversizedAccepted).toBe(false);
+        expect(grokPaste.payloads).toEqual(['\x1b[200~‣ line one\nline two\x1b[201~']);
+    });
+
     test('the in-strip + button opens a second tab independent of the first', async ({ page }) => {
         await navigateToRules(page);
         await launchWebTerminal(page, 'codex');

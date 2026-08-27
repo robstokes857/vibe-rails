@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
 
@@ -70,6 +71,16 @@ public sealed class WaitingForUserInputObserver : ITerminalIoObserver
     // margin further or shifts small_unique past current bounds, add a new
     // fixture and re-tune rather than going to a ratio.
     private const int SmallChunkConcentrationMinSamples = 6;
+    // The repetition heuristic is deliberately cheap, but current Codex builds
+    // fragment the animated "Working (... esc to interrupt)" row into hundreds
+    // of tiny synchronized-output patches. A handful of unrelated larger rows
+    // can then make that active screen look statistically idle. Keep a small
+    // terminal model per Codex session and use the visible Working row as the
+    // final veto before publishing WAITING. Screen checks are throttled because
+    // a candidate window can remain statistically idle across many 30 Hz frames.
+    private static readonly TimeSpan WorkingScreenRecheckInterval = TimeSpan.FromMilliseconds(250);
+    private const int DefaultScreenCols = 240;
+    private const int DefaultScreenRows = 80;
     // The buffer must have been collecting for nearly a full SampleWindow before
     // we classify. Codex's per-char working animation can hit a transient
     // (unique=4, topCount=4) shape during the first ~250ms of the buffer
@@ -100,7 +111,20 @@ public sealed class WaitingForUserInputObserver : ITerminalIoObserver
     public ValueTask OnSessionStartAsync(TerminalSessionStartEvent startEvent, CancellationToken cancellationToken = default)
     {
         if (string.Equals(startEvent.Cli, "codex", StringComparison.OrdinalIgnoreCase))
+        {
+            _buffers.TryAdd(startEvent.SessionId, new SessionBuffer(_timeProvider));
             _codexSessions[startEvent.SessionId] = 0;
+        }
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask OnTerminalResizeAsync(TerminalResizeEvent resizeEvent, CancellationToken cancellationToken = default)
+    {
+        if (_codexSessions.ContainsKey(resizeEvent.SessionId) &&
+            _buffers.TryGetValue(resizeEvent.SessionId, out var buffer))
+        {
+            buffer.Resize(resizeEvent.Cols, resizeEvent.Rows);
+        }
         return ValueTask.CompletedTask;
     }
 
@@ -127,7 +151,8 @@ public sealed class WaitingForUserInputObserver : ITerminalIoObserver
         if (ioEvent.Direction != TerminalIoDirection.Output)
             return ValueTask.CompletedTask;
 
-        var buffer = _buffers.GetOrAdd(ioEvent.SessionId, _ => new SessionBuffer(_timeProvider));
+        if (!_buffers.TryGetValue(ioEvent.SessionId, out var buffer))
+            return ValueTask.CompletedTask;
 
         // Input and output can arrive on different threads. Keep the generation check and publish
         // inside one buffer-lock boundary so ResetAfterSubmit cannot invalidate the decision in
@@ -145,8 +170,8 @@ public sealed class WaitingForUserInputObserver : ITerminalIoObserver
 
     public ValueTask OnSessionCompleteAsync(TerminalSessionCompleteEvent completeEvent, CancellationToken cancellationToken = default)
     {
-        _buffers.TryRemove(completeEvent.SessionId, out _);
         _codexSessions.TryRemove(completeEvent.SessionId, out _);
+        _buffers.TryRemove(completeEvent.SessionId, out _);
         return ValueTask.CompletedTask;
     }
 
@@ -155,7 +180,10 @@ public sealed class WaitingForUserInputObserver : ITerminalIoObserver
         private readonly TimeProvider _timeProvider;
         private readonly Lock _lock = new();
         private readonly Queue<TimedChunk> _chunks = new();
+        private readonly TerminalEmulator.Terminal _screen =
+            new(DefaultScreenCols, DefaultScreenRows, scrollbackSize: 100);
         private bool _hasFired;
+        private DateTimeOffset _nextWorkingScreenCheckUtc = DateTimeOffset.MinValue;
         // Bumped by ResetAfterSubmit. A fire decision carries the generation it was made under;
         // PublishIfCurrentGeneration validates and publishes while still excluding a submit.
         private long _generation;
@@ -175,6 +203,7 @@ public sealed class WaitingForUserInputObserver : ITerminalIoObserver
             {
                 generation = _generation;
                 var now = _timeProvider.GetUtcNow();
+                _screen.Write(rawText);
                 _chunks.Enqueue(new TimedChunk(now, rawText));
 
                 // Hard cap on queue size in case a noisy session pumps a huge
@@ -200,10 +229,16 @@ public sealed class WaitingForUserInputObserver : ITerminalIoObserver
                         // once-per-cycle gate so the next time it settles we
                         // fire again.
                         _hasFired = false;
+                        _nextWorkingScreenCheckUtc = DateTimeOffset.MinValue;
                         return false;
 
                     case BufferVerdict.Idle:
                         if (_hasFired)
+                            return false;
+                        if (now < _nextWorkingScreenCheckUtc)
+                            return false;
+                        _nextWorkingScreenCheckUtc = now + WorkingScreenRecheckInterval;
+                        if (ScreenShowsCodexWorking())
                             return false;
                         _hasFired = true;
                         return true;
@@ -224,7 +259,20 @@ public sealed class WaitingForUserInputObserver : ITerminalIoObserver
             {
                 _chunks.Clear();
                 _hasFired = false;
+                _nextWorkingScreenCheckUtc = DateTimeOffset.MinValue;
                 _generation++;
+            }
+        }
+
+        public void Resize(int cols, int rows)
+        {
+            if (cols <= 0 || rows <= 0)
+                return;
+
+            lock (_lock)
+            {
+                if (_screen.Cols != cols || _screen.Rows != rows)
+                    _screen.Resize(cols, rows);
             }
         }
 
@@ -238,6 +286,26 @@ public sealed class WaitingForUserInputObserver : ITerminalIoObserver
         }
 
         private enum BufferVerdict { Indeterminate, Working, Idle }
+
+        private bool ScreenShowsCodexWorking()
+        {
+            var snapshot = _screen.GetSnapshot();
+            var line = new StringBuilder(_screen.Cols);
+            for (var row = 0; row < _screen.Rows; row++)
+            {
+                line.Clear();
+                for (var col = 0; col < _screen.Cols; col++)
+                    snapshot[row, col].AppendText(line, replaceControlWithSpace: true);
+
+                var visible = line.ToString();
+                if (visible.Contains("Working", StringComparison.OrdinalIgnoreCase) &&
+                    visible.Contains("esc to interrupt", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
 
         // Concrete Queue<TimedChunk> parameter (not IEnumerable<>) so the
         // struct enumerator stays on the stack — this runs once per PTY

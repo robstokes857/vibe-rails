@@ -1,8 +1,8 @@
 # API authentication coverage
 
-Audit date: 2026-08-25
+Audit date: 2026-08-26
 
-Full production route/authentication reconciliation completed: 2026-08-25. All 161
+Full production route/authentication reconciliation completed: 2026-08-26. All 161
 `/api/v1` method/path surfaces, nine protected non-`/api` API surfaces, and the three
 bootstrap/page/probe mappings match the current working tree. The only middleware bypasses
 remain exact `GET /health`, exact `GET /auth/bootstrap`, and global `OPTIONS` requests.
@@ -43,7 +43,7 @@ Kestrel-mapped LLM proxy tree for the native Grok Build CLI). Upstream is
 selected by `GrokLlmProxyMode`. This is not `/llm/grok` and not a second listener.
 The frozen three-case middleware bypass remains unchanged.
 
-Listener topology re-checked: 2026-08-18. The only approved production request listener
+Listener topology re-checked: 2026-08-26. The only approved production request listener
 is the main Kestrel host. An uncommitted Grok integration's second `HttpListener` was
 rejected and is logged below; no other production request listener was found.
 
