@@ -1,5 +1,31 @@
 # TERMINAL.md
 
+> ## 🟡 Fixed, awaiting Rob's test — Codex waiting status fires while still Working (2026-08-26)
+>
+> Current Codex fragments its animated `Working (... esc to interrupt)` row
+> into hundreds of tiny synchronized-output chunks. Four incidental repeated
+> large chunks were enough to satisfy the older repetition heuristic, so this
+> very review session flipped to **Waiting for user input** 56 seconds after
+> submit while the agent was still active.
+>
+> Fix: keep the existing statistical detector, but replay Codex output into a
+> small per-session terminal model and veto WAITING while the visible screen
+> still contains the Working row. The captured `b91596d9` regression produces
+> no event; all existing composer/approval-menu fixtures still produce one.
+
+> ## 🟡 Fixed, awaiting Rob's test — Grok paste of a multi-line file submits each line (2026-08-26)
+>
+> `reqs.txt` is ordinary UTF-8 with Windows CRLF (and `‣` bullets). Ctrl+V and
+> **Open in text editor** both inject through `_createPastePayload`. Other TUIs
+> emit `CSI ?2004h` so xterm.js wraps the blob; native Grok understands `CSI 200~`
+> but often never sets xterm's mode bit (Windows crossterm EnableBracketedPaste
+> is a no-op on the legacy console API). Raw CR/LF then look like Enter and Grok
+> submits one prompt per line.
+>
+> Fix: Grok-only frontend wrap + CRLF→LF (`terminal-grok-paste.js`). Claude /
+> Codex / OpenCode keep the `?2004` gate. Full entry:
+> **"## 2026-08-26 Grok multi-line paste…"** below.
+
 > ## 🟡 Fixed, awaiting Rob's test — OpenCode right-pane TUI scrollbar is inert (2026-08-24)
 >
 > The 2026-07-21 wheel→PageUp rewrite threw away SGR coordinates on **every**
@@ -227,6 +253,57 @@
 > nothing. Harmless to leave in (and may help once Claude Code's
 > wrapping is fixed upstream), but it's belt-only — not the
 > suspenders. Full triage below.
+
+## 2026-08-26 Grok multi-line paste submits each line in xterm.js
+
+**Status:** 🟡 **FIXED IN THE GROK PASTE PATH — AWAITING ROB'S TEST.**
+Frontend-only (`terminal-tab.js` → `terminal-grok-paste.js`). Claude, Codex,
+and OpenCode are unchanged.
+
+### Symptom
+
+Pasting `reqs.txt` (or any multi-line prompt) into native Grok via Ctrl+V or
+**Open in text editor** lands as many separate lines / submits, one per
+newline. The same paste into Claude / Codex / OpenCode stays one prompt.
+
+The file itself is not special: UTF-8, no BOM, Windows CRLF, one `‣`
+(U+2023) bullet. 62 CRLF pairs, 3630 bytes.
+
+### Cause
+
+Both UI paths call `injectText` / the clipboard paste handler, which wrap
+only when xterm.js reports `bracketedPasteMode`. That bit is set by
+`CSI ?2004h` from the CLI. Grok Build *can* parse `CSI 200~`…`CSI 201~`
+(the binary contains `?2004h` and `[200~`), but on Windows, crossterm's
+legacy console API returns "Bracketed paste not implemented", so the enable
+sequence often never reaches xterm.js. We then inject raw CR/LF. Grok's
+composer treats those as Enter.
+
+xterm.js Shift+Enter = Enter is a related Grok limitation (use Alt+Enter);
+this bug is the paste path, not that key.
+
+### Fix
+
+Grok-only (`cli === 'grok-4.6'`): always wrap the clipboard/editor text in
+`ESC[200~`…`ESC[201~` and fold `\r\n` / `\r` to `\n` inside the blob.
+Embedded paste markers are stripped so a payload cannot close paste early.
+Other CLIs still use `createBracketedPastePayload`, which is a no-op when
+`?2004` is off.
+
+### Regression coverage
+
+`Tests/wwwroot/js/terminal-grok-paste.test.mjs` — gate (Claude/Codex/OpenCode
+stay out), CRLF, unicode bullet, paste-marker strip.
+`UITests/tests/terminal-multitab.spec.js` — Grok injects a wrapped LF blob
+with `?2004` off. Run:
+`node --test Tests/wwwroot/js/terminal-grok-paste.test.mjs`.
+
+### Rob's check
+
+1. Reload the Grok tab.
+2. Ctrl+V `reqs.txt` into the composer. Pass = one draft, not 62 submits.
+3. Same file via **Open in text editor** → Send. Same pass.
+4. Spot-check Claude / Codex / OpenCode paste still one prompt.
 
 ## 2026-08-24 OpenCode right-pane TUI scrollbar is inert — 2026-07-21 rewrite stole its coordinates
 

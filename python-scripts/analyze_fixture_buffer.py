@@ -1,10 +1,11 @@
 """One-off analysis: load a binary fixture (the format export_chunks_fixture.py
-produces) and replay it through the WaitingForUserInputObserver classifier
-logic, dumping the per-chunk verdict + buffer stats at the moment of any fire
+produces) and replay it through the WaitingForUserInputObserver statistical
+classifier, dumping the per-chunk verdict + buffer stats at the moment of any candidate fire
 and at a few sample points. Lets us see what numerical signal could
 distinguish a false-positive window (codex Working sub-phase emitting bit-
 identical cursor-park frames) from a true-positive window (codex sitting at
-the composer / approval menu)."""
+the composer / approval menu). The production observer additionally vetoes a
+candidate while its terminal model still visibly renders the Codex Working row."""
 import argparse
 import struct
 from collections import deque, Counter

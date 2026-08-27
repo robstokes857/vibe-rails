@@ -31,7 +31,8 @@ Pure-Node tests (no browser) run via the built-in test runner:
 ```powershell
 npm run test:node
 ```
-Currently this runs `tests/xterm-scrollback.spec.js` using `node --test` with `@xterm/headless`.
+This runs `tests/xterm-scrollback.spec.js` plus the pure Grok paste payload regression
+(`../Tests/wwwroot/js/terminal-grok-paste.test.mjs`) using `node --test`.
 
 ### Playwright E2E Only
 Run all E2E tests in headless mode (console output):
@@ -59,7 +60,7 @@ npx playwright show-report
 - **Fake CLI:** `VIBERAILS_TEST_FAKE_CLI=1` (set by global-setup) makes `CommandService.PrepareSessionAsync` short-circuit to a portable echo+sleep so PTY+WS+xterm are exercised without a real LLM CLI.
 - **Custom backend:** Set `VIBERAILS_E2E_BACKEND_DLL` to point the suite at an already-built isolated DLL instead of `dotnet run`.
 - **Workers:** 1 (one backend instance per run, shared via saved `storageState`).
-- **Tests:** Located in `./tests`; `xterm-scrollback.spec.js` is excluded from Playwright (run via `npm run test:node` with `node --test` + `@xterm/headless`).
+- **Tests:** Located in `./tests`; `xterm-scrollback.spec.js` is excluded from Playwright (run via `npm run test:node` with `node --test` + `@xterm/headless`). Pure frontend module regressions may also be wired into `test:node` from `../Tests/wwwroot/js`.
 
 ## Adding New Tests
 
