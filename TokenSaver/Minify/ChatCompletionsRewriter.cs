@@ -160,6 +160,7 @@ public static class ChatCompletionsRewriter
                             raw,
                             plan,
                             CommandShapes.Classify(entry.Command),
+                            CommandShapes.ReadsFileContents(entry.Command),
                             buffers,
                             out var changed,
                             ref candidateStats,

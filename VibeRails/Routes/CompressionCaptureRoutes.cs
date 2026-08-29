@@ -166,13 +166,15 @@ public static class CompressionCaptureRoutes
         // Keyed off the recorded command, never off sniffing the output — the shape filters' whole
         // safety argument is that they only fire on a command they recognise.
         var shape = CommandShapes.Classify(command);
+        var readsFileContents = CommandShapes.ReadsFileContents(command);
 
         var trace = new List<StageTrace>();
         var minifyStats = default(MinifyStats);
         var condenseStats = default(CondenseStats);
         using var scratch = new PipelineScratch(rawText.Length);
         var output = CompressionPipeline.Run(
-            rawText, plan, shape, scratch, out _, ref minifyStats, ref condenseStats, trace);
+            rawText, plan, shape, readsFileContents, scratch, out _, ref minifyStats,
+            ref condenseStats, trace);
         return (output.ToString(), trace, true);
     }
 

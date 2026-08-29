@@ -187,6 +187,123 @@ public static class CommandShapes
     };
 
     /// <summary>
+    /// Commands that print file contents verbatim to stdout. Matched case-insensitively so
+    /// PowerShell's <c>Get-Content</c>/<c>gc</c> and cmd's <c>TYPE</c> hit alongside the POSIX
+    /// spellings. <c>head</c>/<c>tail</c> are in despite self-limiting: a <c>tail -n 5000</c> of a
+    /// source file is still verbatim file content, and the small forms never reach the truncation
+    /// thresholds anyway, so including them costs almost nothing.
+    /// </summary>
+    private static readonly HashSet<string> FileDumpCommands = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "cat", "bat", "nl", "head", "tail", "more", "less", "type", "get-content", "gc", "sed",
+    };
+
+    private static readonly HashSet<string>.AlternateLookup<ReadOnlySpan<char>> FileDumpLookup =
+        FileDumpCommands.GetAlternateLookup<ReadOnlySpan<char>>();
+
+    /// <summary>
+    /// The grep family, which is a file dump ONLY in combination with a match-everything pattern —
+    /// see <see cref="MatchEverythingPatterns"/>.
+    /// </summary>
+    private static readonly HashSet<string> GrepCommands = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "rg", "ripgrep", "grep", "egrep", "ag", "select-string", "sls",
+    };
+
+    private static readonly HashSet<string>.AlternateLookup<ReadOnlySpan<char>> GrepLookup =
+        GrepCommands.GetAlternateLookup<ReadOnlySpan<char>>();
+
+    /// <summary>
+    /// Patterns that match every line, making <c>rg -n '^' file.jsx</c> a <c>cat -n</c> with extra
+    /// steps. Measured: this idiom alone was 989 KB of the file content the saver was cutting holes
+    /// in — Codex reaches for it constantly. A plain <c>rg -n TODO src/</c> is NOT here and still
+    /// truncates: those payloads really are search results, they can span a whole tree, and the
+    /// <c>grep-group</c> filter already reshapes them.
+    /// </summary>
+    private static readonly HashSet<string> MatchEverythingPatterns = new(StringComparer.Ordinal)
+    {
+        "^", "$", ".*", "^.*$", "^.*", ".*$",
+    };
+
+    private static readonly HashSet<string>.AlternateLookup<ReadOnlySpan<char>> MatchEverythingLookup =
+        MatchEverythingPatterns.GetAlternateLookup<ReadOnlySpan<char>>();
+
+    /// <summary>
+    /// Token delimiters for <see cref="ReadsFileContents"/>. Deliberately far more generous than
+    /// <see cref="TokenSeparators"/>: shell metacharacters, brackets/braces/parens, quotes, and the
+    /// JSON/JavaScript punctuation (<c>: , =</c>) that Codex code-mode wraps a real command in.
+    /// Backslash is a delimiter too — not for Windows paths (splitting <c>backend\domain\x.py</c>
+    /// into three harmless tokens costs nothing) but because Codex embeds a shell command inside a
+    /// JS string literal, so the pattern in <c>rg -n \"^\" app.jsx</c> only becomes the bare token
+    /// <c>^</c> once the escape is treated as punctuation.
+    /// <c>/</c>, <c>.</c> and <c>-</c> are NOT delimiters, so a token matches only when it IS the
+    /// bare word — <c>/var/catalog/x</c> never reads as <c>cat</c>.
+    /// </summary>
+    private static readonly SearchValues<char> FileDumpTokenDelimiters =
+        SearchValues.Create(" \t\n\r;|&<>()[]{}=,:\"'`$\\");
+
+    /// <summary>
+    /// True when any token in <paramref name="command"/> names a command that prints file contents
+    /// verbatim. Used ONLY to widen <c>truncate-long</c>'s keep budget — never to enable a rewrite.
+    ///
+    /// <b>The safety polarity here is the exact INVERSE of <see cref="Classify"/>'s, and the two must
+    /// never be made to agree.</b> Classify asserts a line structure that a filter then rewrites, so a
+    /// wrong answer MANGLES output — hence its whole-command metacharacter rule, its per-command flag
+    /// allowlists, and its first-token-must-be-the-command rule, all failing toward None. This
+    /// predicate asserts nothing about structure and causes no rewrite: a true answer only makes the
+    /// pipeline do LESS. A false positive costs savings on one tool result; a false negative costs
+    /// 250 lines out of the middle of somebody's source file. So this scan is deliberately,
+    /// unapologetically permissive — a flat lexical token sweep, no shell parse, no command-position
+    /// tracking, no flag inspection. Do not "harden" it to match Classify; that reopens the hole.
+    ///
+    /// The permissiveness is what makes it work on the three command languages this library actually
+    /// sees, every one of which Classify returns None for because they all carry metacharacters —
+    /// which is exactly why the hole existed:
+    ///   • POSIX shell — <c>cat -n a.py; echo ===; cat -n b.py</c>
+    ///   • PowerShell — <c>$lines = Get-Content a.py</c>
+    ///   • Codex code-mode JS — <c>tools.exec_command({"cmd":"Get-Content a.py"})</c>
+    ///
+    /// Known gap, deliberate and measured: large <c>git show</c>/<c>git diff</c> payloads (408 KB
+    /// over the sample window) still truncate at the default budget. A diff is a different payload
+    /// class with a different trade — a lockfile diff is exactly what T should cap — so it is left
+    /// for a decision of its own. See <c>runbooks/token_saver/truncation_file_reads.md</c>.
+    /// </summary>
+    public static bool ReadsFileContents(string? command)
+    {
+        if (string.IsNullOrEmpty(command))
+            return false;
+
+        // grep needs two tokens to qualify, so one sweep collects both halves. They do NOT have to
+        // be adjacent or even from the same sub-command: this is a lexical sweep, and a payload that
+        // contains a `rg -n '^'` dump anywhere is one we would rather keep whole.
+        var sawGrep = false;
+        var sawMatchEverything = false;
+
+        var span = command.AsSpan();
+        while (!span.IsEmpty)
+        {
+            var next = span.IndexOfAny(FileDumpTokenDelimiters);
+            var token = next < 0 ? span : span[..next];
+
+            if (!token.IsEmpty)
+            {
+                if (FileDumpLookup.Contains(token))
+                    return true;
+                sawGrep |= GrepLookup.Contains(token);
+                sawMatchEverything |= MatchEverythingLookup.Contains(token);
+                if (sawGrep && sawMatchEverything)
+                    return true;
+            }
+
+            if (next < 0)
+                break;
+            span = span[(next + 1)..];
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Classifies <paramref name="command"/>. Returns <see cref="CommandShape.None"/> for null,
     /// empty, unrecognized, or anything whose output shape is not provable from the string alone.
     /// </summary>

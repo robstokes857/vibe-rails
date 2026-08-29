@@ -176,6 +176,7 @@ public static class CodexResponsesRewriter
                             raw,
                             plan,
                             CommandShapes.Classify(item.Command),
+                            CommandShapes.ReadsFileContents(item.Command),
                             buffers,
                             out var changed,
                             ref candidateStats,

@@ -82,11 +82,19 @@ public static class CompressionPipeline
     /// it from span lengths, because a Reshaping stage can hold length constant while moving bytes.
     ///
     /// Never throws for transform reasons. Every stage either applies or declines.
+    ///
+    /// <paramref name="readsFileContents"/> is required, not optional, on purpose: it is the only
+    /// thing standing between <c>truncate-long</c> and the middle of somebody's source file, and a
+    /// new call site that silently defaulted it to false would reopen that hole without a compile
+    /// error. Derive it from the same command string as <paramref name="shape"/>, via
+    /// <see cref="CommandShapes.ReadsFileContents"/> — the two classifiers answer different questions
+    /// with opposite safety polarities and are deliberately independent.
     /// </summary>
     public static ReadOnlySpan<char> Run(
         ReadOnlySpan<char> input,
         CompressionPlan plan,
         CommandShape shape,
+        bool readsFileContents,
         PipelineScratch scratch,
         out bool changed,
         ref MinifyStats minifyStats,
@@ -112,10 +120,19 @@ public static class CompressionPipeline
         current = RunShape(current, plan, shape, ref changed, trace);
 
         // ---- Stages 10-11: condense. Fused, same reason as 1-5. ----
+        // truncate-long is shape-blind by construction: it counts lines, it has no idea what produced
+        // them. That is fine for build/test/log spew and wrong for a `cat` of source, which the model
+        // may quote back into an Edit. Widen its keep budget instead of declining outright, so the
+        // catastrophic-payload guard survives. This only ever keeps MORE; the stage's own on/off flag
+        // is untouched, so the trace below still reports exactly what the plan enabled.
+        var condense = readsFileContents
+            ? plan.Condense with { PreserveVerbatimFileContents = true }
+            : plan.Condense;
+
         var beforeCondense = condenseStats;
-        if (!plan.Condense.IsNoOp
+        if (!condense.IsNoOp
             && OutputCondenser.TryCondense(
-                current, plan.Condense, scratch.Condensed, out var condensedWritten,
+                current, condense, scratch.Condensed, out var condensedWritten,
                 ref condenseStats))
         {
             current = scratch.Condensed.AsSpan(0, condensedWritten);
