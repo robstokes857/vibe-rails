@@ -210,6 +210,8 @@ class FakeElement {
         this.style = { setProperty() { } };
         this.value = '';
         this.listeners = {};
+        this.attributes = new Map();
+        this.focusCount = 0;
     }
 
     append(...children) {
@@ -220,7 +222,17 @@ class FakeElement {
         this.children = [...children];
     }
 
-    setAttribute() { }
+    setAttribute(name, value) {
+        this.attributes.set(name, String(value));
+    }
+
+    removeAttribute(name) {
+        this.attributes.delete(name);
+    }
+
+    focus() {
+        this.focusCount += 1;
+    }
 
     addEventListener(type, handler) {
         this.listeners[type] = handler;
@@ -230,6 +242,24 @@ class FakeElement {
         this.listeners[type]?.(event);
     }
 }
+
+test('code analyzer dashboard renders an explicit empty detail state', () => {
+    const container = new FakeElement('div');
+    const documentRef = { createElement: tagName => new FakeElement(tagName) };
+
+    const rendered = renderCodeAnalyzerDashboard(container, {
+        healthScore: null,
+        analyzedFileCount: 0,
+        ignoredFileCount: 0,
+        report: null
+    }, documentRef);
+
+    assert.equal(rendered, 0);
+    assert.equal(container.children.length, 1);
+    const empty = container.children[0];
+    assert.equal(empty.className, 'code-analyzer-empty code-analyzer-dashboard-empty');
+    assert.equal(empty.children[1].children[0].textContent, 'No changed source files to inspect');
+});
 
 test('code analyzer dashboard renders the full scan workspace with plain DOM APIs', () => {
     const container = new FakeElement('div');
@@ -315,14 +345,52 @@ test('code analyzer file rail groups files by directory with collapse and kebab 
     // The file row's kebab opens the context menu; "Ignore file" ignores that file.
     const fileKebab = firstFile.children.at(-1);
     assert.equal(fileKebab.className, 'code-analyzer-kebab');
+    assert.equal(fileKebab.attributes.get('aria-expanded'), 'false');
     fileKebab.fire('click', { stopPropagation() { } });
+    assert.equal(fileKebab.attributes.get('aria-expanded'), 'true');
     assert.equal(contextMenu.children[0].children[1].textContent, 'Ignore file');
+    assert.equal(contextMenu.children[0].focusCount, 1);
     // Re-clicking the active kebab toggles its menu closed; a third click reopens it.
     fileKebab.fire('click', { stopPropagation() { } });
+    assert.equal(fileKebab.attributes.get('aria-expanded'), 'false');
     assert.equal(contextMenu.children.length, 0);
     fileKebab.fire('click', { stopPropagation() { } });
     assert.equal(contextMenu.children[0].children[1].textContent, 'Ignore file');
+
+    // Arrow keys stay within the menu; Escape closes it and restores the anchor.
+    const firstMenuItem = contextMenu.children[0];
+    let arrowPrevented = false;
+    firstMenuItem.focusCount = 0;
+    contextMenu.fire('keydown', {
+        key: 'ArrowDown',
+        target: firstMenuItem,
+        preventDefault() { arrowPrevented = true; },
+        stopPropagation() { }
+    });
+    assert.equal(arrowPrevented, true);
+    assert.equal(firstMenuItem.focusCount, 1);
+    contextMenu.fire('keydown', {
+        key: 'Escape',
+        target: firstMenuItem,
+        preventDefault() { },
+        stopPropagation() { }
+    });
+    assert.equal(contextMenu.children.length, 0);
+    assert.equal(fileKebab.attributes.get('aria-expanded'), 'false');
+    assert.equal(fileKebab.focusCount > 0, true);
+
+    // ArrowUp on the anchor opens the menu and focuses its last item.
+    let anchorArrowPrevented = false;
+    fileKebab.fire('keydown', {
+        key: 'ArrowUp',
+        preventDefault() { anchorArrowPrevented = true; },
+        stopPropagation() { }
+    });
+    assert.equal(anchorArrowPrevented, true);
+    assert.equal(fileKebab.attributes.get('aria-expanded'), 'true');
+    assert.equal(contextMenu.children[0].focusCount, 1);
     contextMenu.children[0].fire('click');
+    assert.equal(fileKebab.attributes.get('aria-expanded'), 'false');
     assert.deepEqual(ignoredFilePaths, ['src/Payments/PaymentProcessor.cs']);
 
     // The directory header's kebab offers "Ignore directory" for the whole group.
@@ -387,6 +455,7 @@ test('code analyzer brief summarizes the scan for the Rules hub door card', () =
     assert.equal(stats.children[0].dataset.tone, 'danger');
     const categories = brief.children[3];
     assert.equal(categories.children[0].children[1].textContent, 'Complexity');
+    assert.equal(brief.children[4].children[0].textContent, 'View metrics');
 
     brief.children[4].fire('click');
     assert.equal(opened, 1);
@@ -396,24 +465,44 @@ test('code analyzer brief summarizes the scan for the Rules hub door card', () =
     assert.equal(host.children.length, 0);
 });
 
-test('Code quality and RULES are separate nav destinations, each one surface', () => {
+test('code analyzer brief does not offer an empty metrics drill-down', () => {
+    const documentRef = { createElement: tagName => new FakeElement(tagName) };
+    const host = new FakeElement('section');
+    let opened = 0;
+
+    renderCodeAnalyzerBrief(host, {
+        healthScore: null,
+        analyzedFileCount: 0,
+        ignoredFileCount: 0,
+        report: null
+    }, documentRef, {
+        onOpenDetails: () => { opened += 1; }
+    });
+
+    const brief = host.children[0];
+    assert.equal(brief.children.some(child => child.className === 'code-analyzer-brief-open'), false);
+    assert.equal(opened, 0);
+});
+
+test('Rules and Code quality share one Project health destination without a docked terminal', () => {
     const index = readFileSync(path.resolve('VibeRails/wwwroot/index.html'), 'utf8');
 
-    // Two nav entries in BOTH nav layouts: RULES goes to the rule-files view, and the
-    // Code quality page is home (navigate-home).
+    // One QUALITY entry appears in both nav layouts. The old top-level RULES link is gone.
     const rulesNavLinks = index.match(/data-action="navigate" data-view="rule-files"/g) || [];
-    assert.equal(rulesNavLinks.length, 2, 'RULES appears once per nav layout');
-    assert.match(index, /CODE QUALITY<\/span>/);
+    assert.equal(rulesNavLinks.length, 0);
+    assert.equal((index.match(/<span(?: class="nav-label")?>QUALITY<\/span>/g) || []).length, 2);
     assert.equal((index.match(/data-action="navigate-home"/g) || []).length, 2);
 
-    // The Code quality page: no local tab strip; Git Guard + validation + the compact
-    // brief + the terminal. The workbench and the rule manager are NOT on it.
+    // The unified page carries both summaries and all three agent actions, but never xterm.
     const agentsTemplate = index.match(/<template id="agents-template">([\s\S]*?)<\/template>/)[1];
     assert.doesNotMatch(agentsTemplate, /rules-localnav|role="tablist"|data-rules-tab/);
-    assert.match(agentsTemplate, /Code quality<\/h1>/);
+    assert.match(agentsTemplate, /Rules and code quality<\/h1>/);
     assert.match(agentsTemplate, /data-vca-console\b/);
     assert.match(agentsTemplate, /data-vca-quality-brief/);
-    assert.match(agentsTemplate, /data-terminal-section/);
+    assert.match(agentsTemplate, /project-health-status-copy" role="status"[\s\S]*?aria-live="polite" aria-atomic="true"/);
+    assert.match(agentsTemplate, /data-action="manage-rules"/);
+    assert.equal((agentsTemplate.match(/data-action="launch-health-fix"/g) || []).length, 3);
+    assert.doesNotMatch(agentsTemplate, /data-terminal-section|data-terminal-content|renderTerminalPanel/);
     assert.doesNotMatch(agentsTemplate, /data-code-analyzer-report|data-agent-file-tree|data-rules-files-door/);
 
     // The workbench: a full-page view with a way back to the Code quality page.
@@ -423,20 +512,24 @@ test('Code quality and RULES are separate nav destinations, each one surface', (
     assert.match(quality, /data-code-analyzer-report/);
     assert.match(quality, /data-code-analyzer-full-scan/);
 
-    // The RULES page: a top-level destination — no back button.
+    // Legacy detail routes remain for old links and the full editor, but are no longer nav destinations.
     const files = index.match(/<template id="rule-files-template">([\s\S]*?)<\/template>/)[1];
     assert.match(files, /data-view="rule-files"/);
     assert.doesNotMatch(files, /data-action="go-back"/);
     assert.match(files, /data-agent-file-tree/);
     assert.match(files, /data-agent-rule-editor/);
 
-    // Routing: both views registered, and the old tab module stays gone.
+    // Routing stays backward compatible while the card opens metrics in a modal.
     const app = readFileSync(path.resolve('VibeRails/wwwroot/app.js'), 'utf8');
     assert.match(app, /'code-quality': \(\) => this\.ruleController\.loadCodeQuality\(\)/);
     assert.match(app, /'rule-files': \(\) => this\.agentController\.loadRuleFiles\(\)/);
 
     const ruleController = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/rule-controller.js'), 'utf8');
     assert.match(ruleController, /loadCodeQuality\(\)/);
-    assert.match(ruleController, /this\.app\.navigate\('code-quality'\)/);
+    assert.match(ruleController, /openCodeQualityDetails\(\)/);
+    assert.doesNotMatch(ruleController, /this\.app\.navigate\('code-quality'\)/);
     assert.doesNotMatch(ruleController, /data-rules-tab/);
+
+    const dashboardController = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/dashboard-controller.js'), 'utf8');
+    assert.doesNotMatch(dashboardController, /renderTerminalPanel|bindTerminalActions/);
 });

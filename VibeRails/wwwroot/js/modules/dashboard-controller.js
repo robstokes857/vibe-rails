@@ -38,9 +38,8 @@ export class DashboardController {
         window.scrollTo(0, 0);
     }
 
-    // The dashboard is the Rules workspace. The Rules view provides the terminal slot
-    // between the validation results and the code metrics, so the terminal mounts into
-    // the slot that mountAgentsOverview just rendered.
+    // Rules, validation, Git Guard, and Code quality share one dashboard. Agent work
+    // opens in the dedicated terminal view, so this surface never mounts xterm.
     renderUnifiedDashboard(data = {}) {
         const fragment = this.app.cloneTemplate('dashboard-template');
         const root = fragment.querySelector('[data-dashboard]');
@@ -49,17 +48,6 @@ export class DashboardController {
         const rulesHost = root.querySelector('[data-rules-overview-host]');
         if (rulesHost) {
             this.app.agentController.mountAgentsOverview(rulesHost);
-        }
-
-        // Terminal section
-        const terminalContent = root.querySelector('[data-terminal-content]');
-        if (terminalContent) {
-            terminalContent.innerHTML = this.app.terminalController.renderTerminalPanel();
-            // Pass preselected environment ID if navigating from environments page
-            this.app.terminalController.bindTerminalActions(
-                terminalContent,
-                data.preselectedEnvId || null
-            );
         }
 
         return fragment;

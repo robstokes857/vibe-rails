@@ -81,15 +81,10 @@
                 <img src="assets/img/icons/terminal-solid-full.svg" alt="" class="me-1 icon-light">
                 <span>Terminals</span>
             </button>
-            <button class="app-subnav-link" data-action="navigate" data-view="rule-files"
-                title="The vc.rules.md rules this project enforces">
-                <i class="fa-solid fa-list-check me-1"></i>
-                <span>RULES</span>
-            </button>
             <button class="app-subnav-link" data-action="navigate-home"
-                title="VCA validation and code quality for your changes">
-                <i class="fa-solid fa-chart-simple me-1"></i>
-                <span>CODE</span>
+                title="Rules, Git Guard, and code quality">
+                <i class="fa-solid fa-shield-halved me-1"></i>
+                <span>QUALITY</span>
             </button>
             <button class="app-subnav-link" data-action="navigate" data-view="environments"
                 title="Manage Environment / Workers & Sandboxes">
@@ -156,15 +151,10 @@
                     <img src="assets/img/icons/terminal-solid-full.svg" alt="" class="nav-icon icon-light">
                     <span class="nav-label">Terminals</span>
                 </button>
-                <button class="app-subnav-link" data-action="navigate" data-view="rule-files"
-                    title="The vc.rules.md rules this project enforces">
-                    <i class="fa-solid fa-list-check nav-icon"></i>
-                    <span class="nav-label">RULES</span>
-                </button>
                 <button class="app-subnav-link" data-action="navigate-home"
-                    title="VCA validation and code quality for your changes">
-                    <i class="fa-solid fa-chart-simple nav-icon"></i>
-                    <span class="nav-label">CODE QUALITY</span>
+                    title="Rules, Git Guard, and code quality">
+                    <i class="fa-solid fa-shield-halved nav-icon"></i>
+                    <span class="nav-label">QUALITY</span>
                 </button>
                 <button class="app-subnav-link" data-action="navigate" data-view="environments"
                     title="Manage Environment / Workers & Sandboxes">
@@ -240,9 +230,7 @@
     <!-- Templates -->
     <template id="dashboard-template">
         <div class="dashboard" data-dashboard="unified">
-            <!-- Rules workspace. DashboardController mounts the Rules view here; the terminal
-                 panel mounts into the [data-terminal-content] slot in that view's bottom pane.
-                 No row/col wrapper — the workspace is a full-height flex column. -->
+            <!-- DashboardController mounts the unified, terminal-free Project health view here. -->
             <div class="rules-dashboard-host" data-rules-overview-host></div>
         </div>
     </template>
@@ -332,167 +320,231 @@
         </div>
     </template>
 
-    <!-- Code quality page (view names 'dashboard'/'agents' for historical reasons).
-         One surface, no local tabs: Git Guard, the VCA validation results for your
-         uncommitted changes, and the compact scan brief — with the agent terminal
-         docked below so a fix is one keystroke away. The full file-by-file workbench
-         is its own view (code-quality-template); the vc.rules.md rules those checks
-         enforce live on the separate RULES page (rule-files-template).
-         Every data-* hook below is bound by RuleController / AgentController —
-         keep the attributes even when the surrounding markup moves. -->
+    <!-- Unified project-health page. The historical route name remains "agents", but
+         Rules, VCA findings, Git Guard, and MintLint now live on one calm surface.
+         Agent terminals open in the dedicated terminal view; this page never mounts xterm. -->
     <template id="agents-template">
-        <div class="view rules-workspace" data-view="agents" data-rules-workspace>
-
-            <header class="rules-topbar">
-                <div class="rules-topbar-copy">
-                    <h1 class="rules-topbar-title">Code quality</h1>
-                    <p>Your changes, checked before they ship</p>
+        <div class="view project-health-page" data-view="agents" data-rules-workspace>
+            <header class="project-health-header">
+                <div class="project-health-heading">
+                    <span class="project-health-eyebrow">Project health</span>
+                    <h1>Rules and code quality</h1>
+                    <p>See what needs attention, then hand the full fix to an agent.</p>
                 </div>
-
-                <section class="rules-git-setting" data-hook-health data-tone="neutral" aria-busy="true"
-                    aria-label="Git Guard setting">
-                    <span class="rules-git-setting-icon" aria-hidden="true">
-                        <i class="fa-solid fa-code-commit"></i>
-                    </span>
-                    <span class="rules-git-setting-copy">
-                        <strong>Git Guard</strong>
-                        <small data-hook-status-message>Checking repository hooks…</small>
-                        <span class="visually-hidden" data-hook-status-title>Checking Git Guard</span>
-                    </span>
-                    <span class="hook-health-badge" data-hook-status-badge data-tone="neutral"
-                        aria-live="polite">Checking</span>
-                    <button class="btn btn-sm btn-outline-danger rules-git-remove d-inline-flex align-items-center gap-1"
-                        type="button" data-action="uninstall-hooks" data-repair-only
-                        data-idle-label="Remove" title="Remove broken Git Guard hooks" hidden disabled>
-                        <span class="spinner-border spinner-border-sm" data-button-spinner hidden
-                            aria-hidden="true"></span>
-                        <i class="fa-solid fa-trash-can" data-button-icon aria-hidden="true"></i>
-                        <span data-button-label>Remove</span>
-                    </button>
-                    <button class="rules-git-toggle" type="button" role="switch" aria-checked="false"
-                        data-action="toggle-hooks" data-idle-label="Turn Git Guard on" disabled>
-                        <span class="spinner-border spinner-border-sm" data-button-spinner hidden
-                            aria-hidden="true"></span>
-                        <span class="rules-git-toggle-track" data-button-icon aria-hidden="true">
-                            <span></span>
-                        </span>
-                        <span class="visually-hidden" data-button-label>Turn Git Guard on</span>
-                    </button>
-                </section>
+                <button class="btn btn-primary project-health-fix-all" type="button"
+                    data-action="launch-health-fix" data-fix-scope="all">
+                    <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i>
+                    Fix rules &amp; code quality
+                </button>
             </header>
 
-            <div class="rules-panes" data-rules-panes>
+            <section class="project-health-guard" data-hook-health data-tone="neutral" aria-busy="true"
+                aria-label="Git Guard setting">
+                <span class="project-health-guard-icon" aria-hidden="true">
+                    <i class="fa-solid fa-code-commit"></i>
+                </span>
+                <span class="project-health-guard-copy">
+                    <strong>Git Guard</strong>
+                    <small data-hook-status-message>Checking repository hooks…</small>
+                    <span class="visually-hidden" data-hook-status-title>Checking Git Guard</span>
+                </span>
+                <span class="hook-health-badge" data-hook-status-badge data-tone="neutral"
+                    aria-live="polite">Checking</span>
+                <button class="btn btn-sm btn-outline-danger project-health-guard-remove"
+                    type="button" data-action="uninstall-hooks" data-repair-only
+                    data-idle-label="Remove" title="Remove broken Git Guard hooks" hidden disabled>
+                    <span class="spinner-border spinner-border-sm" data-button-spinner hidden
+                        aria-hidden="true"></span>
+                    <i class="fa-solid fa-trash-can" data-button-icon aria-hidden="true"></i>
+                    <span data-button-label>Remove</span>
+                </button>
+                <button class="rules-git-toggle" type="button" role="switch" aria-checked="false"
+                    data-action="toggle-hooks" data-idle-label="Turn Git Guard on" disabled>
+                    <span class="spinner-border spinner-border-sm" data-button-spinner hidden
+                        aria-hidden="true"></span>
+                    <span class="rules-git-toggle-track" data-button-icon aria-hidden="true"><span></span></span>
+                    <span class="visually-hidden" data-button-label>Turn Git Guard on</span>
+                </button>
+            </section>
 
-                <div class="rules-pane rules-pane-sections" data-rules-sections>
+            <main class="project-health-stack">
+                <section class="card project-health-card project-health-rules vca-console-card"
+                    data-health-card="rules" data-vca-console data-tone="neutral" aria-busy="false">
+                    <header class="project-health-card-header">
+                        <div>
+                            <span class="project-health-card-kicker">Repository policy</span>
+                            <h2>Rules</h2>
+                        </div>
+                        <div class="project-health-card-actions">
+                            <button class="btn btn-sm btn-outline-secondary" type="button"
+                                data-action="manage-rules">
+                                <i class="fa-solid fa-sliders" aria-hidden="true"></i>
+                                Manage rules
+                            </button>
+                            <button class="btn btn-sm btn-primary" type="button"
+                                data-action="launch-health-fix" data-fix-scope="rules">
+                                <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i>
+                                Fix rules
+                            </button>
+                        </div>
+                    </header>
 
-                    <!-- Validate: what blocks the commit right now -->
-                    <section class="rules-section card vca-console-card rules-vca-panel"
-                        aria-label="Validation results" data-vca-console data-tone="neutral" aria-busy="false">
-                        <header class="rules-section-header">
-                            <div class="rules-section-heading">
-                                <h2>Validation results</h2>
-                                <span class="rules-section-note">Your uncommitted changes, checked against
-                                    your vc.rules.md rules</span>
-                            </div>
-                            <div class="rules-section-actions" aria-label="Validation result actions">
-                                <span class="rules-check-running" data-vca-console-spinner hidden aria-hidden="true">
-                                    <span class="spinner-border spinner-border-sm"></span>
+                    <div class="project-health-rules-summary" data-rules-card-status data-tone="neutral">
+                        <span class="project-health-status-icon" aria-hidden="true">
+                            <i class="fa-solid fa-spinner fa-spin" data-rules-card-icon></i>
+                        </span>
+                        <div class="project-health-status-copy" role="status"
+                            aria-live="polite" aria-atomic="true">
+                            <strong data-rules-card-title>Checking your rules…</strong>
+                            <p data-rules-card-message>Matching uncommitted changes to every applicable policy.</p>
+                        </div>
+                        <div class="project-health-inventory" aria-label="Rules inventory">
+                            <span><strong data-rule-file-count>0</strong><small>files</small></span>
+                            <span><strong data-rule-count>0</strong><small>rules</small></span>
+                            <span><strong data-stop-rule-count>0</strong><small>STOP</small></span>
+                        </div>
+                    </div>
+
+                    <div class="project-health-card-toolbar">
+                        <button class="project-health-details-toggle" type="button"
+                            data-action="toggle-health-details" data-health-target="rules"
+                            aria-expanded="false" aria-controls="project-health-rules-details">
+                            <span>View rule results</span>
+                            <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+                        </button>
+                        <div class="project-health-check-actions">
+                            <span class="rules-check-running" data-vca-console-spinner hidden aria-hidden="true">
+                                <span class="spinner-border spinner-border-sm"></span>
+                            </span>
+                            <span class="vca-console-state" data-vca-console-state>Ready</span>
+                            <button class="btn btn-sm btn-outline-secondary" type="button"
+                                data-action="run-hook-preview" data-idle-label="Check again" disabled>
+                                <span class="spinner-border spinner-border-sm" data-button-spinner hidden
+                                    aria-hidden="true"></span>
+                                <i class="fa-solid fa-rotate-right" data-button-icon aria-hidden="true"></i>
+                                <span data-button-label>Check again</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="project-health-details" id="project-health-rules-details"
+                        data-health-details="rules" hidden>
+                        <section class="vca-explanation" data-vca-explanation hidden aria-live="polite">
+                            <div class="vca-explanation-verdict" data-vca-explanation-verdict data-tone="neutral">
+                                <span class="vca-explanation-icon" aria-hidden="true">
+                                    <i class="fa-solid fa-circle-check"></i>
                                 </span>
-                                <span class="vca-console-state" data-vca-console-state>Ready</span>
-                                <details class="rules-action-menu">
-                                    <summary aria-label="More validation actions" title="More actions">
-                                        <i class="fa-solid fa-ellipsis" aria-hidden="true"></i>
-                                    </summary>
-                                    <div class="rules-action-menu-popover" role="group"
-                                        aria-label="Validation utilities">
-                                        <button type="button" data-action="copy-hook-output">
-                                            <i class="fa-regular fa-copy" aria-hidden="true"></i>
-                                            Copy transcript
-                                        </button>
-                                        <button type="button" data-action="clear-hook-output">
-                                            <i class="fa-solid fa-eraser" aria-hidden="true"></i>
-                                            Clear results
-                                        </button>
+                                <div class="vca-explanation-copy">
+                                    <span class="vca-explanation-eyebrow">Validation result</span>
+                                    <h3 data-vca-explanation-title>Validation ready</h3>
+                                    <p data-vca-explanation-message>Run validation to review your changes.</p>
+                                </div>
+                                <div class="vca-explanation-stats" data-vca-explanation-stats></div>
+                            </div>
+                            <section class="rules-action-queue" data-vca-action-queue
+                                aria-labelledby="rules-action-queue-title" hidden>
+                                <header class="rules-action-queue-header">
+                                    <div>
+                                        <h3 id="rules-action-queue-title">What needs attention</h3>
+                                        <p>Open an item for the reason and the next step.</p>
                                     </div>
-                                </details>
-                                <button class="btn btn-sm btn-primary d-inline-flex align-items-center gap-2"
-                                    type="button" data-action="run-hook-preview" data-idle-label="Check changes" disabled>
-                                    <span class="spinner-border spinner-border-sm" data-button-spinner hidden
-                                        aria-hidden="true"></span>
-                                    <i class="fa-solid fa-rotate-right" data-button-icon aria-hidden="true"></i>
-                                    <span data-button-label>Check changes</span>
+                                    <span class="rules-action-queue-count" data-vca-action-queue-count></span>
+                                </header>
+                                <div class="vca-finding-list" data-vca-finding-list></div>
+                            </section>
+                            <div class="vca-explanation-actions" data-vca-explanation-actions hidden>
+                                <button class="btn btn-sm btn-outline-secondary" type="button"
+                                    data-action="copy-fix-brief">
+                                    <i class="fa-regular fa-copy me-1" aria-hidden="true"></i>
+                                    Copy fix brief
                                 </button>
                             </div>
-                        </header>
-                        <div class="rules-section-body rules-vca-results">
-                            <section class="vca-explanation" data-vca-explanation hidden aria-live="polite">
-                                <div class="vca-explanation-verdict" data-vca-explanation-verdict data-tone="neutral">
-                                    <span class="vca-explanation-icon" aria-hidden="true">
-                                        <i class="fa-solid fa-circle-check"></i>
-                                    </span>
-                                    <div class="vca-explanation-copy">
-                                        <span class="vca-explanation-eyebrow">What this means</span>
-                                        <h3 data-vca-explanation-title>Validation ready</h3>
-                                        <p data-vca-explanation-message>Run validation to review your uncommitted
-                                            changes.</p>
-                                    </div>
-                                    <div class="vca-explanation-stats" data-vca-explanation-stats></div>
-                                </div>
-                                <section class="rules-action-queue" data-vca-action-queue
-                                    aria-labelledby="rules-action-queue-title" hidden>
-                                    <header class="rules-action-queue-header">
-                                        <div>
-                                            <h3 id="rules-action-queue-title">Action queue</h3>
-                                            <p>Start with the first blocker, then recheck your changes.</p>
-                                        </div>
-                                        <span class="rules-action-queue-count" data-vca-action-queue-count></span>
-                                    </header>
-                                    <div class="vca-finding-list" data-vca-finding-list></div>
-                                </section>
-                                <div class="vca-explanation-actions" data-vca-explanation-actions hidden>
-                                    <button class="btn btn-sm btn-primary" type="button"
-                                        data-action="open-fix-terminal"
-                                        title="Paste a reviewable fix prompt into the active agent console">
-                                        <i class="fa-solid fa-terminal me-1" aria-hidden="true"></i>
-                                        Send all to agent
-                                    </button>
-                                    <button class="btn btn-sm btn-outline-secondary" type="button"
-                                        data-action="copy-fix-brief">
-                                        <i class="fa-regular fa-copy me-1" aria-hidden="true"></i>
-                                        Copy brief
-                                    </button>
-                                </div>
-                            </section>
-                            <details class="rules-console-transcript">
-                                <summary>
-                                    <span class="vca-console-pulse" aria-hidden="true"></span>
-                                    <span class="rules-console-transcript-label">Console transcript</span>
-                                    <small data-vca-console-meta>Waiting for validation</small>
+                        </section>
+                        <details class="rules-console-transcript">
+                            <summary>
+                                <span class="vca-console-pulse" aria-hidden="true"></span>
+                                <span class="rules-console-transcript-label">Technical details</span>
+                                <small data-vca-console-meta>Waiting for validation</small>
+                            </summary>
+                            <div class="vca-console-shell">
+                                <pre class="vca-console-output" data-vca-console-output role="log"
+                                    aria-live="polite" aria-atomic="false" tabindex="0"></pre>
+                            </div>
+                        </details>
+                        <div class="visually-hidden">
+                            <button type="button" data-action="copy-hook-output">Copy transcript</button>
+                            <button type="button" data-action="clear-hook-output">Clear results</button>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="card project-health-card project-health-quality vca-console-card"
+                    data-code-analyzer-console data-tone="neutral" aria-busy="false">
+                    <header class="project-health-card-header">
+                        <div>
+                            <span class="project-health-card-kicker">Maintainability</span>
+                            <h2>Code quality</h2>
+                        </div>
+                        <div class="project-health-card-actions">
+                            <details class="rules-action-menu">
+                                <summary aria-label="More scan options" title="More scan options">
+                                    <i class="fa-solid fa-ellipsis" aria-hidden="true"></i>
                                 </summary>
-                                <div class="vca-console-shell">
-                                    <pre class="vca-console-output" data-vca-console-output role="log"
-                                        aria-live="polite" aria-atomic="false" tabindex="0"></pre>
+                                <div class="rules-action-menu-popover" role="group" aria-label="Scan options">
+                                    <label class="rules-action-menu-toggle" title="Include every source file">
+                                        <span><i class="fa-solid fa-folder-tree" aria-hidden="true"></i>Full repository</span>
+                                        <input type="checkbox" data-code-analyzer-full-scan>
+                                    </label>
+                                    <button type="button" data-action="run-code-analyzer-unpushed"
+                                        data-idle-label="Scan unpushed commits">
+                                        <span class="spinner-border spinner-border-sm" data-button-spinner hidden
+                                            aria-hidden="true"></span>
+                                        <i class="fa-solid fa-cloud-arrow-up" data-button-icon aria-hidden="true"></i>
+                                        <span data-button-label>Scan unpushed commits</span>
+                                    </button>
+                                    <button type="button" data-action="copy-code-analyzer-output">
+                                        <i class="fa-regular fa-copy" aria-hidden="true"></i>Copy scan summary
+                                    </button>
                                 </div>
                             </details>
+                            <button class="btn btn-sm btn-outline-secondary" type="button"
+                                data-action="run-code-analyzer" data-idle-label="Scan again">
+                                <span class="spinner-border spinner-border-sm" data-button-spinner hidden
+                                    aria-hidden="true"></span>
+                                <i class="fa-solid fa-rotate-right" data-button-icon aria-hidden="true"></i>
+                                <span data-button-label>Scan again</span>
+                            </button>
+                            <button class="btn btn-sm btn-primary" type="button"
+                                data-action="launch-health-fix" data-fix-scope="quality">
+                                <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i>
+                                Fix code quality
+                            </button>
                         </div>
-                    </section>
+                    </header>
 
-                    <!-- Compact scan summary — filled by RuleController after each scan.
-                         Its button opens the full file-by-file workbench view. -->
+                    <div class="project-health-quality-placeholder" data-code-analyzer-empty aria-live="polite">
+                        <span aria-hidden="true"><i class="fa-solid fa-chart-line"></i></span>
+                        <div>
+                            <strong>Preparing your score…</strong>
+                            <p>Scanning changed source files for maintainability risks.</p>
+                        </div>
+                    </div>
                     <section class="code-analyzer-brief-host" data-vca-quality-brief hidden
                         aria-label="Code quality summary" aria-live="polite"></section>
-
-                </div>
-
-                <!-- Fix: the agent terminal fills the rest of the page and is never unmounted
-                     by anything the sections above do. -->
-                <div class="rules-pane rules-pane-terminal" data-terminal-section aria-label="Agent terminal">
-                    <div class="rules-terminal-host" data-terminal-content>
-                        <!-- Terminal panel rendered here -->
-                    </div>
-                </div>
-
-            </div>
+                    <details class="rules-console-transcript project-health-scan-transcript">
+                        <summary>
+                            <span class="vca-console-pulse" aria-hidden="true"></span>
+                            <span class="rules-console-transcript-label">Technical details</span>
+                            <small data-vca-console-meta>Waiting for analysis</small>
+                        </summary>
+                        <div class="vca-console-shell">
+                            <pre class="vca-console-output" data-vca-console-output role="log"
+                                aria-live="polite" aria-atomic="false" tabindex="0"></pre>
+                        </div>
+                    </details>
+                    <button type="button" data-action="clear-code-analyzer-output" hidden>Clear results</button>
+                </section>
+            </main>
         </div>
     </template>
 

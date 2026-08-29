@@ -4,7 +4,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const modulePath = path.resolve('VibeRails/wwwroot/js/modules/terminal-multitab.js');
-const { TerminalController } = await import(pathToFileURL(modulePath).href);
+const { TerminalController, shouldCreateFreshTab } = await import(pathToFileURL(modulePath).href);
 
 function createManager({ selection = 'env:7:opencode', rememberedCli = 'opencode' } = {}) {
     const added = [];
@@ -35,6 +35,41 @@ function createManager({ selection = 'env:7:opencode', rememberedCli = 'opencode
     };
     return { manager, added, focused };
 }
+
+test('launchInFocus carries one-shot launch options into the dedicated terminal view', () => {
+    const navigations = [];
+    const controller = new TerminalController({
+        navigate(view, data) {
+            navigations.push({ view, data });
+            return true;
+        }
+    });
+    const options = {
+        cli: 'claude',
+        initialPrompt: 'Fix the rules',
+        forceNewTab: true
+    };
+
+    assert.equal(controller.launchInFocus(options, { source: 'project-health' }), true);
+    assert.deepEqual(navigations, [{
+        view: 'terminal-focus',
+        data: {
+            source: 'project-health',
+            launchOptions: options
+        }
+    }]);
+    assert.notEqual(navigations[0].data.launchOptions, options);
+});
+
+test('forced launches reuse an active blank tab when the tab limit prevents a fresh one', () => {
+    const blankTab = { state: { hasActiveSession: false } };
+    const runningTab = { state: { hasActiveSession: true } };
+
+    assert.equal(shouldCreateFreshTab({ forceNewTab: true }, blankTab, 7, 8), true);
+    assert.equal(shouldCreateFreshTab({ forceNewTab: true }, blankTab, 8, 8), false);
+    assert.equal(shouldCreateFreshTab({ forceNewTab: true }, runningTab, 8, 8), true);
+    assert.equal(shouldCreateFreshTab({}, blankTab, 7, 8), false);
+});
 
 test('adoptLaunchedTab restores authoritative CLI and session identity', async () => {
     const { manager, added, focused } = createManager();

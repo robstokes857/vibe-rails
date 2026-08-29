@@ -1,5 +1,6 @@
 import { VcaConsole, copyVcaConsoleText } from './vca-console.js';
 import {
+    buildCodeAnalyzerDashboardModel,
     directoryOf,
     disposeCodeAnalyzerDashboard,
     renderCodeAnalyzerBrief,
@@ -17,6 +18,7 @@ import {
     setSafeText,
     statusTone
 } from './git-guard-preflight.js';
+import { getEnabledLlmItems } from './pickers/llm-picker.js';
 
 function normalizeHookStateToken(value) {
     return String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
@@ -351,6 +353,79 @@ export function buildVcaExplanationViewModel(response = {}) {
     };
 }
 
+export function buildProjectHealthFixPrompt(scope = 'all', {
+    vcaFixBrief = '',
+    codeAnalyzerResponse = null
+} = {}) {
+    const normalizedScope = ['rules', 'quality', 'all'].includes(String(scope).toLowerCase())
+        ? String(scope).toLowerCase()
+        : 'all';
+    const includeRules = normalizedScope === 'rules' || normalizedScope === 'all';
+    const includeQuality = normalizedScope === 'quality' || normalizedScope === 'all';
+    const lines = [
+        'Work on this repository as a focused project-health repair task.',
+        'Read and follow every applicable AGENTS.md and vc.rules.md instruction before changing files.',
+        'Use the VibeRails MCP tools already configured in this terminal when they help. validate_vca checks the staged snapshot, so also inspect the current working tree before you finish.'
+    ];
+
+    if (includeRules) {
+        lines.push(
+            '',
+            'RULES',
+            'Check the current changes against the repository VCA policies and fix the violations in the code. Do not weaken, delete, or bypass a rule merely to make validation pass.'
+        );
+        const rawBrief = String(vcaFixBrief || '').trim();
+        const brief = rawBrief.length > 18_000
+            ? `${rawBrief.slice(0, 18_000)}\n[Additional VCA findings omitted from this launch prompt; re-run validation to inspect them.]`
+            : rawBrief;
+        lines.push(brief || 'No saved VCA finding brief is available. Run the relevant VibeRails validation and inspect vc.rules.md directly.');
+    }
+
+    if (includeQuality) {
+        lines.push(
+            '',
+            'CODE QUALITY',
+            'Improve the changed code, prioritizing critical and warning maintainability signals. Do not ignore files or suppress findings unless there is a clear, documented reason.'
+        );
+
+        if (codeAnalyzerResponse) {
+            const model = buildCodeAnalyzerDashboardModel(codeAnalyzerResponse);
+            const score = model.health === null ? 'not rated' : `${Math.round(model.health * 10) / 10}/100`;
+            lines.push(`Latest VibeRails scan: grade ${model.qualityGrade}, health ${score}, ${model.analyzedFileCount} analyzed file${model.analyzedFileCount === 1 ? '' : 's'}.`);
+
+            const categories = [...model.categories]
+                .filter(category => Number.isFinite(category.concern))
+                .sort((left, right) => right.concern - left.concern)
+                .slice(0, 5)
+                .map(category => `${category.name} (${Math.round(category.concern)} risk)`);
+            if (categories.length) lines.push(`Highest-risk categories: ${categories.join(', ')}.`);
+
+            const files = [...model.files]
+                .filter(file => Number.isFinite(file.concern) && file.concern >= 55)
+                .sort((left, right) => right.concern - left.concern)
+                .slice(0, 8)
+                .map(file => `${file.path} (${Math.round(file.concern)} risk)`);
+            if (files.length) lines.push(`Files needing attention: ${files.join(', ')}.`);
+
+            const scanOutput = String(codeAnalyzerResponse?.output || '').trim();
+            if (scanOutput) {
+                const boundedOutput = scanOutput.length > 6_000
+                    ? `${scanOutput.slice(0, 6_000)}\n[Additional scan output omitted.]`
+                    : scanOutput;
+                lines.push(`Latest scan notes:\n${boundedOutput}`);
+            }
+        } else {
+            lines.push('No saved Code quality scan is available. Inspect the changed source files and run the repository quality tooling before deciding what to change.');
+        }
+    }
+
+    lines.push(
+        '',
+        'Make the fixes, run the relevant tests, and re-run validation or quality checks. Finish with a concise summary of what changed and any remaining issues.'
+    );
+    return lines.join('\n');
+}
+
 export class RuleController {
     constructor(app) {
         this.app = app;
@@ -390,8 +465,52 @@ export class RuleController {
         // full workbench (and its controls) live on the 'code-quality' view.
         this.bindGuardControls(root);
         this.bindValidationControls(root);
+        this.bindProjectHealthControls(root);
         this.bindActionMenuAutoClose(root);
+        this.renderRuleInventorySummary();
         void this.runRulesOverviewChecks(root);
+    }
+
+    bindProjectHealthControls(root) {
+        this.app.bindAction(root, '[data-action="manage-rules"]', () => {
+            this.app.agentController?.openRuleManager?.();
+        });
+
+        root.querySelectorAll('[data-action="launch-health-fix"]').forEach(button => {
+            button.addEventListener('click', () => this.launchProjectHealthFix(button.dataset.fixScope));
+        });
+
+        root.querySelectorAll('[data-action="toggle-health-details"]').forEach(button => {
+            button.addEventListener('click', () => {
+                const target = button.dataset.healthTarget;
+                const details = root.querySelector(`[data-health-details="${target}"]`);
+                if (!details) return;
+                const expanded = details.hidden;
+                details.hidden = !expanded;
+                button.setAttribute('aria-expanded', String(expanded));
+                button.closest('[data-health-card]')?.classList.toggle('is-expanded', expanded);
+            });
+        });
+    }
+
+    renderRuleInventorySummary() {
+        const agents = Array.isArray(this.app.data?.agents) ? this.app.data.agents : [];
+        const rules = agents.flatMap(agent => Array.isArray(agent?.rules) ? agent.rules : []);
+        const stopCount = rules.filter(rule => String(rule?.enforcement || '').toUpperCase() === 'STOP').length;
+        this.setText('[data-rule-file-count]', agents.length);
+        this.setText('[data-rule-count]', rules.length);
+        this.setText('[data-stop-rule-count]', stopCount);
+    }
+
+    setRulesCardStatus({ tone = 'neutral', icon = 'fa-circle-info', title = '', message = '' } = {}) {
+        const status = this.query('[data-rules-card-status]');
+        const card = this.query('[data-health-card="rules"]');
+        if (status) status.dataset.tone = tone;
+        if (card) card.dataset.tone = tone;
+        const iconElement = this.query('[data-rules-card-icon]');
+        if (iconElement) iconElement.className = `fa-solid ${icon}`;
+        this.setText('[data-rules-card-title]', title);
+        this.setText('[data-rules-card-message]', message);
     }
 
     // The full-page Code quality workbench (opened from the hub's brief card). Restores
@@ -777,6 +896,24 @@ export class RuleController {
         }
         this.setButtonDisabled(previewButton, !viewModel.inGitRepo || isError);
         this.setButtonDisabled(analyzerButton, !viewModel.inGitRepo || isError);
+        this.setButtonDisabled(this.query('[data-action="run-code-analyzer-unpushed"]'), !viewModel.inGitRepo || isError);
+        this.setHealthFixButtonsDisabled(!viewModel.inGitRepo || isError);
+        if (!viewModel.inGitRepo && this.query('[data-health-card="rules"]')) {
+            this.setRulesCardStatus({
+                tone: 'neutral',
+                icon: 'fa-folder-open',
+                title: 'Open a Git repository to check rules',
+                message: 'Rule validation and Code quality need a local Git working tree.'
+            });
+            const empty = this.query('[data-code-analyzer-empty]');
+            if (empty) {
+                empty.hidden = false;
+                const title = empty.querySelector('strong');
+                const message = empty.querySelector('p');
+                if (title) title.textContent = 'Code quality needs a Git repository';
+                if (message) message.textContent = 'Open a project repository, then return here to scan its changed source files.';
+            }
+        }
         if (this.preflightRunner?.isRunning) this.setHookMutationButtonsDisabled(true);
     }
 
@@ -802,6 +939,7 @@ export class RuleController {
         const uninstallButton = this.query('[data-action="uninstall-hooks"][data-repair-only]');
         if (uninstallButton) uninstallButton.hidden = true;
         this.setHookActionButtonsDisabled(true);
+        this.setHealthFixButtonsDisabled(true);
     }
 
     setHookActionButtonsDisabled(disabled) {
@@ -809,6 +947,11 @@ export class RuleController {
             .forEach(button => {
                 this.setButtonDisabled(button, disabled);
             });
+    }
+
+    setHealthFixButtonsDisabled(disabled) {
+        this.viewRoot?.querySelectorAll('[data-action="launch-health-fix"]')
+            .forEach(button => this.setButtonDisabled(button, disabled));
     }
 
     async runHookPreview() {
@@ -852,6 +995,7 @@ export class RuleController {
         this.setButtonBusy(button, true, unpushed ? 'Scanning…' : 'Refreshing…');
         this.setCodeAnalyzerUtilityButtonsDisabled(true);
         this.codeAnalyzerConsole?.begin('code quality');
+        this.renderCodeAnalyzerLoading();
 
         try {
             const fullScan = this.query('[data-code-analyzer-full-scan]')?.checked === true;
@@ -896,17 +1040,33 @@ export class RuleController {
         }
     }
 
+    renderCodeAnalyzerLoading() {
+        const empty = this.query('[data-code-analyzer-empty]');
+        if (!empty) return;
+        empty.hidden = false;
+        const title = empty.querySelector('strong');
+        const message = empty.querySelector('p');
+        if (title) title.textContent = 'Checking code quality…';
+        if (message) message.textContent = 'Scoring the source files changed in your working tree.';
+    }
+
     renderCodeAnalyzerSummary(response) {
         const empty = this.query('[data-code-analyzer-empty]');
         const reportContainer = this.query('[data-code-analyzer-report]');
         const briefHost = this.query('[data-vca-quality-brief]');
-        if (!response) {
+        if (!response || response?.success === false) {
             disposeCodeAnalyzerDashboard(reportContainer);
             if (reportContainer) {
                 reportContainer.hidden = true;
                 delete reportContainer.dataset.analyzerScore;
             }
-            if (empty) empty.hidden = false;
+            if (empty) {
+                empty.hidden = false;
+                const title = empty.querySelector('strong');
+                const message = empty.querySelector('p');
+                if (title) title.textContent = 'Code quality could not be scored';
+                if (message) message.textContent = 'Open the technical details, then scan again when the issue is resolved.';
+            }
             renderCodeAnalyzerBrief(briefHost, null);
             return;
         }
@@ -915,8 +1075,9 @@ export class RuleController {
         // section's nav badge reads the score from the report container's dataset.
         const summary = buildCodeAnalyzerSummary(response);
         renderCodeAnalyzerBrief(briefHost, response, undefined, {
-            onOpenDetails: () => this.app.navigate('code-quality')
+            onOpenDetails: () => this.openCodeQualityDetails()
         });
+        if (empty) empty.hidden = true;
 
         if (reportContainer) {
             const fileCount = renderCodeAnalyzerDashboard(reportContainer, response, undefined, {
@@ -954,6 +1115,61 @@ export class RuleController {
                 }
             }
         }
+    }
+
+    openCodeQualityDetails() {
+        const response = this.codeAnalyzerCache?.response;
+        if (!response || response?.success === false) {
+            this.app.showToast('Code quality', 'Run a successful scan before opening the metrics.', 'info');
+            return;
+        }
+
+        let report = null;
+        let disposed = false;
+        const disposeReport = () => {
+            if (disposed) return;
+            disposed = true;
+            if (report) disposeCodeAnalyzerDashboard(report);
+        };
+        this.app.showModal('Code quality metrics', `
+            <div class="project-health-quality-modal">
+                <p class="project-health-quality-modal-intro">
+                    Higher health is better. Open a file to inspect its strongest risks, source evidence,
+                    and suggested next step.
+                </p>
+                <div class="code-analyzer-dashboard" data-project-health-quality-report></div>
+            </div>`, { onClose: disposeReport });
+
+        const modalContainer = document.getElementById('modal-container');
+        report = modalContainer?.querySelector('[data-project-health-quality-report]');
+        if (!report) return;
+        const dialog = modalContainer.querySelector('.modal-dialog');
+        dialog?.classList.remove('modal-lg');
+        dialog?.classList.add('modal-xl', 'project-health-quality-modal-dialog');
+
+        renderCodeAnalyzerDashboard(report, response, undefined, {
+            fetchSource: path => this.app.apiCall(
+                `/api/v1/code-analyzer/source?path=${encodeURIComponent(path)}${this.lastAnalyzerUnpushed ? '&scope=unpushed' : ''}`,
+                'GET',
+                null,
+                { showLoading: false }),
+            ignoredFiles: this.analyzerIgnores || [],
+            onIgnoreFile: file => {
+                disposeReport();
+                this.promptIgnoreAnalyzerFile(file);
+            },
+            onIgnoreDirectory: payload => {
+                disposeReport();
+                this.promptIgnoreAnalyzerDirectory(payload);
+            },
+            onRestoreFile: entry => {
+                disposeReport();
+                this.app.closeModal();
+                return this.restoreAnalyzerFile(entry);
+            },
+            preserveState: this.codeAnalyzerState || null,
+            onStateChange: state => { this.codeAnalyzerState = state; }
+        });
     }
 
     // ── Code quality ignore list ────────────────────────────────────────────
@@ -1326,6 +1542,12 @@ export class RuleController {
     }
 
     renderVcaExplanationLoading() {
+        this.setRulesCardStatus({
+            tone: 'neutral',
+            icon: 'fa-spinner fa-spin',
+            title: 'Checking your rules…',
+            message: 'Matching uncommitted changes to every applicable policy.'
+        });
         const explanation = this.query('[data-vca-explanation]');
         const verdict = this.query('[data-vca-explanation-verdict]');
         if (!explanation) return;
@@ -1348,6 +1570,12 @@ export class RuleController {
         const model = buildVcaExplanationViewModel(response);
         this.lastVcaFixBrief = model.fixBrief;
         explanation.hidden = false;
+        this.setRulesCardStatus({
+            tone: model.tone,
+            icon: model.icon,
+            title: model.title,
+            message: model.message
+        });
 
         const verdict = this.query('[data-vca-explanation-verdict]');
         if (verdict) verdict.dataset.tone = model.tone;
@@ -1385,8 +1613,6 @@ export class RuleController {
 
         const actions = this.query('[data-vca-explanation-actions]');
         if (actions) actions.hidden = !model.actionable;
-        const terminalButton = this.query('[data-action="open-fix-terminal"]');
-        if (terminalButton) terminalButton.hidden = !this.findRulesTerminal();
         return model;
     }
 
@@ -1449,44 +1675,57 @@ export class RuleController {
         if (icon) icon.className = `fa-solid ${iconClass}`;
     }
 
-    findRulesTerminal() {
-        // The terminal station lives inside the Rules view itself; the dashboard-level
-        // lookup remains as a fallback for any host that still mounts it as a sibling.
-        return this.viewRoot?.querySelector('[data-terminal-section]')
-            || this.viewRoot?.closest('[data-dashboard]')?.querySelector('[data-terminal-section]')
-            || null;
-    }
-
-    // Paste the complete fix brief without submitting it. The user can review or edit the
-    // prompt in the bottom console before pressing Enter; if no session is active, guide
-    // them to the terminal start control instead.
-    openFixTerminal() {
-        const terminal = this.findRulesTerminal();
-        if (!terminal) return;
-        const manager = this.app.terminalController?.manager;
-        const active = manager?.getActiveTab?.();
-        const brief = String(this.lastVcaFixBrief || '').trim();
-        const prompt = brief
-            ? `Fix the following VCA validation findings. Respect the repository's AGENTS.md instructions and vc.rules.md policies, and run the relevant tests when finished.\n\n${brief}`
-            : '';
-        if (prompt && active?.instance?.injectText?.(prompt)) {
-            active.instance.focusInput?.();
-            active.instance.focus?.();
+    launchProjectHealthFix(scope = 'all') {
+        if (this.hookStatus?.inGitRepo === false) {
             this.app.showToast(
-                'Fix Prompt Ready',
-                'Review the prompt in the agent console, then press Enter to send it.',
+                'Project health',
+                'Open a local Git repository before asking an agent to repair rules or Code quality.',
                 'info');
-            return;
+            return false;
         }
 
-        active?.instance?.focusInput?.();
-        active?.instance?.focus?.();
-        terminal.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        terminal.querySelector('#terminal-header-select, #terminal-start-btn')?.focus();
-        this.app.showToast?.(
-            'Start an Agent Console',
-            'Start a terminal session, then choose “Send all to agent” again.',
-            'info');
+        const normalizedScope = ['rules', 'quality', 'all'].includes(String(scope).toLowerCase())
+            ? String(scope).toLowerCase()
+            : 'all';
+        const prompt = buildProjectHealthFixPrompt(normalizedScope, {
+            vcaFixBrief: this.lastVcaFixBrief,
+            codeAnalyzerResponse: this.codeAnalyzerCache?.response || null
+        });
+        const labels = {
+            rules: 'Fix rules',
+            quality: 'Fix code quality',
+            all: 'Fix project health'
+        };
+
+        // Follow the user's shared LLM-list order instead of assuming Claude is
+        // installed. Older/unit-test hosts without the picker controller retain the
+        // historical Claude fallback.
+        const hasPickerCatalog = typeof this.app.llmPickerController?.getEnabledItems === 'function';
+        const launchTarget = hasPickerCatalog
+            ? getEnabledLlmItems(this.app, 'multi-run')[0] || null
+            : { cli: 'claude' };
+        if (!launchTarget?.cli) {
+            this.app.showToast(
+                'No LLM available',
+                'Enable at least one base LLM in the terminal LLM list, then try again.',
+                'warning');
+            return false;
+        }
+
+        this.app.terminalController?.launchInFocus?.({
+            cli: launchTarget.cli,
+            workingDirectory: this.hookStatus?.repositoryPath || this.app.data?.configs?.rootPath || null,
+            title: labels[normalizedScope],
+            tabLabel: labels[normalizedScope],
+            initialPrompt: prompt,
+            forceNewTab: true
+        });
+        return true;
+    }
+
+    // Compatibility alias for older markup/tests that used the VCA-only action name.
+    openFixTerminal() {
+        return this.launchProjectHealthFix('rules');
     }
 
     async copyVcaFixBrief() {
@@ -1588,7 +1827,7 @@ export class RuleController {
 
     setText(selector, value) {
         const element = this.query(selector);
-        if (element) element.textContent = value || '';
+        if (element) element.textContent = value ?? '';
     }
 
     query(selector) {

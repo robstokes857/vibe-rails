@@ -301,8 +301,8 @@ test('The workbench is registered as the python-script view and torn down like e
     assert.match(duplicate, /view === 'python-script'\s*\?\s*'jobs'/);
     assert.doesNotMatch(duplicate, /'python-script',/, 'the workbench itself is not a duplicateable view');
 
-    // Same viewport-filling shell as the Code quality page.
-    assert.match(app, /const isRulesWorkspace = view === 'dashboard' \|\| view === 'agents' \|\| view === 'python-script';/);
+    // The workbench alone keeps the viewport-filling shell; Project health scrolls normally.
+    assert.match(app, /const isRulesWorkspace = view === 'python-script';/);
     // In-place script switching keeps the stack honest without a reload.
     assert.match(app, /updateCurrentViewData\(data = \{\}\) \{[\s\S]*?this\.navigationStack\[last\] = \{ view: this\.currentView, data \};/);
 });

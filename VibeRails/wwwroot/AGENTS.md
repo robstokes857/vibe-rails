@@ -15,8 +15,8 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | [js/modules/terminal-snapshot-renderer.js](js/modules/terminal-snapshot-renderer.js) | Renders reserved `xterm_ui_bytes` payloads into xterm.js and captures PNG data URLs for MCP Explorer previews |
 | [js/modules/environment-controller.js](js/modules/environment-controller.js) | Environment CRUD + "Web UI" launch button |
 | [js/modules/sandbox-controller.js](js/modules/sandbox-controller.js) | Sandbox CRUD + launch terminals/VS Code into sandbox dirs |
-| [js/modules/dashboard-controller.js](js/modules/dashboard-controller.js) | Dashboard layout with state passing for preselection |
-| [js/modules/code-analyzer-dashboard.js](js/modules/code-analyzer-dashboard.js) | Interactive MintLint scan dashboard with Monaco code evidence for the Rules page |
+| [js/modules/dashboard-controller.js](js/modules/dashboard-controller.js) | Unified Project health page (Rules, VCA, Git Guard, and Code quality; no embedded terminal) |
+| [js/modules/code-analyzer-dashboard.js](js/modules/code-analyzer-dashboard.js) | Compact MintLint score card plus the modal file/metric/source report |
 | [js/modules/jobs-controller.js](js/modules/jobs-controller.js) | Automation page: automation CRUD + inline editor, run history, "Run now" (queues a native terminal run; `launchFromNav` for the nav launcher); owns the shared `PythonScriptsController` |
 | [js/modules/python-scripts-controller.js](js/modules/python-scripts-controller.js) | "Python scripts" section of the Automation page + shared lifecycle flows; also owns the PIN-gated MCP switch/configurator and typed parameter-to-argv mapping fields |
 | [js/modules/python-script-workbench.js](js/modules/python-script-workbench.js) | `python-script` view: Monaco editor beside a docked agent terminal for one script (see "Python script workbench" below) |
@@ -193,11 +193,10 @@ exception that does use tabs (see the interactive-script flow).
 ### Flow: "Web UI" Button
 
 1. User clicks "Web UI" on environments page
-2. `launchInWebUI(envId, envName, cli)` navigates to dashboard (if not already there) with `{ preselectedEnvId }`
-3. Dashboard passes `preselectedEnvId` to `terminalController.bindTerminalActions(container, preselectedEnvId)`
-4. `bindTerminalActions` pre-selects the environment in the dropdown
-5. Terminal section scrolls into view
-6. `startTerminal(terminalContent, 'env:${envId}:${cli}')` auto-starts the terminal session
+2. `launchInWebUI(envId, envName, cli)` calls `terminalController.launchInFocus(...)`
+3. `launchInFocus` navigates to `terminal-focus` carrying one-shot `launchOptions`
+4. `loadTerminalFocusView` mounts and binds the terminal manager, consumes those options, and calls `startTerminalWithOptions`
+5. A fresh tab starts the selected environment. Project health remains terminal-free.
 
 ## Sandbox Management
 
@@ -214,8 +213,8 @@ The sandbox section appears on the dashboard when running in a local git project
 ### Flow: Launching Terminal in Sandbox
 
 1. User selects a CLI/environment from the dropdown on a sandbox card, then clicks the Web Terminal launch button
-2. `sandboxController.launchInWebUI(sandboxId, sandboxName, cli, environmentName)` calls `terminalController.startTerminalWithOptions()`
-3. `startTerminalWithOptions()` creates a tab (`POST /api/v1/terminal/tabs`) and starts the session (`POST /api/v1/terminal/tabs/{tabId}/start`) with `{ cli, environmentName, workingDirectory: sandboxPath, title: "Sandbox: {name}" }`
+2. `sandboxController.launchInWebUI(sandboxId, sandboxName, cli, environmentName)` calls `terminalController.launchInFocus()`
+3. The focused terminal consumes the launch options, creates a tab (`POST /api/v1/terminal/tabs`), and starts the session (`POST /api/v1/terminal/tabs/{tabId}/start`) with `{ cli, environmentName, workingDirectory: sandboxPath, title: "Sandbox: {name}" }`
 4. Terminal starts in sandbox directory with title bar showing sandbox name
 
 ### Flow: Launch VS Code in Sandbox

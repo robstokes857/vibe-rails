@@ -541,12 +541,16 @@ export function renderCodeAnalyzerBrief(host, response, documentRef = globalThis
         brief.append(categories);
     }
 
-    if (onOpenDetails) {
+    // A successful scan can still contain no changed source files. In that state
+    // there is nothing to drill into, so keep the calm summary without offering a
+    // button that would open an empty report. Ignored entries remain actionable.
+    const hasDetails = model.files.length > 0 || model.ignoredFileCount > 0;
+    if (onOpenDetails && hasDetails) {
         const open = element(documentRef, 'button', 'code-analyzer-brief-open');
         open.type = 'button';
-        open.title = 'Open the file-by-file report';
+        open.title = 'View file and metric details';
         open.append(
-            element(documentRef, 'span', '', 'Open full report'),
+            element(documentRef, 'span', '', 'View metrics'),
             icon(documentRef, 'fa-solid fa-arrow-right'));
         open.addEventListener?.('click', () => onOpenDetails());
         brief.append(open);
@@ -1032,10 +1036,14 @@ function renderFileRail(documentRef, model, selectedFile, onSelect, ignoredFiles
     contextMenu.setAttribute('role', 'menu');
     let contextMenuAnchor = null;
 
-    const closeContextMenu = () => {
+    const closeContextMenu = ({ restoreFocus = false } = {}) => {
+        const anchor = contextMenuAnchor;
+        anchor?.setAttribute?.('aria-expanded', 'false');
         contextMenuAnchor = null;
         contextMenu.classList.remove?.('show');
         contextMenu.replaceChildren?.();
+        contextMenu.removeAttribute?.('aria-label');
+        if (restoreFocus) anchor?.focus?.({ preventScroll: true });
     };
 
     const positionContextMenu = (anchor) => {
@@ -1053,8 +1061,18 @@ function renderFileRail(documentRef, model, selectedFile, onSelect, ignoredFiles
         contextMenu.style.right = `${Math.max(6, railRect.right - anchorRect.right)}px`;
     };
 
-    const openContextMenu = (anchor, entries) => {
+    const focusMenuItem = (index) => {
+        const items = Array.from(contextMenu.children || []);
+        if (!items.length) return;
+        const normalizedIndex = ((index % items.length) + items.length) % items.length;
+        items[normalizedIndex]?.focus?.({ preventScroll: true });
+    };
+
+    const openContextMenu = (anchor, entries, label, { focusLast = false } = {}) => {
+        closeContextMenu();
         contextMenuAnchor = anchor;
+        anchor.setAttribute?.('aria-expanded', 'true');
+        contextMenu.setAttribute?.('aria-label', label);
         contextMenu.replaceChildren?.();
         for (const entry of entries) {
             const menuItem = element(documentRef, 'button', 'code-analyzer-context-menu-item');
@@ -1069,6 +1087,7 @@ function renderFileRail(documentRef, model, selectedFile, onSelect, ignoredFiles
         }
         contextMenu.classList.add('show');
         positionContextMenu(anchor);
+        focusMenuItem(focusLast ? contextMenu.children.length - 1 : 0);
     };
 
     const buildKebab = (label, entries) => {
@@ -1077,14 +1096,60 @@ function renderFileRail(documentRef, model, selectedFile, onSelect, ignoredFiles
         kebab.title = label;
         kebab.setAttribute('aria-label', label);
         kebab.setAttribute('aria-haspopup', 'menu');
+        kebab.setAttribute('aria-expanded', 'false');
         kebab.append(icon(documentRef, 'fa-solid fa-ellipsis-vertical'));
         kebab.addEventListener?.('click', event => {
             event.stopPropagation?.();
-            if (contextMenuAnchor === kebab) closeContextMenu();
-            else openContextMenu(kebab, entries);
+            if (contextMenuAnchor === kebab) closeContextMenu({ restoreFocus: true });
+            else openContextMenu(kebab, entries, label);
+        });
+        kebab.addEventListener?.('keydown', event => {
+            if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'Escape') return;
+            if (event.key === 'Escape' && contextMenuAnchor !== kebab) return;
+            event.preventDefault?.();
+            event.stopPropagation?.();
+            if (event.key === 'Escape') {
+                closeContextMenu({ restoreFocus: true });
+                return;
+            }
+            if (contextMenuAnchor === kebab) {
+                focusMenuItem(event.key === 'ArrowUp' ? contextMenu.children.length - 1 : 0);
+                return;
+            }
+            openContextMenu(kebab, entries, label, { focusLast: event.key === 'ArrowUp' });
         });
         return kebab;
     };
+
+    contextMenu.addEventListener?.('keydown', event => {
+        const items = Array.from(contextMenu.children || []);
+        const currentIndex = items.indexOf(event.target);
+        if (event.key === 'Escape') {
+            event.preventDefault?.();
+            event.stopPropagation?.();
+            closeContextMenu({ restoreFocus: true });
+            return;
+        }
+        if (event.key === 'Tab') {
+            // Return focus to the anchor before the native Tab action advances it.
+            // This closes the floating menu without trapping keyboard users in it.
+            closeContextMenu({ restoreFocus: true });
+            return;
+        }
+        const targetIndex = event.key === 'ArrowDown'
+            ? (currentIndex >= 0 ? currentIndex + 1 : 0)
+            : event.key === 'ArrowUp'
+                ? (currentIndex >= 0 ? currentIndex - 1 : items.length - 1)
+                : event.key === 'Home'
+                    ? 0
+                    : event.key === 'End'
+                        ? items.length - 1
+                        : null;
+        if (targetIndex === null || items.length === 0) return;
+        event.preventDefault?.();
+        event.stopPropagation?.();
+        focusMenuItem(targetIndex);
+    });
 
     const onDocumentClick = (event) => {
         if (event.target?.closest?.('.code-analyzer-kebab, .code-analyzer-context-menu')) return;
@@ -1275,7 +1340,20 @@ export function renderCodeAnalyzerDashboard(container, response, documentRef = g
         const ignoredOnly = Array.isArray(options.ignoredFiles) ? options.ignoredFiles : [];
         const onRestoreEarly = typeof options.onRestoreFile === 'function' ? options.onRestoreFile : null;
         const box = renderIgnoredFilesBox(documentRef, ignoredOnly, onRestoreEarly);
-        if (box) container.append(box);
+        if (box) {
+            container.append(box);
+        } else {
+            const empty = element(documentRef, 'div', 'code-analyzer-empty code-analyzer-dashboard-empty');
+            const emptyIcon = element(documentRef, 'span', 'code-analyzer-empty-icon');
+            emptyIcon.setAttribute('aria-hidden', 'true');
+            emptyIcon.append(icon(documentRef, 'fa-regular fa-circle-check'));
+            const copy = element(documentRef, 'div');
+            copy.append(
+                element(documentRef, 'strong', '', 'No changed source files to inspect'),
+                element(documentRef, 'p', '', 'Change a supported source file, then run the scan again.'));
+            empty.append(emptyIcon, copy);
+            container.append(empty);
+        }
         return 0;
     }
 

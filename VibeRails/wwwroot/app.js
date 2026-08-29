@@ -67,6 +67,9 @@ export class VibeControlApp {
         this.loadingOverlayTimer = null;
         this.loadingOverlayVisibleSince = 0;
         this.navigationGuards = new Set();
+        this.modalCleanup = null;
+        this.modalState = null;
+        this.modalSequence = 0;
 
         this.init();
     }
@@ -644,10 +647,8 @@ export class VibeControlApp {
     getDuplicateTabViewName(view) {
         // Detail views land on their parent page: a duplicated Python workbench tab
         // opens the Automation page (the script list), not the single-script editor.
-        const normalizedView = view === 'agents'
+        const normalizedView = ['agents', 'code-quality', 'rule-files', 'agent-edit', 'agent-create'].includes(view)
             ? 'dashboard'
-            : ['agent-edit', 'agent-create'].includes(view)
-                ? 'rule-files'
                 : view === 'python-script'
                     ? 'jobs'
                     : view;
@@ -826,14 +827,11 @@ export class VibeControlApp {
     }
 
     updateActiveSubNav(view) {
-        // Two nav families: the Code quality page (home) owns the checks, the RULES
-        // entry owns the vc.rules.md editing views. The Python script workbench is a
-        // detail view of the Automation page, so Automation stays highlighted.
-        const highlightView = ['agents', 'code-quality'].includes(view)
+        // Rules and Code quality now share the Project health destination. Legacy
+        // detail routes keep that single nav item highlighted.
+        const highlightView = ['agents', 'code-quality', 'rule-files', 'agent-edit', 'agent-create'].includes(view)
             ? 'dashboard'
-            : ['agent-edit', 'agent-create'].includes(view)
-                ? 'rule-files'
-                : view === 'python-script'
+            : view === 'python-script'
                     ? 'jobs'
                     : view;
         document.querySelectorAll('.app-subnav-link').forEach(link => {
@@ -865,6 +863,9 @@ export class VibeControlApp {
                 return false;
             }
 
+            // Back is a navigation path in its own right (it does not call navigate()),
+            // so it must release an open dialog's focus/inert lifecycle explicitly.
+            this.closeModal();
             this.navigationStack.pop();
             this.currentView = previous.view || previous;
             this.loadView(this.currentView, previous.data);
@@ -946,12 +947,9 @@ export class VibeControlApp {
     applyViewLayoutState(view) {
         const isTerminalFocus = view === 'terminal-focus';
         const isGitGuardFocus = view === 'git-guard';
-        // The Rules workspace is a fixed two-pane split (sections over terminal), so it
-        // owns the viewport the same way the terminal focus view does: no page scroll,
-        // no footer, tight gutters. 'dashboard' and 'agents' both render it. The class
-        // is really "viewport-filling flowing shell, footer hidden", so the Python
-        // script workbench (editor over a docked terminal) uses it too.
-        const isRulesWorkspace = view === 'dashboard' || view === 'agents' || view === 'python-script';
+        // Only the Python script workbench still needs the old viewport-filling shell.
+        // Project health is a normal, scrollable page now that its embedded terminal is gone.
+        const isRulesWorkspace = view === 'python-script';
         const layoutRoots = [document.documentElement, document.body];
 
         layoutRoots.forEach((element) => {
@@ -1162,17 +1160,42 @@ export class VibeControlApp {
         return openFileExplorer(this, options);
     }
 
-    showModal(title, content) {
+    showModal(title, content, { onClose = null } = {}) {
         const modalContainer = document.getElementById('modal-container');
+        if (!modalContainer) return;
+
+        // A replacement is a real close followed by a fresh open: the displaced
+        // modal gets its cleanup, background state, and original focus restored
+        // before the new dialog captures those things for itself.
+        if (this.modalState || modalContainer.firstElementChild) {
+            this.closeModal();
+        } else {
+            this.runModalCleanup();
+        }
+
+        const previousFocus = document.activeElement;
+        const background = this.getTopLevelModalBackground(modalContainer).map(element => ({
+            element,
+            inert: Boolean(element.inert),
+            ariaHidden: element.getAttribute('aria-hidden')
+        }));
+        background.forEach(({ element }) => {
+            element.inert = true;
+            element.setAttribute('aria-hidden', 'true');
+        });
+
         // Escape title to prevent XSS, content is trusted HTML template
         const escapedTitle = this.escapeHtml(title);
+        const titleId = `app-modal-title-${++this.modalSequence}`;
         modalContainer.innerHTML = `
-            <div class="modal fade show d-block" tabindex="-1">
+            <div class="modal fade show d-block" tabindex="-1" role="dialog"
+                aria-modal="true" aria-labelledby="${titleId}">
                 <div class="modal-dialog modal-lg modal-dialog-scrollable">
                     <div class="modal-content">
                         <div class="modal-header">
-                            <h5 class="modal-title">${escapedTitle}</h5>
-                            <button type="button" class="btn-close" data-action="close-modal"></button>
+                            <h5 class="modal-title" id="${titleId}">${escapedTitle}</h5>
+                            <button type="button" class="btn-close" data-action="close-modal"
+                                aria-label="Close dialog"></button>
                         </div>
                         <div class="modal-body">
                             ${content}
@@ -1182,14 +1205,148 @@ export class VibeControlApp {
             </div>
             <div class="modal-backdrop fade show"></div>
         `;
+        const dialog = modalContainer.querySelector('.modal[role="dialog"]');
+        const backdrop = modalContainer.querySelector('.modal-backdrop');
+        const state = {
+            container: modalContainer,
+            dialog,
+            backdrop,
+            background,
+            previousFocus,
+            keydownHandler: null,
+            closed: false
+        };
+        state.keydownHandler = event => this.handleTopLevelModalKeydown(event, state);
+        this.modalState = state;
+        document.addEventListener('keydown', state.keydownHandler, true);
+
         // Bind all close buttons without inline handlers (CSP-safe)
         modalContainer.querySelectorAll('[data-action="close-modal"]')
             .forEach(btn => btn.addEventListener('click', () => this.closeModal()));
+        this.modalCleanup = typeof onClose === 'function' ? onClose : null;
+        this.focusTopLevelModal(state);
     }
 
     closeModal() {
-        const modalContainer = document.getElementById('modal-container');
-        modalContainer.innerHTML = '';
+        const state = this.modalState;
+        if (state?.closed) return;
+        if (state) {
+            state.closed = true;
+            if (state.keydownHandler) {
+                document.removeEventListener('keydown', state.keydownHandler, true);
+            }
+            this.modalState = null;
+        }
+
+        const modalContainer = state?.container || document.getElementById('modal-container');
+        this.runModalCleanup();
+        if (modalContainer) modalContainer.innerHTML = '';
+
+        state?.background?.forEach(({ element, inert, ariaHidden }) => {
+            if (!element?.isConnected) return;
+            element.inert = inert;
+            if (ariaHidden == null) element.removeAttribute('aria-hidden');
+            else element.setAttribute('aria-hidden', ariaHidden);
+        });
+
+        const previousFocus = state?.previousFocus;
+        if (previousFocus?.isConnected && typeof previousFocus.focus === 'function') {
+            try { previousFocus.focus({ preventScroll: true }); } catch { /* detached or no longer focusable */ }
+        }
+    }
+
+    getTopLevelModalBackground(modalContainer) {
+        const excludedIds = new Set(['modal-container', 'toast-container', 'loading-overlay']);
+        const excludedTags = new Set(['SCRIPT', 'STYLE', 'LINK', 'TEMPLATE']);
+        return Array.from(document.body?.children || []).filter(element =>
+            element !== modalContainer
+            && !excludedIds.has(element.id)
+            && !excludedTags.has(element.tagName));
+    }
+
+    getTopLevelModalFocusables(root) {
+        if (!root?.querySelectorAll) return [];
+        const selector = [
+            'a[href]',
+            'area[href]',
+            'button:not([disabled])',
+            'input:not([disabled]):not([type="hidden"])',
+            'select:not([disabled])',
+            'textarea:not([disabled])',
+            'iframe',
+            'object',
+            'embed',
+            '[contenteditable="true"]',
+            '[tabindex]:not([tabindex="-1"])'
+        ].join(',');
+        return Array.from(root.querySelectorAll(selector)).filter(element => {
+            if (element.closest?.('[hidden], [inert], [aria-hidden="true"]')) return false;
+            if (typeof element.getClientRects === 'function' && element.getClientRects().length === 0) return false;
+            return true;
+        });
+    }
+
+    hasActiveNestedModalLayer(state = this.modalState) {
+        if (!state?.container) return false;
+        if (document.querySelector?.('.vb-confirm-overlay')) return true;
+
+        return Array.from(state.container.children || []).some(element => {
+            if (element === state.dialog || element === state.backdrop) return false;
+            if (element.matches?.('.llm-picker-modal-layer, .vb-file-explorer-layer, .env-steps-modal-layer')) {
+                return true;
+            }
+            return Boolean(element.querySelector?.(
+                '[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]'));
+        });
+    }
+
+    handleTopLevelModalKeydown(event, state = this.modalState) {
+        if (event.key !== 'Tab' || event.defaultPrevented || state !== this.modalState) return;
+        // Specialized nested layers own their capture-phase focus trap. Since this
+        // listener was registered first, it must detect them and stand down before
+        // they receive the same Tab event.
+        if (this.hasActiveNestedModalLayer(state)) return;
+
+        const focusables = this.getTopLevelModalFocusables(state?.dialog);
+        if (focusables.length === 0) {
+            event.preventDefault();
+            state?.dialog?.focus?.({ preventScroll: true });
+            return;
+        }
+
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        const active = document.activeElement;
+        const focusIsInside = Boolean(state?.dialog?.contains?.(active));
+        if (!focusIsInside || (event.shiftKey && active === first) || (!event.shiftKey && active === last)) {
+            event.preventDefault();
+            (event.shiftKey ? last : first).focus?.({ preventScroll: true });
+        }
+    }
+
+    focusTopLevelModal(state = this.modalState) {
+        const focus = () => {
+            if (state !== this.modalState || !state?.dialog?.isConnected) return;
+            const autofocus = state.dialog.querySelector?.('[autofocus]');
+            const body = state.dialog.querySelector?.('.modal-body');
+            const initial = (autofocus && this.getTopLevelModalFocusables(state.dialog).includes(autofocus))
+                ? autofocus
+                : this.getTopLevelModalFocusables(body)[0];
+            (initial || state.dialog).focus?.({ preventScroll: true });
+        };
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(focus);
+        else focus();
+    }
+
+    runModalCleanup() {
+        const cleanup = this.modalCleanup;
+        this.modalCleanup = null;
+        if (typeof cleanup !== 'function') return;
+        try {
+            cleanup();
+        } catch (error) {
+            console.warn('Modal cleanup failed:', error);
+        }
     }
 
     showToast(title, message, type = 'info', options = {}) {

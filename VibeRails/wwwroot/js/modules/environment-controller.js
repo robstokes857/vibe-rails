@@ -2449,44 +2449,16 @@ export class EnvironmentController {
     }
 
     async launchInWebUI(envId, envName, cli) {
-        // The terminal panel only exists on the dashboard. `goBack()` was unreliable —
-        // if the user reached the env page via the top sub-nav (rather than from the
-        // dashboard), `goBack()` either does nothing or returns to a different view,
-        // and the subsequent [data-terminal-content] lookup silently fails. Navigate
-        // explicitly so the user always lands where the terminal panel lives, and
-        // preselect the env so the dropdown is right even if auto-start races.
-        if (this.app.currentView !== 'dashboard') {
-            this.app.navigate('dashboard', { preselectedEnvId: envId });
-        }
-
         this.app.showToast('Web Terminal',
             `Launching ${envName} (${cli})...`,
             'info');
-
-        // The dashboard renders its terminal container asynchronously. Poll briefly
-        // until the container is mounted, then hand off to startTerminal — which
-        // itself awaits the TerminalManager's init promise, so we don't need to
-        // wait for that here.
-        const terminalContent = await this._waitForTerminalContent(2000);
-        if (!terminalContent) {
-            this.app.showError('Could not find the terminal panel — open Rules and try again.');
-            return;
-        }
-
-        document.querySelector('[data-terminal-section]')
-            ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-
-        await this.app.terminalController.startTerminal(terminalContent, `env:${envId}:${cli}`);
-    }
-
-    async _waitForTerminalContent(timeoutMs) {
-        const deadline = Date.now() + timeoutMs;
-        while (Date.now() < deadline) {
-            const el = document.querySelector('[data-terminal-content]');
-            if (el) return el;
-            await new Promise(resolve => setTimeout(resolve, 50));
-        }
-        return document.querySelector('[data-terminal-content]');
+        return this.app.terminalController.launchInFocus({
+            cli,
+            environmentName: envName,
+            title: envName,
+            tabLabel: envName,
+            forceNewTab: true
+        }, { preselectedEnvId: envId });
     }
 }
 
