@@ -103,6 +103,24 @@ const CODE_QUALITY_RESPONSE = {
   }
 };
 
+async function openFirstRuleFileInManager(page) {
+  const tree = page.locator('[data-agent-file-tree]');
+  const configured = tree.locator('.agent-files-configured .agent-file-tree-item');
+  let item = configured.first();
+
+  if (await configured.count() === 0) {
+    const withoutRules = tree.locator('[data-agent-empty-group]');
+    if (await withoutRules.getAttribute('open') === null) {
+      await withoutRules.locator('summary').click();
+    }
+    item = withoutRules.locator('.agent-file-tree-item').first();
+  }
+
+  await expect(item).toBeVisible();
+  await item.locator('.agent-file-tree-open').click();
+  return item;
+}
+
 test('has title', async ({ page }) => {
   await page.goto('/');
   await expect(page).toHaveTitle(/vibe-rails/i);
@@ -115,84 +133,82 @@ test('opens the terminal workspace by default', async ({ page }) => {
   await expect(page.locator('[data-rules-overview-host]')).toHaveCount(0);
 });
 
-// RULES and Code quality are two separate nav destinations: RULES is the full-page
-// vc.rules.md manager; the Code quality page (home) owns Git Guard, the validation
-// results, the compact scan brief, and the terminal dock.
-test('can navigate to Rule Files', async ({ page }) => {
+test('Quality combines rule management, validation, Git Guard, and Code quality', async ({ page }) => {
   await page.goto('/');
 
-  // The RULES entry goes straight to the rule-files manager.
-  const rulesNav = page.locator('.app-subnav-link[data-view="rule-files"]:visible');
-  await expect(rulesNav).toBeVisible();
-  await expect(rulesNav).toHaveText(/rules/i);
-  await expect(page.getByRole('button', { name: 'Dashboard' })).toHaveCount(0);
-  await rulesNav.click();
+  const qualityNav = page.locator('.app-subnav-link[data-action="navigate-home"]:visible');
+  await expect(qualityNav).toHaveText(/quality/i);
+  await expect(page.locator('.app-subnav-link[data-view="rule-files"]:visible')).toHaveCount(0);
+  await qualityNav.click();
 
-  await expect(page.locator('.view[data-view="rule-files"]')).toBeVisible();
-  // A top-level destination: no back button, no tab strip.
-  await expect(page.locator('.rules-subpage-back')).toHaveCount(0);
-  await expect(page.getByRole('tablist', { name: 'Rules sections' })).toHaveCount(0);
+  await expect(page.locator('.view[data-view="agents"]')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Rules and code quality' })).toBeVisible();
+  await expect(page.locator('.project-health-guard')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Rules', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Code quality', exact: true })).toBeVisible();
+  await expect(page.locator('#vb-terminal-panel')).toHaveCount(0);
+
+  // Rule CRUD is one deliberate drill-in instead of another top-level page.
+  await page.getByRole('button', { name: 'Manage rules' }).click();
+  await expect(page.locator('[data-rule-manager-modal]')).toBeVisible();
 
   const container = page.locator('[data-agent-file-tree]');
   await expect(container).toBeVisible();
 
   const configuredFiles = container.locator('.agent-files-configured .agent-file-tree-item');
-  await expect(configuredFiles.first()).toBeVisible();
-  await expect(configuredFiles.first().locator('.agent-file-tree-name')).toContainText('/Rules');
-  await expect(configuredFiles.first().locator('.agent-file-tree-badge')).toHaveText(/[1-9]\d* rules?/);
+  if (await configuredFiles.count() > 0) {
+    await expect(configuredFiles.first()).toBeVisible();
+    await expect(configuredFiles.first().locator('.agent-file-tree-name')).toContainText('/Rules');
+    await expect(configuredFiles.first().locator('.agent-file-tree-badge')).toHaveText(/[1-9]\d* rules?/);
+  } else {
+    await expect(container.locator('.agent-files-configured .agent-files-group-empty'))
+      .toHaveText(/No rule files have rules yet/i);
+  }
 
   const filesWithoutRules = container.locator('[data-agent-empty-group]');
-  await expect(filesWithoutRules).not.toHaveAttribute('open', '');
-  await expect(filesWithoutRules.locator('summary')).toContainText('Without rules');
+  if (await filesWithoutRules.count() > 0) {
+    await expect(filesWithoutRules).not.toHaveAttribute('open', '');
+    await expect(filesWithoutRules.locator('summary')).toContainText('Without rules');
+  }
 
   // Selecting a rule file opens the inline editor beside the list — still no trip to
   // the full-page markdown editor.
-  await configuredFiles.first().locator('.agent-file-tree-open').click();
+  await openFirstRuleFileInManager(page);
   const editor = page.locator('[data-agent-rule-editor]');
   await expect(editor.getByRole('button', { name: 'Add rule' })).toBeVisible();
   await expect(page.locator('[data-view="agent-edit"]')).toHaveCount(0);
 
-  // The CODE QUALITY entry (home) owns the checks: Git Guard, validation, the brief,
-  // and the terminal dock below.
-  const qualityNav = page.locator('.app-subnav-link[data-action="navigate-home"]:visible');
-  await expect(qualityNav).toHaveText(/code quality/i);
-  await qualityNav.click();
+  // Child CRUD dialogs layer above the manager. Cancel returns to the same
+  // selected file instead of destroying the manager underneath.
+  const renameRuleFile = editor.getByRole('button', { name: "Set this rule file's display name" });
+  await renameRuleFile.click();
+  const ruleCrudDialog = page.locator('.agent-rule-modal-layer');
+  await expect(ruleCrudDialog.getByRole('dialog', { name: 'Set Rule File Display Name' })).toBeVisible();
+  await ruleCrudDialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(ruleCrudDialog).toHaveCount(0);
+  await expect(page.locator('[data-rule-manager-modal]')).toBeVisible();
+  await expect(renameRuleFile).toBeFocused();
 
-  await expect(page.locator('.rules-topbar .rules-topbar-title')).toHaveText('Code quality');
-  await expect(page.locator('.rules-topbar .rules-git-setting')).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Validation results' })).toBeVisible();
-  const validationPanel = page.locator('[data-vca-console]');
-  await expect(validationPanel.getByRole('button', { name: 'Check changes' })).toBeVisible();
-  await expect(validationPanel.getByRole('button', { name: 'Copy transcript' })).not.toBeVisible();
-  await validationPanel.locator('summary[aria-label="More validation actions"]').click();
-  await expect(validationPanel.getByRole('button', { name: 'Copy transcript' })).toBeVisible();
-  await validationPanel.locator('summary[aria-label="More validation actions"]').click();
-  await expect(page.locator('#vb-terminal-panel')).toHaveCount(1);
-  // The rule manager is not on this page.
-  await expect(page.locator('[data-agent-file-tree]')).toHaveCount(0);
-
-  const checksPrecedeTerminal = await page.evaluate(() => {
-    const checks = document.querySelector('[data-rules-overview-host]');
-    const terminal = document.querySelector('[data-terminal-section]');
-    return Boolean(checks && terminal && (checks.compareDocumentPosition(terminal) & Node.DOCUMENT_POSITION_FOLLOWING));
-  });
-  expect(checksPrecedeTerminal).toBe(true);
+  await page.locator('#modal-container [data-action="close-modal"]').click();
+  await expect(page.locator('[data-rule-manager-modal]')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Fix rules & code quality' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Fix rules', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Fix code quality', exact: true })).toBeVisible();
 });
 
 test('rule-file workflows use policy terminology', async ({ page }) => {
   await page.goto('/');
 
-  await page.locator('.app-subnav-link[data-view="rule-files"]:visible').click();
-  await page.getByRole('button', { name: 'New vc.rules.md' }).click();
+  await page.locator('.app-subnav-link[data-action="navigate-home"]:visible').click();
+  await page.getByRole('button', { name: 'Manage rules' }).click();
+  await page.getByRole('button', { name: 'New rule file' }).click();
 
   await expect(page.getByRole('heading', { name: 'Create New Rule File' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Create New Agent' })).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Back' }).click();
-  const configuredFile = page.locator(
-    '[data-agent-file-tree] .agent-files-configured .agent-file-tree-item'
-  ).first();
-  await configuredFile.locator('.agent-file-tree-open').click();
+  await page.getByRole('button', { name: 'Manage rules' }).click();
+  await openFirstRuleFileInManager(page);
   await page.locator('[data-agent-rule-editor]').getByRole('button', { name: 'Full editor' }).click();
 
   await expect(page.getByText('Files covered by this rule file', { exact: true })).toBeVisible();
@@ -200,33 +216,24 @@ test('rule-file workflows use policy terminology', async ({ page }) => {
   await expect(page.getByText('Full Agent File Content', { exact: true })).toHaveCount(0);
 });
 
-test('the code quality page docks a substantial console at the bottom and lets the page scroll', async ({ page }) => {
+test('Project health is a simple scrollable card stack with no embedded terminal', async ({ page }) => {
   await page.goto('/');
   await page.locator('.app-subnav-link[data-action="navigate-home"]:visible').click();
 
-  await expect(page.locator('[data-rules-splitter]')).toHaveCount(0);
-
-  const layout = await page.locator('[data-rules-panes]').evaluate((panes) => {
-    const [sections, terminal] = panes.querySelectorAll(':scope > .rules-pane');
-    const panesRect = panes.getBoundingClientRect();
-    const terminalRect = terminal.getBoundingClientRect();
+  const layout = await page.locator('.project-health-stack').evaluate((stack) => {
+    const [rules, quality] = stack.querySelectorAll(':scope > .project-health-card');
     return {
-      terminalHeight: terminalRect.height,
-      terminalBottom: terminalRect.bottom,
-      workspaceBottom: panesRect.bottom,
+      rulesTop: rules.getBoundingClientRect().top,
+      qualityTop: quality.getBoundingClientRect().top,
       bodyOverflowY: getComputedStyle(document.body).overflowY
     };
   });
-  // The console is a real working surface — it fills what the hub leaves free and
-  // never drops below its floor.
-  expect(layout.terminalHeight).toBeGreaterThanOrEqual(339);
-  // It still rides at the bottom of the workspace.
-  expect(Math.abs(layout.terminalBottom - layout.workspaceBottom)).toBeLessThanOrEqual(1);
-  // The page is not viewport-locked — a long finding list can scroll.
+  expect(layout.qualityTop).toBeGreaterThan(layout.rulesTop);
   expect(layout.bodyOverflowY).not.toBe('hidden');
+  await expect(page.locator('[data-terminal-section], [data-terminal-content]')).toHaveCount(0);
 });
 
-test('the quality brief opens the full-page workbench and back returns to the summary', async ({ page }) => {
+test('the quality brief opens metric details in a modal and returns to the same summary', async ({ page }) => {
   await page.route('**/api/v1/code-analyzer**', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(CODE_QUALITY_RESPONSE) });
   });
@@ -255,11 +262,12 @@ test('the quality brief opens the full-page workbench and back returns to the su
   // The full report is not on the summary page.
   await expect(page.locator('[data-code-analyzer-report]')).toHaveCount(0);
 
-  // Its button opens the full-page workbench, restored from the same scan (no rescan).
-  await brief.getByRole('button', { name: /Open full report/ }).click();
-  await expect(page.locator('.view[data-view="code-quality"]')).toBeVisible();
+  // Its button opens the report without leaving the unified page.
+  await brief.getByRole('button', { name: /View metrics/ }).click();
+  await expect(page.locator('.view[data-view="agents"]')).toBeVisible();
+  await expect(page.locator('[data-project-health-quality-report]')).toBeVisible();
 
-  const card = page.locator('[data-code-analyzer-console]');
+  const card = page.locator('[data-project-health-quality-report]');
   // No internal tabs — the files workspace is the only surface.
   await expect(card.getByRole('tablist', { name: 'Code quality report sections' })).toHaveCount(0);
   await expect(card.getByRole('heading', { name: 'Changed files' })).toBeVisible();
@@ -278,15 +286,16 @@ test('the quality brief opens the full-page workbench and back returns to the su
   await card.locator('.code-analyzer-dir-head').first().click();
   await expect(serviceRow).toHaveCount(1);
 
-  // Back returns to the summary page, brief still in place.
-  await page.locator('.rules-subpage-back').click();
-  await expect(page.getByRole('heading', { name: 'Validation results' })).toBeVisible();
+  // Closing the modal leaves both health cards and the brief in place.
+  await page.locator('#modal-container [data-action="close-modal"]').click();
+  await expect(page.locator('[data-project-health-quality-report]')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Rules and code quality' })).toBeVisible();
   await expect(brief).toBeVisible();
 });
 
 test('project naming is available from Settings', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
 
   const projectCard = page.locator('[data-project-identity-card]');
   await expect(projectCard).toBeVisible();

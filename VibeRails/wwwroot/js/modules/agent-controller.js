@@ -1,4 +1,5 @@
 import { getFileTypeVisual } from './file-type-icons.js';
+import { isConfirmDialogOpen } from './utils.js';
 
 const ENFORCEMENT_LEVELS = [
     { value: 'WARN', icon: '⚠️', blurb: 'Warn, but let the commit through.' },
@@ -191,6 +192,169 @@ export class AgentController {
         content.appendChild(fragment);
     }
 
+    // Compact CRUD surface used by the unified Project health page. The existing
+    // file-tree and inline-editor renderers remain the single implementation of rule
+    // mutations; this method only gives them a focused modal host.
+    openRuleManager() {
+        this.app.showModal('Manage rules', `
+            <div class="project-health-rule-manager" data-rule-manager-modal>
+                <header class="project-health-rule-manager-header">
+                    <p>Choose a <code>vc.rules.md</code> file, then add, remove, or change its enforcement.</p>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-sm btn-outline-secondary" type="button"
+                            data-rule-manager-refresh title="Reload rule files">
+                            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+                            Refresh
+                        </button>
+                        <button class="btn btn-sm btn-primary" type="button" data-rule-manager-create>
+                            <i class="fa-solid fa-plus" aria-hidden="true"></i>
+                            New rule file
+                        </button>
+                    </div>
+                </header>
+                <div class="rules-files-split project-health-rule-manager-grid">
+                    <div class="rules-files-rail" data-agent-file-tree></div>
+                    <div class="rules-files-detail" data-agent-rule-editor></div>
+                </div>
+            </div>`);
+
+        const modalContainer = document.getElementById('modal-container');
+        const root = modalContainer?.querySelector('[data-rule-manager-modal]');
+        if (!root) return;
+
+        const dialog = modalContainer.querySelector('.modal-dialog');
+        dialog?.classList.remove('modal-lg');
+        dialog?.classList.add('modal-xl', 'project-health-rule-modal-dialog');
+
+        root.querySelector('[data-rule-manager-create]')?.addEventListener('click', () => {
+            this.app.navigate('agent-create');
+        });
+        root.querySelector('[data-rule-manager-refresh]')?.addEventListener('click', async event => {
+            const button = event.currentTarget;
+            button.disabled = true;
+            try {
+                await this.app.refreshDashboardData();
+                this.renderAgentFileTree(root);
+            } finally {
+                button.disabled = false;
+            }
+        });
+        this.renderAgentFileTree(root);
+    }
+
+    // Rule CRUD can open while the rule manager itself is already an app modal. Keep
+    // that manager mounted underneath a focused child layer so Cancel, Escape, and a
+    // successful mutation all return to the same file and scroll position.
+    openRuleCrudModal(title, content, { parentRoot = null } = {}) {
+        const manager = parentRoot?.matches?.('[data-rule-manager-modal]')
+            ? parentRoot
+            : parentRoot?.closest?.('[data-rule-manager-modal]');
+        const host = document.getElementById('modal-container');
+        if (!manager?.isConnected || !host?.contains?.(manager)) {
+            this.app.showModal(title, content);
+            return {
+                root: host,
+                close: () => this.app.closeModal(),
+                nested: false
+            };
+        }
+
+        const triggerElement = document.activeElement;
+        const layer = document.createElement('div');
+        layer.className = 'llm-picker-modal-layer agent-rule-modal-layer';
+        layer.innerHTML = `
+            <div class="modal fade show d-block agent-rule-crud-modal" tabindex="-1"
+                 role="dialog" aria-modal="true" aria-labelledby="agent-rule-crud-modal-title">
+                <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title" id="agent-rule-crud-modal-title">${this.app.escapeHtml(title)}</h5>
+                            <button type="button" class="btn-close" data-action="close-modal"
+                                    aria-label="Close ${this.app.escapeHtml(title)}"></button>
+                        </div>
+                        <div class="modal-body">${content}</div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-backdrop fade show agent-rule-crud-backdrop"></div>`;
+
+        const underlying = Array.from(host.children).map(element => ({
+            element,
+            inert: Boolean(element.inert),
+            ariaHidden: element.getAttribute('aria-hidden')
+        }));
+        underlying.forEach(({ element }) => {
+            element.inert = true;
+            element.setAttribute('aria-hidden', 'true');
+        });
+        host.appendChild(layer);
+
+        let closed = false;
+        let observer = null;
+        const restoreUnderlying = () => {
+            underlying.forEach(({ element, inert, ariaHidden }) => {
+                if (!element.isConnected) return;
+                element.inert = inert;
+                if (ariaHidden == null) element.removeAttribute('aria-hidden');
+                else element.setAttribute('aria-hidden', ariaHidden);
+            });
+        };
+        const close = ({ restoreFocus = true } = {}) => {
+            if (closed) return;
+            closed = true;
+            observer?.disconnect();
+            document.removeEventListener('keydown', keydownHandler, true);
+            layer.remove();
+            restoreUnderlying();
+            if (restoreFocus) {
+                requestAnimationFrame(() => {
+                    if (triggerElement?.isConnected) triggerElement.focus?.({ preventScroll: true });
+                });
+            }
+        };
+        const trapFocus = event => {
+            const focusable = Array.from(layer.querySelectorAll(
+                'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'))
+                .filter(element => !element.closest('[inert]'));
+            if (focusable.length === 0) return;
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            if (event.shiftKey && (document.activeElement === first || !layer.contains(document.activeElement))) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && (document.activeElement === last || !layer.contains(document.activeElement))) {
+                event.preventDefault();
+                first.focus();
+            }
+        };
+        const keydownHandler = event => {
+            if (isConfirmDialogOpen()) return;
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                close();
+                return;
+            }
+            if (event.key === 'Tab') trapFocus(event);
+        };
+
+        layer.querySelectorAll('[data-action="close-modal"]')
+            .forEach(button => button.addEventListener('click', () => close()));
+        document.addEventListener('keydown', keydownHandler, true);
+        if (typeof MutationObserver === 'function') {
+            observer = new MutationObserver(() => {
+                if (!layer.isConnected) close({ restoreFocus: false });
+            });
+            observer.observe(host, { childList: true });
+        }
+        requestAnimationFrame(() => {
+            const initialFocus = layer.querySelector('input:not([disabled]), select:not([disabled]), button:not([disabled])');
+            (initialFocus || layer.querySelector('.agent-rule-crud-modal'))?.focus?.();
+        });
+
+        return { root: layer, close, nested: true };
+    }
+
     // Paints (or repaints) the RULES page's file list plus its inline editor. A rename
     // or a rule edit must not remount the whole view — repainting these two hosts in
     // place keeps the selection and never disturbs the rest of the page.
@@ -202,6 +366,8 @@ export class AgentController {
         const fileTree = view?.querySelector('[data-agent-file-tree]');
         if (!fileTree) return;
 
+        this.app.ruleController?.renderRuleInventorySummary?.();
+
         const agents = this.app.data.agents || [];
         if (agents.length > 0) {
             fileTree.innerHTML = this.app.renderLocalFileTree();
@@ -209,7 +375,10 @@ export class AgentController {
                 onSaved: () => this.renderAgentFileTree(view),
                 onSelect: (agent) => {
                     this.selectedAgentPath = agent.path;
-                    this.renderAgentFileTree(view);
+                    // Selecting a file only changes selection and the detail pane. Keep
+                    // the clicked tree button mounted so keyboard focus is not lost.
+                    this.updateAgentFileSelection(fileTree);
+                    this.renderInlineRuleEditor(view);
                 }
             });
         } else if (this.app.data.isInGit) {
@@ -230,8 +399,6 @@ export class AgentController {
             const idx = parseInt(el.dataset.agentTreeIndex);
             const agent = this.app.data.agents[idx];
             if (!agent) return;
-            el.closest('.agent-file-tree-item')?.classList.toggle(
-                'is-selected', Boolean(this.selectedAgentPath) && agent.path === this.selectedAgentPath);
             el.addEventListener('click', () => {
                 if (onSelect) onSelect(agent);
                 else this.app.navigate('agent-edit', agent);
@@ -245,9 +412,41 @@ export class AgentController {
                 el.addEventListener('click', (e) => {
                     // Don't let the click bubble to the row (which would change selection).
                     e.stopPropagation();
-                    this.showAgentCustomNameModal(agent, { onSaved: onSaved || (() => this.loadAgents()) });
+                    this.showAgentCustomNameModal(agent, {
+                        onSaved: onSaved || (() => this.loadAgents()),
+                        parentRoot: container
+                    });
                 });
             }
+        });
+        this.updateAgentFileSelection(container);
+    }
+
+    updateAgentFileSelection(container) {
+        container?.querySelectorAll('[data-agent-tree-index]').forEach(button => {
+            const agent = this.app.data.agents[Number.parseInt(button.dataset.agentTreeIndex, 10)];
+            const selected = Boolean(agent && this.selectedAgentPath && agent.path === this.selectedAgentPath);
+            button.closest('.agent-file-tree-item')?.classList.toggle('is-selected', selected);
+            if (selected) button.setAttribute('aria-current', 'true');
+            else button.removeAttribute('aria-current');
+        });
+    }
+
+    focusRuleManagerControl(root, selectors = []) {
+        const manager = root?.matches?.('[data-rule-manager-modal]')
+            ? root
+            : root?.closest?.('[data-rule-manager-modal]');
+        const scope = manager || root;
+        if (!scope?.querySelector) return;
+
+        requestAnimationFrame(() => {
+            if (!scope.isConnected) return;
+            const target = selectors
+                .map(selector => scope.querySelector(selector))
+                .find(Boolean)
+                || scope.querySelector('[data-agent-tree-index][aria-current="true"]')
+                || scope.querySelector('[data-rule-manager-refresh], [data-action="refresh-agent-files"]');
+            target?.focus?.({ preventScroll: true });
         });
     }
 
@@ -255,8 +454,8 @@ export class AgentController {
     // Inline vc.rules.md rule CRUD (Rules workspace)
     // ============================================
 
-    // The detail half of the Rule files section. Everything happens in place so the user
-    // never leaves the workspace — and therefore never loses the terminal below it.
+    // The detail half of the rule manager. Everything happens in place so the user
+    // keeps the selected file and returns to the same Project health summary.
     renderInlineRuleEditor(root) {
         const view = root
             || document.querySelector('[data-view="rule-files"]')
@@ -344,7 +543,10 @@ export class AgentController {
             </p>`;
 
         host.querySelector('[data-rule-editor-rename]')?.addEventListener('click',
-            () => this.showAgentCustomNameModal(agent, { onSaved: () => this.renderAgentFileTree(view) }));
+            () => this.showAgentCustomNameModal(agent, {
+                onSaved: () => this.renderAgentFileTree(view),
+                parentRoot: view
+            }));
         host.querySelector('[data-rule-editor-open]')?.addEventListener('click',
             () => this.app.navigate('agent-edit', agent));
         host.querySelector('[data-rule-editor-add]')?.addEventListener('click',
@@ -376,6 +578,12 @@ export class AgentController {
             this.app.showToast('Rule updated', `Enforcement set to ${enforcement}.`, 'success');
             await this.app.refreshDashboardData();
             this.renderAgentFileTree(root);
+            const updatedAgent = (this.app.data.agents || []).find(candidate => candidate.path === agent.path);
+            const updatedRuleIndex = (updatedAgent?.rules || []).findIndex(rule => rule.text === ruleText);
+            if (updatedRuleIndex >= 0) {
+                requestAnimationFrame(() => root?.querySelector(
+                    `[data-rule-enforcement="${updatedRuleIndex}"]`)?.focus?.({ preventScroll: true }));
+            }
         } catch {
             this.app.showError('Failed to update enforcement');
             this.renderAgentFileTree(root);
@@ -409,7 +617,7 @@ export class AgentController {
                 <span><strong>${option.icon} ${option.value}</strong><small>${option.blurb}</small></span>
             </label>`).join('');
 
-        this.app.showModal('Add a rule', `
+        const modal = this.openRuleCrudModal('Add a rule', `
             <form id="inline-add-rule-form" class="rules-add-rule">
                 <p class="text-muted mb-2">Adding to <code>${this.app.escapeHtml(agent.path)}</code></p>
                 <div class="rules-add-rule-list">${options}</div>
@@ -427,9 +635,9 @@ export class AgentController {
                     <button type="button" class="btn btn-outline-secondary" data-action="close-modal">Cancel</button>
                     <button type="submit" class="btn btn-primary">Add rule</button>
                 </div>
-            </form>`);
+            </form>`, { parentRoot: root });
 
-        const inlineForm = document.getElementById('inline-add-rule-form');
+        const inlineForm = modal.root?.querySelector?.('#inline-add-rule-form') || null;
         const syncPathLockFields = () => {
             const selectedTemplate = inlineForm?.querySelector('input[name="inline-rule-pick"]:checked')?.value;
             const definition = PATH_LOCK_RULES.find(item => item.template === selectedTemplate);
@@ -470,10 +678,11 @@ export class AgentController {
                     ruleText,
                     enforcement
                 });
-                this.app.closeModal();
+                modal.close();
                 this.app.showToast('Rule added', `${ruleText} is now enforced at ${enforcement}.`, 'success');
                 await this.app.refreshDashboardData();
                 this.renderAgentFileTree(root);
+                this.focusRuleManagerControl(root, ['[data-rule-editor-add]']);
             } catch {
                 this.app.showError('Failed to add rule');
             }
@@ -481,17 +690,17 @@ export class AgentController {
     }
 
     confirmInlineRemoveRule(agent, rule, root) {
-        this.app.showModal('Remove rule', `
+        const modal = this.openRuleCrudModal('Remove rule', `
             <p>Remove <strong>"${this.app.escapeHtml(rule.text)}"</strong> from
                 <code>${this.app.escapeHtml(agent.path)}</code>?</p>
             <p class="text-muted small">You can add it back at any time.</p>
             <div class="d-flex gap-2 justify-content-end mt-4">
                 <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>
                 <button type="button" class="btn btn-danger" id="inline-remove-rule-confirm">Remove rule</button>
-            </div>`);
+            </div>`, { parentRoot: root });
 
-        document.getElementById('inline-remove-rule-confirm')?.addEventListener('click', async () => {
-            this.app.closeModal();
+        modal.root?.querySelector?.('#inline-remove-rule-confirm')?.addEventListener('click', async () => {
+            modal.close();
             try {
                 await this.app.apiCall('/api/v1/agents/rules', 'DELETE', {
                     path: agent.path,
@@ -500,6 +709,7 @@ export class AgentController {
                 this.app.showToast('Rule removed', `${rule.text} no longer applies here.`, 'success');
                 await this.app.refreshDashboardData();
                 this.renderAgentFileTree(root);
+                this.focusRuleManagerControl(root, ['[data-rule-editor-add]']);
             } catch {
                 this.app.showError('Failed to remove rule');
             }
@@ -1067,10 +1277,11 @@ export class AgentController {
         }
     }
 
-    showAgentCustomNameModal(agent, { onSaved = null } = {}) {
+    showAgentCustomNameModal(agent, { onSaved = null, parentRoot = null } = {}) {
         const currentName = agent.customName || agent.name;
+        const openedFromTree = parentRoot?.matches?.('[data-agent-file-tree]') === true;
 
-        this.app.showModal('Set Rule File Display Name', `
+        const modal = this.openRuleCrudModal('Set Rule File Display Name', `
             <form id="agent-custom-name-form">
                 <div class="mb-3">
                     <label class="form-label">Custom Name</label>
@@ -1088,24 +1299,29 @@ export class AgentController {
                     </button>
                 </div>
             </form>
-        `);
+        `, { parentRoot });
 
-        document.getElementById('agent-custom-name-form').addEventListener('submit', async (e) => {
+        modal.root?.querySelector?.('#agent-custom-name-form')?.addEventListener('submit', async (e) => {
             e.preventDefault();
-            const newName = document.getElementById('agent-custom-name').value;
+            const newName = modal.root.querySelector('#agent-custom-name').value;
             try {
                 await this.app.apiCall('/api/v1/agents/name', 'PUT', {
                     path: agent.path,
                     customName: newName
                 });
                 this.app.showToast('Success', `Rule file name updated to "${newName}"`, 'success');
-                this.app.closeModal();
+                modal.close();
                 // Refresh data, then let the caller decide how to re-render. The
                 // list passes onSaved to stay on the list; the editor view falls
                 // back to reloading itself with the updated agent.
                 await this.app.refreshDashboardData();
                 if (onSaved) {
                     onSaved();
+                    const updatedIndex = this.app.data.agents.findIndex(candidate => candidate.path === agent.path);
+                    const selectors = openedFromTree && updatedIndex >= 0
+                        ? [`[data-agent-rename="${updatedIndex}"]`, '[data-rule-editor-rename]']
+                        : ['[data-rule-editor-rename]'];
+                    this.focusRuleManagerControl(parentRoot, selectors);
                 } else {
                     const updatedAgent = this.app.data.agents.find(a => a.path === agent.path);
                     if (updatedAgent) {

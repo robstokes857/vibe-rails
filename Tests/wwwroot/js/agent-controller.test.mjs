@@ -146,6 +146,56 @@ test('Inline rule editor shows an empty state for a rule file that enforces noth
     assert.match(host.innerHTML, /data-rule-editor-add/);
 });
 
+test('Rule-file selection exposes aria-current without replacing the focused tree button', () => {
+    const app = createApp();
+    app.data.agents = [
+        { path: 'C:\\repo\\vc.rules.md' },
+        { path: 'C:\\repo\\src\\vc.rules.md' }
+    ];
+    const items = [{ selected: false }, { selected: false }];
+    const attributes = [new Map(), new Map()];
+    const buttons = [0, 1].map(index => ({
+        dataset: { agentTreeIndex: String(index) },
+        closest() {
+            return { classList: { toggle(_name, selected) { items[index].selected = selected; } } };
+        },
+        setAttribute(name, value) { attributes[index].set(name, value); },
+        removeAttribute(name) { attributes[index].delete(name); }
+    }));
+    const controller = new AgentController(app);
+    controller.selectedAgentPath = app.data.agents[1].path;
+
+    controller.updateAgentFileSelection({ querySelectorAll: () => buttons });
+
+    assert.equal(items[0].selected, false);
+    assert.equal(items[1].selected, true);
+    assert.equal(attributes[0].has('aria-current'), false);
+    assert.equal(attributes[1].get('aria-current'), 'true');
+});
+
+test('Rule-manager mutations focus the replacement control after a rerender', (t) => {
+    const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
+    t.after(() => { globalThis.requestAnimationFrame = originalRequestAnimationFrame; });
+    globalThis.requestAnimationFrame = callback => callback();
+
+    let focusOptions = null;
+    const replacement = {
+        focus(options) { focusOptions = options; }
+    };
+    const manager = {
+        isConnected: true,
+        matches: selector => selector === '[data-rule-manager-modal]',
+        querySelector(selector) {
+            return selector === '[data-rule-editor-add]' ? replacement : null;
+        }
+    };
+    const controller = new AgentController(createApp());
+
+    controller.focusRuleManagerControl(manager, ['[data-rule-editor-add]']);
+
+    assert.deepEqual(focusOptions, { preventScroll: true });
+});
+
 test('Inline add-rule modal escapes rule names and the target path', (t) => {
     const originalDocument = globalThis.document;
     t.after(() => { globalThis.document = originalDocument; });

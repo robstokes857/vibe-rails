@@ -10256,17 +10256,13 @@ button.git-guard-menu-button:focus-visible {
     }
 }
 
-/* ─── Code quality page: one surface over the agent terminal ─────────────
-   The old Rules page time-shared three full surfaces (validation, the
-   code-quality workbench, the rule-file manager) behind a local tab strip.
-   Now: this page owns the checks — Git Guard, the VCA validation results,
-   the compact scan brief — with the agent terminal filling the rest of the
-    viewport. The file-by-file workbench is its own view, and the vc.rules.md
-    manager is the separate top-level RULES page (both .rules-subpage). */
+/* ─── Legacy workbench/subpage primitives ────────────────────────────────
+   The unified Project health page has its own block near the end of this file.
+   These selectors remain for backward-compatible detail routes and for the
+   Python script editor/terminal workbench, which still uses the viewport shell. */
 
-/* Flowing shell. app.js adds .vb-rules-workspace-active while this page is
-   mounted. The page scrolls naturally when the validation report is long;
-   otherwise the terminal grows to fill the viewport. */
+/* Flowing shell. app.js now applies .vb-rules-workspace-active only to the
+   Python script workbench. */
 body.vb-rules-workspace-active .app-main {
     min-height: 100dvh;
 }
@@ -12224,9 +12220,15 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     transition: background 0.12s ease, color 0.12s ease;
 }
 
-.code-analyzer-context-menu-item:hover {
+.code-analyzer-context-menu-item:hover,
+.code-analyzer-context-menu-item:focus-visible {
     background: color-mix(in srgb, var(--color-text) 7%, transparent);
     color: var(--color-text);
+}
+
+.code-analyzer-context-menu-item:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-primary) 62%, transparent);
+    outline-offset: -2px;
 }
 
 .code-analyzer-context-menu-item i {
@@ -18111,4 +18113,506 @@ body.performance-mode #vb-terminal-panel .tab-status-thinking .vb-tab-status-tex
 
 body.performance-mode .brand-text-sm {
     filter: none;
+}
+
+/* ── Unified Project health ────────────────────────────────────────────────
+   Rules, VCA status, Git Guard, and Code quality share one intentionally
+   shallow page. Detail-heavy work stays behind one disclosure or modal. */
+.project-health-page {
+    width: min(1120px, 100%);
+    margin: 0 auto;
+    padding: clamp(18px, 3vw, 36px) 0 clamp(32px, 5vw, 64px);
+}
+
+.project-health-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+    margin-bottom: 18px;
+}
+
+.project-health-heading {
+    min-width: 0;
+}
+
+.project-health-eyebrow,
+.project-health-card-kicker {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--color-accent, #06b6d4);
+    font-size: .72rem;
+    font-weight: 700;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+}
+
+.project-health-heading h1 {
+    margin: 0;
+    color: var(--color-text, #f8fafc);
+    font-size: clamp(1.65rem, 4vw, 2.4rem);
+    font-weight: 700;
+    letter-spacing: -.035em;
+}
+
+.project-health-heading p {
+    margin: 8px 0 0;
+    color: var(--color-text-muted, #94a3b8);
+    font-size: .98rem;
+}
+
+.project-health-fix-all,
+.project-health-card-actions .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+.project-health-fix-all {
+    min-height: 44px;
+    padding-inline: 18px;
+}
+
+.project-health-guard {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 18px;
+    padding: 12px 14px;
+    border: 1px solid var(--color-border, #334155);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--color-bg-surface, #1e1e1e) 86%, transparent);
+}
+
+.project-health-guard[data-tone="success"] {
+    border-color: color-mix(in srgb, var(--color-success, #10b981) 42%, var(--color-border, #334155));
+}
+
+.project-health-guard[data-tone="warning"] {
+    border-color: color-mix(in srgb, var(--color-warning, #f59e0b) 48%, var(--color-border, #334155));
+}
+
+.project-health-guard[data-tone="danger"] {
+    border-color: color-mix(in srgb, var(--color-danger, #ef4444) 48%, var(--color-border, #334155));
+}
+
+.project-health-guard-icon {
+    display: grid;
+    width: 34px;
+    height: 34px;
+    place-items: center;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--color-primary, #3b82f6) 16%, transparent);
+    color: var(--color-primary, #3b82f6);
+}
+
+.project-health-guard-copy {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.project-health-guard-copy strong {
+    color: var(--color-text, #f8fafc);
+    font-size: .9rem;
+}
+
+.project-health-guard-copy small {
+    overflow: hidden;
+    color: var(--color-text-muted, #94a3b8);
+    font-size: .76rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.project-health-guard-remove {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.project-health-stack {
+    display: grid;
+    gap: 18px;
+}
+
+.project-health-card {
+    --health-tone: var(--color-primary, #3b82f6);
+    overflow: visible;
+    border: 1px solid var(--color-border, #334155);
+    border-radius: 14px;
+    background: var(--color-bg-surface, #1e1e1e);
+    box-shadow: none;
+}
+
+.project-health-card[data-tone="success"],
+.project-health-rules-summary[data-tone="success"] {
+    --health-tone: var(--color-success, #10b981);
+}
+
+.project-health-card[data-tone="warning"],
+.project-health-rules-summary[data-tone="warning"] {
+    --health-tone: var(--color-warning, #f59e0b);
+}
+
+.project-health-card[data-tone="danger"],
+.project-health-rules-summary[data-tone="danger"] {
+    --health-tone: var(--color-danger, #ef4444);
+}
+
+.project-health-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 18px 20px 14px;
+    border-bottom: 0;
+}
+
+.project-health-card-header h2 {
+    margin: 0;
+    color: var(--color-text, #f8fafc);
+    font-size: 1.2rem;
+    font-weight: 700;
+}
+
+.project-health-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.project-health-rules-summary {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 16px;
+    margin: 0 20px 14px;
+    padding: clamp(18px, 3vw, 26px);
+    border: 1px solid color-mix(in srgb, var(--health-tone) 26%, var(--color-border, #334155));
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--health-tone) 8%, var(--color-bg-base, #121212));
+}
+
+.project-health-status-icon {
+    display: grid;
+    width: 52px;
+    height: 52px;
+    place-items: center;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--health-tone) 18%, transparent);
+    color: var(--health-tone);
+    font-size: 1.35rem;
+}
+
+.project-health-status-copy {
+    min-width: 0;
+}
+
+.project-health-status-copy strong {
+    display: block;
+    color: var(--color-text, #f8fafc);
+    font-size: clamp(1.02rem, 2.5vw, 1.3rem);
+    line-height: 1.25;
+}
+
+.project-health-status-copy p {
+    margin: 6px 0 0;
+    color: var(--color-text-muted, #94a3b8);
+    font-size: .86rem;
+    line-height: 1.45;
+}
+
+.project-health-inventory {
+    display: flex;
+    gap: 8px;
+}
+
+.project-health-inventory > span {
+    display: grid;
+    min-width: 62px;
+    padding: 8px 10px;
+    place-items: center;
+    border: 1px solid var(--color-border, #334155);
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--color-bg-surface, #1e1e1e) 78%, transparent);
+}
+
+.project-health-inventory strong {
+    color: var(--color-text, #f8fafc);
+    font-size: 1rem;
+}
+
+.project-health-inventory small {
+    color: var(--color-text-muted, #94a3b8);
+    font-size: .66rem;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+}
+
+.project-health-card-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 20px 16px;
+}
+
+.project-health-details-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    border: 0;
+    background: transparent;
+    color: var(--color-text, #f8fafc);
+    font-size: .84rem;
+    font-weight: 600;
+}
+
+.project-health-details-toggle i {
+    color: var(--color-text-muted, #94a3b8);
+    font-size: .7rem;
+    transition: transform .15s ease;
+}
+
+.project-health-details-toggle[aria-expanded="true"] i {
+    transform: rotate(180deg);
+}
+
+.project-health-check-actions {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+}
+
+.project-health-details {
+    padding: 0 20px 20px;
+    border-top: 1px solid var(--color-border, #334155);
+}
+
+.project-health-details .vca-explanation {
+    padding-top: 16px;
+}
+
+.project-health-details .vca-explanation-verdict {
+    margin-top: 0;
+}
+
+.project-health-quality-placeholder {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin: 0 20px 20px;
+    padding: 26px;
+    border: 1px dashed var(--color-border, #334155);
+    border-radius: 12px;
+    color: var(--color-text-muted, #94a3b8);
+}
+
+.project-health-quality-placeholder > span {
+    font-size: 1.5rem;
+    color: var(--color-accent, #06b6d4);
+}
+
+.project-health-quality-placeholder strong {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--color-text, #f8fafc);
+}
+
+.project-health-quality-placeholder p {
+    margin: 0;
+    font-size: .85rem;
+}
+
+.project-health-quality .code-analyzer-brief-host {
+    margin: 0;
+    padding: 0 20px 20px;
+}
+
+.project-health-quality .code-analyzer-brief {
+    min-height: 150px;
+    margin: 0;
+    border: 1px solid color-mix(in srgb, var(--analyzer-tone, var(--color-primary, #3b82f6)) 30%, var(--color-border, #334155));
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--analyzer-tone, var(--color-primary, #3b82f6)) 7%, var(--color-bg-base, #121212));
+    box-shadow: none;
+}
+
+.project-health-quality .code-analyzer-brief-open {
+    align-self: stretch;
+    min-width: 132px;
+    border-left-color: var(--color-border, #334155);
+}
+
+.project-health-scan-transcript {
+    margin: 0 20px 18px;
+}
+
+.project-health-rule-modal-dialog,
+.project-health-quality-modal-dialog {
+    width: min(1180px, calc(100vw - 32px));
+    max-width: 1180px;
+}
+
+/* Rule add/remove/rename dialogs sit above the still-mounted Manage rules modal. */
+.agent-rule-modal-layer > .agent-rule-crud-modal {
+    z-index: 1070;
+}
+
+.agent-rule-modal-layer > .agent-rule-crud-backdrop {
+    z-index: 1065;
+}
+
+.project-health-rule-manager-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 14px;
+}
+
+.project-health-rule-manager-header p,
+.project-health-quality-modal-intro {
+    margin: 0;
+    color: var(--color-text-muted, #94a3b8);
+    font-size: .86rem;
+}
+
+.project-health-rule-manager-grid {
+    min-height: min(580px, 66vh);
+    overflow: hidden;
+    border: 1px solid var(--color-border, #334155);
+    border-radius: 10px;
+}
+
+.project-health-quality-modal-intro {
+    margin-bottom: 14px;
+}
+
+.project-health-quality-modal .code-analyzer-dashboard {
+    min-height: 560px;
+}
+
+@media (max-width: 820px) {
+    .project-health-header,
+    .project-health-card-header,
+    .project-health-rule-manager-header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .project-health-fix-all {
+        width: 100%;
+    }
+
+    .project-health-card-actions {
+        width: 100%;
+        flex-wrap: wrap;
+    }
+
+    .project-health-card-actions > .btn {
+        flex: 1 1 160px;
+    }
+
+    .project-health-rules-summary {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .project-health-inventory {
+        grid-column: 1 / -1;
+    }
+
+    .project-health-inventory > span {
+        flex: 1;
+    }
+
+    .project-health-rule-manager-grid {
+        min-height: 0;
+    }
+}
+
+@media (max-width: 600px) {
+    .project-health-page {
+        padding-top: 14px;
+    }
+
+    .project-health-guard {
+        grid-template-columns: auto minmax(0, 1fr) auto;
+    }
+
+    .project-health-guard .hook-health-badge {
+        grid-column: 2;
+        justify-self: start;
+    }
+
+    .project-health-guard-remove {
+        grid-column: 2;
+        justify-self: start;
+    }
+
+    .project-health-guard .rules-git-toggle {
+        grid-column: 3;
+        grid-row: 1 / span 2;
+    }
+
+    .project-health-card-header {
+        padding: 16px 16px 12px;
+    }
+
+    .project-health-rules-summary,
+    .project-health-quality-placeholder {
+        margin-inline: 16px;
+    }
+
+    .project-health-rules-summary {
+        grid-template-columns: 1fr;
+    }
+
+    .project-health-status-icon {
+        width: 42px;
+        height: 42px;
+    }
+
+    .project-health-inventory {
+        grid-column: auto;
+        width: 100%;
+    }
+
+    .project-health-card-toolbar {
+        align-items: stretch;
+        flex-direction: column;
+        padding-inline: 16px;
+    }
+
+    .project-health-check-actions {
+        justify-content: space-between;
+    }
+
+    .project-health-details {
+        padding-inline: 16px;
+    }
+
+    .project-health-quality .code-analyzer-brief-host {
+        padding-inline: 16px;
+    }
+
+    .project-health-quality .code-analyzer-brief {
+        grid-template-columns: 1fr;
+    }
+
+    .project-health-quality .code-analyzer-brief-open {
+        min-height: 48px;
+        border-top: 1px solid var(--color-border, #334155);
+        border-left: 0;
+    }
+
+    .project-health-scan-transcript {
+        margin-inline: 16px;
+    }
 }

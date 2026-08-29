@@ -5,7 +5,7 @@
 // `echo VIBERAILS_FAKE_CLI_READY:<llm>; sleep 600` running under the real PTY+WS+xterm path.
 //
 // What we cover here:
-//   1. Tab creation via the preserved Code quality page terminal → tab item + xterm output appear
+//   1. Tab creation via the dedicated Terminals page → tab item + xterm output appear
 //   2. Tab creation via the in-strip add button → second tab appears, two coexist
 //   3. Multi-tab isolation → output from tab A doesn't leak into tab B
 //   4. Tab close → enters pending-close state; kill-X in undo dropdown commits the DELETE
@@ -16,9 +16,9 @@ const { test, expect, selectors } = require('./fixtures');
 const FAKE_MARKER = /VIBERAILS_FAKE_CLI_READY/;
 
 async function navigateToRules(page) {
-    // The terminal dock lives on the Code quality page (the app's home view).
+    // Terminals own their own workspace; Project health intentionally has no xterm dock.
     await page.goto('/');
-    await page.getByRole('button', { name: 'CODE QUALITY' }).click();
+    await expect(page.locator('.view[data-view="terminal-focus"]')).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('#terminal-header-select')).toBeAttached({ timeout: 15_000 });
     await expect(page.locator('#terminal-start-btn')).toBeVisible({ timeout: 15_000 });
     // The controls render before the manager finishes restoring/creating its

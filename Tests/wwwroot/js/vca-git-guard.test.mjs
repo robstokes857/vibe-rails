@@ -17,6 +17,7 @@ const {
 const {
     RuleController,
     buildCodeAnalyzerSummary,
+    buildProjectHealthFixPrompt,
     buildVcaExplanationViewModel,
     normalizeHookStatus
 } = await import(pathToFileURL(controllerModule).href);
@@ -123,9 +124,25 @@ test('no-repository state disables all hook mutations', () => {
     assert.equal(model.preCommit.label, 'Unavailable');
 });
 
-test('Rules header includes a direct remove action for a broken Git Guard', async () => {
+test('Project health renders zero-valued rule inventory counts', () => {
+    const nodes = new Map([
+        ['[data-rule-file-count]', { textContent: 'stale' }],
+        ['[data-rule-count]', { textContent: 'stale' }],
+        ['[data-stop-rule-count]', { textContent: 'stale' }]
+    ]);
+    const controller = new RuleController({ data: { agents: [] } });
+    controller.viewRoot = { querySelector: selector => nodes.get(selector) || null };
+
+    controller.renderRuleInventorySummary();
+
+    assert.equal(nodes.get('[data-rule-file-count]').textContent, 0);
+    assert.equal(nodes.get('[data-rule-count]').textContent, 0);
+    assert.equal(nodes.get('[data-stop-rule-count]').textContent, 0);
+});
+
+test('Project health includes a direct remove action for a broken Git Guard', async () => {
     const html = await readFile('VibeRails/wwwroot/index.html', 'utf8');
-    const settingStart = html.indexOf('<section class="rules-git-setting"');
+    const settingStart = html.indexOf('<section class="project-health-guard"');
     const settingEnd = html.indexOf('</section>', settingStart);
     const setting = html.slice(settingStart, settingEnd);
 
@@ -298,43 +315,86 @@ test('VCA action queue puts blockers before acknowledgments and warnings', () =>
     assert.deepEqual(model.findings.map(finding => finding.rule), ['Blocker', 'Acknowledge', 'Warning']);
 });
 
-test('sending VCA findings pastes a reviewable prompt without submitting it', () => {
-    const pasted = [];
-    let focused = 0;
-    const terminal = {
-        scrollIntoView() {},
-        querySelector() { return null; }
-    };
+test('Fix rules opens a fresh managed terminal with an auto-submitted VCA brief', () => {
+    const launches = [];
     const controller = new RuleController({
         terminalController: {
-            manager: {
-                getActiveTab: () => ({
-                    instance: {
-                        injectText(text) {
-                            pasted.push(text);
-                            return true;
-                        },
-                        focusInput() { focused += 1; }
-                    }
-                })
-            }
+            launchInFocus(options) { launches.push(options); }
         },
-        showToast() {}
+        data: { configs: { rootPath: 'C:\\source\\project' } }
     });
-    controller.viewRoot = {
-        querySelector(selector) {
-            return selector === '[data-terminal-section]' ? terminal : null;
-        },
-        closest() { return null; }
-    };
     controller.lastVcaFixBrief = 'VCA VALIDATION: Commit blocked\n1. [STOP] Add tests';
 
     controller.openFixTerminal();
 
-    assert.equal(pasted.length, 1);
-    assert.match(pasted[0], /Fix the following VCA validation findings/);
-    assert.match(pasted[0], /Add tests/);
-    assert.equal(focused, 1);
+    assert.equal(launches.length, 1);
+    assert.equal(launches[0].cli, 'claude');
+    assert.equal(launches[0].forceNewTab, true);
+    assert.equal(launches[0].workingDirectory, 'C:\\source\\project');
+    assert.match(launches[0].initialPrompt, /RULES/);
+    assert.match(launches[0].initialPrompt, /Add tests/);
+    assert.match(launches[0].initialPrompt, /Do not weaken, delete, or bypass a rule/i);
+});
+
+test('Project health uses the first enabled managed LLM from the shared picker order', () => {
+    const launches = [];
+    const controller = new RuleController({
+        llmPickerController: {
+            getEnabledItems(context) {
+                assert.equal(context, 'multi-run');
+                return [{ cli: 'codex', key: 'base:codex' }, { cli: 'claude', key: 'base:claude' }];
+            }
+        },
+        terminalController: { launchInFocus(options) { launches.push(options); } },
+        data: { configs: { rootPath: 'C:\\source\\project' } },
+        showToast() {}
+    });
+
+    assert.equal(controller.launchProjectHealthFix('quality'), true);
+    assert.equal(launches[0].cli, 'codex');
+});
+
+test('Project health does not launch an agent outside a Git repository', () => {
+    const launches = [];
+    const toasts = [];
+    const controller = new RuleController({
+        terminalController: { launchInFocus(options) { launches.push(options); } },
+        data: { configs: {} },
+        showToast(...args) { toasts.push(args); }
+    });
+    controller.hookStatus = { inGitRepo: false };
+
+    assert.equal(controller.launchProjectHealthFix('all'), false);
+    assert.equal(launches.length, 0);
+    assert.match(toasts[0][1], /Open a local Git repository/i);
+});
+
+test('project-health prompts stay useful when one or both scans have no cached result', () => {
+    const quality = buildProjectHealthFixPrompt('quality');
+    assert.match(quality, /CODE QUALITY/);
+    assert.match(quality, /No saved Code quality scan is available/);
+    assert.doesNotMatch(quality, /\nRULES\n/);
+
+    const both = buildProjectHealthFixPrompt('all', {
+        vcaFixBrief: 'VCA VALIDATION: 1 STOP finding'
+    });
+    assert.match(both, /\nRULES\n/);
+    assert.match(both, /VCA VALIDATION: 1 STOP finding/);
+    assert.match(both, /\nCODE QUALITY\n/);
+    assert.match(both, /validate_vca checks the staged snapshot/);
+
+    const withScan = buildProjectHealthFixPrompt('quality', {
+        codeAnalyzerResponse: {
+            success: true,
+            healthScore: 64,
+            rating: 'NeedsWork',
+            analyzedFileCount: 1,
+            output: 'Top issue: cyclomatic complexity in src/Widget.cs',
+            report: { score: 36, rating: 'NeedsWork', files: [], overview: [], scorecard: [] }
+        }
+    });
+    assert.match(withScan, /grade D, health 64\/100/);
+    assert.match(withScan, /Top issue: cyclomatic complexity in src\/Widget\.cs/);
 });
 
 test('VCA COMMIT and WARN findings clearly distinguish acknowledgement from advice', () => {

@@ -47,6 +47,15 @@ function cleanString(value) {
     return trimmed.length > 0 ? trimmed : null;
 }
 
+// A caller can prefer a fresh tab without making a launch impossible at the
+// server-enforced cap. An active blank tab has no session or user work to
+// preserve, so it is the safe fallback when another tab cannot be created.
+export function shouldCreateFreshTab(options, activeTab, tabCount, maxTabs) {
+    if (options?.forceNewTab !== true) return false;
+    const activeTabIsBlank = Boolean(activeTab && !activeTab.state?.hasActiveSession);
+    return !(tabCount >= maxTabs && activeTabIsBlank);
+}
+
 function shorten(text, max = 26) {
     if (!text) return '';
     if (text.length <= max) return text;
@@ -1245,8 +1254,13 @@ class TerminalManager {
         }
 
         if (!tab) {
-            const forceNew = options?.forceNewTab === true;
-            tab = forceNew ? null : this.getActiveTab();
+            const activeTab = this.getActiveTab();
+            const createFreshTab = shouldCreateFreshTab(
+                options,
+                activeTab,
+                this.tabOrder.length,
+                this.maxTabs);
+            tab = createFreshTab ? null : activeTab;
             if (!tab || tab.state.hasActiveSession) {
                 tab = await this.createAndActivateTab({
                     selection,
@@ -2936,6 +2950,16 @@ export class TerminalController {
         return await manager.startWithOptions(options);
     }
 
+    // Navigate first, then launch after the dedicated terminal surface has mounted.
+    // `launchOptions` is consumed once by loadTerminalFocusView so a later remount of
+    // the same navigation entry cannot accidentally submit the prompt again.
+    launchInFocus(options = {}, navigationData = {}) {
+        return this.app.navigate('terminal-focus', {
+            ...navigationData,
+            launchOptions: { ...options }
+        });
+    }
+
     async focusTerminalTab(container, tabId) {
         const manager = await this.ensureManager(container);
         if (!manager) {
@@ -2945,6 +2969,12 @@ export class TerminalController {
     }
 
     async loadTerminalFocusView(data = {}) {
+        const launchOptions = data?.launchOptions && typeof data.launchOptions === 'object'
+            ? { ...data.launchOptions }
+            : null;
+        if (data && Object.prototype.hasOwnProperty.call(data, 'launchOptions')) {
+            delete data.launchOptions;
+        }
         const content = document.getElementById('app-content');
         if (!content) return;
 
@@ -2993,6 +3023,10 @@ export class TerminalController {
         terminalContent.inert = false;
         terminalContent.removeAttribute('aria-busy');
         this._initChatHistorySidebar(root);
+
+        if (launchOptions && this.app.currentView === 'terminal-focus' && terminalContent.isConnected) {
+            await this.startTerminalWithOptions(launchOptions, terminalContent);
+        }
     }
 
     _initChatHistorySidebar(root) {
