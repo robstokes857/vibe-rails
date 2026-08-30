@@ -1,6 +1,6 @@
 # truncate-long was cutting holes in source files — findings and fix
 
-**Status: IMPLEMENTED, tests green (2196/2196), live soak owed.** Rob decides what ships.
+**Status: IMPLEMENTED, tests green (2204 passed / 8 skipped), live soak owed.** Rob decides what ships.
 
 **Started from a different question.** The dashboard's piggy-bank popover read *"This session:
 2.2M tokens saved"* and the worry was the opposite of a bug report: if we really removed two
@@ -114,7 +114,8 @@ pins the divergence as intended behaviour rather than an inconsistency to clean 
 
 1. **`CommandShapes.ReadsFileContents(string?)`** — a flat lexical token sweep. No shell parse, no
    command-position tracking, no flag inspection. Matches whole tokens only, so `/var/catalog/x`
-   never reads as `cat`. It has to work across the three command languages the library actually
+   never reads as `cat`; executable basenames are normalized, so `/usr/bin/cat`, `./tools/bat`, and
+   `cat.exe` still count. It has to work across the three command languages the library actually
    sees, all of which Classify declines: POSIX shell, PowerShell, and the JavaScript that Codex
    code-mode wraps around a real command.
    - file dumps: `cat bat nl head tail more less type Get-Content gc sed`
@@ -127,12 +128,20 @@ pins the divergence as intended behaviour rather than an inconsistency to clean 
    two-argument construction keep the original budget.
 
 3. **`OutputCondenser`** — `TruncateInPlace` takes `keepHead`/`keepTail` instead of reading the
-   constants. File reads get **1200/200** instead of 150/50.
+   constants. File reads up to **256 KiB** get **1200/200** instead of 150/50; larger payloads fall
+   back to 150/50 so a moderately-lined generated/minified file cannot bypass the guard with huge
+   individual lines.
 
 4. **`CompressionPipeline.Run`** — takes `bool readsFileContents` as a **required** parameter.
    Required, not optional: it is the only thing standing between `truncate-long` and the middle of
    a source file, and a new call site that silently defaulted it would reopen the hole with no
    compile error.
+
+5. **Responses native shell correlation** — `shell_call.action.commands` is paired to
+   `shell_call_output` by `call_id`. When a client sends only the output plus
+   `previous_response_id`, the command is unavailable and the adapter conservatively chooses the
+   wider file-read budget: unnecessary preservation costs savings, while the opposite answer can
+   cut source.
 
 ### Why widen the budget instead of declining outright
 
@@ -142,30 +151,54 @@ reads get a wider budget, not an exemption.
 
 **1200/200 is calibrated, not chosen.** Across ~8,000 proxied requests the file-read payloads being
 cut ran 194–967 elided lines, i.e. 394–1167 lines total. A 1400-line budget passes every observed
-case through verbatim and still caps beyond that. Re-derive from captures before changing it (§6).
+case through verbatim by line count and still caps beyond that. The independent 256 KiB selector
+ceiling handles the other catastrophic shape: fewer than 1410 lines carrying an enormous amount of
+text. Re-derive both limits from captures before changing them (§6).
 
 ### Invariants
 
-All three still hold, and the idempotency argument is budget-*independent*: output is exactly
-`keepHead + 1 + keepTail` lines, so a re-pass at the same budget computes a 1-line middle and
-declines. What the proof needs is per-payload budget **stability**, and that holds because the
-budget is a pure function of the producing command — which the CLI re-sends verbatim every turn,
-the same property prompt caching already requires of every other stage. The stage's own on/off flag
-is untouched, so the trace still reports exactly what the plan enabled (a declining file read reads
-as `NoChange`, never as absent).
+All three still hold. Output is exactly `keepHead + 1 + keepTail` lines, so a re-pass at the same
+budget computes a 1-line middle and declines. If the 256 KiB ceiling selected 150/50 on the first
+pass, its 201-line output is also below the widened budget's line threshold, so even a selector
+change after shrinking cannot trigger a second truncation.
+
+That last sentence is the one worth checking by hand if you touch the ceiling, because the ceiling
+made the budget a function of *payload size* as well as command — so the selector really can flip
+between passes, which the original design avoided by construction. It was verified empirically
+(2026-08-30) over 108 combinations of line count × line width × dedupe, spanning both sides of the
+ceiling and specifically the flip case (first pass over the ceiling at 150/50, output landing under
+it so the second pass selects 1200/200): deterministic, idempotent, never-grows, and preserving
+never removed more than the standard budget. Re-run that sweep after any change to the ceiling or
+either budget — a drifting transform is a prompt-cache bug that is nearly undiagnosable from the
+symptom. The stage's own on/off flag is untouched,
+so the trace still reports exactly what the plan enabled (a declining file read reads as `NoChange`,
+never as absent).
 
 ## 5. Result
 
-Replayed against **261 unique elided outputs** from real captured traffic (2026-08-26 → 08-29,
-4,056,231 chars removed), using the real C# predicate:
+The original detector was replayed against **261 unique elided outputs** from real captured traffic
+(2026-08-26 → 08-29, 4,056,231 chars removed):
 
 | | outputs | chars |
 | --- | --- | --- |
 | now preserved | **205 / 261 (79%)** | **2,960,996 (73% of all removal)** |
 | still truncated | 56 | 1,095,235 |
 
-Tests: `Tests/TokenSaver/FileReadTruncationTests.cs` (48 cases — detector, budget arithmetic,
-restated invariants, pipeline wiring), full suite **2196 passed / 8 skipped / 0 failed**.
+**Re-run after those changes landed (2026-08-30), driving the current predicate:**
+
+- Same 261-row sample: **unchanged at 205/261 (79%), 2,960,996 chars** — executable-basename
+  normalization cost nothing and gained nothing on this sample, so its value is the shapes it
+  future-proofs (`/usr/bin/cat`, `cat.exe`) rather than anything observed here.
+- Widened 288-row sample (traffic accrued since): **217/288 (75%), 3,153,691 chars (71% of
+  removal)**. The percentage moved because the denominator grew, not because coverage regressed.
+- **The 256 KiB ceiling blocked 0 of 217** detected payloads. Every observed file read is far under
+  it (394–1167 lines at ~56 chars/line ≈ 65 KB), which is the right shape for that guard: pure
+  catastrophic-payload insurance, no cost to real traffic. It is *not* load-bearing for any measured
+  case, so do not tune it to chase savings — it exists for the minified-file shape nobody has hit yet.
+
+Tests: `Tests/TokenSaver/FileReadTruncationTests.cs` (53 cases — detector, budget arithmetic,
+restated invariants, pipeline wiring), plus native Responses adapter coverage in
+`CodexResponsesRewriterTests`; full suite **2204 passed / 8 skipped / 0 failed**.
 
 ## 6. Known gaps — deliberate, measured, not fixed here
 
@@ -187,9 +220,10 @@ worth re-deriving rather than maintaining. The recipe:
 1. `~/.vibe_rails/proxy_exchanges.db` (`ProxyExchanges`) holds `RequestBefore`/`RequestAfter` for
    every proxied request. Open it **read-only** (`file:…?mode=ro`) — a dev instance is usually
    holding it. Never `SELECT` the body columns without a `CreatedUTC` bound; the file is ~41 GB.
-2. Walk both bodies for tool outputs. Two shapes: Anthropic `messages[].content[]` with
-   `tool_use`/`tool_result`, and Responses `input[]` with `custom_tool_call` /
-   `custom_tool_call_output` (Codex `output` is a list of `{type,text}` parts).
+2. Walk both bodies for tool outputs. Anthropic uses `messages[].content[]` with
+   `tool_use`/`tool_result`. Responses uses `input[]` with `custom_tool_call` /
+   `custom_tool_call_output` (Codex `output` is a list of `{type,text}` parts) or native
+   `shell_call` / `shell_call_output` (`action.commands` plus `{stdout,stderr}` output chunks).
 3. **De-duplicate by hash of the raw text** before totalling anything, or you re-derive the
    per-turn inflation instead of measuring content.
 4. Match `[... N lines elided ...]` in the rewritten text to find lossy elisions, and pair each

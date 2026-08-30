@@ -1596,9 +1596,41 @@ export class EnvironmentController {
         return settings;
     }
 
+    normalizeGrokEffort(effort) {
+        return (effort || '').trim().toLowerCase();
+    }
+
+    renderGrokEffortOptions(selectedEffort) {
+        const selected = this.normalizeGrokEffort(selectedEffort);
+        // Canonical Grok levels from `grok --help` / `--reasoning-effort` (alias `--effort`).
+        // Per-model menu ids (e.g. `deep`) are not pinned — they survive as `(custom)`.
+        const options = [
+            ['', 'Default'],
+            ['none', 'None'],
+            ['minimal', 'Minimal'],
+            ['low', 'Low'],
+            ['medium', 'Medium'],
+            ['high', 'High'],
+            ['xhigh', 'XHigh'],
+            ['max', 'Max']
+        ];
+        const known = new Set(options.map(([value]) => value));
+        const rendered = options.map(([value, label]) =>
+            `<option value="${this.app.escapeHtml(value)}" ${selected === value ? 'selected' : ''}>${this.app.escapeHtml(label)}</option>`
+        );
+
+        if (selected && !known.has(selected)) {
+            rendered.push(`<option value="${this.app.escapeHtml(selected)}" selected>${this.app.escapeHtml(selected)} (custom)</option>`);
+        }
+
+        return rendered.join('');
+    }
+
     buildGrokCustomArgs(settings) {
         const s = settings || {};
         const args = ['-m', 'grok-4.6'];
+
+        this.pushStringArg(args, '--effort', this.normalizeGrokEffort(s.effort));
 
         if (s.yoloMode) {
             args.push('--yolo');
@@ -1630,6 +1662,22 @@ export class EnvironmentController {
             }
 
             if (arg.startsWith('-m=') || arg.startsWith('--model=')) {
+                continue;
+            }
+
+            if (arg.startsWith('--effort=')) {
+                settings.effort = this.normalizeGrokEffort(arg.slice('--effort='.length));
+                continue;
+            }
+
+            if (arg.startsWith('--reasoning-effort=')) {
+                settings.effort = this.normalizeGrokEffort(arg.slice('--reasoning-effort='.length));
+                continue;
+            }
+
+            if ((arg === '--effort' || arg === '--reasoning-effort') && next) {
+                settings.effort = this.normalizeGrokEffort(next);
+                i++;
                 continue;
             }
 
@@ -1850,6 +1898,7 @@ export class EnvironmentController {
         if (this.isNativeGrokCli(cliLower)) {
             return {
                 initialMessage,
+                effort: this.normalizeGrokEffort(document.getElementById('grok-effort').value),
                 yoloMode: document.getElementById('grok-yolo').checked,
                 additionalArgs: document.getElementById('grok-additional-args').value
             };
@@ -2010,6 +2059,7 @@ export class EnvironmentController {
 
         if (this.isNativeGrokCli(cliLower)) {
             const additionalArgs = this.app.escapeHtml(s.additionalArgs || '');
+            const effort = this.normalizeGrokEffort(s.effort);
             return `
                 <hr class="my-4">
                 <h6 class="text-muted mb-3">Grok 4.6 CLI Settings</h6>
@@ -2017,6 +2067,13 @@ export class EnvironmentController {
                     <label class="form-label">Model</label>
                     <input type="text" class="form-control" id="grok-model" value="grok-4.6" disabled>
                     <small class="form-text text-muted">Pinned to <code>grok-4.6</code> — launched as <code>-m grok-4.6</code>. OpenCode still offers <code>xai/grok-4.6</code> in its own model list.</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Effort</label>
+                    <select class="form-select" id="grok-effort">
+                        ${this.renderGrokEffortOptions(effort)}
+                    </select>
+                    <small class="form-text text-muted">Passed as <code>--effort</code> (alias of <code>--reasoning-effort</code>). This is the TUI thinking level (<code>/effort</code>); leave blank for Grok's default.</small>
                 </div>
                 <div class="mb-3">
                     <div class="form-check form-switch">

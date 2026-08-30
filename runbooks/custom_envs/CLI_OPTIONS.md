@@ -26,6 +26,7 @@ and launch behavior before changing generated arguments:
 - OpenCode CLI: https://opencode.ai/docs/cli/
 - OpenCode config: https://opencode.ai/docs/config/
 - OpenCode models: https://opencode.ai/docs/models/
+- Grok (native Build CLI): run `grok --help` (authoritative flags; `--reasoning-effort` / `--effort`)
 
 Status re-checked on August 23, 2026 against the upstream references above plus
 live CLIs on this host: Claude Code 2.1.241, Codex CLI 0.148.0 (`codex debug
@@ -467,6 +468,14 @@ UI-managed launch and prompt settings:
 
 - Initial Message: stored in `CustomPrompt`; sent as a trailing positional.
 - Model: **pinned to `grok-4.6`** — the model field is a read-only display, not a dropdown.
+- Effort: `--effort` (canonical flag `--reasoning-effort`; both are parsed on load). Values
+  `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Empty omits the flag so Grok's
+  default applies (config.toml `[models].default_reasoning_effort` or the TUI `/effort`
+  default — this is the thinking level shown in the Grok TUI). Launch-flag-only; VibeRails
+  does not write `config.toml`. Per-model menu aliases (e.g. `deep`) are not pinned — an
+  unknown saved value round-trips as a `(custom)` dropdown entry. Verified 2026-08-29 against
+  live `grok --help` and the Grok user-guide (`14-headless-mode.md`). There is no separate
+  `--thinking` flag.
 - YOLO Mode: `--yolo`.
 - Additional Arguments: preserved in `CustomArgs`.
 - Leftover OpenCode flags (`--model=xai/grok-4.6`, `--auto`, `--pure`, `--agent`) are rewritten
@@ -826,7 +835,8 @@ Grok 4.6 :
   lowercased `grok46` is NOT the executable). `--model=grok-4.6` is injected for base CLI
   launches; custom envs carry `-m grok-4.6` in `CustomArgs`.
 - Settings form is launch-flag-only (`isNativeGrokCli()`); the Model field is a read-only
-  display pinned to `grok-4.6`. YOLO is `--yolo`.
+  display pinned to `grok-4.6`. Effort is `--effort` (alias of `--reasoning-effort`; the TUI
+  thinking level). YOLO is `--yolo`.
 - Token Saver reuses `/llm/xai` on the main Kestrel host (gated by the OpenCode proxy
   flag). Auth is `XAI_API_KEY` / `grok login`. Do not set `GROK_HOME`. Do not reintroduce
   `GrokLoopbackBridge` or `/llm/grok`.

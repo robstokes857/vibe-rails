@@ -105,5 +105,7 @@ SELECT Trace FROM CompressionCaptures WHERE Id = '<GUID>';
   line holes in the middle of source, 71% of everything removed from Claude on 2026-08-28.
   New `CommandShapes.ReadsFileContents` (deliberately permissive — inverse safety polarity
   to `Classify`, read both doc comments before "harmonising" them) widens T's keep budget
-  from 150/50 to 1200/200 on those payloads. Full writeup, evidence and known gaps:
+  from 150/50 to 1200/200 on payloads up to 256 KiB; larger reads fall back to 150/50.
+  Explicit executable paths and native Responses `shell_call.action.commands` are covered, with
+  output-only native shell calls failing toward preservation. Full writeup, evidence and known gaps:
   [`truncation_file_reads.md`](truncation_file_reads.md).

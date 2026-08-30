@@ -1,3 +1,7 @@
+Himan made note:
+
+Hey next time we go through the optimization process I want to look for re-runs. When the LLM had to call again to get something we trunked. 
+
 # TokenSaver
 
 TokenSaver is the library that sits between a coding CLI (Claude Code, Codex,
@@ -110,7 +114,7 @@ payload under the truncation threshold).
 | 9 | `find-group` | Reshaping | on | Groups a flat path list under one header per directory. |
 | 10 | `elide-passed-tests` | Lossy | on | Runs of individual passing-test lines from a recognised test runner → one `[... N passed ...]` marker. Failures/errors/skips/logs/summaries kept verbatim, in place. |
 | 11 | `dedupe-lines` | Lossy | on | 3+ identical lines → one, tagged `[xN]`. |
-| 12 | `truncate-long` | Lossy | on | Keeps first 150 + last 50 lines, elides the middle. Widens to 1200/200 when the producing command reads file contents — see [the side door](#the-side-door-scope-read-is-off-cat-is-not). |
+| 12 | `truncate-long` | Lossy | on | Keeps first 150 + last 50 lines, elides the middle. Widens to 1200/200 when the producing command reads file contents and the payload is at most 256 KiB — see [the side door](#the-side-door-scope-read-is-off-cat-is-not). |
 
 **Why are `cr-collapse` and `ansi-strip` off by default?** They are the two largest
 lossless wins available, and they are off by deliberate product decision (2026-07-15,
@@ -168,8 +172,11 @@ because `cat` / `sed -n` / `Get-Content` / `rg -n '^'` through a shell tool is a
 of everything the saver removed from Claude's context on 2026-08-28, and the single most common way
 an agent loads source into context.
 
-`CommandShapes.ReadsFileContents` now recognises those commands and widens `truncate-long`'s keep
-budget to 1200/200 for their output. Two things about it are easy to get wrong:
+`CommandShapes.ReadsFileContents` now recognises those commands (including explicit executable
+paths such as `/usr/bin/cat`) and widens `truncate-long`'s keep budget to 1200/200 for their output.
+Responses `shell_call.action.commands` is correlated with `shell_call_output`; an output-only native
+shell item conservatively gets the wider budget because its command may live behind
+`previous_response_id`. Three things about this are easy to get wrong:
 
 - **It is deliberately permissive, and that is the opposite of `CommandShapes.Classify`.** Classify
   authorises a *rewrite*, so a wrong answer mangles output and every rule fails toward `None` —
@@ -179,6 +186,8 @@ budget to 1200/200 for their output. Two things about it are easy to get wrong:
   "harden" it to match Classify — that is precisely how the hole existed.
 - **It widens the budget, it does not disable the stage.** `cat` of a 50k-line generated file still
   has to be capped, or the stage stops protecting the context window it exists to protect.
+- **The wide budget has a 256 KiB selector ceiling.** Larger file-read payloads fall back to 150/50,
+  so a 1000-line generated file with enormous lines cannot bypass the catastrophic-payload guard.
 
 Full evidence, calibration and the known gaps it does *not* close (`git diff`/`git show`, genuine
 grep searches): [`runbooks/token_saver/truncation_file_reads.md`](../runbooks/token_saver/truncation_file_reads.md).

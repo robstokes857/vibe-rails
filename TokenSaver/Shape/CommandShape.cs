@@ -236,8 +236,10 @@ public static class CommandShapes
     /// into three harmless tokens costs nothing) but because Codex embeds a shell command inside a
     /// JS string literal, so the pattern in <c>rg -n \"^\" app.jsx</c> only becomes the bare token
     /// <c>^</c> once the escape is treated as punctuation.
-    /// <c>/</c>, <c>.</c> and <c>-</c> are NOT delimiters, so a token matches only when it IS the
-    /// bare word — <c>/var/catalog/x</c> never reads as <c>cat</c>.
+    /// <c>/</c>, <c>.</c> and <c>-</c> are NOT delimiters. Instead
+    /// <see cref="ExecutableName"/> normalizes the final path segment and common Windows executable
+    /// suffixes before command lookup: <c>/usr/bin/cat</c> and <c>cat.exe</c> match, while
+    /// <c>/var/catalog/x</c> still normalizes to the harmless token <c>x</c>.
     /// </summary>
     private static readonly SearchValues<char> FileDumpTokenDelimiters =
         SearchValues.Create(" \t\n\r;|&<>()[]{}=,:\"'`$\\");
@@ -287,9 +289,10 @@ public static class CommandShapes
 
             if (!token.IsEmpty)
             {
-                if (FileDumpLookup.Contains(token))
+                var executable = ExecutableName(token);
+                if (FileDumpLookup.Contains(executable))
                     return true;
-                sawGrep |= GrepLookup.Contains(token);
+                sawGrep |= GrepLookup.Contains(executable);
                 sawMatchEverything |= MatchEverythingLookup.Contains(token);
                 if (sawGrep && sawMatchEverything)
                     return true;
@@ -302,6 +305,29 @@ public static class CommandShapes
 
         return false;
     }
+
+    /// <summary>
+    /// Returns the executable-shaped part of a lexical token. POSIX paths remain one token because
+    /// slash is not a delimiter; Windows backslashes are delimiters, so their final segment reaches
+    /// this method directly. Stripping only executable suffixes avoids substring matching — for
+    /// example, <c>catalog.exe</c> still does not become <c>cat</c>.
+    /// </summary>
+    private static ReadOnlySpan<char> ExecutableName(ReadOnlySpan<char> token)
+    {
+        var slash = token.LastIndexOf('/');
+        if (slash >= 0)
+            token = token[(slash + 1)..];
+
+        foreach (var suffix in ExecutableSuffixes)
+        {
+            if (token.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                return token[..^suffix.Length];
+        }
+
+        return token;
+    }
+
+    private static readonly string[] ExecutableSuffixes = [".exe", ".com", ".cmd", ".bat"];
 
     /// <summary>
     /// Classifies <paramref name="command"/>. Returns <see cref="CommandShape.None"/> for null,

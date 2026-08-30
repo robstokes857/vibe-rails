@@ -37,6 +37,14 @@ public class FileReadTruncationTests
         return builder.ToString();
     }
 
+    private static string WideLineDump(int lines, int contentCharsPerLine)
+    {
+        var builder = new StringBuilder(lines * (contentCharsPerLine + 16));
+        for (var i = 0; i < lines; i++)
+            builder.Append(i).Append(' ').Append('x', contentCharsPerLine).Append('\n');
+        return builder.ToString();
+    }
+
     // ---------------------------------------------------------------------
     // The detector. Every "true" case below is a VERBATIM command from the
     // captures that exposed the bug — do not tidy them into synthetic shapes.
@@ -61,9 +69,14 @@ public class FileReadTruncationTests
     [InlineData("cat README.md")]
     [InlineData("head -200 build/generated.ts")]
     [InlineData("tail -n 5000 src/main.rs")]
+    // Explicit executable paths and Windows suffixes are still commands, not harmless path tokens.
+    [InlineData("/usr/bin/cat src/main.rs")]
+    [InlineData("\"./tools/bat\" src/generated.ts")]
+    [InlineData("C:\\Tools\\cat.exe src\\main.cs")]
     // ripgrep-as-cat: `^` matches every line, so this is `cat -n` with extra steps. The single
     // largest remaining category before it was covered (989 KB across the sample window).
     [InlineData("rg -n '^' frontend/src/App.jsx")]
+    [InlineData("/usr/local/bin/rg -n '^' frontend/src/App.jsx")]
     // Verbatim from a capture: the shell command lives inside a JS string literal, so the pattern
     // arrives backslash-escaped rather than bare.
     [InlineData("tools.exec_command({cmd:\"rg -n \\\"^\\\" frontend/src/styles.css\"})")]
@@ -160,7 +173,27 @@ public class FileReadTruncationTests
     {
         var output = OutputCondenser.Condense(SourceDump(50_000), TruncatePreserving);
         Assert.Contains("lines elided ...]", output);
-        Assert.Equal(1401, output.TrimEnd('\n').Split('\n').Length); // 1200 + marker + 200
+        // Beyond the character ceiling, catastrophic reads fall back to the original 150/50
+        // budget instead of retaining an arbitrarily large 1400-line envelope.
+        Assert.Equal(201, output.TrimEnd('\n').Split('\n').Length);
+    }
+
+    /// <summary>
+    /// The wide budget is line-based, so without an independent character ceiling a 1000-line
+    /// generated file could carry hundreds of megabytes and never expose a ten-line middle. Once
+    /// the payload crosses the ceiling it must fall back to T's standard, bounded line budget.
+    /// </summary>
+    [Fact]
+    public void PreservingBudget_LargeModerateLineCount_FallsBackToStandardBudget()
+    {
+        var input = WideLineDump(1000, 400);
+        Assert.True(input.Length > OutputCondenser.VerbatimBudgetMaxChars);
+
+        var output = OutputCondenser.Condense(input, TruncatePreserving);
+
+        Assert.Equal(OutputCondenser.Condense(input, TruncateOnly), output);
+        Assert.Contains("[... 800 lines elided ...]", output);
+        Assert.Equal(201, output.TrimEnd('\n').Split('\n').Length);
     }
 
     // ---------------------------------------------------------------------
