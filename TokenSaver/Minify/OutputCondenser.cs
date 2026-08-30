@@ -11,7 +11,13 @@ namespace TokenSaver.Minify;
 ///   T. Head/tail truncation — a payload whose middle (after the first 150 and last 50 lines) is
 ///      both ≥10 lines and ≥4096 chars has that middle replaced by one
 ///      <c>[... N lines elided ...]</c> marker line. Runs after D, so lossless collapse gets first
-///      shot at shrinking the payload below the elision threshold.
+///      shot at shrinking the payload below the elision threshold. The 150/50 budget widens to
+///      1200/200 for file-read payloads up to 256 KiB
+///      (<see cref="CondenseOptions.PreserveVerbatimFileContents"/>): T cannot tell a 450-line
+///      source dump from 450 lines of build spew, and cutting the middle out of source the model is
+///      about to quote back is a correctness bug, not a lost saving. Larger payloads fall back to
+///      150/50 so generated/minified files cannot evade catastrophic-payload defence by staying
+///      below the widened line threshold.
 ///
 /// Both transforms INSERT marker text, so unlike the minifier the output is not a subsequence of
 /// the input — which is exactly why they are not <see cref="MinifyFlags"/> members (that would
@@ -25,8 +31,11 @@ namespace TokenSaver.Minify;
 ///     ineligible to start or join a run — every line a collapse emits ends in the marker shape, so
 ///     no second-pass run can form (naive run-collapse is NOT idempotent: two adjacent genuine
 ///     <c>"x [x3]"</c> lines followed by three <c>"x"</c> lines would re-collapse). T's is
-///     arithmetic: truncated output has exactly 150+1+50 lines, so a re-pass sees a 1-line middle
-///     and never fires. Genuine lines that happen to end in marker shape merely lose eligibility —
+///     arithmetic: truncated output has exactly keepHead+1+keepTail lines. A re-pass at the same
+///     budget sees a 1-line middle; if the first pass crossed the 256 KiB ceiling and used 150/50,
+///     its 201-line output is also below the widened budget's line threshold. Either way it cannot
+///     fire again.
+///     Genuine lines that happen to end in marker shape merely lose eligibility —
 ///     a savings loss, never a correctness loss.
 ///   • Never grows: D collapses only when strictly profitable; T removes ≥4096 chars to insert a
 ///     ~30-char line.
@@ -46,6 +55,32 @@ public static class OutputCondenser
 
     internal const int KeepHeadLines = 150;
     internal const int KeepTailLines = 50;
+
+    /// <summary>
+    /// T's budget when the producing command reads file contents
+    /// (<see cref="CondenseOptions.PreserveVerbatimFileContents"/>). Wider, not infinite: T's real
+    /// job is catastrophic-payload defence, and <c>cat</c> of a 50k-line generated file still has to
+    /// be capped or it blows the context window T exists to protect.
+    ///
+    /// 1200/200 is calibrated from measured traffic, not taste. Across 8 000 proxied requests the
+    /// file-read payloads that were being cut ran 194–967 elided lines, i.e. 394–1167 lines total;
+    /// a 1400-line budget passes every one of them through verbatim by line count. The independent
+    /// <see cref="VerbatimBudgetMaxChars"/> ceiling below remains the final resource-safety bound.
+    /// Re-derive from captures before changing either — see
+    /// runbooks/token_saver/truncation_file_reads.md.
+    /// </summary>
+    internal const int VerbatimKeepHeadLines = 1200;
+    internal const int VerbatimKeepTailLines = 200;
+
+    /// <summary>
+    /// Maximum payload size that may use the widened file-read line budget. Above this ceiling T
+    /// falls back to its standard 150/50 budget, so a moderately-lined generated/minified file
+    /// cannot bypass catastrophic-payload defence merely because it has fewer than 1410 lines.
+    /// This is a selector ceiling rather than a promise that the final output is this many chars:
+    /// T preserves whole lines, and its standard path deliberately leaves very long individual
+    /// lines intact.
+    /// </summary>
+    internal const int VerbatimBudgetMaxChars = 256 * 1024;
 
     /// <summary>The middle must be at least this many lines AND this many chars to be elided —
     /// jointly, so a huge single-line payload (one JSON blob) is never cut.</summary>
@@ -128,7 +163,14 @@ public static class OutputCondenser
         }
 
         if (options.TruncateLongOutput)
-            length = TruncateInPlace(destination, length, ref pending);
+        {
+            var useVerbatimBudget = options.PreserveVerbatimFileContents
+                && length <= VerbatimBudgetMaxChars;
+            var (head, tail) = useVerbatimBudget
+                ? (VerbatimKeepHeadLines, VerbatimKeepTailLines)
+                : (KeepHeadLines, KeepTailLines);
+            length = TruncateInPlace(destination, length, head, tail, ref pending);
+        }
 
         // Every applied action strictly shrinks, byte-identical otherwise — so length alone
         // decides "changed" (same contract as the minifier).
@@ -299,12 +341,20 @@ public static class OutputCondenser
     /// In-place is safe: the marker end stays short of the tail start (middle ≥4096 chars, marker
     /// ~30), and the tail copy moves chars strictly leftward (memmove semantics). Returns the new
     /// length (or <paramref name="length"/> unchanged).
+    ///
+    /// <paramref name="keepHead"/>/<paramref name="keepTail"/> are the budget, not constants, so a
+    /// file-read payload can keep more (see <see cref="VerbatimKeepHeadLines"/>). The idempotency
+    /// argument stays intact: output is exactly <c>keepHead + 1 + keepTail</c> lines, so a re-pass at
+    /// the same budget computes a 1-line middle and declines. If the 256 KiB selector ceiling chose
+    /// the standard budget first, its 201-line output is below the widened budget's line threshold
+    /// too, so a selector change after shrinking still cannot trigger a second truncation.
     /// </summary>
-    private static int TruncateInPlace(Span<char> destination, int length, ref CondenseStats stats)
+    private static int TruncateInPlace(
+        Span<char> destination, int length, int keepHead, int keepTail, ref CondenseStats stats)
     {
         var text = (ReadOnlySpan<char>)destination[..length];
 
-        // First scan: total \n count, plus the head boundary (position after the 150th \n).
+        // First scan: total \n count, plus the head boundary (position after the keepHead'th \n).
         var newlines = 0;
         var headEnd = -1;
         var pos = 0;
@@ -315,21 +365,21 @@ public static class OutputCondenser
                 break;
             pos += nl + 1;
             newlines++;
-            if (newlines == KeepHeadLines)
+            if (newlines == keepHead)
                 headEnd = pos;
         }
 
         // An unterminated tail segment is a line; a trailing \n does not start one.
         var totalLines = newlines + (text[^1] != '\n' ? 1 : 0);
-        var middleLines = totalLines - KeepHeadLines - KeepTailLines;
+        var middleLines = totalLines - keepHead - keepTail;
         if (headEnd < 0 || middleLines < MinElidedLines)
             return length;
 
-        // Second scan: the tail boundary — the start of line index (totalLines - KeepTailLines),
+        // Second scan: the tail boundary — the start of line index (totalLines - keepTail),
         // i.e. the position after that many \n's. Resumes from the head boundary.
         var tailStart = headEnd;
-        var seen = KeepHeadLines;
-        var target = totalLines - KeepTailLines;
+        var seen = keepHead;
+        var target = totalLines - keepTail;
         while (seen < target)
         {
             var nl = text[tailStart..].IndexOf('\n');

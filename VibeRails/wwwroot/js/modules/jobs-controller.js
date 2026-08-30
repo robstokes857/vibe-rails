@@ -1411,7 +1411,7 @@ export class JobController {
         const customArgs = environment.customArgs || '';
         const prompt = (environment.customPrompt || '').trim();
         const model = this.extractArg(customArgs, ['--model', '-m']) || '';
-        const effort = this.extractArg(customArgs, ['--effort']) || this.extractConfig(customArgs, 'model_reasoning_effort') || '';
+        const effort = this.extractArg(customArgs, ['--effort', '--reasoning-effort']) || this.extractConfig(customArgs, 'model_reasoning_effort') || '';
         const triggers = (job.triggers || []).map(({ kind, scheduleKind, intervalMinutes, localTime, daysOfWeekMask, timeZoneId }) =>
             ({ kind, scheduleKind, intervalMinutes, localTime, daysOfWeekMask, timeZoneId }));
 

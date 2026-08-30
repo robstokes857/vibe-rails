@@ -1855,3 +1855,12 @@ test('Escape closing the nav Launch flyout does not also wipe the open Automatio
     assert.equal(destroyCount, 1, 'with no flyout up, Escape closes the editor as before');
     assert.equal(escapeHandler, null);
 });
+
+test('recipe export reads Grok --effort and --reasoning-effort as effort', () => {
+    const controller = new JobController(createApp());
+    const flags = ['--effort', '--reasoning-effort'];
+
+    assert.equal(controller.extractArg('-m grok-4.6 --effort xhigh', flags), 'xhigh');
+    assert.equal(controller.extractArg('-m grok-4.6 --reasoning-effort high', flags), 'high');
+    assert.equal(controller.extractArg('--reasoning-effort=max', flags), 'max');
+});

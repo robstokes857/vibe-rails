@@ -40,6 +40,13 @@ A capture holds:
 Background: [`TokenSaver/README.md`](../../TokenSaver/README.md). Read it first if you
 have not — you cannot judge a stage without knowing its invariants.
 
+Worked example: [`truncation_file_reads.md`](truncation_file_reads.md) — the file-read
+truncation investigation (2026-08-29). Read it if you are judging a `truncate-long`
+capture, if you are about to trust the savings meter's headline number, or if you want a
+worked example of this loop end to end: a suspicion, a de-duplicated measurement over
+`proxy_exchanges.db`, a real hole, a fix, and a replay that scores it. §7 there is the
+recipe for re-running that measurement.
+
 ## 1. Fetching the capture
 
 
@@ -92,3 +99,13 @@ SELECT Trace FROM CompressionCaptures WHERE Id = '<GUID>';
   Ordering bonus: running before `truncate-long` keeps a big suite's failure
   section out of the truncated middle. Condenser stages renumbered 9-10 → 10-11.
   **2026-07-28** — I Robert the human cam in this file and didn't like most of it so I deleted most of it.
+- **2026-08-29** — `truncate-long` learned about file reads. `scope-read` is off because
+  rewriting file contents breaks the model's `old_string` matching, but `scope-shell` is on
+  and `cat`/`sed`/`Get-Content` through a shell tool is a file read — so T was cutting 250+
+  line holes in the middle of source, 71% of everything removed from Claude on 2026-08-28.
+  New `CommandShapes.ReadsFileContents` (deliberately permissive — inverse safety polarity
+  to `Classify`, read both doc comments before "harmonising" them) widens T's keep budget
+  from 150/50 to 1200/200 on payloads up to 256 KiB; larger reads fall back to 150/50.
+  Explicit executable paths and native Responses `shell_call.action.commands` are covered, with
+  output-only native shell calls failing toward preservation. Full writeup, evidence and known gaps:
+  [`truncation_file_reads.md`](truncation_file_reads.md).

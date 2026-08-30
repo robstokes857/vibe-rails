@@ -16,8 +16,9 @@ namespace TokenSaver.Minify;
 ///
 /// Both ordinary <c>function_call(_output)</c> and <c>custom_tool_call(_output)</c> pairs are
 /// supported, including array-form output content containing <c>input_text</c>. Provider-native
-/// <c>local_shell_call_output</c> and <c>shell_call_output</c> items are intrinsically shell output
-/// and do not need name correlation. Every other byte remains exactly as Codex serialized it.
+/// <c>local_shell_call_output</c> and <c>shell_call_output</c> items are intrinsically shell output;
+/// when their paired call is present, correlation also recovers <c>action.commands</c> for safe
+/// file-read budgeting. Every other byte remains exactly as Codex serialized it.
 /// </summary>
 public static class CodexResponsesRewriter
 {
@@ -82,8 +83,15 @@ public static class CodexResponsesRewriter
         var toolUses = new Dictionary<string, ToolUseInfo>(StringComparer.Ordinal);
         foreach (var item in items)
         {
-            if (item.CallId is not null && item.Name is not null && item.IsToolCall)
-                toolUses[item.CallId] = new ToolUseInfo(item.Name, item.Command);
+            if (item.CallId is null || !item.IsToolCall)
+                continue;
+
+            // Provider-native shell calls have no `name`; their type is the identity. Keep them in
+            // the same call-id map as function/custom tools so shell_call.action.commands reaches
+            // the paired shell_call_output instead of being discarded as unrelated metadata.
+            var name = item.Name ?? (item.IsIntrinsicShellCall ? "shell_command" : null);
+            if (name is not null)
+                toolUses[item.CallId] = new ToolUseInfo(name, item.Command);
         }
 
         var seen = 0;
@@ -98,15 +106,23 @@ public static class CodexResponsesRewriter
             if (item.Ranges.Count == 0)
                 continue;
 
-            if (item.IsIntrinsicShellOutput)
-            {
-                item.Name = "shell_command";
-                item.Command = null;
-            }
-            else if (item.CallId is not null && toolUses.TryGetValue(item.CallId, out var use))
+            if (item.CallId is not null && toolUses.TryGetValue(item.CallId, out var use))
             {
                 item.Name = use.Name;
                 item.Command = use.Command;
+                item.PreserveFileContentsWhenCommandUnknown =
+                    item.IsIntrinsicShellOutput && use.Command is null;
+            }
+            else if (item.IsIntrinsicShellOutput)
+            {
+                // A client may send only shell_call_output plus previous_response_id, leaving the
+                // producing shell_call server-side. We still know this is shell output but cannot
+                // prove whether it was a file read. The detector's safety polarity requires the
+                // conservative answer: a false positive only keeps more context, while false would
+                // reopen source-file truncation on this supported wire form.
+                item.Name = "shell_command";
+                item.Command = null;
+                item.PreserveFileContentsWhenCommandUnknown = true;
             }
             else
             {
@@ -176,6 +192,8 @@ public static class CodexResponsesRewriter
                             raw,
                             plan,
                             CommandShapes.Classify(item.Command),
+                            item.PreserveFileContentsWhenCommandUnknown
+                                || CommandShapes.ReadsFileContents(item.Command),
                             buffers,
                             out var changed,
                             ref candidateStats,
@@ -323,14 +341,20 @@ public static class CodexResponsesRewriter
         public string? Name;
         public string? CallId;
         public string? Command;
+        public bool PreserveFileContentsWhenCommandUnknown;
         public readonly List<(int Start, int End)> Ranges = [];
 
-        public bool IsToolCall => Type is "function_call" or "custom_tool_call";
+        public bool IsToolCall => Type is
+            "function_call" or
+            "custom_tool_call" or
+            "local_shell_call" or
+            "shell_call";
         public bool IsToolOutput => Type is
             "function_call_output" or
             "custom_tool_call_output" or
             "local_shell_call_output" or
             "shell_call_output";
+        public bool IsIntrinsicShellCall => Type is "local_shell_call" or "shell_call";
         public bool IsIntrinsicShellOutput => Type is "local_shell_call_output" or "shell_call_output";
     }
 
@@ -426,6 +450,14 @@ public static class CodexResponsesRewriter
                 else
                     reader.Skip();
             }
+            else if (reader.ValueTextEquals("action"u8))
+            {
+                reader.Read();
+                if (reader.TokenType == JsonTokenType.StartObject)
+                    item.Command = ReadShellCommandsFromAction(ref reader);
+                else
+                    reader.Skip();
+            }
             else if (reader.ValueTextEquals("output"u8))
             {
                 reader.Read();
@@ -460,6 +492,52 @@ public static class CodexResponsesRewriter
 
         item.Ranges.Sort(static (left, right) => left.Start.CompareTo(right.Start));
         return item;
+    }
+
+    /// <summary>
+    /// Reads the current Responses shell tool shape: <c>shell_call.action.commands</c>. Commands
+    /// are joined with newlines because the file-read detector deliberately scans compound command
+    /// text, while the stricter shape classifier will correctly decline the compound form.
+    /// </summary>
+    private static string? ReadShellCommandsFromAction(ref Utf8JsonReader reader)
+    {
+        List<string>? commands = null;
+        string? singleCommand = null;
+        while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
+        {
+            if (reader.TokenType != JsonTokenType.PropertyName)
+                continue;
+
+            if (!reader.ValueTextEquals("commands"u8))
+            {
+                reader.Skip();
+                continue;
+            }
+
+            reader.Read();
+            if (reader.TokenType == JsonTokenType.String)
+            {
+                singleCommand = reader.GetString();
+                continue;
+            }
+
+            if (reader.TokenType != JsonTokenType.StartArray)
+            {
+                reader.Skip();
+                continue;
+            }
+
+            commands = [];
+            while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
+            {
+                if (reader.TokenType == JsonTokenType.String)
+                    commands.Add(reader.GetString()!);
+                else
+                    reader.Skip();
+            }
+        }
+
+        return commands is { Count: > 0 } ? string.Join('\n', commands) : singleCommand;
     }
 
     private static string? ExtractCommand(string? arguments)

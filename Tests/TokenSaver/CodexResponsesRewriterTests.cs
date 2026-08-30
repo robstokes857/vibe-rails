@@ -312,6 +312,55 @@ public class CodexResponsesRewriterTests
     }
 
     [Fact]
+    public void Rewrite_NativeShellCall_CorrelatesFileReadCommandAndKeepsMiddle()
+    {
+        var source = LongUniqueOutput(454);
+        var body = NativeShellBody(source, includeCall: true, command: "/usr/bin/cat src/main.cs");
+        var plan = CompressionCatalog.Resolve(null);
+        var captures = new RecordingCaptureSink();
+
+        var (_, rewritten, _) = RewriteIncludingNoOp(body, plan: plan, captures: captures);
+        var output = ReadShellStdout(rewritten, outputItemIndex: 1);
+
+        Assert.DoesNotContain("lines elided ...]", output, StringComparison.Ordinal);
+        Assert.Contains("source-line-0227", output, StringComparison.Ordinal);
+        var capture = Assert.Single(captures.Captures, c => c.RawText == source);
+        Assert.Equal("/usr/bin/cat src/main.cs", capture.Command);
+        Assert.Contains(capture.Trace, trace =>
+            trace.StageId == CompressionCatalog.TruncateLong
+            && trace.Outcome == StageOutcome.NoChange);
+    }
+
+    [Fact]
+    public void Rewrite_NativeShellCall_NonFileCommandStillUsesStandardBudget()
+    {
+        var sourceShapedSpew = LongUniqueOutput(454);
+        var body = NativeShellBody(
+            sourceShapedSpew, includeCall: true, command: "dotnet test --no-restore");
+        var plan = CompressionCatalog.Resolve(null);
+
+        var (_, rewritten, _) = RewriteIncludingNoOp(body, plan: plan);
+        var output = ReadShellStdout(rewritten, outputItemIndex: 1);
+
+        Assert.Contains("lines elided ...]", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("source-line-0227", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Rewrite_UncorrelatedNativeShellOutput_ConservativelyKeepsMiddle()
+    {
+        var source = LongUniqueOutput(454);
+        var body = NativeShellBody(source, includeCall: false, command: null);
+        var plan = CompressionCatalog.Resolve(null);
+
+        var (_, rewritten, _) = RewriteIncludingNoOp(body, plan: plan);
+        var output = ReadShellStdout(rewritten, outputItemIndex: 0);
+
+        Assert.DoesNotContain("lines elided ...]", output, StringComparison.Ordinal);
+        Assert.Contains("source-line-0227", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Rewrite_CatalogPlan_AppliesShapeFilterAndCapturesCommand()
     {
         const string body = """
@@ -399,6 +448,54 @@ public class CodexResponsesRewriterTests
         using var document = JsonDocument.Parse(body);
         return document.RootElement.GetProperty("input")[1].GetProperty("output")[0]
             .GetProperty("text").GetString();
+    }
+
+    private static string ReadShellStdout(string body, int outputItemIndex)
+    {
+        using var document = JsonDocument.Parse(body);
+        return document.RootElement.GetProperty("input")[outputItemIndex].GetProperty("output")[0]
+            .GetProperty("stdout").GetString()!;
+    }
+
+    private static string LongUniqueOutput(int lines)
+    {
+        var builder = new StringBuilder();
+        for (var i = 0; i < lines; i++)
+            builder.Append("source-line-").Append(i.ToString("D4"))
+                .Append(" public void Method(int argument) { return; }").Append('\n');
+        return builder.ToString();
+    }
+
+    private static string NativeShellBody(string output, bool includeCall, string? command)
+    {
+        var items = new List<object>();
+        if (includeCall)
+        {
+            items.Add(new
+            {
+                type = "shell_call",
+                call_id = "native-1",
+                action = new { commands = new[] { command! }, timeout_ms = 120_000 },
+                status = "completed"
+            });
+        }
+
+        items.Add(new
+        {
+            type = "shell_call_output",
+            call_id = "native-1",
+            output = new[]
+            {
+                new
+                {
+                    stdout = output,
+                    stderr = "",
+                    outcome = new { type = "exit", exit_code = 0 }
+                }
+            }
+        });
+
+        return JsonSerializer.Serialize(new { input = items });
     }
 
     private static string GetCodexFixtureDir([CallerFilePath] string? callerPath = null) =>

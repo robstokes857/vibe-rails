@@ -164,13 +164,15 @@ public sealed class CrLfNormalizeTests
     }
 
     private static string RunPipeline(
-        string input, CompressionPlan plan, CommandShape shape, ICollection<StageTrace> trace)
+        string input, CompressionPlan plan, CommandShape shape, ICollection<StageTrace> trace,
+        bool readsFileContents = false)
     {
         using var scratch = new PipelineScratch(Math.Max(input.Length, 64));
         var minifyStats = new MinifyStats();
         var condenseStats = new CondenseStats();
         return CompressionPipeline
-            .Run(input, plan, shape, scratch, out _, ref minifyStats, ref condenseStats, trace)
+            .Run(input, plan, shape, readsFileContents, scratch, out _, ref minifyStats,
+                ref condenseStats, trace)
             .ToString();
     }
 }

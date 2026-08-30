@@ -1,3 +1,7 @@
+Himan made note:
+
+Hey next time we go through the optimization process I want to look for re-runs. When the LLM had to call again to get something we trunked. 
+
 # TokenSaver
 
 TokenSaver is the library that sits between a coding CLI (Claude Code, Codex,
@@ -110,7 +114,7 @@ payload under the truncation threshold).
 | 9 | `find-group` | Reshaping | on | Groups a flat path list under one header per directory. |
 | 10 | `elide-passed-tests` | Lossy | on | Runs of individual passing-test lines from a recognised test runner → one `[... N passed ...]` marker. Failures/errors/skips/logs/summaries kept verbatim, in place. |
 | 11 | `dedupe-lines` | Lossy | on | 3+ identical lines → one, tagged `[xN]`. |
-| 12 | `truncate-long` | Lossy | on | Keeps first 150 + last 50 lines, elides the middle. |
+| 12 | `truncate-long` | Lossy | on | Keeps first 150 + last 50 lines, elides the middle. Widens to 1200/200 when the producing command reads file contents and the payload is at most 256 KiB — see [the side door](#the-side-door-scope-read-is-off-cat-is-not). |
 
 **Why are `cr-collapse` and `ansi-strip` off by default?** They are the two largest
 lossless wins available, and they are off by deliberate product decision (2026-07-15,
@@ -158,6 +162,35 @@ does not exist in the file and **the edit fails**. That is a correctness bug, no
 lost saving. It ships off, and it should stay off until captures prove otherwise.
 `scope-grep` is milder — the model navigates by those line numbers rather than
 quoting them — but has not been proven either.
+
+### The side door: scope-read is off, `cat` is not
+
+Turning `scope-read` off protects the `Read` **tool**. It does not protect *file contents*,
+because `cat` / `sed -n` / `Get-Content` / `rg -n '^'` through a shell tool is a file read and
+`scope-shell` is on. `truncate-long` counts lines and has no idea what produced them, so until
+2026-08-29 it treated multi-file source dumps as log spew and elided the middle — measured at 71%
+of everything the saver removed from Claude's context on 2026-08-28, and the single most common way
+an agent loads source into context.
+
+`CommandShapes.ReadsFileContents` now recognises those commands (including explicit executable
+paths such as `/usr/bin/cat`) and widens `truncate-long`'s keep budget to 1200/200 for their output.
+Responses `shell_call.action.commands` is correlated with `shell_call_output`; an output-only native
+shell item conservatively gets the wider budget because its command may live behind
+`previous_response_id`. Three things about this are easy to get wrong:
+
+- **It is deliberately permissive, and that is the opposite of `CommandShapes.Classify`.** Classify
+  authorises a *rewrite*, so a wrong answer mangles output and every rule fails toward `None` —
+  hence the whole-command metacharacter rule that makes it return `None` for `cat a.py; cat b.py`.
+  `ReadsFileContents` authorises nothing; it only makes the pipeline do *less*. A false positive
+  costs savings on one tool result, a false negative costs 250 lines of somebody's source. Do not
+  "harden" it to match Classify — that is precisely how the hole existed.
+- **It widens the budget, it does not disable the stage.** `cat` of a 50k-line generated file still
+  has to be capped, or the stage stops protecting the context window it exists to protect.
+- **The wide budget has a 256 KiB selector ceiling.** Larger file-read payloads fall back to 150/50,
+  so a 1000-line generated file with enormous lines cannot bypass the catastrophic-payload guard.
+
+Full evidence, calibration and the known gaps it does *not* close (`git diff`/`git show`, genuine
+grep searches): [`runbooks/token_saver/truncation_file_reads.md`](../runbooks/token_saver/truncation_file_reads.md).
 
 Unknown tool names always fail toward *no savings*: they are counted in the `seen`
 counter and never rewritten. So if Anthropic renames `Bash` tomorrow, savings quietly
