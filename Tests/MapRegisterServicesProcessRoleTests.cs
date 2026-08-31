@@ -14,6 +14,8 @@ public sealed class MapRegisterServicesProcessRoleTests
         { [], true },
         { ["--web"], true },
         { ["--git-guard"], true },
+        { ["--job-daemon"], false },
+        { ["--job-daemon-service", "status", "--json"], false },
         { ["--vs-code-v1"], true },
         { ["--vs-code-v1", "--parent-pid", "42"], false },
         { ["--vs-code-v1", "--parent-pid=42"], false },
@@ -57,6 +59,21 @@ public sealed class MapRegisterServicesProcessRoleTests
     {
         Assert.True(JobTickProcessHost.IsRequested(["--job-tick"]));
         Assert.Equal(0, await JobTickProcessHost.RunAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public void JobDaemon_IsRecognizedOnlyBeforeThePassthroughSeparator()
+    {
+        Assert.True(JobDaemonProcessHost.IsRequested(["--job-daemon"]));
+        Assert.False(JobDaemonProcessHost.IsRequested(["--env", "nightly", "--", "--job-daemon"]));
+    }
+
+    [Fact]
+    public void JobDaemonMaintenance_IsRecognizedOnlyBeforeThePassthroughSeparator()
+    {
+        Assert.True(JobDaemonMaintenanceProcessHost.IsRequested(["--job-daemon-service", "status", "--json"]));
+        Assert.False(JobDaemonMaintenanceProcessHost.IsRequested(
+            ["--env", "nightly", "--", "--job-daemon-service", "status"]));
     }
 
     [Fact]

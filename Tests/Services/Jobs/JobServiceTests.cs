@@ -23,6 +23,7 @@ public sealed class JobServiceTests : IDisposable
     private readonly Mock<IRepository> _repository = new();
     private readonly Mock<IJobExecutableResolver> _executableResolver = new();
     private readonly Mock<IJobScheduler> _scheduler = new();
+    private readonly Mock<IJobDaemonKicker> _daemonKicker = new();
 
     public JobServiceTests()
     {
@@ -355,13 +356,88 @@ public sealed class JobServiceTests : IDisposable
         Assert.Equal("manual-run", response.RunId);
         Assert.Contains("queued", response.Message, StringComparison.OrdinalIgnoreCase);
         _scheduler.Verify(s => s.Kick(), Times.Once);
+        _daemonKicker.Verify(
+            candidate => candidate.KickAsync(CancellationToken.None),
+            Times.Once);
         _store.Verify(
             s => s.TryMarkLaunchedAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
+    [Fact]
+    public async Task RetryRun_QueuesForTheSchedulerAndWakesTheDaemon()
+    {
+        var source = new JobRunRecord(
+            "source-run",
+            7,
+            JobTriggerKind.Manual,
+            "manual",
+            JobRunStatus.Succeeded,
+            "nightly review",
+            _repoRoot,
+            LLM.Claude,
+            1,
+            "nightly",
+            60,
+            "session-1",
+            DateTime.UtcNow.AddMinutes(-2),
+            DateTime.UtcNow.AddMinutes(-1),
+            DateTime.UtcNow,
+            0,
+            null,
+            false,
+            null);
+        _store
+            .Setup(candidate => candidate.GetRunAsync("source-run", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(source);
+        _store
+            .Setup(candidate => candidate.EnqueueRetryAsync("source-run", It.IsAny<CancellationToken>()))
+            .ReturnsAsync("retry-run");
+        _executableResolver.Setup(candidate => candidate.Resolve(LLM.Claude)).Returns("claude");
+
+        var response = await Service().RetryRunAsync(
+            "source-run",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("retry-run", response.RunId);
+        _scheduler.Verify(candidate => candidate.Kick(), Times.Once);
+        _daemonKicker.Verify(
+            candidate => candidate.KickAsync(CancellationToken.None),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task RunNow_DaemonWakeupFailureDoesNotLoseTheDurablyQueuedRun()
+    {
+        _store
+            .Setup(candidate => candidate.GetJobAsync(7, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Record() with { Id = 7 });
+        _store
+            .Setup(candidate => candidate.EnqueueManualRunAsync(7, CancellationToken.None))
+            .ReturnsAsync("manual-run");
+        _executableResolver.Setup(candidate => candidate.Resolve(LLM.Claude)).Returns("claude");
+        _daemonKicker
+            .Setup(candidate => candidate.KickAsync(CancellationToken.None))
+            .ThrowsAsync(new IOException("control pipe unavailable"));
+
+        var response = await Service().RunNowAsync(
+            7,
+            TestContext.Current.CancellationToken);
+
+        Assert.True(response.Success);
+        Assert.Equal("manual-run", response.RunId);
+        _scheduler.Verify(candidate => candidate.Kick(), Times.Once);
+        _daemonKicker.Verify(
+            candidate => candidate.KickAsync(CancellationToken.None),
+            Times.Once);
+    }
+
     private JobService Service() => new(
-        _store.Object, _repository.Object, _executableResolver.Object, _scheduler.Object);
+        _store.Object,
+        _repository.Object,
+        _executableResolver.Object,
+        _scheduler.Object,
+        _daemonKicker.Object);
 
     private void WithEnvironment(
         int id = 1,

@@ -13886,24 +13886,246 @@ body.git-guard-focus-active #app-content {
     line-height: 1.5;
 }
 
-/* Runtime behavior is important enough to state plainly. This is a fully opaque
-   note so it remains readable in browser and VS Code themes. */
-.jobs-runtime-note {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.6rem;
-    padding: 0.7rem 0.85rem;
-    border: 1px solid var(--color-border);
-    border-left: 3px solid var(--color-accent);
-    border-radius: 8px;
+/* VBD is an opt-in current-user lifecycle setting, status surface, and recovery panel. It stays
+   fully opaque in every host theme; arbitrary OS diagnostics never become a transparent overlay. */
+.jobs-daemon-panel {
+    display: grid;
+    gap: 0.75rem;
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--color-border, #2c2c2c);
+    border-radius: 10px;
     background-color: var(--color-bg-surface, #1e1e1e);
-    color: var(--color-text-muted);
-    font-size: 0.84rem;
+    color: var(--color-text, #f0f0f0);
+}
+
+.jobs-daemon-setting-row,
+.jobs-daemon-setting-copy,
+.jobs-daemon-title-row,
+.jobs-daemon-toggle,
+.jobs-daemon-limitation,
+.jobs-daemon-warning,
+.jobs-daemon-actions {
+    display: flex;
+    align-items: center;
+}
+
+.jobs-daemon-setting-row {
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.jobs-daemon-setting-copy {
+    min-width: 0;
+    align-items: flex-start;
+    gap: 0.7rem;
+}
+
+.jobs-daemon-icon {
+    display: inline-grid;
+    flex: 0 0 auto;
+    place-items: center;
+    width: 2.2rem;
+    height: 2.2rem;
+    border: 1px solid color-mix(in srgb, var(--color-text-muted, #9aa4b2) 30%, transparent);
+    border-radius: 8px;
+    background-color: color-mix(in srgb, var(--color-text-muted, #9aa4b2) 11%, var(--color-bg-base, #121212));
+    color: var(--color-text-muted, #9aa4b2);
+}
+
+.jobs-daemon-icon[data-tone="success"] {
+    border-color: color-mix(in srgb, var(--color-success, #3fb950) 38%, transparent);
+    background-color: color-mix(in srgb, var(--color-success, #3fb950) 12%, var(--color-bg-base, #121212));
+    color: var(--color-success, #3fb950);
+}
+
+.jobs-daemon-icon[data-tone="warning"] {
+    border-color: color-mix(in srgb, var(--color-warning, #d29922) 38%, transparent);
+    background-color: color-mix(in srgb, var(--color-warning, #d29922) 12%, var(--color-bg-base, #121212));
+    color: var(--color-warning, #d29922);
+}
+
+.jobs-daemon-icon[data-tone="danger"] {
+    border-color: color-mix(in srgb, var(--color-danger, #f85149) 38%, transparent);
+    background-color: color-mix(in srgb, var(--color-danger, #f85149) 12%, var(--color-bg-base, #121212));
+    color: var(--color-danger, #f85149);
+}
+
+.jobs-daemon-setting-copy > div { min-width: 0; }
+
+.jobs-daemon-title-row {
+    flex-wrap: wrap;
+    gap: 0.45rem;
+}
+
+.jobs-daemon-preview {
+    display: inline-flex;
+    align-items: center;
+    min-height: 1.35rem;
+    padding: 0.1rem 0.45rem;
+    border: 1px solid color-mix(in srgb, var(--color-primary, #7c5cff) 45%, transparent);
+    border-radius: 999px;
+    color: var(--color-primary, #9c87ff);
+    background: color-mix(in srgb, var(--color-primary, #7c5cff) 10%, transparent);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+.jobs-daemon-title-row h2 {
+    margin: 0;
+    color: var(--color-text, #f0f0f0);
+    font-size: 0.92rem;
+    font-weight: 700;
+}
+
+.jobs-daemon-setting-copy p {
+    margin: 0.25rem 0 0;
+    color: var(--color-text-muted, #9aa4b2);
+    font-size: 0.8rem;
     line-height: 1.45;
 }
 
-.jobs-runtime-note i { margin-top: 0.15rem; color: var(--color-accent); }
-.jobs-runtime-note strong { color: var(--color-text); }
+.jobs-daemon-state {
+    padding: 0.18rem 0.42rem;
+    border: 1px solid var(--color-border, #2c2c2c);
+    border-radius: 999px;
+    background-color: var(--color-bg-base, #121212);
+    color: var(--color-text-muted, #9aa4b2);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.025em;
+    text-transform: uppercase;
+}
+
+.jobs-daemon-state[data-tone="success"] { color: var(--color-success, #3fb950); }
+.jobs-daemon-state[data-tone="warning"] { color: var(--color-warning, #d29922); }
+.jobs-daemon-state[data-tone="danger"] { color: var(--color-danger, #f85149); }
+
+.jobs-daemon-toggle {
+    flex: 0 0 auto;
+    gap: 0.45rem;
+    padding: 0.35rem 0.55rem;
+    border: 1px solid color-mix(in srgb, var(--color-danger, #f85149) 48%, var(--color-border, #2c2c2c));
+    border-radius: 999px;
+    background-color: color-mix(in srgb, var(--color-danger, #f85149) 8%, var(--color-bg-base, #121212));
+    color: var(--color-danger, #f85149);
+    font-size: 0.76rem;
+    font-weight: 700;
+}
+
+.jobs-daemon-toggle[aria-checked="true"] {
+    border-color: color-mix(in srgb, var(--color-success, #3fb950) 55%, var(--color-border, #2c2c2c));
+    background-color: color-mix(in srgb, var(--color-success, #3fb950) 9%, var(--color-bg-base, #121212));
+    color: var(--color-success, #3fb950);
+}
+
+.jobs-daemon-toggle:not(:disabled):hover {
+    background-color: color-mix(in srgb, currentColor 14%, var(--color-bg-base, #121212));
+}
+
+.jobs-daemon-toggle:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--color-accent, #4c8dff) 38%, transparent);
+    outline-offset: 2px;
+}
+
+.jobs-daemon-toggle:disabled { cursor: not-allowed; opacity: 0.55; }
+
+.jobs-daemon-toggle-track {
+    position: relative;
+    display: inline-block;
+    width: 1.85rem;
+    height: 1rem;
+    border-radius: 999px;
+    background-color: currentColor;
+}
+
+.jobs-daemon-toggle-track > span {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 0.75rem;
+    height: 0.75rem;
+    border-radius: 50%;
+    background-color: var(--color-bg-base, #121212);
+    transition: transform 140ms ease;
+}
+
+.jobs-daemon-toggle[aria-checked="true"] .jobs-daemon-toggle-track > span { transform: translateX(0.85rem); }
+
+.jobs-daemon-diagnostics {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.55rem;
+    margin: 0;
+    padding: 0.65rem;
+    border: 1px solid var(--color-border, #2c2c2c);
+    border-radius: 8px;
+    background-color: var(--color-bg-base, #121212);
+}
+
+.jobs-daemon-diagnostics > div {
+    min-width: 0;
+}
+
+.jobs-daemon-diagnostics dt {
+    color: var(--color-text-muted, #9aa4b2);
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+}
+
+.jobs-daemon-diagnostics dd {
+    overflow-wrap: anywhere;
+    margin: 0.16rem 0 0;
+    color: var(--color-text, #f0f0f0);
+    font: 0.76rem/1.35 var(--vb-font-mono, ui-monospace, monospace);
+}
+
+.jobs-daemon-diagnostics .jobs-daemon-error {
+    grid-column: 1 / -1;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--color-border, #2c2c2c);
+}
+
+.jobs-daemon-error dd { color: var(--color-danger, #f85149); }
+
+.jobs-daemon-limitation,
+.jobs-daemon-warning {
+    align-items: flex-start;
+    gap: 0.5rem;
+    font-size: 0.76rem;
+    line-height: 1.4;
+}
+
+.jobs-daemon-limitation { color: var(--color-text-muted, #9aa4b2); }
+.jobs-daemon-limitation i { margin-top: 0.15rem; color: var(--color-accent, #4c8dff); }
+
+.jobs-daemon-warning {
+    padding: 0.6rem 0.7rem;
+    border: 1px solid color-mix(in srgb, var(--color-warning, #d29922) 42%, var(--color-border, #2c2c2c));
+    border-radius: 8px;
+    background-color: color-mix(in srgb, var(--color-warning, #d29922) 9%, var(--color-bg-base, #121212));
+    color: var(--color-text-muted, #9aa4b2);
+}
+
+.jobs-daemon-warning i { margin-top: 0.15rem; color: var(--color-warning, #d29922); }
+.jobs-daemon-warning strong { color: var(--color-text, #f0f0f0); }
+
+.jobs-daemon-actions {
+    justify-content: flex-end;
+    gap: 0.45rem;
+    padding-top: 0.65rem;
+    border-top: 1px solid var(--color-border, #2c2c2c);
+}
+
+.jobs-daemon-actions .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
 
 .jobs-section { margin-top: 1rem; }
 
@@ -14434,7 +14656,7 @@ body.git-guard-focus-active #app-content {
 /* Editing is a focused page state: keep the header for orientation, and hide the
    list/history until the form is saved or cancelled. */
 .jobs-view[data-editor-open="true"] .jobs-page-header > .btn,
-.jobs-view[data-editor-open="true"] .jobs-runtime-note,
+.jobs-view[data-editor-open="true"] .jobs-daemon-panel,
 .jobs-view[data-editor-open="true"] .jobs-section-heading,
 .jobs-view[data-editor-open="true"] .jobs-grid,
 .jobs-view[data-editor-open="true"] .jobs-history-panel {
@@ -15498,6 +15720,8 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
 }
 
 @media (max-width: 960px) {
+    .jobs-daemon-diagnostics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
     .job-card {
         grid-template-columns: minmax(0, 1fr);
     }
@@ -15513,6 +15737,11 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
 @media (max-width: 720px) {
     .jobs-page-header { align-items: stretch; flex-direction: column; }
     .jobs-page-header .btn { width: 100%; }
+    .jobs-daemon-setting-row { align-items: stretch; flex-direction: column; }
+    .jobs-daemon-toggle { align-self: flex-start; }
+    .jobs-daemon-diagnostics { grid-template-columns: minmax(0, 1fr); }
+    .jobs-daemon-actions { justify-content: stretch; flex-wrap: wrap; }
+    .jobs-daemon-actions .btn { flex: 1 1 auto; justify-content: center; }
     .jobs-panel { padding: 0.75rem; }
     .jobs-section-heading { align-items: flex-start; flex-wrap: wrap; }
     .job-inline-form { padding: 1rem; }

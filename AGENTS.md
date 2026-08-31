@@ -17,6 +17,7 @@
 - **Environment Management** - Configure separate environments for different LLM providers with custom args and prompts. Launch environments directly in the Web UI terminal with the "Web UI" button or select from the terminal's environment dropdown
 - **Sandbox Management** - Create isolated git clone sandboxes for parallel AI workflows. Shallow clones current branch with all dirty/untracked files. Launch terminals or VS Code directly into sandbox directories.
 - **Session Logging** - Track and monitor all CLI session history and outputs
+- **Background Automations (Preview)** - Opt-in, current-user VibeRails Demon runs the existing durable Automation scheduler while the dashboard is closed
 - **MCP Integration** - Custom Model Context Protocol server with specialized tools
 
 ## Technology Stack
@@ -29,6 +30,7 @@
 - **ModelContextProtocol.AspNetCore** (v2.0.0) - ASP.NET Core integration for the in-process MCP server
 - **Pty.Net** - Cross-platform pseudo-terminal support (inlined fork, ConPTY only)
 - **PyBridge** - AOT-friendly Python process and session runner (in-tree library)
+- **VibeRails.Daemon** - In-tree current-user lifecycle, single-instance, and bounded IPC library for the VibeRails Demon
 
 ### Frontend
 - **Vanilla JavaScript** - No framework dependencies
@@ -117,6 +119,7 @@ vibe-rails/
 │
 ├── Pty.Net/                        # Cross-platform PTY library (inlined fork, ConPTY only)
 ├── PyBridge/                       # AOT-friendly Python runner library (in-tree)
+├── VibeRails.Daemon/               # Current-user daemon lifecycle + bounded local IPC project
 │
 ├── Tests/                          # xUnit test suite
 │   ├── AgentFileServiceTests.cs
@@ -181,13 +184,26 @@ vb --git-guard
 - VCA is the only preflight stage that can block a commit; automated workflows enqueue before-commit Automations without waiting on them
 - The native pre-commit hook uses the same shared pipeline and console event presentation
 
+#### 5. VibeRails Demon Mode (Preview)
+```bash
+vb --job-daemon
+```
+- Internal current-user background host installed from the Automation page
+- Uses a lean Generic Host: no Kestrel, browser, MCP, BERT, or dashboard maintenance graph
+- Runs the existing SQLite-backed Automation scheduler and native-terminal launch pipeline
+- Shares `JobSchedulerLease` with open root dashboards, so only one process drains queued work
+- Serves only bounded current-user `PING`, `STATUS`, `KICK`, and `SHUTDOWN` pipe commands
+- Lifecycle/IPC primitives live in the standalone `VibeRails.Daemon` project
+
 The old CLI management commands (`vb env`, `vb validate`, `vb hooks`, etc.) are no longer part of the supported surface. Use the Web UI, VS Code extension, or REST APIs for those workflows.
 
 > **Additional process-host modes** (internal, not user-facing): `vb mcp` (MCP stdio server),
 > `vb --vca-hook <type>` (VCA hook process host used by git hooks), `vb --job-run <id>`
 > (automated job run), `vb --job-trigger` (post-commit job enqueue), and `vb --job-tick`
 > (compatibility tombstone for the retired OS Jobs scheduler — recognized and exits before the
-> web host starts). These are invoked internally by the main app or git hooks, not typed by end users.
+> web host starts). Installers also use `vb --job-daemon-service <status|stop|repair|start>` as a
+> hidden update-maintenance surface. These are invoked internally by the main app, installers, or
+> git hooks, not typed by end users.
 
 ### Component Interaction Flow
 
@@ -543,6 +559,11 @@ tools (security review 2026-07-02).
 **Session Logging**:
 - `GET /api/v1/sessions/{sessionId}/logs` - Get session logs
 - `GET /api/v1/sessions/recent` - Recent sessions
+
+**VibeRails Demon lifecycle** (authenticated, active-root-backend only):
+- `GET /api/v1/jobs/demon` - OS registration plus live VBD health
+- `POST /api/v1/jobs/demon/install` | `/start` | `/stop` | `/restart` | `/repair` - Current-user lifecycle actions
+- `DELETE /api/v1/jobs/demon` - Remove only the background registration; Automation data remains
 
 **MCP Integration**:
 - `GET /api/v1/mcp/status` - MCP server status

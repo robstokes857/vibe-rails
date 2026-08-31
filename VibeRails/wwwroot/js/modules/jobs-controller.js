@@ -67,6 +67,97 @@ const RUN_STATUS_CODE = Object.freeze({
     INTERRUPTED: 6
 });
 
+const DAEMON_STATE_META = Object.freeze({
+    NotInstalled: { label: 'Not installed', tone: 'neutral' },
+    InstalledStopped: { label: 'Stopped', tone: 'warning' },
+    Running: { label: 'Running', tone: 'success' },
+    NeedsRepair: { label: 'Needs repair', tone: 'warning' },
+    Unavailable: { label: 'Unavailable', tone: 'neutral' },
+    Error: { label: 'Error', tone: 'danger' }
+});
+
+const DAEMON_STATE_BY_TOKEN = Object.freeze({
+    notinstalled: 'NotInstalled',
+    installedstopped: 'InstalledStopped',
+    running: 'Running',
+    needsrepair: 'NeedsRepair',
+    unavailable: 'Unavailable',
+    error: 'Error'
+});
+
+const DAEMON_ACTION_PATHS = Object.freeze({
+    install: { method: 'POST', path: '/api/v1/jobs/demon/install', busyLabel: 'Installing…' },
+    start: { method: 'POST', path: '/api/v1/jobs/demon/start', busyLabel: 'Starting…' },
+    stop: { method: 'POST', path: '/api/v1/jobs/demon/stop', busyLabel: 'Stopping…' },
+    restart: { method: 'POST', path: '/api/v1/jobs/demon/restart', busyLabel: 'Restarting…' },
+    repair: { method: 'POST', path: '/api/v1/jobs/demon/repair', busyLabel: 'Repairing…' },
+    remove: { method: 'DELETE', path: '/api/v1/jobs/demon', busyLabel: 'Removing…' }
+});
+
+function daemonToken(value) {
+    return String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function defaultDaemonActions(state, status) {
+    if (status.isSupported === false || state === 'Unavailable') return [];
+    if (state === 'NotInstalled') return ['install'];
+    if (state === 'InstalledStopped') return ['start', 'repair', 'remove'];
+    if (state === 'Running') return ['stop', 'restart', 'remove'];
+    if (state === 'NeedsRepair') {
+        return [
+            ...(status.isReachable || status.isRunning ? ['stop'] : []),
+            'repair',
+            ...(status.isInstalled ? ['remove'] : [])
+        ];
+    }
+    if (state === 'Error') {
+        return status.isInstalled ? ['repair', 'remove'] : ['install'];
+    }
+    return [];
+}
+
+/**
+ * Keep the browser tolerant of state casing from early VBD builds while exposing one stable
+ * view-model shape to the renderer. Unknown states fail closed as Error; a numeric enum must
+ * never be interpreted as one of the lifecycle states by accident.
+ */
+export function normalizeJobDaemonStatus(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const state = DAEMON_STATE_BY_TOKEN[daemonToken(source.state)] || 'Error';
+    const normalized = {
+        state,
+        platform: String(source.platform || ''),
+        isSupported: source.isSupported !== false && state !== 'Unavailable',
+        isInstalled: source.isInstalled === true || state === 'InstalledStopped' || state === 'Running',
+        isRunning: source.isRunning === true || state === 'Running',
+        isReachable: source.isReachable === true,
+        registrationIsCurrent: source.registrationIsCurrent === true,
+        currentVersion: String(source.currentVersion || ''),
+        daemonVersion: String(source.daemonVersion || ''),
+        protocolVersion: source.protocolVersion ?? null,
+        pid: source.pid !== null && source.pid !== undefined && source.pid !== '' && Number.isFinite(Number(source.pid))
+            ? Number(source.pid)
+            : null,
+        startedUtc: source.startedUtc || null,
+        uptimeSeconds: source.uptimeSeconds !== null && source.uptimeSeconds !== undefined && source.uptimeSeconds !== ''
+            && Number.isFinite(Number(source.uptimeSeconds))
+            ? Math.max(0, Number(source.uptimeSeconds))
+            : null,
+        lastCycleUtc: source.lastCycleUtc || null,
+        ownsSchedulerLease: typeof source.ownsSchedulerLease === 'boolean' ? source.ownsSchedulerLease : null,
+        lastError: String(source.lastError || ''),
+        platformLimitation: String(source.platformLimitation || '')
+    };
+
+    const suppliedActions = Array.isArray(source.allowedActions)
+        ? source.allowedActions
+            .map(action => daemonToken(action) === 'uninstall' ? 'remove' : daemonToken(action))
+            .filter(action => Object.hasOwn(DAEMON_ACTION_PATHS, action))
+        : defaultDaemonActions(state, normalized);
+    normalized.allowedActions = [...new Set(suppliedActions)];
+    return normalized;
+}
+
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export class JobController {
@@ -94,6 +185,12 @@ export class JobController {
         this.environments = [];
         this.pollTimer = null;
         this.logTimer = null;
+        this.daemonStatus = null;
+        this.daemonStatusLoading = true;
+        this.daemonStatusError = '';
+        this.daemonRefreshPromise = null;
+        this.daemonRequestGeneration = 0;
+        this.daemonActionInFlight = null;
         this.runModalGeneration = 0;
         this.editorModalCleanup = null;
         this.activeEditorJob = null;
@@ -101,6 +198,7 @@ export class JobController {
         this.activeEditorPreferredTrigger = null;
         this._lastJobsListHtml = null;
         this._lastRunsHtml = null;
+        this._lastDaemonHtml = null;
     }
 
     async loadView(data = {}) {
@@ -114,7 +212,11 @@ export class JobController {
         // visit would make the first renderJobs() skip and leave the spinner forever.
         this._lastJobsListHtml = null;
         this._lastRunsHtml = null;
+        this._lastDaemonHtml = null;
         void this.pythonScripts.mount(this.root?.querySelector('[data-python-scripts-root]'));
+        // VBD lifecycle probing is deliberately independent of Automation data. A failed or slow
+        // OS/IPC status check must never hold up the jobs, Workers, Python scripts, or run history.
+        void this.refreshDaemonStatus();
         await this.refreshAll();
 
         if (data?.newJob) {
@@ -126,6 +228,7 @@ export class JobController {
             // Jobs too, not just run history: the scheduler advances nextRunUtc server-side,
             // so a "Next run" rendered once at load drifts into "Due now" and stays there.
             this.refreshJobs({ quiet: true });
+            this.refreshDaemonStatus({ quiet: true });
         }, 5000);
     }
 
@@ -137,6 +240,9 @@ export class JobController {
         this.activeEditorJob = null;
         this.activeEditorSource = null;
         this.activeEditorPreferredTrigger = null;
+        this.daemonRequestGeneration += 1;
+        this.daemonRefreshPromise = null;
+        this.daemonActionInFlight = null;
         if (this.pollTimer) window.clearInterval(this.pollTimer);
         if (this.logTimer) window.clearInterval(this.logTimer);
         this.pollTimer = null;
@@ -198,10 +304,9 @@ export class JobController {
                     </button>
                 </header>
 
-                <div class="jobs-runtime-note" role="note">
-                    <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
-                    <span><strong>VibeRails must stay open.</strong> Scheduled and commit-triggered runs only start while this app is running.</span>
-                </div>
+                <section class="jobs-daemon-panel" data-job-daemon aria-label="Background Automation execution" aria-live="polite">
+                    ${this.renderDaemonStatusHtml()}
+                </section>
 
                 <section class="jobs-section jobs-panel" aria-labelledby="jobs-list-title">
                     <div class="jobs-section-heading">
@@ -267,7 +372,259 @@ export class JobController {
             if (action === 'view-history' && Number.isFinite(jobId)) return this.openRunHistory(jobId);
             if (action === 'cancel-run' && runId) return this.cancelRun(runId, actionElement);
             if (action === 'retry-run' && runId) return this.retryRun(runId, actionElement);
+            if (action === 'daemon-remove') return this.removeDaemon(actionElement);
+            if (action?.startsWith('daemon-')) return this.performDaemonAction(action.slice('daemon-'.length), actionElement);
         });
+    }
+
+    canManageDaemon() {
+        // Same compatibility rule as host-file import: old root hosts predate this context field,
+        // while an explicit false identifies a terminal child that must not expose lifecycle APIs.
+        return this.app.data?.configs?.isActiveRootBackend !== false;
+    }
+
+    async refreshDaemonStatus({ quiet = false } = {}) {
+        if (!this.canManageDaemon()) {
+            this.daemonStatusLoading = false;
+            this.daemonStatusError = '';
+            this.daemonStatus = normalizeJobDaemonStatus({
+                state: 'Unavailable',
+                isSupported: false,
+                platformLimitation: 'Background Automation management is available from the main VibeRails dashboard.'
+            });
+            this.renderDaemonStatus();
+            return this.daemonStatus;
+        }
+        if (this.daemonActionInFlight) return this.daemonStatus;
+        if (this.daemonRefreshPromise) return this.daemonRefreshPromise;
+
+        const generation = ++this.daemonRequestGeneration;
+        this.daemonStatusLoading = true;
+        this.renderDaemonStatus();
+        const request = (async () => {
+            try {
+                const response = await this.app.apiCall(
+                    '/api/v1/jobs/demon',
+                    'GET',
+                    null,
+                    { showLoading: false, preferErrorResponseMessage: true }
+                );
+                if (generation !== this.daemonRequestGeneration) return this.daemonStatus;
+                this.daemonStatus = normalizeJobDaemonStatus(response);
+                this.daemonStatusError = '';
+                return this.daemonStatus;
+            } catch (error) {
+                if (generation !== this.daemonRequestGeneration) return this.daemonStatus;
+                this.daemonStatusError = error?.message || 'VibeRails Demon status could not be read.';
+                this.daemonStatus = normalizeJobDaemonStatus({
+                    state: 'Error',
+                    isInstalled: this.daemonStatus?.isInstalled === true,
+                    lastError: this.daemonStatusError,
+                    allowedActions: this.daemonStatus?.isInstalled ? ['repair', 'remove'] : []
+                });
+                // The error belongs in this panel. A page-level toast on every quiet poll would
+                // obscure unrelated work and turn a stopped background helper into an app failure.
+                if (!quiet) console.warn('[Automation] VBD status unavailable:', error);
+                return this.daemonStatus;
+            } finally {
+                if (generation === this.daemonRequestGeneration) {
+                    this.daemonStatusLoading = false;
+                    this.renderDaemonStatus();
+                }
+            }
+        })();
+        this.daemonRefreshPromise = request;
+        try {
+            return await request;
+        } finally {
+            if (this.daemonRefreshPromise === request) this.daemonRefreshPromise = null;
+        }
+    }
+
+    renderDaemonStatus() {
+        const target = this.root?.querySelector?.('[data-job-daemon]');
+        if (!target) return;
+        const html = this.renderDaemonStatusHtml();
+        if (html === this._lastDaemonHtml) return;
+        this._lastDaemonHtml = html;
+        target.innerHTML = html;
+    }
+
+    renderDaemonStatusHtml() {
+        const status = this.daemonStatus;
+        const loading = this.daemonStatusLoading && !status;
+        // A first-load probe is an unknown state, not an error. Keep the card visually calm until
+        // the request either supplies a real state or fails into the explicit Error model.
+        const meta = loading
+            ? DAEMON_STATE_META.NotInstalled
+            : DAEMON_STATE_META[status?.state] || DAEMON_STATE_META.Error;
+        const actionInFlight = this.daemonActionInFlight;
+        const installed = status?.isInstalled === true;
+        const settingAction = installed ? 'remove' : 'install';
+        const settingAllowed = status?.allowedActions?.includes(settingAction) === true;
+        const settingDisabled = loading || Boolean(actionInFlight) || !settingAllowed;
+        const settingLabel = actionInFlight === settingAction
+            ? DAEMON_ACTION_PATHS[settingAction].busyLabel
+            : installed ? 'On' : 'Off';
+        const summary = loading
+            ? 'Checking the current-user background host…'
+            : this.daemonSummary(status);
+        const limitation = status?.platformLimitation
+            || 'The computer must be awake with the user signed in, and the configured project, CLI, and credentials must remain available.';
+        const actions = status ? this.renderDaemonActions(status) : '';
+        const warning = status && status.state !== 'Running' && this.hasEnabledScheduledJobs()
+            ? `<div class="jobs-daemon-warning" role="alert">
+                    <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                    <span><strong>Enabled schedules need an active host.</strong> Until VBD is running, they start only while an active VibeRails root backend is open.</span>
+               </div>`
+            : '';
+
+        return `
+            <div class="jobs-daemon-setting-row">
+                <div class="jobs-daemon-setting-copy">
+                    <span class="jobs-daemon-icon" data-tone="${meta.tone}"><i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i></span>
+                    <div>
+                        <div class="jobs-daemon-title-row">
+                            <h2>Run Automations when VibeRails is closed</h2>
+                            <span class="jobs-daemon-preview">Preview</span>
+                            <span class="jobs-daemon-state" data-tone="${meta.tone}">${loading ? 'Checking…' : meta.label}</span>
+                        </div>
+                        <p>${this.escape(summary)}</p>
+                    </div>
+                </div>
+                <button class="jobs-daemon-toggle" type="button" role="switch"
+                        aria-checked="${installed}" aria-label="Run Automations when VibeRails is closed"
+                        data-job-action="daemon-${settingAction}"${settingDisabled ? ' disabled' : ''}>
+                    <span class="jobs-daemon-toggle-track" aria-hidden="true"><span></span></span>
+                    <span class="jobs-daemon-toggle-label">${this.escape(settingLabel)}</span>
+                </button>
+            </div>
+            ${status ? this.renderDaemonDiagnostics(status) : ''}
+            <div class="jobs-daemon-limitation"><i class="fa-solid fa-circle-info" aria-hidden="true"></i><span>${this.escape(limitation)}</span></div>
+            ${warning}
+            ${actions}`;
+    }
+
+    daemonSummary(status) {
+        if (!status) return 'Checking the current-user background host…';
+        if (status.state === 'Running') return 'VibeRails Demon is running for this user, so due Automations can start after the dashboard closes.';
+        if (status.state === 'InstalledStopped') return 'VibeRails Demon is installed but stopped. Start it to keep schedules available after the dashboard closes.';
+        if (status.state === 'NeedsRepair') return 'The background registration or running VBD version no longer matches this VibeRails installation.';
+        if (status.state === 'Unavailable') return 'Background Automation execution is not available in this host or on this platform.';
+        if (status.state === 'Error') return 'VibeRails could not verify background Automation execution. Durable jobs and queued runs are unchanged.';
+        return 'Background execution is off. Automations still run while an active VibeRails root backend is open.';
+    }
+
+    renderDaemonDiagnostics(status) {
+        const version = status.daemonVersion || status.currentVersion || '—';
+        const versionDetail = status.daemonVersion && status.currentVersion && status.daemonVersion !== status.currentVersion
+            ? `${version} (current: ${status.currentVersion})`
+            : version;
+        const cycle = status.lastCycleUtc ? this.relativeTime(status.lastCycleUtc) : 'Not reported';
+        const uptime = status.uptimeSeconds !== null ? this.formatDaemonUptime(status.uptimeSeconds) : '';
+        const pid = status.pid !== null ? String(status.pid) : '—';
+        const lease = status.ownsSchedulerLease === null ? 'Not reported' : status.ownsSchedulerLease ? 'Owned by VBD' : 'Owned elsewhere';
+        const reachability = status.isReachable ? 'Reachable' : status.isRunning ? 'Starting' : 'Not reachable';
+        const registration = status.registrationIsCurrent ? 'Current' : status.isInstalled ? 'Needs attention' : 'Not installed';
+        return `<dl class="jobs-daemon-diagnostics">
+            <div><dt>Platform</dt><dd>${this.escape(status.platform || 'Unknown')}</dd></div>
+            <div><dt>Version</dt><dd>${this.escape(versionDetail)}</dd></div>
+            <div><dt>Process</dt><dd>${this.escape(pid)}${uptime ? ` · ${this.escape(uptime)}` : ''}</dd></div>
+            <div><dt>Reachability</dt><dd>${this.escape(reachability)}</dd></div>
+            <div><dt>Registration</dt><dd>${this.escape(registration)}</dd></div>
+            <div><dt>Last scheduler cycle</dt><dd title="${this.escape(status.lastCycleUtc || '')}">${this.escape(cycle)}</dd></div>
+            <div><dt>Scheduler lease</dt><dd>${this.escape(lease)}</dd></div>
+            ${status.protocolVersion !== null ? `<div><dt>Protocol</dt><dd>${this.escape(String(status.protocolVersion))}</dd></div>` : ''}
+            ${status.startedUtc ? `<div><dt>Started</dt><dd title="${this.escape(status.startedUtc)}">${this.escape(this.relativeTime(status.startedUtc))}</dd></div>` : ''}
+            ${status.lastError ? `<div class="jobs-daemon-error"><dt>Last error</dt><dd>${this.escape(status.lastError)}</dd></div>` : ''}
+        </dl>`;
+    }
+
+    renderDaemonActions(status) {
+        const allowed = new Set(status.allowedActions || []);
+        const actions = [
+            ['start', 'fa-play', 'Start', 'btn-outline-primary'],
+            ['stop', 'fa-stop', 'Stop', 'btn-outline-secondary'],
+            ['restart', 'fa-rotate', 'Restart', 'btn-outline-secondary'],
+            ['repair', 'fa-screwdriver-wrench', 'Repair', 'btn-outline-warning'],
+            ['remove', 'fa-trash', 'Remove', 'btn-outline-danger']
+        ].filter(([action]) => allowed.has(action));
+        if (actions.length === 0) return '';
+        return `<div class="jobs-daemon-actions" aria-label="VibeRails Demon controls">${actions.map(([action, icon, label, css]) => {
+            const busy = this.daemonActionInFlight === action;
+            return `<button class="btn btn-sm ${css}" type="button" data-job-action="daemon-${action}"${this.daemonActionInFlight ? ' disabled' : ''}>
+                ${busy ? '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span>' : `<i class="fa-solid ${icon}" aria-hidden="true"></i>`}
+                ${this.escape(busy ? DAEMON_ACTION_PATHS[action].busyLabel : label)}
+            </button>`;
+        }).join('')}</div>`;
+    }
+
+    hasEnabledScheduledJobs() {
+        return this.jobs.some(job => job.enabled === true
+            && (job.triggers || []).some(trigger => Number(trigger.kind) === TRIGGER.SCHEDULE));
+    }
+
+    formatDaemonUptime(value) {
+        const totalSeconds = Math.max(0, Math.floor(Number(value) || 0));
+        const days = Math.floor(totalSeconds / 86400);
+        const hours = Math.floor((totalSeconds % 86400) / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        if (days > 0) return `${days}d ${hours}h uptime`;
+        if (hours > 0) return `${hours}h ${minutes}m uptime`;
+        if (minutes > 0) return `${minutes}m uptime`;
+        return `${totalSeconds}s uptime`;
+    }
+
+    async removeDaemon(button) {
+        const confirmed = await this.confirm({
+            title: 'Remove VibeRails Demon?',
+            message: 'Background startup will be removed for this user. Your Automations, queued runs, history, and terminal recordings stay intact.',
+            confirmLabel: 'Remove',
+            danger: true
+        });
+        if (!confirmed) return;
+        return this.performDaemonAction('remove', button);
+    }
+
+    async performDaemonAction(action, _button = null) {
+        const route = DAEMON_ACTION_PATHS[action];
+        if (!route || this.daemonActionInFlight) return;
+        if (!this.daemonStatus?.allowedActions?.includes(action)) return;
+
+        // Invalidate a status request that began before this mutation. Its pre-action snapshot must
+        // not overwrite the authoritative action response when it eventually arrives.
+        this.daemonRequestGeneration += 1;
+        this.daemonRefreshPromise = null;
+        this.daemonStatusLoading = false;
+        this.daemonActionInFlight = action;
+        this.renderDaemonStatus();
+        let needsRefresh = false;
+        try {
+            const response = await this.app.apiCall(
+                route.path,
+                route.method,
+                null,
+                { showLoading: false, preferErrorResponseMessage: true }
+            );
+            if (response?.status) {
+                this.daemonStatus = normalizeJobDaemonStatus(response.status);
+                this.daemonStatusError = '';
+            } else {
+                needsRefresh = true;
+            }
+            if (response?.success === false) {
+                this.app.showError(response.message || 'The VibeRails Demon action did not complete.');
+            } else {
+                this.app.showToast('Background Automation', response?.message || 'VibeRails Demon updated.', 'success');
+            }
+        } catch (error) {
+            this.app.showError(error?.message || 'The VibeRails Demon action failed.');
+            needsRefresh = true;
+        } finally {
+            this.daemonActionInFlight = null;
+            this.renderDaemonStatus();
+        }
+        if (needsRefresh) await this.refreshDaemonStatus({ quiet: true });
     }
 
     async refreshAll({ quiet = false } = {}) {
@@ -343,6 +700,9 @@ export class JobController {
         const target = this.root?.querySelector('[data-jobs-list]');
         const count = this.root?.querySelector('[data-jobs-count]');
         if (count) count.textContent = `${this.jobs.length} ${this.jobs.length === 1 ? 'automation' : 'automations'}`;
+        // The background-host warning is derived from enabled scheduled jobs, so a scheduler poll
+        // that changes a job must update this panel even when VBD's own status did not change.
+        this.renderDaemonStatus();
         if (!target) return;
         const html = this.renderJobsListHtml();
         // The 5s poll calls this constantly. Only touch the DOM when the markup actually

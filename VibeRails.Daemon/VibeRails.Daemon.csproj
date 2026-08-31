@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
+    <IsPackable>true</IsPackable>
+    <PackageId>VibeRails.Daemon</PackageId>
+    <Title>VibeRails.Daemon</Title>
+    <Description>Current-user daemon lifecycle and bounded local IPC primitives for VibeRails.</Description>
+    <Authors>VibeRails Contributors</Authors>
+    <Copyright>Copyright (c) 2025 VibeRails Contributors</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/robstokes857/vibe-rails</RepositoryUrl>
+    <PackageTags>daemon;named-pipe;systemd;launchagent;task-scheduler;nativeaot</PackageTags>
+  </PropertyGroup>
+</Project>

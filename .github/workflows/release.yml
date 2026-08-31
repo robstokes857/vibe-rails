@@ -15,9 +15,32 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.103"
+
+      - name: Run .NET tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet test VibeRails.slnx \
+            -c "$CONFIGURATION" \
+            -f "$FRAMEWORK"
+
   build:
     name: Build ${{ matrix.rid }}
     runs-on: ${{ matrix.os }}
+    needs: test
     strategy:
       fail-fast: false
       matrix:
@@ -69,7 +92,9 @@ jobs:
             -o "$outDir" `
             /p:PublishAot=true `
             /p:StripSymbols=true `
-            /p:InvariantGlobalization=true
+            /p:InvariantGlobalization=true `
+            /p:TreatWarningsAsErrors=true `
+            /p:ILLinkTreatWarningsAsErrors=true
 
       - name: Publish NativeAOT (Linux/macOS)
         if: runner.os != 'Windows'
@@ -85,7 +110,9 @@ jobs:
             -o "$out_dir" \
             /p:PublishAot=true \
             /p:StripSymbols=true \
-            /p:InvariantGlobalization=true
+            /p:InvariantGlobalization=true \
+            /p:TreatWarningsAsErrors=true \
+            /p:ILLinkTreatWarningsAsErrors=true
 
       - name: Sign Windows binary
         if: runner.os == 'Windows'
@@ -131,6 +158,206 @@ jobs:
 
           hash="$(shasum -a 256 "$archive" | awk '{print tolower($1)}')"
           printf "%s  %s\n" "$hash" "$(basename "$archive")" > "${archive}.sha256"
+
+      - name: Verify NativeAOT release archive (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $rid = "${{ matrix.rid }}"
+          $archive = "release-assets/vb-$rid.zip"
+          $verifyDir = Join-Path $env:RUNNER_TEMP "viberails-archive-$rid-$([Guid]::NewGuid().ToString('N'))"
+          New-Item -ItemType Directory -Path $verifyDir | Out-Null
+
+          try {
+              Expand-Archive -LiteralPath $archive -DestinationPath $verifyDir
+
+              $requiredFiles = @(
+                  "vb.exe",
+                  "appsettings.json",
+                  "wwwroot/index.html",
+                  "Models/BertV2/model.onnx.zip",
+                  "Models/BertV2/vocab.txt",
+                  "scripts/pre-commit-hook.sh",
+                  "scripts/commit-msg-hook.sh",
+                  "onnxruntime.dll",
+                  "e_sqlite3.dll",
+                  "vec0.dll"
+              )
+              foreach ($relativePath in $requiredFiles) {
+                  $path = Join-Path $verifyDir $relativePath
+                  if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+                      throw "Release archive $archive is missing required file: $relativePath"
+                  }
+              }
+
+              # VBD is statically folded into the NativeAOT vb executable. A
+              # separate daemon DLL would be both unnecessary and easy to omit
+              # from one of the installer paths, so fail if one appears.
+              $daemonDll = Get-ChildItem -LiteralPath $verifyDir -Recurse -File -Filter "VibeRails.Daemon.dll" |
+                  Select-Object -First 1
+              if ($daemonDll) {
+                  throw "Unexpected separate VBD assembly in release archive: $($daemonDll.FullName)"
+              }
+
+              $binary = Join-Path $verifyDir "vb.exe"
+              $statusJson = (& $binary --job-daemon-service status --json 2>$null | Out-String).Trim()
+              if ($LASTEXITCODE -ne 0) {
+                  throw "Packaged VBD status smoke test failed with exit code $LASTEXITCODE"
+              }
+              $status = $statusJson | ConvertFrom-Json -ErrorAction Stop
+              $properties = @($status.PSObject.Properties.Name)
+              if ($properties -notcontains "isInstalled" -or $properties -notcontains "isRunning") {
+                  throw "Packaged VBD status JSON is missing isInstalled or isRunning"
+              }
+              if ([bool]$status.isInstalled -or [bool]$status.isRunning) {
+                  throw "Release smoke tests require a clean runner with no existing VBD registration or process."
+              }
+
+              $stableBinary = Join-Path `
+                  ([Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)) `
+                  ".vibe_rails\vb.exe"
+              if (Test-Path -LiteralPath $stableBinary) {
+                  throw "Release smoke tests refuse to run lifecycle actions while the stable VBD target exists: $stableBinary"
+              }
+
+              # A clean runner has no stable ~/.vibe_rails/vb.exe launch target,
+              # so these commands are non-mutating and should return a structured
+              # action failure (exit 1), not the unknown-command exit code (2).
+              foreach ($action in @("stop", "repair", "start")) {
+                  $actionJson = (& $binary --job-daemon-service $action --json 2>$null | Out-String).Trim()
+                  $actionExitCode = $LASTEXITCODE
+                  if ($actionExitCode -ne 1) {
+                      throw "Packaged VBD $action smoke test unexpectedly returned exit code $actionExitCode instead of 1"
+                  }
+                  $actionResult = $actionJson | ConvertFrom-Json -ErrorAction Stop
+                  $actionProperties = @($actionResult.PSObject.Properties.Name)
+                  if ($actionProperties -notcontains "success" -or $actionProperties -notcontains "status") {
+                      throw "Packaged VBD $action JSON is missing success or status"
+                  }
+                  if ([bool]$actionResult.success) {
+                      throw "Packaged VBD $action unexpectedly succeeded on a clean runner"
+                  }
+              }
+          } finally {
+              $runnerTemp = [System.IO.Path]::GetFullPath($env:RUNNER_TEMP)
+              $separator = [string][System.IO.Path]::DirectorySeparatorChar
+              if (-not $runnerTemp.EndsWith($separator, [StringComparison]::Ordinal)) {
+                  $runnerTemp += $separator
+              }
+              $resolvedVerifyDir = [System.IO.Path]::GetFullPath($verifyDir)
+              if (-not $resolvedVerifyDir.StartsWith($runnerTemp, [StringComparison]::OrdinalIgnoreCase)) {
+                  throw "Refusing to clean archive verification directory outside RUNNER_TEMP: $resolvedVerifyDir"
+              }
+              Remove-Item -LiteralPath $resolvedVerifyDir -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Verify NativeAOT release archive (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rid="${{ matrix.rid }}"
+          archive="release-assets/vb-${rid}.tar.gz"
+          verify_dir="$(mktemp -d)"
+          cleanup() {
+            rm -rf -- "$verify_dir"
+          }
+          trap cleanup EXIT
+
+          tar -xzf "$archive" -C "$verify_dir"
+
+          required_files=(
+            "vb"
+            "appsettings.json"
+            "wwwroot/index.html"
+            "Models/BertV2/model.onnx.gz"
+            "Models/BertV2/vocab.txt"
+            "scripts/pre-commit-hook.sh"
+            "scripts/commit-msg-hook.sh"
+          )
+
+          case "$rid" in
+            linux-x64)
+              required_files+=("libonnxruntime.so" "libe_sqlite3.so" "vec0.so")
+              expected_format='ELF 64-bit'
+              ;;
+            osx-x64|osx-arm64)
+              required_files+=("libonnxruntime.dylib" "libe_sqlite3.dylib" "vec0.dylib")
+              expected_format='Mach-O 64-bit'
+              ;;
+            *)
+              echo "Unsupported release verification RID: $rid" >&2
+              exit 1
+              ;;
+          esac
+
+          for relative_path in "${required_files[@]}"; do
+            if [ ! -f "$verify_dir/$relative_path" ]; then
+              echo "Release archive $archive is missing required file: $relative_path" >&2
+              exit 1
+            fi
+          done
+
+          if find "$verify_dir" -type f -name 'VibeRails.Daemon.dll' -print -quit | grep -q .; then
+            echo "Unexpected separate VBD assembly in release archive." >&2
+            exit 1
+          fi
+
+          chmod +x "$verify_dir/vb"
+          if ! file "$verify_dir/vb" | grep -q "$expected_format"; then
+            echo "Packaged vb is not the expected NativeAOT executable format: $expected_format" >&2
+            file "$verify_dir/vb" >&2
+            exit 1
+          fi
+
+          if ! status_json=$("$verify_dir/vb" --job-daemon-service status --json 2>/dev/null); then
+            echo "Packaged VBD status smoke test failed." >&2
+            exit 1
+          fi
+          if ! grep -Eq '"isInstalled"[[:space:]]*:[[:space:]]*(true|false)' <<<"$status_json"; then
+            echo "Packaged VBD status JSON is missing isInstalled." >&2
+            exit 1
+          fi
+          if ! grep -Eq '"isRunning"[[:space:]]*:[[:space:]]*(true|false)' <<<"$status_json"; then
+            echo "Packaged VBD status JSON is missing isRunning." >&2
+            exit 1
+          fi
+          if grep -Eq '"isInstalled"[[:space:]]*:[[:space:]]*true' <<<"$status_json" ||
+             grep -Eq '"isRunning"[[:space:]]*:[[:space:]]*true' <<<"$status_json"; then
+            echo "Release smoke tests require a clean runner with no existing VBD registration or process." >&2
+            exit 1
+          fi
+          stable_binary="$HOME/.vibe_rails/vb"
+          if [ -e "$stable_binary" ] || [ -L "$stable_binary" ]; then
+            echo "Release smoke tests refuse to run lifecycle actions while the stable VBD target exists: $stable_binary" >&2
+            exit 1
+          fi
+
+          # With no stable ~/.vibe_rails/vb launch target on a clean runner,
+          # lifecycle verbs are non-mutating and return structured failure JSON.
+          for action in stop repair start; do
+            set +e
+            action_json=$("$verify_dir/vb" --job-daemon-service "$action" --json 2>/dev/null)
+            action_exit_code=$?
+            set -e
+            if [ "$action_exit_code" -ne 1 ]; then
+              echo "Packaged VBD $action unexpectedly returned exit code $action_exit_code instead of 1." >&2
+              exit 1
+            fi
+            if ! grep -Eq '"success"[[:space:]]*:[[:space:]]*(true|false)' <<<"$action_json"; then
+              echo "Packaged VBD $action JSON is missing success." >&2
+              exit 1
+            fi
+            if ! grep -Eq '"status"[[:space:]]*:' <<<"$action_json"; then
+              echo "Packaged VBD $action JSON is missing status." >&2
+              exit 1
+            fi
+            if grep -Eq '"success"[[:space:]]*:[[:space:]]*true' <<<"$action_json"; then
+              echo "Packaged VBD $action unexpectedly succeeded on a clean runner." >&2
+              exit 1
+            fi
+          done
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v7
@@ -226,8 +453,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: package_extension
-    env:
-      VSCE_PAT: ${{ secrets.VS_PAT }}
+    # VSCE_PAT is deliberately NOT job-wide: only the publish step below sees the Marketplace
+    # token, so dependency installation (and its install scripts) runs without it in scope.
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -236,6 +463,15 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version-file: ".nvmrc"
+
+      # Installs the lockfile-pinned @vscode/vsce (exact version + integrity hashes for its whole
+      # dependency tree) instead of letting npx fetch whatever the registry currently serves.
+      - name: Install pinned publishing toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd vscode-viberails
+          npm ci
 
       - name: Download VSIX artifacts
         uses: actions/download-artifact@v7
@@ -246,10 +482,18 @@ jobs:
 
       - name: Publish VSIX packages
         shell: bash
+        env:
+          VSCE_PAT: ${{ secrets.VS_PAT }}
         run: |
           set -euo pipefail
           if [ -z "${VSCE_PAT:-}" ]; then
             echo "VS_PAT GitHub secret is required to publish the VS Code extension." >&2
+            exit 1
+          fi
+
+          vsce="$(pwd)/vscode-viberails/node_modules/.bin/vsce"
+          if [ ! -x "$vsce" ]; then
+            echo "Pinned @vscode/vsce was not installed; refusing to fall back to an unpinned copy." >&2
             exit 1
           fi
 
@@ -268,7 +512,7 @@ jobs:
 
             for ((attempt = 1; attempt <= max_attempts; attempt++)); do
               echo "Publishing $(basename "$package") (attempt ${attempt}/${max_attempts})..."
-              if npx --yes @vscode/vsce publish --packagePath "$package" --skip-duplicate; then
+              if "$vsce" publish --packagePath "$package" --skip-duplicate; then
                 return 0
               fi
 

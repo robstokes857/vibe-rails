@@ -25,6 +25,8 @@ public static class RouteExtensions
         AutomationNavRoutes.Map(app);
         PythonScriptRoutes.Map(app, isActiveRootBackend);
         JobRoutes.Map(app, launchDirectory);
+        if (isActiveRootBackend)
+            JobDaemonRoutes.Map(app);
         CliLaunchRoutes.Map(app, launchDirectory);
         SessionRoutes.Map(app);
         ChatHistoryRoutes.Map(app);
@@ -61,4 +63,3 @@ public static class RouteExtensions
         SearchRoutes.Map(app);
     }
 }
-

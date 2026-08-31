@@ -1,6 +1,7 @@
 using Serilog;
 using VibeRails.DB;
 using VibeRails.DTOs;
+using VibeRails.Services.Jobs;
 using VibeRails.Services.VCA.Hooks;
 
 namespace VibeRails.Services.GitPreflight;
@@ -10,7 +11,9 @@ namespace VibeRails.Services.GitPreflight;
 /// hook queues after-commit runs. This never waits on the agent and never blocks Git: VCA is still
 /// the only preflight stage that can stop a commit.
 /// </summary>
-public sealed class AutomatedWorkflowsPreflightStep(IJobStoreAccessor? jobStoreAccessor = null) : IGitPreflightStep
+public sealed class AutomatedWorkflowsPreflightStep(
+    IJobStoreAccessor? jobStoreAccessor = null,
+    IJobDaemonKicker? daemonKicker = null) : IGitPreflightStep
 {
     public const string Id = "automated-workflows";
 
@@ -112,6 +115,7 @@ public sealed class AutomatedWorkflowsPreflightStep(IJobStoreAccessor? jobStoreA
                 "[Jobs] Queued {Count} before-commit run(s) for {Repository}",
                 runIds.Count,
                 projectPath);
+            await JobDaemonWakeup.TryKickAsync(daemonKicker, CancellationToken.None);
         }
 
         return await FinishAsync(context, GitPreflightStepStatus.Passed, message, cancellationToken);

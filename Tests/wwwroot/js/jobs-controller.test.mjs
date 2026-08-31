@@ -13,7 +13,8 @@ const ruleControllerPath = path.resolve('VibeRails/wwwroot/js/modules/rule-contr
 const {
     JobController,
     getJobCliForLlm,
-    getJobLlmForCli
+    getJobLlmForCli,
+    normalizeJobDaemonStatus
 } = await import(pathToFileURL(modulePath).href);
 const { EnvironmentController } = await import(pathToFileURL(environmentModulePath).href);
 const { confirmDialog } = await import(pathToFileURL(utilsModulePath).href);
@@ -45,22 +46,24 @@ function createApp() {
     };
 }
 
-test('Automation page makes automations primary and explains its active-instance runtime', () => {
+test('Automation page makes automations primary and exposes the opt-in VBD setting', () => {
     const controller = new JobController(createApp());
     const html = controller.renderPage();
 
     assert.match(html, /<h1 class="jobs-page-title">Automation<\/h1>/);
-    assert.match(html, /VibeRails must stay open/);
-    assert.match(html, /only start while this app is running/);
+    assert.match(html, /Run Automations when VibeRails is closed/);
+    assert.match(html, /jobs-daemon-preview">Preview/);
+    assert.match(html, /class="jobs-daemon-panel"/);
+    assert.match(html, /data-job-daemon/);
+    assert.match(html, /aria-live="polite"/);
+    assert.match(html, /data-job-action="daemon-install" disabled/);
+    assert.match(html, /Checking the current-user background host/);
+    assert.match(html, /jobs-daemon-icon" data-tone="neutral"/);
     assert.match(html, /id="jobs-list-title">Your automations/);
     assert.match(html, /Run history/);
-    // Runtime behavior is a readable note, not hidden in a title tooltip.
-    assert.match(html, /jobs-runtime-note/);
-    assert.match(html, /role="note"/);
     assert.doesNotMatch(html, /text-gradient/);
     assert.doesNotMatch(html, /jobs-runtime-strip/);
-    assert.doesNotMatch(html, /Run jobs while VibeRails is closed/);
-    assert.doesNotMatch(html, /data-jobs-scheduler-status/);
+    assert.doesNotMatch(html, /VibeRails must stay open/);
     assert.doesNotMatch(html, /data-job-environments-table/);
 });
 
@@ -1577,15 +1580,203 @@ test('The editor exposes and persists the Launch minimized option', () => {
     assert.match(source, /launchMinimized: form\.querySelector\('#job-launch-minimized'\)/);
 });
 
-test('Automation frontend has no OS scheduler controls or API calls', () => {
-    const controller = new JobController(createApp());
-    const html = controller.renderPage();
-    const source = readFileSync(modulePath, 'utf8');
+test('VBD status normalization keeps lifecycle facts orthogonal and rejects numeric states', () => {
+    const running = normalizeJobDaemonStatus({
+        state: 'running',
+        platform: 'Windows',
+        isSupported: true,
+        isInstalled: true,
+        isRunning: true,
+        isReachable: true,
+        registrationIsCurrent: true,
+        currentVersion: '2.0.0',
+        daemonVersion: '2.0.0',
+        protocolVersion: 1,
+        pid: 314,
+        uptimeSeconds: 90,
+        ownsSchedulerLease: false,
+        allowedActions: ['STOP', 'restart', 'uninstall', 'arbitrary-shell-command']
+    });
 
-    assert.match(html, /VibeRails must stay open/);
-    assert.doesNotMatch(html, /install-scheduler|uninstall-scheduler|Task Scheduler|background task/i);
-    assert.doesNotMatch(source, /\/api\/v1\/jobs\/scheduler/);
-    assert.doesNotMatch(source, /renderSchedulerStatus|setSchedulerInstalled|refreshSchedulerStatus/);
+    assert.equal(running.state, 'Running');
+    assert.equal(running.pid, 314);
+    assert.equal(running.uptimeSeconds, 90);
+    assert.equal(running.ownsSchedulerLease, false);
+    assert.deepEqual(running.allowedActions, ['stop', 'restart', 'remove']);
+    assert.equal(normalizeJobDaemonStatus({ state: 2 }).state, 'Error');
+    assert.equal(normalizeJobDaemonStatus({ state: 'Unavailable', isSupported: true }).isSupported, false);
+});
+
+test('VBD panel renders live diagnostics, escapes OS errors, and suppresses the schedule warning while Running', () => {
+    const controller = new JobController(createApp());
+    controller.jobs = [{ enabled: true, triggers: [{ kind: 0 }] }];
+    controller.daemonStatusLoading = false;
+    controller.daemonStatus = normalizeJobDaemonStatus({
+        state: 'Running',
+        platform: 'Windows <desktop>',
+        isInstalled: true,
+        isRunning: true,
+        isReachable: true,
+        registrationIsCurrent: true,
+        currentVersion: '2.0.0',
+        daemonVersion: '1.9.0',
+        protocolVersion: 1,
+        pid: 4512,
+        startedUtc: '2026-08-30T12:00:00Z',
+        uptimeSeconds: 3720,
+        lastCycleUtc: '2026-08-30T13:00:00Z',
+        ownsSchedulerLease: true,
+        lastError: '<img src=x onerror=alert(1)>',
+        platformLimitation: 'Requires an interactive <desktop>.',
+        allowedActions: ['stop', 'restart', 'remove']
+    });
+
+    const html = controller.renderDaemonStatusHtml();
+
+    assert.match(html, />Running</);
+    assert.match(html, /4512/);
+    assert.match(html, /1h 2m uptime/);
+    assert.match(html, /1\.9\.0 \(current: 2\.0\.0\)/);
+    assert.match(html, /Owned by VBD/);
+    assert.match(html, /data-job-action="daemon-stop"/);
+    assert.match(html, /data-job-action="daemon-restart"/);
+    assert.match(html, /data-job-action="daemon-remove"/);
+    assert.match(html, /Windows &lt;desktop&gt;/);
+    assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
+    assert.doesNotMatch(html, /<img src=x/);
+    assert.doesNotMatch(html, /Enabled schedules need an active host/);
+});
+
+test('VBD remains opt-in and warns only for an enabled schedule when it is not Running', () => {
+    const app = createApp();
+    const controller = new JobController(app);
+    controller.daemonStatusLoading = false;
+    controller.daemonStatus = normalizeJobDaemonStatus({
+        state: 'NotInstalled',
+        isSupported: true,
+        isInstalled: false,
+        allowedActions: ['install']
+    });
+
+    controller.jobs = [{ enabled: true, triggers: [{ kind: 2 }] }];
+    assert.doesNotMatch(controller.renderDaemonStatusHtml(), /Enabled schedules need an active host/);
+
+    controller.jobs = [{ enabled: false, triggers: [{ kind: 0 }] }];
+    assert.doesNotMatch(controller.renderDaemonStatusHtml(), /Enabled schedules need an active host/);
+
+    controller.jobs = [{ enabled: true, triggers: [{ kind: 0 }] }];
+    const html = controller.renderDaemonStatusHtml();
+    assert.match(html, /Enabled schedules need an active host/);
+    assert.match(html, /only while an active VibeRails root backend is open/);
+    assert.match(html, /data-job-action="daemon-install"/);
+    assert.equal(app.calls.length, 0, 'rendering an enabled schedule must never install VBD');
+});
+
+test('VBD lifecycle controls call the exact authenticated Demon routes and consume returned status', async () => {
+    const app = createApp();
+    const toasts = [];
+    app.showToast = (title, message, type) => toasts.push({ title, message, type });
+    app.apiCall = async (url, method, body, requestOptions) => {
+        app.calls.push({ url, method, body, requestOptions });
+        return {
+            success: true,
+            message: 'Lifecycle updated.',
+            status: {
+                state: 'Running',
+                isSupported: true,
+                isInstalled: true,
+                isRunning: true,
+                isReachable: true,
+                registrationIsCurrent: true,
+                allowedActions: ['install', 'start', 'stop', 'restart', 'repair', 'remove']
+            }
+        };
+    };
+    const controller = new JobController(app);
+    controller.daemonStatusLoading = false;
+    controller.daemonStatus = normalizeJobDaemonStatus({
+        state: 'NeedsRepair',
+        isSupported: true,
+        isInstalled: true,
+        allowedActions: ['install', 'start', 'stop', 'restart', 'repair', 'remove']
+    });
+
+    for (const action of ['install', 'start', 'stop', 'restart', 'repair']) {
+        // The action response above deliberately keeps every action available for the next loop.
+        await controller.performDaemonAction(action);
+    }
+
+    assert.deepEqual(app.calls.map(({ url, method }) => ({ url, method })), [
+        { url: '/api/v1/jobs/demon/install', method: 'POST' },
+        { url: '/api/v1/jobs/demon/start', method: 'POST' },
+        { url: '/api/v1/jobs/demon/stop', method: 'POST' },
+        { url: '/api/v1/jobs/demon/restart', method: 'POST' },
+        { url: '/api/v1/jobs/demon/repair', method: 'POST' }
+    ]);
+    assert.ok(app.calls.every(call => call.body === null));
+    assert.ok(app.calls.every(call => call.requestOptions.showLoading === false));
+    assert.equal(controller.daemonStatus.state, 'Running');
+    assert.equal(toasts.length, 5);
+});
+
+test('Removing VBD confirms in-app and never removes Automation data', async () => {
+    const app = createApp();
+    app.apiCall = async (url, method, body) => {
+        app.calls.push({ url, method, body });
+        return {
+            success: true,
+            message: 'VBD removed.',
+            status: { state: 'NotInstalled', isSupported: true, isInstalled: false, allowedActions: ['install'] }
+        };
+    };
+    const controller = new JobController(app);
+    controller.daemonStatusLoading = false;
+    controller.daemonStatus = normalizeJobDaemonStatus({
+        state: 'Running', isInstalled: true, allowedActions: ['remove']
+    });
+
+    controller.confirm = async () => false;
+    await controller.removeDaemon(null);
+    assert.equal(app.calls.length, 0);
+
+    let prompt;
+    controller.confirm = async options => { prompt = options; return true; };
+    await controller.removeDaemon(null);
+    assert.equal(app.calls[0].url, '/api/v1/jobs/demon');
+    assert.equal(app.calls[0].method, 'DELETE');
+    assert.match(prompt.message, /Automations, queued runs, history, and terminal recordings stay intact/);
+});
+
+test('VBD status failure stays in its panel and a non-root host never calls the root-only endpoint', async () => {
+    const app = createApp();
+    app.apiCall = async () => { throw new Error('<status probe failed>'); };
+    const controller = new JobController(app);
+    controller.jobs = [{ id: 7, name: 'Still here' }];
+
+    await controller.refreshDaemonStatus({ quiet: true });
+
+    assert.deepEqual(controller.jobs, [{ id: 7, name: 'Still here' }]);
+    assert.equal(controller.daemonStatus.state, 'Error');
+    assert.match(controller.renderDaemonStatusHtml(), /&lt;status probe failed&gt;/);
+    assert.doesNotMatch(controller.renderDaemonStatusHtml(), /<status probe failed>/);
+
+    let calls = 0;
+    app.data.configs.isActiveRootBackend = false;
+    app.apiCall = async () => { calls += 1; };
+    await controller.refreshDaemonStatus();
+    assert.equal(calls, 0);
+    assert.equal(controller.daemonStatus.state, 'Unavailable');
+    assert.match(controller.renderDaemonStatusHtml(), /main VibeRails dashboard/);
+});
+
+test('The existing five-second Automation poll refreshes VBD without a second timer', () => {
+    const source = readFileSync(modulePath, 'utf8');
+    const poll = source.slice(source.indexOf('this.pollTimer = window.setInterval'), source.indexOf('}, 5000)', source.indexOf('this.pollTimer = window.setInterval')));
+
+    assert.match(poll, /refreshRuns\(\{ quiet: true \}\)/);
+    assert.match(poll, /refreshJobs\(\{ quiet: true \}\)/);
+    assert.match(poll, /refreshDaemonStatus\(\{ quiet: true \}\)/);
+    assert.equal((source.match(/this\.pollTimer = window\.setInterval/g) || []).length, 1);
 });
 
 test('Deleting an automation confirms in-app — window.confirm is dead in the webview', async () => {
@@ -1733,6 +1924,8 @@ test('Automation surfaces have a defined elevated background in every theme scop
 test('Automation CRUD surfaces stay opaque, including disabled rows', () => {
     const css = readFileSync(stylePath, 'utf8');
 
+    assert.match(css, /\.jobs-daemon-panel\s*\{[^}]*background-color:\s*var\(--color-bg-surface,\s*#1e1e1e\)/);
+    assert.match(css, /\.jobs-daemon-diagnostics\s*\{[^}]*background-color:\s*var\(--color-bg-base,\s*#121212\)/);
     assert.match(css, /\.jobs-panel\s*\{[^}]*background-color:\s*var\(--color-bg-surface/);
     assert.match(css, /\.job-inline-form\s*\{[^}]*background-color:\s*var\(--color-bg-surface/);
     assert.match(css, /\.job-card\s*\{[^}]*background-color:\s*var\(--color-bg-base/);
@@ -1740,6 +1933,15 @@ test('Automation CRUD surfaces stay opaque, including disabled rows', () => {
     assert.match(css, /\.job-recipe-review-value\s*\{[^}]*background-color:\s*var\(--color-bg-base/);
     assert.match(css, /\.job-history-bulk\s*\{[^}]*background-color:[^}]*var\(--color-bg-elevated/);
     assert.doesNotMatch(css, /\.job-card\[data-enabled="false"\]\s*\{[^}]*opacity:/);
+});
+
+test('VBD controls remain usable at narrow Automation widths', () => {
+    const css = readFileSync(stylePath, 'utf8');
+
+    assert.match(css, /@media \(max-width: 720px\)[\s\S]*?\.jobs-daemon-setting-row\s*\{[^}]*flex-direction:\s*column/);
+    assert.match(css, /@media \(max-width: 720px\)[\s\S]*?\.jobs-daemon-diagnostics\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/);
+    assert.match(css, /\.jobs-daemon-toggle:focus-visible\s*\{/);
+    assert.match(css, /\.jobs-daemon-toggle\[aria-checked="true"\]/);
 });
 
 test('The automation switch reads green when on and red when off, and the row edge echoes it', () => {

@@ -2,6 +2,7 @@ using System.Threading.Channels;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Serilog;
+using Serilog.Events;
 using VibeRails.DB;
 using VibeRails.Utils;
 
@@ -30,6 +31,7 @@ public sealed class JobSchedulerHostedService : BackgroundService, IJobScheduler
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IJobStore _store;
+    private readonly JobSchedulerHealth _health;
     private readonly string _ownerId = $"{Environment.ProcessId}:{Guid.NewGuid():N}";
     private readonly Channel<byte> _wake = Channel.CreateBounded<byte>(new BoundedChannelOptions(1)
     {
@@ -49,10 +51,14 @@ public sealed class JobSchedulerHostedService : BackgroundService, IJobScheduler
     internal Func<bool> IsBootstrapProcess { get; set; } =
         static () => ParserConfigs.GetArguments().IsLMBootstrap;
 
-    public JobSchedulerHostedService(IServiceScopeFactory scopeFactory, IJobStore store)
+    public JobSchedulerHostedService(
+        IServiceScopeFactory scopeFactory,
+        IJobStore store,
+        JobSchedulerHealth? health = null)
     {
         _scopeFactory = scopeFactory;
         _store = store;
+        _health = health ?? new JobSchedulerHealth();
     }
 
     public void Kick()
@@ -84,6 +90,7 @@ public sealed class JobSchedulerHostedService : BackgroundService, IJobScheduler
                 }
                 catch (Exception ex)
                 {
+                    _health.CycleFailed(DateTime.UtcNow, ex);
                     Log.Error(ex, "[Jobs] Scheduler cycle failed");
                 }
 
@@ -114,40 +121,81 @@ public sealed class JobSchedulerHostedService : BackgroundService, IJobScheduler
             {
                 try
                 {
-                    await _store.ReleaseSchedulerLeaseAsync(_ownerId, CancellationToken.None);
+                    if (await _store.ReleaseSchedulerLeaseAsync(_ownerId, CancellationToken.None))
+                    {
+                        Log.Information("[Jobs] Scheduler lease released by {OwnerId}", _ownerId);
+                    }
                 }
                 catch (Exception ex)
                 {
                     Log.Warning(ex, "[Jobs] Could not release scheduler lease for {OwnerId}", _ownerId);
                 }
                 _ownsLease = false;
+                _health.LeaseChanged(false);
             }
         }
     }
 
     internal async Task<bool> RunCycleAsync(DateTime nowUtc, CancellationToken cancellationToken)
     {
+        _health.CycleStarted(nowUtc);
+        var previouslyOwnedLease = _ownsLease;
         _ownsLease = await _store.TryAcquireOrRenewSchedulerLeaseAsync(
             _ownerId,
             nowUtc,
             SchedulerLeaseDuration,
             cancellationToken);
+        _health.LeaseChanged(_ownsLease);
         if (!_ownsLease)
+        {
+            if (previouslyOwnedLease)
+                Log.Information("[Jobs] Scheduler lease lost by {OwnerId}", _ownerId);
+            _health.CycleContended(DateTime.UtcNow);
+            Log.Debug("[Jobs] Scheduler cycle healthy; lease is held by another process");
             return false;
+        }
 
-        await JobRunReaper.ReapAsync(_store, cancellationToken);
-        await _store.FailStalledLaunchesAsync(LaunchGrace, cancellationToken);
-        await _store.EnqueueDueSchedulesAsync(nowUtc, cancellationToken);
+        if (!previouslyOwnedLease)
+            Log.Information("[Jobs] Scheduler lease acquired by {OwnerId}", _ownerId);
+
+        var reaped = await JobRunReaper.ReapAsync(_store, cancellationToken);
+        var stalled = await _store.FailStalledLaunchesAsync(LaunchGrace, cancellationToken);
+        var enqueued = await _store.EnqueueDueSchedulesAsync(nowUtc, cancellationToken);
 
         // Launching is fire-and-forget by nature: the spawned terminal owns the run from here, so
         // this returns promptly no matter how long the run itself takes. Nothing about a long run
         // can stall enqueueing, reaping, or a "Run now" kick.
         await using var scope = _scopeFactory.CreateAsyncScope();
         var launcher = scope.ServiceProvider.GetRequiredService<IJobLaunchService>();
-        return await LaunchQueuedRunsWithLeaseRenewalAsync(launcher, cancellationToken);
+        var (leaseMaintained, launched) = await LaunchQueuedRunsWithLeaseRenewalAsync(launcher, cancellationToken);
+        _health.CycleCompleted(
+            DateTime.UtcNow,
+            leaseMaintained,
+            enqueued.Count,
+            launched,
+            reaped,
+            stalled);
+        Log.Write(
+            GetCycleCompletionLogLevel(enqueued.Count, launched, reaped, stalled),
+            "[Jobs] Scheduler cycle complete. lease={OwnsLease} enqueued={Enqueued} launched={Launched} reaped={Reaped} stalled={Stalled}",
+            leaseMaintained,
+            enqueued.Count,
+            launched,
+            reaped,
+            stalled);
+        return leaseMaintained;
     }
 
-    private async Task<bool> LaunchQueuedRunsWithLeaseRenewalAsync(
+    internal static LogEventLevel GetCycleCompletionLogLevel(
+        int schedulesEnqueued,
+        int runsLaunched,
+        int runsReaped,
+        int stalledLaunchesFailed) =>
+        schedulesEnqueued > 0 || runsLaunched > 0 || runsReaped > 0 || stalledLaunchesFailed > 0
+            ? LogEventLevel.Information
+            : LogEventLevel.Debug;
+
+    private async Task<(bool LeaseMaintained, int Launched)> LaunchQueuedRunsWithLeaseRenewalAsync(
         IJobLaunchService launcher,
         CancellationToken cancellationToken)
     {
@@ -157,9 +205,12 @@ public sealed class JobSchedulerHostedService : BackgroundService, IJobScheduler
             launchCancellation,
             () => Interlocked.Exchange(ref leaseLost, 1));
 
+        var launched = 0;
+        var launchCompleted = false;
         try
         {
-            await launcher.LaunchQueuedRunsAsync(launchCancellation.Token);
+            launched = await launcher.LaunchQueuedRunsAsync(launchCancellation.Token);
+            launchCompleted = true;
         }
         catch (OperationCanceledException) when (
             !cancellationToken.IsCancellationRequested &&
@@ -174,7 +225,13 @@ public sealed class JobSchedulerHostedService : BackgroundService, IJobScheduler
             await renewal;
         }
 
-        return Volatile.Read(ref leaseLost) == 0;
+        // The verdict must be read only after the renewal task has fully stopped: a final renewal
+        // failure that races the launch batch completing would otherwise be latched after this
+        // method captured leaseLost == 0, and CycleCompleted(leaseMaintained: true) would then
+        // overwrite OwnsSchedulerLease/LastError with ownership another process actually holds.
+        return launchCompleted && Volatile.Read(ref leaseLost) == 0
+            ? (true, launched)
+            : (false, launchCompleted ? launched : 0);
     }
 
     private async Task RenewLeaseUntilCancelledAsync(
@@ -209,6 +266,7 @@ public sealed class JobSchedulerHostedService : BackgroundService, IJobScheduler
                     continue;
 
                 _ownsLease = false;
+                _health.LeaseChanged(false);
                 markLeaseLost();
                 launchCancellation.Cancel();
                 Log.Warning(

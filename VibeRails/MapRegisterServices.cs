@@ -33,6 +33,8 @@ using VibeRails.Services.Integrations.VibeCodeRemote;
 using VibeRails.Services.GitPreflight;
 using VibeRails.Services.Jobs;
 using VibeRails.Services.HttpRelay;
+using VibeRails.Daemon;
+using VibeRails.Daemon.Ipc;
 
 namespace VibeRails
 {
@@ -133,9 +135,8 @@ namespace VibeRails
             // same reason as the other state.db stores: one writer, connection-per-operation.
             serviceCollection.AddSingleton<ICodeAnalyzerIgnoreStore>(_ => new CodeAnalyzerIgnoreStore(
                 $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared"));
-            serviceCollection.AddSingleton<IJobStore>(_ => new JobStore(
-                $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared"));
-            serviceCollection.AddSingleton<IJobExecutableResolver, JobExecutableResolver>();
+            serviceCollection.AddAutomationRuntime(
+                hostScheduler: isActiveRootBackendProcess && !isFakeCliTestProcess);
             // General-purpose process runner (hidden+captured, or its own visible terminal window).
             // Stateless, so one instance serves every caller. Environment Steps are its first
             // consumer; GitProcessRunner and ShellService are the obvious later migrations.
@@ -146,40 +147,29 @@ namespace VibeRails
             // Resolves {{datetime}}-style built-ins and {{step:<id>}} output injection in an
             // environment's Initial Message. Scoped for the same IRepository reason as above.
             serviceCollection.AddScoped<IPromptPlaceholderService, PromptPlaceholderService>();
-            // Spawns a real OS terminal per queued run through the same scoped Environment launch
-            // pipeline as the CLI launch API. JobRunner itself lives in the spawned process.
-            serviceCollection.AddScoped<IJobLaunchService, JobLaunchService>();
-            // Keep the scheduler signal resolvable everywhere JobService can be resolved, but only
-            // an active root backend hosts the polling loop. Terminal-tab children and `vb --env`
-            // processes share state.db but must never compete for scheduled work.
-            serviceCollection.AddSingleton<JobSchedulerHostedService>();
-            serviceCollection.AddSingleton<IJobScheduler>(sp => sp.GetRequiredService<JobSchedulerHostedService>());
             // Playwright's real backend uses a fake CLI but shares the developer account's state
             // directory. Never let that test host dispatch persisted Automation work.
-            if (isActiveRootBackendProcess && !isFakeCliTestProcess)
-            {
-                serviceCollection.AddHostedService(sp => sp.GetRequiredService<JobSchedulerHostedService>());
-            }
-            else if (isActiveRootBackendProcess)
+            if (isActiveRootBackendProcess && isFakeCliTestProcess)
             {
                 // An env var silently disabling the scheduler in a real environment would look
                 // exactly like "Automations never fire". Make the suppression loud and findable.
                 Serilog.Log.Warning(
                     "[Jobs] Automation scheduler NOT registered: VIBERAILS_TEST_FAKE_CLI=1 marks this as a UI-test host");
             }
+            serviceCollection.AddSingleton<ICurrentUserIdentityProvider, CurrentUserIdentityProvider>();
+            serviceCollection.AddSingleton<IDaemonControlClient, DaemonControlClient>();
+            // A provider, not a one-time Resolve(): a singleton resolution latches File.Exists
+            // (vb.exe) for the process lifetime, so a dashboard started before the payload was
+            // installed would report VBD Unavailable until restarted.
+            serviceCollection.AddSingleton<IJobDaemonRegistrationProvider, JobDaemonRegistrationProvider>();
+            serviceCollection.AddSingleton<IJobDaemonKicker, JobDaemonKicker>();
             serviceCollection.AddScoped<IJobService, JobService>();
+            serviceCollection.AddSingleton<IJobDaemonLifecycleService, JobDaemonLifecycleService>();
             // Singleton for the same reason as the savings tally: one ordered writer, so concurrent
             // relays serialize capture inserts, re-sight counts, and clears before reaching SQLite.
             serviceCollection.AddSingleton<ICompressionCaptureStore>(_ => new CompressionCaptureStore(
                 $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared"));
             serviceCollection.AddScoped<IAgentTerminalToolService, AgentTerminalToolService>();
-            serviceCollection.AddScoped<IRepository>(sp =>
-            {
-                var connectionString = $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared";
-                var gitDiff = sp.GetService<IGitDiffCaptureService>();
-                var logger = sp.GetService<ILogger<Repository>>();
-                return new Repository(connectionString, gitDiff, logger);
-            });
             serviceCollection.AddScoped<ILlmPickerPreferenceService, LlmPickerPreferenceService>();
             serviceCollection.AddScoped<IAutomationNavPreferenceService, AutomationNavPreferenceService>();
             // Python script signing: file-based state + a lazily-probed interpreter. Singleton so
@@ -239,21 +229,6 @@ namespace VibeRails
             serviceCollection.AddScoped<IOpencodeLlmCliEnvironment, OpencodeLlmCliEnvironment>();
             serviceCollection.AddScoped<IGrokLlmCliEnvironment, GrokLlmCliEnvironment>();
             serviceCollection.AddScoped<LlmCliEnvironmentService>();
-
-            // Sandbox service, and the workspace resolution that reuses it to back an
-            // environment's Persistent / PerRun clone modes.
-            serviceCollection.AddScoped<ISandboxService, SandboxService>();
-            serviceCollection.AddScoped<IRunWorkspaceService, RunWorkspaceService>();
-
-            // LLM CLI Launcher services
-            serviceCollection.AddScoped<IClaudeLlmCliLauncher, ClaudeLlmCliLauncher>();
-            serviceCollection.AddScoped<ICodexLlmCliLauncher, CodexLlmCliLauncher>();
-            serviceCollection.AddScoped<IAntigravityLlmCliLauncher, AntigravityLlmCliLauncher>();
-            serviceCollection.AddScoped<ICopilotLlmCliLauncher, CopilotLlmCliLauncher>();
-            serviceCollection.AddScoped<IOpencodeLlmCliLauncher, OpencodeLlmCliLauncher>();
-            serviceCollection.AddScoped<IGrokLlmCliLauncher, GrokLlmCliLauncher>();
-            serviceCollection.AddScoped<ILaunchLLMService, LaunchLLMService>();
-            serviceCollection.AddScoped<IEnvironmentLaunchService, EnvironmentLaunchService>();
 
             // In-process MCP server, exposed over HTTP at /mcp (see app.MapMcp in Program.cs).
             // Only the root backend hosts it — terminal-tab child processes skip it so we don't
@@ -429,7 +404,9 @@ namespace VibeRails
         internal static bool IsActiveRootBackendProcess(IEnumerable<string> args)
         {
             var arguments = args as string[] ?? args.ToArray();
-            return !IsTerminalTabChildProcess(arguments)
+            return !JobDaemonProcessHost.IsRequested(arguments)
+                   && !JobDaemonMaintenanceProcessHost.IsRequested(arguments)
+                   && !IsTerminalTabChildProcess(arguments)
                    && !ArgumentParser.Parse(arguments).IsLMBootstrap;
         }
 
