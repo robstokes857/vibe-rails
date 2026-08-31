@@ -25,7 +25,8 @@ public sealed class JobService(
     IJobStore store,
     IRepository repository,
     IJobExecutableResolver executableResolver,
-    IJobScheduler scheduler) : IJobService
+    IJobScheduler scheduler,
+    IJobDaemonKicker? daemonKicker = null) : IJobService
 {
     private const int MaximumNameLength = 100;
     private const int MaximumPromptLength = 50_000;
@@ -105,6 +106,7 @@ public sealed class JobService(
         // it. Kick only wakes that loop early; it deliberately does NOT reserve the run here, so
         // there is exactly one launcher and one kind of window an Automation can run in.
         scheduler.Kick();
+        await JobDaemonWakeup.TryKickAsync(daemonKicker, CancellationToken.None);
         return new JobActionResponse(true, "Automation queued.", runId);
     }
 
@@ -255,6 +257,7 @@ public sealed class JobService(
         var retryId = await store.EnqueueRetryAsync(runId, cancellationToken)
             ?? throw JobServiceException.Conflict("Only completed runs for active Automations can be retried.");
         scheduler.Kick();
+        await JobDaemonWakeup.TryKickAsync(daemonKicker, CancellationToken.None);
         return new JobActionResponse(true, "Automation retry queued.", retryId);
     }
 

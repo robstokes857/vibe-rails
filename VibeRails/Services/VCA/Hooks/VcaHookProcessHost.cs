@@ -1,7 +1,10 @@
 using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
+using VibeRails.Daemon;
+using VibeRails.Daemon.Ipc;
 using VibeRails.Services.GitPreflight;
+using VibeRails.Services.Jobs;
 using VibeRails.DB;
 using VibeRails.Utils;
 
@@ -337,6 +340,13 @@ public static class VcaHookProcessHost
             var statePath = Path.Combine(installDirectory, PathConstants.STATE_FILENAME);
             return new JobStore($"Data Source={statePath};Mode=ReadWriteCreate;Cache=Shared");
         });
+        // Without these, AutomatedWorkflowsPreflightStep's optional IJobDaemonKicker resolves to
+        // null and the immediate VBD wakeup after queueing before-commit runs is a silent no-op
+        // in the exact process (`vb --vca-hook`) it was added for. The kicker resolves identity
+        // lazily, so registering it can never fail hook startup.
+        services.AddSingleton<IDaemonControlClient, DaemonControlClient>();
+        services.AddSingleton<ICurrentUserIdentityProvider, CurrentUserIdentityProvider>();
+        services.AddSingleton<IJobDaemonKicker, JobDaemonKicker>();
         services.AddGitPreflight();
         services.AddSingleton<IVcaHookPresenter>(_ =>
             new VcaConsoleHookPresenter(new VcaHookConsoleOptions(output, error, input, enableSpinner, style)));

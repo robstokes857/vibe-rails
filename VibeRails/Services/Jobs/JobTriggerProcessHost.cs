@@ -2,6 +2,8 @@ using Serilog;
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Utils;
+using VibeRails.Daemon;
+using VibeRails.Daemon.Ipc;
 
 namespace VibeRails.Services.Jobs;
 
@@ -13,17 +15,29 @@ public static class JobTriggerProcessHost
     public static Task<int> RunAsync(
         IReadOnlyList<string> args,
         CancellationToken cancellationToken = default) =>
-        RunCoreAsync(args, jobStore: null, cancellationToken);
+        RunCoreAsync(
+            args,
+            jobStore: null,
+            CreateDefaultKicker(),
+            cancellationToken);
 
     internal static Task<int> RunAsync(
         IReadOnlyList<string> args,
         IJobStore jobStore,
         CancellationToken cancellationToken = default) =>
-        RunCoreAsync(args, jobStore, cancellationToken);
+        RunCoreAsync(args, jobStore, daemonKicker: null, cancellationToken);
+
+    internal static Task<int> RunAsync(
+        IReadOnlyList<string> args,
+        IJobStore jobStore,
+        IJobDaemonKicker daemonKicker,
+        CancellationToken cancellationToken = default) =>
+        RunCoreAsync(args, jobStore, daemonKicker, cancellationToken);
 
     private static async Task<int> RunCoreAsync(
         IReadOnlyList<string> args,
         IJobStore? jobStore,
+        IJobDaemonKicker? daemonKicker,
         CancellationToken cancellationToken)
     {
         try
@@ -85,6 +99,7 @@ public static class JobTriggerProcessHost
             if (runIds.Count > 0)
             {
                 Log.Information("[Jobs] Queued {Count} commit-triggered run(s) for {Repository}", runIds.Count, repositoryPath);
+                await JobDaemonWakeup.TryKickAsync(daemonKicker, CancellationToken.None);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -105,5 +120,19 @@ public static class JobTriggerProcessHost
                 return args[index][(option.Length + 1)..];
         }
         return null;
+    }
+
+    private static IJobDaemonKicker? CreateDefaultKicker()
+    {
+        try
+        {
+            return new JobDaemonKicker(new DaemonControlClient(), new CurrentUserIdentityProvider());
+        }
+        catch (Exception ex)
+        {
+            // The Git hook must remain report-only even if current-user IPC identity is unavailable.
+            Log.Debug(ex, "[VBD] Could not initialize the post-commit scheduler wakeup client");
+            return null;
+        }
     }
 }

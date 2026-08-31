@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
+using Serilog.Events;
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services.Jobs;
@@ -26,15 +27,23 @@ public sealed class JobSchedulerHostedServiceTests
         await using var services = new ServiceCollection()
             .AddSingleton(launcher.Object)
             .BuildServiceProvider();
+        var health = new JobSchedulerHealth();
         var scheduler = new JobSchedulerHostedService(
             services.GetRequiredService<IServiceScopeFactory>(),
-            store.Object);
+            store.Object,
+            health);
 
         var ran = await scheduler.RunCycleAsync(
             new DateTime(2026, 7, 26, 12, 0, 0, DateTimeKind.Utc),
             TestContext.Current.CancellationToken);
 
         Assert.False(ran);
+        var snapshot = health.GetSnapshot();
+        Assert.Equal(new DateTime(2026, 7, 26, 12, 0, 0, DateTimeKind.Utc), snapshot.LastCycleStartedUtc);
+        Assert.NotNull(snapshot.LastCycleCompletedUtc);
+        Assert.Null(snapshot.LastSuccessfulCycleUtc);
+        Assert.False(snapshot.OwnsSchedulerLease);
+        Assert.Null(snapshot.LastError);
         store.VerifyAll();
         store.VerifyNoOtherCalls();
         launcher.VerifyNoOtherCalls();
@@ -61,26 +70,58 @@ public sealed class JobSchedulerHostedServiceTests
             .Setup(candidate => candidate.FailStalledLaunchesAsync(
                 It.IsAny<TimeSpan>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(0);
+            .ReturnsAsync(2);
         store.InSequence(sequence)
             .Setup(candidate => candidate.EnqueueDueSchedulesAsync(
                 nowUtc,
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Array.Empty<string>());
+            .ReturnsAsync(["due-1", "due-2", "due-3"]);
         launcher.InSequence(sequence)
             .Setup(candidate => candidate.LaunchQueuedRunsAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(0);
+            .ReturnsAsync(1);
 
         await using var services = new ServiceCollection()
             .AddSingleton(launcher.Object)
             .BuildServiceProvider();
+        var health = new JobSchedulerHealth();
         var scheduler = new JobSchedulerHostedService(
             services.GetRequiredService<IServiceScopeFactory>(),
-            store.Object);
+            store.Object,
+            health);
 
         Assert.True(await scheduler.RunCycleAsync(nowUtc, TestContext.Current.CancellationToken));
+        var snapshot = health.GetSnapshot();
+        Assert.NotNull(snapshot.LastSuccessfulCycleUtc);
+        Assert.True(snapshot.OwnsSchedulerLease);
+        Assert.Equal(3, snapshot.LastSchedulesEnqueued);
+        Assert.Equal(1, snapshot.LastRunsLaunched);
+        Assert.Equal(0, snapshot.LastRunsReaped);
+        Assert.Equal(2, snapshot.LastStalledLaunchesFailed);
+        Assert.Null(snapshot.LastError);
         store.VerifyAll();
         launcher.VerifyAll();
+    }
+
+    [Theory]
+    [InlineData(0, 0, 0, 0, LogEventLevel.Debug)]
+    [InlineData(1, 0, 0, 0, LogEventLevel.Information)]
+    [InlineData(0, 1, 0, 0, LogEventLevel.Information)]
+    [InlineData(0, 0, 1, 0, LogEventLevel.Information)]
+    [InlineData(0, 0, 0, 1, LogEventLevel.Information)]
+    public void GetCycleCompletionLogLevel_UsesInformationOnlyForMeaningfulWork(
+        int schedulesEnqueued,
+        int runsLaunched,
+        int runsReaped,
+        int stalledLaunchesFailed,
+        LogEventLevel expected)
+    {
+        Assert.Equal(
+            expected,
+            JobSchedulerHostedService.GetCycleCompletionLogLevel(
+                schedulesEnqueued,
+                runsLaunched,
+                runsReaped,
+                stalledLaunchesFailed));
     }
 
     [Fact]
@@ -129,9 +170,11 @@ public sealed class JobSchedulerHostedServiceTests
         await using var services = new ServiceCollection()
             .AddSingleton(launcher.Object)
             .BuildServiceProvider();
+        var health = new JobSchedulerHealth();
         var scheduler = new JobSchedulerHostedService(
             services.GetRequiredService<IServiceScopeFactory>(),
-            store.Object)
+            store.Object,
+            health)
         {
             LeaseRenewalInterval = TimeSpan.FromMilliseconds(10)
         };
@@ -154,6 +197,7 @@ public sealed class JobSchedulerHostedServiceTests
     public async Task RunCycleAsync_WhenLeaseRenewalIsLost_CancelsRemainingLaunches()
     {
         var leaseCalls = 0;
+        var health = new JobSchedulerHealth();
         var launchCancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var store = new Mock<IJobStore>(MockBehavior.Strict);
         store
@@ -199,7 +243,8 @@ public sealed class JobSchedulerHostedServiceTests
             .BuildServiceProvider();
         var scheduler = new JobSchedulerHostedService(
             services.GetRequiredService<IServiceScopeFactory>(),
-            store.Object)
+            store.Object,
+            health)
         {
             LeaseRenewalInterval = TimeSpan.FromMilliseconds(10)
         };
@@ -212,6 +257,7 @@ public sealed class JobSchedulerHostedServiceTests
             TestContext.Current.CancellationToken);
 
         Assert.Equal(2, Volatile.Read(ref leaseCalls));
+        Assert.False(health.GetSnapshot().OwnsSchedulerLease);
         store.VerifyAll();
         launcher.VerifyAll();
     }
@@ -275,9 +321,11 @@ public sealed class JobSchedulerHostedServiceTests
         await using var services = new ServiceCollection()
             .AddSingleton(launcher.Object)
             .BuildServiceProvider();
+        var health = new JobSchedulerHealth();
         var scheduler = new JobSchedulerHostedService(
             services.GetRequiredService<IServiceScopeFactory>(),
-            store.Object);
+            store.Object,
+            health);
 
         // Use the seam instead of flipping the process-global parsed-args state.
         scheduler.IsBootstrapProcess = static () => false;
@@ -307,6 +355,7 @@ public sealed class JobSchedulerHostedServiceTests
 
             Assert.Equal(2, Volatile.Read(ref launchCount));
             Assert.False(string.IsNullOrWhiteSpace(leaseOwner));
+            Assert.False(health.GetSnapshot().OwnsSchedulerLease);
             store.Verify(candidate => candidate.ReleaseSchedulerLeaseAsync(
                 leaseOwner!,
                 CancellationToken.None), Times.Once);

@@ -125,7 +125,8 @@ async function installStatefulApi(page) {
             return respond({
                 isInGit: true,
                 rootPath: CURRENT_REPOSITORY,
-                launchDirectory: CURRENT_REPOSITORY
+                launchDirectory: CURRENT_REPOSITORY,
+                isActiveRootBackend: true
             });
         }
         if (method === 'GET' && path === '/api/v1/environments') {
@@ -209,13 +210,29 @@ async function installStatefulApi(page) {
         if (method === 'GET' && path === '/api/v1/jobs/runs') {
             return respond({ runs: [] });
         }
-        if (method === 'GET' && path === '/api/v1/jobs/worker') {
+        // Keep the page's VBD probe deterministic and read-only. Lifecycle mutation behavior is
+        // covered by controller tests; this editor fixture must never inspect or change the
+        // developer account's real per-user background registration.
+        if (method === 'GET' && path === '/api/v1/jobs/demon') {
             return respond({
-                state: 'running',
-                installed: true,
-                running: true,
-                needsRepair: false,
-                message: 'Jobs worker is running.'
+                state: 'NotInstalled',
+                platform: 'test',
+                isSupported: true,
+                isInstalled: false,
+                isRunning: false,
+                isReachable: false,
+                registrationIsCurrent: false,
+                currentVersion: 'test',
+                daemonVersion: null,
+                protocolVersion: 1,
+                pid: null,
+                startedUtc: null,
+                uptimeSeconds: null,
+                lastCycleUtc: null,
+                ownsSchedulerLease: null,
+                lastError: null,
+                platformLimitation: 'Test fixture background execution is disabled.',
+                allowedActions: ['install']
             });
         }
         // The Python scripts section reads the developer's real ~/.vibe_rails/scripts

@@ -156,6 +156,8 @@ public sealed class CookieAuthMiddlewareTests
     [InlineData("/api/v1/settings/export-data/progress")]
     [InlineData("/api/v1/http-relay/test/posts")]
     [InlineData("/api/v1/http-relay/test/posts/7")]
+    [InlineData("/api/v1/jobs/demon")]
+    [InlineData("/api/v1/jobs/demon/install")]
     public async Task NewlyInventoriedApiRoutes_WithSessionTokenOnly_AreRejected(string path)
     {
         var middleware = Build(out var reachedNext);

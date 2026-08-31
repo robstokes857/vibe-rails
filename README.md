@@ -19,6 +19,7 @@
 - **Token Savings** - Learn your codebase and how you describe it, providing LLMs with smart file hints to reduce token usage and costs
 - **Rule Files (`vc.rules.md`)** - Create and manage VibeRails rule files that gate every commit with WARN/COMMIT/STOP enforcement
 - **Web Terminal** - Launch CLIs directly in the browser with xterm.js. Select base CLIs (Claude, Codex, Antigravity, Copilot, OpenCode, GLM 5.2, Grok 4.6) or custom environments from a visual dropdown with optgroups
+- **Background Automations (Preview)** - Opt in to the per-user VibeRails Demon so scheduled Automations continue while the dashboard is closed. See the [VBD runbook](runbooks/VBD/VBD.md) for limits and recovery.
 
 ---
 

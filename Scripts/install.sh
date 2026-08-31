@@ -127,6 +127,205 @@ sha256_file() {
     exit 1
 }
 
+validate_release_payload() {
+    local root_dir="$1"
+    local binary_name="$2"
+    local model_archive_name="$3"
+    local relative_path
+    local entry
+    local entry_name
+    local entry_name_lower
+
+    local required_files=(
+        "$binary_name"
+        "appsettings.json"
+        "wwwroot/index.html"
+        "Models/BertV2/$model_archive_name"
+        "Models/BertV2/vocab.txt"
+        "scripts/pre-commit-hook.sh"
+        "scripts/commit-msg-hook.sh"
+    )
+
+    case "$OS_TYPE" in
+        linux)
+            required_files+=("libonnxruntime.so" "libe_sqlite3.so" "vec0.so")
+            ;;
+        macos)
+            required_files+=("libonnxruntime.dylib" "libe_sqlite3.dylib" "vec0.dylib")
+            ;;
+        *)
+            echo -e "${RED}Error: Cannot validate native libraries for unsupported platform '$OS_TYPE'.${NC}" >&2
+            return 1
+            ;;
+    esac
+
+    for relative_path in "${required_files[@]}"; do
+        if [ ! -f "$root_dir/$relative_path" ]; then
+            echo -e "${RED}Error: Release package is incomplete: required file '$relative_path' is missing. The existing installation was not changed.${NC}" >&2
+            return 1
+        fi
+    done
+
+    # The payload is overlaid into ~/.vibe_rails. Refuse an archive that
+    # accidentally contains known user-owned roots before it can overwrite them.
+    # Compare the archive's actual entry spelling so bundled `Models/` remains
+    # distinct from runtime `models/`, even on case-insensitive macOS volumes.
+    for entry in "$root_dir"/*; do
+        if [ ! -e "$entry" ] && [ ! -L "$entry" ]; then
+            continue
+        fi
+        entry_name=${entry##*/}
+        entry_name_lower=$(printf '%s' "$entry_name" | tr '[:upper:]' '[:lower:]')
+        if [ "$entry_name" = "Models" ]; then
+            continue
+        fi
+        case "$entry_name_lower" in
+            config.json|envs|history|logs|models|sandboxes|state.db|state.db-*)
+                echo -e "${RED}Error: Release package contains protected user-data path '$entry_name'. The existing installation was not changed.${NC}" >&2
+                return 1
+                ;;
+        esac
+    done
+}
+
+validate_install_target() {
+    local owner_uid
+    local current_uid
+
+    if [ -L "$INSTALL_DIR" ]; then
+        echo -e "${RED}Error: Installation target must not be a symlink: $INSTALL_DIR${NC}" >&2
+        return 1
+    fi
+    if [ -e "$INSTALL_DIR" ] && [ ! -d "$INSTALL_DIR" ]; then
+        echo -e "${RED}Error: Installation target exists but is not a directory: $INSTALL_DIR${NC}" >&2
+        return 1
+    fi
+    if [ ! -d "$INSTALL_DIR" ]; then
+        return 0
+    fi
+
+    current_uid=$(id -u)
+    case "$OS_TYPE" in
+        linux) owner_uid=$(stat -c '%u' "$INSTALL_DIR") ;;
+        macos) owner_uid=$(stat -f '%u' "$INSTALL_DIR") ;;
+        *)
+            echo -e "${RED}Error: Cannot validate installation ownership for '$OS_TYPE'.${NC}" >&2
+            return 1
+            ;;
+    esac
+    if [ "$owner_uid" != "$current_uid" ]; then
+        echo -e "${RED}Error: Installation target must be owned by the current user: $INSTALL_DIR${NC}" >&2
+        return 1
+    fi
+}
+
+get_vbd_status() {
+    local executable="$1"
+    local json
+    local compact_json
+
+    if ! json=$("$executable" --job-daemon-service status --json 2>/dev/null); then
+        echo "VBD status command failed." >&2
+        return 1
+    fi
+
+    compact_json=$(printf '%s' "$json" | tr -d '\r\n')
+    if ! grep -Eq '"isInstalled"[[:space:]]*:[[:space:]]*(true|false)' <<<"$compact_json"; then
+        echo "VBD status JSON did not contain isInstalled." >&2
+        return 1
+    fi
+    if ! grep -Eq '"isRunning"[[:space:]]*:[[:space:]]*(true|false)' <<<"$compact_json"; then
+        echo "VBD status JSON did not contain isRunning." >&2
+        return 1
+    fi
+
+    printf '%s' "$compact_json"
+}
+
+json_boolean_is_true() {
+    local json="$1"
+    local property_name="$2"
+    grep -Eq "\"${property_name}\"[[:space:]]*:[[:space:]]*true" <<<"$json"
+}
+
+json_string_value() {
+    local json="$1"
+    local property_name="$2"
+    printf '%s' "$json" |
+        sed -n "s/.*\"${property_name}\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" |
+        head -1
+}
+
+assert_no_destination_links() {
+    local payload_dir="$1"
+    local install_dir="$2"
+    local entry relative destination
+
+    # cp -R overlays THROUGH an existing symlink at any payload-shadowed path (e.g. a planted
+    # 'wwwroot' link would redirect application files into another directory). Refuse to copy
+    # while any such link exists.
+    while IFS= read -r -d '' entry; do
+        relative="${entry#"$payload_dir"/}"
+        destination="$install_dir/$relative"
+        if [ -L "$destination" ]; then
+            echo -e "${RED}Error: Refusing to overlay through a symlink at '$destination'. Remove the link and retry; no application files were replaced.${NC}" >&2
+            return 1
+        fi
+    done < <(find "$payload_dir" -mindepth 1 -print0)
+}
+
+wait_for_vbd_running_state() {
+    local executable="$1"
+    local expected_running="$2"
+    local deadline=$((SECONDS + 10))
+    local status_json
+    local is_running
+
+    while (( SECONDS < deadline )); do
+        if status_json=$(get_vbd_status "$executable" 2>/dev/null); then
+            is_running=false
+            if json_boolean_is_true "$status_json" "isRunning"; then
+                is_running=true
+            fi
+            if [ "$is_running" = "$expected_running" ]; then
+                return 0
+            fi
+        fi
+        sleep 0.25
+    done
+
+    return 1
+}
+
+wait_for_process_exit() {
+    local target_pid="$1"
+    local deadline=$((SECONDS + 10))
+
+    while kill -0 "$target_pid" 2>/dev/null; do
+        if (( SECONDS >= deadline )); then
+            return 1
+        fi
+        sleep 0.25
+    done
+
+    return 0
+}
+
+print_vbd_recovery_commands() {
+    local installed_executable="$INSTALL_DIR/vb"
+    local quoted_executable
+    printf -v quoted_executable '%q' "$installed_executable"
+
+    echo "" >&2
+    echo -e "${RED}VBD could not be restored automatically.${NC}" >&2
+    echo -e "${YELLOW}After resolving the installation error, run these current-user commands:${NC}" >&2
+    echo "  $quoted_executable --job-daemon-service repair" >&2
+    if [ "$DAEMON_WAS_RUNNING" = true ]; then
+        echo "  $quoted_executable --job-daemon-service start" >&2
+    fi
+    echo "" >&2
+}
+
 # Detect OS
 OS="$(uname -s)"
 ARCH="$(uname -m)"
@@ -185,9 +384,37 @@ if [ -z "$TAR_URL" ]; then
     exit 1
 fi
 
-# Create temp directory
-TEMP_DIR=$(mktemp -d)
-trap 'rm -rf "$TEMP_DIR"' EXIT
+# Fail closed: without the published checksum the installer would extract and execute an
+# unverified download. A release missing its .sha256 asset is a broken release.
+if [ -z "$CHECKSUM_URL" ]; then
+    echo -e "${RED}Error: Could not find $ASSET_NAME.sha256 in release assets. Refusing to install an unverified download.${NC}"
+    exit 1
+fi
+
+# Create a private, random staging directory. The archive is fully extracted and
+# validated here before the live installation or VBD process is touched.
+TEMP_ROOT="${TMPDIR:-/tmp}"
+TEMP_DIR=$(mktemp -d "$TEMP_ROOT/vibe_rails_install.XXXXXXXX")
+chmod 700 "$TEMP_DIR"
+PAYLOAD_DIR="$TEMP_DIR/payload"
+mkdir -m 700 "$PAYLOAD_DIR"
+
+DAEMON_WAS_INSTALLED=false
+DAEMON_WAS_RUNNING=false
+RECOVERY_NEEDED=false
+
+cleanup() {
+    local exit_code="$1"
+    if [ "$exit_code" -ne 0 ] && [ "$RECOVERY_NEEDED" = true ]; then
+        print_vbd_recovery_commands
+    fi
+    if [ -n "${TEMP_DIR:-}" ] && [ -d "$TEMP_DIR" ]; then
+        rm -rf -- "$TEMP_DIR"
+    fi
+    trap - EXIT
+    exit "$exit_code"
+}
+trap 'cleanup $?' EXIT
 
 # Download files
 TAR_PATH="$TEMP_DIR/$ASSET_NAME"
@@ -196,35 +423,150 @@ CHECKSUM_PATH="$TEMP_DIR/$ASSET_NAME.sha256"
 echo -e "${CYAN}Downloading $ASSET_NAME...${NC}"
 download_to_file "$TAR_URL" "$TAR_PATH"
 
-if [ -n "$CHECKSUM_URL" ]; then
-    echo -e "${CYAN}Downloading checksum...${NC}"
-    download_to_file "$CHECKSUM_URL" "$CHECKSUM_PATH"
+echo -e "${CYAN}Downloading checksum...${NC}"
+download_to_file "$CHECKSUM_URL" "$CHECKSUM_PATH"
 
-    # Verify checksum
-    echo -e "${CYAN}Verifying checksum...${NC}"
-    EXPECTED_HASH=$(cut -d' ' -f1 "$CHECKSUM_PATH")
-    ACTUAL_HASH=$(sha256_file "$TAR_PATH")
+# Verify checksum (mandatory: the asset's presence was asserted before downloading)
+echo -e "${CYAN}Verifying checksum...${NC}"
+EXPECTED_HASH=$(cut -d' ' -f1 "$CHECKSUM_PATH" | tr '[:upper:]' '[:lower:]')
+ACTUAL_HASH=$(sha256_file "$TAR_PATH")
 
-    if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then
-        echo -e "${RED}Error: Checksum verification failed!${NC}"
-        echo -e "${RED}Expected: $EXPECTED_HASH${NC}"
-        echo -e "${RED}Actual:   $ACTUAL_HASH${NC}"
-        exit 1
+if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then
+    echo -e "${RED}Error: Checksum verification failed!${NC}"
+    echo -e "${RED}Expected: $EXPECTED_HASH${NC}"
+    echo -e "${RED}Actual:   $ACTUAL_HASH${NC}"
+    exit 1
+fi
+echo -e "${GREEN}Checksum verified!${NC}"
+
+echo -e "${CYAN}Extracting release into private staging...${NC}"
+tar -xzf "$TAR_PATH" -C "$PAYLOAD_DIR"
+validate_release_payload "$PAYLOAD_DIR" "vb" "model.onnx.gz"
+validate_install_target
+chmod +x "$PAYLOAD_DIR/vb"
+echo -e "${GREEN}Release payload validated.${NC}"
+
+# The staged binary can inspect and control the stable current-user registration even if
+# the old installed executable is absent or predates this command. On hosts that refuse to
+# execute a fresh download from TMPDIR (noexec mounts, AV), fall back to the installed
+# executable; if neither can answer, VBD cannot have been registered by a pre-VBD build,
+# so treat it as not installed instead of failing the whole install.
+VBD_EXECUTABLE="$PAYLOAD_DIR/vb"
+if ! VBD_STATUS_JSON=$(get_vbd_status "$PAYLOAD_DIR/vb"); then
+    echo -e "${YELLOW}Staged VBD probe failed (TMPDIR may be mounted noexec).${NC}"
+    VBD_STATUS_JSON=""
+    if [ -x "$INSTALL_DIR/vb" ]; then
+        echo -e "${YELLOW}Falling back to the installed executable for the VBD probe...${NC}"
+        if VBD_STATUS_JSON=$(get_vbd_status "$INSTALL_DIR/vb"); then
+            VBD_EXECUTABLE="$INSTALL_DIR/vb"
+        else
+            VBD_STATUS_JSON=""
+            echo -e "${YELLOW}WARNING: VBD state could not be determined (the installed executable may predate VBD). Assuming it is not installed.${NC}"
+        fi
     fi
-    echo -e "${GREEN}Checksum verified!${NC}"
 fi
 
-# Create install directory if it doesn't exist
-mkdir -p "$INSTALL_DIR"
+VBD_PROCESS_ID=""
+if [ -n "$VBD_STATUS_JSON" ]; then
+    VBD_STATE=$(json_string_value "$VBD_STATUS_JSON" "state" | tr '[:upper:]' '[:lower:]')
+    if json_boolean_is_true "$VBD_STATUS_JSON" "isInstalled"; then
+        DAEMON_WAS_INSTALLED=true
+    fi
+    # isReachable guards against a status whose isRunning was computed while the process
+    # was still starting; either signal means a live daemon must stop before file swaps.
+    if json_boolean_is_true "$VBD_STATUS_JSON" "isRunning" ||
+        json_boolean_is_true "$VBD_STATUS_JSON" "isReachable"; then
+        DAEMON_WAS_RUNNING=true
+    fi
+    VBD_PROCESS_ID=$(printf '%s' "$VBD_STATUS_JSON" |
+        sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')
 
-# Extract (overwrites app files, preserves user data like state.db, envs/, etc.)
-echo -e "${CYAN}Extracting to $INSTALL_DIR...${NC}"
-tar -xzf "$TAR_PATH" -C "$INSTALL_DIR"
+    # An Error state means VBD's own view of the registration is broken; an Unavailable state
+    # alongside an active daemon/registration means lifecycle control (including stop) cannot
+    # work. Proceeding would replace files under a running daemon.
+    if [ "$VBD_STATE" = "error" ]; then
+        echo -e "${RED}Error: VBD reported lifecycle state 'Error'. Resolve it (vb --job-daemon-service status) and retry. The existing installation was not changed.${NC}" >&2
+        exit 1
+    fi
+    if [ "$VBD_STATE" = "unavailable" ] &&
+        { [ "$DAEMON_WAS_INSTALLED" = true ] || [ "$DAEMON_WAS_RUNNING" = true ]; }; then
+        echo -e "${RED}Error: VBD lifecycle support is unavailable while a VBD process or registration appears active. Resolve it and retry. The existing installation was not changed.${NC}" >&2
+        exit 1
+    fi
+fi
+
+if [ "$DAEMON_WAS_INSTALLED" = true ]; then
+    if [ "$DAEMON_WAS_RUNNING" = true ]; then
+        echo -e "${CYAN}Detected installed VBD (running).${NC}"
+    else
+        echo -e "${CYAN}Detected installed VBD (stopped).${NC}"
+    fi
+else
+    echo -e "${CYAN}VBD is not installed for the current user.${NC}"
+fi
+
+if [ "$DAEMON_WAS_INSTALLED" = true ] || [ "$DAEMON_WAS_RUNNING" = true ]; then
+    echo -e "${CYAN}Ensuring VBD is stopped before replacing files...${NC}"
+    RECOVERY_NEEDED=true
+    if ! "$VBD_EXECUTABLE" --job-daemon-service stop; then
+        echo -e "${RED}Error: Could not stop VBD. The existing installation was not changed.${NC}" >&2
+        exit 1
+    fi
+    if ! wait_for_vbd_running_state "$VBD_EXECUTABLE" false; then
+        echo -e "${RED}Error: VBD did not stop within 10 seconds. The existing installation was not changed.${NC}" >&2
+        exit 1
+    fi
+    if [ -n "$VBD_PROCESS_ID" ] && ! wait_for_process_exit "$VBD_PROCESS_ID"; then
+        echo -e "${RED}Error: The previous VBD process (PID $VBD_PROCESS_ID) did not exit within 10 seconds. The existing installation was not changed.${NC}" >&2
+        exit 1
+    fi
+    echo -e "${GREEN}VBD stopped.${NC}"
+fi
+
+# Overlay release files without deleting ~/.vibe_rails, which also contains
+# state.db, environments, logs, models, sandboxes, and user scripts.
+if [ ! -d "$INSTALL_DIR" ]; then
+    mkdir -m 700 "$INSTALL_DIR"
+fi
+validate_install_target
+if [ "$DAEMON_WAS_INSTALLED" = true ]; then
+    RECOVERY_NEEDED=true
+fi
+assert_no_destination_links "$PAYLOAD_DIR" "$INSTALL_DIR"
+echo -e "${CYAN}Installing application files to $INSTALL_DIR...${NC}"
+cp -R "$PAYLOAD_DIR"/. "$INSTALL_DIR"/
 
 install_bertv2_assets "$INSTALL_DIR"
 
 # Make binary executable
 chmod +x "$INSTALL_DIR/vb"
+
+if [ "$DAEMON_WAS_INSTALLED" = true ]; then
+    echo -e "${CYAN}Repairing current-user VBD registration...${NC}"
+    if ! "$INSTALL_DIR/vb" --job-daemon-service repair; then
+        echo -e "${RED}Error: VBD registration repair failed.${NC}" >&2
+        exit 1
+    fi
+fi
+
+if [ "$DAEMON_WAS_RUNNING" = true ]; then
+    echo -e "${CYAN}Restarting VBD because it was running before the update...${NC}"
+    if ! "$INSTALL_DIR/vb" --job-daemon-service start; then
+        echo -e "${RED}Error: VBD restart failed.${NC}" >&2
+        exit 1
+    fi
+    if ! wait_for_vbd_running_state "$INSTALL_DIR/vb" true; then
+        echo -e "${RED}Error: VBD did not report running within 10 seconds after restart.${NC}" >&2
+        exit 1
+    fi
+    echo -e "${GREEN}VBD restarted.${NC}"
+elif [ "$DAEMON_WAS_INSTALLED" = true ]; then
+    echo -e "${GREEN}VBD registration repaired; it remains stopped.${NC}"
+fi
+
+if [ "$DAEMON_WAS_INSTALLED" = true ] || [ "$DAEMON_WAS_RUNNING" = true ]; then
+    RECOVERY_NEEDED=false
+fi
 
 # Add to PATH in shell rc files
 add_to_path() {

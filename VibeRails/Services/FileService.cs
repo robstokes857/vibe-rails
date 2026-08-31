@@ -12,43 +12,20 @@ namespace VibeRails.Services
     {
         private static readonly TimeSpan GitRootTimeout = TimeSpan.FromSeconds(5);
         private readonly string _hiddenDir;
-        private const string EMPTY_JSON = @"{}";
 
         public FileService(IConfiguration configuration)
         {
             _hiddenDir = configuration["VibeRails:InstallDirName"] ?? PathConstants.DEFAULT_INSTALL_DIR_NAME;
         }
 
-        public string GetGlobalSavePath()
-        {
-            string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            return Path.Combine(home, _hiddenDir);
-        }
+        public string GetGlobalSavePath() =>
+            // Same normalization as InitGlobalSave: a padded or oddly-cased override must not
+            // make reads target a different directory than Initialize created.
+            GlobalRuntimePaths.ResolveGlobalDirectory(_hiddenDir);
 
         public void InitGlobalSave()
         {
-            string globalDir = GetGlobalSavePath();
-            string envDir = Path.Combine(globalDir, PathConstants.ENVS_SUBDIR);
-            string sandboxDir = Path.Combine(globalDir, PathConstants.SANDBOXES_SUBDIR);
-            string historyDir = Path.Combine(globalDir, PathConstants.HISTORY_SUBDIR);
-            string stateFile = Path.Combine(globalDir, PathConstants.STATE_FILENAME);
-            string configFile = Path.Combine(globalDir, PathConstants.CONFIG_FILENAME);
-            ParserConfigs.SetConfigPath(configFile);
-            ParserConfigs.SetStatePath(stateFile);
-            ParserConfigs.SetEnvPath(envDir);
-            ParserConfigs.SetSandboxPath(sandboxDir);
-            ParserConfigs.SetHistoryPath(historyDir);
-
-            PrivateFilePermissions.EnsureDirectory(globalDir);
-            PrivateFilePermissions.EnsureDirectory(envDir);
-            PrivateFilePermissions.EnsureDirectory(sandboxDir);
-            PrivateFilePermissions.EnsureDirectory(historyDir);
-            // SQLite database will be created by StateService.InitializeDatabase()
-            if (!File.Exists(configFile))
-            {
-                File.WriteAllText(configFile, EMPTY_JSON);
-            }
-            PrivateFilePermissions.EnsureFile(configFile);
+            GlobalRuntimePaths.Initialize(_hiddenDir);
         }
 
         public void InitLocal(string rootPath)

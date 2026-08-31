@@ -26,6 +26,7 @@
   <ItemGroup>
     <ProjectReference Include="..\MintLint\MintLint.csproj" />
     <ProjectReference Include="..\TokenSaver\TokenSaver.csproj" />
+    <ProjectReference Include="..\VibeRails.Daemon\VibeRails.Daemon.csproj" />
     <ProjectReference Include="..\VibeRails\VibeRails.csproj" />
   </ItemGroup>
 
