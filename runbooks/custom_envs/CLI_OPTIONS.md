@@ -84,16 +84,22 @@ Where they live in code
 - Copilot: `renderCopilotModelOptions()`.
 - OpenCode: `renderOpencodeModelOptions()`.
 
-Current pinned values (Claude re-verified 2026-08-23; Codex 2026-08-23;
+Current pinned values (Claude re-verified 2026-09-01; Codex 2026-08-23;
 Copilot 2026-08-23; OpenCode 2026-08-23; Antigravity flags 2026-08-23, models
 still last hand-copied 2026-07-02):
 
-- Claude (full model IDs): `claude-fable-5`, `claude-opus-5`, `claude-opus-4-8`,
-  `claude-opus-4-7`, `claude-sonnet-5`, `claude-sonnet-4-6`,
-  `claude-haiku-4-5`, plus an empty "Default (Claude recommended)" entry.
+- Claude (full model IDs): `claude-fable-5-1`, `claude-fable-5`,
+  `claude-opus-5`, `claude-opus-4-8`, `claude-opus-4-7`, `claude-sonnet-5`,
+  `claude-sonnet-4-6`, `claude-haiku-4-5`, plus an empty
+  "Default (Claude recommended)" entry.
   (Fable — `claude-fable-5` — was previously left unpinned as a product choice;
   Rob asked to add it on 2026-07-02. It needs Claude Code ≥ 2.1.170 and is not
   the upstream default; safety-flagged requests auto-fall-back to Opus.)
+  `claude-fable-5-1` added 2026-09-01 — Fable 5.1 is the current Fable and the
+  top entry. The point release is hyphenated in the ID: `claude-fable-5-1`, NOT
+  `claude-fable-5.1`. `claude-fable-5` stays pinned below it — upstream lists it
+  as "legacy (still available)", and the rule only removes a model once it is
+  actually retired.
   `claude-opus-5` added 2026-07-24 — the current Opus, sitting between Fable and
   Opus 4.8 in the list. Fixed ID with no date suffix (same scheme as
   `claude-opus-4-8`); the `[1m]` suffix seen in Claude Code session banners is a

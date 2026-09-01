@@ -1283,6 +1283,7 @@ export class EnvironmentController {
         // ("Model Lists") to add a newly released model or drop a retired one.
         const options = [
             ['', 'Default (Claude recommended)'],
+            ['claude-fable-5-1', 'claude-fable-5-1'],
             ['claude-fable-5', 'claude-fable-5'],
             ['claude-opus-5', 'claude-opus-5'],
             ['claude-opus-4-8', 'claude-opus-4-8'],
