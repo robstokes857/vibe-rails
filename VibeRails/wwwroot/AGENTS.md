@@ -17,7 +17,7 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | [js/modules/sandbox-controller.js](js/modules/sandbox-controller.js) | Sandbox CRUD + launch terminals/VS Code into sandbox dirs |
 | [js/modules/dashboard-controller.js](js/modules/dashboard-controller.js) | Unified Project health page (Rules, VCA, Git Guard, and Code quality; no embedded terminal) |
 | [js/modules/code-analyzer-dashboard.js](js/modules/code-analyzer-dashboard.js) | Compact MintLint score card plus the modal file/metric/source report |
-| [js/modules/jobs-controller.js](js/modules/jobs-controller.js) | Automation page: automation CRUD + inline editor, run history, "Run now" (queues a native terminal run; `launchFromNav` for the nav launcher); owns the shared `PythonScriptsController` |
+| [js/modules/jobs-controller.js](js/modules/jobs-controller.js) | Automation page: ordered repository-script/Worker workflow editor, automation CRUD, per-action run details, recipes, and "Run now" (queues a native terminal run; `launchFromNav` for the nav launcher); owns the shared `PythonScriptsController` |
 | [js/modules/python-scripts-controller.js](js/modules/python-scripts-controller.js) | "Python scripts" section of the Automation page + shared lifecycle flows; also owns the PIN-gated MCP switch/configurator and typed parameter-to-argv mapping fields |
 | [js/modules/python-script-workbench.js](js/modules/python-script-workbench.js) | `python-script` view: Monaco editor beside a docked agent terminal for one script (see "Python script workbench" below) |
 | [js/modules/python-run-window.js](js/modules/python-run-window.js) | The little run window: typed inputs + free arguments + stdin in, exit code / output / return value out, no terminal (see "Python script run window" below) |
@@ -79,6 +79,36 @@ paused via the `pause_token_saver` / `resume_token_saver` MCP tools.
 The terminal dropdown shows two groups:
 - **Base CLIs**: Claude, Codex, GLM 5.2, GLM 5.3, OpenCode, Copilot, Antigravity (each shown as "(default)") — resolved to its executable server-side (Antigravity → `agy`)
 - **Custom Environments**: User-created environments — spawned directly via the tab start endpoint
+
+## Automation workflow editor
+
+`jobs-controller.js` owns an ordered workflow made of repository Script actions and at most one
+Worker action. Script actions select `.py`, `.ps1`, or `.sh`, an explicit matching runtime,
+optional repository-relative working directory, optional per-action timeout, and zero or more
+argument rows. Each row is one argv value; never replace the rows with a command-line textbox or
+join them into shell text. The backend remains authoritative for containment, links, runtime
+availability, and SHA-256 approval.
+
+The workflow is state-backed in `editorActions`. Text/select input updates the matching object
+without rerendering so the caret survives. Structural operations (add/remove/move action, add/remove
+argument, file/folder picker) rerender the list. A rerender also recreates the one Worker picker,
+so `renderEditorActions` must dispose/remount its Tom Select instance and restore the selected
+Environment. Add Worker is disabled as soon as one Worker exists; scripts may appear before or
+after it, or form a script-only workflow.
+
+Run details fetch the individual run and render its immutable action snapshot: per-action status,
+argv, error, and captured stdout/stderr. Worker actions link to their own normal terminal replay.
+All arbitrary output uses escaped text/pre content. A completed workflow with no Worker therefore
+has useful history even though it has no `Sessions` recording.
+
+Recipes export V2 action order plus portable script configuration, never action ids, Environment
+ids, or approval hashes. V1 one-Worker recipes normalize to V2 on import. Imports are untrusted:
+the confirmation shows Worker arguments/instructions and script paths, creates the Automation
+disabled, and lets the backend resolve and pin the local repository bytes. Do not accept a hash
+from the recipe as local approval.
+
+Card/run-detail styles use the `job-action-*`, `job-script-*`, and `job-run-action-*` prefixes and
+must keep explicit `var(--token, #fallback)` colors in every theme scope.
 
 ## Environment Steps editor
 
@@ -187,8 +217,9 @@ Both base CLI and custom environment launches share one unified tab API; the onl
 
 Automations never land in this terminal surface. Every Automation run — manual **Run now**, retry,
 schedule, commit trigger — is launched by the backend scheduler into its own native OS terminal
-window, so `runNow` just POSTs, toasts and refreshes the run history. Python scripts are the
-exception that does use tabs (see the interactive-script flow).
+window, so `runNow` just POSTs, toasts and refreshes the run history. This includes `.py` actions
+inside an Automation. The separate signed Python-script workbench is the exception that can use a
+Web UI tab for its **Run in terminal…** flow (see below).
 
 ### Flow: "Web UI" Button
 
@@ -341,4 +372,4 @@ See also: [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for back
 
 ---
 
-*Last checked: 2026-08-25T00:00:00Z by claude (opus-5)*
+*Last checked: 2026-09-01T00:00:00Z by Codex*

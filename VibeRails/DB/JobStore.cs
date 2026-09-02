@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using VibeRails.DTOs;
 using VibeRails.Services;
@@ -40,6 +41,18 @@ public interface IJobStore
     Task<bool> StartRunAsync(string runId, int processId, CancellationToken cancellationToken = default);
     Task CompleteRunAsync(string runId, JobRunStatus status, int? exitCode, string? errorMessage, CancellationToken cancellationToken = default);
     Task<JobRunStatus> CompleteIdleRunAsync(string runId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<JobRunActionRecord>> GetRunActionsAsync(string runId, CancellationToken cancellationToken = default);
+    Task<bool> StartRunActionAsync(string runId, string actionId, CancellationToken cancellationToken = default);
+    Task LinkRunActionSessionAsync(string runId, string actionId, string sessionId, CancellationToken cancellationToken = default);
+    Task CompleteRunActionAsync(
+        string runId,
+        string actionId,
+        JobRunActionStatus status,
+        int? exitCode,
+        string? errorMessage,
+        string? standardOutput,
+        string? standardError,
+        CancellationToken cancellationToken = default);
     Task<bool> RequestCancelAsync(string runId, CancellationToken cancellationToken = default);
     Task<bool> IsCancelRequestedAsync(string runId, CancellationToken cancellationToken = default);
 }
@@ -76,10 +89,12 @@ public sealed class JobStore : IJobStore
         }
 
         var triggersByJob = await ReadTriggersForJobsAsync(connection, projectPath, includeDeleted, cancellationToken);
+        var actionsByJob = await ReadActionsForJobsAsync(connection, projectPath, includeDeleted, cancellationToken);
         for (var index = 0; index < jobs.Count; index++)
         {
             IReadOnlyList<JobTriggerDto> triggers = triggersByJob.TryGetValue(jobs[index].Id, out var jobTriggers) ? jobTriggers : [];
-            jobs[index] = jobs[index] with { Triggers = triggers };
+            IReadOnlyList<JobActionRecord> actions = actionsByJob.TryGetValue(jobs[index].Id, out var jobActions) ? jobActions : [];
+            jobs[index] = jobs[index] with { Triggers = triggers, Actions = actions };
         }
         return jobs;
     }
@@ -95,7 +110,13 @@ public sealed class JobStore : IJobStore
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             job = await reader.ReadAsync(cancellationToken) ? ReadJob(reader) : null;
         }
-        return job is null ? null : job with { Triggers = await ReadTriggersAsync(connection, job.Id, cancellationToken) };
+        return job is null
+            ? null
+            : job with
+            {
+                Triggers = await ReadTriggersAsync(connection, job.Id, cancellationToken),
+                Actions = await ReadActionsAsync(connection, job.Id, cancellationToken)
+            };
     }
 
     public async Task<JobDefinitionRecord> CreateJobAsync(CreateJobRequest request, CancellationToken cancellationToken = default)
@@ -123,6 +144,14 @@ public sealed class JobStore : IJobStore
             now);
         var id = Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
         await ReplaceTriggersAsync(connection, transaction, id, request.Triggers, now, cancellationToken);
+        await ReplaceActionsAsync(
+            connection,
+            transaction,
+            id,
+            request.EnvironmentId,
+            request.Actions,
+            now,
+            cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return (await GetJobAsync(id, cancellationToken))!;
     }
@@ -158,6 +187,14 @@ public sealed class JobStore : IJobStore
         }
 
         await ReplaceTriggersAsync(connection, transaction, id, request.Triggers, now, cancellationToken);
+        await ReplaceActionsAsync(
+            connection,
+            transaction,
+            id,
+            request.EnvironmentId,
+            request.Actions,
+            now,
+            cancellationToken);
         if (!request.Enabled)
             await CancelQueuedRunsAsync(connection, transaction, id, "Automation disabled before the run started.", now, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -188,7 +225,13 @@ public sealed class JobStore : IJobStore
     {
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM Jobs WHERE EnvironmentId = $id AND DeletedUTC IS NULL;";
+        command.CommandText = """
+            SELECT COUNT(DISTINCT j.Id)
+            FROM Jobs j
+            LEFT JOIN JobActions a ON a.JobId = j.Id
+            WHERE j.DeletedUTC IS NULL
+              AND (j.EnvironmentId = $id OR a.EnvironmentId = $id);
+            """;
         command.Parameters.AddWithValue("$id", environmentId);
         return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
     }
@@ -211,7 +254,12 @@ public sealed class JobStore : IJobStore
                     SELECT EXISTS (
                         SELECT 1 FROM Environments e
                         WHERE e.Id = $id
-                          AND NOT EXISTS (SELECT 1 FROM Jobs j WHERE j.EnvironmentId = e.Id AND j.DeletedUTC IS NULL)
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM Jobs j
+                              LEFT JOIN JobActions a ON a.JobId = j.Id
+                              WHERE j.DeletedUTC IS NULL
+                                AND (j.EnvironmentId = e.Id OR a.EnvironmentId = e.Id))
                     );
                     """;
                 eligibility.Parameters.AddWithValue("$id", environmentId);
@@ -325,12 +373,69 @@ public sealed class JobStore : IJobStore
 
     public async Task<string?> EnqueueRetryAsync(string runId, CancellationToken cancellationToken = default)
     {
-        // A retry is just a fresh manual run of the same job. The recorded session of the source run
-        // is kept; the retry produces its own new session.
-        var source = await GetRunAsync(runId, cancellationToken);
-        if (source is null)
-            return null;
-        return await EnqueueJobRunAsync(source.JobId, JobTriggerKind.Manual, $"retry:{runId}:{Guid.NewGuid():N}", requireEnabled: false, cancellationToken);
+        // Retry the definition that actually ran, not whatever the editor contains now. This keeps
+        // script path/runtime/hash and action order truthful while preserving the original run and
+        // its terminal recording.
+        var retryId = Guid.NewGuid().ToString("N");
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+
+        await using (var insertRun = connection.CreateCommand())
+        {
+            insertRun.Transaction = transaction;
+            insertRun.CommandText = """
+                INSERT INTO JobRuns
+                    (Id, JobId, TriggerKind, TriggerKey, Status, JobName, ProjectPath, Llm,
+                     EnvironmentId, EnvironmentName, TimeoutMinutes, QueuedUTC, LaunchMinimized)
+                SELECT $retryId, source.JobId, $manual, $triggerKey, $queued, source.JobName,
+                       source.ProjectPath, source.Llm, source.EnvironmentId,
+                       source.EnvironmentName, source.TimeoutMinutes, $queuedUtc,
+                       source.LaunchMinimized
+                FROM JobRuns source
+                JOIN Jobs job ON job.Id = source.JobId AND job.DeletedUTC IS NULL
+                WHERE source.Id = $sourceId AND source.DeletedUTC IS NULL
+                  AND source.Status NOT IN ($queued, $running)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM JobRuns active
+                      WHERE active.JobId = source.JobId AND active.Status IN ($queued, $running));
+                """;
+            insertRun.Parameters.AddWithValue("$retryId", retryId);
+            insertRun.Parameters.AddWithValue("$sourceId", runId);
+            insertRun.Parameters.AddWithValue("$manual", (int)JobTriggerKind.Manual);
+            insertRun.Parameters.AddWithValue("$triggerKey", $"retry:{runId}:{Guid.NewGuid():N}");
+            insertRun.Parameters.AddWithValue("$queued", (int)JobRunStatus.Queued);
+            insertRun.Parameters.AddWithValue("$running", (int)JobRunStatus.Running);
+            insertRun.Parameters.AddWithValue("$queuedUtc", ToDb(DateTime.UtcNow));
+            if (await insertRun.ExecuteNonQueryAsync(cancellationToken) == 0)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return null;
+            }
+        }
+
+        await using (var copyActions = connection.CreateCommand())
+        {
+            copyActions.Transaction = transaction;
+            copyActions.CommandText = """
+                INSERT INTO JobRunActions
+                    (Id, RunId, SourceActionId, Position, Kind, Status, EnvironmentId,
+                     EnvironmentName, Llm, ScriptPath, ScriptRuntime, ArgumentsJson,
+                     WorkingDirectory, TimeoutSeconds, ApprovedHash)
+                SELECT lower(hex(randomblob(16))), $retryId, SourceActionId, Position, Kind,
+                       $pending, EnvironmentId, EnvironmentName, Llm, ScriptPath, ScriptRuntime,
+                       ArgumentsJson, WorkingDirectory, TimeoutSeconds, ApprovedHash
+                FROM JobRunActions
+                WHERE RunId = $sourceId
+                ORDER BY Position;
+                """;
+            copyActions.Parameters.AddWithValue("$retryId", retryId);
+            copyActions.Parameters.AddWithValue("$sourceId", runId);
+            copyActions.Parameters.AddWithValue("$pending", (int)JobRunActionStatus.Pending);
+            await copyActions.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        return retryId;
     }
 
     public async Task<IReadOnlyList<string>> EnqueueEventRunsAsync(
@@ -520,11 +625,18 @@ public sealed class JobStore : IJobStore
     public async Task<JobRunRecord?> GetRunAsync(string runId, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = RunSelectSql + " WHERE r.Id = $id AND r.DeletedUTC IS NULL LIMIT 1;";
-        command.Parameters.AddWithValue("$id", runId);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        return await reader.ReadAsync(cancellationToken) ? ReadRun(reader) : null;
+        JobRunRecord? run;
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = RunSelectSql + " WHERE r.Id = $id AND r.DeletedUTC IS NULL LIMIT 1;";
+            command.Parameters.AddWithValue("$id", runId);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            run = await reader.ReadAsync(cancellationToken) ? ReadRun(reader) : null;
+        }
+
+        return run is null
+            ? null
+            : run with { Actions = await ReadRunActionsAsync(connection, runId, cancellationToken) };
     }
 
     /// <summary>
@@ -674,14 +786,19 @@ public sealed class JobStore : IJobStore
     {
         await using var connection = await OpenAsync(cancellationToken);
         var results = new List<JobRunRecord>();
-        await using var command = connection.CreateCommand();
-        command.CommandText = RunSelectSql + """
-             WHERE r.Status = $queued AND r.LaunchedUTC IS NULL AND r.CancelRequested = 0
-             ORDER BY r.QueuedUTC;
-            """;
-        command.Parameters.AddWithValue("$queued", (int)JobRunStatus.Queued);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken)) results.Add(ReadRun(reader));
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = RunSelectSql + """
+                 WHERE r.Status = $queued AND r.LaunchedUTC IS NULL AND r.CancelRequested = 0
+                 ORDER BY r.QueuedUTC;
+                """;
+            command.Parameters.AddWithValue("$queued", (int)JobRunStatus.Queued);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken)) results.Add(ReadRun(reader));
+        }
+
+        for (var index = 0; index < results.Count; index++)
+            results[index] = results[index] with { Actions = await ReadRunActionsAsync(connection, results[index].Id, cancellationToken) };
         return results;
     }
 
@@ -711,18 +828,47 @@ public sealed class JobStore : IJobStore
     public async Task<int> FailStalledLaunchesAsync(TimeSpan grace, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            UPDATE JobRuns
-            SET Status = $failed, EndedUTC = $now,
-                ErrorMessage = 'The terminal was launched but never started the run. If this keeps happening, the native terminal launcher may not have access to an interactive desktop.'
-            WHERE Status = $queued AND LaunchedUTC IS NOT NULL AND LaunchedUTC <= $cutoff;
-            """;
-        command.Parameters.AddWithValue("$failed", (int)JobRunStatus.Failed);
-        command.Parameters.AddWithValue("$queued", (int)JobRunStatus.Queued);
-        command.Parameters.AddWithValue("$now", ToDb(DateTime.UtcNow));
-        command.Parameters.AddWithValue("$cutoff", ToDb(DateTime.UtcNow - grace));
-        return await command.ExecuteNonQueryAsync(cancellationToken);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        var now = DateTime.UtcNow;
+        const string error = "The terminal was launched but never started the run. If this keeps happening, the native terminal launcher may not have access to an interactive desktop.";
+
+        await using (var actions = connection.CreateCommand())
+        {
+            actions.Transaction = transaction;
+            actions.CommandText = """
+                UPDATE JobRunActions
+                SET Status = $skipped, EndedUTC = $now, ErrorMessage = $error
+                WHERE Status = $pending AND RunId IN (
+                    SELECT Id FROM JobRuns
+                    WHERE Status = $queued AND LaunchedUTC IS NOT NULL AND LaunchedUTC <= $cutoff);
+                """;
+            actions.Parameters.AddWithValue("$skipped", (int)JobRunActionStatus.Skipped);
+            actions.Parameters.AddWithValue("$pending", (int)JobRunActionStatus.Pending);
+            actions.Parameters.AddWithValue("$queued", (int)JobRunStatus.Queued);
+            actions.Parameters.AddWithValue("$now", ToDb(now));
+            actions.Parameters.AddWithValue("$cutoff", ToDb(now - grace));
+            actions.Parameters.AddWithValue("$error", error);
+            await actions.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        int changed;
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = """
+                UPDATE JobRuns
+                SET Status = $failed, EndedUTC = $now, ErrorMessage = $error
+                WHERE Status = $queued AND LaunchedUTC IS NOT NULL AND LaunchedUTC <= $cutoff;
+                """;
+            command.Parameters.AddWithValue("$failed", (int)JobRunStatus.Failed);
+            command.Parameters.AddWithValue("$queued", (int)JobRunStatus.Queued);
+            command.Parameters.AddWithValue("$now", ToDb(now));
+            command.Parameters.AddWithValue("$cutoff", ToDb(now - grace));
+            command.Parameters.AddWithValue("$error", error);
+            changed = await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await transaction.CommitAsync(cancellationToken);
+        return changed;
     }
 
     public Task<IReadOnlyList<JobRunRecord>> GetQueuedRunsAsync(CancellationToken cancellationToken = default) =>
@@ -764,7 +910,9 @@ public sealed class JobStore : IJobStore
     public async Task CompleteRunAsync(string runId, JobRunStatus status, int? exitCode, string? errorMessage, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = connection.BeginTransaction(deferred: false);
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         // Only finalize a run that is still Running (or Queued, for a never-started reap). This makes
         // completion idempotent and prevents a stale process from overwriting a terminal status.
         command.CommandText = """
@@ -778,21 +926,140 @@ public sealed class JobStore : IJobStore
         command.Parameters.AddWithValue("$exitCode", exitCode is null ? DBNull.Value : exitCode.Value);
         command.Parameters.AddWithValue("$errorMessage", errorMessage is null ? DBNull.Value : errorMessage);
         command.Parameters.AddWithValue("$id", runId);
+        var changed = await command.ExecuteNonQueryAsync(cancellationToken);
+        if (changed > 0)
+        {
+            await using var actions = connection.CreateCommand();
+            actions.Transaction = transaction;
+            actions.CommandText = """
+                UPDATE JobRunActions SET
+                    Status = CASE
+                        WHEN $runStatus = $cancelled THEN $actionCancelled
+                        WHEN $runStatus = $timedOut THEN $actionTimedOut
+                        WHEN Status = $actionRunning THEN $actionFailed
+                        ELSE $actionSkipped
+                    END,
+                    EndedUTC = COALESCE(EndedUTC, $ended),
+                    ErrorMessage = COALESCE(ErrorMessage, $errorMessage)
+                WHERE RunId = $id AND Status IN ($actionPending, $actionRunning);
+                """;
+            actions.Parameters.AddWithValue("$runStatus", (int)status);
+            actions.Parameters.AddWithValue("$cancelled", (int)JobRunStatus.Cancelled);
+            actions.Parameters.AddWithValue("$timedOut", (int)JobRunStatus.TimedOut);
+            actions.Parameters.AddWithValue("$actionPending", (int)JobRunActionStatus.Pending);
+            actions.Parameters.AddWithValue("$actionRunning", (int)JobRunActionStatus.Running);
+            actions.Parameters.AddWithValue("$actionCancelled", (int)JobRunActionStatus.Cancelled);
+            actions.Parameters.AddWithValue("$actionTimedOut", (int)JobRunActionStatus.TimedOut);
+            actions.Parameters.AddWithValue("$actionFailed", (int)JobRunActionStatus.Failed);
+            actions.Parameters.AddWithValue("$actionSkipped", (int)JobRunActionStatus.Skipped);
+            actions.Parameters.AddWithValue("$ended", ToDb(DateTime.UtcNow));
+            actions.Parameters.AddWithValue("$errorMessage", errorMessage is null ? DBNull.Value : errorMessage);
+            actions.Parameters.AddWithValue("$id", runId);
+            await actions.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<JobRunActionRecord>> GetRunActionsAsync(
+        string runId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        return await ReadRunActionsAsync(connection, runId, cancellationToken);
+    }
+
+    public async Task<bool> StartRunActionAsync(
+        string runId,
+        string actionId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE JobRunActions SET Status = $running, StartedUTC = $started
+            WHERE Id = $actionId AND RunId = $runId AND Status = $pending;
+            """;
+        command.Parameters.AddWithValue("$running", (int)JobRunActionStatus.Running);
+        command.Parameters.AddWithValue("$pending", (int)JobRunActionStatus.Pending);
+        command.Parameters.AddWithValue("$started", ToDb(DateTime.UtcNow));
+        command.Parameters.AddWithValue("$actionId", actionId);
+        command.Parameters.AddWithValue("$runId", runId);
+        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+    }
+
+    public async Task LinkRunActionSessionAsync(
+        string runId,
+        string actionId,
+        string sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE JobRunActions SET SessionId = $sessionId
+            WHERE Id = $actionId AND RunId = $runId;
+            """;
+        command.Parameters.AddWithValue("$sessionId", sessionId);
+        command.Parameters.AddWithValue("$actionId", actionId);
+        command.Parameters.AddWithValue("$runId", runId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task CompleteRunActionAsync(
+        string runId,
+        string actionId,
+        JobRunActionStatus status,
+        int? exitCode,
+        string? errorMessage,
+        string? standardOutput,
+        string? standardError,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE JobRunActions SET
+                Status = $status,
+                EndedUTC = $ended,
+                ExitCode = $exitCode,
+                ErrorMessage = $errorMessage,
+                StandardOutput = $standardOutput,
+                StandardError = $standardError
+            WHERE Id = $actionId AND RunId = $runId AND Status IN ($pending, $running);
+            """;
+        command.Parameters.AddWithValue("$status", (int)status);
+        command.Parameters.AddWithValue("$ended", ToDb(DateTime.UtcNow));
+        command.Parameters.AddWithValue("$exitCode", exitCode is null ? DBNull.Value : exitCode.Value);
+        command.Parameters.AddWithValue("$errorMessage", errorMessage is null ? DBNull.Value : errorMessage);
+        command.Parameters.AddWithValue("$standardOutput", standardOutput ?? string.Empty);
+        command.Parameters.AddWithValue("$standardError", standardError ?? string.Empty);
+        command.Parameters.AddWithValue("$actionId", actionId);
+        command.Parameters.AddWithValue("$runId", runId);
+        command.Parameters.AddWithValue("$pending", (int)JobRunActionStatus.Pending);
+        command.Parameters.AddWithValue("$running", (int)JobRunActionStatus.Running);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     /// <summary>
-    /// Finalizes a raw-output-idle Automation as success unless an explicit cancel is already
-    /// pending. The choice and terminal write happen in one SQLite statement, so cancellation
-    /// cannot slip between a separate check and a successful idle completion.
+    /// Finalizes a run that finished its work as Succeeded unless an explicit cancel is already
+    /// pending, in which case it is Cancelled. The choice and terminal write happen in one SQLite
+    /// statement, so cancellation cannot slip between a separate check and a successful write.
+    /// JobRunner routes every successful completion through here — the Worker's raw-output idle
+    /// signal, a script-only workflow's last action, and the idle-shutdown fallback alike — and
+    /// keeps <see cref="CompleteRunAsync"/> for the non-success outcomes.
     /// </summary>
     public async Task<JobRunStatus> CompleteIdleRunAsync(
         string runId,
         CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        var ended = ToDb(DateTime.UtcNow);
+        JobRunStatus? completedStatus = null;
         await using (var command = connection.CreateCommand())
         {
+            command.Transaction = transaction;
             command.CommandText = """
                 UPDATE JobRuns SET
                     Status = CASE WHEN CancelRequested = 1 THEN $cancelled ELSE $succeeded END,
@@ -806,31 +1073,76 @@ public sealed class JobStore : IJobStore
             command.Parameters.AddWithValue("$succeeded", (int)JobRunStatus.Succeeded);
             command.Parameters.AddWithValue("$running", (int)JobRunStatus.Running);
             command.Parameters.AddWithValue("$queued", (int)JobRunStatus.Queued);
-            command.Parameters.AddWithValue("$ended", ToDb(DateTime.UtcNow));
+            command.Parameters.AddWithValue("$ended", ended);
             command.Parameters.AddWithValue("$cancelExitCode", JobRunOutcome.ToExitCode(JobRunStatus.Cancelled));
             command.Parameters.AddWithValue("$cancelMessage", JobRunOutcome.CancelledMessage);
             command.Parameters.AddWithValue("$id", runId);
 
             var updatedStatus = await command.ExecuteScalarAsync(cancellationToken);
             if (updatedStatus is not null && updatedStatus is not DBNull)
-                return (JobRunStatus)Convert.ToInt32(updatedStatus, CultureInfo.InvariantCulture);
+                completedStatus = (JobRunStatus)Convert.ToInt32(updatedStatus, CultureInfo.InvariantCulture);
+        }
+
+        if (completedStatus is JobRunStatus finalStatus)
+        {
+            await using var actions = connection.CreateCommand();
+            actions.Transaction = transaction;
+            actions.CommandText = """
+                UPDATE JobRunActions SET
+                    Status = CASE
+                        WHEN $runStatus = $runCancelled THEN $actionCancelled
+                        WHEN Status = $actionRunning THEN $actionSucceeded
+                        ELSE $actionSkipped
+                    END,
+                    EndedUTC = COALESCE(EndedUTC, $ended),
+                    ExitCode = CASE
+                        WHEN $runStatus = $runCancelled THEN $cancelExitCode
+                        WHEN Status = $actionRunning THEN 0
+                        ELSE ExitCode
+                    END,
+                    ErrorMessage = CASE
+                        WHEN $runStatus = $runCancelled THEN $cancelMessage
+                        ELSE ErrorMessage
+                    END
+                WHERE RunId = $id AND Status IN ($actionPending, $actionRunning);
+                """;
+            actions.Parameters.AddWithValue("$runStatus", (int)finalStatus);
+            actions.Parameters.AddWithValue("$runCancelled", (int)JobRunStatus.Cancelled);
+            actions.Parameters.AddWithValue("$actionPending", (int)JobRunActionStatus.Pending);
+            actions.Parameters.AddWithValue("$actionRunning", (int)JobRunActionStatus.Running);
+            actions.Parameters.AddWithValue("$actionSucceeded", (int)JobRunActionStatus.Succeeded);
+            actions.Parameters.AddWithValue("$actionSkipped", (int)JobRunActionStatus.Skipped);
+            actions.Parameters.AddWithValue("$actionCancelled", (int)JobRunActionStatus.Cancelled);
+            actions.Parameters.AddWithValue("$ended", ended);
+            actions.Parameters.AddWithValue("$cancelExitCode", JobRunOutcome.ToExitCode(JobRunStatus.Cancelled));
+            actions.Parameters.AddWithValue("$cancelMessage", JobRunOutcome.CancelledMessage);
+            actions.Parameters.AddWithValue("$id", runId);
+            await actions.ExecuteNonQueryAsync(cancellationToken);
+
+            await transaction.CommitAsync(cancellationToken);
+            return finalStatus;
         }
 
         // Another terminal path may have won first (deadline/cancellation/reaper). Return that
         // durable outcome rather than pretending this idle completion was the winner.
         await using var readCommand = connection.CreateCommand();
+        readCommand.Transaction = transaction;
         readCommand.CommandText = "SELECT Status FROM JobRuns WHERE Id = $id;";
         readCommand.Parameters.AddWithValue("$id", runId);
         var existingStatus = await readCommand.ExecuteScalarAsync(cancellationToken);
-        return existingStatus is null || existingStatus is DBNull
+        var result = existingStatus is null || existingStatus is DBNull
             ? JobRunStatus.Succeeded
             : (JobRunStatus)Convert.ToInt32(existingStatus, CultureInfo.InvariantCulture);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     public async Task<bool> RequestCancelAsync(string runId, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = connection.BeginTransaction(deferred: false);
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             UPDATE JobRuns SET
                 CancelRequested = 1,
@@ -844,7 +1156,26 @@ public sealed class JobStore : IJobStore
         command.Parameters.AddWithValue("$cancelled", (int)JobRunStatus.Cancelled);
         command.Parameters.AddWithValue("$now", ToDb(DateTime.UtcNow));
         command.Parameters.AddWithValue("$id", runId);
-        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+        var changed = await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+        if (changed)
+        {
+            await using var actions = connection.CreateCommand();
+            actions.Transaction = transaction;
+            actions.CommandText = """
+                UPDATE JobRunActions SET Status = $cancelled, EndedUTC = $now,
+                    ErrorMessage = 'Cancelled before start.'
+                WHERE RunId = $id AND Status = $pending
+                  AND EXISTS (SELECT 1 FROM JobRuns r WHERE r.Id = $id AND r.Status = $runCancelled);
+                """;
+            actions.Parameters.AddWithValue("$cancelled", (int)JobRunActionStatus.Cancelled);
+            actions.Parameters.AddWithValue("$pending", (int)JobRunActionStatus.Pending);
+            actions.Parameters.AddWithValue("$runCancelled", (int)JobRunStatus.Cancelled);
+            actions.Parameters.AddWithValue("$now", ToDb(DateTime.UtcNow));
+            actions.Parameters.AddWithValue("$id", runId);
+            await actions.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await transaction.CommitAsync(cancellationToken);
+        return changed;
     }
 
     public async Task<bool> IsCancelRequestedAsync(string runId, CancellationToken cancellationToken = default)
@@ -876,6 +1207,22 @@ public sealed class JobStore : IJobStore
         cancel.Parameters.AddWithValue("$reason", reason);
         cancel.Parameters.AddWithValue("$id", jobId);
         await cancel.ExecuteNonQueryAsync(cancellationToken);
+
+        await using var actions = connection.CreateCommand();
+        actions.Transaction = transaction;
+        actions.CommandText = """
+            UPDATE JobRunActions
+            SET Status = $cancelled, EndedUTC = $now, ErrorMessage = $reason
+            WHERE Status = $pending AND RunId IN (
+                SELECT Id FROM JobRuns WHERE JobId = $id AND Status = $runCancelled);
+            """;
+        actions.Parameters.AddWithValue("$cancelled", (int)JobRunActionStatus.Cancelled);
+        actions.Parameters.AddWithValue("$pending", (int)JobRunActionStatus.Pending);
+        actions.Parameters.AddWithValue("$runCancelled", (int)JobRunStatus.Cancelled);
+        actions.Parameters.AddWithValue("$now", ToDb(now));
+        actions.Parameters.AddWithValue("$reason", reason);
+        actions.Parameters.AddWithValue("$id", jobId);
+        await actions.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private async Task<string?> EnqueueJobRunAsync(long jobId, JobTriggerKind kind, string triggerKey, bool requireEnabled, CancellationToken cancellationToken)
@@ -899,8 +1246,9 @@ public sealed class JobStore : IJobStore
         var runId = Guid.NewGuid().ToString("N");
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        // Denormalized snapshot from the Job + its Environment. INNER JOIN Environments: a Job with
-        // no live worker cannot be launched, so it simply produces no run (0 rows -> null).
+        // Denormalized summary snapshot from the Job + its optional Worker. The ordered action
+        // snapshot below is authoritative; these legacy columns remain for list/history clients
+        // and for the single Worker terminal-session backlink.
         //
         // The NOT EXISTS clause is the self-overlap guard, and it lives here rather than in any
         // caller so that EVERY trigger path inherits it — schedule, commit, manual, and retry all
@@ -916,11 +1264,12 @@ public sealed class JobStore : IJobStore
                 (Id, JobId, TriggerKind, TriggerKey, Status, JobName, ProjectPath, Llm,
                  EnvironmentId, EnvironmentName, TimeoutMinutes, QueuedUTC, LaunchMinimized)
             SELECT $runId, j.Id, $triggerKind, $triggerKey, $queued, j.Name, j.ProjectPath,
-                   e.LLM, j.EnvironmentId, e.CustomName, j.TimeoutMinutes, $queuedUtc,
+                   COALESCE(e.LLM, 0), j.EnvironmentId, e.CustomName, j.TimeoutMinutes, $queuedUtc,
                    j.LaunchMinimized
             FROM Jobs j
-            JOIN Environments e ON e.Id = j.EnvironmentId
+            LEFT JOIN Environments e ON e.Id = j.EnvironmentId
             WHERE j.Id = $jobId AND ($requireEnabled = 0 OR j.Enabled = 1) AND j.DeletedUTC IS NULL
+              AND EXISTS (SELECT 1 FROM JobActions configured WHERE configured.JobId = j.Id)
               AND NOT EXISTS (
                   SELECT 1 FROM JobRuns active
                   WHERE active.JobId = j.Id AND active.Status IN ($queued, $running));
@@ -933,7 +1282,203 @@ public sealed class JobStore : IJobStore
         command.Parameters.AddWithValue("$running", (int)JobRunStatus.Running);
         command.Parameters.AddWithValue("$queuedUtc", ToDb(DateTime.UtcNow));
         command.Parameters.AddWithValue("$requireEnabled", requireEnabled ? 1 : 0);
-        return await command.ExecuteNonQueryAsync(cancellationToken) > 0 ? runId : null;
+        if (await command.ExecuteNonQueryAsync(cancellationToken) == 0)
+            return null;
+
+        await using var snapshot = connection.CreateCommand();
+        snapshot.Transaction = transaction;
+        snapshot.CommandText = """
+            INSERT INTO JobRunActions
+                (Id, RunId, SourceActionId, Position, Kind, Status, EnvironmentId,
+                 EnvironmentName, Llm, ScriptPath, ScriptRuntime, ArgumentsJson,
+                 WorkingDirectory, TimeoutSeconds, ApprovedHash)
+            SELECT lower(hex(randomblob(16))), $runId, a.Id, a.Position, a.Kind, $pending,
+                   a.EnvironmentId, e.CustomName, COALESCE(e.LLM, 0), a.ScriptPath,
+                   a.ScriptRuntime, a.ArgumentsJson, a.WorkingDirectory,
+                   a.TimeoutSeconds, a.ApprovedHash
+            FROM JobActions a
+            LEFT JOIN Environments e ON e.Id = a.EnvironmentId
+            WHERE a.JobId = $jobId
+            ORDER BY a.Position;
+            """;
+        snapshot.Parameters.AddWithValue("$runId", runId);
+        snapshot.Parameters.AddWithValue("$jobId", jobId);
+        snapshot.Parameters.AddWithValue("$pending", (int)JobRunActionStatus.Pending);
+        await snapshot.ExecuteNonQueryAsync(cancellationToken);
+        return runId;
+    }
+
+    private static async Task ReplaceActionsAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        long jobId,
+        int? legacyEnvironmentId,
+        IReadOnlyList<JobActionRequest>? requestedActions,
+        DateTime nowUtc,
+        CancellationToken cancellationToken)
+    {
+        var actions = requestedActions is { Count: > 0 }
+            ? requestedActions
+            : legacyEnvironmentId is int environmentId
+                ? [new JobActionRequest(Guid.NewGuid().ToString(), JobActionKind.Worker, environmentId)]
+                : [];
+
+        await using (var delete = connection.CreateCommand())
+        {
+            delete.Transaction = transaction;
+            delete.CommandText = "DELETE FROM JobActions WHERE JobId = $jobId;";
+            delete.Parameters.AddWithValue("$jobId", jobId);
+            await delete.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var position = 0; position < actions.Count; position++)
+        {
+            var action = actions[position];
+            var id = Guid.TryParse(action.Id, out var parsedId)
+                ? parsedId.ToString()
+                : Guid.NewGuid().ToString();
+            if (!seenIds.Add(id))
+                id = Guid.NewGuid().ToString();
+
+            await using var insert = connection.CreateCommand();
+            insert.Transaction = transaction;
+            insert.CommandText = """
+                INSERT INTO JobActions
+                    (Id, JobId, Position, Kind, EnvironmentId, ScriptPath, ScriptRuntime,
+                     ArgumentsJson, WorkingDirectory, TimeoutSeconds, ApprovedHash,
+                     CreatedUTC, UpdatedUTC)
+                VALUES
+                    ($id, $jobId, $position, $kind, $environmentId, $scriptPath,
+                     $scriptRuntime, $argumentsJson, $workingDirectory, $timeoutSeconds,
+                     $approvedHash, $now, $now);
+                """;
+            insert.Parameters.AddWithValue("$id", id);
+            insert.Parameters.AddWithValue("$jobId", jobId);
+            insert.Parameters.AddWithValue("$position", position);
+            insert.Parameters.AddWithValue("$kind", (int)action.Kind);
+            insert.Parameters.AddWithValue("$environmentId", action.EnvironmentId is null ? DBNull.Value : action.EnvironmentId.Value);
+            insert.Parameters.AddWithValue("$scriptPath", action.ScriptPath is null ? DBNull.Value : action.ScriptPath);
+            insert.Parameters.AddWithValue("$scriptRuntime", action.ScriptRuntime is null ? DBNull.Value : (int)action.ScriptRuntime.Value);
+            insert.Parameters.AddWithValue(
+                "$argumentsJson",
+                JsonSerializer.Serialize(action.Arguments ?? [], AppJsonSerializerContext.Default.ListString));
+            insert.Parameters.AddWithValue("$workingDirectory", action.WorkingDirectory is null ? DBNull.Value : action.WorkingDirectory);
+            insert.Parameters.AddWithValue("$timeoutSeconds", action.TimeoutSeconds is > 0 ? action.TimeoutSeconds.Value : 0);
+            insert.Parameters.AddWithValue("$approvedHash", action.ApprovedHash is null ? DBNull.Value : action.ApprovedHash);
+            insert.Parameters.AddWithValue("$now", ToDb(nowUtc));
+            await insert.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
+
+    private static async Task<IReadOnlyList<JobActionRecord>> ReadActionsAsync(
+        SqliteConnection connection,
+        long jobId,
+        CancellationToken cancellationToken)
+    {
+        var actions = new List<JobActionRecord>();
+        await using var command = connection.CreateCommand();
+        command.CommandText = ActionSelectSql + " WHERE a.JobId = $jobId ORDER BY a.Position;";
+        command.Parameters.AddWithValue("$jobId", jobId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            actions.Add(ReadAction(reader));
+        return actions;
+    }
+
+    private static async Task<Dictionary<long, List<JobActionRecord>>> ReadActionsForJobsAsync(
+        SqliteConnection connection,
+        string? projectPath,
+        bool includeDeleted,
+        CancellationToken cancellationToken)
+    {
+        var actionsByJob = new Dictionary<long, List<JobActionRecord>>();
+        await using var command = connection.CreateCommand();
+        command.CommandText = ActionSelectSql + "\n" + $"""
+            WHERE ($includeDeleted = 1 OR j.DeletedUTC IS NULL)
+              AND ($projectPath IS NULL OR j.ProjectPath = $projectPath{ProjectPathCollation})
+            ORDER BY a.JobId, a.Position;
+            """;
+        command.Parameters.AddWithValue("$includeDeleted", includeDeleted ? 1 : 0);
+        command.Parameters.AddWithValue("$projectPath", projectPath is null ? DBNull.Value : NormalizeProjectPath(projectPath));
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var action = ReadAction(reader);
+            if (!actionsByJob.TryGetValue(action.JobId, out var actions))
+            {
+                actions = [];
+                actionsByJob.Add(action.JobId, actions);
+            }
+            actions.Add(action);
+        }
+        return actionsByJob;
+    }
+
+    private static JobActionRecord ReadAction(SqliteDataReader reader) => new(
+        reader.GetString(0),
+        reader.GetInt64(1),
+        reader.GetInt32(2),
+        (JobActionKind)reader.GetInt32(3),
+        reader.IsDBNull(4) ? null : reader.GetInt32(4),
+        reader.IsDBNull(5) ? null : reader.GetString(5),
+        reader.IsDBNull(6) ? LLM.NotSet : (LLM)reader.GetInt32(6),
+        reader.IsDBNull(7) ? null : reader.GetString(7),
+        reader.IsDBNull(8) ? null : (JobScriptRuntime)reader.GetInt32(8),
+        DeserializeArguments(reader.GetString(9)),
+        reader.IsDBNull(10) ? null : reader.GetString(10),
+        ToOptionalTimeout(reader.GetInt32(11)),
+        reader.IsDBNull(12) ? null : reader.GetString(12));
+
+    private static async Task<IReadOnlyList<JobRunActionRecord>> ReadRunActionsAsync(
+        SqliteConnection connection,
+        string runId,
+        CancellationToken cancellationToken)
+    {
+        var actions = new List<JobRunActionRecord>();
+        await using var command = connection.CreateCommand();
+        command.CommandText = RunActionSelectSql + " WHERE RunId = $runId ORDER BY Position;";
+        command.Parameters.AddWithValue("$runId", runId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            actions.Add(ReadRunAction(reader));
+        return actions;
+    }
+
+    private static JobRunActionRecord ReadRunAction(SqliteDataReader reader) => new(
+        reader.GetString(0),
+        reader.GetString(1),
+        reader.IsDBNull(2) ? null : reader.GetString(2),
+        reader.GetInt32(3),
+        (JobActionKind)reader.GetInt32(4),
+        (JobRunActionStatus)reader.GetInt32(5),
+        reader.IsDBNull(6) ? null : reader.GetInt32(6),
+        reader.IsDBNull(7) ? null : reader.GetString(7),
+        (LLM)reader.GetInt32(8),
+        reader.IsDBNull(9) ? null : reader.GetString(9),
+        reader.IsDBNull(10) ? null : (JobScriptRuntime)reader.GetInt32(10),
+        DeserializeArguments(reader.GetString(11)),
+        reader.IsDBNull(12) ? null : reader.GetString(12),
+        ToOptionalTimeout(reader.GetInt32(13)),
+        reader.IsDBNull(14) ? null : reader.GetString(14),
+        reader.IsDBNull(15) ? null : reader.GetString(15),
+        reader.IsDBNull(16) ? null : ParseDb(reader.GetString(16)),
+        reader.IsDBNull(17) ? null : ParseDb(reader.GetString(17)),
+        reader.IsDBNull(18) ? null : reader.GetInt32(18),
+        reader.IsDBNull(19) ? null : reader.GetString(19),
+        reader.GetString(20),
+        reader.GetString(21));
+
+    private static IReadOnlyList<string> DeserializeArguments(string json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize(json, AppJsonSerializerContext.Default.ListString) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
     }
 
     private static async Task ReplaceTriggersAsync(
@@ -1183,6 +1728,78 @@ public sealed class JobStore : IJobStore
             alter.ExecuteNonQuery();
         }
 
+        // Upgrade every Worker-only Automation in place. Jobs.EnvironmentId remains a mirrored
+        // compatibility column, while JobActions is authoritative for new code. The run backfill
+        // makes old recordings render through the same per-action history surface.
+        using (var actionMigration = connection.BeginTransaction(deferred: false))
+        {
+            var now = ToDb(DateTime.UtcNow);
+            // JobStore is also used by the lean scheduler graph and isolated lease tests before
+            // Repository has necessarily created the Environments table. SQLite permits the FK
+            // declaration in JobActions, but preparing an INSERT against it fails while the
+            // parent table is absent. A database with legacy Worker jobs necessarily has the
+            // parent table, so skipping only this backfill until it exists loses no migratable
+            // rows.
+            if (HasColumn(connection, "Environments", "Id"))
+            {
+                using var jobs = connection.CreateCommand();
+                jobs.Transaction = actionMigration;
+                jobs.CommandText = """
+                    INSERT OR IGNORE INTO JobActions
+                        (Id, JobId, Position, Kind, EnvironmentId, ScriptPath, ScriptRuntime,
+                         ArgumentsJson, WorkingDirectory, TimeoutSeconds, ApprovedHash,
+                         CreatedUTC, UpdatedUTC)
+                    SELECT lower(hex(randomblob(16))), j.Id, 0, $worker, j.EnvironmentId,
+                           NULL, NULL, '[]', NULL, 0, NULL, $now, $now
+                    FROM Jobs j
+                    WHERE j.EnvironmentId IS NOT NULL
+                      AND NOT EXISTS (SELECT 1 FROM JobActions a WHERE a.JobId = j.Id);
+                    """;
+                jobs.Parameters.AddWithValue("$worker", (int)JobActionKind.Worker);
+                jobs.Parameters.AddWithValue("$now", now);
+                jobs.ExecuteNonQuery();
+            }
+
+            using (var runs = connection.CreateCommand())
+            {
+                runs.Transaction = actionMigration;
+                runs.CommandText = """
+                    INSERT OR IGNORE INTO JobRunActions
+                        (Id, RunId, SourceActionId, Position, Kind, Status, EnvironmentId,
+                         EnvironmentName, Llm, ScriptPath, ScriptRuntime, ArgumentsJson,
+                         WorkingDirectory, TimeoutSeconds, ApprovedHash, SessionId, StartedUTC,
+                         EndedUTC, ExitCode, ErrorMessage, StandardOutput, StandardError)
+                    SELECT lower(hex(randomblob(16))), r.Id,
+                           (SELECT a.Id FROM JobActions a WHERE a.JobId = r.JobId AND a.Position = 0),
+                           0, $worker,
+                           CASE r.Status
+                               WHEN 0 THEN $pending
+                               WHEN 1 THEN $running
+                               WHEN 2 THEN $succeeded
+                               WHEN 3 THEN $failed
+                               WHEN 4 THEN $cancelled
+                               WHEN 5 THEN $timedOut
+                               ELSE $failed
+                           END,
+                           r.EnvironmentId, r.EnvironmentName, r.Llm, NULL, NULL, '[]', NULL,
+                           0, NULL, r.SessionId, r.StartedUTC, r.EndedUTC, r.ExitCode,
+                           r.ErrorMessage, '', ''
+                    FROM JobRuns r
+                    WHERE NOT EXISTS (SELECT 1 FROM JobRunActions a WHERE a.RunId = r.Id);
+                    """;
+                runs.Parameters.AddWithValue("$worker", (int)JobActionKind.Worker);
+                runs.Parameters.AddWithValue("$pending", (int)JobRunActionStatus.Pending);
+                runs.Parameters.AddWithValue("$running", (int)JobRunActionStatus.Running);
+                runs.Parameters.AddWithValue("$succeeded", (int)JobRunActionStatus.Succeeded);
+                runs.Parameters.AddWithValue("$failed", (int)JobRunActionStatus.Failed);
+                runs.Parameters.AddWithValue("$cancelled", (int)JobRunActionStatus.Cancelled);
+                runs.Parameters.AddWithValue("$timedOut", (int)JobRunActionStatus.TimedOut);
+                runs.ExecuteNonQuery();
+            }
+
+            actionMigration.Commit();
+        }
+
         // These indexes reference DeletedUTC, so create them only after the guarded migration
         // above. Putting them in SchemaSql would fail startup for an existing pre-soft-delete DB
         // before ALTER TABLE had a chance to add the column.
@@ -1283,6 +1900,23 @@ public sealed class JobStore : IJobStore
         FROM Jobs j LEFT JOIN Environments e ON e.Id = j.EnvironmentId
         """;
 
+    private const string ActionSelectSql = """
+        SELECT a.Id, a.JobId, a.Position, a.Kind, a.EnvironmentId, e.CustomName, e.LLM,
+               a.ScriptPath, a.ScriptRuntime, a.ArgumentsJson, a.WorkingDirectory,
+               a.TimeoutSeconds, a.ApprovedHash
+        FROM JobActions a
+        JOIN Jobs j ON j.Id = a.JobId
+        LEFT JOIN Environments e ON e.Id = a.EnvironmentId
+        """;
+
+    private const string RunActionSelectSql = """
+        SELECT Id, RunId, SourceActionId, Position, Kind, Status, EnvironmentId,
+               EnvironmentName, Llm, ScriptPath, ScriptRuntime, ArgumentsJson,
+               WorkingDirectory, TimeoutSeconds, ApprovedHash, SessionId, StartedUTC,
+               EndedUTC, ExitCode, ErrorMessage, StandardOutput, StandardError
+        FROM JobRunActions
+        """;
+
     /// <summary>
     /// The JobRuns columns every run projection selects, in the order <see cref="ReadRun"/> reads
     /// them. Both the plain projection and the summary window query are built from this list, so a
@@ -1319,6 +1953,25 @@ public sealed class JobStore : IJobStore
             UpdatedUTC TEXT NOT NULL,
             DeletedUTC TEXT,
             FOREIGN KEY (EnvironmentId) REFERENCES Environments(Id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS JobActions (
+            Id TEXT PRIMARY KEY,
+            JobId INTEGER NOT NULL,
+            Position INTEGER NOT NULL,
+            Kind INTEGER NOT NULL,
+            EnvironmentId INTEGER,
+            ScriptPath TEXT,
+            ScriptRuntime INTEGER,
+            ArgumentsJson TEXT NOT NULL DEFAULT '[]',
+            WorkingDirectory TEXT,
+            TimeoutSeconds INTEGER NOT NULL DEFAULT 0,
+            ApprovedHash TEXT,
+            CreatedUTC TEXT NOT NULL,
+            UpdatedUTC TEXT NOT NULL,
+            FOREIGN KEY (JobId) REFERENCES Jobs(Id) ON DELETE CASCADE,
+            FOREIGN KEY (EnvironmentId) REFERENCES Environments(Id) ON DELETE SET NULL,
+            UNIQUE(JobId, Position)
         );
 
         CREATE TABLE IF NOT EXISTS JobTriggers (
@@ -1362,6 +2015,33 @@ public sealed class JobStore : IJobStore
             FOREIGN KEY (JobId) REFERENCES Jobs(Id)
         );
 
+        CREATE TABLE IF NOT EXISTS JobRunActions (
+            Id TEXT PRIMARY KEY,
+            RunId TEXT NOT NULL,
+            SourceActionId TEXT,
+            Position INTEGER NOT NULL,
+            Kind INTEGER NOT NULL,
+            Status INTEGER NOT NULL,
+            EnvironmentId INTEGER,
+            EnvironmentName TEXT,
+            Llm INTEGER NOT NULL DEFAULT 0,
+            ScriptPath TEXT,
+            ScriptRuntime INTEGER,
+            ArgumentsJson TEXT NOT NULL DEFAULT '[]',
+            WorkingDirectory TEXT,
+            TimeoutSeconds INTEGER NOT NULL DEFAULT 0,
+            ApprovedHash TEXT,
+            SessionId TEXT,
+            StartedUTC TEXT,
+            EndedUTC TEXT,
+            ExitCode INTEGER,
+            ErrorMessage TEXT,
+            StandardOutput TEXT NOT NULL DEFAULT '',
+            StandardError TEXT NOT NULL DEFAULT '',
+            FOREIGN KEY (RunId) REFERENCES JobRuns(Id) ON DELETE CASCADE,
+            UNIQUE(RunId, Position)
+        );
+
         CREATE TABLE IF NOT EXISTS JobSchedulerLease (
             LeaseName TEXT PRIMARY KEY,
             OwnerId TEXT NOT NULL,
@@ -1369,9 +2049,11 @@ public sealed class JobStore : IJobStore
         );
 
         CREATE INDEX IF NOT EXISTS idx_jobs_project ON Jobs(ProjectPath, Enabled, DeletedUTC);
+        CREATE INDEX IF NOT EXISTS idx_job_actions_job ON JobActions(JobId, Position);
         CREATE INDEX IF NOT EXISTS idx_job_triggers_due ON JobTriggers(Kind, NextRunUTC);
         CREATE INDEX IF NOT EXISTS idx_job_runs_queue ON JobRuns(Status, QueuedUTC);
         CREATE INDEX IF NOT EXISTS idx_job_runs_job ON JobRuns(JobId, QueuedUTC DESC);
+        CREATE INDEX IF NOT EXISTS idx_job_run_actions_run ON JobRunActions(RunId, Position);
         """;
 }
 

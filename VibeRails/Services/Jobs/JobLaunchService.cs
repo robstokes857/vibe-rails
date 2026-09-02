@@ -2,6 +2,7 @@ using Serilog;
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services.LlmClis;
+using VibeRails.Services.LlmClis.Launchers;
 using VibeRails.Utils;
 
 namespace VibeRails.Services.Jobs;
@@ -13,13 +14,13 @@ public interface IJobLaunchService
 }
 
 /// <summary>
-/// Opens a real OS terminal window per queued Job run, running the Job's Environment/Worker
-/// EXACTLY as the user configured it on the Environment screen — the same command the Env screen's
-/// launch button produces.
+/// Opens one real OS terminal window per queued Automation run. Script-only workflows launch the
+/// VibeRails child directly; a workflow with a Worker uses the same Environment launch pipeline as
+/// the Environment screen so its arguments and workspace policy remain exact.
 ///
-/// This is deliberately NOT an automation-specific invocation. There is no non-interactive rewrite,
-/// no auto-approval flag injection, and no filtering of the env's saved arguments: whatever the user
-/// chose is what runs, including permission-skipping flags. A Job is an Env on a timer, nothing more.
+/// There is no non-interactive Worker rewrite, auto-approval flag injection, or filtering of the
+/// Environment's saved arguments. Repository-script validation and orchestration happen later in
+/// the child process from the immutable run-action snapshot.
 ///
 /// The spawned process (<c>vb --env … --job-run &lt;id&gt;</c>) owns the run from there: it claims it
 /// under its own PID, records its own session, honours cancellation, enforces its own deadline, and
@@ -27,7 +28,8 @@ public interface IJobLaunchService
 /// </summary>
 public sealed class JobLaunchService(
     IJobStore store,
-    IEnvironmentLaunchService environmentLaunchService) : IJobLaunchService
+    IEnvironmentLaunchService environmentLaunchService,
+    IJobProcessLauncher processLauncher) : IJobLaunchService
 {
     /// <summary>
     /// Ceiling on simultaneously open job terminals across the whole machine. The per-job overlap
@@ -81,23 +83,46 @@ public sealed class JobLaunchService(
             return false;
         }
 
-        var vbArgs = BuildVbArgs(run);
+        var actions = run.Actions?.OrderBy(action => action.Position).ToList() ?? [];
+        var workers = actions.Where(action => action.Kind == JobActionKind.Worker).ToList();
+        if (workers.Count > 1)
+        {
+            await FailAsync(run, "This Automation snapshot contains more than one Worker.");
+            return false;
+        }
 
         LaunchResultSnapshot result;
         try
         {
-            // This is the exact application pipeline behind POST /api/v1/cli/launch/{cli}. The
-            // empty Args array is the same request the Environments screen sends; only vb's private
-            // run-bookkeeping flags differ.
-            var launch = await environmentLaunchService.LaunchAsync(
-                run.Llm,
-                new LaunchCliRequest(run.ProjectPath, run.EnvironmentName, []),
-                run.ProjectPath,
-                vbArgs,
-                keepTerminalOpen: false,
-                environmentId: run.EnvironmentId,
-                launchMinimized: run.LaunchMinimized,
-                cancellationToken: cancellationToken);
+            LaunchResult launch;
+            if (workers.Count == 1 || actions.Count == 0 && run.EnvironmentId is not null)
+            {
+                // Worker workflows retain the exact Environment launch pipeline, including its
+                // persistent/per-run workspace resolution. Every repository script in the child
+                // process then uses that resolved workspace root.
+                var worker = workers.FirstOrDefault();
+                var llm = worker?.Llm ?? run.Llm;
+                var environmentId = worker?.EnvironmentId ?? run.EnvironmentId;
+                var environmentName = worker?.EnvironmentName ?? run.EnvironmentName;
+                launch = await environmentLaunchService.LaunchAsync(
+                    llm,
+                    new LaunchCliRequest(run.ProjectPath, environmentName, []),
+                    run.ProjectPath,
+                    BuildVbArgs(run),
+                    keepTerminalOpen: false,
+                    environmentId: environmentId,
+                    launchMinimized: run.LaunchMinimized,
+                    cancellationToken: cancellationToken);
+            }
+            else
+            {
+                // No Worker means there is no LLM launcher to borrow. Open the same native
+                // terminal shape directly and let --job-run orchestrate the script actions.
+                launch = processLauncher.Launch(
+                    run.ProjectPath,
+                    BuildStandaloneVbArgs(run),
+                    run.LaunchMinimized);
+            }
             result = new LaunchResultSnapshot(launch.Success, launch.Message);
         }
         catch (Exception ex)
@@ -113,8 +138,9 @@ public sealed class JobLaunchService(
         }
 
         Log.Information(
-            "[Jobs] Launched run {RunId} for job '{JobName}' using worker '{Worker}' in {ProjectPath}; minimized={LaunchMinimized}",
-            run.Id, run.JobName, run.EnvironmentName, run.ProjectPath, run.LaunchMinimized);
+            "[Jobs] Launched run {RunId} for job '{JobName}' ({ActionCount} action(s), worker={Worker}) in {ProjectPath}; minimized={LaunchMinimized}",
+            run.Id, run.JobName, actions.Count, workers.FirstOrDefault()?.EnvironmentName ?? run.EnvironmentName ?? "none",
+            run.ProjectPath, run.LaunchMinimized);
         return true;
     }
 
@@ -134,6 +160,10 @@ public sealed class JobLaunchService(
         }
         return args.ToArray();
     }
+
+    /// <summary>Complete argv for a script-only child, which has no --env launcher to add workdir.</summary>
+    public static string[] BuildStandaloneVbArgs(JobRunRecord run) =>
+        ["--workdir", run.ProjectPath, .. BuildVbArgs(run)];
 
     private async Task FailAsync(JobRunRecord run, string message)
     {

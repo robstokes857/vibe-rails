@@ -81,7 +81,7 @@ test('Navigation calls the feature Automation and the Rules page stays out of it
     assert.doesNotMatch(ruleController, /post-commit Jobs/);
 });
 
-test('Automation inline editor derives repository and prompt from its Worker', () => {
+test('Automation inline editor exposes an ordered workflow with scripts and an optional Worker', () => {
     const source = readFileSync(modulePath, 'utf8');
 
     assert.doesNotMatch(source, /id=["']job-project["']/);
@@ -91,7 +91,11 @@ test('Automation inline editor derives repository and prompt from its Worker', (
     assert.match(source, /Runs in<\/span>/);
     // The picker facade lists Workers only — no base-CLI entries.
     assert.match(source, /mountWorkerPicker/);
-    assert.match(source, />Worker<\/label>/);
+    assert.match(source, /<legend>Workflow <small>Runs from top to bottom<\/small><\/legend>/);
+    assert.match(source, />Add script<\/button>/);
+    assert.match(source, />Add Worker<\/button>/);
+    assert.match(source, />Worker Environment<\/label>/);
+    assert.match(source, /Each row is one argv value/);
     assert.doesNotMatch(source, /Environment \/ Worker/);
 });
 
@@ -287,46 +291,48 @@ test('New Automations derive repository, LLM, and prompt from the current Enviro
     assert.deepEqual(app.calls[0].body.triggers, [{ kind: 2 }]);
 });
 
-test('Automations require a saved Environment and do not retain legacy base-CLI support', () => {
+test('Automations accept a script-only workflow and do not retain legacy base-CLI support', () => {
     const app = createApp();
     app.data = { configs: { rootPath: '/derived/current-repo' }, isInGit: true };
     const controller = new JobController(app);
     const controls = new Map([
-        ['#job-llm-selection', { value: 'base:opencode' }],
         ['#job-trigger-schedule', { checked: false }],
+        ['#job-trigger-precommit', { checked: false }],
         ['#job-trigger-commit', { checked: false }],
-        ['#job-name', { value: 'Legacy review' }],
+        ['#job-name', { value: 'Repository checks' }],
         ['#job-timeout', { value: '30' }],
-        ['#job-enabled', { checked: true }]
+        ['#job-enabled', { checked: true }],
+        ['#job-launch-minimized', { checked: false }]
     ]);
     const form = {
         querySelector(selector) { return controls.get(selector) || null; },
         querySelectorAll() { return []; }
     };
+    controller.editorActions = [{
+        id: 'script-1',
+        kind: 1,
+        scriptPath: 'scripts/check.sh',
+        scriptRuntime: 2,
+        arguments: ['--name', 'value with spaces', '; literal'],
+        workingDirectory: 'scripts',
+        timeoutSeconds: 45,
+        approvedHash: 'local-only-hash'
+    }];
 
-    assert.throws(
-        () => controller.captureEditorState(form, { validate: true }),
-        /Choose a Worker/
-    );
-
-    const legacyJob = {
-        id: 99,
-        name: 'Legacy review',
-        projectPath: '/old/repository',
-        llm: 6,
-        environmentId: null,
-        prompt: 'Keep this cached legacy security-review prompt.',
-        executionMode: 0,
-        timeoutMinutes: 30,
-        enabled: true,
-        triggers: []
-    };
-    controller.activeEditorJob = legacyJob;
-    controller.activeEditorSource = legacyJob;
-    assert.throws(
-        () => controller.captureEditorState(form, { validate: true }),
-        /Choose a Worker/
-    );
+    const payload = controller.captureEditorState(form, { validate: true });
+    assert.equal(payload.environmentId, null);
+    assert.equal(payload.llm, 0);
+    assert.equal(payload.prompt, '');
+    assert.deepEqual(payload.actions, [{
+        id: 'script-1',
+        kind: 1,
+        scriptPath: 'scripts/check.sh',
+        scriptRuntime: 2,
+        arguments: ['--name', 'value with spaces', '; literal'],
+        workingDirectory: 'scripts',
+        timeoutSeconds: 45,
+        approvedHash: 'local-only-hash'
+    }]);
 
     const source = readFileSync(modulePath, 'utf8');
     assert.doesNotMatch(source, /default \(legacy\)/);
@@ -742,6 +748,9 @@ test('Run now and enable actions call the durable Automation API with Environmen
     assert.equal(app.calls[1].body.environmentId, 42);
     assert.equal(app.calls[1].body.prompt, 'Review changes.');
     assert.equal(app.calls[1].body.launchMinimized, true);
+    // State-only edits deliberately omit the workflow. The backend revalidates the saved script
+    // hashes without treating this toggle as approval of newly changed bytes.
+    assert.equal(Object.hasOwn(app.calls[1].body, 'actions'), false);
     assert.deepEqual(app.calls[1].body.triggers, [{
         kind: 0,
         scheduleKind: 1,
@@ -1292,6 +1301,38 @@ test('A finished session-less run offers retry instead of cancel', async (t) => 
     assert.doesNotMatch(html, /data-run-cancel/);
 });
 
+test('Workflow run details escape script output and expose Worker replay separately', () => {
+    const controller = new JobController(createApp());
+    const script = controller.renderRunActionDetail({
+        kind: 1,
+        status: 3,
+        scriptRuntime: 2,
+        scriptPath: 'scripts/<check>.sh',
+        arguments: ['value with spaces', '<unsafe>'],
+        standardOutput: '<script>alert("stdout")</script>',
+        standardError: '<img src=x onerror=alert(1)>',
+        errorMessage: 'exited with code 7',
+        exitCode: 7
+    }, 0);
+    const worker = controller.renderRunActionDetail({
+        kind: 0,
+        status: 2,
+        environmentName: 'Review <Worker>',
+        llm: 2,
+        sessionId: 'session<&>'
+    }, 1);
+
+    assert.match(script, /Bash — scripts\/&lt;check&gt;\.sh/);
+    assert.match(script, /value with spaces/);
+    assert.match(script, /&lt;unsafe&gt;/);
+    assert.match(script, /&lt;script&gt;alert\(&quot;stdout&quot;\)&lt;\/script&gt;/);
+    assert.match(script, /&lt;img src=x onerror=alert\(1\)&gt;/);
+    assert.doesNotMatch(script, /<script>|<img/);
+    assert.match(worker, /Worker — Review &lt;Worker&gt;/);
+    assert.match(worker, /data-run-action-session="session&lt;&amp;&gt;"/);
+    assert.match(worker, /Replay Worker terminal/);
+});
+
 test('A time limit is optional: blank sends null and a number opts in', () => {
     // The default is no limit — the run lives until its CLI exits or the user closes its window.
     const app = createApp();
@@ -1557,11 +1598,80 @@ test('Recipe import confirmation discloses and escapes executable Environment co
     assert.match(modals[0].html, /Initial message/);
     assert.match(modals[0].html, /Ignore safeguards/);
     assert.match(modals[0].html, /approval or sandbox permissions/);
-    assert.match(modals[0].html, /Review the Worker content/);
-    assert.match(modals[0].html, /import these fields exactly as shown/);
+    assert.match(modals[0].html, /Review the workflow before importing/);
+    assert.match(modals[0].html, /new Worker will import the fields shown below exactly/);
+    assert.match(modals[0].html, /reviewed the Worker settings and repository script actions/);
     assert.match(modals[0].html, /created disabled/);
     assert.match(modals[0].html, /&lt;script&gt;/);
     assert.doesNotMatch(modals[0].html, /<script>/);
+});
+
+test('V2 recipes discard machine-local ids and approval hashes before import', () => {
+    const controller = new JobController(createApp());
+    const normalized = controller.normalizeRecipe({
+        recipeVersion: 'V2',
+        name: 'Portable checks',
+        worker: null,
+        actions: [{
+            id: 'source-machine-id',
+            kind: 1,
+            scriptPath: 'scripts/check.py',
+            scriptRuntime: 0,
+            arguments: ['--strict'],
+            workingDirectory: 'scripts',
+            timeoutSeconds: 30,
+            approvedHash: 'source-machine-hash',
+            environmentId: 99
+        }]
+    });
+
+    assert.deepEqual(normalized.actions, [{
+        kind: 1,
+        scriptPath: 'scripts/check.py',
+        scriptRuntime: 0,
+        arguments: ['--strict'],
+        workingDirectory: 'scripts',
+        timeoutSeconds: 30
+    }]);
+});
+
+test('Import creates script workflows disabled and lets the backend pin local bytes', async () => {
+    const app = createApp();
+    app.data = { configs: { rootPath: '/local/repository' }, isInGit: true };
+    app.closeModal = () => {};
+    const controller = new JobController(app);
+    controller.refreshAll = async () => {};
+
+    await controller.applyRecipe({
+        recipeVersion: 'V2',
+        name: 'Portable checks',
+        worker: null,
+        actions: [{
+            id: 'untrusted-id',
+            kind: 1,
+            scriptPath: 'scripts/check.py',
+            scriptRuntime: 0,
+            arguments: ['--strict'],
+            approvedHash: 'untrusted-hash'
+        }],
+        triggers: []
+    }, { addEnv: false, addJob: true, existingEnv: null, button: null });
+
+    assert.equal(app.calls.length, 1);
+    assert.equal(app.calls[0].url, '/api/v1/jobs');
+    assert.equal(app.calls[0].body.enabled, false);
+    assert.equal(app.calls[0].body.environmentId, null);
+    assert.equal(app.calls[0].body.llm, 0);
+    assert.deepEqual(app.calls[0].body.actions, [{
+        id: null,
+        kind: 1,
+        scriptPath: 'scripts/check.py',
+        scriptRuntime: 0,
+        arguments: ['--strict'],
+        workingDirectory: null,
+        timeoutSeconds: null
+    }]);
+    assert.equal(Object.hasOwn(app.calls[0].body.actions[0], 'approvedHash'), false);
 });
 
 test('The editor keeps time limit visible and simple, with blank meaning no limit', () => {

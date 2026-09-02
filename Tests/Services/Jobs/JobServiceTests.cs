@@ -24,6 +24,7 @@ public sealed class JobServiceTests : IDisposable
     private readonly Mock<IJobExecutableResolver> _executableResolver = new();
     private readonly Mock<IJobScheduler> _scheduler = new();
     private readonly Mock<IJobDaemonKicker> _daemonKicker = new();
+    private readonly Mock<IAutomationScriptService> _automationScriptService = new();
 
     public JobServiceTests()
     {
@@ -36,13 +37,55 @@ public sealed class JobServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task CreateJob_WithoutAnEnvironment_IsRejected()
+    public async Task CreateJob_WithoutAnyWorkflowActions_IsRejected()
     {
         var error = await Assert.ThrowsAsync<JobServiceException>(() =>
             Service().CreateJobAsync(Request(environmentId: null), TestContext.Current.CancellationToken));
 
         Assert.Equal(400, error.StatusCode);
-        Assert.Contains("Environment", error.Message);
+        Assert.Contains("at least one Worker or repository script", error.Message);
+    }
+
+    [Fact]
+    public async Task CreateJob_WithOnlyARepositoryScript_DoesNotRequireAnEnvironment()
+    {
+        var script = ScriptRequest();
+        var normalized = script with { ApprovedHash = new string('a', 64) };
+        _repository
+            .Setup(r => r.GetAllEnvironmentsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        _automationScriptService
+            .Setup(service => service.NormalizeAsync(
+                _repoRoot,
+                It.Is<JobActionRequest>(action => action.Kind == JobActionKind.Script),
+                It.IsAny<CancellationToken>(),
+                true))
+            .ReturnsAsync(normalized);
+
+        CreateJobRequest? captured = null;
+        _store
+            .Setup(store => store.CreateJobAsync(It.IsAny<CreateJobRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<CreateJobRequest, CancellationToken>((request, _) => captured = request)
+            .ReturnsAsync(Record() with
+            {
+                Llm = LLM.NotSet,
+                EnvironmentId = null,
+                EnvironmentName = null,
+                Prompt = string.Empty,
+                Actions = [ScriptRecord(normalized)]
+            });
+
+        var created = await Service().CreateJobAsync(
+            Request(environmentId: null, actions: [script]),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(LLM.NotSet, created.Llm);
+        Assert.Null(created.EnvironmentId);
+        Assert.NotNull(captured);
+        Assert.Equal(LLM.NotSet, captured.Llm);
+        Assert.Null(captured.EnvironmentId);
+        Assert.Equal(string.Empty, captured.Prompt);
+        Assert.Equal(normalized, Assert.Single(captured.Actions!));
     }
 
     [Theory]
@@ -293,11 +336,31 @@ public sealed class JobServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task UpdateJob_CannotDetachAnExistingWorker()
+    public async Task UpdateJob_FromAnOlderClient_PreservesScriptsWithoutReapprovingChangedBytes()
     {
+        var script = ScriptRequest() with { ApprovedHash = new string('a', 64) };
+        var existing = Record() with
+        {
+            Llm = LLM.NotSet,
+            EnvironmentId = null,
+            EnvironmentName = null,
+            Prompt = string.Empty,
+            Actions = [ScriptRecord(script)]
+        };
         _store
             .Setup(s => s.GetJobAsync(7, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Record() with { EnvironmentId = 1 });
+            .ReturnsAsync(existing);
+        _repository
+            .Setup(r => r.GetAllEnvironmentsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        _automationScriptService
+            .Setup(service => service.NormalizeAsync(
+                _repoRoot,
+                It.IsAny<JobActionRequest>(),
+                It.IsAny<CancellationToken>(),
+                false))
+            .ThrowsAsync(new AutomationScriptValidationException(
+                "Script 'scripts/check.py' has changed since this Automation was saved."));
 
         var error = await Assert.ThrowsAsync<JobServiceException>(() =>
             Service().UpdateJobAsync(
@@ -306,7 +369,68 @@ public sealed class JobServiceTests : IDisposable
                 TestContext.Current.CancellationToken));
 
         Assert.Equal(400, error.StatusCode);
-        Assert.Contains("cannot be detached", error.Message);
+        Assert.Contains("has changed", error.Message);
+        _automationScriptService.Verify(service => service.NormalizeAsync(
+            _repoRoot,
+            It.Is<JobActionRequest>(action => action.ApprovedHash == script.ApprovedHash),
+            It.IsAny<CancellationToken>(),
+            false), Times.Once);
+        _store.Verify(
+            store => store.UpdateJobAsync(
+                It.IsAny<long>(),
+                It.IsAny<UpdateJobRequest>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task UpdateJob_DisablingFromAnOlderClient_KeepsAScriptThatCanNoLongerBeValidated()
+    {
+        // The card toggle sends no actions. Disabling is the safety valve: a deleted script, a
+        // missing interpreter, or changed bytes must not trap the user in an Automation that keeps
+        // firing. The saved snapshot rides through verbatim (same hash, nothing re-approved).
+        var script = ScriptRequest() with { ApprovedHash = new string('a', 64) };
+        var existing = Record() with
+        {
+            Llm = LLM.NotSet,
+            EnvironmentId = null,
+            EnvironmentName = null,
+            Prompt = string.Empty,
+            Actions = [ScriptRecord(script)]
+        };
+        _store
+            .Setup(s => s.GetJobAsync(7, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existing);
+        _repository
+            .Setup(r => r.GetAllEnvironmentsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        _automationScriptService
+            .Setup(service => service.NormalizeAsync(
+                _repoRoot,
+                It.IsAny<JobActionRequest>(),
+                It.IsAny<CancellationToken>(),
+                false))
+            .ThrowsAsync(new AutomationScriptValidationException("Script was not found: scripts/check.py"));
+        UpdateJobRequest? captured = null;
+        _store
+            .Setup(s => s.UpdateJobAsync(7, It.IsAny<UpdateJobRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<long, UpdateJobRequest, CancellationToken>((_, request, _) => captured = request)
+            .ReturnsAsync(existing with { Enabled = false });
+
+        var updated = await Service().UpdateJobAsync(
+            7,
+            new UpdateJobRequest("nightly", _repoRoot, LLM.Claude, null, "", null, false, []),
+            TestContext.Current.CancellationToken);
+
+        Assert.False(updated.Enabled);
+        Assert.NotNull(captured);
+        Assert.False(captured.Enabled);
+        var carried = Assert.Single(captured.Actions!);
+        Assert.Equal(JobActionKind.Script, carried.Kind);
+        Assert.Equal(script.ScriptPath, carried.ScriptPath);
+        Assert.Equal(script.ScriptRuntime, carried.ScriptRuntime);
+        Assert.Equal(script.Arguments, carried.Arguments);
+        Assert.Equal(script.ApprovedHash, carried.ApprovedHash);
     }
 
     [Fact]
@@ -437,7 +561,8 @@ public sealed class JobServiceTests : IDisposable
         _repository.Object,
         _executableResolver.Object,
         _scheduler.Object,
-        _daemonKicker.Object);
+        _daemonKicker.Object,
+        _automationScriptService.Object);
 
     private void WithEnvironment(
         int id = 1,
@@ -470,8 +595,33 @@ public sealed class JobServiceTests : IDisposable
         int? environmentId = 1,
         string prompt = "run the nightly review",
         int? timeoutMinutes = 60,
-        List<JobTriggerRequest>? triggers = null) =>
-        new(name, projectPath ?? _repoRoot, llm, environmentId, prompt, timeoutMinutes, true, triggers ?? []);
+        List<JobTriggerRequest>? triggers = null,
+        List<JobActionRequest>? actions = null) =>
+        new(name, projectPath ?? _repoRoot, llm, environmentId, prompt, timeoutMinutes, true, triggers ?? [], Actions: actions);
+
+    private static JobActionRequest ScriptRequest() => new(
+        Guid.NewGuid().ToString(),
+        JobActionKind.Script,
+        ScriptPath: "scripts/check.py",
+        ScriptRuntime: JobScriptRuntime.Python,
+        Arguments: ["--mode", "strict"],
+        WorkingDirectory: "scripts",
+        TimeoutSeconds: 30);
+
+    private static JobActionRecord ScriptRecord(JobActionRequest action) => new(
+        action.Id!,
+        1,
+        0,
+        JobActionKind.Script,
+        null,
+        null,
+        LLM.NotSet,
+        action.ScriptPath,
+        action.ScriptRuntime,
+        action.Arguments ?? [],
+        action.WorkingDirectory,
+        action.TimeoutSeconds,
+        action.ApprovedHash);
 
     private JobDefinitionRecord Record() => new(
         1, "nightly review", _repoRoot, LLM.Claude, 1, "nightly", "run the nightly review",

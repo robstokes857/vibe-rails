@@ -17,7 +17,7 @@
 - **Environment Management** - Configure separate environments for different LLM providers with custom args and prompts. Launch environments directly in the Web UI terminal with the "Web UI" button or select from the terminal's environment dropdown
 - **Sandbox Management** - Create isolated git clone sandboxes for parallel AI workflows. Shallow clones current branch with all dirty/untracked files. Launch terminals or VS Code directly into sandbox directories.
 - **Session Logging** - Track and monitor all CLI session history and outputs
-- **Background Automations (Preview)** - Opt-in, current-user VibeRails Demon runs the existing durable Automation scheduler while the dashboard is closed
+- **Background Automations (Preview)** - Ordered workflows of repository `.py`, `.ps1`, and `.sh` scripts plus at most one optional Worker; the opt-in current-user VibeRails Demon runs the durable scheduler while the dashboard is closed
 - **MCP Integration** - Custom Model Context Protocol server with specialized tools
 
 ## Technology Stack
@@ -199,7 +199,8 @@ The old CLI management commands (`vb env`, `vb validate`, `vb hooks`, etc.) are 
 
 > **Additional process-host modes** (internal, not user-facing): `vb mcp` (MCP stdio server),
 > `vb --vca-hook <type>` (VCA hook process host used by git hooks), `vb --job-run <id>`
-> (automated job run), `vb --job-trigger` (post-commit job enqueue), and `vb --job-tick`
+> (automated workflow run; script-only runs do not need `--env`), `vb --job-trigger`
+> (post-commit job enqueue), and `vb --job-tick`
 > (compatibility tombstone for the retired OS Jobs scheduler — recognized and exits before the
 > web host starts). Installers also use `vb --job-daemon-service <status|stop|repair|start>` as a
 > hidden update-maintenance surface. These are invoked internally by the main app, installers, or
@@ -442,6 +443,29 @@ Environments page *and* every Job/Worker run) and `TerminalTabHostService.StartS
 **Retention**: `MaxRetainedPerRunWorkspaces` (3). Every run is a full working copy, so this is the
 only thing between a nightly automation and a full disk.
 
+#### Automation workflows ([Services/Jobs](VibeRails/Services/Jobs))
+
+An Automation is an ordered, fail-fast list of actions. An action is either a repository script
+(`.py`, `.ps1`, or `.sh`) or a Worker Environment; a workflow may contain zero or one Worker and
+up to 20 total actions. Existing Worker-only Automations migrate to a one-Worker action without
+changing their behavior.
+
+- `JobService` validates and normalizes the editor payload. Script and working-directory paths are
+  persisted relative to the repository, arguments stay as discrete argv values, and saving pins
+  the current script bytes with SHA-256. A state-only update never approves changed bytes.
+- `AutomationScriptService` rejects escapes, network/device paths, links/reparse points, wrong
+  extensions, oversized files/arguments, unavailable runtimes, and changed hashes. Execution uses
+  explicit Python 3, PowerShell 7, or Bash/Git Bash interpreters; no user field is concatenated
+  into a shell command.
+- `JobStore` snapshots `JobActions` into immutable `JobRunActions` when a run is queued. Retry
+  copies the original run snapshot, not the Automation's current edited definition.
+- `JobLaunchService` always opens a native OS terminal. Script-only workflows use the neutral
+  `IJobProcessLauncher`; workflows with a Worker use `EnvironmentLaunchService`, preserving the
+  Worker's Project/Persistent/PerRun workspace resolution for every script in that workflow.
+- `JobRunner` executes snapshots from top to bottom, records per-action status/output, stops at the
+  first failure, and retains the existing global timeout, cancellation, overlap guard, scheduler,
+  Demon, and Worker terminal-session replay behavior.
+
 #### McpClientService ([Services/Mcp/McpClientService.cs](VibeRails/Services/Mcp/McpClientService.cs))
 **Purpose**: Custom MCP client service layer built on ModelContextProtocol NuGet package
 
@@ -499,6 +523,8 @@ tools (security review 2026-07-02).
   - `Id`, `SessionId`, `Timestamp`, `Content` (BLOB), `IsError`
 - `UserInputs` / `InputFileChanges` - User input tracking + correlated git diffs
 - `TerminalSessionLogs` - Per-terminal-session structured log rows
+- `Jobs` / `JobActions` / `JobTriggers` - Automation definitions, ordered actions, and triggers
+- `JobRuns` / `JobRunActions` - Immutable per-run workflow snapshots and per-action outcomes/output
 - Additional tables: `AgentMetadata`, `ChatSummary`, `sessionOutPut`, `TokenSavings`, `CompressionCaptures`, `CodeAnalyzerIgnores`, `ProjectCache`, `GlobalCache`
 
 **Configuration**:
@@ -564,6 +590,12 @@ tools (security review 2026-07-02).
 - `GET /api/v1/jobs/demon` - OS registration plus live VBD health
 - `POST /api/v1/jobs/demon/install` | `/start` | `/stop` | `/restart` | `/repair` - Current-user lifecycle actions
 - `DELETE /api/v1/jobs/demon` - Remove only the background registration; Automation data remains
+
+**Automation workflows**:
+- `GET|POST /api/v1/jobs`, `GET|PUT|DELETE /api/v1/jobs/{id}` - List/create/read/update/remove workflows
+- `POST /api/v1/jobs/{id}/run` - Queue Run now through the same native-terminal scheduler as every trigger
+- `GET /api/v1/jobs/runs`, `GET /api/v1/jobs/runs/{runId}` - Run history and per-action detail
+- `POST /api/v1/jobs/runs/{runId}/cancel` | `/retry` - Cancel an active run or retry its immutable snapshot
 
 **MCP Integration**:
 - `GET /api/v1/mcp/status` - MCP server status
@@ -957,6 +989,9 @@ vb --web  # Explicit web-dashboard launch
 
 ### Input Validation
 - All file paths validated to prevent directory traversal
+- Automation scripts must be regular repository-contained `.py`, `.ps1`, or `.sh` files; saved
+  SHA-256 hashes are rechecked in the resolved run workspace before execution
+- Automation arguments are bounded argv elements and are never joined into a shell command
 - SQL queries parameterized to prevent injection
 - Rule names and values sanitized before file write
 - MCP tool arguments validated before execution
@@ -973,7 +1008,8 @@ vb --web  # Explicit web-dashboard launch
 
 ### Process Security
 - Terminal session mode uses pseudo-terminal (PTY) for safe terminal emulation
-- No shell injection vulnerabilities in CLI launching
+- Automation script runtimes and VibeRails child launches use explicit executables and argv; shell
+  text is never constructed from script paths or arguments
 - Terminal output filtered before database storage
 
 ## Performance Considerations

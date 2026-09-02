@@ -83,6 +83,8 @@ public sealed class JobStoreOverlapTests : IDisposable
         var cancellationToken = TestContext.Current.CancellationToken;
         var runId = await store.EnqueueManualRunAsync(jobId, cancellationToken);
         Assert.True(await store.StartRunAsync(runId!, 4242, cancellationToken));
+        var action = Assert.Single((await store.GetRunAsync(runId!, cancellationToken))!.Actions!);
+        Assert.True(await store.StartRunActionAsync(runId!, action.Id, cancellationToken));
         Assert.True(await store.RequestCancelAsync(runId!, cancellationToken));
 
         var status = await store.CompleteIdleRunAsync(runId!, cancellationToken);
@@ -92,6 +94,11 @@ public sealed class JobStoreOverlapTests : IDisposable
         Assert.Equal(JobRunStatus.Cancelled, run!.Status);
         Assert.Equal(3, run.ExitCode);
         Assert.Equal("Automation was cancelled.", run.ErrorMessage);
+        var completedAction = Assert.Single(run.Actions!);
+        Assert.Equal(JobRunActionStatus.Cancelled, completedAction.Status);
+        Assert.Equal(3, completedAction.ExitCode);
+        Assert.Equal("Automation was cancelled.", completedAction.ErrorMessage);
+        Assert.NotNull(completedAction.EndedUtc);
     }
 
     [Fact]
@@ -101,6 +108,8 @@ public sealed class JobStoreOverlapTests : IDisposable
         var cancellationToken = TestContext.Current.CancellationToken;
         var runId = await store.EnqueueManualRunAsync(jobId, cancellationToken);
         Assert.True(await store.StartRunAsync(runId!, 4242, cancellationToken));
+        var action = Assert.Single((await store.GetRunAsync(runId!, cancellationToken))!.Actions!);
+        Assert.True(await store.StartRunActionAsync(runId!, action.Id, cancellationToken));
 
         var status = await store.CompleteIdleRunAsync(runId!, cancellationToken);
         var run = await store.GetRunAsync(runId!, cancellationToken);
@@ -109,6 +118,10 @@ public sealed class JobStoreOverlapTests : IDisposable
         Assert.Equal(JobRunStatus.Succeeded, run!.Status);
         Assert.Equal(0, run.ExitCode);
         Assert.Null(run.ErrorMessage);
+        var completedAction = Assert.Single(run.Actions!);
+        Assert.Equal(JobRunActionStatus.Succeeded, completedAction.Status);
+        Assert.Equal(0, completedAction.ExitCode);
+        Assert.NotNull(completedAction.EndedUtc);
     }
 
     [Fact]
@@ -171,6 +184,26 @@ public sealed class JobStoreOverlapTests : IDisposable
         var run = await store.GetRunAsync(runId!, cancellationToken);
         Assert.Equal(JobRunStatus.Failed, run!.Status);
         Assert.Contains("interactive desktop", run.ErrorMessage!, StringComparison.OrdinalIgnoreCase);
+        var action = Assert.Single(run.Actions!);
+        Assert.Equal(JobRunActionStatus.Skipped, action.Status);
+        Assert.Contains("interactive desktop", action.ErrorMessage!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RequestCancelAsync_CancelsEveryPendingActionBeforeTheRunStarts()
+    {
+        var (store, jobId) = await SeedJobAsync();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var runId = await store.EnqueueManualRunAsync(jobId, cancellationToken);
+
+        Assert.True(await store.RequestCancelAsync(runId!, cancellationToken));
+
+        var run = await store.GetRunAsync(runId!, cancellationToken);
+        Assert.Equal(JobRunStatus.Cancelled, run!.Status);
+        var action = Assert.Single(run.Actions!);
+        Assert.Equal(JobRunActionStatus.Cancelled, action.Status);
+        Assert.Equal("Cancelled before start.", action.ErrorMessage);
+        Assert.NotNull(action.EndedUtc);
     }
 
     [Fact]
@@ -218,6 +251,156 @@ public sealed class JobStoreOverlapTests : IDisposable
 
         Assert.True(job!.LaunchMinimized);
         Assert.True(run!.LaunchMinimized);
+    }
+
+    [Fact]
+    public async Task EnqueueAndRetry_PreserveTheOriginalOrderedActionSnapshot()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var firstId = Guid.NewGuid().ToString();
+        var secondId = Guid.NewGuid().ToString();
+        var originalActions = new List<JobActionRequest>
+        {
+            new(
+                firstId,
+                JobActionKind.Script,
+                ScriptPath: "scripts/first.py",
+                ScriptRuntime: JobScriptRuntime.Python,
+                Arguments: ["--value", "one two"],
+                WorkingDirectory: "scripts",
+                TimeoutSeconds: 30,
+                ApprovedHash: new string('a', 64)),
+            new(
+                secondId,
+                JobActionKind.Script,
+                ScriptPath: "scripts/second.sh",
+                ScriptRuntime: JobScriptRuntime.Bash,
+                Arguments: ["literal;argument"],
+                TimeoutSeconds: 45,
+                ApprovedHash: new string('b', 64))
+        };
+        var (store, jobId) = await SeedScriptJobAsync(originalActions);
+        var sourceRunId = await store.EnqueueManualRunAsync(jobId, cancellationToken);
+
+        var source = await store.GetRunAsync(sourceRunId!, cancellationToken);
+        var sourceActions = source!.Actions!;
+        Assert.Equal(["scripts/first.py", "scripts/second.sh"], sourceActions.Select(action => action.ScriptPath));
+        Assert.Equal([firstId, secondId], sourceActions.Select(action => action.SourceActionId));
+        Assert.Equal([0, 1], sourceActions.Select(action => action.Position));
+        Assert.Equal(["one two"], sourceActions[0].Arguments.Skip(1));
+
+        await store.UpdateJobAsync(
+            jobId,
+            new UpdateJobRequest(
+                "Changed definition",
+                Path.GetTempPath(),
+                LLM.NotSet,
+                null,
+                string.Empty,
+                null,
+                true,
+                [],
+                Actions:
+                [
+                    new JobActionRequest(
+                        Guid.NewGuid().ToString(),
+                        JobActionKind.Script,
+                        ScriptPath: "scripts/new.py",
+                        ScriptRuntime: JobScriptRuntime.Python,
+                        ApprovedHash: new string('c', 64))
+                ]),
+            cancellationToken);
+        await store.CompleteRunAsync(sourceRunId!, JobRunStatus.Succeeded, 0, null, cancellationToken);
+
+        var retryId = await store.EnqueueRetryAsync(sourceRunId!, cancellationToken);
+        var retry = await store.GetRunAsync(retryId!, cancellationToken);
+
+        Assert.NotNull(retry);
+        var retryActions = retry.Actions!;
+        Assert.Equal(["scripts/first.py", "scripts/second.sh"], retryActions.Select(action => action.ScriptPath));
+        Assert.Equal([firstId, secondId], retryActions.Select(action => action.SourceActionId));
+        Assert.All(retryActions, action => Assert.Equal(JobRunActionStatus.Pending, action.Status));
+        Assert.Equal(new string('a', 64), retryActions[0].ApprovedHash);
+        Assert.Equal(new string('b', 64), retryActions[1].ApprovedHash);
+    }
+
+    [Fact]
+    public async Task Initialize_MigratesLegacyWorkerJobsAndRunsToActionRows()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var now = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+        await using (var connection = new SqliteConnection(_connectionString))
+        {
+            await connection.OpenAsync(cancellationToken);
+            await using var command = connection.CreateCommand();
+            command.CommandText = SqlStrings.CreateEnvironmentsTable + ";\n" + """
+                INSERT INTO Environments
+                    (Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC)
+                VALUES
+                    (1, 'legacy-worker', 2, '', '', 'Review the repository.', $now, $now);
+
+                CREATE TABLE Jobs (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Name TEXT NOT NULL,
+                    ProjectPath TEXT NOT NULL,
+                    EnvironmentId INTEGER,
+                    TimeoutMinutes INTEGER NOT NULL DEFAULT 60,
+                    Enabled INTEGER NOT NULL DEFAULT 0,
+                    CreatedUTC TEXT NOT NULL,
+                    UpdatedUTC TEXT NOT NULL,
+                    DeletedUTC TEXT
+                );
+                CREATE TABLE JobRuns (
+                    Id TEXT PRIMARY KEY,
+                    JobId INTEGER NOT NULL,
+                    TriggerKind INTEGER NOT NULL,
+                    TriggerKey TEXT NOT NULL UNIQUE,
+                    Status INTEGER NOT NULL,
+                    JobName TEXT NOT NULL,
+                    ProjectPath TEXT NOT NULL,
+                    Llm INTEGER NOT NULL,
+                    EnvironmentId INTEGER,
+                    EnvironmentName TEXT,
+                    TimeoutMinutes INTEGER NOT NULL,
+                    SessionId TEXT,
+                    QueuedUTC TEXT NOT NULL,
+                    StartedUTC TEXT,
+                    EndedUTC TEXT,
+                    ExitCode INTEGER,
+                    ErrorMessage TEXT,
+                    CancelRequested INTEGER NOT NULL DEFAULT 0,
+                    OwnerProcessId INTEGER
+                );
+                INSERT INTO Jobs
+                    (Id, Name, ProjectPath, EnvironmentId, TimeoutMinutes, Enabled, CreatedUTC, UpdatedUTC)
+                VALUES
+                    (7, 'Legacy worker job', $projectPath, 1, 60, 1, $now, $now);
+                INSERT INTO JobRuns
+                    (Id, JobId, TriggerKind, TriggerKey, Status, JobName, ProjectPath, Llm,
+                     EnvironmentId, EnvironmentName, TimeoutMinutes, SessionId, QueuedUTC,
+                     StartedUTC, EndedUTC, ExitCode, CancelRequested)
+                VALUES
+                    ('legacy-run', 7, 3, 'manual:legacy', 2, 'Legacy worker job', $projectPath,
+                     2, 1, 'legacy-worker', 60, 'legacy-session', $now, $now, $now, 0, 0);
+                """;
+            command.Parameters.AddWithValue("$now", now);
+            command.Parameters.AddWithValue("$projectPath", Path.GetTempPath());
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        var store = new JobStore(_connectionString);
+        var job = await store.GetJobAsync(7, cancellationToken);
+        var run = await store.GetRunAsync("legacy-run", cancellationToken);
+
+        var jobAction = Assert.Single(job!.Actions!);
+        Assert.Equal(JobActionKind.Worker, jobAction.Kind);
+        Assert.Equal(1, jobAction.EnvironmentId);
+        var runAction = Assert.Single(run!.Actions!);
+        Assert.Equal(jobAction.Id, runAction.SourceActionId);
+        Assert.Equal(JobActionKind.Worker, runAction.Kind);
+        Assert.Equal(JobRunActionStatus.Succeeded, runAction.Status);
+        Assert.Equal("legacy-session", runAction.SessionId);
+        Assert.Equal(0, runAction.ExitCode);
     }
 
     [Fact]
@@ -446,6 +629,25 @@ public sealed class JobStoreOverlapTests : IDisposable
             Triggers: triggers,
             LaunchMinimized: launchMinimized), cancellationToken);
 
+        return (store, job.Id);
+    }
+
+    private async Task<(JobStore Store, long JobId)> SeedScriptJobAsync(
+        IReadOnlyList<JobActionRequest> actions)
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var store = new JobStore(_connectionString);
+        _ = await InsertEnvironmentAsync(cancellationToken);
+        var job = await store.CreateJobAsync(new CreateJobRequest(
+            Name: "Script workflow",
+            ProjectPath: Path.GetTempPath(),
+            Llm: LLM.NotSet,
+            EnvironmentId: null,
+            Prompt: string.Empty,
+            TimeoutMinutes: null,
+            Enabled: true,
+            Triggers: [],
+            Actions: actions.ToList()), cancellationToken);
         return (store, job.Id);
     }
 

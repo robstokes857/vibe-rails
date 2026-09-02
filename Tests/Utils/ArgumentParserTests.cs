@@ -67,4 +67,19 @@ public class ArgumentParserTests
 
         Assert.Null(parsed.EnvId);
     }
+
+    [Fact]
+    public void Parse_StandaloneJobRun_DoesNotPretendItHasAnEnvironment()
+    {
+        var parsed = ArgumentParser.Parse(
+            ["--workdir", @"C:\repo", "--job-run", "run-123", "--max-runtime", "45"]);
+
+        Assert.Equal("run-123", parsed.JobRunId);
+        Assert.Equal(@"C:\repo", parsed.WorkDir);
+        Assert.Equal(45, parsed.MaxRuntimeMinutes);
+        Assert.False(parsed.IsLMBootstrap);
+        Assert.Null(parsed.LMBootstrapCli);
+        Assert.Null(parsed.EnvId);
+        Assert.False(parsed.OpenBrowser);
+    }
 }

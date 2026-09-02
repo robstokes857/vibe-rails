@@ -95,7 +95,7 @@ function Assert-NoDestinationReparsePoints {
     # directory). Refuse to copy while any such link exists.
     $payloadRoot = [System.IO.Path]::GetFullPath($PayloadDir)
     foreach ($item in Get-ChildItem -LiteralPath $payloadRoot -Recurse -Force) {
-        $relative = $item.FullName.Substring($payloadRoot.Length).TrimStart('', '/')
+        $relative = $item.FullName.Substring($payloadRoot.Length).TrimStart('\', '/')
         $destination = Join-Path $InstallDir $relative
         if (-not (Test-Path -LiteralPath $destination)) {
             continue

@@ -44,6 +44,23 @@ export function getJobCliForLlm(llm) {
 }
 const TRIGGER = Object.freeze({ SCHEDULE: 0, COMMIT: 2, MANUAL: 3, PRECOMMIT: 4 });
 const SCHEDULE = Object.freeze({ INTERVAL: 0, DAILY: 1, WEEKLY: 2 });
+const JOB_ACTION = Object.freeze({ WORKER: 0, SCRIPT: 1 });
+const SCRIPT_RUNTIME = Object.freeze({ PYTHON: 0, POWERSHELL: 1, BASH: 2 });
+const SCRIPT_RUNTIME_META = Object.freeze({
+    [SCRIPT_RUNTIME.PYTHON]: { label: 'Python', extension: '.py', icon: 'fa-brands fa-python' },
+    [SCRIPT_RUNTIME.POWERSHELL]: { label: 'PowerShell', extension: '.ps1', icon: 'fa-solid fa-terminal' },
+    [SCRIPT_RUNTIME.BASH]: { label: 'Bash', extension: '.sh', icon: 'fa-solid fa-terminal' }
+});
+
+const RUN_ACTION_STATUS = Object.freeze({
+    0: { label: 'Pending', tone: 'neutral' },
+    1: { label: 'Running', tone: 'info' },
+    2: { label: 'Succeeded', tone: 'success' },
+    3: { label: 'Failed', tone: 'danger' },
+    4: { label: 'Skipped', tone: 'neutral' },
+    5: { label: 'Cancelled', tone: 'neutral' },
+    6: { label: 'Timed out', tone: 'warning' }
+});
 
 const RUN_STATUS = Object.freeze({
     0: { label: 'Queued', tone: 'neutral' },
@@ -193,6 +210,7 @@ export class JobController {
         this.daemonActionInFlight = null;
         this.runModalGeneration = 0;
         this.editorModalCleanup = null;
+        this.editorActions = [];
         this.activeEditorJob = null;
         this.activeEditorSource = null;
         this.activeEditorPreferredTrigger = null;
@@ -726,11 +744,24 @@ export class JobController {
 
         return this.jobs.map(job => {
             const triggers = (job.triggers || []).map(trigger => `<span class="jobs-trigger-chip">${this.escape(this.formatTrigger(trigger))}</span>`).join('');
-            const environment = this.findEnvironment(job.environmentId);
-            const cli = environment?.cli || getJobCliForLlm(job.llm) || 'unknown';
-            const llm = getLlmName(Number(getJobLlmForCli(cli) ?? job.llm));
+            const actions = this.normalizeJobActions(job);
+            const workerAction = actions.find(action => action.kind === JOB_ACTION.WORKER);
+            const scriptActions = actions.filter(action => action.kind === JOB_ACTION.SCRIPT);
+            const environment = workerAction ? this.findEnvironment(workerAction.environmentId) : null;
+            const cli = environment?.cli || (workerAction ? getJobCliForLlm(workerAction.llm || job.llm) : null) || 'workflow';
+            const llm = workerAction
+                ? getLlmName(Number(getJobLlmForCli(cli) ?? workerAction.llm ?? job.llm))
+                : scriptActions.length === 1
+                    ? (SCRIPT_RUNTIME_META[scriptActions[0].scriptRuntime]?.label || 'Script')
+                    : 'Workflow';
             const environmentName = environment?.name
-                || (job.environmentName ? `${job.environmentName} (missing)` : 'Missing environment');
+                || (workerAction?.environmentName || job.environmentName
+                    ? `${workerAction?.environmentName || job.environmentName} (missing)`
+                    : 'Missing Worker');
+            const actionLabel = `${actions.length} ${actions.length === 1 ? 'action' : 'actions'}`;
+            const scriptLabel = scriptActions.length > 0
+                ? scriptActions.map(action => action.scriptPath?.split(/[\\/]/).pop() || 'Unselected script').join(' → ')
+                : '';
             const nextRun = this.nextRunSummary(job);
             const nextRunTitle = nextRun.utc
                 ? ` title="${this.escape(new Date(nextRun.utc).toLocaleString())}"`
@@ -750,10 +781,12 @@ export class JobController {
                             </div>
                         </div>
                         <div class="job-card-meta">
-                            <span ${environment ? '' : 'data-tone="warning"'} title="Worker"><i class="fa-solid fa-robot" aria-hidden="true"></i><span class="job-card-meta-text">${this.escape(environmentName)}</span></span>
+                            <span title="Workflow"><i class="fa-solid fa-list-check" aria-hidden="true"></i><span class="job-card-meta-text">${this.escape(actionLabel)}</span></span>
+                            ${workerAction ? `<span ${environment ? '' : 'data-tone="warning"'} title="Worker"><i class="fa-solid fa-robot" aria-hidden="true"></i><span class="job-card-meta-text">${this.escape(environmentName)}</span></span>` : '<span title="Script-only workflow"><i class="fa-solid fa-code" aria-hidden="true"></i><span class="job-card-meta-text">Script only</span></span>'}
                             <span class="job-card-trigger" title="When it runs"><i class="fa-regular fa-clock" aria-hidden="true"></i><span class="job-triggers">${triggers || '<span class="jobs-trigger-chip">On demand</span>'}</span></span>
                             <span title="Next run"><i class="fa-solid fa-forward" aria-hidden="true"></i><span>Next: <strong${nextRunTitle}>${this.escape(nextRun.label)}</strong></span></span>
                         </div>
+                        ${scriptLabel ? `<p class="job-card-workflow" title="${this.escape(scriptLabel)}"><i class="fa-solid fa-code-branch" aria-hidden="true"></i><span>${this.escape(scriptLabel)}</span></p>` : ''}
                         ${prompt ? `
                         <p class="job-card-prompt" title="${this.escape(this.truncate(prompt, 400))}"><i class="fa-regular fa-message" aria-hidden="true"></i><span>${this.escape(prompt)}</span></p>` : ''}
                     </div>
@@ -1174,13 +1207,7 @@ export class JobController {
         const hasPreCommit = triggers.some(trigger => Number(trigger.kind) === TRIGGER.PRECOMMIT) || preferredTrigger === TRIGGER.PRECOMMIT;
         const timezone = scheduled?.timeZoneId || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
         const scheduleKind = Number(scheduled?.scheduleKind ?? SCHEDULE.INTERVAL);
-        const environment = this.findEnvironment(source.environmentId);
-        const selectedCli = environment?.cli || getJobCliForLlm(source.llm) || 'codex';
-        const selectedValue = environment
-            ? buildLlmSelectionValue(selectedCli, environment.id)
-            : source.environmentId
-                ? buildLlmSelectionValue(selectedCli, source.environmentId)
-                : '';
+        this.editorActions = this.normalizeJobActions(source, { defaultWorker: !isEdit && !editorState });
         const projectPath = this.currentProjectPath();
 
         editor.hidden = false;
@@ -1189,23 +1216,25 @@ export class JobController {
                 <div class="job-inline-form-header">
                     <div>
                         <h3>${isEdit ? `Edit ${this.escape(source.name)}` : 'New automation'}</h3>
-                        <p>Name it, choose a Worker, and decide when it runs.</p>
+                        <p>Name it, arrange its scripts and optional Worker, then decide when it runs.</p>
                     </div>
                     <button class="btn btn-sm btn-outline-secondary" type="button" data-job-action="cancel-editor" aria-label="Close automation editor"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
                 </div>
                 <div class="job-form-fields">
                     <div><label class="form-label" for="job-name">Name</label><input class="form-control" id="job-name" maxlength="100" required value="${this.escape(source.name || '')}" placeholder="Security review after commit"></div>
-                    <div>
-                        <label class="form-label" for="job-llm-selection">Worker</label>
-                        <div class="job-environment-picker-row">
-                            <div class="job-environment-picker"><select class="form-select" id="job-llm-selection" required></select></div>
-                            <button class="btn btn-outline-primary text-nowrap" type="button" data-job-action="add-environment-from-editor"><i class="fa-solid fa-plus me-1" aria-hidden="true"></i>New Worker</button>
-                            <button class="btn btn-outline-secondary text-nowrap" type="button" data-job-action="edit-selected-environment" hidden disabled>Edit</button>
-                        </div>
-                        <small class="form-text text-muted">The Worker contains the CLI, model, and instructions to run.</small>
-                    </div>
-                    <div class="job-environment-preview" data-job-environment-preview aria-live="polite"></div>
                 </div>
+
+                <fieldset class="job-actions-fieldset">
+                    <legend>Workflow <small>Runs from top to bottom</small></legend>
+                    <div class="job-actions-toolbar">
+                        <p>Scripts run from this repository with explicit arguments. Add at most one Worker anywhere in the sequence.</p>
+                        <div>
+                            <button class="btn btn-sm btn-outline-primary" type="button" data-job-action="add-script-action"><i class="fa-solid fa-code me-1" aria-hidden="true"></i>Add script</button>
+                            <button class="btn btn-sm btn-outline-primary" type="button" data-job-action="add-worker-action"><i class="fa-solid fa-robot me-1" aria-hidden="true"></i>Add Worker</button>
+                        </div>
+                    </div>
+                    <div class="job-actions-list" data-job-actions aria-live="polite"></div>
+                </fieldset>
 
                 <fieldset class="job-trigger-fieldset"><legend>Run automatically <small>Optional</small></legend>
                     <label class="job-trigger-option"><span><strong>On a schedule</strong><small>Run every few minutes, daily, or weekly.</small></span><input class="job-switch-input" type="checkbox" id="job-trigger-schedule" ${scheduled ? 'checked' : ''}></label>
@@ -1240,8 +1269,7 @@ export class JobController {
             </form>`;
 
         const form = editor.querySelector('[data-job-form]');
-        const selection = form?.querySelector('#job-llm-selection');
-        this.refreshEditorEnvironmentPicker(null, selectedValue);
+        this.renderEditorActions();
 
         const updateScheduleFields = () => {
             const enabled = form.querySelector('#job-trigger-schedule').checked;
@@ -1255,9 +1283,8 @@ export class JobController {
             form.querySelector('#job-local-time').disabled = !enabled || kind === SCHEDULE.INTERVAL;
             form.querySelector('#job-timezone').disabled = !enabled || kind === SCHEDULE.INTERVAL;
         };
-        selection?.addEventListener('change', () => this.updateEditorEnvironmentPreview());
-        form?.querySelector('[data-job-action="add-environment-from-editor"]')?.addEventListener('click', () => this.createEnvironmentFromEditor());
-        form?.querySelector('[data-job-action="edit-selected-environment"]')?.addEventListener('click', () => this.editSelectedEnvironment());
+        form?.querySelector('[data-job-action="add-script-action"]')?.addEventListener('click', () => this.addEditorAction(JOB_ACTION.SCRIPT));
+        form?.querySelector('[data-job-action="add-worker-action"]')?.addEventListener('click', () => this.addEditorAction(JOB_ACTION.WORKER));
         form?.querySelectorAll('[data-job-action="cancel-editor"]')?.forEach(button => button.addEventListener('click', () => this.closeEditor()));
         form?.querySelector('#job-trigger-schedule')?.addEventListener('change', updateScheduleFields);
         form?.querySelector('#job-schedule-kind')?.addEventListener('change', updateScheduleFields);
@@ -1277,16 +1304,284 @@ export class JobController {
         form?.querySelector('#job-name')?.focus?.();
     }
 
+    normalizeJobActions(source = {}, { defaultWorker = false } = {}) {
+        const supplied = Array.isArray(source.actions) ? source.actions : [];
+        const raw = supplied.length > 0
+            ? supplied
+            : source.environmentId
+                ? [{
+                    id: null,
+                    kind: JOB_ACTION.WORKER,
+                    environmentId: source.environmentId,
+                    environmentName: source.environmentName,
+                    llm: source.llm
+                }]
+                : defaultWorker
+                    ? [{ id: null, kind: JOB_ACTION.WORKER, environmentId: null }]
+                    : [];
+
+        return raw.slice(0, 20).map(action => ({
+            id: String(action?.id || this.newActionId()),
+            kind: Number(action?.kind) === JOB_ACTION.SCRIPT ? JOB_ACTION.SCRIPT : JOB_ACTION.WORKER,
+            environmentId: action?.environmentId == null ? null : Number(action.environmentId),
+            environmentName: action?.environmentName || null,
+            llm: Number(action?.llm) || 0,
+            scriptPath: String(action?.scriptPath || ''),
+            scriptRuntime: Number.isFinite(Number(action?.scriptRuntime))
+                ? Number(action.scriptRuntime)
+                : SCRIPT_RUNTIME.PYTHON,
+            arguments: Array.isArray(action?.arguments) ? action.arguments.map(value => String(value ?? '')) : [],
+            workingDirectory: String(action?.workingDirectory || ''),
+            timeoutSeconds: action?.timeoutSeconds == null || action.timeoutSeconds === ''
+                ? null
+                : Number(action.timeoutSeconds),
+            approvedHash: action?.approvedHash || null
+        }));
+    }
+
+    newActionId() {
+        if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+        return `action-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    }
+
+    addEditorAction(kind) {
+        if (this.editorActions.length >= 20) {
+            this.app.showError('An automation can have at most 20 actions.');
+            return;
+        }
+        if (kind === JOB_ACTION.WORKER && this.editorActions.some(action => action.kind === JOB_ACTION.WORKER)) {
+            this.app.showError('An automation can contain at most one Worker.');
+            return;
+        }
+
+        this.editorActions.push(kind === JOB_ACTION.WORKER
+            ? { id: this.newActionId(), kind, environmentId: null, environmentName: null, llm: 0 }
+            : {
+                id: this.newActionId(),
+                kind,
+                scriptPath: '',
+                scriptRuntime: SCRIPT_RUNTIME.PYTHON,
+                arguments: [],
+                workingDirectory: '',
+                timeoutSeconds: null,
+                approvedHash: null
+            });
+        this.renderEditorActions();
+    }
+
+    renderEditorActions() {
+        const form = this.root?.querySelector('[data-job-editor] [data-job-form]');
+        const target = form?.querySelector('[data-job-actions]');
+        if (!target) return;
+
+        const hasWorker = this.editorActions.some(action => action.kind === JOB_ACTION.WORKER);
+        const addWorker = form.querySelector('[data-job-action="add-worker-action"]');
+        if (addWorker) {
+            addWorker.disabled = hasWorker;
+            addWorker.title = hasWorker ? 'This workflow already has its one Worker.' : '';
+        }
+
+        target.innerHTML = this.editorActions.length > 0
+            ? this.editorActions.map((action, index) => this.renderEditorAction(action, index)).join('')
+            : `<div class="job-actions-empty"><i class="fa-solid fa-diagram-project" aria-hidden="true"></i><strong>No actions yet</strong><span>Add a repository script or Worker to build the workflow.</span></div>`;
+
+        target.oninput = event => this.updateEditorActionField(event);
+        target.onchange = event => this.updateEditorActionField(event);
+        target.onclick = event => { void this.handleEditorActionClick(event); };
+
+        const worker = this.editorActions.find(action => action.kind === JOB_ACTION.WORKER);
+        if (worker) {
+            this.refreshEditorEnvironmentPicker(worker.environmentId);
+        } else {
+            this.disposeEditorModal();
+            this.registerEditorModalCleanup(null);
+        }
+    }
+
+    renderEditorAction(action, index) {
+        const actionId = this.escape(action.id);
+        const controls = `
+            <div class="job-action-order-controls" aria-label="Reorder action">
+                <button class="btn btn-sm btn-outline-secondary" type="button" data-workflow-action="move-up" ${index === 0 ? 'disabled' : ''} aria-label="Move action up"><i class="fa-solid fa-arrow-up" aria-hidden="true"></i></button>
+                <button class="btn btn-sm btn-outline-secondary" type="button" data-workflow-action="move-down" ${index === this.editorActions.length - 1 ? 'disabled' : ''} aria-label="Move action down"><i class="fa-solid fa-arrow-down" aria-hidden="true"></i></button>
+                <button class="btn btn-sm btn-outline-danger" type="button" data-workflow-action="remove" aria-label="Remove action"><i class="fa-solid fa-trash" aria-hidden="true"></i></button>
+            </div>`;
+
+        if (action.kind === JOB_ACTION.WORKER) {
+            return `
+                <article class="job-action-card" data-job-action-id="${actionId}" data-kind="worker">
+                    <header><span class="job-action-number">${index + 1}</span><div><strong><i class="fa-solid fa-robot" aria-hidden="true"></i>Worker</strong><small>Runs the Environment’s CLI and Initial Message.</small></div>${controls}</header>
+                    <div class="job-action-body">
+                        <label class="form-label" for="job-llm-selection">Worker Environment</label>
+                        <div class="job-environment-picker-row">
+                            <div class="job-environment-picker"><select class="form-select" id="job-llm-selection"></select></div>
+                            <button class="btn btn-outline-primary text-nowrap" type="button" data-workflow-action="new-worker"><i class="fa-solid fa-plus me-1" aria-hidden="true"></i>New Worker</button>
+                            <button class="btn btn-outline-secondary text-nowrap" type="button" data-workflow-action="edit-worker" hidden disabled>Edit</button>
+                        </div>
+                        <small class="form-text text-muted">The Worker contains the CLI, model, permissions, workspace policy, and instructions.</small>
+                        <div class="job-environment-preview" data-job-environment-preview aria-live="polite"></div>
+                    </div>
+                </article>`;
+        }
+
+        const runtime = Number(action.scriptRuntime);
+        const argumentRows = (action.arguments || []).map((argument, argumentIndex) => `
+            <div class="job-script-argument-row">
+                <input class="form-control" data-action-field="argument" data-argument-index="${argumentIndex}" value="${this.escape(argument)}" aria-label="Argument ${argumentIndex + 1}" placeholder="One argv value">
+                <button class="btn btn-outline-danger" type="button" data-workflow-action="remove-argument" data-argument-index="${argumentIndex}" aria-label="Remove argument"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+            </div>`).join('');
+
+        return `
+            <article class="job-action-card" data-job-action-id="${actionId}" data-kind="script">
+                <header><span class="job-action-number">${index + 1}</span><div><strong><i class="fa-solid fa-code" aria-hidden="true"></i>Repository script</strong><small>Runs with an explicit interpreter—never as a concatenated shell command.</small></div>${controls}</header>
+                <div class="job-action-body job-script-fields">
+                    <div class="job-script-path-field">
+                        <label class="form-label">Script file</label>
+                        <div class="input-group"><input class="form-control" data-action-field="scriptPath" value="${this.escape(action.scriptPath)}" placeholder="scripts/check.ps1"><button class="btn btn-outline-secondary" type="button" data-workflow-action="browse-script">Browse…</button></div>
+                        <small>Must be a regular <code>.py</code>, <code>.ps1</code>, or <code>.sh</code> file inside this repository.</small>
+                    </div>
+                    <div>
+                        <label class="form-label">Runtime</label>
+                        <select class="form-select" data-action-field="scriptRuntime">
+                            ${Object.entries(SCRIPT_RUNTIME_META).map(([value, meta]) => `<option value="${value}" ${runtime === Number(value) ? 'selected' : ''}>${meta.label} (${meta.extension})</option>`).join('')}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="form-label">Working directory <small>Optional</small></label>
+                        <div class="input-group"><input class="form-control" data-action-field="workingDirectory" value="${this.escape(action.workingDirectory)}" placeholder="Repository root"><button class="btn btn-outline-secondary" type="button" data-workflow-action="browse-working-directory">Browse…</button></div>
+                        <small>Stored relative to the repository or Worker workspace.</small>
+                    </div>
+                    <div>
+                        <label class="form-label">Action time limit <small>Optional</small></label>
+                        <div class="input-group"><input class="form-control" type="number" min="1" max="3600" data-action-field="timeoutSeconds" value="${action.timeoutSeconds ?? ''}" placeholder="No action limit"><span class="input-group-text">sec</span></div>
+                    </div>
+                    <div class="job-script-arguments">
+                        <div class="job-script-arguments-header"><label class="form-label mb-0">Arguments <small>Optional</small></label><button class="btn btn-sm btn-outline-secondary" type="button" data-workflow-action="add-argument"><i class="fa-solid fa-plus me-1" aria-hidden="true"></i>Add argument</button></div>
+                        <small>Each row is one argv value; spaces and shell characters are passed literally.</small>
+                        <div data-script-arguments>${argumentRows || '<span class="job-script-no-arguments">No arguments</span>'}</div>
+                    </div>
+                </div>
+            </article>`;
+    }
+
+    updateEditorActionField(event) {
+        const row = event.target?.closest?.('[data-job-action-id]');
+        const field = event.target?.dataset?.actionField;
+        if (!row || !field) return;
+        const action = this.editorActions.find(item => item.id === row.dataset.jobActionId);
+        if (!action) return;
+
+        if (field === 'argument') {
+            const index = Number(event.target.dataset.argumentIndex);
+            if (Number.isInteger(index) && index >= 0 && index < action.arguments.length) {
+                action.arguments[index] = event.target.value;
+            }
+            return;
+        }
+        if (field === 'scriptRuntime') action.scriptRuntime = Number(event.target.value);
+        else if (field === 'timeoutSeconds') action.timeoutSeconds = event.target.value ? Number(event.target.value) : null;
+        else action[field] = event.target.value;
+    }
+
+    async handleEditorActionClick(event) {
+        const button = event.target?.closest?.('[data-workflow-action]');
+        if (!button) return;
+        const row = button.closest('[data-job-action-id]');
+        const index = row ? this.editorActions.findIndex(item => item.id === row.dataset.jobActionId) : -1;
+        const action = index >= 0 ? this.editorActions[index] : null;
+
+        switch (button.dataset.workflowAction) {
+            case 'move-up':
+                if (index > 0) [this.editorActions[index - 1], this.editorActions[index]] = [this.editorActions[index], this.editorActions[index - 1]];
+                return this.renderEditorActions();
+            case 'move-down':
+                if (index >= 0 && index < this.editorActions.length - 1) [this.editorActions[index + 1], this.editorActions[index]] = [this.editorActions[index], this.editorActions[index + 1]];
+                return this.renderEditorActions();
+            case 'remove':
+                if (index >= 0) this.editorActions.splice(index, 1);
+                return this.renderEditorActions();
+            case 'add-argument':
+                if (action && action.arguments.length < 64) action.arguments.push('');
+                return this.renderEditorActions();
+            case 'remove-argument': {
+                const argumentIndex = Number(button.dataset.argumentIndex);
+                if (action && Number.isInteger(argumentIndex)) action.arguments.splice(argumentIndex, 1);
+                return this.renderEditorActions();
+            }
+            case 'browse-script':
+                return this.pickEditorScript(action, button);
+            case 'browse-working-directory':
+                return this.pickEditorWorkingDirectory(action, button);
+            case 'new-worker':
+                return this.createEnvironmentFromEditor();
+            case 'edit-worker':
+                return this.editSelectedEnvironment();
+            default:
+                return undefined;
+        }
+    }
+
+    async pickEditorScript(action, trigger) {
+        if (!action || typeof this.app.pickFileSystemEntry !== 'function') {
+            this.app.showError('The file picker is not available in this window.');
+            return;
+        }
+        const picked = await this.app.pickFileSystemEntry({
+            mode: 'file',
+            title: 'Choose a repository script',
+            initialPath: this.currentProjectPath(),
+            filters: [{ label: 'Automation scripts (*.py, *.ps1, *.sh)', extensions: ['py', 'ps1', 'sh'] }],
+            triggerElement: trigger instanceof HTMLElement ? trigger : undefined
+        });
+        if (!picked || picked.canceled || !picked.path) return;
+        action.scriptPath = picked.path;
+        const extension = String(picked.path).toLowerCase().match(/\.[^.\\/]+$/)?.[0];
+        const runtime = Object.entries(SCRIPT_RUNTIME_META).find(([, meta]) => meta.extension === extension)?.[0];
+        if (runtime !== undefined) action.scriptRuntime = Number(runtime);
+        this.renderEditorActions();
+    }
+
+    async pickEditorWorkingDirectory(action, trigger) {
+        if (!action || typeof this.app.pickFileSystemEntry !== 'function') {
+            this.app.showError('The folder picker is not available in this window.');
+            return;
+        }
+        const picked = await this.app.pickFileSystemEntry({
+            mode: 'directory',
+            title: 'Choose script working directory',
+            initialPath: this.currentProjectPath(),
+            triggerElement: trigger instanceof HTMLElement ? trigger : undefined
+        });
+        if (!picked || picked.canceled || !picked.path) return;
+        action.workingDirectory = picked.path;
+        this.renderEditorActions();
+    }
+
     refreshEditorEnvironmentPicker(selectedEnvironmentId = null, selectedValue = null) {
         const selection = this.root?.querySelector('[data-job-editor] #job-llm-selection');
         if (!selection) return;
+        const worker = this.editorActions.find(action => action.kind === JOB_ACTION.WORKER);
+        if (!worker) return;
 
         const currentValue = selectedValue
-            || (selectedEnvironmentId == null ? (selection.tomselect?.getValue?.() || selection.value) : null);
+            || (selectedEnvironmentId == null
+                ? (selection.tomselect?.getValue?.() || selection.value)
+                : null)
+            || (worker.environmentId
+                ? buildLlmSelectionValue(
+                    this.findEnvironment(worker.environmentId)?.cli || getJobCliForLlm(worker.llm) || '',
+                    worker.environmentId)
+                : '');
         const preferredEnvironment = this.findEnvironment(selectedEnvironmentId);
         const valueToRestore = preferredEnvironment
             ? buildLlmSelectionValue(preferredEnvironment.cli, preferredEnvironment.id)
             : currentValue || '';
+
+        if (preferredEnvironment) {
+            worker.environmentId = Number(preferredEnvironment.id);
+            worker.environmentName = preferredEnvironment.name || null;
+            worker.llm = getJobLlmForCli(preferredEnvironment.cli) || 0;
+        }
 
         this.disposeEditorModal();
         const parsedValue = parseLlmSelection(valueToRestore, this.environments);
@@ -1296,11 +1591,21 @@ export class JobController {
             selectedValue: valueToRestore,
             selectedFallback: missingEnvironment ? {
                 value: valueToRestore,
-                label: `${this.activeEditorJob?.environmentName || 'Deleted Worker'} (missing)`,
+                label: `${worker.environmentName || this.activeEditorJob?.environmentName || 'Deleted Worker'} (missing)`,
                 cli: parsedValue.cli || '',
                 environmentId: parsedValue.envId,
-                environmentName: this.activeEditorJob?.environmentName || null
+                environmentName: worker.environmentName || this.activeEditorJob?.environmentName || null
             } : null
+        });
+        selection.addEventListener('change', () => {
+            const parsed = parseLlmSelection(
+                selection.tomselect?.getValue?.() || selection.value,
+                this.environments);
+            const environment = parsed.kind === 'environment' ? this.findEnvironment(parsed.envId) : null;
+            worker.environmentId = environment ? Number(environment.id) : null;
+            worker.environmentName = environment?.name || null;
+            worker.llm = environment ? (getJobLlmForCli(environment.cli) || 0) : 0;
+            this.updateEditorEnvironmentPreview();
         });
         this.registerEditorModalCleanup(selection, pickerDisposer);
         this.updateEditorEnvironmentPreview();
@@ -1311,7 +1616,7 @@ export class JobController {
         if (!form) return;
         const selection = form.querySelector('#job-llm-selection');
         const preview = form.querySelector('[data-job-environment-preview]');
-        const editButton = form.querySelector('[data-job-action="edit-selected-environment"]');
+        const editButton = form.querySelector('[data-workflow-action="edit-worker"]');
         const parsed = parseLlmSelection(selection?.tomselect?.getValue?.() || selection?.value, this.environments);
         const environment = parsed.kind === 'environment' ? this.findEnvironment(parsed.envId) : null;
 
@@ -1388,6 +1693,7 @@ export class JobController {
         this.activeEditorJob = null;
         this.activeEditorSource = null;
         this.activeEditorPreferredTrigger = null;
+        this.editorActions = [];
         const editor = this.root?.querySelector('[data-job-editor]');
         if (!editor) return;
         editor.innerHTML = '';
@@ -1396,32 +1702,98 @@ export class JobController {
     }
 
     captureEditorState(form, { validate = false } = {}) {
-        const parsedSelection = parseLlmSelection(
-            form.querySelector('#job-llm-selection')?.tomselect?.getValue?.() || form.querySelector('#job-llm-selection')?.value,
-            this.environments
-        );
-        const selectedEnvironment = parsedSelection.kind === 'environment'
-            ? this.findEnvironment(parsedSelection.envId)
-            : null;
+        let actions = this.editorActions.map(action => ({
+            ...action,
+            arguments: [...(action.arguments || [])]
+        }));
 
-        if (parsedSelection.kind === 'environment' && !selectedEnvironment) {
-            if (validate) this.app.showError('The selected Worker no longer exists. Choose another Worker.');
+        // Compatibility for tests and for an editor restored from a pre-workflow DOM snapshot.
+        // The real workflow editor keeps this.editorActions authoritative as fields change.
+        if (actions.length === 0 && form.querySelector('#job-llm-selection')) {
+            const parsedSelection = parseLlmSelection(
+                form.querySelector('#job-llm-selection')?.tomselect?.getValue?.() || form.querySelector('#job-llm-selection')?.value,
+                this.environments);
+            if (parsedSelection.kind === 'environment') {
+                actions = [{ id: this.newActionId(), kind: JOB_ACTION.WORKER, environmentId: parsedSelection.envId }];
+            }
+        }
+
+        if (actions.length === 0) {
+            if (validate) this.app.showError('Add at least one Worker or repository script.');
             return null;
         }
-        if (!selectedEnvironment) {
-            if (validate) this.app.showError('Choose a Worker.');
+        if (actions.length > 20) {
+            if (validate) this.app.showError('An automation can have at most 20 actions.');
+            return null;
+        }
+        if (actions.filter(action => action.kind === JOB_ACTION.WORKER).length > 1) {
+            if (validate) this.app.showError('An automation can contain at most one Worker.');
             return null;
         }
 
-        const llm = getJobLlmForCli(selectedEnvironment.cli);
-        const prompt = (selectedEnvironment.customPrompt || '').trim();
-        if (llm === null) {
-            if (validate) this.app.showError('The selected Worker uses an unsupported CLI.');
-            return null;
-        }
-        if (!prompt) {
-            if (validate) this.app.showError('Edit this Worker and add an Initial Message before creating the automation.');
-            return null;
+        let selectedEnvironment = null;
+        let llm = 0;
+        let prompt = '';
+        const normalizedActions = [];
+        for (const action of actions) {
+            if (action.kind === JOB_ACTION.WORKER) {
+                selectedEnvironment = this.findEnvironment(action.environmentId);
+                if (!selectedEnvironment) {
+                    if (validate) this.app.showError('The selected Worker no longer exists. Choose another Worker.');
+                    return null;
+                }
+                llm = getJobLlmForCli(selectedEnvironment.cli);
+                prompt = (selectedEnvironment.customPrompt || '').trim();
+                if (llm === null) {
+                    if (validate) this.app.showError('The selected Worker uses an unsupported CLI.');
+                    return null;
+                }
+                if (!prompt) {
+                    if (validate) this.app.showError('Edit this Worker and add an Initial Message before saving the automation.');
+                    return null;
+                }
+                normalizedActions.push({
+                    id: action.id,
+                    kind: JOB_ACTION.WORKER,
+                    environmentId: Number(selectedEnvironment.id)
+                });
+                continue;
+            }
+
+            const scriptPath = String(action.scriptPath || '').trim();
+            const runtime = Number(action.scriptRuntime);
+            const runtimeMeta = SCRIPT_RUNTIME_META[runtime];
+            if (!scriptPath) {
+                if (validate) this.app.showError('Choose a file for every script action.');
+                return null;
+            }
+            if (!runtimeMeta || !scriptPath.toLowerCase().endsWith(runtimeMeta.extension)) {
+                if (validate) this.app.showError(`${runtimeMeta?.label || 'The selected runtime'} requires a ${runtimeMeta?.extension || 'supported'} script file.`);
+                return null;
+            }
+            const timeoutSeconds = action.timeoutSeconds == null || action.timeoutSeconds === ''
+                ? null
+                : Number(action.timeoutSeconds);
+            if (timeoutSeconds !== null && (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 3600)) {
+                if (validate) this.app.showError('Each script time limit must be between 1 and 3600 seconds, or blank.');
+                return null;
+            }
+            const scriptArguments = (action.arguments || []).map(value => String(value ?? ''));
+            if (scriptArguments.length > 64 || scriptArguments.some(value => value.length > 8000 || value.includes('\0'))) {
+                if (validate) this.app.showError('A script can have at most 64 arguments, each no longer than 8000 characters.');
+                return null;
+            }
+
+            normalizedActions.push({
+                id: action.id,
+                kind: JOB_ACTION.SCRIPT,
+                scriptPath,
+                scriptRuntime: runtime,
+                arguments: scriptArguments,
+                workingDirectory: String(action.workingDirectory || '').trim() || null,
+                timeoutSeconds,
+                approvedHash: action.approvedHash || null
+            });
         }
 
         const triggers = [];
@@ -1461,7 +1833,7 @@ export class JobController {
             name: form.querySelector('#job-name').value.trim(),
             projectPath,
             llm,
-            environmentId: Number(selectedEnvironment.id),
+            environmentId: selectedEnvironment ? Number(selectedEnvironment.id) : null,
             prompt,
             // A blank field is the simple default: no time limit.
             timeoutMinutes: form.querySelector('#job-timeout')?.value
@@ -1469,7 +1841,8 @@ export class JobController {
                 : null,
             enabled: form.querySelector('#job-enabled').checked,
             triggers,
-            launchMinimized: form.querySelector('#job-launch-minimized')?.checked === true
+            launchMinimized: form.querySelector('#job-launch-minimized')?.checked === true,
+            actions: normalizedActions
         };
     }
 
@@ -1530,19 +1903,21 @@ export class JobController {
     async toggleJob(jobId, button) {
         const job = this.jobs.find(item => item.id === jobId);
         if (!job) return;
-        const environment = this.findEnvironment(job.environmentId);
-        if (!environment) {
-            this.app.showError('This automation needs a valid Worker before it can be enabled or disabled.');
+        const workerAction = this.normalizeJobActions(job).find(action => action.kind === JOB_ACTION.WORKER);
+        const environment = workerAction ? this.findEnvironment(workerAction.environmentId) : null;
+        if (workerAction && !environment) {
+            this.app.showError('This automation’s Worker no longer exists. Edit the workflow before changing its state.');
             return;
         }
-        const llm = getJobLlmForCli(environment.cli);
-        if (llm === null) {
+        const llm = environment ? getJobLlmForCli(environment.cli) : 0;
+        if (environment && llm === null) {
             this.app.showError('This automation uses a Worker with an unsupported CLI.');
             return;
         }
         const payload = {
             name: job.name, projectPath: this.currentProjectPath(), llm,
-            environmentId: Number(environment.id), prompt: environment.customPrompt || '',
+            environmentId: environment ? Number(environment.id) : null,
+            prompt: environment?.customPrompt || '',
             timeoutMinutes: job.timeoutMinutes,
             enabled: !job.enabled,
             launchMinimized: job.launchMinimized === true,
@@ -1594,10 +1969,10 @@ export class JobController {
             return;
         }
 
-        // A finished (or running) run IS a recorded terminal session — replay it with the exact same
-        // xterm player Chat History uses. Automated sessions are hidden from the history list but stay
-        // fetchable by id, so replay just works.
-        if (run?.sessionId) {
+        const actions = Array.isArray(run?.actions) ? run.actions : [];
+        // Legacy Worker-only runs predate per-action snapshots. Preserve their direct replay path;
+        // workflow runs open a detail surface so script output and every action remain visible.
+        if (actions.length === 0 && run?.sessionId) {
             try {
                 await showReplayModal(run.sessionId);
                 return;
@@ -1607,7 +1982,6 @@ export class JobController {
             }
         }
 
-        // No session yet (run still queued, or it failed before launching a terminal).
         const status = RUN_STATUS[Number(run?.status)] || { label: 'Unknown', tone: 'neutral' };
         const active = Number(run?.status) <= 1;
         this.app.showModal('Automation run', `
@@ -1616,8 +1990,13 @@ export class JobController {
                     <div><strong>${this.escape(run?.jobName || 'Automation run')}</strong><span class="job-run-status" data-tone="${status.tone}">${status.label}</span></div>
                     <small>${this.escape(run?.projectPath || '')}</small>
                     ${run?.errorMessage ? `<p class="text-danger mb-0 mt-2">${this.escape(run.errorMessage)}</p>` : ''}
-                    <p class="text-muted mb-0 mt-2">${active ? 'This run is starting — its recorded terminal will be ready to watch here shortly.' : 'This run has no recorded terminal to watch.'}</p>
+                    <p class="text-muted mb-0 mt-2">${actions.length > 0
+                        ? `${actions.length} ${actions.length === 1 ? 'action' : 'actions'} · ${this.escape(this.runDuration(run))}`
+                        : active
+                            ? 'This run is starting — its recorded terminal will be ready to watch here shortly.'
+                            : 'This run has no recorded terminal to watch.'}</p>
                 </div>
+                ${actions.length > 0 ? `<div class="job-run-actions-detail">${actions.map((action, index) => this.renderRunActionDetail(action, index)).join('')}</div>` : ''}
                 <div class="d-flex justify-content-end gap-2 mt-3">
                     ${active ? '<button class="btn btn-outline-danger" type="button" data-run-cancel>Stop run</button>' : '<button class="btn btn-outline-secondary" type="button" data-run-retry>Run again</button>'}
                     <button class="btn btn-primary" type="button" data-action="close-modal">Close</button>
@@ -1630,6 +2009,45 @@ export class JobController {
             await this.refreshRuns({ quiet: true });
         });
         detail?.querySelector('[data-run-retry]')?.addEventListener('click', event => this.retryRun(runId, event.currentTarget));
+        detail?.querySelectorAll('[data-run-action-session]')?.forEach(button => {
+            button.addEventListener('click', async () => {
+                try {
+                    await showReplayModal(button.dataset.runActionSession);
+                } catch (error) {
+                    this.app.showError(error?.message || 'Could not replay this Worker action.');
+                }
+            });
+        });
+    }
+
+    renderRunActionDetail(action, index) {
+        const kind = Number(action?.kind);
+        const status = RUN_ACTION_STATUS[Number(action?.status)] || { label: 'Unknown', tone: 'neutral' };
+        const runtime = SCRIPT_RUNTIME_META[Number(action?.scriptRuntime)];
+        const title = kind === JOB_ACTION.WORKER
+            ? `Worker — ${action?.environmentName || getLlmName(Number(action?.llm))}`
+            : `${runtime?.label || 'Script'} — ${action?.scriptPath || 'Unknown script'}`;
+        const detail = this.runDetail(action);
+        const stdout = String(action?.standardOutput || '');
+        const stderr = String(action?.standardError || '');
+        const argumentsText = kind === JOB_ACTION.SCRIPT && Array.isArray(action?.arguments) && action.arguments.length > 0
+            ? `<code class="job-run-action-argv">${action.arguments.map(value => this.escape(value)).join('</code><code class="job-run-action-argv">')}</code>`
+            : '';
+
+        return `
+            <article class="job-run-action-detail" data-tone="${status.tone}">
+                <header>
+                    <span class="job-action-number">${index + 1}</span>
+                    <div><strong>${this.escape(title)}</strong>${detail ? `<small>${this.escape(detail)}</small>` : ''}</div>
+                    <span class="job-run-status" data-tone="${status.tone}">${status.label}</span>
+                </header>
+                ${argumentsText ? `<div class="job-run-action-arguments"><span>argv</span>${argumentsText}</div>` : ''}
+                ${kind === JOB_ACTION.WORKER && action?.sessionId
+                    ? `<button class="btn btn-sm btn-outline-secondary" type="button" data-run-action-session="${this.escape(action.sessionId)}"><i class="fa-solid fa-play me-1" aria-hidden="true"></i>Replay Worker terminal</button>`
+                    : ''}
+                ${stdout ? `<details><summary>Standard output</summary><pre>${this.escape(stdout)}</pre></details>` : ''}
+                ${stderr ? `<details><summary>Standard error</summary><pre data-tone="danger">${this.escape(stderr)}</pre></details>` : ''}
+            </article>`;
     }
 
     formatTrigger(trigger) {
@@ -1762,47 +2180,73 @@ export class JobController {
     exportRecipe(jobId) {
         const job = this.jobs.find(item => item.id === jobId);
         if (!job) return;
-        const environment = this.findEnvironment(job.environmentId);
-        if (!environment) {
+        const actions = this.normalizeJobActions(job);
+        const workerAction = actions.find(action => action.kind === JOB_ACTION.WORKER);
+        const environment = workerAction ? this.findEnvironment(workerAction.environmentId) : null;
+        if (workerAction && !environment) {
             this.app.showError('This automation needs a valid Worker before it can be exported.');
             return;
         }
-        const cli = environment.cli;
-        const customArgs = environment.customArgs || '';
-        const prompt = (environment.customPrompt || '').trim();
+        const cli = environment?.cli || '';
+        const customArgs = environment?.customArgs || '';
+        const prompt = (environment?.customPrompt || '').trim();
         const model = this.extractArg(customArgs, ['--model', '-m']) || '';
         const effort = this.extractArg(customArgs, ['--effort', '--reasoning-effort']) || this.extractConfig(customArgs, 'model_reasoning_effort') || '';
         const triggers = (job.triggers || []).map(({ kind, scheduleKind, intervalMinutes, localTime, daysOfWeekMask, timeZoneId }) =>
             ({ kind, scheduleKind, intervalMinutes, localTime, daysOfWeekMask, timeZoneId }));
 
         const recipe = {
-            recipeVersion: 'V1',
+            recipeVersion: 'V2',
             name: job.name,
-            llm: getLlmName(Number(getJobLlmForCli(cli) ?? job.llm)),
-            cli,
-            model,
-            effort,
-            customArgs,
-            prompt,
+            worker: environment ? {
+                name: environment.name,
+                llm: getLlmName(Number(getJobLlmForCli(cli) ?? job.llm)),
+                cli,
+                model,
+                effort,
+                customArgs,
+                prompt,
+                workspaceMode: Number(environment.workspaceMode) || 0
+            } : null,
+            actions: actions.map(action => action.kind === JOB_ACTION.WORKER
+                ? { kind: JOB_ACTION.WORKER }
+                : {
+                    kind: JOB_ACTION.SCRIPT,
+                    scriptPath: action.scriptPath,
+                    scriptRuntime: Number(action.scriptRuntime),
+                    arguments: [...(action.arguments || [])],
+                    workingDirectory: action.workingDirectory || null,
+                    timeoutSeconds: action.timeoutSeconds ?? null
+                }),
             timeoutMinutes: job.timeoutMinutes,
+            launchMinimized: job.launchMinimized === true,
             triggers
         };
 
         const whenText = triggers.length
             ? triggers.map(t => this.formatTrigger(t)).join(', ')
             : 'On demand only';
+        const workflowText = recipe.actions.length
+            ? recipe.actions.map((action, index) => action.kind === JOB_ACTION.WORKER
+                ? `${index + 1}. Worker${environment ? ` — ${environment.name}` : ''}`
+                : `${index + 1}. ${SCRIPT_RUNTIME_META[action.scriptRuntime]?.label || 'Script'} — \`${action.scriptPath}\``).join('\n')
+            : '_No actions_';
         const markdown = `# VibeRails Recipe — ${job.name}
 
-- **Recipe version:** V1
-- **LLM:** ${recipe.llm}${model ? `\n- **Model:** ${model}` : ''}${effort ? `\n- **Effort:** ${effort}` : ''}
+- **Recipe version:** V2
+- **Worker:** ${environment ? `${recipe.worker.llm}${model ? ` · ${model}` : ''}${effort ? ` · ${effort}` : ''}` : 'none (script-only)'}
 - **Runs:** ${whenText}
 - **Timeout:** ${job.timeoutMinutes ? `${job.timeoutMinutes} min` : 'none'}
 
-## Initial message
+## Workflow
 
-${prompt ? prompt.split('\n').map(line => `> ${line}`).join('\n') : '> _(none)_'}
+${workflowText}
 
-Import this file from the **Automation** screen in VibeRails to add the Worker and this automation.
+${environment ? `## Initial message
+
+${prompt ? prompt.split('\n').map(line => `> ${line}`).join('\n') : '> _(none)_'}\n` : ''}
+
+Import this file from the **Automation** screen in VibeRails. Script paths are resolved and hash-pinned from the local repository during import; script contents and machine-specific approvals are never embedded in the recipe.
 
 <!-- viberails-recipe
 ${JSON.stringify(recipe, null, 2)}
@@ -1849,51 +2293,100 @@ viberails-recipe -->
         if (!match) return null;
         try {
             const recipe = JSON.parse(match[1]);
-            return recipe && recipe.cli && recipe.name ? recipe : null;
+            return recipe && recipe.name && (recipe.cli || Array.isArray(recipe.actions)) ? recipe : null;
         } catch {
             return null;
         }
     }
 
+    normalizeRecipe(recipe) {
+        if (String(recipe?.recipeVersion || '').toUpperCase() === 'V2' && Array.isArray(recipe.actions)) {
+            return {
+                ...recipe,
+                worker: recipe.worker && typeof recipe.worker === 'object' ? recipe.worker : null,
+                actions: recipe.actions.map(action => Number(action?.kind) === JOB_ACTION.WORKER
+                    ? { kind: JOB_ACTION.WORKER }
+                    : {
+                        kind: JOB_ACTION.SCRIPT,
+                        scriptPath: String(action?.scriptPath || ''),
+                        scriptRuntime: Number(action?.scriptRuntime),
+                        arguments: Array.isArray(action?.arguments) ? action.arguments.map(value => String(value ?? '')) : [],
+                        workingDirectory: action?.workingDirectory || null,
+                        timeoutSeconds: action?.timeoutSeconds ?? null
+                    })
+            };
+        }
+
+        // V1 carried exactly one Worker in top-level fields. Converting it here keeps every old
+        // recipe import path working while the rest of the UI deals only in ordered V2 actions.
+        return {
+            recipeVersion: 'V2',
+            name: recipe?.name,
+            worker: {
+                name: recipe?.name,
+                llm: recipe?.llm,
+                cli: recipe?.cli,
+                model: recipe?.model || '',
+                effort: recipe?.effort || '',
+                customArgs: recipe?.customArgs || '',
+                prompt: recipe?.prompt || '',
+                workspaceMode: 0
+            },
+            actions: [{ kind: JOB_ACTION.WORKER }],
+            timeoutMinutes: recipe?.timeoutMinutes ?? null,
+            launchMinimized: recipe?.launchMinimized === true,
+            triggers: Array.isArray(recipe?.triggers) ? recipe.triggers : []
+        };
+    }
+
     confirmImportRecipe(recipe) {
-        const cli = String(recipe.cli || '').toLowerCase();
-        const existingEnv = (this.environments || []).find(env => (env.name || '').toLowerCase() === String(recipe.name).toLowerCase() && (env.cli || '').toLowerCase() === cli);
+        recipe = this.normalizeRecipe(recipe);
+        const worker = recipe.worker;
+        const cli = String(worker?.cli || '').toLowerCase();
+        const existingEnv = worker
+            ? (this.environments || []).find(env => (env.name || '').toLowerCase() === String(worker.name).toLowerCase() && (env.cli || '').toLowerCase() === cli)
+            : null;
         const whenText = (recipe.triggers || []).length
             ? (recipe.triggers || []).map(t => this.formatTrigger(t)).join(', ')
             : 'On demand only';
         // Preserve the exact strings applyRecipe will persist; trimming here could conceal leading
         // or trailing content while claiming that the user is reviewing the imported value.
-        const customArgs = String(recipe.customArgs || '');
-        const prompt = String(recipe.prompt || '');
-        const hasReviewableContent = customArgs.trim().length > 0 || prompt.trim().length > 0;
+        const customArgs = String(worker?.customArgs || '');
+        const prompt = String(worker?.prompt || '');
+        const scripts = (recipe.actions || []).filter(action => Number(action.kind) === JOB_ACTION.SCRIPT);
+        const hasReviewableContent = customArgs.trim().length > 0 || prompt.trim().length > 0 || scripts.length > 0;
         this.app.showModal('Import recipe', `
             <div class="job-recipe-import">
-                <p>Import <strong>${this.escape(recipe.name)}</strong> (${this.escape(recipe.llm || cli)}) into this repository?</p>
+                <p>Import <strong>${this.escape(recipe.name)}</strong> into this repository?</p>
                 <ul class="text-muted small">
-                    <li>Worker: <strong>${this.escape(recipe.name)}</strong>${recipe.model ? ` · ${this.escape(recipe.model)}` : ''}${existingEnv ? ' <em>(already exists — will be reused)</em>' : ''}</li>
+                    <li>Workflow: <strong>${recipe.actions.length} ${recipe.actions.length === 1 ? 'action' : 'actions'}</strong></li>
+                    ${worker ? `<li>Worker: <strong>${this.escape(worker.name)}</strong>${worker.model ? ` · ${this.escape(worker.model)}` : ''}${existingEnv ? ' <em>(already exists — will be reused)</em>' : ''}</li>` : '<li>Worker: none (script-only)</li>'}
+                    ${scripts.length ? `<li>Scripts: ${scripts.map(action => this.escape(action.scriptPath || '(missing path)')).join(' → ')}</li>` : ''}
                     <li>Runs: ${this.escape(whenText)} · ${recipe.timeoutMinutes ? `${this.escape(String(recipe.timeoutMinutes))} min limit` : 'no time limit'}</li>
                 </ul>
                 <div class="alert alert-warning small" role="alert">
-                    <strong>Review the Worker content before importing.</strong>
-                    Custom arguments can change approval or sandbox permissions, and the initial message becomes instructions to the agent.
-                    ${existingEnv
-                        ? 'A matching Worker already exists, so the recipe content below will not overwrite its settings.'
-                        : 'The new Worker will import these fields exactly as shown.'}
+                    <strong>Review the workflow before importing.</strong>
+                    ${worker ? 'Worker arguments can change approval or sandbox permissions, and its initial message becomes instructions to the agent. ' : ''}
+                    ${scripts.length ? 'Script paths refer to files in this local repository. VibeRails verifies and hash-pins their current contents during import; the automation starts disabled. ' : ''}
+                    ${worker ? (existingEnv
+                        ? 'A matching Worker already exists, so the recipe will reuse it without overwriting its settings.'
+                        : 'The new Worker will import the fields shown below exactly.') : ''}
                 </div>
                 <div class="job-recipe-review">
-                    <div>
+                    ${worker ? `<div>
                         <div class="form-label mb-1">Custom arguments</div>
                         <pre class="job-recipe-review-value" data-recipe-custom-args>${this.escape(customArgs || '(none)')}</pre>
                     </div>
                     <div>
                         <div class="form-label mb-1">Initial message</div>
                         <pre class="job-recipe-review-value" data-recipe-prompt>${this.escape(prompt || '(none)')}</pre>
-                    </div>
+                    </div>` : ''}
+                    ${scripts.length ? `<div><div class="form-label mb-1">Repository scripts</div><pre class="job-recipe-review-value" data-recipe-scripts>${scripts.map((action, index) => `${index + 1}. ${SCRIPT_RUNTIME_META[action.scriptRuntime]?.label || 'Unknown runtime'}  ${action.scriptPath || '(missing path)'}`).map(line => this.escape(line)).join('\n')}</pre></div>` : ''}
                 </div>
-                <label class="form-check"><input class="form-check-input" type="checkbox" id="recipe-add-env" ${existingEnv ? '' : 'checked'} ${existingEnv ? 'disabled' : ''}><span class="form-check-label">Add the Worker</span></label>
+                ${worker ? `<label class="form-check"><input class="form-check-input" type="checkbox" id="recipe-add-env" ${existingEnv ? '' : 'checked'} ${existingEnv ? 'disabled' : ''}><span class="form-check-label">Add the Worker</span></label>` : ''}
                 <label class="form-check"><input class="form-check-input" type="checkbox" id="recipe-add-job" checked><span class="form-check-label">Add the automation (created disabled)</span></label>
                 ${hasReviewableContent
-                    ? '<label class="form-check mt-2"><input class="form-check-input" type="checkbox" id="recipe-reviewed"><span class="form-check-label">I have read the custom arguments and initial message above</span></label>'
+                    ? '<label class="form-check mt-2"><input class="form-check-input" type="checkbox" id="recipe-reviewed"><span class="form-check-label">I have reviewed the Worker settings and repository script actions above</span></label>'
                     : ''}
                 <div class="d-flex justify-content-end gap-2 mt-3">
                     <button class="btn btn-outline-secondary" type="button" data-action="close-modal">Cancel</button>
@@ -1920,33 +2413,54 @@ viberails-recipe -->
 
     async applyRecipe(recipe, { addEnv, addJob, existingEnv, button }) {
         return this.withBusy(button, 'Importing…', async () => {
-            const cli = String(recipe.cli || '').toLowerCase();
-            if (addEnv) {
+            recipe = this.normalizeRecipe(recipe);
+            const worker = recipe.worker;
+            const cli = String(worker?.cli || '').toLowerCase();
+            if (worker && addEnv) {
                 // Recipes install through the Automation flow, so the imported record
                 // is a Worker: listed by the Worker picker, excluded from launch pickers.
                 await this.app.apiCall('/api/v1/environments', 'POST', {
-                    name: recipe.name,
+                    name: worker.name,
                     cli,
-                    customArgs: recipe.customArgs || '',
-                    customPrompt: recipe.prompt || '',
-                    automationWorker: true
+                    customArgs: worker.customArgs || '',
+                    customPrompt: worker.prompt || '',
+                    automationWorker: true,
+                    workspaceMode: Number(worker.workspaceMode) || 0
                 });
             }
             await this.refreshAll({ quiet: true });
 
             if (addJob) {
-                const environment = (this.environments || []).find(env => (env.name || '').toLowerCase() === String(recipe.name).toLowerCase() && (env.cli || '').toLowerCase() === cli)
-                    || existingEnv;
-                if (!environment) throw new Error('The recipe Worker could not be created.');
-                const llm = getJobLlmForCli(cli);
+                const environment = worker
+                    ? (this.environments || []).find(env => (env.name || '').toLowerCase() === String(worker.name).toLowerCase() && (env.cli || '').toLowerCase() === cli) || existingEnv
+                    : null;
+                if (worker && !environment) throw new Error('The recipe Worker could not be created or found.');
+                const llm = environment ? getJobLlmForCli(cli) : 0;
+                const actions = (recipe.actions || []).map(action => Number(action.kind) === JOB_ACTION.WORKER
+                    ? {
+                        id: null,
+                        kind: JOB_ACTION.WORKER,
+                        environmentId: Number(environment.id)
+                    }
+                    : {
+                        id: null,
+                        kind: JOB_ACTION.SCRIPT,
+                        scriptPath: action.scriptPath,
+                        scriptRuntime: Number(action.scriptRuntime),
+                        arguments: Array.isArray(action.arguments) ? action.arguments : [],
+                        workingDirectory: action.workingDirectory || null,
+                        timeoutSeconds: action.timeoutSeconds ?? null
+                    });
                 await this.app.apiCall('/api/v1/jobs', 'POST', {
                     name: recipe.name,
                     projectPath: this.currentProjectPath(),
                     llm,
-                    environmentId: Number(environment.id),
-                    prompt: recipe.prompt || environment.customPrompt || '',
+                    environmentId: environment ? Number(environment.id) : null,
+                    prompt: worker ? (worker.prompt || environment.customPrompt || '') : '',
                     timeoutMinutes: Number(recipe.timeoutMinutes) || null,
                     enabled: false,
+                    launchMinimized: recipe.launchMinimized === true,
+                    actions,
                     triggers: (recipe.triggers || []).filter(t => {
                         const kind = Number(t.kind);
                         return kind === TRIGGER.SCHEDULE || kind === TRIGGER.COMMIT || kind === TRIGGER.PRECOMMIT;
@@ -1954,7 +2468,7 @@ viberails-recipe -->
                 });
             }
             this.app.closeModal();
-            this.app.showToast('Recipe imported', 'The Worker and automation were added.', 'success');
+            this.app.showToast('Recipe imported', 'The workflow was added disabled for local review.', 'success');
             await this.refreshAll({ quiet: true });
         });
     }

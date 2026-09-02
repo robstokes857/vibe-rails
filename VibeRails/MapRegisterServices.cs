@@ -137,10 +137,6 @@ namespace VibeRails
                 $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared"));
             serviceCollection.AddAutomationRuntime(
                 hostScheduler: isActiveRootBackendProcess && !isFakeCliTestProcess);
-            // General-purpose process runner (hidden+captured, or its own visible terminal window).
-            // Stateless, so one instance serves every caller. Environment Steps are its first
-            // consumer; GitProcessRunner and ShellService are the obvious later migrations.
-            serviceCollection.AddSingleton<ICliWrapper, CliWrapper>();
             // Scoped because it reads steps through the scoped IRepository, matching TerminalRunner
             // (its only launch-path consumer) so both live in the same scope.
             serviceCollection.AddScoped<IEnvironmentStepRunner, EnvironmentStepRunner>();
@@ -404,10 +400,12 @@ namespace VibeRails
         internal static bool IsActiveRootBackendProcess(IEnumerable<string> args)
         {
             var arguments = args as string[] ?? args.ToArray();
+            var parsed = ArgumentParser.Parse(arguments);
             return !JobDaemonProcessHost.IsRequested(arguments)
                    && !JobDaemonMaintenanceProcessHost.IsRequested(arguments)
                    && !IsTerminalTabChildProcess(arguments)
-                   && !ArgumentParser.Parse(arguments).IsLMBootstrap;
+                   && !parsed.IsLMBootstrap
+                   && parsed.JobRunId is null;
         }
 
     }

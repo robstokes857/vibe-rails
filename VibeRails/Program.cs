@@ -450,21 +450,20 @@ _ = Task.Run(async () =>
 
 string serverUrl = $"http://localhost:{port}";
 
+if (parsedArgs.JobRunId is not null)
+{
+    // An Automation may be script-only (no --env) or may contain one interactive Worker. The
+    // ordered action runner chooses whether and when to enter the ordinary CLI path.
+    Environment.ExitCode = await JobRunner.RunAsync(parsedArgs, app.Services);
+    await app.StopAsync();
+    return;
+}
+
 if (parsedArgs.IsLMBootstrap)
 {
-    if (parsedArgs.JobRunId is not null)
-    {
-        // Automated Job run. Same interactive CLI the user would get from the Environment screen,
-        // in this real terminal window — JobRunner only wraps it with run bookkeeping and the
-        // opt-in deadline, and reports the outcome through the process exit code.
-        Environment.ExitCode = await JobRunner.RunAsync(parsedArgs, app.Services);
-    }
-    else
-    {
-        // CLI + Web concurrent mode: terminal runs in foreground, web server in background
-        Console.WriteLine($"[VibeRails] Web viewer: {serverUrl}");
-        await CliLoop.RunTerminalWithWebAsync(parsedArgs, app.Services);
-    }
+    // CLI + Web concurrent mode: terminal runs in foreground, web server in background
+    Console.WriteLine($"[VibeRails] Web viewer: {serverUrl}");
+    await CliLoop.RunTerminalWithWebAsync(parsedArgs, app.Services);
     await app.StopAsync();
     return;
 }
