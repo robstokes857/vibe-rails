@@ -11,6 +11,7 @@ namespace VibeRails.Utils
     ///   vb --vs-code-v1 [--parent-pid &lt;pid&gt;]         → VS Code extension / new-tab child mode
     ///   vb --env &lt;name|llm&gt; --workdir &lt;path&gt; [-- ...]  → LMBootstrap (CLI + web concurrent)
     ///   vb --env &lt;name&gt; --env-id &lt;id&gt; ...             → same, but launching an exact environment row
+    ///   vb --job-run &lt;id&gt; --workdir &lt;path&gt;             → internal script-only Automation process
     /// </summary>
     public static class ArgumentParser
     {

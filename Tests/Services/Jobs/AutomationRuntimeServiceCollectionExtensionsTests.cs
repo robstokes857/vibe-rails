@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using VibeRails.Services.Cli;
 using VibeRails.Services.Jobs;
 using VibeRails.Utils;
 using Xunit;
@@ -60,6 +61,11 @@ public sealed class AutomationRuntimeServiceCollectionExtensionsTests : IDisposa
         Assert.Same(
             provider.GetRequiredService<JobSchedulerHealth>(),
             provider.GetRequiredService<JobSchedulerHealth>());
+        Assert.Single(provider.GetServices<ICliWrapper>());
+        Assert.IsType<AutomationScriptService>(
+            provider.GetRequiredService<IAutomationScriptService>());
+        Assert.IsType<JobProcessLauncher>(
+            provider.GetRequiredService<IJobProcessLauncher>());
     }
 
     public void Dispose()

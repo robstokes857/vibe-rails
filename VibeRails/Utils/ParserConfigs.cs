@@ -19,9 +19,9 @@ namespace VibeRails.Utils
         // back to a name lookup that is filtered by project.
         public int? EnvId { get; set; }
 
-        // Automated Job run: vb --env <worker> --workdir <repo> --job-run <runId> [--max-runtime <min>].
-        // Runs the worker's env exactly as configured, interactively, in whatever terminal window
-        // spawned this process, while reporting the run's lifecycle back to the JobRuns table.
+        // Automated Job run: optionally paired with --env when the workflow contains a Worker.
+        // Script-only workflows use vb --workdir <repo> --job-run <runId>. Both report their
+        // lifecycle back to JobRuns from the native terminal process that owns the work.
         public string? JobRunId { get; set; }
 
         // Opt-in absolute deadline in minutes for a --job-run process. Absent (null) means the run

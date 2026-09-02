@@ -31,6 +31,36 @@ public enum JobRunStatus
 }
 
 /// <summary>
+/// One ordered action in an Automation. Existing Automations are represented as one Worker
+/// action; Script actions may run before or after it, or form a script-only Automation.
+/// </summary>
+public enum JobActionKind
+{
+    Worker = 0,
+    Script = 1
+}
+
+/// <summary>The explicitly selected interpreter for a repository-local script action.</summary>
+public enum JobScriptRuntime
+{
+    Python = 0,
+    PowerShell = 1,
+    Bash = 2
+}
+
+/// <summary>Per-action status inside one Automation run.</summary>
+public enum JobRunActionStatus
+{
+    Pending = 0,
+    Running = 1,
+    Succeeded = 2,
+    Failed = 3,
+    Skipped = 4,
+    Cancelled = 5,
+    TimedOut = 6
+}
+
+/// <summary>
 /// The shared outcome contract for a Job-run process: the exit code reported for each terminal
 /// <see cref="JobRunStatus"/> and the user-facing cancellation message. It lives beside the enum
 /// so JobStore's atomic completion SQL and the JobRunner agree on one mapping without the DB
@@ -94,7 +124,8 @@ public sealed record JobResponse(
     DateTime UpdatedUtc,
     DateTime? DeletedUtc,
     List<JobTriggerDto> Triggers,
-    bool LaunchMinimized = false);
+    bool LaunchMinimized = false,
+    List<JobActionDto>? Actions = null);
 
 public sealed record JobListResponse(List<JobResponse> Jobs);
 
@@ -115,7 +146,8 @@ public sealed record CreateJobRequest(
     int? TimeoutMinutes,
     bool Enabled,
     List<JobTriggerRequest> Triggers,
-    bool LaunchMinimized = false);
+    bool LaunchMinimized = false,
+    List<JobActionRequest>? Actions = null);
 
 public sealed record UpdateJobRequest(
     string Name,
@@ -126,7 +158,39 @@ public sealed record UpdateJobRequest(
     int? TimeoutMinutes,
     bool Enabled,
     List<JobTriggerRequest> Triggers,
-    bool LaunchMinimized = false);
+    bool LaunchMinimized = false,
+    List<JobActionRequest>? Actions = null);
+
+/// <summary>
+/// Client-supplied action shape. Script paths and working directories may arrive absolute from
+/// the local file picker, but the service normalizes them to repository-relative paths before
+/// persistence. ApprovedHash is output-only in normal UI use: the server computes it from the
+/// current regular file whenever the Automation is saved.
+/// </summary>
+public sealed record JobActionRequest(
+    string? Id,
+    JobActionKind Kind,
+    int? EnvironmentId = null,
+    string? ScriptPath = null,
+    JobScriptRuntime? ScriptRuntime = null,
+    List<string>? Arguments = null,
+    string? WorkingDirectory = null,
+    int? TimeoutSeconds = null,
+    string? ApprovedHash = null);
+
+public sealed record JobActionDto(
+    string Id,
+    int Position,
+    JobActionKind Kind,
+    int? EnvironmentId,
+    string? EnvironmentName,
+    LLM Llm,
+    string? ScriptPath,
+    JobScriptRuntime? ScriptRuntime,
+    List<string> Arguments,
+    string? WorkingDirectory,
+    int? TimeoutSeconds,
+    string? ApprovedHash);
 
 // A Job run is a recorded native terminal session. SessionId links to the Sessions row (and its
 // SessionLogs / TerminalSessionLogs) so the Jobs UI can replay it with the same xterm player the
@@ -149,7 +213,30 @@ public sealed record JobRunResponse(
     DateTime? EndedUtc,
     int? ExitCode,
     string? ErrorMessage,
-    bool CancelRequested);
+    bool CancelRequested,
+    List<JobRunActionDto>? Actions = null);
+
+public sealed record JobRunActionDto(
+    string Id,
+    int Position,
+    JobActionKind Kind,
+    JobRunActionStatus Status,
+    int? EnvironmentId,
+    string? EnvironmentName,
+    LLM Llm,
+    string? ScriptPath,
+    JobScriptRuntime? ScriptRuntime,
+    List<string> Arguments,
+    string? WorkingDirectory,
+    int? TimeoutSeconds,
+    string? ApprovedHash,
+    string? SessionId,
+    DateTime? StartedUtc,
+    DateTime? EndedUtc,
+    int? ExitCode,
+    string? ErrorMessage,
+    string StandardOutput,
+    string StandardError);
 
 /// <summary>
 /// Pagination metadata is nullable because not every path that returns runs is paged. The capped
@@ -218,7 +305,23 @@ public sealed record JobDefinitionRecord(
     DateTime UpdatedUtc,
     DateTime? DeletedUtc,
     IReadOnlyList<JobTriggerDto> Triggers,
-    bool LaunchMinimized = false);
+    bool LaunchMinimized = false,
+    IReadOnlyList<JobActionRecord>? Actions = null);
+
+public sealed record JobActionRecord(
+    string Id,
+    long JobId,
+    int Position,
+    JobActionKind Kind,
+    int? EnvironmentId,
+    string? EnvironmentName,
+    LLM Llm,
+    string? ScriptPath,
+    JobScriptRuntime? ScriptRuntime,
+    IReadOnlyList<string> Arguments,
+    string? WorkingDirectory,
+    int? TimeoutSeconds,
+    string? ApprovedHash);
 
 public sealed record JobRunRecord(
     string Id,
@@ -240,4 +343,29 @@ public sealed record JobRunRecord(
     string? ErrorMessage,
     bool CancelRequested,
     int? OwnerProcessId,
-    bool LaunchMinimized = false);
+    bool LaunchMinimized = false,
+    IReadOnlyList<JobRunActionRecord>? Actions = null);
+
+public sealed record JobRunActionRecord(
+    string Id,
+    string RunId,
+    string? SourceActionId,
+    int Position,
+    JobActionKind Kind,
+    JobRunActionStatus Status,
+    int? EnvironmentId,
+    string? EnvironmentName,
+    LLM Llm,
+    string? ScriptPath,
+    JobScriptRuntime? ScriptRuntime,
+    IReadOnlyList<string> Arguments,
+    string? WorkingDirectory,
+    int? TimeoutSeconds,
+    string? ApprovedHash,
+    string? SessionId,
+    DateTime? StartedUtc,
+    DateTime? EndedUtc,
+    int? ExitCode,
+    string? ErrorMessage,
+    string StandardOutput,
+    string StandardError);

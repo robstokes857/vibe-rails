@@ -30,13 +30,29 @@ public sealed class JobLaunchServiceTests
     }
 
     [Fact]
+    public void BuildStandaloneVbArgs_IncludesTheWorkingDirectoryWithoutAnEnvironment()
+    {
+        var run = Run(
+            timeoutMinutes: 15,
+            projectPath: ExistingProjectPath(),
+            llm: LLM.NotSet,
+            environmentId: null,
+            environmentName: null,
+            actions: [ScriptAction("action-1", 0)]);
+
+        Assert.Equal(
+            ["--workdir", run.ProjectPath, "--job-run", "run-1", "--max-runtime", "15"],
+            JobLaunchService.BuildStandaloneVbArgs(run));
+    }
+
+    [Fact]
     public async Task LaunchQueuedRunsAsync_UsesTheSameEnvironmentLaunchRequestAsTheApi()
     {
         var run = Run(projectPath: ExistingProjectPath());
         var store = LaunchableStore(run);
         var pipeline = SuccessfulPipeline();
 
-        var launched = await new JobLaunchService(store.Object, pipeline.Object)
+        var launched = await new JobLaunchService(store.Object, pipeline.Object, UnusedProcessLauncher().Object)
             .LaunchQueuedRunsAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(1, launched);
@@ -57,13 +73,98 @@ public sealed class JobLaunchServiceTests
     }
 
     [Fact]
+    public async Task LaunchQueuedRunsAsync_ScriptOnlyWorkflowUsesTheNeutralNativeTerminalLauncher()
+    {
+        var run = Run(
+            projectPath: ExistingProjectPath(),
+            llm: LLM.NotSet,
+            environmentId: null,
+            environmentName: null,
+            actions: [ScriptAction("script-1", 0)]);
+        var store = LaunchableStore(run);
+        var pipeline = new Mock<IEnvironmentLaunchService>(MockBehavior.Strict);
+        var process = new Mock<IJobProcessLauncher>(MockBehavior.Strict);
+        process
+            .Setup(launcher => launcher.Launch(
+                run.ProjectPath,
+                It.Is<IReadOnlyList<string>>(arguments => arguments.SequenceEqual(
+                    new[] { "--workdir", run.ProjectPath, "--job-run", run.Id })),
+                false))
+            .Returns(new LaunchResult(true, "launched"));
+
+        var launched = await new JobLaunchService(store.Object, pipeline.Object, process.Object)
+            .LaunchQueuedRunsAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, launched);
+        pipeline.VerifyNoOtherCalls();
+        process.VerifyAll();
+    }
+
+    [Fact]
+    public async Task LaunchQueuedRunsAsync_MixedWorkflowUsesTheWorkerActionForWorkspaceResolution()
+    {
+        var run = Run(
+            projectPath: ExistingProjectPath(),
+            llm: LLM.NotSet,
+            environmentId: null,
+            environmentName: null,
+            actions:
+            [
+                ScriptAction("script-1", 0),
+                WorkerAction("worker-1", 1, 19, "workspace worker", LLM.Codex),
+                ScriptAction("script-2", 2)
+            ]);
+        var store = LaunchableStore(run);
+        var pipeline = SuccessfulPipeline();
+        var process = UnusedProcessLauncher();
+
+        var launched = await new JobLaunchService(store.Object, pipeline.Object, process.Object)
+            .LaunchQueuedRunsAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, launched);
+        pipeline.Verify(candidate => candidate.LaunchAsync(
+            LLM.Codex,
+            It.Is<LaunchCliRequest>(request => request.EnvironmentName == "workspace worker"),
+            run.ProjectPath,
+            It.Is<string[]>(arguments => arguments.SequenceEqual(new[] { "--job-run", run.Id })),
+            false,
+            19,
+            false,
+            It.IsAny<CancellationToken>()), Times.Once);
+        process.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task LaunchQueuedRunsAsync_RejectsASnapshotWithMoreThanOneWorker()
+    {
+        var run = Run(
+            projectPath: ExistingProjectPath(),
+            actions:
+            [
+                WorkerAction("worker-1", 0, 7, "one", LLM.Claude),
+                WorkerAction("worker-2", 1, 8, "two", LLM.Codex)
+            ]);
+        var store = LaunchableStore(run);
+        var pipeline = new Mock<IEnvironmentLaunchService>(MockBehavior.Strict);
+        var process = UnusedProcessLauncher();
+
+        var launched = await new JobLaunchService(store.Object, pipeline.Object, process.Object)
+            .LaunchQueuedRunsAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, launched);
+        AssertFailedWith(store, "more than one Worker");
+        pipeline.VerifyNoOtherCalls();
+        process.VerifyNoOtherCalls();
+    }
+
+    [Fact]
     public async Task LaunchQueuedRunsAsync_ForwardsTheMinimizedPreference()
     {
         var run = Run(projectPath: ExistingProjectPath(), launchMinimized: true);
         var store = LaunchableStore(run);
         var pipeline = SuccessfulPipeline();
 
-        var launched = await new JobLaunchService(store.Object, pipeline.Object)
+        var launched = await new JobLaunchService(store.Object, pipeline.Object, UnusedProcessLauncher().Object)
             .LaunchQueuedRunsAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(1, launched);
@@ -96,7 +197,7 @@ public sealed class JobLaunchServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new LaunchResult(false, "Environment was not found."));
 
-        var launched = await new JobLaunchService(store.Object, pipeline.Object)
+        var launched = await new JobLaunchService(store.Object, pipeline.Object, UnusedProcessLauncher().Object)
             .LaunchQueuedRunsAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(0, launched);
@@ -109,7 +210,7 @@ public sealed class JobLaunchServiceTests
         var store = LaunchableStore(Run());
         var pipeline = new Mock<IEnvironmentLaunchService>(MockBehavior.Strict);
 
-        var launched = await new JobLaunchService(store.Object, pipeline.Object)
+        var launched = await new JobLaunchService(store.Object, pipeline.Object, UnusedProcessLauncher().Object)
             .LaunchQueuedRunsAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(0, launched);
@@ -126,7 +227,7 @@ public sealed class JobLaunchServiceTests
             .ReturnsAsync(false);
         var pipeline = new Mock<IEnvironmentLaunchService>(MockBehavior.Strict);
 
-        var launched = await new JobLaunchService(store.Object, pipeline.Object)
+        var launched = await new JobLaunchService(store.Object, pipeline.Object, UnusedProcessLauncher().Object)
             .LaunchQueuedRunsAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(0, launched);
@@ -150,7 +251,7 @@ public sealed class JobLaunchServiceTests
         var store = LaunchableStore(runs);
         var pipeline = SuccessfulPipeline();
 
-        var launched = await new JobLaunchService(store.Object, pipeline.Object)
+        var launched = await new JobLaunchService(store.Object, pipeline.Object, UnusedProcessLauncher().Object)
             .LaunchQueuedRunsAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(JobLaunchService.MaxConcurrentJobTerminals, launched);
@@ -168,7 +269,7 @@ public sealed class JobLaunchServiceTests
             .ReturnsAsync(JobLaunchService.MaxConcurrentJobTerminals - 1);
         var pipeline = SuccessfulPipeline();
 
-        var launched = await new JobLaunchService(store.Object, pipeline.Object)
+        var launched = await new JobLaunchService(store.Object, pipeline.Object, UnusedProcessLauncher().Object)
             .LaunchQueuedRunsAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(1, launched);
@@ -202,6 +303,9 @@ public sealed class JobLaunchServiceTests
             .ReturnsAsync(new LaunchResult(true, "launched"));
         return pipeline;
     }
+
+    private static Mock<IJobProcessLauncher> UnusedProcessLauncher() =>
+        new(MockBehavior.Strict);
 
     private static Mock<IJobStore> LaunchableStore(params JobRunRecord[] runs)
     {
@@ -241,7 +345,11 @@ public sealed class JobLaunchServiceTests
         int? timeoutMinutes = null,
         string id = "run-1",
         string? projectPath = null,
-        bool launchMinimized = false) => new(
+        bool launchMinimized = false,
+        LLM llm = LLM.Claude,
+        int? environmentId = 7,
+        string? environmentName = "nightly",
+        IReadOnlyList<JobRunActionRecord>? actions = null) => new(
         Id: id,
         JobId: 1,
         TriggerKind: JobTriggerKind.Manual,
@@ -249,9 +357,9 @@ public sealed class JobLaunchServiceTests
         Status: JobRunStatus.Queued,
         JobName: "Nightly review",
         ProjectPath: projectPath ?? MissingProjectPath,
-        Llm: LLM.Claude,
-        EnvironmentId: 7,
-        EnvironmentName: "nightly",
+        Llm: llm,
+        EnvironmentId: environmentId,
+        EnvironmentName: environmentName,
         TimeoutMinutes: timeoutMinutes,
         SessionId: null,
         QueuedUtc: new DateTime(2026, 7, 24, 9, 0, 0, DateTimeKind.Utc),
@@ -261,5 +369,59 @@ public sealed class JobLaunchServiceTests
         ErrorMessage: null,
         CancelRequested: false,
         OwnerProcessId: null,
-        LaunchMinimized: launchMinimized);
+        LaunchMinimized: launchMinimized,
+        Actions: actions);
+
+    private static JobRunActionRecord ScriptAction(string id, int position) => new(
+        id,
+        "run-1",
+        id,
+        position,
+        JobActionKind.Script,
+        JobRunActionStatus.Pending,
+        null,
+        null,
+        LLM.NotSet,
+        $"scripts/{id}.py",
+        JobScriptRuntime.Python,
+        [],
+        null,
+        null,
+        new string('a', 64),
+        null,
+        null,
+        null,
+        null,
+        null,
+        string.Empty,
+        string.Empty);
+
+    private static JobRunActionRecord WorkerAction(
+        string id,
+        int position,
+        int environmentId,
+        string environmentName,
+        LLM llm) => new(
+        id,
+        "run-1",
+        id,
+        position,
+        JobActionKind.Worker,
+        JobRunActionStatus.Pending,
+        environmentId,
+        environmentName,
+        llm,
+        null,
+        null,
+        [],
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        string.Empty,
+        string.Empty);
 }

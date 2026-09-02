@@ -14183,7 +14183,7 @@ body.git-guard-focus-active #app-content {
 .job-inline-editor[hidden] { display: none; }
 
 .job-inline-form {
-    width: min(820px, 100%);
+    width: min(980px, 100%);
     margin: 0 auto;
     padding: 1.25rem;
     border: 1px solid var(--color-border);
@@ -14317,6 +14317,182 @@ body.git-guard-focus-active #app-content {
     font: inherit;
     line-height: 1.5;
     white-space: pre-wrap;
+}
+
+.job-actions-fieldset {
+    min-width: 0;
+    margin-top: 1rem;
+    padding: 1rem;
+    border: 1px solid var(--color-border, rgba(128, 128, 128, 0.35));
+    border-radius: 10px;
+    background-color: var(--color-bg-base, #121212);
+}
+
+.job-actions-fieldset > legend {
+    float: none;
+    width: auto;
+    margin: 0;
+    padding: 0 0.35rem;
+    color: var(--color-text, #e0e0e0);
+    font-size: 0.9rem;
+    font-weight: 700;
+}
+
+.job-actions-fieldset > legend small {
+    margin-left: 0.35rem;
+    color: var(--color-text-muted, #9a9a9a);
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.job-actions-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.8rem;
+}
+
+.job-actions-toolbar p {
+    margin: 0;
+    color: var(--color-text-muted, #9a9a9a);
+    font-size: 0.78rem;
+}
+
+.job-actions-toolbar > div {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 0.45rem;
+}
+
+.job-actions-list {
+    display: grid;
+    gap: 0.7rem;
+}
+
+.job-actions-empty {
+    display: grid;
+    justify-items: center;
+    gap: 0.25rem;
+    padding: 1.4rem;
+    border: 1px dashed var(--color-border, rgba(128, 128, 128, 0.35));
+    border-radius: 8px;
+    color: var(--color-text-muted, #9a9a9a);
+    text-align: center;
+}
+
+.job-actions-empty i { margin-bottom: 0.2rem; font-size: 1.2rem; }
+.job-actions-empty strong { color: var(--color-text, #e0e0e0); font-size: 0.86rem; }
+.job-actions-empty span { font-size: 0.76rem; }
+
+.job-action-card {
+    overflow: hidden;
+    border: 1px solid var(--color-border, rgba(128, 128, 128, 0.35));
+    border-radius: 9px;
+    background-color: var(--color-bg-surface, #1e1e1e);
+}
+
+.job-action-card > header {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.65rem 0.75rem;
+    border-bottom: 1px solid var(--color-border, rgba(128, 128, 128, 0.35));
+    background-color: var(--color-bg-elevated, #232323);
+}
+
+.job-action-card > header > div:nth-child(2) {
+    display: grid;
+    min-width: 0;
+    gap: 0.1rem;
+}
+
+.job-action-card > header strong {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--color-text, #e0e0e0);
+    font-size: 0.84rem;
+}
+
+.job-action-card > header small {
+    color: var(--color-text-muted, #9a9a9a);
+    font-size: 0.72rem;
+}
+
+.job-action-number {
+    display: inline-grid;
+    place-items: center;
+    flex: 0 0 auto;
+    width: 1.65rem;
+    height: 1.65rem;
+    border-radius: 50%;
+    background-color: color-mix(in srgb, var(--color-primary, #0d6efd) 18%, var(--color-bg-base, #121212));
+    color: var(--color-text, #e0e0e0);
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.job-action-order-controls {
+    display: flex;
+    gap: 0.3rem;
+}
+
+.job-action-order-controls .btn {
+    display: inline-grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+}
+
+.job-action-body {
+    display: grid;
+    gap: 0.55rem;
+    padding: 0.8rem;
+}
+
+.job-script-fields {
+    grid-template-columns: minmax(0, 1.6fr) minmax(150px, 0.65fr);
+    align-items: start;
+    gap: 0.8rem;
+}
+
+.job-script-fields > * { min-width: 0; }
+.job-script-path-field,
+.job-script-arguments { grid-column: 1 / -1; }
+
+.job-script-fields small {
+    display: block;
+    margin-top: 0.25rem;
+    color: var(--color-text-muted, #9a9a9a);
+    font-size: 0.72rem;
+}
+
+.job-script-arguments-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.job-script-arguments [data-script-arguments] {
+    display: grid;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+}
+
+.job-script-argument-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 42px;
+    gap: 0.4rem;
+}
+
+.job-script-no-arguments {
+    color: var(--color-text-muted, #9a9a9a);
+    font-size: 0.75rem;
+    font-style: italic;
 }
 
 .job-manual-note {
@@ -15671,6 +15847,107 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
 .job-run-detail-summary > div { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .job-run-detail-summary small { overflow-wrap: anywhere; color: var(--color-text-muted); font-family: var(--vb-font-mono, ui-monospace, monospace); }
 
+.job-run-actions-detail {
+    display: grid;
+    gap: 0.65rem;
+    max-height: min(62vh, 680px);
+    overflow: auto;
+}
+
+.job-card-workflow {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin: 0.45rem 0 0;
+    overflow: hidden;
+    color: var(--color-text-muted, #9a9a9a);
+    font-size: 0.76rem;
+}
+
+.job-card-workflow i { flex: 0 0 auto; }
+.job-card-workflow span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.job-run-action-detail {
+    display: grid;
+    gap: 0.6rem;
+    padding: 0.75rem;
+    border: 1px solid var(--color-border, rgba(128, 128, 128, 0.35));
+    border-left: 3px solid var(--color-text-muted, #9a9a9a);
+    border-radius: 8px;
+    background-color: var(--color-bg-base, #121212);
+}
+
+.job-run-action-detail[data-tone="success"] { border-left-color: var(--color-success, #198754); }
+.job-run-action-detail[data-tone="danger"] { border-left-color: var(--color-danger, #dc3545); }
+.job-run-action-detail[data-tone="warning"] { border-left-color: var(--color-warning, #ffc107); }
+.job-run-action-detail[data-tone="info"] { border-left-color: var(--color-primary, #0d6efd); }
+
+.job-run-action-detail > header {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.job-run-action-detail > header > div {
+    display: grid;
+    min-width: 0;
+    gap: 0.1rem;
+}
+
+.job-run-action-detail > header strong {
+    overflow-wrap: anywhere;
+    color: var(--color-text, #e0e0e0);
+    font-size: 0.82rem;
+}
+
+.job-run-action-detail > header small {
+    color: var(--color-text-muted, #9a9a9a);
+    font-size: 0.72rem;
+}
+
+.job-run-action-detail details {
+    min-width: 0;
+    color: var(--color-text-muted, #9a9a9a);
+    font-size: 0.75rem;
+}
+
+.job-run-action-detail pre {
+    max-height: 280px;
+    margin: 0.45rem 0 0;
+    padding: 0.65rem;
+    overflow: auto;
+    border-radius: 6px;
+    background-color: var(--color-bg-elevated, #232323);
+    color: var(--color-text, #e0e0e0);
+    font: 0.75rem/1.45 var(--vb-font-mono, ui-monospace, monospace);
+    white-space: pre-wrap;
+}
+
+.job-run-action-detail pre[data-tone="danger"] { color: var(--color-danger, #dc3545); }
+
+.job-run-action-arguments {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.job-run-action-arguments > span {
+    color: var(--color-text-muted, #9a9a9a);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+}
+
+.job-run-action-argv {
+    padding: 0.15rem 0.35rem;
+    border: 1px solid var(--color-border, rgba(128, 128, 128, 0.35));
+    border-radius: 4px;
+    background-color: var(--color-bg-elevated, #232323);
+    color: var(--color-text, #e0e0e0);
+    font-size: 0.72rem;
+}
+
 /* In-app confirm (utils.js confirmDialog): window.confirm is a silent no-op in the
    VS Code webview. Sits above Bootstrap modals (z-index 1055) so a confirm launched
    from inside one still lands on top. */
@@ -15750,6 +16027,16 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
     .job-environment-picker,
     .job-environment-picker-row .btn { width: 100%; }
     .job-environment-preview > div { align-items: flex-start; flex-direction: column; }
+    .job-actions-toolbar { align-items: stretch; flex-direction: column; }
+    .job-actions-toolbar > div { width: 100%; }
+    .job-actions-toolbar .btn { flex: 1 1 0; }
+    .job-action-card > header { grid-template-columns: auto minmax(0, 1fr); }
+    .job-action-order-controls { grid-column: 1 / -1; justify-content: flex-end; }
+    .job-script-fields { grid-template-columns: minmax(0, 1fr); }
+    .job-script-path-field,
+    .job-script-arguments { grid-column: auto; }
+    .job-run-action-detail > header { grid-template-columns: auto minmax(0, 1fr); }
+    .job-run-action-detail > header .job-run-status { grid-column: 2; justify-self: start; }
     .job-repository-context code { flex-basis: 100%; }
     .job-inline-form-actions .btn { flex: 1 1 0; }
     .job-card-topline { align-items: flex-start; }

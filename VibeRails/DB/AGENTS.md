@@ -693,9 +693,10 @@ the browser. Reset removes the cache document and makes supported custom Environ
 
 Created by `JobStore.cs` (`JobStore.SchemaSql`), **not** `SqlStrings` — but they live in the same
 `state.db` and are initialized on first use by `JobStore`. These power the Automated Jobs feature
-(scheduled/triggered CLI sessions).
+(scheduled/triggered ordered workflows).
 
-**Jobs** — a scheduled/triggered automation definition.
+**Jobs** — a scheduled/triggered automation definition. `EnvironmentId` remains a compatibility
+mirror of the workflow's optional Worker; `JobActions` is authoritative.
 
 ```sql
 CREATE TABLE IF NOT EXISTS Jobs (
@@ -714,6 +715,35 @@ CREATE TABLE IF NOT EXISTS Jobs (
 ```
 
 **Index:** `idx_jobs_project` on `(ProjectPath, Enabled, DeletedUTC)`
+
+**JobActions** — the editable ordered workflow. `Position` is zero-based and unique within the
+Automation. `Kind` is 0 Worker / 1 Script; there may be at most one Worker (enforced by
+`JobService`). Script paths and working directories are repository-relative portable paths,
+`ArgumentsJson` is an array of discrete argv values, and `ApprovedHash` is the SHA-256 of the
+reviewed script bytes. `TimeoutSeconds = 0` means no action-specific limit.
+
+```sql
+CREATE TABLE IF NOT EXISTS JobActions (
+    Id               TEXT    PRIMARY KEY,
+    JobId            INTEGER NOT NULL,
+    Position         INTEGER NOT NULL,
+    Kind             INTEGER NOT NULL,
+    EnvironmentId    INTEGER,
+    ScriptPath       TEXT,
+    ScriptRuntime    INTEGER,
+    ArgumentsJson    TEXT    NOT NULL DEFAULT '[]',
+    WorkingDirectory TEXT,
+    TimeoutSeconds   INTEGER NOT NULL DEFAULT 0,
+    ApprovedHash     TEXT,
+    CreatedUTC       TEXT    NOT NULL,
+    UpdatedUTC       TEXT    NOT NULL,
+    FOREIGN KEY (JobId) REFERENCES Jobs(Id) ON DELETE CASCADE,
+    FOREIGN KEY (EnvironmentId) REFERENCES Environments(Id) ON DELETE SET NULL,
+    UNIQUE(JobId, Position)
+);
+```
+
+**Index:** `idx_job_actions_job` on `(JobId, Position)`
 
 **JobTriggers** — one or more triggers per Job (interval/daily/weekly schedule, before commit,
 after commit). Before-commit and after-commit are mutually exclusive because the per-Job overlap
@@ -739,8 +769,10 @@ CREATE TABLE IF NOT EXISTS JobTriggers (
 
 **Index:** `idx_job_triggers_due` on `(Kind, NextRunUTC)`
 
-**JobRuns** — one row per executed job run. `SessionId` links back to `Sessions` (the
-`Sessions_LinkJobRunSession` trigger backlinks it atomically — see Sessions above).
+**JobRuns** — one row per executed workflow. The top-level LLM/Environment fields are a summary
+snapshot for legacy list clients and the Worker's session backlink. `SessionId` links back to
+`Sessions` (the `Sessions_LinkJobRunSession` trigger backlinks it atomically — see Sessions
+above); the authoritative action snapshot is in `JobRunActions`.
 
 ```sql
 CREATE TABLE IF NOT EXISTS JobRuns (
@@ -772,6 +804,48 @@ CREATE TABLE IF NOT EXISTS JobRuns (
 
 **Indexes:** `idx_job_runs_queue` on `(Status, QueuedUTC)`, `idx_job_runs_job` on `(JobId, QueuedUTC DESC)`
 
+**JobRunActions** — immutable action definitions copied transactionally when a run is queued, plus
+their mutable per-run status/output. A retry copies these rows from the source run instead of
+reading the currently edited `JobActions`. `SourceActionId` is informational rather than a foreign
+key so later edits/deletion cannot invalidate history. Worker `SessionId` opens the normal terminal
+replay; script stdout/stderr is captured here (bounded by `JobRunner`).
+
+```sql
+CREATE TABLE IF NOT EXISTS JobRunActions (
+    Id               TEXT    PRIMARY KEY,
+    RunId            TEXT    NOT NULL,
+    SourceActionId   TEXT,
+    Position         INTEGER NOT NULL,
+    Kind             INTEGER NOT NULL,
+    Status           INTEGER NOT NULL,
+    EnvironmentId    INTEGER,
+    EnvironmentName  TEXT,
+    Llm               INTEGER NOT NULL DEFAULT 0,
+    ScriptPath       TEXT,
+    ScriptRuntime    INTEGER,
+    ArgumentsJson    TEXT    NOT NULL DEFAULT '[]',
+    WorkingDirectory TEXT,
+    TimeoutSeconds   INTEGER NOT NULL DEFAULT 0,
+    ApprovedHash     TEXT,
+    SessionId        TEXT,
+    StartedUTC       TEXT,
+    EndedUTC         TEXT,
+    ExitCode         INTEGER,
+    ErrorMessage     TEXT,
+    StandardOutput   TEXT    NOT NULL DEFAULT '',
+    StandardError    TEXT    NOT NULL DEFAULT '',
+    FOREIGN KEY (RunId) REFERENCES JobRuns(Id) ON DELETE CASCADE,
+    UNIQUE(RunId, Position)
+);
+```
+
+**Index:** `idx_job_run_actions_run` on `(RunId, Position)`
+
+`JobStore` migrates an older Worker-only `Jobs.EnvironmentId` row to one Worker `JobActions` row,
+and similarly backfills historical `JobRuns` with one status-mapped `JobRunActions` row. Run/action
+terminal states are finalized together for cancellation, timeout, interrupted/reaped runs, stalled
+launches, disabling, and deletion so no pending action remains under a terminal run.
+
 **JobSchedulerLease** — single-writer lease so only one process runs the job scheduler at a time.
 
 ```sql
@@ -788,8 +862,9 @@ CREATE TABLE IF NOT EXISTS JobSchedulerLease (
 
 Sandboxes, AgentMetadata, TokenSavings, CompressionCaptures, CodeAnalyzerIgnores,
 ProjectCache, and GlobalCache have **no foreign key relationships** — they are fully independent
-tables. `Environments` is referenced by `Jobs.EnvironmentId` (`ON DELETE SET NULL` — see the
-Automated Jobs Tables above) and by `EnvironmentSteps.EnvironmentId` (`ON DELETE CASCADE` — a
+tables. `Environments` is referenced by the compatibility mirror `Jobs.EnvironmentId` and by
+`JobActions.EnvironmentId` (both `ON DELETE SET NULL` — see the Automated Jobs Tables above), and
+by `EnvironmentSteps.EnvironmentId` (`ON DELETE CASCADE` — a
 step is part of its environment and owns no filesystem resource). Sessions reference environments and working directories by string
 value only — no FK constraints. Sandboxes reference projects by `ProjectPath` string value — no
 FK to any project table.
@@ -798,9 +873,10 @@ The tables with actual FK constraints point at `Sessions.Id` (`SessionLogs`, `se
 with `ON DELETE CASCADE`, `TerminalSessionLogs`, `UserInputs`) and at `UserInputs.Id`
 (`InputFileChanges`, whose `PreviousInputId` is a second FK to `UserInputs.Id` — not
 self-referential). `EnvironmentSteps.EnvironmentId → Environments(Id)` is the one
-`ON DELETE CASCADE` pointing at Environments. The Automated Jobs tables add two more FK chains:
-`Jobs.EnvironmentId → Environments(Id)` (`ON DELETE SET NULL`) and `JobTriggers.JobId` /
-`JobRuns.JobId → Jobs(Id)`.
+`ON DELETE CASCADE` pointing at Environments. The Automated Jobs tables add these FK chains:
+`Jobs.EnvironmentId` / `JobActions.EnvironmentId → Environments(Id)` (`ON DELETE SET NULL`),
+`JobActions.JobId → Jobs(Id)` (`ON DELETE CASCADE`), `JobTriggers.JobId` / `JobRuns.JobId →
+Jobs(Id)`, and `JobRunActions.RunId → JobRuns(Id)` (`ON DELETE CASCADE`).
 
 ```
 Environments              AgentMetadata
@@ -893,4 +969,4 @@ ChatSummary               TokenSavings / CompressionCaptures
 
 ---
 
-*Last checked: 2026-08-11T00:00:00Z by claude (opus-5)*
+*Last checked: 2026-09-01T00:00:00Z by Codex*

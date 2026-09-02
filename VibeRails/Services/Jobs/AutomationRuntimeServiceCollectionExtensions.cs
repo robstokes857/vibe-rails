@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using VibeRails.DB;
 using VibeRails.Interfaces;
 using VibeRails.Services.BertBaseClasses;
+using VibeRails.Services.Cli;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.LlmClis.Launchers;
 using VibeRails.Services.Workspaces;
@@ -23,6 +24,11 @@ public static class AutomationRuntimeServiceCollectionExtensions
         services.TryAddSingleton<IJobStore>(_ => new JobStore(
             $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared"));
         services.TryAddSingleton<IJobExecutableResolver, JobExecutableResolver>();
+        services.TryAddSingleton<IAutomationScriptService, AutomationScriptService>();
+        services.TryAddSingleton<IJobProcessLauncher, JobProcessLauncher>();
+        // Shared process runner for repository-script actions and Environment Steps. It is
+        // stateless, so the dashboard and lean Demon host both use one singleton.
+        services.TryAddSingleton<ICliWrapper, CliWrapper>();
 
         services.TryAddScoped<IRepository>(serviceProvider =>
         {
