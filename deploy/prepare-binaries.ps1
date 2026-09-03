@@ -119,9 +119,11 @@ foreach ($platform in $platforms) {
     # CompileApi cctor under ORT >= 1.24.
     $sourceDir = Join-Path $ArtifactsDir $platform.SourceDir
     $skipNames = @($platform.Binary, 'appsettings.json')
-    # Excluded extensions: NativeAOT PDBs are 50+ MB each; xmldoc files are
-    # runtime-irrelevant. Keeps the VSIX lean.
-    $skipExtensions = @('.pdb', '.xml')
+    # Excluded extensions: NativeAOT debug symbols are 50-115 MB each (.pdb on
+    # Windows, .dbg on Linux, .dwarf on macOS); xmldoc files are runtime-irrelevant.
+    # Keeps the VSIX lean. Shipping .dbg also tripped vsce's secret scanner, which
+    # matched a github_pat_-shaped byte run inside the 114 MB linux symbol blob.
+    $skipExtensions = @('.pdb', '.xml', '.dbg', '.dwarf')
     $extraFiles = Get-ChildItem -Path $sourceDir -File | Where-Object {
         $skipNames -notcontains $_.Name -and $skipExtensions -notcontains $_.Extension
     }
