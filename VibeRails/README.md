@@ -267,7 +267,7 @@ dotnet publish -c Release -r win-x64
 dotnet publish -c Release -r linux-x64
 
 # macOS
-dotnet publish -c Release -r osx-x64
+dotnet publish -c Release -r osx-arm64
 ```
 
 ### Building VS Code Extension

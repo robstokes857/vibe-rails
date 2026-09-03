@@ -341,14 +341,18 @@ case "$OS_TYPE:$ARCH" in
         ASSET_NAME="vb-linux-x64.tar.gz"
         ;;
     macos:x86_64|macos:amd64)
-        ASSET_NAME="vb-osx-x64.tar.gz"
+        echo -e "${RED}Error: Intel Macs are no longer supported.${NC}"
+        echo -e "${YELLOW}VibeRails requires Apple Silicon on macOS. The upstream ONNX Runtime${NC}"
+        echo -e "${YELLOW}no longer ships a macOS x86_64 build, so semantic search cannot run.${NC}"
+        echo -e "${YELLOW}The last Intel Mac release is v1.10.0.${NC}"
+        exit 1
         ;;
     macos:arm64|macos:aarch64)
         ASSET_NAME="vb-osx-arm64.tar.gz"
         ;;
     *)
         echo -e "${RED}Error: Unsupported platform: $OS_TYPE/$ARCH${NC}"
-        echo -e "${YELLOW}Supported targets: linux-x64, osx-x64, osx-arm64${NC}"
+        echo -e "${YELLOW}Supported targets: linux-x64, osx-arm64${NC}"
         exit 1
         ;;
 esac

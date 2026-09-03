@@ -19,7 +19,7 @@ $ExtensionRoot = Join-Path $RepoRoot "vscode-viberails"
 $ArtifactsDir = if ($ArtifactsRoot) { $ArtifactsRoot } else { Join-Path $RepoRoot "Scripts" "artifacts" "aot" }
 $WwwrootSource = Join-Path $RepoRoot "VibeRails" "wwwroot"
 $BinDir = Join-Path $ExtensionRoot "bin"
-$supportedTargets = @("win32-x64", "linux-x64", "darwin-x64", "darwin-arm64")
+$supportedTargets = @("win32-x64", "linux-x64", "darwin-arm64")
 
 Write-Host "VibeRails Extension - Binary Preparation" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
@@ -29,7 +29,6 @@ Write-Host ""
 $targetConfigs = @{
     "win32-x64" = @{ SourceDir = "win-x64"; Binary = "vb.exe" }
     "linux-x64" = @{ SourceDir = "linux-x64"; Binary = "vb" }
-    "darwin-x64" = @{ SourceDir = "osx-x64"; Binary = "vb" }
     "darwin-arm64" = @{ SourceDir = "osx-arm64"; Binary = "vb" }
 }
 

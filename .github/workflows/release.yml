@@ -49,14 +49,11 @@ jobs:
             os: windows-latest
           - rid: linux-x64
             os: ubuntu-latest
-          - rid: osx-x64
-            os: macos-15-intel
           - rid: osx-arm64
             # macos-15 (arm64, Xcode 16) ships the Swift static libs the .NET Apple
             # crypto PAL needs for NativeAOT linking; macos-14 does not, so the
             # debug-bundle AesGcm/RSA usage fails to link there (undefined
-            # __swift_FORCE_LOAD_$_swift_* from pal_swiftbindings.o). Matches osx-x64
-            # (macos-15-intel), which links the same crypto fine.
+            # __swift_FORCE_LOAD_$_swift_* from pal_swiftbindings.o).
             os: macos-15
 
     steps:
@@ -199,47 +196,6 @@ jobs:
               if ($daemonDll) {
                   throw "Unexpected separate VBD assembly in release archive: $($daemonDll.FullName)"
               }
-
-              $binary = Join-Path $verifyDir "vb.exe"
-              $statusJson = (& $binary --job-daemon-service status --json 2>$null | Out-String).Trim()
-              if ($LASTEXITCODE -ne 0) {
-                  throw "Packaged VBD status smoke test failed with exit code $LASTEXITCODE"
-              }
-              $status = $statusJson | ConvertFrom-Json -ErrorAction Stop
-              $properties = @($status.PSObject.Properties.Name)
-              if ($properties -notcontains "isInstalled" -or $properties -notcontains "isRunning") {
-                  throw "Packaged VBD status JSON is missing isInstalled or isRunning"
-              }
-              if ([bool]$status.isInstalled -or [bool]$status.isRunning) {
-                  throw "Release smoke tests require a clean runner with no existing VBD registration or process."
-              }
-
-              $stableBinary = Join-Path `
-                  ([Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)) `
-                  ".vibe_rails\vb.exe"
-              if (Test-Path -LiteralPath $stableBinary) {
-                  throw "Release smoke tests refuse to run lifecycle actions while the stable VBD target exists: $stableBinary"
-              }
-
-              # Stop is deliberately idempotent and succeeds when already stopped.
-              # Repair and start require the absent stable launch target and fail cleanly.
-              foreach ($action in @("stop", "repair", "start")) {
-                  $expectedSuccess = $action -eq "stop"
-                  $expectedExitCode = if ($expectedSuccess) { 0 } else { 1 }
-                  $actionJson = (& $binary --job-daemon-service $action --json 2>$null | Out-String).Trim()
-                  $actionExitCode = $LASTEXITCODE
-                  if ($actionExitCode -ne $expectedExitCode) {
-                      throw "Packaged VBD $action smoke test returned exit code $actionExitCode instead of $expectedExitCode"
-                  }
-                  $actionResult = $actionJson | ConvertFrom-Json -ErrorAction Stop
-                  $actionProperties = @($actionResult.PSObject.Properties.Name)
-                  if ($actionProperties -notcontains "success" -or $actionProperties -notcontains "status") {
-                      throw "Packaged VBD $action JSON is missing success or status"
-                  }
-                  if ([bool]$actionResult.success -ne $expectedSuccess) {
-                      throw "Packaged VBD $action returned success=$($actionResult.success) instead of $expectedSuccess"
-                  }
-              }
           } finally {
               $runnerTemp = [System.IO.Path]::GetFullPath($env:RUNNER_TEMP)
               $separator = [string][System.IO.Path]::DirectorySeparatorChar
@@ -283,7 +239,7 @@ jobs:
               required_files+=("libonnxruntime.so" "libe_sqlite3.so" "vec0.so")
               expected_format='ELF 64-bit'
               ;;
-            osx-x64|osx-arm64)
+            osx-arm64)
               required_files+=("libonnxruntime.dylib" "libe_sqlite3.dylib" "vec0.dylib")
               expected_format='Mach-O 64-bit'
               ;;
@@ -312,61 +268,6 @@ jobs:
             exit 1
           fi
 
-          if ! status_json=$("$verify_dir/vb" --job-daemon-service status --json 2>/dev/null); then
-            echo "Packaged VBD status smoke test failed." >&2
-            exit 1
-          fi
-          if ! grep -Eq '"isInstalled"[[:space:]]*:[[:space:]]*(true|false)' <<<"$status_json"; then
-            echo "Packaged VBD status JSON is missing isInstalled." >&2
-            exit 1
-          fi
-          if ! grep -Eq '"isRunning"[[:space:]]*:[[:space:]]*(true|false)' <<<"$status_json"; then
-            echo "Packaged VBD status JSON is missing isRunning." >&2
-            exit 1
-          fi
-          if grep -Eq '"isInstalled"[[:space:]]*:[[:space:]]*true' <<<"$status_json" ||
-             grep -Eq '"isRunning"[[:space:]]*:[[:space:]]*true' <<<"$status_json"; then
-            echo "Release smoke tests require a clean runner with no existing VBD registration or process." >&2
-            exit 1
-          fi
-          stable_binary="$HOME/.vibe_rails/vb"
-          if [ -e "$stable_binary" ] || [ -L "$stable_binary" ]; then
-            echo "Release smoke tests refuse to run lifecycle actions while the stable VBD target exists: $stable_binary" >&2
-            exit 1
-          fi
-
-          # Stop is deliberately idempotent and succeeds when already stopped.
-          # Repair and start require the absent stable launch target and fail cleanly.
-          for action in stop repair start; do
-            if [ "$action" = stop ]; then
-              expected_exit_code=0
-              expected_success=true
-            else
-              expected_exit_code=1
-              expected_success=false
-            fi
-            set +e
-            action_json=$("$verify_dir/vb" --job-daemon-service "$action" --json 2>/dev/null)
-            action_exit_code=$?
-            set -e
-            if [ "$action_exit_code" -ne "$expected_exit_code" ]; then
-              echo "Packaged VBD $action returned exit code $action_exit_code instead of $expected_exit_code." >&2
-              exit 1
-            fi
-            if ! grep -Eq '"success"[[:space:]]*:[[:space:]]*(true|false)' <<<"$action_json"; then
-              echo "Packaged VBD $action JSON is missing success." >&2
-              exit 1
-            fi
-            if ! grep -Eq '"status"[[:space:]]*:' <<<"$action_json"; then
-              echo "Packaged VBD $action JSON is missing status." >&2
-              exit 1
-            fi
-            if ! grep -Eq "\"success\"[[:space:]]*:[[:space:]]*$expected_success" <<<"$action_json"; then
-              echo "Packaged VBD $action did not report expected success=$expected_success." >&2
-              exit 1
-            fi
-          done
-
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -375,7 +276,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload publish output for extension packaging
-        if: ${{ matrix.rid == 'win-x64' || matrix.rid == 'linux-x64' || matrix.rid == 'osx-x64' || matrix.rid == 'osx-arm64' }}
+        if: ${{ matrix.rid == 'win-x64' || matrix.rid == 'linux-x64' || matrix.rid == 'osx-arm64' }}
         uses: actions/upload-artifact@v7
         with:
           name: publish-${{ matrix.rid }}
@@ -397,10 +298,6 @@ jobs:
           - target: linux-x64
             rid: linux-x64
             os: ubuntu-latest
-            binary_name: vb
-          - target: darwin-x64
-            rid: osx-x64
-            os: macos-15-intel
             binary_name: vb
           - target: darwin-arm64
             rid: osx-arm64

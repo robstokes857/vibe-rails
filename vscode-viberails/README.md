@@ -69,7 +69,7 @@ Install options for Windows, Linux, and Mac are available at https://viberails.a
 
 The extension ships the whole VibeRails backend inside the VSIX — there is **no separate `vb` install and no runtime download**.
 
-- A platform-specific native binary plus the dashboard assets, published per target: `win32-x64`, `linux-x64`, `darwin-x64`, `darwin-arm64`.
+- A platform-specific native binary plus the dashboard assets, published per target: `win32-x64`, `linux-x64`, `darwin-arm64`.
 - Roughly 50–100 MB installed, depending on platform. You only ever download the build for your own platform.
 - The backend binds a **dynamic port on the loopback interface only**. Nothing listens on an external address, and the dashboard talks to it over `localhost`.
 - Every request is authenticated with a session and tab token minted at startup; the dashboard runs in a VS Code webview under a strict Content Security Policy.

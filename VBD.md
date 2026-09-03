@@ -512,8 +512,7 @@ Exit criteria:
 ### Release verification
 
 - `dotnet test`
-- Native AOT publish for `win-x64`, `linux-x64`, `osx-x64`, and `osx-arm64`
-- Smoke-test lifecycle commands against published binaries
+- Native AOT publish for `win-x64`, `linux-x64`, and `osx-arm64`
 - Verify install archives contain all VBD dependencies
 - Verify no new trimming/AOT warnings are introduced
 

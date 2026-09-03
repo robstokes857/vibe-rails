@@ -303,11 +303,9 @@ function Wait-ForReleaseWorkflow {
     $requiredJobs = @(
         "Build win-x64",
         "Build linux-x64",
-        "Build osx-x64",
         "Build osx-arm64",
         "Package VSIX win32-x64",
         "Package VSIX linux-x64",
-        "Package VSIX darwin-x64",
         "Package VSIX darwin-arm64",
         "Publish VS Code Extension",
         "Upload Assets To GitHub Release"
@@ -346,13 +344,10 @@ function Assert-ReleaseAssetsPresent {
         "vb-win-x64.zip.sha256",
         "vb-linux-x64.tar.gz",
         "vb-linux-x64.tar.gz.sha256",
-        "vb-osx-x64.tar.gz",
-        "vb-osx-x64.tar.gz.sha256",
         "vb-osx-arm64.tar.gz",
         "vb-osx-arm64.tar.gz.sha256",
         "vscode-viberails-win32-x64-$version.vsix",
         "vscode-viberails-linux-x64-$version.vsix",
-        "vscode-viberails-darwin-x64-$version.vsix",
         "vscode-viberails-darwin-arm64-$version.vsix"
     )
 

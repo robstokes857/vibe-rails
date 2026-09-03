@@ -36,7 +36,7 @@ Then open `vscode-viberails/` in VS Code and press **F5** to launch an Extension
 The extension needs a staged backend at least once, or it throws "Bundled VibeRails backend is missing". `npm run prepare-binaries` only *copies* a published backend into `bin/<target>/` — publish it first:
 
 ```powershell
-# from the repository root; -r matches your platform (win-x64 / linux-x64 / osx-x64 / osx-arm64)
+# from the repository root; -r matches your platform (win-x64 / linux-x64 / osx-arm64)
 dotnet publish VibeRails/VibeRails.csproj -c Debug -r win-x64 --self-contained false -o Scripts/artifacts/aot/win-x64
 cd vscode-viberails && npm run prepare-binaries
 ```
@@ -62,7 +62,7 @@ The smoke test downloads a VS Code build, launches it **with no workspace folder
 ## Packaging
 
 ```bash
-npm run package:win32-x64     # or linux-x64 / darwin-x64 / darwin-arm64
+npm run package:win32-x64     # or linux-x64 / darwin-arm64
 npm run package               # all four
 ```
 

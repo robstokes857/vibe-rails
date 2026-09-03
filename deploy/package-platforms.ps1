@@ -4,7 +4,7 @@
 #   npm run package:all
 #   npm run package:win32-x64
 #   npm run package:linux-x64
-#   npm run package:darwin-x64
+#   npm run package:darwin-arm64
 #   npm run package:darwin-arm64
 
 param(
@@ -36,11 +36,10 @@ if (-not $vsceIsGlobal -and -not (Get-Command npx -ErrorAction SilentlyContinue)
 }
 
 # Validate input
-$supportedTargets = @("win32-x64", "linux-x64", "darwin-x64", "darwin-arm64")
+$supportedTargets = @("win32-x64", "linux-x64", "darwin-arm64")
 $targetConfigs = @{
     "win32-x64" = @{ SourceDir = "win-x64"; Binary = "vb.exe" }
     "linux-x64" = @{ SourceDir = "linux-x64"; Binary = "vb" }
-    "darwin-x64" = @{ SourceDir = "osx-x64"; Binary = "vb" }
     "darwin-arm64" = @{ SourceDir = "osx-arm64"; Binary = "vb" }
 }
 

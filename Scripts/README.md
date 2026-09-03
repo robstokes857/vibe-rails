@@ -32,7 +32,6 @@ curl -fsSL https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Script
 This will:
 - Detect your platform/architecture and download the correct release asset:
   - `vb-linux-x64.tar.gz`
-  - `vb-osx-x64.tar.gz`
   - `vb-osx-arm64.tar.gz`
 - Verify SHA256 checksum
 - Extract to `~/.vibe_rails`
