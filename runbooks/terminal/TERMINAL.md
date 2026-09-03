@@ -1,5 +1,20 @@
 # TERMINAL.md
 
+> ## 🟡 Fixed, awaiting Rob's test — Codex CRLF paste becomes multiple turns and makes ESC look dead (2026-09-03)
+>
+> Session `3d1793ce-6906-4640-bc74-af9be43843fa` was replayed byte-for-byte
+> through `TerminalEmulator`, then its exact bracketed-paste + ESC input shape
+> was sent through a real Windows ConPTY key probe. ConPTY delivered CR as
+> plain Enter, LF as Ctrl+Enter, and the later ESC as an ordinary Escape key.
+> The CRs split the pasted prompt into queued turns/approval menus; ESC was not
+> swallowed anywhere in xterm.js, VibeRails, the input rewriter, or ConPTY.
+>
+> Fix: the Codex clipboard/editor paste path now folds CRLF and bare CR to LF
+> before bracketed-paste wrapping. Other CLIs keep their established bytes.
+> This intentionally differs from xterm's CR-oriented paste normalization on
+> Windows because Codex reads ConPTY-translated key records. Full entry:
+> **"## 2026-09-03 Codex CRLF paste…"** below.
+
 > ## 🟡 Fixed, awaiting Rob's test — Codex waiting status fires while still Working (2026-08-26)
 >
 > Current Codex fragments its animated `Working (... esc to interrupt)` row
@@ -254,6 +269,112 @@
 > wrapping is fixed upstream), but it's belt-only — not the
 > suspenders. Full triage below.
 
+## 2026-09-03 Codex CRLF paste becomes multiple turns and makes ESC look dead
+
+**Status:** 🟡 **FIXED IN THE CODEX WEB PASTE PATH — AWAITING ROB'S TEST.**
+Frontend-only (`terminal-tab.js`), so a browser/webview reload is enough when
+`vb` serves this tree; a packaged VSIX needs its usual rebuild. Session
+`3d1793ce-6906-4640-bc74-af9be43843fa` is the evidence.
+
+### Symptom
+
+Pasting a Windows multi-line string into Codex submitted its lines as multiple
+inputs instead of leaving one multi-line draft. After that split, repeated ESC
+presses appeared to do nothing while Codex moved through work and approval
+screens created by those unintended turns. The failure was intermittent because
+it required a paste containing CRLF (or bare CR), not ordinary typing or every
+clipboard source.
+
+### Byte replay and ConPTY probe
+
+The private session was replayed in `SessionLogs.Id` order through the real
+`TerminalEmulator`, with timestamp-bounded screens around the paste and later
+approval menus. That replay reproduced the sequence of paste-induced
+transitions; it did not show an xterm rendering or output-parser failure.
+
+The decisive input test sent the same shape through a real Windows ConPTY:
+
+```
+ESC [ 200 ~ first line CR LF second line CR LF third line ESC [ 201 ~
+ESC
+```
+
+`Console.ReadKey` on the ConPTY child observed:
+
+| Input byte | Child key event |
+|---|---|
+| CR (`0x0D`) | Enter, character 13, no modifier |
+| LF (`0x0A`) | Enter, character 10, Control modifier |
+| ESC (`0x1B`) after the paste | Escape, character 27, no modifier |
+
+Codex 0.152.1 on Windows reads the legacy key records produced by ConPTY and
+reconstructs bracketed paste from the burst. A CR is therefore submit-capable
+plain Enter before that reconstruction can preserve it as pasted content. LF is
+the non-submitting Ctrl+Enter event and remains usable as an embedded paste line
+break. This is the same ConPTY mapping documented by the 2026-08-22
+Shift+Enter investigation, but here it occurs *inside* bracketed paste.
+
+The ESC finding is equally important: xterm.js emitted `0x1B`, the WebSocket
+kept it as its own payload, VibeRails forwarded it byte-for-byte, and ConPTY
+reported Escape. What looked like a new ESC regression was downstream state
+caused by the CR-split paste—queued turns and approval prompts—not a lost or
+rewritten Escape key.
+
+### Why xterm-style CR normalization is wrong here
+
+Terminal paste implementations commonly normalize line breaks to CR because a
+line discipline or application paste event consumes the finished blob. That is
+not the effective boundary in this Windows path: host bytes first become
+ConPTY `KEY_EVENT` records, and Codex reads those records. Normalizing to CR
+would deliberately manufacture one plain Enter per pasted line and reproduce
+the bug.
+
+The safe Codex byte shape is LF-only content between `CSI 200~` and `CSI 201~`.
+The existing Windows `CodexWindowsInputRewriter` already leaves LF untouched
+while its bracketed-paste state is active, so those bytes reach ConPTY exactly
+as sent. Outside paste, its existing bare-LF → Win32 Shift+Enter behavior is
+unchanged.
+
+### Fix
+
+`TerminalTab._createPastePayload` now applies Codex-only newline normalization
+before asking xterm to create the bracketed-paste payload:
+
+- CRLF → LF
+- bare CR → LF
+- existing LF → LF
+
+Both clipboard paste and **Open in text editor** use this method. Claude,
+OpenCode, Copilot, Antigravity, Shell, and the existing Grok-specialized path
+retain their prior byte shape.
+
+### Regression coverage
+
+- `terminal-codex-paste.test.mjs` pins CRLF/bare-CR folding, leading newlines,
+  and byte-identical non-Codex behavior.
+- `CodexWindowsInputRewriterTests` pins an LF-only bracketed paste followed by a
+  separate ESC as byte-exact through the Windows rewrite layer.
+- `terminal-multitab.spec.js` captures the actual WebSocket sends from Chromium:
+  one LF-only bracketed-paste payload followed by standalone `0x1B`.
+
+The Chromium test was confirmed red before the normalization change: its paste
+payload still contained CR bytes while the following ESC was already correct.
+
+Validation on 2026-09-03:
+
+- `npm run test:node`: 417 passed, 2 pre-existing missing-fixture skips.
+- terminal-focused `Tests.csproj`: 213/213 passed.
+- complete Chromium `terminal-multitab.spec.js`: 9/9 passed.
+
+### Rob's check
+
+1. Reload the Codex Web UI tab.
+2. Paste three or more lines copied from a Windows CRLF source. Pass = one
+   multi-line draft and no turn starts until plain Enter is pressed.
+3. While Codex is working, press ESC. Pass = the current operation interrupts;
+   no paste-created turns or approval menus continue afterward.
+4. Repeat via **Open in text editor** → Send and spot-check another CLI's paste.
+
 ## 2026-08-26 Grok multi-line paste submits each line in xterm.js
 
 **Status:** 🟡 **FIXED IN THE GROK PASTE PATH — AWAITING ROB'S TEST.**
@@ -449,7 +570,7 @@ on Windows at `TerminalRunner.CreateSessionAsync`.
 `CodexWindowsInputRewriterTests` pin the exact Win32-input bytes and exercise
 CRLF split across calls, paste markers split at every byte boundary, invalid and
 split UTF-8, multiple independent terminal instances, raw-write state breaks,
-the byte-identical non-Codex path, and concurrent rewrite/write ordering (18/18).
+the byte-identical non-Codex path, and concurrent rewrite/write ordering (19/19).
 Codex history/status coverage proves bare LF remains composing content while CR
 and CRLF submit, including split CRLF and `InputAccumulator.Clear()` (22/22
 focused .NET tests; 45/45 tab-status Node tests).
