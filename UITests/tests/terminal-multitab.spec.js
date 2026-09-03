@@ -124,7 +124,7 @@ test.describe('terminal-multitab', () => {
         await waitForFakeCliReady(page, /** @type {string} */(tabId));
     });
 
-    test('Codex Shift+Enter emits raw LF through xterm regardless of bracketed-paste state', async ({ page }) => {
+    test('Codex Shift+Enter and paste preserve their distinct newline and Escape byte contracts', async ({ page }) => {
         await navigateToRules(page);
         await launchWebTerminal(page, 'codex');
 
@@ -146,6 +146,40 @@ test.describe('terminal-multitab', () => {
             { data: '\n', wasUserInput: true },
         ]);
         expect(withBracketedPaste.payloads).toEqual(['\n']);
+
+        const captured = await page.evaluate(async (id) => {
+            const tab = window.app?.terminalController?.manager?.tabs?.get(id);
+            const instance = tab?.instance;
+            const terminal = instance?.vibeTerminal;
+            const socket = instance?.socket;
+            if (!instance || !terminal || !socket) {
+                throw new Error('Active terminal session was not available.');
+            }
+
+            await terminal.writeAsync('\x1b[?2004h');
+            const payloads = [];
+            const originalSend = socket.send;
+            socket.send = (data) => payloads.push(data);
+            try {
+                instance.injectText('first line\r\nsecond line\rthird line\nfourth line');
+                terminal.textarea.dispatchEvent(new KeyboardEvent('keydown', {
+                    key: 'Escape',
+                    code: 'Escape',
+                    keyCode: 27,
+                    bubbles: true,
+                    cancelable: true,
+                }));
+            } finally {
+                socket.send = originalSend;
+            }
+
+            return payloads;
+        }, tabId);
+
+        expect(captured).toEqual([
+            '\x1b[200~first line\nsecond line\nthird line\nfourth line\x1b[201~',
+            '\x1b',
+        ]);
     });
 
     test('OpenCode-backed Shift+Enter keeps its bracketed-paste newline path', async ({ page }) => {

@@ -37,6 +37,20 @@ function resolveResizeDebounceMs() {
 const OUTPUT_CURSOR_IDLE_MS = 90;
 const CONNECT_FOCUS_RETRY_MS = 180;
 
+export function normalizeCodexPasteNewlines(text) {
+    if (typeof text !== 'string' || text.length === 0) {
+        return text;
+    }
+
+    // Codex reads legacy KEY_EVENT records inside ConPTY on Windows. A clipboard
+    // CRLF therefore becomes a plain Enter (CR, which submits) followed by a
+    // Ctrl+Enter (LF). Keep paste line breaks LF-only so no submit-capable CR can
+    // escape into Codex's paste-burst reconstruction. This deliberately differs
+    // from xterm's native CR normalization, which assumes the child receives a
+    // bracketed-paste event rather than ConPTY-translated key records.
+    return text.replace(/\r\n?/g, '\n');
+}
+
 // Once the user has typed this many plain characters on a single input line
 // (no Enter yet), nudge them toward the "Open in text editor" button — long
 // prompts are far nicer to compose in the editor than in a raw TUI line.
@@ -111,7 +125,10 @@ export class TerminalTab {
         if (isNativeGrokCli(this.state.cli)) {
             return createGrokPastePayload(text);
         }
-        return this.vibeTerminal?.createBracketedPastePayload(text) ?? text;
+
+        const isCodex = (this.state.cli || '').toLowerCase() === 'codex';
+        const pasteText = isCodex ? normalizeCodexPasteNewlines(text) : text;
+        return this.vibeTerminal?.createBracketedPastePayload(pasteText) ?? pasteText;
     }
 
     // Passive keystroke counter behind the "Open in text editor" discovery nudge.

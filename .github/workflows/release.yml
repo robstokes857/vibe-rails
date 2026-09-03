@@ -221,22 +221,23 @@ jobs:
                   throw "Release smoke tests refuse to run lifecycle actions while the stable VBD target exists: $stableBinary"
               }
 
-              # A clean runner has no stable ~/.vibe_rails/vb.exe launch target,
-              # so these commands are non-mutating and should return a structured
-              # action failure (exit 1), not the unknown-command exit code (2).
+              # Stop is deliberately idempotent and succeeds when already stopped.
+              # Repair and start require the absent stable launch target and fail cleanly.
               foreach ($action in @("stop", "repair", "start")) {
+                  $expectedSuccess = $action -eq "stop"
+                  $expectedExitCode = if ($expectedSuccess) { 0 } else { 1 }
                   $actionJson = (& $binary --job-daemon-service $action --json 2>$null | Out-String).Trim()
                   $actionExitCode = $LASTEXITCODE
-                  if ($actionExitCode -ne 1) {
-                      throw "Packaged VBD $action smoke test unexpectedly returned exit code $actionExitCode instead of 1"
+                  if ($actionExitCode -ne $expectedExitCode) {
+                      throw "Packaged VBD $action smoke test returned exit code $actionExitCode instead of $expectedExitCode"
                   }
                   $actionResult = $actionJson | ConvertFrom-Json -ErrorAction Stop
                   $actionProperties = @($actionResult.PSObject.Properties.Name)
                   if ($actionProperties -notcontains "success" -or $actionProperties -notcontains "status") {
                       throw "Packaged VBD $action JSON is missing success or status"
                   }
-                  if ([bool]$actionResult.success) {
-                      throw "Packaged VBD $action unexpectedly succeeded on a clean runner"
+                  if ([bool]$actionResult.success -ne $expectedSuccess) {
+                      throw "Packaged VBD $action returned success=$($actionResult.success) instead of $expectedSuccess"
                   }
               }
           } finally {
@@ -334,15 +335,22 @@ jobs:
             exit 1
           fi
 
-          # With no stable ~/.vibe_rails/vb launch target on a clean runner,
-          # lifecycle verbs are non-mutating and return structured failure JSON.
+          # Stop is deliberately idempotent and succeeds when already stopped.
+          # Repair and start require the absent stable launch target and fail cleanly.
           for action in stop repair start; do
+            if [ "$action" = stop ]; then
+              expected_exit_code=0
+              expected_success=true
+            else
+              expected_exit_code=1
+              expected_success=false
+            fi
             set +e
             action_json=$("$verify_dir/vb" --job-daemon-service "$action" --json 2>/dev/null)
             action_exit_code=$?
             set -e
-            if [ "$action_exit_code" -ne 1 ]; then
-              echo "Packaged VBD $action unexpectedly returned exit code $action_exit_code instead of 1." >&2
+            if [ "$action_exit_code" -ne "$expected_exit_code" ]; then
+              echo "Packaged VBD $action returned exit code $action_exit_code instead of $expected_exit_code." >&2
               exit 1
             fi
             if ! grep -Eq '"success"[[:space:]]*:[[:space:]]*(true|false)' <<<"$action_json"; then
@@ -353,8 +361,8 @@ jobs:
               echo "Packaged VBD $action JSON is missing status." >&2
               exit 1
             fi
-            if grep -Eq '"success"[[:space:]]*:[[:space:]]*true' <<<"$action_json"; then
-              echo "Packaged VBD $action unexpectedly succeeded on a clean runner." >&2
+            if ! grep -Eq "\"success\"[[:space:]]*:[[:space:]]*$expected_success" <<<"$action_json"; then
+              echo "Packaged VBD $action did not report expected success=$expected_success." >&2
               exit 1
             fi
           done

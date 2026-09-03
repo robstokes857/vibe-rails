@@ -117,6 +117,20 @@ public sealed class CodexWindowsInputRewriterTests
     }
 
     [Fact]
+    public void Rewrite_LfOnlyPasteFollowedByEscape_PreservesEveryByte()
+    {
+        var paste = Encoding.ASCII.GetBytes(
+            $"{Esc}[200~first line\nsecond line\nthird line{Esc}[201~");
+        var escape = new byte[] { 0x1B };
+        var rewriter = new CodexWindowsInputRewriter();
+
+        var output = RewriteChunks(rewriter, paste, escape);
+
+        Assert.Equal(Concat(paste, escape), output);
+        Assert.DoesNotContain((byte)'\r', output);
+    }
+
+    [Fact]
     public void Rewrite_LfBeforeInsideAndAfterPaste_RewritesOnlyOutsideLf()
     {
         var rewriter = new CodexWindowsInputRewriter();
