@@ -5,6 +5,13 @@ namespace Tests.Services.VCA
 {
     public class PathNormalizerTests
     {
+        // GetScopedFiles runs the rule-file and root paths through Path.GetFullPath, so the
+        // fake repo has to be an absolute path native to the OS running the tests. A hardcoded
+        // "c:\repo" is relative on Linux (backslash is an ordinary filename character there),
+        // which made these three tests return zero files on the Linux CI runner.
+        private static readonly string RepoRoot = Path.GetFullPath(
+            Path.Combine(Path.GetTempPath(), "viberails-path-normalizer-tests", "repo"));
+
         private readonly PathNormalizer _normalizer;
 
         public PathNormalizerTests()
@@ -33,8 +40,8 @@ namespace Tests.Services.VCA
         {
             // Arrange
             var files = new List<string> { "src/file1.cs", "lib/file2.cs", "file3.cs" };
-            var sourceFile = "c:\\repo\\vc.rules.md";
-            var rootPath = "c:\\repo";
+            var sourceFile = Path.Combine(RepoRoot, "vc.rules.md");
+            var rootPath = RepoRoot;
 
             // Act
             var result = _normalizer.GetScopedFiles(files, sourceFile, rootPath);
@@ -51,8 +58,8 @@ namespace Tests.Services.VCA
         {
             // Arrange
             var files = new List<string> { "src/file1.cs", "lib/file2.cs", "src/sub/file3.cs" };
-            var sourceFile = "c:\\repo\\src\\vc.rules.md";
-            var rootPath = "c:\\repo";
+            var sourceFile = Path.Combine(RepoRoot, "src", "vc.rules.md");
+            var rootPath = RepoRoot;
 
             // Act
             var result = _normalizer.GetScopedFiles(files, sourceFile, rootPath);
@@ -69,8 +76,8 @@ namespace Tests.Services.VCA
         {
             // Arrange
             var files = new List<string> { "Src/File1.cs", "SRC/file2.cs" };
-            var sourceFile = "c:\\repo\\src\\vc.rules.md";
-            var rootPath = "c:\\repo";
+            var sourceFile = Path.Combine(RepoRoot, "src", "vc.rules.md");
+            var rootPath = RepoRoot;
 
             // Act
             var result = _normalizer.GetScopedFiles(files, sourceFile, rootPath);

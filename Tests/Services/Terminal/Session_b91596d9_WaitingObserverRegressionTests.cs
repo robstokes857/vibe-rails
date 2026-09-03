@@ -13,6 +13,9 @@ namespace Tests.Services.Terminal;
 /// Current Codex builds fragment that row into hundreds of tiny synchronized-
 /// output patches; four incidental repeated large chunks satisfied the older
 /// chunk-repetition heuristic even though the agent was still active.
+///
+/// Fixture is gitignored (real session bytes); the test Skip()s when absent
+/// so CI and contributors without the fixture pass cleanly.
 /// </summary>
 public sealed class Session_b91596d9_WaitingObserverRegressionTests
 {
@@ -28,6 +31,9 @@ public sealed class Session_b91596d9_WaitingObserverRegressionTests
     [Fact]
     public async Task WorkingScreen_DoesNotPublishWaitingEvent()
     {
+        if (!File.Exists(FixturePath))
+            Assert.Skip($"Fixture not present: {FixturePath}. Run python-scripts/export_chunks_fixture.py against the session locally to regenerate.");
+
         var chunks = TerminalTestFixtures.LoadFixture(FixturePath);
         Assert.NotEmpty(chunks);
 

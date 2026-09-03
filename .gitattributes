@@ -14,6 +14,13 @@ session_*.bin binary
 session_*.fixture.bin binary
 **/Fixtures/session_* binary
 
+# Parser golden-test captures are raw terminal byte streams whose CR/LF pairs are
+# semantically meaningful (carriage returns move the cursor). They were first
+# committed under text=auto, which stripped every CR from the blob; Windows
+# checkouts with core.autocrlf=true happened to restore them, Linux CI did not,
+# so SessionParseV4FixtureTests failed only on Linux. Keep them byte-exact.
+Tests/ParserTests/*.bin binary
+
 # Token-saver minifier fixtures are byte-exact: inputs carry deliberate CRLF /
 # bare-CR terminal output and expected files pin the minifier's exact bytes.
 # text=auto corrupted both (CRLF stripped at commit, re-added at checkout),
