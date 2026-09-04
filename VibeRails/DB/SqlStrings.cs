@@ -1,9 +1,14 @@
-namespace VibeRails.DB
+﻿namespace VibeRails.DB
 {
     public static class SqlStrings
     {
         // Pragmas
         public const string PragmaWal = "PRAGMA journal_mode=WAL;";
+        public const string PragmaBusyTimeout = "PRAGMA busy_timeout = 5000;";
+        // Without a limit the WAL only grows to its high-water mark and is never truncated back
+        // after a checkpoint, so the largest export window sets state.db-wal's size for the life
+        // of the process. 64 MiB leaves ample room for normal terminal write bursts.
+        public const string PragmaJournalSizeLimit = "PRAGMA journal_size_limit = 67108864;";
         public const string PragmaForeignKeys = "PRAGMA foreign_keys=ON;";
 
         // Environments Table (global, not project-scoped)
@@ -146,7 +151,10 @@ namespace VibeRails.DB
                 SessionDisplayName TEXT DEFAULT '',
                 OwnerPid INTEGER,
                 OwnershipTracked INTEGER NOT NULL DEFAULT 1,
-                JobRunId TEXT
+                JobRunId TEXT,
+                ExportedUTC TEXT,
+                ExportAttempts INTEGER NOT NULL DEFAULT 0,
+                ExportNextAttemptUTC TEXT
             )
             """;
         public const string CreateSessionsIndex = "CREATE INDEX IF NOT EXISTS idx_sessions_started ON Sessions(StartedUTC DESC)";
@@ -177,6 +185,16 @@ namespace VibeRails.DB
         // AggregateEmbeddedUTC column added by ALTER TABLE.
         public const string MigrateSessionsAddAggregateEmbeddedUTC = "ALTER TABLE Sessions ADD COLUMN AggregateEmbeddedUTC TEXT";
         public const string CreateSessionsUnaggregatedIndex = "CREATE INDEX IF NOT EXISTS idx_sessions_unaggregated ON Sessions(EndedUTC) WHERE AggregateEmbeddedUTC IS NULL AND EndedUTC IS NOT NULL";
+        // Independent data-export acknowledgement. Processed belongs to transcript generation and
+        // must never be reused as an upload cursor.
+        public const string MigrateSessionsAddExportedUTC = "ALTER TABLE Sessions ADD COLUMN ExportedUTC TEXT";
+        // Export retry pacing. Deliberately a *deferral* rather than a failure cap: this job's
+        // dominant failure is a transient network condition, and every one of them surfaces as the
+        // same UploadFailed, so a cap would turn a recoverable outage into permanent data loss.
+        // A deferred session keeps its turn in line and is retried once the backoff expires.
+        public const string MigrateSessionsAddExportAttempts = "ALTER TABLE Sessions ADD COLUMN ExportAttempts INTEGER NOT NULL DEFAULT 0";
+        public const string MigrateSessionsAddExportNextAttemptUTC = "ALTER TABLE Sessions ADD COLUMN ExportNextAttemptUTC TEXT";
+        public const string CreateSessionsUnexportedIndex = "CREATE INDEX IF NOT EXISTS idx_sessions_unexported ON Sessions(EndedUTC, Id) WHERE ExportedUTC IS NULL AND EndedUTC IS NOT NULL";
 
         // SessionLogs Table
         public const string CreateSessionLogsTable = """
@@ -606,6 +624,10 @@ namespace VibeRails.DB
             MigrateSessionsAddAggregateEmbeddedUTC,
             CreateSessionsUnaggregatedIndex,
             MigrateSessionsAddAggregateEmbedFailureCount,
+            MigrateSessionsAddExportedUTC,
+            MigrateSessionsAddExportAttempts,
+            MigrateSessionsAddExportNextAttemptUTC,
+            CreateSessionsUnexportedIndex,
             CreateUserInputsFts,
             CreateUserInputsFtsAfterDeleteTrigger,
             DropUserInputsFtsAfterInsertTrigger,
@@ -932,6 +954,87 @@ namespace VibeRails.DB
               AND Processed = 0
             ORDER BY EndedUTC ASC
             LIMIT $limit;
+            """;
+        public const string SelectOldestUnexportedSession = """
+            SELECT Id, ExportAttempts
+            FROM Sessions
+            WHERE EndedUTC IS NOT NULL
+              AND EndedUTC <= $endedBeforeUtc
+              AND ExportedUTC IS NULL
+              AND (ExportNextAttemptUTC IS NULL OR ExportNextAttemptUTC <= $nowUtc)
+            ORDER BY EndedUTC ASC, Id ASC
+            LIMIT 1;
+            """;
+        // Records one failed attempt and defers the next. Never sets ExportedUTC: an undelivered
+        // session stays undelivered, it just stops holding the queue head while it backs off.
+        public const string DeferSessionExport = """
+            UPDATE Sessions
+            SET ExportAttempts = ExportAttempts + 1,
+                ExportNextAttemptUTC = $nextAttemptUtc
+            WHERE Id = $sessionId
+              AND EndedUTC IS NOT NULL
+              AND ExportedUTC IS NULL;
+            """;
+
+        public const string SelectSessionForExport = """
+            SELECT Id, Cli, EnvironmentName, WorkingDirectory, ProjectDisplayName,
+                   StartedUTC, EndedUTC, ExitCode, ParentSessionId, SessionDisplayName, JobRunId
+            FROM Sessions
+            WHERE Id = $sessionId
+              AND EndedUTC IS NOT NULL
+              AND ExportedUTC IS NULL;
+            """;
+        public const string SelectSessionLogsForExport = """
+            SELECT Id, Timestamp, Content, IsError
+            FROM SessionLogs
+            WHERE SessionId = $sessionId
+            ORDER BY Id ASC;
+            """;
+        public const string SelectTerminalSessionLogsForExport = """
+            SELECT Id, Sequence, IsAlternateScreen, Data, Cols, Rows, Timestamp
+            FROM TerminalSessionLogs
+            WHERE SessionId = $sessionId
+            ORDER BY Sequence ASC, Id ASC;
+            """;
+        public const string SelectUserInputsWithFileChangesForExport = """
+            SELECT u.Id, u.Sequence, u.InputText, u.GitCommitHash, u.TimestampUTC,
+                   c.Id, c.PreviousInputId, c.FilePath, c.ChangeType,
+                   c.LinesAdded, c.LinesDeleted, c.DiffContent
+            FROM UserInputs u
+            LEFT JOIN InputFileChanges c ON c.UserInputId = u.Id
+            WHERE u.SessionId = $sessionId
+            ORDER BY u.Sequence ASC, u.Id ASC, c.Id ASC;
+            """;
+        public const string SelectSessionTranscriptForExport = """
+            SELECT Text
+            FROM sessionOutPut
+            WHERE SessionId = $sessionId
+            ORDER BY Id DESC
+            LIMIT 1;
+            """;
+        public const string SelectSessionSummaryForExport = """
+            SELECT SummaryText, Date
+            FROM ChatSummary
+            WHERE SessionId = $sessionId
+            ORDER BY Date DESC, Id DESC
+            LIMIT 1;
+            """;
+        // Spool retention predicate. A spool file whose session no longer answers this is
+        // orphaned: either the session was exported, or the user deleted it outright.
+        public const string SelectSessionAwaitsExport = """
+            SELECT 1
+            FROM Sessions
+            WHERE Id = $sessionId
+              AND EndedUTC IS NOT NULL
+              AND ExportedUTC IS NULL
+            LIMIT 1;
+            """;
+        public const string MarkSessionExported = """
+            UPDATE Sessions
+            SET ExportedUTC = $exportedUtc
+            WHERE Id = $sessionId
+              AND EndedUTC IS NOT NULL
+              AND ExportedUTC IS NULL;
             """;
         public const string SelectSessionLogChunks = """
             SELECT Id, Timestamp, Content

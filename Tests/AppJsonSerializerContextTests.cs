@@ -89,7 +89,9 @@ public sealed class AppJsonSerializerContextTests
         Assert.Null(dto.RemoveCoAuthorTrailers);
         Assert.Null(dto.RouteThroughVibeRailsAi);
         Assert.Null(dto.ShowVibeAiUi);
+        Assert.Null(dto.DataExportOptIn);
         Assert.False(dto.DataExportConfigured);
+        Assert.False(new VibeRails.Utils.Settings().DataExportOptIn);
     }
 
     [Fact]
@@ -119,7 +121,7 @@ public sealed class AppJsonSerializerContextTests
     }
 
     [Fact]
-    public void AppSettingsDto_ReportsDataExportConfigured_SoTheClientCanGateTheButton()
+    public void AppSettingsDto_ReportsSessionSharingConfigurationAndConsent()
     {
         var json = JsonSerializer.Serialize(
             new AppSettingsDto(
@@ -139,7 +141,8 @@ public sealed class AppJsonSerializerContextTests
                 MachineName: "build-box",
                 ClearApiKey: null,
                 DataExportConfigured: true,
-                RemoveCoAuthorTrailers: true),
+                RemoveCoAuthorTrailers: true,
+                DataExportOptIn: true),
             AppJsonSerializerContext.Default.AppSettingsDto);
 
         Assert.Contains("""
@@ -147,6 +150,9 @@ public sealed class AppJsonSerializerContextTests
             """, json);
         Assert.Contains("""
             "removeCoAuthorTrailers":true
+            """, json);
+        Assert.Contains("""
+            "dataExportOptIn":true
             """, json);
     }
 

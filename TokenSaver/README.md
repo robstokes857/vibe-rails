@@ -1,6 +1,8 @@
 Himan made note:
 
-Hey next time we go through the optimization process I want to look for re-runs. When the LLM had to call again to get something we trunked. 
+Hey next time we go through the optimization process I want to look for re-runs. When the LLM had to call again to get something we trunked.
+
+> Measured 2026-09-03 — `runbooks/token_saver/plans/plan_1B.md` §2: on Claude 75% of elisions were followed by a re-fetch turn and `truncate-long` cost ~3× what it saved; on Codex it paid for itself. Re-run with `python-scripts/token_saver/rerun_economics.py`. 
 
 # TokenSaver
 

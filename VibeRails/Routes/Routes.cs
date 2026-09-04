@@ -50,6 +50,7 @@ public static class RouteExtensions
         UpdateRoutes.Map(app);
         AppSettingsRoutes.Map(app);
         HttpRelayRoutes.Map(app);
+        // Legacy one-shot full-database export (Settings modal "Export Data" button).
         // Active root backend only: terminal-tab children do not serve the Settings workflow.
         // More than one root backend can coexist, so DataExportService also holds an OS-backed
         // lock beside state.db across snapshot, upload, and cleanup.

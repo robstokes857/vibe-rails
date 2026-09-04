@@ -12,6 +12,9 @@ public class Settings
 {
     public string InstallDirName { get; set; } = PathConstants.DEFAULT_INSTALL_DIR_NAME;
     public string ApiKey { get; set; } = string.Empty;
+    // Explicit consent for the incremental session-data POC. Default-off both for new installs
+    // and for settings files written before this field existed.
+    public bool DataExportOptIn { get; set; } = false;
     public bool RemoteAccess { get; set; } = false;
     // Proof-of-concept HTTP proxy. Off by default; the settings route also forces it off when
     // there is no saved cloud API key.

@@ -1,5 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using VibeRails;
+using VibeRails.Jobs;
 using VibeRails.Services.Jobs;
 using VibeRails.Services.Terminal;
 using VibeRails.Services.Terminal.Consumers;
@@ -23,6 +25,8 @@ public sealed class MapRegisterServicesProcessRoleTests
         // The catastrophic misclassification: a spawned Automation run that counted as an
         // active root would start scheduling — every job terminal enqueueing more job terminals.
         { ["--env", "nightly", "--workdir", @"C:\source\repo", "--job-run", "run-1"], false },
+        // Script-only Automation runs omit --env but are still execution children, never roots.
+        { ["--workdir", @"C:\source\repo", "--job-run", "run-1"], false },
     };
 
     [Theory]
@@ -52,6 +56,22 @@ public sealed class MapRegisterServicesProcessRoleTests
 
         Assert.Equal(expectedActiveRoot, role.IsActiveRootBackend);
         Assert.Equal(MapRegisterServices.IsTerminalTabChildProcess(args), role.IsTerminalTabChild);
+    }
+
+    [Theory]
+    [MemberData(nameof(ProcessRoles))]
+    public void Register_HostsSessionDataDrainOnlyInActiveRootProcesses(
+        string[] args,
+        bool expectedActiveRoot)
+    {
+        var services = new ServiceCollection();
+
+        MapRegisterServices.Register(services, args, "http://127.0.0.1:12345");
+
+        var registrations = services.Count(descriptor =>
+            descriptor.ServiceType == typeof(IHostedService)
+            && descriptor.ImplementationType == typeof(SessionDataDrainJob));
+        Assert.Equal(expectedActiveRoot ? 1 : 0, registrations);
     }
 
     [Fact]

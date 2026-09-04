@@ -325,6 +325,7 @@ namespace VibeRails
                         })
                         .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
                     serviceCollection.AddHostedService<TokenSavingsPublishJob>();
+                    serviceCollection.AddHostedService<SessionDataDrainJob>();
                 }
             }
 
@@ -337,6 +338,17 @@ namespace VibeRails
             // Remote State Service (for terminal session remote registration)
             serviceCollection.AddHttpClient<IRemoteStateService, RemoteStateService>();
 
+            // Incremental session export. The service creates its own repository scopes and owns
+            // both process/cross-process gates, so it is safe for the singleton drain job.
+            serviceCollection
+                .AddHttpClient<ISessionDataExportService, SessionDataExportService>(client =>
+                {
+                    client.Timeout = TimeSpan.FromMinutes(30);
+                })
+                .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
+
+            // Legacy one-shot export (full state.db upload from the Settings modal). Runs beside
+            // the incremental session exporter above; both read VibeRails:ExportUrl.
             // Progress for the running export, polled by the settings modal. Singleton because a
             // process-wide gate means only one export can ever be in flight here.
             serviceCollection.AddSingleton<IDataExportProgress, DataExportProgress>();
@@ -384,8 +396,8 @@ namespace VibeRails
         /// <summary>
         /// Shared by every client that sends the user's API key in an <c>X-Api-Key</c> header.
         /// Unlike <c>Authorization</c>, custom headers are NOT stripped when a redirect crosses to
-        /// another host, so following one would replay the secret (and, for the export, the whole
-        /// database body) to wherever the response pointed. 3xx is treated as a plain failure.
+        /// another host, so following one would replay the secret and request body to wherever the
+        /// response pointed. 3xx is treated as a plain failure.
         /// </summary>
         internal static HttpMessageHandler CreateNoRedirectHttpMessageHandler() =>
             new HttpClientHandler

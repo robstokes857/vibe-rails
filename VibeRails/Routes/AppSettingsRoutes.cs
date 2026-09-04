@@ -11,6 +11,8 @@ public static class AppSettingsRoutes
 {
     public static void Map(WebApplication app)
     {
+        // Legacy one-shot export support: the Settings modal shows the state.db size next to the
+        // Export Data button. Kept alongside the incremental session-sharing opt-in.
         app.MapGet("/api/v1/settings/db-size", () =>
         {
             // ParserConfigs is the source used by DataExportService and respects a custom
@@ -110,6 +112,10 @@ public static class AppSettingsRoutes
                 settings.RouteThroughVibeRailsAi = false;
             if (settingsDto.ShowVibeAiUi.HasValue)
                 settings.ShowVibeAiUi = settingsDto.ShowVibeAiUi.Value;
+            settings.DataExportOptIn = ResolveDataExportOptIn(
+                settings.DataExportOptIn,
+                settingsDto.DataExportOptIn,
+                settings.ApiKey);
 
             // Save back to settings.json
             Config.Save(settings);
@@ -178,17 +184,18 @@ public static class AppSettingsRoutes
             ComputerNameFormatter.Machine(),
             // Response-only; the request flag is never echoed back.
             ClearApiKey: null,
-            // Asked of DataExportService itself so the button the client shows and the rule the
-            // export enforces can't drift apart (placeholder value, non-HTTPS, unparseable).
-            DataExportConfigured: DataExportService.TryParseExportUri(
-                configuration[DataExportService.ExportUrlSettingKey],
+            // The sharing switch uses the same absolute-HTTPS rule as the session transport.
+            // Keep this response-only capability bit so a bad/placeholder URL cannot be opted in.
+            DataExportConfigured: DataExportEndpointConfiguration.TryParseExportUri(
+                configuration[DataExportEndpointConfiguration.ExportUrlSettingKey],
                 out _),
             RemoveCoAuthorTrailers: settings.RemoveCoAuthorTrailers,
             RouteThroughVibeRailsAi: settings.RouteThroughVibeRailsAi,
             ShowVibeAiUi:             settings.ShowVibeAiUi,
             settings.GrokLlmProxyEnabled,
             LlmProxyCliChatConfig.NormalizeMode(settings.GrokLlmProxyMode),
-            settings.GrokTokenSaverEnabled ?? settings.OpenCodeTokenSaverEnabled ?? settings.ClaudeTokenSaverEnabled
+            settings.GrokTokenSaverEnabled ?? settings.OpenCodeTokenSaverEnabled ?? settings.ClaudeTokenSaverEnabled,
+            DataExportOptIn: settings.DataExportOptIn
         );
     }
 
@@ -196,6 +203,12 @@ public static class AppSettingsRoutes
         ComputerNameFormatter.Normalize(value);
 
     internal static bool ResolveHttpRelaySetting(
+        bool storedValue,
+        bool? requestedValue,
+        string? finalApiKey) =>
+        !string.IsNullOrWhiteSpace(finalApiKey) && (requestedValue ?? storedValue);
+
+    internal static bool ResolveDataExportOptIn(
         bool storedValue,
         bool? requestedValue,
         string? finalApiKey) =>
@@ -215,4 +228,5 @@ public static class AppSettingsRoutes
             return 0;
         }
     }
+
 }

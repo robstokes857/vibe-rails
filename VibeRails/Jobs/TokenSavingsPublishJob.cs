@@ -42,7 +42,7 @@ public sealed class TokenSavingsPublishJob(
     // Parsed once, at construction. Keeping this out of the tick means a malformed configured URL
     // can't throw UriFormatException on every tick forever. HTTPS is mandatory: the API key rides
     // in a custom X-Api-Key header, so an http:// endpoint would put the secret on the wire in
-    // cleartext (the same guard DataExportService.TryGetExportUri applies).
+    // cleartext. The session-data transport enforces the same rule for its endpoint.
     private readonly Uri? _endpoint = ParseHttpsEndpoint(
         configuration["VibeRails:TokenSavingsPublish:EndpointUrl"] ?? DefaultEndpoint);
 

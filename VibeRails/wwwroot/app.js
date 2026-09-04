@@ -1545,7 +1545,7 @@ export class VibeControlApp {
                 credentials: 'include'  // Send cookies with requests
             };
             if (data) options.body = JSON.stringify(data);
-            // Lets a caller abort a long request (the data export modal's Cancel button).
+            // Lets callers abort long-running requests without changing the common API wrapper.
             if (requestOptions?.signal) options.signal = requestOptions.signal;
             const baseUrl = window.__viberails_API_BASE__ || '';
             const response = await fetch(baseUrl + endpoint, options);

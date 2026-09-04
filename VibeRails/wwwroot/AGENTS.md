@@ -9,6 +9,7 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | File | Purpose |
 |------|---------|
 | [app.js](app.js) | Central controller, routing, API layer |
+| [js/modules/settings-controller.js](js/modules/settings-controller.js) | App settings, including the off-by-default **Share session data** switch gated by a saved API key and configured export endpoint, plus the legacy one-shot **Export Data** button and progress modal ([js/modules/data-export-modal.js](js/modules/data-export-modal.js)) |
 | [js/modules/terminal-multitab.js](js/modules/terminal-multitab.js) | Reusable xterm.js terminal manager with per-tab lifecycle and environment picker |
 | [js/modules/llm-picker-controller.js](js/modules/llm-picker-controller.js) | Shared launch-picker catalog, Tom Select lifecycle, customization modal, and live preference refresh |
 | [js/modules/terminal-token-compression.js](js/modules/terminal-token-compression.js) | Persistent token-savings meter and per-tab pause-badge display (the per-tab on/off toggle was removed 2026-07-19; the saver is now per-LLM in Settings) |

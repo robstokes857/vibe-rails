@@ -362,14 +362,17 @@ CREATE TABLE IF NOT EXISTS Sessions (
     SessionDisplayName TEXT DEFAULT '',
     OwnerPid           INTEGER,
     OwnershipTracked   INTEGER NOT NULL DEFAULT 1,
-    JobRunId           TEXT
+    JobRunId           TEXT,
+    ExportedUTC        TEXT
 );
 ```
 
 `Processed`, `ParentSessionId`, `SessionDisplayName`, `ProjectDisplayName`, `OwnerPid`,
-`OwnershipTracked`, and `JobRunId` are added via `ALTER TABLE` migrations (safe to re-run). Two
-further migration columns — `AggregateEmbeddedUTC` and `AggregateEmbedFailureCount` — drive the
-session-level BERT aggregate embedding backfill job.
+`OwnershipTracked`, `JobRunId`, and `ExportedUTC` are added via `ALTER TABLE` migrations (safe to
+re-run). `ExportedUTC` is the independent remote-upload acknowledgement cursor; `Processed`
+remains exclusively for transcript generation. Two further migration columns —
+`AggregateEmbeddedUTC` and `AggregateEmbedFailureCount` — drive the session-level BERT aggregate
+embedding backfill job.
 
 When `JobRunId` is not NULL the session belongs to an Automated Job; a trigger
 (`Sessions_LinkJobRunSession`) atomically backlinks the `JobRuns.SessionId` inside the INSERT
@@ -399,6 +402,9 @@ CREATE TABLE IF NOT EXISTS SessionLogs (
 | `UpdateLatestProjectDisplayNameAsync(path, projectDisplayName)` | Updates the newest session for that working directory |
 | `LogSessionOutputAsync(sessionId, content, isError)` | Append terminal output (byte buffer) |
 | `CompleteSessionAsync(sessionId, exitCode)` | Mark session as ended |
+| `GetOldestUnexportedSessionIdAsync(endedBeforeUtc, ct)` | Oldest settled session without an export ACK |
+| `WriteSessionExportAsync(sessionId, destination, ct)` | Stream a deterministic session envelope from one read transaction |
+| `MarkSessionExportedAsync(sessionId, exportedUtc, ct)` | Set `ExportedUTC` after a matching remote ACK without touching `Processed` |
 | `GetRecentSessionsAsync(limit, ct)` | Recent sessions ordered by `StartedUTC DESC` |
 | `GetSessionWithLogsAsync(sessionId, ct)` | Session with all log entries |
 | `GetSessionOutputAsync(sessionId, ct)` | Session row joined with `sessionOutPut` aggregated text |
