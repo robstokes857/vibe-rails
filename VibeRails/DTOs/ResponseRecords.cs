@@ -938,6 +938,8 @@ namespace VibeRails.DTOs
         string? ImageBase64 = null
     );
 
+    // Legacy one-shot export (full state.db upload from the Settings modal). Kept alongside the
+    // incremental SessionDataExport drain — see DataExportRoutes and data-export-modal.js.
     public record DataExportResponse(
         bool Success,
         string Status,
@@ -991,8 +993,8 @@ namespace VibeRails.DTOs
         // proxy fields — a client that omits it must never wipe the key by accident.
         bool? ClearApiKey = null,
         // Read-only: whether VibeRails:ExportUrl holds a usable HTTPS URL. The client gates the
-        // Export Data button on this as well as on a saved key, so the shipped placeholder
-        // doesn't present a button whose only possible outcome is "not configured".
+        // session-sharing switch on this as well as on an API key, so a placeholder endpoint
+        // cannot present consent for a job that can never run.
         bool DataExportConfigured = false,
         // Git Guard commit-msg policy. Nullable so an older cached client that does not send the
         // field cannot reset the persisted choice when it saves unrelated settings.
@@ -1006,7 +1008,10 @@ namespace VibeRails.DTOs
         // Native Grok proxy. Same stale-client nullable guard as the other proxy fields.
         bool? GrokLlmProxyEnabled = null,
         string? GrokLlmProxyMode = null,
-        bool? GrokTokenSaverEnabled = null
+        bool? GrokTokenSaverEnabled = null,
+        // Incremental completed-session sharing consent. Nullable on requests so a cached client
+        // that predates this field cannot opt the user in or out while saving another setting.
+        bool? DataExportOptIn = null
     );
     // Append new fields at the END of this record, with a default. Inserting one in the middle
     // shifts every positional argument after it: call sites only fail to compile when the types

@@ -130,6 +130,21 @@ text + `scopeAllowed:false`; provider is the stored wire key, matched exactly). 
 candidate strings can now be judged against the real pipeline in one request, no traffic
 reproduction needed.
 
+### 2c. `mining_timeline.db` — the sequence dataset (derived, 2026-09-03)
+
+`~/.vibe_rails/mining_timeline.db`, built by `scan_conversations.py` (§6) from `ProxyExchanges`
+in one incremental pass (~4 min for everything). The corpus dedupes outputs by content, which is
+right for sizing a transform and wrong for two questions: **re-runs** (did the model call again
+after we elided something?) and **composition** (what fraction of a request is even tool output,
+and what was actually billed).
+
+| table | grain / gotcha |
+|-------|----------------|
+| `Requests` | one row per rewrite-endpoint request: char counters per body slice (system, tools_def, user text + `<system-reminder>`s, assistant text, thinking, tool_use inputs, tool results allowlisted/not, before AND after), saver markers found in `RequestAfter`, and **real usage tokens** parsed from `ResponseBody` (`InputTokens`, `CacheCreationTokens`, `CacheReadTokens`, `OutputTokens`; OpenAI's `InputTokens` INCLUDES `CacheReadTokens`). `ConvKey` = provider + hash of the first user message — merges side requests that share it; compaction starts a new key. |
+| `Conversations` | one row per `ConvKey`: the ordered tool timeline (JSON) of the request that carried the MOST tool calls. Items: tool, command/input summary (≤400 chars), raw/after chars, marker counts (`el`/`eln`/`dd`/`pt`), CLI-side truncation chars, assistant turn number, ≤300-char note of the assistant text before the call, `react_to`. |
+
+Derived file: delete and rebuild at will. Same handling rules as the source (§3).
+
 ## 3. Handling rules (non-negotiable)
 
 - **This data never leaves the machine.** An exchange carries the system prompt, every user
@@ -150,8 +165,25 @@ reproduction needed.
 
 Ranked by expected leverage as of 2026-08-16; reorder as answers land. **Before re-mining
 any of these, check [`plans/`](plans/) — several already have measured answers there**
-(first sweep: [`plans/plan_1A.md`](plans/plan_1A.md), incl. closed negative results —
-don't re-litigate those without new data).
+(first sweep: [`plans/plan_1A.md`](plans/plan_1A.md); Claude sweep with the cost-equivalent
+model, re-run economics and the closed-negatives table:
+[`plans/plan_1B.md`](plans/plan_1B.md) — don't re-litigate those without new data).
+
+**Answered 2026-09-03 (plan_1B):** #2 metachar decline (the `cd X &&` carve-out rescues 3
+outputs — closed), #3 non-allowlisted Claude tools (only `Read` matters, and minify-only on it
+is worth 1.6 MB wire — closed), #6 ctl fail-opens (CRLF-only on Claude — non-issue; Codex
+ansi-strip sized at 43.6 MB wire), #8 response-side framing (real usage is now in
+`Requests` — cost is 55% cache reads), #9 cross-request redundancy (duplicate results within a
+conversation ≈ 0 — Claude Code suppresses re-reads). Still open: #5 wire-guard rejections
+(never measured), #7 threshold tuning beyond truncation (dedupe/blank-run knobs).
+
+10. **Re-runs after elision** (Rob's README note). Answered for the window in plan_1B §2 with
+    `rerun_economics.py`: truncation is net-negative on Claude, net-positive on Codex. Re-run
+    it on fresh traffic after any change to `truncate-long` or the file-read budget.
+11. **Cost outside the pipeline.** Tool definitions (21% of every Claude request), the
+    auto-mode classifier (10% of Claude spend), and cache-miss causes (TTL, MCP tool-list
+    churn, model switches) are now measured in plan_1B §1/§3. `timeline_stats.py` sections
+    A–D re-derive them; they are findings for Rob's config, not stages.
 
 1. **Passthroughs.** Which (provider, tool, command-shape) buckets carry the most declined
    chars? Start from `RequestBefore = RequestAfter` rows, then raw==after tool outputs inside
@@ -220,6 +252,9 @@ imported by the product). The corpus lives at `~/.vibe_rails/mining_corpus.db`.
 |--------|-----------|
 | `build_corpus.py --name <you>` | One streaming pass over `ProxyExchanges` → deduped corpus (`Outputs` with raw + paired after-text + resend counts + shape/allowlist/ctl tags, `Exchanges` stats). Incremental via `Meta.last_src_rowid` — re-run anytime to ingest new traffic. Skips `ResponseBody` entirely (never SELECTed). |
 | `corpus_stats.py --name <you>` | Descriptive report answering §4: passthroughs, tool ranking, decline reasons, shapes, ctl impact, size distribution → `results/<you>/corpus_stats_*.md`. |
+| `scan_conversations.py --name <you>` | One incremental streaming pass over `ProxyExchanges` → the sequence dataset `~/.vibe_rails/mining_timeline.db` (§2c): per-request composition + real usage tokens, per-conversation tool timelines with saver markers and reactions. Own OS lock; safe beside `build_corpus.py`. |
+| `timeline_stats.py --name <you> [--provider P]` | Descriptive report over the sequence dataset: usage/cost-eq per day, request classes (finds side-request families like the auto-mode classifier), body composition, cache health + big-miss idle gaps, duplicate results, reactions to markers, elisions/day, passthrough anatomy → `results/<you>/timeline_stats_*.md`. |
+| `rerun_economics.py --name <you> [--provider P]` | **Rob's re-run question.** Per elided result: saved (write + resends) vs the re-fetch (an extra turn at the conversation's real average cost + the re-fetched output), by command family, with break-even rate and examples → `results/<you>/rerun_economics_*.md`. |
 | `experiment.py candidates/<x>.py --name <you>` | **The harness.** Runs a candidate transform over the corpus; reports savings (unique + resend-weighted, wire-guard-mirrored), loss accounting (content vs whitespace, Lossless/Reshaping/Lossy per output), invariant violations (idempotence, never-grows, determinism, exceptions) with samples, and top-wins/worst-losses diffs → `results/<you>/<x>_*.md` + `.json`. `--on after` (default) = incremental over the shipped pipeline; `--on raw` = against raw output. Filters: `--provider --tool --allowlisted-only --min-chars --limit`. |
 
 A **candidate** is one Python file in `candidates/`: `transform(text, tool, command, provider)
@@ -286,3 +321,20 @@ gitignored (reports quote real tool output — never commit them).
   plan_1A's), and the ordered soak steps. Measurement note for future estimates: the real
   minifier compresses ANSI-bearing exec output the Python mirror declines (confirmed via the
   fixture test), so `curated_stages_mirror.py` numbers are **floors** on ANSI-heavy tools.
+- **2026-09-03** — Claude sweep (Claude session `claude-mine-0903`, Rob's brief: Claude first,
+  single user, no legacy concerns). `ProxyExchanges` at 49,750 rows / 45 GB; corpus rebuilt
+  incrementally (28,826 rows in 132 s — full passes are cheap, §3's one-pass budget was
+  overcautious). New sequence dataset (§2c) + `scan_conversations.py` / `timeline_stats.py` /
+  `rerun_economics.py` (§6). Findings in **[`plans/plan_1B.md`](plans/plan_1B.md)**: with real
+  usage the cost model is 55% cache reads; the saver removes 0.65% of Claude's request wire and
+  its one big stage, `truncate-long`, is **net-negative on Claude** (75% of elisions trigger a
+  re-fetch turn; −3.9M cost-eq over the window; Claude Code already caps Bash at 30k chars) while
+  net-positive on Codex (+18M). The three largest Claude levers are outside the pipeline: tool
+  definitions (21% of every request), the auto-mode security classifier (10% of spend), and cache
+  misses from MCP tool-list churn / TTL / model switches. TokenSaver exonerated as a cache-buster
+  by byte-level forensics. Proposed: B1 retire `truncate-long` for Anthropic (per-provider stage
+  defaults), B4 `ansi-strip` for Codex only (43.6 MB wire). Closed with numbers: Read
+  minify-only, `cd &&` carve-out, grep-group via Bash, in-conversation duplicate results, Claude
+  ctl/ANSI. Nothing shipped; Rob decides. Readable findings + ranked suggestions (including
+  the config levers: 34 never-called tool definitions = 46% of the slice, MCP per project,
+  classifier allow-rules): [`findings_2026-09-03.md`](findings_2026-09-03.md).

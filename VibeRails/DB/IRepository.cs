@@ -1,4 +1,4 @@
-using VibeRails.DTOs;
+﻿using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services;
 
@@ -24,6 +24,23 @@ namespace VibeRails.DB
         Task<List<SessionResponse>> GetRecentSessionsAsync(int limit, CancellationToken cancellationToken);
         Task<SessionOutputDetailResponse?> GetSessionOutputAsync(string sessionId, CancellationToken cancellationToken);
         Task<List<string>> GetEndedUnprocessedSessionIdsAsync(int limit, CancellationToken cancellationToken);
+        /// <summary>
+        /// Oldest ended session whose independent data-export acknowledgement is absent and whose
+        /// retry backoff (if any) has elapsed, together with its recorded attempt count.
+        /// </summary>
+        Task<UnexportedSessionRef?> GetOldestUnexportedSessionAsync(DateTime endedBeforeUtc, DateTime nowUtc, CancellationToken cancellationToken);
+        /// <summary>
+        /// Records one failed attempt and defers the next until <paramref name="nextAttemptUtc"/>.
+        /// Never marks the session exported: an undelivered session stays undelivered, it just
+        /// stops holding the head of the queue while it backs off.
+        /// </summary>
+        Task<bool> DeferSessionExportAsync(string sessionId, DateTime nextAttemptUtc, CancellationToken cancellationToken);
+        /// <summary>Streams one complete session envelope from a single SQLite read transaction.</summary>
+        Task<SessionDataExportDescriptor?> WriteSessionExportAsync(string sessionId, Stream destination, CancellationToken cancellationToken);
+        /// <summary>True while a spool file for this session is still worth keeping.</summary>
+        Task<bool> SessionAwaitsExportAsync(string sessionId, CancellationToken cancellationToken);
+        /// <summary>Sets ExportedUTC once; does not touch the transcript Processed flag.</summary>
+        Task<bool> MarkSessionExportedAsync(string sessionId, DateTime exportedUtc, CancellationToken cancellationToken);
         Task<List<SessionLogChunkRecord>> GetSessionLogChunksAsync(string sessionId, CancellationToken cancellationToken);
         Task InsertTerminalSessionLogAsync(string sessionId, int sequence, byte[] data, bool isAlternateScreen, int cols, int rows);
         Task<List<TerminalSessionLogRecord>> GetTerminalSessionLogsAsync(string sessionId, CancellationToken cancellationToken);

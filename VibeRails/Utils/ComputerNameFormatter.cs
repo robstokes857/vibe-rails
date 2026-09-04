@@ -1,4 +1,4 @@
-namespace VibeRails.Utils;
+﻿namespace VibeRails.Utils;
 
 /// <summary>
 /// One definition of a computer-name string for every caller that sends one off-machine
@@ -11,12 +11,23 @@ public static class ComputerNameFormatter
     public const int MaxLength = 80;
 
     /// <summary>
-    /// Trims and caps at <see cref="MaxLength"/> without splitting a surrogate pair (a dangling
-    /// high surrogate would render as a replacement char). A null value normalizes to empty.
+    /// Strips control characters, then trims and caps at <see cref="MaxLength"/> without splitting
+    /// a surrogate pair (a dangling high surrogate would render as a replacement char). A null
+    /// value normalizes to empty.
     /// </summary>
+    /// <remarks>
+    /// Control characters have to go before the value is stored, not just before it is displayed.
+    /// <c>Trim()</c> leaves an interior one in place and <c>Uri.EscapeDataString</c> encodes it
+    /// into a perfectly legal header value, but the receiving API rejects any control character
+    /// with a 400 — which is not a transient status, so nothing retries and no session from this
+    /// machine can be exported until the name is corrected by hand.
+    /// </remarks>
     public static string Normalize(string? value)
     {
-        var trimmed = (value ?? string.Empty).Trim();
+        var source = value ?? string.Empty;
+        var trimmed = source.Any(char.IsControl)
+            ? new string(source.Where(c => !char.IsControl(c)).ToArray()).Trim()
+            : source.Trim();
         if (trimmed.Length <= MaxLength)
             return trimmed;
 

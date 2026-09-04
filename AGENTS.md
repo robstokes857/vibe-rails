@@ -518,7 +518,7 @@ tools (security review 2026-07-02).
   - `Id`, `Name`, `Path`, `ProjectPath`, `Branch`, `CommitHash`, `RemoteUrl`, `SourceBranch`, `CreatedUTC`
   - `UNIQUE(Name, ProjectPath)`
 - `Sessions` - CLI session metadata
-  - `Id` (TEXT PK), `Cli`, `EnvironmentName`, `WorkingDirectory`, `ProjectDisplayName`, `StartedUTC`, `EndedUTC`, `ExitCode`, `Processed`, `ParentSessionId`, `SessionDisplayName`, `OwnerPid`, `OwnershipTracked`, `JobRunId`
+  - `Id` (TEXT PK), `Cli`, `EnvironmentName`, `WorkingDirectory`, `ProjectDisplayName`, `StartedUTC`, `EndedUTC`, `ExitCode`, `Processed`, `ExportedUTC`, `ParentSessionId`, `SessionDisplayName`, `OwnerPid`, `OwnershipTracked`, `JobRunId`
 - `SessionLogs` - Terminal output logs
   - `Id`, `SessionId`, `Timestamp`, `Content` (BLOB), `IsError`
 - `UserInputs` / `InputFileChanges` - User input tracking + correlated git diffs

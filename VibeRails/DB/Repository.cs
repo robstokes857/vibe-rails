@@ -1,9 +1,10 @@
-using Microsoft.Data.Sqlite;
+﻿using Microsoft.Data.Sqlite;
 using Serilog;
 using VibeRails.DTOs;
 using VibeRails.Services;
 using VibeRails.Services.BertBaseClasses;
 using System.Text;
+using System.Text.Json;
 
 namespace VibeRails.DB
 {
@@ -52,7 +53,7 @@ namespace VibeRails.DB
             {
                 await connection.OpenAsync(cancellationToken);
                 using var pragma = connection.CreateCommand();
-                pragma.CommandText = "PRAGMA busy_timeout = 5000;";
+                pragma.CommandText = SqlStrings.PragmaBusyTimeout + SqlStrings.PragmaJournalSizeLimit;
                 await pragma.ExecuteNonQueryAsync(cancellationToken);
                 return connection;
             }
@@ -61,6 +62,35 @@ namespace VibeRails.DB
                 // The caller cannot own a connection that this helper never returned.
                 // In particular, cancellation between OpenAsync and the PRAGMA must not
                 // leave an open native SQLite handle waiting for finalization.
+                await connection.DisposeAsync();
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Opens the long-lived session-export reader outside SQLite shared-cache locking. Shared
+        /// cache adds table-level locks on top of WAL, so a read transaction held while JSON is
+        /// streamed would otherwise block terminal writers for the entire export. All connection
+        /// settings are preserved except this connection's cache mode.
+        /// </summary>
+        private async Task<SqliteConnection> OpenSessionExportConnectionAsync(
+            CancellationToken cancellationToken)
+        {
+            var connectionString = new SqliteConnectionStringBuilder(_connectionString)
+            {
+                Cache = SqliteCacheMode.Private
+            }.ToString();
+            var connection = new SqliteConnection(connectionString);
+            try
+            {
+                await connection.OpenAsync(cancellationToken);
+                using var pragma = connection.CreateCommand();
+                pragma.CommandText = SqlStrings.PragmaBusyTimeout + SqlStrings.PragmaJournalSizeLimit;
+                await pragma.ExecuteNonQueryAsync(cancellationToken);
+                return connection;
+            }
+            catch
+            {
                 await connection.DisposeAsync();
                 throw;
             }
@@ -94,7 +124,7 @@ namespace VibeRails.DB
                 // otherwise let masquerade as a skipped migration).
                 using (var busyCmd = connection.CreateCommand())
                 {
-                    busyCmd.CommandText = "PRAGMA busy_timeout = 5000;";
+                    busyCmd.CommandText = SqlStrings.PragmaBusyTimeout + SqlStrings.PragmaJournalSizeLimit;
                     busyCmd.ExecuteNonQuery();
                 }
 
@@ -1572,6 +1602,293 @@ namespace VibeRails.DB
 
             return sessionIds;
         }
+
+        public async Task<UnexportedSessionRef?> GetOldestUnexportedSessionAsync(
+            DateTime endedBeforeUtc,
+            DateTime nowUtc,
+            CancellationToken cancellationToken)
+        {
+            await using var connection = await OpenConnectionAsync(cancellationToken);
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectOldestUnexportedSession;
+            cmd.Parameters.AddWithValue("$endedBeforeUtc", endedBeforeUtc.ToUniversalTime().ToString("O"));
+            cmd.Parameters.AddWithValue("$nowUtc", nowUtc.ToUniversalTime().ToString("O"));
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+                return null;
+
+            // Carrying the attempt count out with the id lets a failure be recorded as one write
+            // instead of a read-modify-write race between two root backends.
+            return new UnexportedSessionRef(
+                reader.GetString(0),
+                reader.IsDBNull(1) ? 0 : reader.GetInt32(1));
+        }
+
+        public async Task<bool> DeferSessionExportAsync(
+            string sessionId,
+            DateTime nextAttemptUtc,
+            CancellationToken cancellationToken)
+        {
+            await using var connection = await OpenConnectionAsync(cancellationToken);
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.DeferSessionExport;
+            cmd.Parameters.AddWithValue("$sessionId", sessionId);
+            cmd.Parameters.AddWithValue("$nextAttemptUtc", nextAttemptUtc.ToUniversalTime().ToString("O"));
+            return await cmd.ExecuteNonQueryAsync(cancellationToken) == 1;
+        }
+
+        public async Task<SessionDataExportDescriptor?> WriteSessionExportAsync(
+            string sessionId,
+            Stream destination,
+            CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(destination);
+
+            await using var connection =
+                await OpenSessionExportConnectionAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            await using var transaction = connection.BeginTransaction(deferred: true);
+
+            string id;
+            string cli;
+            string? environmentName;
+            string workingDirectory;
+            string projectDisplayName;
+            string startedUtc;
+            string endedUtc;
+            int? exitCode;
+            string? parentSessionId;
+            string? sessionDisplayName;
+            string? jobRunId;
+
+            await using (var cmd = connection.CreateCommand())
+            {
+                cmd.Transaction = transaction;
+                cmd.CommandText = SqlStrings.SelectSessionForExport;
+                cmd.Parameters.AddWithValue("$sessionId", sessionId);
+                await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+                if (!await reader.ReadAsync(cancellationToken))
+                {
+                    await transaction.CommitAsync(cancellationToken);
+                    return null;
+                }
+
+                id = reader.GetString(0);
+                cli = reader.GetString(1);
+                environmentName = reader.IsDBNull(2) ? null : reader.GetString(2);
+                workingDirectory = reader.GetString(3);
+                projectDisplayName = reader.GetString(4);
+                startedUtc = reader.GetString(5);
+                endedUtc = reader.GetString(6);
+                exitCode = reader.IsDBNull(7) ? null : reader.GetInt32(7);
+                parentSessionId = NullIfEmpty(reader.IsDBNull(8) ? null : reader.GetString(8));
+                sessionDisplayName = NullIfEmpty(reader.IsDBNull(9) ? null : reader.GetString(9));
+                jobRunId = NullIfEmpty(reader.IsDBNull(10) ? null : reader.GetString(10));
+            }
+
+            if (!Guid.TryParse(id, out var sourceId) || sourceId == Guid.Empty)
+                throw new InvalidDataException($"Session '{id}' does not have a non-empty GUID id.");
+
+            await using var writer = new Utf8JsonWriter(destination);
+            writer.WriteStartObject();
+            writer.WriteNumber("schemaVersion", 1);
+            writer.WriteString("kind", "session");
+            writer.WriteString("sourceId", sourceId);
+
+            writer.WritePropertyName("session");
+            writer.WriteStartObject();
+            writer.WriteString("id", id);
+            writer.WriteString("cli", cli);
+            WriteNullableString(writer, "environmentName", environmentName);
+            writer.WriteString("workingDirectory", workingDirectory);
+            writer.WriteString("projectDisplayName", projectDisplayName);
+            writer.WriteString("startedUtc", startedUtc);
+            writer.WriteString("endedUtc", endedUtc);
+            if (exitCode is null) writer.WriteNull("exitCode"); else writer.WriteNumber("exitCode", exitCode.Value);
+            WriteNullableString(writer, "parentSessionId", parentSessionId);
+            WriteNullableString(writer, "sessionDisplayName", sessionDisplayName);
+            WriteNullableString(writer, "jobRunId", jobRunId);
+            writer.WriteEndObject();
+
+            writer.WritePropertyName("sessionLogs");
+            writer.WriteStartArray();
+            await using (var cmd = connection.CreateCommand())
+            {
+                cmd.Transaction = transaction;
+                cmd.CommandText = SqlStrings.SelectSessionLogsForExport;
+                cmd.Parameters.AddWithValue("$sessionId", sessionId);
+                await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    writer.WriteStartObject();
+                    writer.WriteNumber("id", reader.GetInt64(0));
+                    writer.WriteString("timestampUtc", reader.GetString(1));
+                    writer.WriteBase64String("rawBytes", (byte[])reader[2]);
+                    writer.WriteBoolean("isError", reader.GetInt32(3) != 0);
+                    writer.WriteEndObject();
+                    await FlushIfPendingAsync(writer, cancellationToken);
+                }
+            }
+            writer.WriteEndArray();
+
+            writer.WritePropertyName("terminalSessionLogs");
+            writer.WriteStartArray();
+            await using (var cmd = connection.CreateCommand())
+            {
+                cmd.Transaction = transaction;
+                cmd.CommandText = SqlStrings.SelectTerminalSessionLogsForExport;
+                cmd.Parameters.AddWithValue("$sessionId", sessionId);
+                await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    writer.WriteStartObject();
+                    writer.WriteNumber("id", reader.GetInt64(0));
+                    writer.WriteNumber("sequence", reader.GetInt32(1));
+                    writer.WriteBoolean("isAlternateScreen", reader.GetInt32(2) != 0);
+                    writer.WriteBase64String("rawBytes", (byte[])reader[3]);
+                    writer.WriteNumber("cols", reader.GetInt32(4));
+                    writer.WriteNumber("rows", reader.GetInt32(5));
+                    writer.WriteString("timestampUtc", reader.GetString(6));
+                    writer.WriteEndObject();
+                    await FlushIfPendingAsync(writer, cancellationToken);
+                }
+            }
+            writer.WriteEndArray();
+
+            writer.WritePropertyName("userInputs");
+            writer.WriteStartArray();
+            await using (var cmd = connection.CreateCommand())
+            {
+                cmd.Transaction = transaction;
+                cmd.CommandText = SqlStrings.SelectUserInputsWithFileChangesForExport;
+                cmd.Parameters.AddWithValue("$sessionId", sessionId);
+                await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+                long? openInputId = null;
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    var inputId = reader.GetInt64(0);
+                    if (openInputId != inputId)
+                    {
+                        if (openInputId is not null)
+                        {
+                            writer.WriteEndArray();
+                            writer.WriteEndObject();
+                        }
+
+                        writer.WriteStartObject();
+                        writer.WriteNumber("id", inputId);
+                        writer.WriteNumber("sequence", reader.GetInt32(1));
+                        writer.WriteString("inputText", reader.GetString(2));
+                        WriteNullableString(writer, "gitCommitHash", reader.IsDBNull(3) ? null : reader.GetString(3));
+                        writer.WriteString("timestampUtc", reader.GetString(4));
+                        writer.WritePropertyName("fileChanges");
+                        writer.WriteStartArray();
+                        openInputId = inputId;
+                    }
+
+                    if (!reader.IsDBNull(5))
+                    {
+                        writer.WriteStartObject();
+                        writer.WriteNumber("id", reader.GetInt64(5));
+                        if (reader.IsDBNull(6)) writer.WriteNull("previousInputId"); else writer.WriteNumber("previousInputId", reader.GetInt64(6));
+                        writer.WriteString("filePath", reader.GetString(7));
+                        writer.WriteString("changeType", reader.GetString(8));
+                        if (reader.IsDBNull(9)) writer.WriteNull("linesAdded"); else writer.WriteNumber("linesAdded", reader.GetInt32(9));
+                        if (reader.IsDBNull(10)) writer.WriteNull("linesDeleted"); else writer.WriteNumber("linesDeleted", reader.GetInt32(10));
+                        WriteNullableString(writer, "diffContent", reader.IsDBNull(11) ? null : reader.GetString(11));
+                        writer.WriteEndObject();
+                    }
+
+                    await FlushIfPendingAsync(writer, cancellationToken);
+                }
+
+                if (openInputId is not null)
+                {
+                    writer.WriteEndArray();
+                    writer.WriteEndObject();
+                }
+            }
+            writer.WriteEndArray();
+
+            await using (var cmd = connection.CreateCommand())
+            {
+                cmd.Transaction = transaction;
+                cmd.CommandText = SqlStrings.SelectSessionTranscriptForExport;
+                cmd.Parameters.AddWithValue("$sessionId", sessionId);
+                var transcript = await cmd.ExecuteScalarAsync(cancellationToken) as string;
+                WriteNullableString(writer, "transcript", transcript);
+            }
+
+            writer.WritePropertyName("summary");
+            await using (var cmd = connection.CreateCommand())
+            {
+                cmd.Transaction = transaction;
+                cmd.CommandText = SqlStrings.SelectSessionSummaryForExport;
+                cmd.Parameters.AddWithValue("$sessionId", sessionId);
+                await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+                if (await reader.ReadAsync(cancellationToken))
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("summaryText", reader.GetString(0));
+                    writer.WriteString("dateUtc", reader.GetString(1));
+                    writer.WriteEndObject();
+                }
+                else
+                {
+                    writer.WriteNullValue();
+                }
+            }
+
+            writer.WriteEndObject();
+            await writer.FlushAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return new SessionDataExportDescriptor(1, "session", sourceId);
+        }
+
+        public async Task<bool> SessionAwaitsExportAsync(
+            string sessionId,
+            CancellationToken cancellationToken)
+        {
+            await using var connection = await OpenConnectionAsync(cancellationToken);
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectSessionAwaitsExport;
+            cmd.Parameters.AddWithValue("$sessionId", sessionId);
+            return await cmd.ExecuteScalarAsync(cancellationToken) is not null;
+        }
+
+        public async Task<bool> MarkSessionExportedAsync(
+            string sessionId,
+            DateTime exportedUtc,
+            CancellationToken cancellationToken)
+        {
+            await using var connection = await OpenConnectionAsync(cancellationToken);
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.MarkSessionExported;
+            cmd.Parameters.AddWithValue("$sessionId", sessionId);
+            cmd.Parameters.AddWithValue("$exportedUtc", exportedUtc.ToUniversalTime().ToString("O"));
+            return await cmd.ExecuteNonQueryAsync(cancellationToken) == 1;
+        }
+
+        // Utf8JsonWriter over a raw Stream does NOT auto-flush — it accumulates into an internal
+        // ArrayBufferWriter until Flush is called. Flushing only at the end would materialise the
+        // entire uncompressed envelope (including base64 of every log BLOB, a 4/3 expansion) as one
+        // contiguous array with a hard Int32 ceiling, before the compressor sees a single byte.
+        // Flushing on a byte threshold is what JsonSerializer.SerializeAsync itself does; the JSON
+        // produced is byte-identical either way.
+        private const int ExportFlushThresholdBytes = 64 * 1024;
+
+        private static Task FlushIfPendingAsync(Utf8JsonWriter writer, CancellationToken cancellationToken)
+            => writer.BytesPending >= ExportFlushThresholdBytes
+                ? writer.FlushAsync(cancellationToken)
+                : Task.CompletedTask;
+
+        private static void WriteNullableString(Utf8JsonWriter writer, string name, string? value)
+        {
+            if (value is null) writer.WriteNull(name); else writer.WriteString(name, value);
+        }
+
+        private static string? NullIfEmpty(string? value)
+            => string.IsNullOrEmpty(value) ? null : value;
 
         public async Task<List<SessionLogChunkRecord>> GetSessionLogChunksAsync(string sessionId, CancellationToken cancellationToken)
         {

@@ -20,6 +20,7 @@ and launch behavior before changing generated arguments:
 - Claude settings: https://code.claude.com/docs/en/settings
 - Codex: https://developers.openai.com/codex/cli/reference
 - Codex config: https://developers.openai.com/codex/config-reference
+- Codex models: https://developers.openai.com/codex/models
 - Antigravity (agy): https://antigravity.google/docs/cli-using (also `cli-getting-started`, `cli-settings`)
 - Antigravity authoritative flags: run `agy --help` (and `agy models` for the live model catalog)
 - Copilot: https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference
@@ -84,7 +85,7 @@ Where they live in code
 - Copilot: `renderCopilotModelOptions()`.
 - OpenCode: `renderOpencodeModelOptions()`.
 
-Current pinned values (Claude re-verified 2026-09-01; Codex 2026-08-23;
+Current pinned values (Claude re-verified 2026-09-01; Codex 2026-09-04;
 Copilot 2026-08-23; OpenCode 2026-08-23; Antigravity flags 2026-08-23, models
 still last hand-copied 2026-07-02):
 
@@ -104,8 +105,11 @@ still last hand-copied 2026-07-02):
   Opus 4.8 in the list. Fixed ID with no date suffix (same scheme as
   `claude-opus-4-8`); the `[1m]` suffix seen in Claude Code session banners is a
   context-window variant marker, NOT part of the `--model` value.
-- Codex: `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, plus an
-  empty "Default (Codex recommended)" entry. Live `codex debug models` on
+- Codex: `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`,
+  `gpt-5.5`, plus an empty "Default (Codex recommended)" entry. `gpt-6-astra`
+  (Astra) was added as the top pinned entry on 2026-09-04. The official Codex
+  models page documents the exact launch value as `codex -m gpt-6-astra`;
+  launch announcement: https://openai.com/index/gpt-6-astra/. Live `codex debug models` on
   2026-08-23 (CLI 0.148.0) still lists `gpt-5.6-sol` / `terra` / `luna`,
   `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, and `gpt-5.3-codex-spark` as
   `"visibility": "list"`. This dropdown stays intentionally narrower: at the
@@ -177,8 +181,10 @@ How to verify what's current:
 - Claude: the model-config docs at
   https://code.claude.com/docs/en/model-config (full model IDs and which alias
   maps to which version).
-- Codex: run `codex debug models` to print Codex's live model catalog as JSON, and
-  the Codex config reference at https://developers.openai.com/codex/config-reference.
+- Codex: run `codex debug models` to print Codex's live model catalog as JSON, check
+  https://developers.openai.com/codex/models for released Codex models and exact
+  `codex -m` values, and use the Codex config reference at
+  https://developers.openai.com/codex/config-reference.
   Filter on `"visibility": "list"` — hidden entries (e.g. `codex-auto-review`)
   are not user-selectable.
 - Antigravity: run `agy models` — it prints the catalog, but as an INTERACTIVE picker

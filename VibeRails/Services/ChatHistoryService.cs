@@ -1,4 +1,4 @@
-using VibeRails.DB;
+﻿using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services.Integrations.VibeCodeRemote;
@@ -8,7 +8,8 @@ namespace VibeRails.Services;
 public class ChatHistoryService(
     IRepository repository,
     ISessionTranscriptService sessionTranscriptService,
-    ISummaryService summaryService) : IChatHistoryService
+    ISummaryService summaryService,
+    ISessionDataExportService sessionDataExportService) : IChatHistoryService
 {
     public async Task<ChatHistoryResponse> GetHistoryAsync(int page, int pageSize, string? preferredWorkingDirectory, string? sortBy, string? sortDirection, CancellationToken cancellationToken)
     {
@@ -30,6 +31,11 @@ public class ChatHistoryService(
             return false;
 
         await repository.DeleteChatSummaryBySessionAsync(sessionId, cancellationToken);
+
+        // The session rows are gone, so the drain job can never select this id again and the
+        // exporter's own post-upload cleanup is now unreachable for it. Without this, a spool
+        // retained from an earlier failed attempt would outlive the data the user just erased.
+        sessionDataExportService.DeleteSpool(sessionId);
         return true;
     }
 
