@@ -23,6 +23,7 @@ test.describe('responsive top navigation', () => {
             const nav = page.locator('.app-subnav');
             const switchButton = nav.locator('[aria-label="Switch to side navigation"]');
             await expect(nav).toBeVisible();
+            await expect(nav).toHaveCSS('opacity', '1');
             await expect(switchButton).toBeVisible();
 
             const dimensions = await switchButton.evaluate(element => {

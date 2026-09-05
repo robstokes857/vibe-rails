@@ -103,7 +103,10 @@ export class WebviewPanelManager {
 
     private buildHtml(webview: vscode.Webview, port: number, sessionToken: string | null, tabToken: string | null): string {
         const indexPath = path.join(this.wwwrootPath, 'index.html');
-        let html = fs.readFileSync(indexPath, 'utf8');
+        // VS Code parses this string with DOMParser before loading the webview.
+        // A decoded BOM becomes body text there, moving head styles into the body
+        // where the nav's initial opacity: 0 overrides the app stylesheet.
+        let html = fs.readFileSync(indexPath, 'utf8').replace(/^\uFEFF/, '');
 
         const nonce = crypto.randomBytes(16).toString('hex');
         const wwwrootUri = vscode.Uri.file(this.wwwrootPath);
