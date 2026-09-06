@@ -577,33 +577,20 @@ export class VibeControlApp {
         }
 
         this.brandClickTimestamps = [];
-        this.showAppVersionModal();
+        this.showInternalToolsModal();
     }
 
-    async showAppVersionModal() {
-        this.showModal('App Version', `
-            <div class="d-flex flex-column gap-3">
-                <div class="d-flex align-items-baseline gap-2">
-                    <span class="text-muted">Version</span>
-                    <span id="app-version-value" class="font-monospace fs-5">Loading…</span>
-                </div>
-                <div class="d-flex justify-content-end">
-                    <button type="button" class="btn btn-secondary" data-action="close-modal">Close</button>
-                </div>
-            </div>
-        `);
-
-        const versionOutput = document.getElementById('app-version-value');
+    async showInternalToolsModal() {
+        if (this.internalToolsOpening) return;
+        this.internalToolsOpening = true;
         try {
-            const response = await this.apiCall('/api/v1/update/version', 'GET', null, { showLoading: false });
-            if (versionOutput) {
-                versionOutput.textContent = response?.version || 'Unknown';
-            }
+            // Internal tools do not add requests or initialization to normal app startup.
+            const { showInternalToolsModal } = await import('./js/modules/internal-tools-modal.js');
+            showInternalToolsModal(this);
         } catch (error) {
-            console.error('Failed to fetch app version:', error);
-            if (versionOutput) {
-                versionOutput.textContent = 'Unavailable';
-            }
+            this.showError('Unable to open internal tools: ' + error.message);
+        } finally {
+            this.internalToolsOpening = false;
         }
     }
 

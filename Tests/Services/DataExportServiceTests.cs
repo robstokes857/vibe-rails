@@ -24,6 +24,7 @@ public sealed class DataExportServiceTests : IDisposable
         $"viberails-data-export-tests-{Guid.NewGuid():N}");
     private readonly string _exportTempRoot;
     private int _temporaryDirectoryCount;
+    private readonly UploadFeatureLogRecorder _featureLog = new();
 
     public DataExportServiceTests()
     {
@@ -56,6 +57,7 @@ public sealed class DataExportServiceTests : IDisposable
         var result = await service.ExportAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(DataExportStatus.NoApiKey, result.Status);
+        _featureLog.AssertAttempt("Database snapshot", "skipped");
         Assert.Equal(0, handler.RequestCount);
         Assert.Equal(0, Volatile.Read(ref _temporaryDirectoryCount));
         AssertExportTempRootIsEmpty();
@@ -83,6 +85,7 @@ public sealed class DataExportServiceTests : IDisposable
         var result = await service.ExportAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(DataExportStatus.NotConfigured, result.Status);
+        _featureLog.AssertAttempt("Database snapshot", "skipped");
         Assert.Equal(0, handler.RequestCount);
         Assert.Equal(0, Volatile.Read(ref _temporaryDirectoryCount));
         AssertExportTempRootIsEmpty();
@@ -101,6 +104,7 @@ public sealed class DataExportServiceTests : IDisposable
 
         Assert.Equal(DataExportStatus.Failed, result.Status);
         Assert.Contains("not found", result.Detail, StringComparison.OrdinalIgnoreCase);
+        _featureLog.AssertAttempt("Database snapshot", "failed");
         Assert.Equal(0, handler.RequestCount);
         Assert.Equal(0, Volatile.Read(ref _temporaryDirectoryCount));
         AssertExportTempRootIsEmpty();
@@ -125,6 +129,7 @@ public sealed class DataExportServiceTests : IDisposable
         var result = await service.ExportAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(DataExportStatus.Success, result.Status);
+        _featureLog.AssertAttempt("Database snapshot", "succeeded");
         Assert.Equal(1, handler.RequestCount);
         Assert.Equal(HttpMethod.Post, handler.Method);
         Assert.Equal(ValidExportUrl, handler.RequestUri?.AbsoluteUri);
@@ -208,6 +213,7 @@ public sealed class DataExportServiceTests : IDisposable
         var result = await service.ExportAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(expectedStatus, result.Status);
+        _featureLog.AssertAttempt("Database snapshot", "failed");
         Assert.Equal(1, handler.RequestCount);
         Assert.False(string.IsNullOrWhiteSpace(result.Sha256));
         AssertExportTempRootIsEmpty();
@@ -240,6 +246,13 @@ public sealed class DataExportServiceTests : IDisposable
             "The account does not have enough storage for this export "
             + "(HTTP 422 Unprocessable Entity). Reference: 00-safe-trace-00",
             result.Detail);
+        _featureLog.AssertAttempt("Database snapshot", "failed");
+        Assert.All(_featureLog.Entries, entry =>
+        {
+            Assert.DoesNotContain("not have enough storage", entry.Message);
+            Assert.DoesNotContain("00-safe-trace-00", entry.Message);
+            Assert.DoesNotContain(ConfiguredApiKey, entry.Message);
+        });
         AssertExportTempRootIsEmpty();
     }
 
@@ -359,6 +372,7 @@ public sealed class DataExportServiceTests : IDisposable
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             async () => await exportTask);
+        _featureLog.AssertAttempt("Database snapshot", "cancelled");
         Assert.Equal(1, handler.RequestCount);
         AssertExportTempRootIsEmpty();
     }
@@ -426,6 +440,10 @@ public sealed class DataExportServiceTests : IDisposable
         }
 
         Assert.Equal(DataExportStatus.Success, firstResult?.Status);
+        var operationIds = _featureLog.Entries.Select(entry => entry.OperationId).Distinct().ToArray();
+        Assert.Equal(2, operationIds.Length);
+        _featureLog.AssertAttempt("Database snapshot", "succeeded", operationIds[0]);
+        _featureLog.AssertAttempt("Database snapshot", "skipped", operationIds[1]);
         AssertExportTempRootIsEmpty();
     }
 
@@ -448,6 +466,7 @@ public sealed class DataExportServiceTests : IDisposable
         var result = await service.ExportAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(DataExportStatus.Busy, result.Status);
+        _featureLog.AssertAttempt("Database snapshot", "skipped");
         Assert.Equal(0, handler.RequestCount);
         Assert.Equal(0, Volatile.Read(ref _temporaryDirectoryCount));
         AssertExportTempRootIsEmpty();
@@ -477,7 +496,8 @@ public sealed class DataExportServiceTests : IDisposable
             httpClient,
             configuration,
             CreateTemporaryDirectoryPath,
-            static () => "test-computer");
+            static () => "test-computer",
+            featureLog: _featureLog);
     }
 
     private string CreateTemporaryDirectoryPath()

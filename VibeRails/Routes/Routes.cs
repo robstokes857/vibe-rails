@@ -56,6 +56,8 @@ public static class RouteExtensions
         // lock beside state.db across snapshot, upload, and cleanup.
         if (isActiveRootBackend)
             DataExportRoutes.Map(app);
+        if (isActiveRootBackend)
+            InternalToolsRoutes.Map(app);
         PinRoutes.Map(app);
         PushRoutes.Map(app);
         LifecycleRoutes.Map(app);

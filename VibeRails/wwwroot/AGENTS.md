@@ -9,6 +9,7 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | File | Purpose |
 |------|---------|
 | [app.js](app.js) | Central controller, routing, API layer |
+| [js/modules/internal-tools-modal.js](js/modules/internal-tools-modal.js) | Triple-click the brand icon to open Internal tools: About/version, retained upload attempts, and filterable application/Demon logs and feature journal; lazy loaded with bounded pages and no polling |
 | [js/modules/settings-controller.js](js/modules/settings-controller.js) | App settings, including the off-by-default **Share session data** switch gated by a saved API key and configured export endpoint, plus the legacy one-shot **Export Data** button and progress modal ([js/modules/data-export-modal.js](js/modules/data-export-modal.js)) |
 | [js/modules/terminal-multitab.js](js/modules/terminal-multitab.js) | Reusable xterm.js terminal manager with per-tab lifecycle and environment picker |
 | [js/modules/llm-picker-controller.js](js/modules/llm-picker-controller.js) | Shared launch-picker catalog, Tom Select lifecycle, customization modal, and live preference refresh |
@@ -23,6 +24,32 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | [js/modules/python-script-workbench.js](js/modules/python-script-workbench.js) | `python-script` view: Monaco editor beside a docked agent terminal for one script (see "Python script workbench" below) |
 | [js/modules/python-run-window.js](js/modules/python-run-window.js) | The little run window: typed inputs + free arguments + stdin in, exit code / output / return value out, no terminal (see "Python script run window" below) |
 | [js/modules/automation-launcher.js](js/modules/automation-launcher.js) | Nav "Launch" flyout (automations + Python scripts, unsigned ones disabled) and its order/show-hide customize modal over `/api/v1/automation-nav/preferences` |
+
+## Internal tools modal
+
+Three clicks on the brand icon within 900ms opens `Internal tools`. `app.js` dynamically imports
+`internal-tools-modal.js`, so this surface adds no requests to normal startup. Its `SECTIONS`
+registry owns each tab's markup and lazy load function; add new diagnostic/CRUD screens there.
+The modal uses `app.showModal` with `onClose` cleanup, preserving the shared focus trap,
+background inert state, Escape behavior and focus restoration. Arrow keys, Home and End switch
+the About, Data uploads and Logs tabs.
+
+About reads `/api/v1/update/version`. Data uploads and Logs read the authenticated
+`/api/v1/internal/uploads` and `/api/v1/internal/logs` endpoints in pages of 100. The upload
+screen shows the latest retained event for each attempt; Details and operation-linked View logs
+work, while Create/Edit/Delete are explicit disabled placeholders. Logs defaults to existing
+application files (`source=application`); the source selector also offers VibeRails Demon files
+(`source=daemon`) and the new feature journal (`source=features`). Existing files are read on
+demand without copying or backfilling them. Filter by feature/category, level, and search text;
+status and operation ID apply only to the feature journal and are disabled for other sources.
+Changing sources clears incompatible filters, categories, and old results and starts on page 1.
+An upload's View logs explicitly selects the feature journal and its operation ID.
+Filter submits, selection changes and Refresh are the only reload triggers. Requests abort on
+tab changes or modal close; there are no polling timers or global subscriptions. Render server
+text with escaping/textContent, including multiline exception details and the source filename.
+Keep endpoint results bounded and show `truncated`/logger health notices so a bounded window is
+not presented as complete history. Upload history and the feature journal remain forward-only.
+CSS uses the `vb-internal-*` prefix and theme tokens with fallback colors.
 
 ## Reusable local File Explorer
 
