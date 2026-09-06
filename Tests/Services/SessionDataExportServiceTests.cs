@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.IO.Compression;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using VibeRails.DB;
@@ -21,6 +22,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
     private const string ExportUrl = "https://exports.example.test/v1/data";
     private const string ApiKey = "session-export-api-key";
     private const string ComputerName = "test computer/α";
+    private readonly UploadFeatureLogRecorder _featureLog = new();
 
     private readonly string _originalApiKey = ParserConfigs.GetApiKey();
     private readonly string _originalStatePath = ParserConfigs.GetStatePath();
@@ -71,6 +73,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
             TestContext.Current.CancellationToken);
 
         Assert.Equal(SessionDataExportStatus.Success, result.Status);
+        _featureLog.AssertAttempt(sessionId, "succeeded");
         var request = Assert.IsType<RequestSnapshot>(handler.Request);
         Assert.Equal(HttpMethod.Post, request.Method);
         Assert.Equal($"/v1/data/sessions/{sessionId}", request.Uri.AbsolutePath);
@@ -121,6 +124,9 @@ public sealed class SessionDataExportServiceTests : IDisposable
             TestContext.Current.CancellationToken);
 
         Assert.Equal(SessionDataExportStatus.Failed, result.Status);
+        var log = _featureLog.AssertAttempt(sessionId, "uploaded");
+        Assert.Equal("local-acknowledgement-failed", log.Event);
+        Assert.Equal(LogLevel.Warning, log.Level);
         Assert.Contains("local acknowledgement", result.Detail, StringComparison.OrdinalIgnoreCase);
         Assert.False(File.Exists(SpoolPath(sourceId)));
         repository.Verify(repo => repo.WriteSessionExportAsync(
@@ -156,12 +162,117 @@ public sealed class SessionDataExportServiceTests : IDisposable
 
         Assert.Equal(SessionDataExportStatus.UploadFailed, result.Status);
         Assert.Contains("did not match", result.Detail, StringComparison.OrdinalIgnoreCase);
+        _featureLog.AssertAttempt(sessionId, "failed");
         Assert.True(File.Exists(SpoolPath(sourceId)));
         repository.Verify(repo => repo.WriteSessionExportAsync(
             sessionId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once);
         repository.Verify(repo => repo.MarkSessionExportedAsync(
             It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Never);
         repository.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExportSessionAsync_LocalAcknowledgementThrows_HistoryStillShowsUploaded(bool cancelled)
+    {
+        var sourceId = Guid.NewGuid();
+        var sessionId = sourceId.ToString("D").ToUpperInvariant();
+        var repository = new Mock<IRepository>(MockBehavior.Strict);
+        SetupEnvelopeWrite(repository, sessionId, sourceId,
+            () => Encoding.UTF8.GetBytes("private transcript content"));
+        using var cancellationSource = CancellationTokenSource.CreateLinkedTokenSource(
+            TestContext.Current.CancellationToken);
+        repository
+            .Setup(repo => repo.MarkSessionExportedAsync(
+                sessionId, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns((string _, DateTime _, CancellationToken token) =>
+            {
+                if (cancelled)
+                {
+                    cancellationSource.Cancel();
+                    return Task.FromCanceled<bool>(token);
+                }
+                return Task.FromException<bool>(new InvalidOperationException(
+                    $"Sensitive local failure: {ApiKey}; private transcript content"));
+            });
+        using var services = BuildServices(repository.Object);
+        using var client = new HttpClient(new SingleUploadHandler(HttpStatusCode.Created, sourceId, "stored"));
+        var service = CreateService(client, services);
+
+        if (cancelled)
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => service.ExportSessionAsync(sessionId, cancellationSource.Token));
+        }
+        else
+        {
+            var result = await service.ExportSessionAsync(sessionId, cancellationSource.Token);
+            Assert.Equal(SessionDataExportStatus.Failed, result.Status);
+        }
+
+        var log = _featureLog.AssertAttempt(sourceId.ToString("D"), "uploaded");
+        Assert.Equal("local-acknowledgement-failed", log.Event);
+        Assert.Equal(LogLevel.Warning, log.Level);
+        Assert.All(_featureLog.Entries, entry =>
+        {
+            Assert.DoesNotContain(ApiKey, entry.Message);
+            Assert.DoesNotContain("private transcript", entry.Message);
+            Assert.DoesNotContain("Sensitive local failure", entry.Message);
+        });
+    }
+
+    [Theory]
+    [InlineData("missing-key", SessionDataExportStatus.NoApiKey)]
+    [InlineData("not-configured", SessionDataExportStatus.NotConfigured)]
+    [InlineData("busy", SessionDataExportStatus.Busy)]
+    [InlineData("not-found", SessionDataExportStatus.NotFound)]
+    [InlineData("invalid-id", SessionDataExportStatus.NotFound)]
+    public async Task ExportSessionAsync_EarlyExit_RecordsSkippedWithoutNetworkWork(
+        string reason,
+        SessionDataExportStatus expectedStatus)
+    {
+        var sessionId = reason == "invalid-id" ? ApiKey + " invalid id" : Guid.NewGuid().ToString("D");
+        var repository = new Mock<IRepository>(MockBehavior.Strict);
+        if (reason == "not-found")
+        {
+            repository.Setup(repo => repo.WriteSessionExportAsync(
+                    sessionId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((SessionDataExportDescriptor?)null);
+        }
+        if (reason == "missing-key")
+            ParserConfigs.SetApiKey(string.Empty);
+        using var heldLock = reason == "busy"
+            ? CrossProcessFileLock.TryAcquire(CrossProcessFileLock.BesideStateDatabase(
+                ParserConfigs.GetStatePath(), SessionDataExportService.LockFileName))
+            : null;
+        if (reason == "busy")
+            Assert.NotNull(heldLock);
+        using var services = BuildServices(repository.Object);
+        using var client = new HttpClient(new UnreachableHandler());
+        var service = CreateService(client, services, reason == "not-configured" ? null : ExportUrl);
+
+        var result = await service.ExportSessionAsync(sessionId, TestContext.Current.CancellationToken);
+
+        Assert.Equal(expectedStatus, result.Status);
+        _featureLog.AssertAttempt(reason == "invalid-id" ? "Unknown session" : sessionId, "skipped");
+        Assert.All(_featureLog.Entries, entry => Assert.DoesNotContain(ApiKey, entry.ToString()));
+    }
+
+    [Fact]
+    public async Task ExportSessionAsync_AlreadyCancelled_RecordsCancellationAndPropagates()
+    {
+        var sessionId = Guid.NewGuid().ToString("D");
+        using var services = BuildServices(new Mock<IRepository>(MockBehavior.Strict).Object);
+        using var client = new HttpClient(new UnreachableHandler());
+        var service = CreateService(client, services);
+        using var cancellationSource = new CancellationTokenSource();
+        cancellationSource.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => service.ExportSessionAsync(sessionId, cancellationSource.Token));
+
+        _featureLog.AssertAttempt(sessionId, "cancelled");
     }
 
     [Fact]
@@ -189,6 +300,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
 
         Assert.Equal(SessionDataExportStatus.UploadFailed, result.Status);
         Assert.Contains("409", result.Detail, StringComparison.Ordinal);
+        _featureLog.AssertAttempt(sessionId, "failed");
         Assert.True(File.Exists(SpoolPath(sourceId)));
         repository.Verify(repo => repo.WriteSessionExportAsync(
             sessionId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once);
@@ -251,6 +363,10 @@ public sealed class SessionDataExportServiceTests : IDisposable
             TestContext.Current.CancellationToken);
 
         Assert.Equal(SessionDataExportStatus.Success, retryResult.Status);
+        var operationIds = _featureLog.Entries.Select(entry => entry.OperationId).Distinct().ToArray();
+        Assert.Equal(2, operationIds.Length);
+        _featureLog.AssertAttempt(sessionId, "failed", operationIds[0]);
+        _featureLog.AssertAttempt(sessionId, "succeeded", operationIds[1]);
         Assert.Equal(1, writeCount);
         Assert.Equal(
             Assert.IsType<RequestSnapshot>(lostAckHandler.Request).Body,
@@ -447,12 +563,13 @@ public sealed class SessionDataExportServiceTests : IDisposable
 
     private SessionDataExportService CreateService(
         HttpClient client,
-        ServiceProvider services)
+        ServiceProvider services,
+        string? exportUrl = ExportUrl)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["VibeRails:ExportUrl"] = ExportUrl
+                ["VibeRails:ExportUrl"] = exportUrl
             })
             .Build();
         return new SessionDataExportService(
@@ -460,7 +577,8 @@ public sealed class SessionDataExportServiceTests : IDisposable
             configuration,
             services.GetRequiredService<IServiceScopeFactory>(),
             NullLogger<SessionDataExportService>.Instance,
-            () => ComputerName);
+            () => ComputerName,
+            _featureLog);
     }
 
     private static ServiceProvider BuildServices(IRepository repository) =>

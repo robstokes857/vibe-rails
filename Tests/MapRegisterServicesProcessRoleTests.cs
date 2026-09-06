@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using VibeRails;
 using VibeRails.Jobs;
 using VibeRails.Services.Jobs;
+using VibeRails.Services.Diagnostics;
 using VibeRails.Services.Terminal;
 using VibeRails.Services.Terminal.Consumers;
 using Xunit;
@@ -79,6 +80,23 @@ public sealed class MapRegisterServicesProcessRoleTests
     {
         Assert.True(JobTickProcessHost.IsRequested(["--job-tick"]));
         Assert.Equal(0, await JobTickProcessHost.RunAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
+    [MemberData(nameof(ProcessRoles))]
+    public void Register_HostsFeatureLogOnlyInActiveRootProcesses(
+        string[] args,
+        bool expectedActiveRoot)
+    {
+        var services = new ServiceCollection();
+        MapRegisterServices.Register(services, args, "http://127.0.0.1:12345");
+
+        Assert.Equal(expectedActiveRoot, services.Any(item => item.ServiceType == typeof(FeatureLogService)));
+        Assert.Equal(expectedActiveRoot, services.Any(item => item.ServiceType == typeof(IFeatureLogReader)));
+        Assert.Equal(expectedActiveRoot, services.Any(item => item.ServiceType == typeof(IDiagnosticLogReader)));
+        var writer = Assert.Single(services, item => item.ServiceType == typeof(IFeatureLog));
+        if (!expectedActiveRoot)
+            Assert.Same(NullFeatureLog.Instance, writer.ImplementationInstance);
     }
 
     [Fact]

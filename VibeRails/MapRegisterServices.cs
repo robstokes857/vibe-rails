@@ -33,6 +33,7 @@ using VibeRails.Services.Integrations.VibeCodeRemote;
 using VibeRails.Services.GitPreflight;
 using VibeRails.Services.Jobs;
 using VibeRails.Services.HttpRelay;
+using VibeRails.Services.Diagnostics;
 using VibeRails.Daemon;
 using VibeRails.Daemon.Ipc;
 
@@ -55,6 +56,21 @@ namespace VibeRails
             // own from a different argv array. See <see cref="ProcessRole"/>.
             serviceCollection.AddSingleton(
                 new ProcessRole(isActiveRootBackendProcess, isTerminalTabChildProcess));
+
+            // Feature logging is explicitly opted into by callers. Only root dashboards own
+            // its bounded background writer; terminal children do not add a logging worker.
+            if (isActiveRootBackendProcess)
+            {
+                serviceCollection.AddSingleton<FeatureLogService>();
+                serviceCollection.AddSingleton<IFeatureLog>(sp => sp.GetRequiredService<FeatureLogService>());
+                serviceCollection.AddSingleton<IFeatureLogReader>(sp => sp.GetRequiredService<FeatureLogService>());
+                serviceCollection.AddSingleton<IDiagnosticLogReader, DiagnosticLogReader>();
+                serviceCollection.AddHostedService(sp => sp.GetRequiredService<FeatureLogService>());
+            }
+            else
+            {
+                serviceCollection.AddSingleton<IFeatureLog>(NullFeatureLog.Instance);
+            }
 
             serviceCollection.AddHttpClient<ISummaryService, SummaryService>(
                 x =>

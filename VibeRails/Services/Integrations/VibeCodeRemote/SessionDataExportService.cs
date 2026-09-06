@@ -9,6 +9,7 @@ using System.Text;
 using System.Text.Json;
 using VibeRails.DB;
 using VibeRails.DTOs;
+using VibeRails.Services.Diagnostics;
 using VibeRails.Utils;
 
 namespace VibeRails.Services.Integrations.VibeCodeRemote;
@@ -51,18 +52,21 @@ public sealed class SessionDataExportService : ISessionDataExportService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<SessionDataExportService> _logger;
     private readonly Func<string> _computerNameFactory;
+    private readonly IFeatureLog _featureLog;
 
     public SessionDataExportService(
         HttpClient httpClient,
         IConfiguration configuration,
         IServiceScopeFactory scopeFactory,
-        ILogger<SessionDataExportService> logger)
+        ILogger<SessionDataExportService> logger,
+        IFeatureLog? featureLog = null)
         : this(
             httpClient,
             configuration,
             scopeFactory,
             logger,
-            ResolveComputerName)
+            ResolveComputerName,
+            featureLog)
     {
     }
 
@@ -71,19 +75,83 @@ public sealed class SessionDataExportService : ISessionDataExportService
         IConfiguration configuration,
         IServiceScopeFactory scopeFactory,
         ILogger<SessionDataExportService> logger,
-        Func<string> computerNameFactory)
+        Func<string> computerNameFactory,
+        IFeatureLog? featureLog = null)
     {
         _httpClient = httpClient;
         _configuration = configuration;
         _scopeFactory = scopeFactory;
         _logger = logger;
         _computerNameFactory = computerNameFactory;
+        _featureLog = featureLog ?? NullFeatureLog.Instance;
     }
 
     public bool IsConfigured => TryResolveConfiguration(out _, out _);
 
     public async Task<SessionDataExportResult> ExportSessionAsync(
         string sessionId,
+        CancellationToken cancellationToken)
+    {
+        var attempt = new UploadAttempt(
+            Guid.NewGuid().ToString("D"),
+            Guid.TryParse(sessionId, out var sourceId) ? sourceId.ToString("D") : "Unknown session");
+        WriteUploadLog(attempt, "started", "Session data upload requested.");
+        try
+        {
+            var result = await ExportSessionCoreAsync(sessionId, attempt, cancellationToken);
+            var (status, message) = result.Status switch
+            {
+                SessionDataExportStatus.Success => ("succeeded", "The server acknowledged the session upload and the local export marker was saved."),
+                SessionDataExportStatus.NoApiKey => ("skipped", "Upload skipped because no API key is configured."),
+                SessionDataExportStatus.NotConfigured => ("skipped", "Upload skipped because no HTTPS export endpoint is configured."),
+                SessionDataExportStatus.Busy => ("skipped", "Upload skipped because another session export is running."),
+                SessionDataExportStatus.NotFound => ("skipped", "Upload skipped because the ended, unexported session was not found."),
+                SessionDataExportStatus.InvalidApiKey => ("failed", "The server rejected the configured API key."),
+                SessionDataExportStatus.UploadFailed => ("failed", "The session upload was not acknowledged by the server."),
+                _ => ("failed", "The session data could not be prepared for upload.")
+            };
+            WriteUploadLog(attempt, status, message);
+            return result;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            WriteUploadLog(attempt, "cancelled", "The session upload was cancelled before an acknowledgement was received.");
+            throw;
+        }
+        catch
+        {
+            WriteUploadLog(attempt, "failed", "The session data export did not complete.");
+            throw;
+        }
+    }
+
+    private void WriteUploadLog(UploadAttempt attempt, string status, string message)
+    {
+        // Upload acknowledgement and the local database update are different outcomes. If the
+        // latter fails or is cancelled, the history must still show that the server has the data.
+        var acknowledgementIssue = attempt.RemoteAcknowledged && status != "succeeded";
+        _featureLog.Write(
+            "data-upload",
+            acknowledgementIssue ? "local-acknowledgement-failed" : status,
+            acknowledgementIssue
+                ? "The server acknowledged the session upload, but the local export marker could not be confirmed. The session may be retried."
+                : message,
+            attempt.OperationId,
+            attempt.Subject,
+            acknowledgementIssue ? "uploaded" : status,
+            acknowledgementIssue || status == "failed" ? LogLevel.Warning : LogLevel.Information);
+    }
+
+    private sealed class UploadAttempt(string operationId, string subject)
+    {
+        public string OperationId { get; } = operationId;
+        public string Subject { get; } = subject;
+        public bool RemoteAcknowledged { get; set; }
+    }
+
+    private async Task<SessionDataExportResult> ExportSessionCoreAsync(
+        string sessionId,
+        UploadAttempt attempt,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -171,6 +239,8 @@ public sealed class SessionDataExportService : ISessionDataExportService
                 cancellationToken);
             if (upload.Status != SessionDataExportStatus.Success)
                 return upload;
+
+            attempt.RemoteAcknowledged = true;
 
             await using (var scope = _scopeFactory.CreateAsyncScope())
             {

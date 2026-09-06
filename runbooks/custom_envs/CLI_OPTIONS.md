@@ -85,6 +85,26 @@ Where they live in code
 - Copilot: `renderCopilotModelOptions()`.
 - OpenCode: `renderOpencodeModelOptions()`.
 
+Model addition completion checklist:
+
+1. Update the matching dropdown renderer and this runbook in the same change.
+2. Update and run the existing model-list UI test for the affected CLI. For Codex,
+   [UITests/tests/environment-codex.spec.js](../../UITests/tests/environment-codex.spec.js)
+   checks the pinned model values and their priority order. Run it with
+   `npm --prefix UITests run test:e2e -- tests/environment-codex.spec.js`.
+3. Verify the model appears when creating a **new** environment, in the intended
+   position after Default. An existing environment displaying it as `(custom)`
+   does not prove it was added to the pinned dropdown list.
+4. Select the model, save, and reopen the environment. Confirm the exact model ID
+   is preserved and the generated `CustomArgs` contains the expected `--model`
+   argument.
+5. Verify against the updated app build and refresh the UI so it loads the changed
+   JavaScript. State whether the change is only in source or is also installed in
+   the running app; a source edit alone does not update an installed copy.
+
+Syntax checks and a successful build cannot detect a missing dropdown entry.
+If the UI check cannot run, report that verification gap explicitly.
+
 Current pinned values (Claude re-verified 2026-09-01; Codex 2026-09-04;
 Copilot 2026-08-23; OpenCode 2026-08-23; Antigravity flags 2026-08-23, models
 still last hand-copied 2026-07-02):

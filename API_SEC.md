@@ -1,11 +1,22 @@
 # API authentication coverage
 
-Audit date: 2026-09-03
+Audit date: 2026-09-05
 
-Full production route/authentication reconciliation completed: 2026-09-03. All 168
-`/api/v1` method/path surfaces, nine protected non-`/api` API surfaces, and the three
-bootstrap/page/probe mappings match the current working tree. The only middleware bypasses
-remain exact `GET /health`, exact `GET /auth/bootstrap`, and global `OPTIONS` requests.
+Full production route/authentication reconciliation completed: 2026-09-05, covering the 168
+`/api/v1` method/path surfaces that existed then, nine protected non-`/api` API surfaces, and
+the three bootstrap/page/probe mappings. The only middleware bypasses remain exact
+`GET /health`, exact `GET /auth/bootstrap`, and global `OPTIONS` requests.
+
+That audit found no missing or removed endpoints and no additional endpoint lacking a
+valid session credential. No `SECURITY_ERROR.md` was needed. The existing one-credential
+page/static-file behavior and conditional proxy responses remain documented in section 2.
+Cookie and session-header authentication are alternative transports of the same secret;
+the additional check on business APIs is the tab token, not a second copy of the session token.
+
+Internal diagnostics inventory reconciled: 2026-09-06 (the two authenticated, active-root-only
+`GET /api/v1/internal/*` read routes introduced with the Internal tools modal were added to
+section 3, bringing the `/api/v1` count to 170; the raw-Serilog exposure decision is recorded
+there).
 
 Python-script MCP inventory reconciled: 2026-08-21 (three authenticated MCP-configuration
 routes and the authenticated, active-root-only interactive-run route added to the inventory).
@@ -119,7 +130,7 @@ discovery alone is insufficient if the same feature change is allowed to expand 
 set. The production listener set is now frozen above so a new match starts as a finding, not as
 an expectation.
 
-### Repository-wide listener result — 2026-09-03
+### Repository-wide listener result — 2026-09-05
 
 - Approved serving implementation: the main Kestrel host in `VibeRails/Program.cs`.
 - Rejected and removed before merge: `GrokLoopbackBridge`'s `HttpListener`.
@@ -149,8 +160,8 @@ session-scoped browser credential (`viberails_tab`), which the implementation ca
 Authentication is enforced primarily by
 [`CookieAuthMiddleware`](VibeRails/Middleware/CookieAuthMiddleware.cs). The LLM proxy
 routes additionally use
-[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 180 mapped route
-surfaces in this inventory: 168 `/api/v1` method/path mappings, nine non-`/api` protected
+[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 182 mapped route
+surfaces in this inventory: 170 `/api/v1` method/path mappings, nine non-`/api` protected
 API surfaces, and three bootstrap/page/probe routes. Static-file middleware and the
 global `OPTIONS` behavior are noted separately because they are not finite mapped-route
 lists.
@@ -473,6 +484,28 @@ WebSocket handshakes use the session cookie/subprotocol plus the tab-token subpr
 - `DELETE /api/v1/python-scripts`
 - `POST /api/v1/python-scripts/import` — mapped only by an active root-backend process.
 
+### Internal diagnostics tools (2; active root backend only)
+
+- `GET /api/v1/internal/logs` — read-only. `source=features` (the default) pages the
+  redacted feature journal; `source=application` and `source=daemon` return bounded tails of
+  the existing Serilog `vb-*.log` / `vbd-*.log` files under the install directory's `logs`
+  folder. `source` is a fixed whitelist: no caller-supplied value ever reaches the filesystem,
+  and both the directory and each file are refused when they are symlinks, junctions, or other
+  reparse points.
+- `GET /api/v1/internal/uploads` — read-only; the feature journal grouped to the latest event
+  per upload operation.
+
+Accepted exposure (decided 2026-09-06): the application and daemon sources serve Serilog
+lines verbatim. Whatever the process logged, including full exception messages, becomes
+readable by any holder of both credentials. This is accepted because those files already
+belong to the same OS user under private permissions, the surface is GET-only and mapped only
+by the active root backend, and the feature journal remains the redacted channel: the
+`IFeatureLog` contract forbids secrets and payload bodies there, but nothing redacts Serilog
+output. Code that logs through `ILogger`/Serilog must therefore keep API keys, tokens, and
+transcript text out of messages and exception text; do not rely on the Logs viewer being
+hidden. `Tests/Routes/InternalToolsRoutesTests.cs` pins the two-credential requirement, the
+whitelist rejection of path-like sources, and the absence of mutating verbs.
+
 ### Local filesystem browser (1)
 
 - `GET /api/v1/filesystem/entries` — mapped only by an active root-backend process and
@@ -514,6 +547,24 @@ WebSocket handshakes use the session cookie/subprotocol plus the tab-token subpr
 
 ## Audit observations
 
+- Amendment on 2026-09-06: the Internal tools feature added `GET /api/v1/internal/logs` and
+  `GET /api/v1/internal/uploads`, which the 2026-09-05 inventory did not list. Both are now in
+  section 3 with their accepted raw-Serilog exposure, and the `/api/v1` count is 170. Verified
+  for these two routes only: path under `/api/`, so `CookieAuthMiddleware` requires both
+  credentials; mapped only by the active root backend; GET only; `source` whitelisted before
+  any filesystem access. Pinned by `Tests/Routes/InternalToolsRoutesTests.cs`. This was not a
+  repeat of the full route sweep.
+- Validation on 2026-09-05: compared all 168 documented `/api/v1` method/path entries
+  against source mappings, including constant-based HTTP-relay paths and WebSocket
+  mappings; neither set had unmatched entries. Inspected the route-registration aggregator,
+  the nine non-`/api` API surfaces, and the bootstrap/page/probe mappings. Repeated both
+  repository-wide listener searches above, including untracked files.
+- Inspected production pipeline ordering, the exact middleware bypass predicate, session
+  and tab validation, bootstrap code consumption/expiry, and the shared proxy/control gate.
+  Existing targeted tests passed: **95 passed, 0 failed, 0 skipped**, covering
+  `CookieAuthMiddlewareTests`, `AuthServiceTests`, `AuthRoutesTests`, all five LLM proxy
+  route test classes, `TokenSaverPauseRoutesTests`, and `McpServerHttpTests`. This is a
+  source audit plus targeted tests, not a live request sweep of every production endpoint.
 - If “auth Cookie and SessionToken” is meant literally as the cookie plus the
   `viberails_session` header, **no route requires both**: the middleware deliberately accepts
   either transport for the same session secret. The actual second credential is

@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Serilog;
+using VibeRails.Services.Diagnostics;
 using VibeRails.Utils;
 
 namespace VibeRails.Services.Integrations.VibeCodeRemote;
@@ -72,11 +73,13 @@ public sealed class DataExportService : IDataExportService
     private readonly Func<string> _temporaryDirectoryFactory;
     private readonly Func<string> _computerNameFactory;
     private readonly IDataExportProgress _progress;
+    private readonly IFeatureLog _featureLog;
 
     public DataExportService(
         HttpClient httpClient,
         IConfiguration configuration,
-        IDataExportProgress progress)
+        IDataExportProgress progress,
+        IFeatureLog? featureLog = null)
         : this(
             httpClient,
             configuration,
@@ -84,7 +87,8 @@ public sealed class DataExportService : IDataExportService
                 Path.GetTempPath(),
                 $"viberails-data-export-{Guid.NewGuid():N}"),
             ResolveComputerName,
-            progress)
+            progress,
+            featureLog)
     {
     }
 
@@ -93,13 +97,15 @@ public sealed class DataExportService : IDataExportService
         IConfiguration configuration,
         Func<string> temporaryDirectoryFactory,
         Func<string> computerNameFactory,
-        IDataExportProgress? progress = null)
+        IDataExportProgress? progress = null,
+        IFeatureLog? featureLog = null)
     {
         _httpClient = httpClient;
         _configuration = configuration;
         _temporaryDirectoryFactory = temporaryDirectoryFactory;
         _computerNameFactory = computerNameFactory;
         _progress = progress ?? NullDataExportProgress.Instance;
+        _featureLog = featureLog ?? NullFeatureLog.Instance;
     }
 
     /// <summary>
@@ -136,6 +142,43 @@ public sealed class DataExportService : IDataExportService
     }
 
     public async Task<DataExportResult> ExportAsync(CancellationToken cancellationToken)
+    {
+        var operationId = Guid.NewGuid().ToString("D");
+        WriteUploadLog(operationId, "started", "Database snapshot upload requested.");
+        try
+        {
+            var result = await ExportCoreAsync(cancellationToken);
+            var (status, message) = result.Status switch
+            {
+                DataExportStatus.Success => ("succeeded", "The server acknowledged the database snapshot upload."),
+                DataExportStatus.NoApiKey => ("skipped", "Upload skipped because no API key is configured."),
+                DataExportStatus.NotConfigured => ("skipped", "Upload skipped because no HTTPS export endpoint is configured."),
+                DataExportStatus.Busy => ("skipped", "Upload skipped because another database export is running."),
+                DataExportStatus.InvalidApiKey => ("failed", "The server rejected the configured API key."),
+                DataExportStatus.UploadFailed => ("failed", "The database snapshot upload was not acknowledged by the server."),
+                _ => ("failed", "The database snapshot could not be prepared for upload.")
+            };
+            WriteUploadLog(operationId, status, message);
+            return result;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            WriteUploadLog(operationId, "cancelled", "The database snapshot upload was cancelled before an acknowledgement was received.");
+            throw;
+        }
+        catch
+        {
+            WriteUploadLog(operationId, "failed", "The database snapshot export did not complete.");
+            throw;
+        }
+    }
+
+    private void WriteUploadLog(string operationId, string status, string message) =>
+        _featureLog.Write(
+            "data-upload", status, message, operationId, "Database snapshot", status,
+            status == "failed" ? LogLevel.Warning : LogLevel.Information);
+
+    private async Task<DataExportResult> ExportCoreAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 

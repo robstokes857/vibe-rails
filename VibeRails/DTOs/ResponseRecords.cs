@@ -1659,6 +1659,7 @@ namespace VibeRails.DTOs
     // Push Notification DTOs
     [JsonSerializable(typeof(PushSendRequest))]
     [JsonSerializable(typeof(DataExportResponse))]
+    [JsonSerializable(typeof(InternalLogResponse))]
     [JsonSerializable(typeof(DataExportProgressResponse))]
     [JsonSerializable(typeof(StateDatabaseSizeResponse))]
     [JsonSerializable(typeof(UpdateInfo))]

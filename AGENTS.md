@@ -924,6 +924,21 @@ See "Adding a New MCP Tool" above: add a `[McpServerToolType]` class under
 
 ### Debug Logging
 
+The hidden logo triple-click modal is **Internal tools**, with About, Data uploads, and Logs
+tabs. `Services/Diagnostics/FeatureLogService` is a root-backend-only, bounded asynchronous
+JSONL journal, separate from Serilog and terminal transcripts. Callers explicitly opt in through
+`IFeatureLog.Write(feature, eventName, message, operationId, subject, status, level)`; currently
+both data-export services record attempts and outcomes under `data-upload`. Keep one operation
+ID through an action and use safe metadata only. Files live in `logs/features` beside `state.db`.
+`GET /api/v1/internal/logs` reads filtered retained events; `/api/v1/internal/uploads` groups
+each attempt to its latest event before applying filters. The Logs route accepts `source=features`
+(API default), `application`, or `daemon`. `DiagnosticLogReader` reads bounded tails of existing
+Serilog `logs/vb-*.log` and `logs/vbd-*.log` files on demand, with a two-second cache and no
+writer changes. The UI defaults to Application logs; upload drill-down selects the Feature journal.
+Routes are authenticated and mapped
+only on active root backends. See [README.md](README.md#internal-tools-and-feature-logs) for
+the extension recipe, retention, status semantics, and best-effort persistence limits.
+
 Enable verbose logging in [Program.cs](VibeRails/Program.cs):
 ```csharp
 // Modify logging level
