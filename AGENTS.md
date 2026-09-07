@@ -1,5 +1,16 @@
 # AGENTS.md - VibeRails Project Documentation
 
+## Runbooks and diagnostic helpers
+
+Runbooks, investigation notes, and diagnostic Python helpers live in the private
+`vibe-books` repository. With sibling checkouts, start at
+[the topic index](../vibe-books/INDEX.md). Keep product code, regression tests,
+build/install scripts, and component documentation in this repository.
+
+[API_SEC.md](API_SEC.md) stays here as the API security contract and review gate.
+Read it before changing API exposure, authentication, or production listeners;
+record security violations in `SECURITY_ERROR.md` for the owner to review.
+
 ## Terminology Note
 
 **"Web UI Chat"** refers to the xterm.js-based terminal interface where users interact with CLI tools (Claude, Codex, Antigravity) through a browser-based terminal emulator. This is NOT a separate chat UI - it's the PTY-backed terminal that runs actual CLI sessions.

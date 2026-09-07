@@ -66,8 +66,7 @@ public static class OutputCondenser
     /// file-read payloads that were being cut ran 194–967 elided lines, i.e. 394–1167 lines total;
     /// a 1400-line budget passes every one of them through verbatim by line count. The independent
     /// <see cref="VerbatimBudgetMaxChars"/> ceiling below remains the final resource-safety bound.
-    /// Re-derive from captures before changing either — see
-    /// runbooks/token_saver/truncation_file_reads.md.
+    /// Re-derive from captures before changing either.
     /// </summary>
     internal const int VerbatimKeepHeadLines = 1200;
     internal const int VerbatimKeepTailLines = 200;

@@ -268,7 +268,7 @@ public static class CommandShapes
     /// Known gap, deliberate and measured: large <c>git show</c>/<c>git diff</c> payloads (408 KB
     /// over the sample window) still truncate at the default budget. A diff is a different payload
     /// class with a different trade — a lockfile diff is exactly what T should cap — so it is left
-    /// for a decision of its own. See <c>runbooks/token_saver/truncation_file_reads.md</c>.
+    /// for a decision of its own.
     /// </summary>
     public static bool ReadsFileContents(string? command)
     {

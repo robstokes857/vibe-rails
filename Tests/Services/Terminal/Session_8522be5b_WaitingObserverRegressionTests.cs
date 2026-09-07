@@ -47,7 +47,7 @@ public sealed class Session_8522be5b_WaitingObserverRegressionTests
     public async Task Replay_FiresExactlyOneWaitingEventAfterCodexGoesIdle()
     {
         if (!File.Exists(FixturePath))
-            Assert.Skip($"Fixture not present: {FixturePath}. Run python-scripts/export_chunks_fixture.py against the session locally to regenerate.");
+            Assert.Skip($"Fixture not present: {FixturePath}.");
 
         var chunks = TerminalTestFixtures.LoadFixture(FixturePath);
         Assert.NotEmpty(chunks);

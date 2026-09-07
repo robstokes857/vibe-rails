@@ -1,8 +1,17 @@
 # MintLint
 
 MintLint measures and grades maintainability signals for supported source languages.
-The metric thresholds, category aggregation, breadth-gated file roll-up, and rating bands
-are documented in [MintLintAlgo.md](MintLintAlgo.md).
+The metric thresholds and weights live in [ScoringProfile](Scoring/ScoringProfile.cs).
+[ScoreCalculator](Scoring/ScoreCalculator.cs) implements category aggregation,
+breadth-gated file roll-up, and rating bands.
+
+Why those numbers are what they are is the tuning journal, kept in the private
+`vibe-books` repository at
+[mintlint/MintLintAlgo.md](../../vibe-books/mintlint/MintLintAlgo.md) with sibling
+checkouts. Read it before changing grading and record the change there: the
+aggregation knobs are tuned against hand-computed fixture values in
+`Tests/MintLintTests`, so a change that looks local to `ScoreCalculator` moves
+numbers the tests assert by hand.
 
 ## VibeRails change-scoped grading
 

@@ -1,8 +1,8 @@
 # API authentication coverage
 
-Audit date: 2026-09-06
+Audit date: 2026-09-07
 
-Full production route/authentication reconciliation completed: 2026-09-06, covering all 170
+Full production route/authentication reconciliation completed: 2026-09-07, covering all 170
 current `/api/v1` method/path surfaces, nine protected non-`/api` API surfaces, and
 the three bootstrap/page/probe mappings. The only middleware bypasses remain exact
 `GET /health`, exact `GET /auth/bootstrap`, and global `OPTIONS` requests.
@@ -130,7 +130,7 @@ discovery alone is insufficient if the same feature change is allowed to expand 
 set. The production listener set is now frozen above so a new match starts as a finding, not as
 an expectation.
 
-### Repository-wide listener result — 2026-09-06
+### Repository-wide listener result — 2026-09-07
 
 - Approved serving implementation: the main Kestrel host in `VibeRails/Program.cs`.
 - Rejected and removed before merge: `GrokLoopbackBridge`'s `HttpListener`.
@@ -549,6 +549,24 @@ whitelist rejection of path-like sources, and the absence of mutating verbs.
 
 ## Audit observations
 
+- Full validation on 2026-09-07: reconciled all **182 mapped route surfaces** against the
+  current working tree, including uncommitted changes: 170 `/api/v1` mappings, nine protected
+  non-`/api` API surfaces, and three bootstrap/page/probe mappings. Resolved constant-based
+  HTTP-relay/control/proxy paths and the inherited event-WebSocket mapping; no endpoints
+  were missing from the inventory or removed from the codebase.
+  Inspected the registration aggregator, production middleware ordering, exact three-case
+  bypass predicate, bootstrap code validation/consumption, session/tab validation, and
+  proxy/control gates. Both repository-wide listener searches found only the approved main
+  Kestrel host, the non-serving port probe, and test-only hosts.
+  Existing targeted tests passed: **95 passed, 0 failed, 0 skipped**, covering
+  `CookieAuthMiddlewareTests`, `AuthServiceTests`, `AuthRoutesTests`, all five LLM proxy
+  route test classes, `TokenSaverPauseRoutesTests`, and `McpServerHttpTests`.
+  No additional endpoint lacking a session credential was found, so no `SECURITY_ERROR.md`
+  was created. The only session-authentication exceptions remain `GET /health`, `OPTIONS *`,
+  and `GET /auth/bootstrap?code={one-time-code}&redirect={local-path}`. All `/api/v1` business
+  handlers additionally require the tab credential; the existing session-only page/static
+  behavior and conditional proxy responses are documented in section 2.
+  This was source reconciliation plus targeted tests, not a live sweep of every endpoint.
 - Full validation on 2026-09-06: compared all 170 documented `/api/v1` method/path entries
   against source mappings, resolving the HTTP-relay constants and event-WebSocket mapping;
   neither set had unmatched entries. Also inspected all nine non-`/api` API surfaces,

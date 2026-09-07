@@ -113,8 +113,7 @@ public sealed class TerminalGridSerializerTests
         // tracking without restoring it, xterm.js has no active mouse protocol and
         // falls back to alt-scroll: wheel events become cursor-up/down, which
         // OpenCode's composer reads as input-history navigation. Sticky for the rest
-        // of the session, because opentui never re-asserts. See runbooks/terminal/
-        // TERMINAL.md "## 2026-07-26 GLM 5.2 wheel acts like a held up-arrow".
+        // of the session, because opentui never re-asserts.
         var server = new TerminalEmulator.Terminal(cols: 20, rows: 5, scrollbackSize: 100);
         server.Write("\x1b[?1049h" + OpenTuiStartupModes);
         // ?1000/?1002/?1003 are last-wins, so the effective protocol is 1003 (any-event).

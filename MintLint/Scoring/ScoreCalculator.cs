@@ -7,7 +7,7 @@ namespace MintLint;
 /// THE one place MintLint turns raw metric values into grades. Every number the library
 /// reports — per-metric concern, category scores, the file overall, the scan overall, and
 /// the rating labels — is computed inside this class, in pipeline order, top to bottom
-/// (stage numbers follow MintLint/MintLintAlgo.md):
+/// (after stage 1 measures the raw metrics):
 ///
 /// <code>
 ///   Stage 2  Normalize   raw value → 0–100 concern via warn/critical thresholds
@@ -19,9 +19,8 @@ namespace MintLint;
 /// </code>
 ///
 /// Tuning knob VALUES (thresholds, weights, BreadthRank, DepthFloor) live in
-/// <see cref="ScoringProfile"/>; the FORMULAS live here and nowhere else. Log any change to
-/// either in MintLintAlgo.md (the tuning journal) and re-derive the hand-computed numbers
-/// in Tests/MintLintTests.
+/// <see cref="ScoringProfile"/>; the FORMULAS live here and nowhere else. Document the rationale
+/// for changes to either and re-derive the hand-computed numbers in Tests/MintLintTests.
 /// </summary>
 public sealed class ScoreCalculator : IScoreCalculator
 {

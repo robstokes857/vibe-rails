@@ -312,7 +312,7 @@ export class CompressionCapturesController {
             <div class="insp-cap-guid">
                 <span class="lbl">Capture</span>
                 <span class="val" data-cap-guid>${esc(d.id)}</span>
-                <button class="insp-cap-copy" type="button" data-cap-copy="${esc(d.id)}" title="Copy this GUID — it is the handle used with runbooks/compress_runbook.md">Copy GUID</button>
+                <button class="insp-cap-copy" type="button" data-cap-copy="${esc(d.id)}" title="Copy this GUID to investigate the compression capture">Copy GUID</button>
             </div>
 
             <div class="insp-cap-meta">

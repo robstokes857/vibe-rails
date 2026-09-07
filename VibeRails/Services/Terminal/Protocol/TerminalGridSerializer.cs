@@ -53,7 +53,6 @@ internal static class TerminalGridSerializer
         // the session. xterm.js then falls back to alt-scroll — emitting cursor-up/
         // down for wheel events, which OpenCode's composer reads as input-history
         // navigation. Re-emit exactly the modes the app enabled, in one DECSET.
-        // See runbooks/terminal/TERMINAL.md "## 2026-07-26 GLM 5.2 wheel".
         if (inputReportingModes is { Count: > 0 })
         {
             sb.Append("\x1b[?");

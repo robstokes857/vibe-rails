@@ -16,8 +16,7 @@ namespace Tests.Services.Terminal;
 /// our ConPTY child doesn't land on, so CLAUDE_CODE_FORCE_SYNC_OUTPUT=1 is the
 /// only reliable way to make it bracket its post-resize redraws. xterm.js v6
 /// in the browser then commits one atomic frame per BSU/ESU pair and the
-/// resize-reprint flash disappears. See runbooks/terminal/TERMINAL.md
-/// resize-reprint entry + anthropics/claude-code#49584, #55613.
+/// resize-reprint flash disappears. See anthropics/claude-code#49584, #55613.
 ///
 /// Also pins the MCP behavior: VibeRails registers its stdio MCP server for every
 /// managed agent CLI launch. Remove-first repairs stale registrations and add

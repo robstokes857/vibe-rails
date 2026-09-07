@@ -448,7 +448,7 @@
 
         /// <summary>
         /// Insert-or-count. On a ContentHash collision the payload is NOT rewritten — the original
-        /// row's Id stays stable (it is the handle the compress runbook cites) and CreatedUTC keeps
+        /// row's Id stays stable (it is the handle pasted at a reviewer) and CreatedUTC keeps
         /// pointing at first sight. Only SeenCount moves.
         ///
         /// SeenCount is the measurement that pays for this table: a 20KB tool_result re-sent 30 times

@@ -8,8 +8,7 @@ namespace Tests.Services.Terminal;
 /// Session 71dee36a (GLM 5.2, 2026-07-26) sent `__resize__:171,4` from a VS Code panel
 /// dragged to a 4-row sliver; rows=4 fails the rows>=5 bound, the caller treated
 /// "didn't parse" as "not a control message", and the literal text was written to PTY
-/// stdin — appearing typed into OpenCode's composer. See runbooks/terminal/TERMINAL.md
-/// "## 2026-07-26 __resize__:171,4 typed into the OpenCode composer".
+/// stdin — appearing typed into OpenCode's composer.
 /// </summary>
 public sealed class TerminalControlProtocolTests
 {

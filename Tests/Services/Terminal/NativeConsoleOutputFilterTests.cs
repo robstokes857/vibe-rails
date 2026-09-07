@@ -10,8 +10,7 @@ namespace Tests.Services.Terminal;
 /// ConsoleOutputConsumer relayed it verbatim and conhost obeyed, resizing the real window
 /// 120x30 -> 156x41. vb's 50 ms geometry poll then pushed that back into the inner PTY, and when
 /// the console later snapped back to 120x30 it reflowed the alt-screen cells it had already
-/// painted — which a diff-rendering TUI never repaints. See runbooks/terminal/TERMINAL.md
-/// "## 2026-08-02 Automation runs in a native terminal…".
+/// painted — which a diff-rendering TUI never repaints.
 ///
 /// The filter is the one deliberate exception to the no-stripping rule and must stay narrow:
 /// window *geometry* ops only, on the console relay only. Everything else — including every other

@@ -240,7 +240,7 @@ public class CommandService : ICommandService
         // respected rather than clobbered. Glm52 and Glm53 are included because they
         // are OpenCode-backed pseudo-CLIs. Note the injected config only remaps the zai/xai
         // providers, so Glm53's pinned zai-coding-plan model is NOT proxied — it talks to
-        // Z.AI directly (deliberate; see runbooks/custom_envs/CLI_OPTIONS.md "GLM 5.3").
+        // Z.AI directly (deliberate).
         var inheritedOpenCodeConfig = Environment.GetEnvironmentVariable(
             LlmProxyZaiConfig.ConfigContentVariable);
         var openCodeProxyActive = proxySettings.OpenCodeLlmProxyLaunchEnabled

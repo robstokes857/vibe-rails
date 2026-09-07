@@ -259,7 +259,7 @@ public sealed class Terminal : IAsyncDisposable
     /// While one is attached it owns the PTY geometry: xterm.js is never told about
     /// geometry changes it didn't request (there is no resize rebroadcast to viewers),
     /// so a foreign resize makes it wrap frames composed for a different width —
-    /// shredded chrome + stranded cursor (TERMINAL.md "## 2026-08-10").
+    /// shredded chrome + stranded cursor.
     /// </summary>
     public bool HasLocalWebViewer
     {

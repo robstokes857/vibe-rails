@@ -83,8 +83,7 @@ IBaseLlmCliLauncher (Interface)
   standard config/agents/commands/plugins directory beneath that root at `opencode/`.
   `OPENCODE_CONFIG_DIR` is intentionally not used because it is an additive overlay and still
   merges the user's global config. `XDG_DATA_HOME` is left unchanged, so credentials remain
-  global. Launch-flag-only — no settings file is written (see
-  runbooks/custom_envs/CLI_OPTIONS.md "### OpenCode"). YOLO is `--auto`; initial prompt is
+  global. Launch-flag-only — no settings file is written. YOLO is `--auto`; initial prompt is
   `--prompt=<text>` (positional = project path). VibeRails registers its MCP server via
   `opencode mcp add` (or `opencode.cmd mcp add` on Windows) as a setup command — see
   `CommandService.McpClis` / `GetMcpCommands`.

@@ -7,8 +7,7 @@ using Xunit;
 namespace Tests.TokenSaver;
 
 /// <summary>
-/// Pins the file-read truncation fix (2026-08-29). See
-/// <c>runbooks/token_saver/truncation_file_reads.md</c> for the capture evidence that motivated it.
+/// Pins the file-read truncation fix (2026-08-29).
 ///
 /// The bug: <c>scope-read</c> ships off because rewriting file contents breaks the model's
 /// <c>old_string</c> matching — but <c>scope-shell</c> is on, and <c>cat</c>/<c>sed</c>/

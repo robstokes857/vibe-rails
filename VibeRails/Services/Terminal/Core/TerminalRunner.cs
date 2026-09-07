@@ -425,7 +425,7 @@ public class TerminalRunner
                             // Log every remote resize request unconditionally — before the auth
                             // check, the same-size early-return, and the local-viewer authority
                             // gate, all of which can swallow it silently. Session b92fb476
-                            // (TERMINAL.md "## 2026-08-10") was resized over this path with zero
+                            // was resized over this path with zero
                             // log evidence; "did anything remote touch this session" must be
                             // answerable from the log alone.
                             Log.Information(

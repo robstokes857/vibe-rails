@@ -290,7 +290,7 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
                         }
                         // Reserved prefix that failed to parse: drop, never route.
                         // Routing types the literal frame into the TUI — same bug as
-                        // the local path (TERMINAL.md "## 2026-07-26 __resize__:171,4").
+                        // the local path (`__resize__:171,4` typed into the TUI).
                         if (TerminalControlProtocol.IsReservedControlFrame(text))
                         {
                             Log.Warning(

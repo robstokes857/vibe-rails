@@ -21,8 +21,7 @@ namespace VibeRails.Services.Terminal.Consumers;
 /// <c>d2328427-187c-48ae-b0a5-2747a542fadf</c>, where opentui emitted <c>\e[8;41;156t</c> and
 /// conhost obeyed it — 120x30 to 156x41 — and the console later snapped back to 120x30, reflowing
 /// the alt-screen content it had already painted. opentui is a diff renderer, so it never repaints
-/// those cells and the window stays shredded for the rest of the run. See TERMINAL.md
-/// "## 2026-08-02 Automation runs in a native terminal…".
+/// those cells and the window stays shredded for the rest of the run.
 /// </para>
 ///
 /// <para>

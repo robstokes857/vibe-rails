@@ -9,8 +9,7 @@ namespace Tests.Services.Terminal;
 /// webview is never told about foreign geometry changes (no resize rebroadcast exists),
 /// so it wrapped the 145-wide repaints at 129 cols — shredded input-box chrome and the
 /// cursor stranded on a blank row. Policy: while a local web viewer is attached, remote
-/// resizes are ignored. See runbooks/terminal/TERMINAL.md "## 2026-08-10 Passive-viewer
-/// resize shreds the webview".
+/// resizes are ignored.
 /// </summary>
 public sealed class TerminalResizeCoordinatorTests
 {

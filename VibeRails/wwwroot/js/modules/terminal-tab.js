@@ -18,8 +18,7 @@ const RESIZE_PREFIX = '__resize__:';
 // xterm.js renders the rapid repaints mid-reflow and persistent stacked
 // copies of the UI appear). Trade-off: Claude Code learns the new terminal
 // size ~2 s after the user stops dragging, so fast drag-then-type feels
-// briefly off until the size settles. See runbooks/terminal/TERMINAL.md
-// "Stacked repaints during drag-resize" entry. Do NOT reduce the extended
+// briefly off until the size settles. Do NOT reduce the extended
 // value below 500 ms without re-running the slow-sidebar-drag repro
 // (session fd7ac97f-0b7b-4c0b-9c32-4daf9030392d).
 const RESIZE_SYNC_DEBOUNCE_MS_DEFAULT = 140;
@@ -756,7 +755,7 @@ export class TerminalTab {
                     replayBytesBeforeFirstRender += data.byteLength;
                 }
 
-                // Cursor suppression is CODEX-ONLY (TERMINAL.md "## 2026-06-11").
+                // Cursor suppression is CODEX-ONLY.
                 // Codex's repaints briefly park a visible cursor on its status line,
                 // and the in-box Windows ConPTY re-emits that transient state outside
                 // the ?2026 sync brackets, so xterm paints it (~10x/sec hop while

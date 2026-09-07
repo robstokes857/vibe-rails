@@ -32,7 +32,7 @@ public sealed class Session_b91596d9_WaitingObserverRegressionTests
     public async Task WorkingScreen_DoesNotPublishWaitingEvent()
     {
         if (!File.Exists(FixturePath))
-            Assert.Skip($"Fixture not present: {FixturePath}. Run python-scripts/export_chunks_fixture.py against the session locally to regenerate.");
+            Assert.Skip($"Fixture not present: {FixturePath}.");
 
         var chunks = TerminalTestFixtures.LoadFixture(FixturePath);
         Assert.NotEmpty(chunks);

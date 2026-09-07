@@ -1002,7 +1002,7 @@ export class EnvironmentController {
 
     renderAntigravityModelOptions(selectedModel) {
         const selected = (selectedModel || '').trim();
-        // Hand-maintained pinned list — see runbooks/custom_envs/CLI_OPTIONS.md ("Model Lists").
+        // Hand-maintained pinned list.
         // Values are the exact display strings `agy models` prints and that `--model` accepts,
         // spaces + parens included (e.g. "Gemini 3.5 Flash (Low)"). `agy models` is an
         // interactive picker with no scriptable/JSON output, so this list is updated by hand.
@@ -1252,8 +1252,7 @@ export class EnvironmentController {
 
     renderCodexModelOptions(selectedModel) {
         const selected = this.normalizeCodexModel(selectedModel);
-        // Hand-maintained pinned list — see runbooks/custom_envs/CLI_OPTIONS.md
-        // ("Model Lists") to add a newly released model or drop a retired one.
+        // Hand-maintained pinned list. Add a newly released model or drop a retired one here.
         const options = [
             ['', 'Default (Codex recommended)'],
             ['gpt-6-astra', 'gpt-6-astra'],
@@ -1280,8 +1279,7 @@ export class EnvironmentController {
 
     renderClaudeModelOptions(selectedModel) {
         const selected = this.normalizeClaudeModel(selectedModel);
-        // Hand-maintained pinned list — see runbooks/custom_envs/CLI_OPTIONS.md
-        // ("Model Lists") to add a newly released model or drop a retired one.
+        // Hand-maintained pinned list. Add a newly released model or drop a retired one here.
         const options = [
             ['', 'Default (Claude recommended)'],
             ['claude-fable-5-1', 'claude-fable-5-1'],
@@ -1307,8 +1305,7 @@ export class EnvironmentController {
 
     renderCopilotModelOptions(selectedModel) {
         const selected = (selectedModel || '').trim();
-        // Hand-maintained pinned list — see runbooks/custom_envs/CLI_OPTIONS.md ("Model
-        // Lists"). Availability varies by Copilot plan/policy, so these are suggestions;
+        // Hand-maintained pinned list. Availability varies by Copilot plan/policy, so these are suggestions;
         // an unavailable model errors at launch ("is not available"), and unknown saved
         // values survive via the `(custom)` fallback below.
         const options = [
@@ -1476,7 +1473,7 @@ export class EnvironmentController {
 
     renderOpencodeModelOptions(selectedModel) {
         const selected = (selectedModel || '').trim();
-        // Hand-maintained pinned list — see runbooks/custom_envs/CLI_OPTIONS.md ("Model Lists").
+        // Hand-maintained pinned list.
         // OpenCode model IDs are `provider/model` (e.g. anthropic/claude-sonnet-4-5). Verify the
         // current catalog with `opencode models` and refresh when providers ship/retire models;
         // unknown saved values survive via the `(custom)` fallback below.

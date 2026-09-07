@@ -166,7 +166,7 @@ public static class AnthropicMessagesRewriter
 
                         // Everything the compression does to this string happens in here. See
                         // CompressionPipeline.Run — it is the only path, and the trace it fills is
-                        // what the capture view and the compress runbook read.
+                        // what the capture view reads.
                         var trace = captures is not null ? new List<StageTrace>() : null;
                         var current = CompressionPipeline.Run(
                             raw,
