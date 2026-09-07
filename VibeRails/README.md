@@ -529,9 +529,7 @@ vibe-rails/
 ├── IntegrationTest/            # Integration tests
 ├── UITests/                    # Playwright E2E / UI tests
 ├── deploy/                     # Build & release scripts
-├── Scripts/                    # Install scripts
-├── runbooks/                   # Operational documentation
-└── python-scripts/             # Python helper scripts
+└── Scripts/                    # Install scripts
 ```
 
 ### Running Tests

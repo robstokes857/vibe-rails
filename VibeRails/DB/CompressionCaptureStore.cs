@@ -28,7 +28,7 @@ public sealed record CompressionCaptureSummary(
     bool RewriteAccepted);
 
 /// <summary>
-/// One capture in full — the unit the compress runbook judges, reconstituted from state.db.
+/// One capture in full — the unit used to judge compression correctness, reconstituted from state.db.
 ///
 /// <see cref="RawText"/> is byte-for-byte what the pipeline saw, which is what makes the what-if
 /// preview real: feeding it back through a different plan is the same operation the proxy performed,

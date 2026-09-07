@@ -56,7 +56,7 @@ public sealed class WaitingForUserInputObserver : ITerminalIoObserver
     // one of them repeats. We reject Idle when small_top < small_unique
     // *and* the small-chunk sample is large enough to be meaningful.
     //
-    // Concrete numbers at the fire moment (from analyze_fixture_buffer.py):
+    // Concrete numbers at the fire moment:
     //   e910eb94 working falsefire: small_top=11 vs small_unique=12 → REJECT
     //   881cd29d approval menu:     small_top=49 vs small_unique=13 → ACCEPT
     //   0ebd404d idle-at-end:       small_top=50 vs small_unique=12 → ACCEPT

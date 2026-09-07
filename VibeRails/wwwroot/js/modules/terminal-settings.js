@@ -102,8 +102,7 @@ export function renderTerminalSettingsPanelHtml() {
 }
 // NOTE: the Cursor section (active/inactive style selects) was deliberately
 // removed 2026-06-12 — the cursor is owned by the TUI/xterm defaults now.
-// Do not reintroduce user-facing cursor styling; see TERMINAL.md
-// ("Cursor flicker" entries) for the history that motivated this.
+// Do not reintroduce user-facing cursor styling.
 
 export class TerminalSettings {
     constructor(container, manager) {
@@ -148,7 +147,6 @@ export class TerminalSettings {
 
     // 'default' = 140 ms (matches community xterm fit-addon norm)
     // 'extended' = 2 s (opt-in; suppresses stacked-repaints during slow drags).
-    // See runbooks/terminal/TERMINAL.md "Stacked repaints during drag-resize".
     // Consumed by terminal-tab.js via the same localStorage key (kept in sync
     // by string contract — do not rename without grepping for the key).
     loadResizeDebounce() {

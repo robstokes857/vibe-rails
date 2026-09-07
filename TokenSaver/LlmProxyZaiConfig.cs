@@ -16,8 +16,7 @@ namespace TokenSaver;
 /// The inline config overrides the <c>zai</c> and <c>xai</c> providers' <c>options.baseURL</c>
 /// and <c>options.headers</c>; everything else (apiKey from global <c>auth.json</c>, models, etc.)
 /// merges from the user's existing global/project OpenCode config. Credentials stay isolated:
-/// <c>XDG_DATA_HOME</c> is left unchanged, per the OpenCode integration policy in
-/// <c>runbooks/custom_envs/CLI_OPTIONS.md</c>.
+/// <c>XDG_DATA_HOME</c> is left unchanged so credentials stay in the user's global OpenCode data directory.
 ///
 /// Upstream: Z.AI's OpenAI-compatible Chat Completions API lives at
 /// <c>https://api.z.ai/api/paas/v4</c> (verified against OpenCode's built-in <c>zai</c> provider,

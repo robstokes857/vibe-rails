@@ -29,8 +29,8 @@ public enum StageKind
 /// <param name="Id">Stable id. Persisted in settings.json AND in every capture row, so renaming one
 /// silently re-reads history as "stage disabled". Treat these as a wire format.</param>
 /// <param name="Order">Execution order. See <see cref="CompressionCatalog"/> remarks — this is
-/// declaration order made explicit so the UI, the README, and the runbook can all render the real
-/// pipeline instead of three hand-maintained lists that drift.</param>
+/// declaration order made explicit so the UI and the README can render the real
+/// pipeline instead of hand-maintained lists that drift.</param>
 public sealed record CompressionStageInfo(
     string Id,
     string Name,
@@ -193,8 +193,8 @@ public static class CompressionCatalog
     /// both ship OFF. The reason is specific, not squeamishness: the model builds Edit
     /// <c>old_string</c> values out of Read output, so a rewritten Read means a FAILED EDIT, not
     /// merely a lost saving. They exist as toggles so the capture log can answer "would this have
-    /// been safe" with evidence instead of a guess. Read runbooks/compress_runbook.md before
-    /// turning either on.
+    /// been safe" with evidence instead of a guess. Do not turn either on
+    /// without capture evidence.
     /// </summary>
     public static readonly IReadOnlyList<CompressionScopeInfo> Scopes =
     [

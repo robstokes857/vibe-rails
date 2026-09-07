@@ -499,8 +499,7 @@ public class TerminalSessionService : ITerminalSessionService
                 // A reserved control frame that reached this point failed to parse —
                 // a bug on the sending side, not something the user typed. Dropping
                 // it is the only safe move: routing would write the literal frame to
-                // PTY stdin as keystrokes. See runbooks/terminal/TERMINAL.md
-                // "## 2026-07-26 __resize__:171,4 typed into the OpenCode composer".
+                // PTY stdin as keystrokes.
                 if (result.MessageType == WebSocketMessageType.Text &&
                     TerminalControlProtocol.IsReservedControlFrame(input))
                 {

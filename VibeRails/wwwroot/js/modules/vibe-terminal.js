@@ -124,8 +124,7 @@ export class VibeTerminal {
             scrollback,
             minimumContrastRatio: 3,
             rightClickSelectsWord: true,
-            // cursorBlink stays explicitly false (see TERMINAL.md cursor-flicker
-            // entries). Style/inactive-style are deliberately NOT set: xterm
+            // cursorBlink stays explicitly false. Style/inactive-style are deliberately NOT set: xterm
             // defaults + the CLI's own escape sequences own the cursor — the
             // user-facing cursor settings were removed 2026-06-12.
             cursorBlink: false,

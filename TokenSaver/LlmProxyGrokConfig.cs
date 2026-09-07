@@ -19,7 +19,7 @@ namespace TokenSaver;
 /// headers are not written or overwritten here.
 ///
 /// Do not invent a <c>/llm/grok</c> sidecar or a second listener
-/// (see <c>API_SEC.md</c> / <c>GROK_HARNES.md</c>).
+/// (see <c>API_SEC.md</c>).
 /// </summary>
 public static class LlmProxyGrokConfig
 {

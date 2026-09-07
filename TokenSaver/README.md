@@ -2,7 +2,7 @@ Himan made note:
 
 Hey next time we go through the optimization process I want to look for re-runs. When the LLM had to call again to get something we trunked.
 
-> Measured 2026-09-03 — `runbooks/token_saver/plans/plan_1B.md` §2: on Claude 75% of elisions were followed by a re-fetch turn and `truncate-long` cost ~3× what it saved; on Codex it paid for itself. Re-run with `python-scripts/token_saver/rerun_economics.py`. 
+> Measured 2026-09-03: on Claude 75% of elisions were followed by a re-fetch turn and `truncate-long` cost ~3× what it saved; on Codex it paid for itself.
 
 # TokenSaver
 
@@ -152,11 +152,11 @@ separate because they fail in completely different ways, and conflating them mak
 | `scope-read` | **off** | `Read` (Claude) · `read` (OpenCode) |
 | `scope-grep` | **off** | `Grep` (Claude) · `grep` (OpenCode) |
 
-Codex's code-mode `exec` and background `wait` joined the shell scopes 2026-08-16
-(`runbooks/token_saver/plans/plan_1A.md`): exec alone carried 61% of every tool-output char
-the proxy had ever relayed, all untouched. Its output can quote file contents the model later
-edits against — the same accepted risk class as `cat` through `shell_command` — which is why
-plan_1A pairs the allowlisting with a capture-audited soak on real code-mode traffic.
+Codex's code-mode `exec` and background `wait` joined the shell scopes 2026-08-16:
+exec alone carried 61% of every tool-output char the proxy had ever relayed, all
+untouched. Its output can quote file contents the model later edits against — the
+same accepted risk class as `cat` through `shell_command` — which is why
+allowlisting was paired with a capture-audited soak on real code-mode traffic.
 
 **`scope-read` is the dangerous one.** The model builds Edit `old_string` values out
 of Read output. If we rewrite Read output, the model constructs an `old_string` that
@@ -191,8 +191,7 @@ shell item conservatively gets the wider budget because its command may live beh
 - **The wide budget has a 256 KiB selector ceiling.** Larger file-read payloads fall back to 150/50,
   so a 1000-line generated file with enormous lines cannot bypass the catastrophic-payload guard.
 
-Full evidence, calibration and the known gaps it does *not* close (`git diff`/`git show`, genuine
-grep searches): [`runbooks/token_saver/truncation_file_reads.md`](../runbooks/token_saver/truncation_file_reads.md).
+Known gaps this does *not* close: `git diff`/`git show`, and genuine grep searches.
 
 Unknown tool names always fail toward *no savings*: they are counted in the `seen`
 counter and never rewritten. So if Anthropic renames `Bash` tomorrow, savings quietly
@@ -327,7 +326,7 @@ capture tells you whether what came off **mattered**. Captures answer "was this
 compression correct", which is not a question byte counts can answer.
 
 - **The GUID is the handle.** Paste it at an LLM reviewer, look it up in Vibe AI, cite
-  it in a bug report. See [`runbooks/compress_runbook.md`](../runbooks/compress_runbook.md).
+  it in a bug report.
 - **Grain is per textual output string, not per request.** "This Bash output compressed wrong" is
   the real grain of every bug; one request carries many tool results, and an array result can carry
   multiple text blocks that are captured separately.

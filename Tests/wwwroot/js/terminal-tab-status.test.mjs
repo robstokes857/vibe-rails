@@ -193,8 +193,8 @@ test('typing a printable char during WAITING clears it to CONNECTED', () => {
     // tab landed in WAITING, user started typing a reply, and the indicator
     // stayed on "Waiting for user input" — but the user is no longer waiting,
     // they're engaging. Single printable bytes (0x20–0x7E) now clear WAITING
-    // back to CONNECTED. CSI sequences and pastes are still ignored — see the
-    // ACTIVE-state retirement note in terminal-tab-status.md for why.
+    // back to CONNECTED. CSI sequences and pastes are still ignored because
+    // arrow keys and terminal auto-responses must not look like composing a reply.
     const { controller } = makeController({ isActiveTab: () => true });
     controller.onSocketOpen();
     controller.onTerminalData('\r');

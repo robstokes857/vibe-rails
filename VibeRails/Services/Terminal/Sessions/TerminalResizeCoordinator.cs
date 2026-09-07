@@ -42,7 +42,7 @@ internal static class TerminalResizeCoordinator
         // Geometry authority: while a local web viewer is attached, remote resizes are
         // ignored. There is no geometry rebroadcast to viewers, so honoring one repaints
         // the PTY at a width the local xterm.js will wrap — shredded chrome + stranded
-        // cursor (TERMINAL.md "## 2026-08-10", session b92fb476). Remote-only sessions
+        // cursor (session b92fb476). Remote-only sessions
         // keep full remote resize authority, and LocalCli (native console poll) is
         // deliberately exempt so native-console + web-viewer coexistence is unchanged.
         if (ShouldIgnoreResize(source, terminal.HasLocalWebViewer))
@@ -177,7 +177,7 @@ internal static class TerminalResizeCoordinator
     }
 
     /// <summary>
-    /// Resize authority policy (TERMINAL.md "## 2026-08-10"). Only <see
+    /// Resize authority policy. Only <see
     /// cref="TerminalIoSource.RemoteWebUi"/> is ever ignored, and only while a local web
     /// viewer is attached: the local viewer is the primary work surface and cannot render
     /// frames composed for someone else's geometry. Everything else — the local viewer's
@@ -194,9 +194,8 @@ internal static class TerminalResizeCoordinator
     /// A native session relays PTY output into a real console window that owns its own screen
     /// buffer. When that window is resized, the console reflows the cells it has already painted —
     /// and an alternate-screen TUI is a diff renderer, so its model still says those cells are
-    /// correct and it never repaints them. The result is permanently shredded/rewrapped output
-    /// (TERMINAL.md "## 2026-08-02 Automation runs in a native terminal…"). A debounced repaint is
-    /// the only thing that clears that residue.
+    /// correct and it never repaints them. The result is permanently shredded/rewrapped output.
+    /// A debounced repaint is the only thing that clears that residue.
     ///
     /// <para>
     /// Deliberately narrow on two axes. <see cref="TerminalIoSource.LocalCli"/> is exactly the

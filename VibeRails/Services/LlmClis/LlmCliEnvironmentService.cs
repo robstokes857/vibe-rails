@@ -302,8 +302,7 @@ namespace VibeRails.Services.LlmClis
                 // Force DEC 2026 sync output regardless of TERM. Claude Code 2.1.110+ gates
                 // BSU/ESU on a hardcoded TERM allowlist (xterm-ghostty/kitty) our ConPTY child
                 // doesn't land on, so without it the post-resize redraws aren't bracketed and
-                // xterm.js commits the intermediate frame. See runbooks/terminal/TERMINAL.md
-                // resize-reprint entry + anthropics/claude-code#49584, #55613.
+                // xterm.js commits the intermediate frame. See anthropics/claude-code#49584, #55613.
                 LLM.Claude => new Dictionary<string, string> { ["CLAUDE_CODE_FORCE_SYNC_OUTPUT"] = "1" },
                 _ => new Dictionary<string, string>()
             };

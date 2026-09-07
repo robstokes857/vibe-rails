@@ -14,8 +14,7 @@ internal static class TerminalTestFixtures
     /// <summary>
     /// Binary fixture format: little-endian u32 chunk count, followed by N
     /// records each shaped (u32 byteCount, u32 msOffset, byteCount bytes).
-    /// Produced by python-scripts/export_chunks_fixture.py. Bounded against
-    /// truncation and bogus length prefixes so a corrupt fixture surfaces a
+    /// Bounded against truncation and bogus length prefixes so a corrupt fixture surfaces a
     /// clear error rather than an OOM or IndexOutOfRangeException.
     /// </summary>
     public static List<TimedChunk> LoadFixture(string path)

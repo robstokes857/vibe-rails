@@ -24,7 +24,6 @@ session_*.bin
 session_*.fixture.bin
 **/Fixtures/session_*
 # Debug bundles pulled from viberails.ai (real user session data — never commit).
-# Written by python-scripts/pull_debug_bundle.py.
 bundles/
 **/bundles/
 # Decoded/forensic session dumps (real terminal output) — keep local, never commit.
@@ -38,7 +37,6 @@ tools/pty-capture/captures/
 !Tests/Services/Terminal/Fixtures/session_e910eb94_codex_working_falsefire.fixture.bin
 !Tests/Services/Terminal/Fixtures/session_e910eb94_codex_composer_truefire.fixture.bin
 !Tests/Services/Terminal/Fixtures/session_b91596d9_codex_working_falsefire.fixture.bin
-!runbooks/terminal/repro-fixtures/session_f3e25a1e_resize_reprint.bin
 # User-specific files
 *.rsuser
 *.suo
@@ -436,7 +434,7 @@ bin_check/
 
 # Working notes from review/design sessions. They are point-in-time scratch that cites code by
 # file:line, so they go stale the moment the code moves and are actively misleading once tracked.
-# Anything worth keeping belongs in an AGENTS.md or a runbook, where it gets updated with the code.
+# Keep architecture in AGENTS.md.
 /kill-job.md
 /vscode-viberails/CLAUDE_VS_CODE_IMPROVE.md
 
@@ -444,3 +442,13 @@ bin_check/
 # so it's pure machine-local churn — not worth tracking. Keep it gitignored.
 /agent_drift.md
 Tests/Services/Terminal/Fixtures/session_b91596d9_codex_working_falsefire.fixture.bin
+
+# Local MSBuild preprocessor dump.
+/pp.xml
+
+# Runbooks, investigation notes and diagnostic Python helpers were moved to the
+# private vibe-books repository (2026-09-07). This repository is public, so guard
+# the old locations: if they are recreated here they stay untracked instead of
+# being published. See AGENTS.md; start at ../vibe-books/INDEX.md.
+/runbooks/
+/python-scripts/

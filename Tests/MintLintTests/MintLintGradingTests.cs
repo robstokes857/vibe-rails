@@ -11,7 +11,7 @@ namespace Tests.MintLintTests;
 /// numbers are hand-checkable: a function with 16 `if`, 5 `&amp;&amp;`, and 5 `||`
 /// (cyclomatic 27), an 8-parameter signature, and a 6-deep nested block.
 ///
-/// Overall file ratings are breadth-gated (see MintLint/MintLintAlgo.md): the overall
+/// Overall file ratings are breadth-gated (see <see cref="ScoreCalculator"/>): the overall
 /// score is the 4th-worst weight-adjusted category, floored at 0.3 × the single worst.
 /// The messy fixtures saturate Complexity but only carry one or two supporting smells,
 /// so alone they grade "Okay" — their per-category scores still light up, and it takes

@@ -26,10 +26,10 @@ public interface ICompressionCaptureSink
 }
 
 /// <summary>
-/// One textual tool-output observation — the unit the compress runbook judges.
+/// One textual tool-output observation — the unit used to judge compression correctness.
 ///
-/// <paramref name="Id"/> is the handle: it is what you paste at an LLM reviewer, what the Vibe AI
-/// capture view looks up, and what runbooks/compress_runbook.md is organized around. It is minted
+/// <paramref name="Id"/> is the handle: it is what you paste at an LLM reviewer and what the Vibe AI
+/// capture view looks up. It is minted
 /// per textual output string, not per request, because "this Bash output compressed wrong" is the
 /// actual grain of every bug report. One request carries many tool results, and an array-form
 /// result can carry multiple text blocks, each of which is captured separately.
