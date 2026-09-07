@@ -29,7 +29,8 @@
     --color-text-muted: #94a3b8;
     /* Light slate */
 
-    --color-success: #10b981;
+    /* Muted green for readable status text and calm success surfaces. */
+    --color-success: #78b89a;
     --color-warning: #f59e0b;
     --color-danger: #ef4444;
 
@@ -61,7 +62,7 @@ html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] {
     --vb-vscode-primary: var(--vscode-button-background, #3b82f6);
     --vb-vscode-primary-hover: var(--vscode-button-hoverBackground, #2563eb);
     --vb-vscode-muted: var(--vscode-descriptionForeground, #94a3b8);
-    --vb-vscode-success: var(--vscode-testing-iconPassed, #10b981);
+    --vb-vscode-success: var(--vscode-testing-iconPassed, #78b89a);
     --vb-vscode-warning: var(--vscode-testing-iconQueued, #f59e0b);
     --vb-vscode-danger: var(--vscode-errorForeground, #ef4444);
 
@@ -191,7 +192,7 @@ html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body #
     --color-accent: #06b6d4;
     --color-text: #f8fafc;
     --color-text-muted: #94a3b8;
-    --color-success: #10b981;
+    --color-success: #78b89a;
     --color-warning: #f59e0b;
     --color-danger: #ef4444;
     --color-border: #334155;
@@ -1000,18 +1001,18 @@ code {
 }
 
 #vb-terminal-panel .vb-terminal-controls-bar .vb-activity-blinker.is-active .vb-activity-blinker-trigger {
-    color: #bbf7d0;
-    background: linear-gradient(135deg, rgba(34, 197, 94, 0.17), rgba(20, 83, 45, 0.1));
-    border-color: rgba(74, 222, 128, 0.72);
-    box-shadow: 0 0 18px rgba(34, 197, 94, 0.28), inset 0 0 12px rgba(74, 222, 128, 0.06);
+    color: var(--color-success);
+    background: color-mix(in srgb, var(--color-success) 10%, transparent);
+    border-color: color-mix(in srgb, var(--color-success) 55%, transparent);
+    box-shadow: 0 0 10px color-mix(in srgb, var(--color-success) 14%, transparent);
 }
 
 #vb-terminal-panel .vb-terminal-controls-bar .vb-activity-blinker.is-active .vb-activity-blinker-zip {
-    color: #4ade80;
+    color: var(--color-success);
 }
 
 #vb-terminal-panel .vb-terminal-controls-bar .vb-activity-blinker.is-active .vb-activity-blinker-dot {
-    background: #4ade80;
+    background: var(--color-success);
 }
 
 /* Shed the descriptive label first, then collapse to the zipper-only state on narrow screens. */
@@ -2260,7 +2261,7 @@ code {
 
 .btn-outline-success:hover {
     color: var(--color-success);
-    background: rgba(16, 185, 129, 0.1);
+    background: color-mix(in srgb, var(--color-success) 10%, transparent);
     /* Subtle background */
     border-color: var(--color-success);
 }
@@ -2268,8 +2269,24 @@ code {
 .btn-outline-success:focus,
 .btn-outline-success:active {
     color: #ffffff;
-    background: #059669;
-    border-color: #059669;
+    background: color-mix(in srgb, var(--color-success) 58%, #121212);
+    border-color: var(--color-success);
+}
+
+/* Bootstrap's success utilities otherwise keep a separate saturated green. */
+.text-success { color: var(--color-success) !important; }
+.bg-success { background-color: color-mix(in srgb, var(--color-success) 58%, #121212) !important; }
+.border-success { border-color: var(--color-success) !important; }
+.btn-success {
+    --bs-btn-bg: color-mix(in srgb, var(--color-success) 58%, #121212);
+    --bs-btn-border-color: var(--bs-btn-bg);
+    --bs-btn-hover-bg: color-mix(in srgb, var(--color-success) 65%, #121212);
+    --bs-btn-hover-border-color: var(--bs-btn-hover-bg);
+    --bs-btn-active-bg: color-mix(in srgb, var(--color-success) 52%, #121212);
+    --bs-btn-active-border-color: var(--bs-btn-active-bg);
+    --bs-btn-disabled-bg: var(--bs-btn-bg);
+    --bs-btn-disabled-border-color: var(--bs-btn-border-color);
+    --bs-btn-focus-shadow-rgb: 120, 184, 154;
 }
 
 .btn-outline-danger {
@@ -2607,11 +2624,11 @@ code {
 
     0%,
     100% {
-        box-shadow: 0 0 0 1px rgba(76, 175, 80, 0.14), 0 2px 6px rgba(76, 175, 80, 0.08);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-success) 14%, transparent), 0 2px 6px color-mix(in srgb, var(--color-success) 8%, transparent);
     }
 
     50% {
-        box-shadow: 0 0 0 1px rgba(76, 175, 80, 0.2), 0 4px 10px rgba(76, 175, 80, 0.14);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-success) 20%, transparent), 0 4px 10px color-mix(in srgb, var(--color-success) 14%, transparent);
     }
 }
 
@@ -6793,8 +6810,8 @@ input.form-control:disabled {
 }
 
 /* Per-type accents (default/info uses the terminal accent above). */
-.vb-term-toast-success { border-left-color: #22c55e; }
-.vb-term-toast-success .vb-term-toast-icon { color: #22c55e; }
+.vb-term-toast-success { border-left-color: var(--color-success, #78b89a); }
+.vb-term-toast-success .vb-term-toast-icon { color: var(--color-success, #78b89a); }
 .vb-term-toast-warning { border-left-color: #f59e0b; }
 .vb-term-toast-warning .vb-term-toast-icon { color: #f59e0b; }
 .vb-term-toast-error { border-left-color: #ef4444; }
@@ -10827,6 +10844,10 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 }
 
 .rules-action-menu > summary {
+    list-style: none;
+}
+
+.rules-action-menu > summary:not(.btn) {
     display: grid;
     width: 30px;
     height: 30px;
@@ -10843,15 +10864,15 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     display: none;
 }
 
-.rules-action-menu > summary:hover,
-.rules-action-menu > summary:focus-visible,
-.rules-action-menu[open] > summary {
+.rules-action-menu > summary:not(.btn):hover,
+.rules-action-menu > summary:not(.btn):focus-visible,
+.rules-action-menu[open] > summary:not(.btn) {
     border-color: color-mix(in srgb, var(--color-primary) 42%, var(--color-border));
     background: color-mix(in srgb, var(--color-primary) 9%, transparent);
     color: var(--color-text);
 }
 
-.rules-action-menu > summary:focus-visible {
+.rules-action-menu > summary:not(.btn):focus-visible {
     outline: 2px solid color-mix(in srgb, var(--color-primary) 70%, transparent);
     outline-offset: 2px;
 }
@@ -12160,23 +12181,7 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     align-items: center;
     gap: 0.4rem;
     margin-left: auto;
-    padding: 0.42rem 0.62rem;
-    border: 1px solid color-mix(in srgb, var(--color-primary) 45%, var(--color-border));
-    border-radius: 8px;
-    background: color-mix(in srgb, var(--color-primary) 12%, transparent);
-    color: var(--color-text);
-    font-size: 0.64rem;
-    font-weight: 700;
     white-space: nowrap;
-}
-
-.code-analyzer-brief-open:hover {
-    background: color-mix(in srgb, var(--color-primary) 20%, transparent);
-}
-
-.code-analyzer-brief-open:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--color-primary) 62%, transparent);
-    outline-offset: 2px;
 }
 
 /* Section kickers ("Change quality", "Scan overview"). Sentence case and muted —
@@ -12245,18 +12250,24 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     background: color-mix(in srgb, var(--color-border) 40%, transparent);
 }
 
-/* Classic three panes: changed files | metrics | the code itself. The detail
-   columns set the row height; the rail never contributes to it. */
+/* Keep file identity above metrics + source; neither long list pushes code down. */
 .code-analyzer-workspace {
     display: grid;
-    grid-template-columns: 250px minmax(300px, 0.85fr) minmax(0, 1.3fr);
+    grid-template-columns: 220px minmax(260px, 0.75fr) minmax(0, 1.3fr);
+    grid-template-areas: "files overview overview" "files metrics source";
     gap: 0.85rem;
 }
+
+.code-analyzer-source-column { grid-area: source; }
+.code-analyzer-file-overview { grid-area: overview; }
+.code-analyzer-metrics-panel,
+.code-analyzer-no-metrics { grid-area: metrics; }
 
 /* The rail is absolutely positioned inside this cell, so a long file list can
    never stretch the page — it caps at the detail columns' height and scrolls
    inside its own box (the min-height keeps it usable beside short reports). */
 .code-analyzer-rail-cell {
+    grid-area: files;
     position: relative;
     min-width: 0;
     min-height: 380px;
@@ -12621,45 +12632,13 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     text-align: center;
 }
 
-/* "Ignore folder" variant on the file overview — visually distinct from the
-   per-file Ignore button so the directory-level action doesn't read as the
-   same thing. */
-.code-analyzer-ignore-folder-button {
-    color: color-mix(in srgb, var(--color-accent) 70%, var(--color-text-muted));
-}
-
-.code-analyzer-ignore-folder-button:hover {
-    border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
-    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
-    color: color-mix(in srgb, var(--color-accent) 80%, var(--color-text));
-}
-
 /* ── Ignored files (user's Code quality ignore list) ─────────────────────── */
 .code-analyzer-ignore-button {
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
     margin-left: 0.35rem;
-    padding: 0.4rem 0.55rem;
-    border: 1px solid var(--analyzer-line);
-    border-radius: 8px;
-    background: transparent;
-    color: var(--analyzer-muted);
-    font-size: 0.62rem;
-    font-weight: 700;
     white-space: nowrap;
-    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
-}
-
-.code-analyzer-ignore-button:hover {
-    border-color: color-mix(in srgb, var(--color-warning) 45%, var(--color-border));
-    background: color-mix(in srgb, var(--color-warning) 9%, transparent);
-    color: color-mix(in srgb, var(--color-warning) 70%, var(--color-text));
-}
-
-.code-analyzer-ignore-button:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--color-primary) 62%, transparent);
-    outline-offset: 2px;
 }
 
 .code-analyzer-ignored-box {
@@ -12726,19 +12705,6 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 
 .code-analyzer-ignored-restore {
     flex: 0 0 auto;
-    padding: 0.25rem 0.5rem;
-    border: 1px solid var(--analyzer-line);
-    border-radius: 6px;
-    background: transparent;
-    color: color-mix(in srgb, var(--color-accent) 68%, var(--color-text-muted));
-    font-size: 0.56rem;
-    font-weight: 700;
-}
-
-.code-analyzer-ignored-restore:hover {
-    border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
-    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
-    color: color-mix(in srgb, var(--color-accent) 80%, var(--color-text));
 }
 
 /* The ignore-reason modal (rendered into #modal-container by RuleController). */
@@ -12790,14 +12756,33 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 }
 
 .code-analyzer-review-column {
-    display: grid;
-    min-width: 0;
-    gap: 0.85rem;
+    display: contents;
 }
 
 .code-analyzer-file-overview {
-    padding: 0.85rem 1rem;
+    padding: 0.65rem 0.85rem;
 }
+
+.code-analyzer-file-context { margin-top: 0.4rem; }
+.code-analyzer-file-context > summary {
+    color: var(--color-text-muted, #94a3b8);
+    cursor: pointer;
+    font-size: 0.7rem;
+}
+
+.code-analyzer-metric-picker,
+.code-analyzer-file-picker {
+    display: grid;
+    gap: 0.25rem;
+    margin-top: 0.55rem;
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 0.7rem;
+}
+
+.code-analyzer-metric-picker select,
+.code-analyzer-file-picker select { min-width: 0; width: 100%; }
+.code-analyzer-file-picker { display: none; }
+.code-analyzer-clear-filters { margin: 0 0.65rem 0.65rem; }
 
 .code-analyzer-file-title-row {
     align-items: flex-start;
@@ -12807,7 +12792,7 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 }
 
 .code-analyzer-file-title-wrap {
-    flex: 1 1 220px;
+    flex: 1 1 160px;
     min-width: 0;
 }
 
@@ -12854,6 +12839,7 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 
 .code-analyzer-file-grade-block {
     flex: 0 0 auto;
+    flex-wrap: wrap;
     gap: 0.55rem;
 }
 
@@ -12936,6 +12922,18 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     overflow: hidden;
 }
 
+.code-analyzer-metrics-panel {
+    max-height: min(65vh, 700px);
+    overflow-y: auto;
+    align-self: start;
+    scrollbar-gutter: stable;
+}
+
+.code-analyzer-source-column {
+    min-height: min(58vh, 620px);
+    align-self: start;
+}
+
 .code-analyzer-metrics-head,
 .code-analyzer-code-head {
     padding: 0.75rem 0.85rem;
@@ -12944,6 +12942,7 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 
 .code-analyzer-metrics-head {
     display: flex;
+    flex-direction: column;
     align-items: flex-start;
     justify-content: space-between;
     gap: 0.75rem;
@@ -12959,6 +12958,7 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 
 .code-analyzer-metrics-legend {
     flex: 0 0 auto;
+    flex-wrap: wrap;
     gap: 0.5rem;
     color: var(--analyzer-muted);
     font-size: 0.58rem;
@@ -12991,8 +12991,20 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.75rem;
-    padding: 0 0.2rem 0.35rem;
+    gap: 0.4rem;
+    padding: 0.4rem 0.2rem;
+    cursor: pointer;
+    list-style: none;
+}
+
+.code-analyzer-metric-group-head::-webkit-details-marker { display: none; }
+.code-analyzer-metric-group-head::before { content: '›'; }
+.code-analyzer-metric-group[open] > summary::before { transform: rotate(90deg); }
+.code-analyzer-metric-group-head strong { flex: 1; }
+.code-analyzer-metric-group-head:focus-visible,
+.code-analyzer-metric-row:focus-visible {
+    outline: 2px solid var(--color-primary, #3b82f6);
+    outline-offset: 2px;
 }
 
 .code-analyzer-metric-group-head strong {
@@ -13015,7 +13027,7 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 .code-analyzer-metric-row {
     display: grid;
     width: 100%;
-    grid-template-columns: minmax(130px, 1.25fr) 64px 76px minmax(80px, 0.72fr) 75px;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     align-items: center;
     gap: 0.45rem;
     padding: 0.48rem 0.52rem;
@@ -13036,6 +13048,14 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     background: color-mix(in srgb, var(--color-primary) 12%, transparent);
 }
 
+.code-analyzer-metric-row > .code-analyzer-risk-track { grid-column: 1 / -1; }
+.code-analyzer-metric-row > .code-analyzer-metric-threshold {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: space-between;
+    gap: 0.4rem;
+}
+
 .code-analyzer-metric-title {
     display: flex;
     min-width: 0;
@@ -13052,12 +13072,10 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 }
 
 .code-analyzer-metric-title span {
-    overflow: hidden;
     color: color-mix(in srgb, var(--color-text) 92%, var(--color-text-muted));
     font-size: 0.64rem;
     font-weight: 700;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
 }
 
 .code-analyzer-metric-raw {
@@ -13268,13 +13286,13 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 }
 
 .code-analyzer-monaco-shell .monaco-editor .mintlint-monaco-line-success {
-    background: rgb(16 185 129 / 7%);
-    box-shadow: inset 3px 0 #10b981;
+    background: color-mix(in srgb, var(--color-success) 7%, transparent);
+    box-shadow: inset 3px 0 var(--color-success);
 }
 
 .code-analyzer-monaco-shell .monaco-editor .mintlint-monaco-line-okay {
-    background: rgb(16 185 129 / 7%);
-    box-shadow: inset 3px 0 #10b981;
+    background: color-mix(in srgb, var(--color-success) 7%, transparent);
+    box-shadow: inset 3px 0 var(--color-success);
 }
 
 .code-analyzer-monaco-shell .monaco-editor .mintlint-monaco-glyph {
@@ -13296,13 +13314,13 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 }
 
 .code-analyzer-monaco-shell .monaco-editor .mintlint-monaco-glyph-success {
-    background: #10b981;
-    box-shadow: 0 0 7px rgb(16 185 129 / 60%);
+    background: var(--color-success);
+    box-shadow: 0 0 7px color-mix(in srgb, var(--color-success) 40%, transparent);
 }
 
 .code-analyzer-monaco-shell .monaco-editor .mintlint-monaco-glyph-okay {
-    background: #10b981;
-    box-shadow: 0 0 7px rgb(16 185 129 / 60%);
+    background: var(--color-success);
+    box-shadow: 0 0 7px color-mix(in srgb, var(--color-success) 40%, transparent);
 }
 
 .code-analyzer-no-metrics {
@@ -13347,24 +13365,32 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 }
 
 @media (max-width: 1250px) {
-    /* Not enough width for three panes: the code drops below files + metrics. */
+    /* On laptops, source stays ahead of the detailed metric list. */
     .code-analyzer-workspace {
-        grid-template-columns: 250px minmax(0, 1fr);
+        grid-template-columns: 220px minmax(0, 1fr);
+        grid-template-areas: "files overview" "files source" "files metrics";
     }
 
-    .code-analyzer-source-column {
-        grid-column: 1 / -1;
+    .code-analyzer-rail-cell {
+        max-height: calc(100vh - 180px);
     }
 
     .code-analyzer-metric-row {
-        grid-template-columns: minmax(120px, 1.2fr) 58px 66px minmax(64px, 0.6fr) 68px;
+        grid-template-columns: minmax(0, 1fr) auto auto;
     }
 }
 
 @media (max-width: 820px) {
     .code-analyzer-workspace {
         grid-template-columns: 1fr;
+        grid-template-areas: "overview" "source" "files" "metrics";
     }
+
+    .code-analyzer-file-picker { display: grid; }
+    .code-analyzer-rail-cell { min-height: 260px; max-height: 320px; }
+    .code-analyzer-priority-finding { display: none; }
+    .code-analyzer-source-column { min-height: 340px; }
+    .code-analyzer-monaco-shell { min-height: 240px; }
 
     .code-analyzer-metrics-head {
         align-items: stretch;
@@ -13382,6 +13408,12 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     .code-analyzer-note {
         align-items: flex-start;
         flex-direction: column;
+    }
+
+    .code-analyzer-file-title-wrap,
+    .code-analyzer-code-copy {
+        flex-basis: auto;
+        width: 100%;
     }
 
     .code-analyzer-file-grade-copy,
@@ -18999,7 +19031,6 @@ body.performance-mode .brand-text-sm {
     font-size: .98rem;
 }
 
-.project-health-fix-all,
 .project-health-card-actions .btn {
     display: inline-flex;
     align-items: center;
@@ -19008,10 +19039,25 @@ body.performance-mode .brand-text-sm {
     white-space: nowrap;
 }
 
-.project-health-fix-all {
-    min-height: 44px;
-    padding-inline: 18px;
+.project-health-fix-controls {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-width: 0;
+    max-width: 100%;
 }
+
+.project-health-fix-picker {
+    flex: 1 1 200px;
+    width: 200px;
+    min-width: 160px;
+    max-width: 280px;
+    margin: 0;
+}
+
+.project-health-fix-picker .ts-wrapper { width: 100%; }
+.project-health-fix-controls > .btn { flex: 0 0 auto; }
 
 .project-health-guard {
     display: grid;
@@ -19121,6 +19167,9 @@ body.performance-mode .brand-text-sm {
 .project-health-card-actions {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    min-width: 0;
     gap: 8px;
 }
 
@@ -19204,12 +19253,6 @@ body.performance-mode .brand-text-sm {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 0;
-    border: 0;
-    background: transparent;
-    color: var(--color-text, #f8fafc);
-    font-size: .84rem;
-    font-weight: 600;
 }
 
 .project-health-details-toggle i {
@@ -19274,7 +19317,6 @@ body.performance-mode .brand-text-sm {
 }
 
 .project-health-quality .code-analyzer-brief {
-    min-height: 150px;
     margin: 0;
     border: 1px solid color-mix(in srgb, var(--analyzer-tone, var(--color-primary, #3b82f6)) 30%, var(--color-border, #334155));
     border-radius: 12px;
@@ -19283,20 +19325,27 @@ body.performance-mode .brand-text-sm {
 }
 
 .project-health-quality .code-analyzer-brief-open {
-    align-self: stretch;
-    min-width: 132px;
-    border-left-color: var(--color-border, #334155);
+    align-self: center;
+    flex: 0 0 auto;
+    min-width: 0;
 }
 
 .project-health-scan-transcript {
     margin: 0 20px 18px;
 }
 
-.project-health-rule-modal-dialog,
-.project-health-quality-modal-dialog {
+.project-health-rule-modal-dialog {
     width: min(1180px, calc(100vw - 32px));
     max-width: 1180px;
 }
+
+.project-health-quality-modal-dialog {
+    width: min(1600px, calc(100vw - 32px));
+    max-width: 1600px;
+}
+
+.project-health-quality-modal-dialog .modal-body { padding: 0.75rem; }
+.project-health-quality-modal .code-analyzer-dashboard { padding: 0.65rem 0 0; }
 
 /* Rule add/remove/rename dialogs sit above the still-mounted Manage rules modal. */
 .agent-rule-modal-layer > .agent-rule-crud-modal {
@@ -19334,7 +19383,7 @@ body.performance-mode .brand-text-sm {
 }
 
 .project-health-quality-modal .code-analyzer-dashboard {
-    min-height: 560px;
+    min-height: 0;
 }
 
 @media (max-width: 820px) {
@@ -19345,10 +19394,6 @@ body.performance-mode .brand-text-sm {
         flex-direction: column;
     }
 
-    .project-health-fix-all {
-        width: 100%;
-    }
-
     .project-health-card-actions {
         width: 100%;
         flex-wrap: wrap;
@@ -19357,6 +19402,12 @@ body.performance-mode .brand-text-sm {
     .project-health-card-actions > .btn {
         flex: 1 1 160px;
     }
+
+    .project-health-card-actions > .project-health-fix-controls {
+        flex: 1 1 100%;
+    }
+
+    .project-health-fix-picker { max-width: none; }
 
     .project-health-rules-summary {
         grid-template-columns: auto minmax(0, 1fr);
@@ -19442,12 +19493,6 @@ body.performance-mode .brand-text-sm {
 
     .project-health-quality .code-analyzer-brief {
         grid-template-columns: 1fr;
-    }
-
-    .project-health-quality .code-analyzer-brief-open {
-        min-height: 48px;
-        border-top: 1px solid var(--color-border, #334155);
-        border-left: 0;
     }
 
     .project-health-scan-transcript {

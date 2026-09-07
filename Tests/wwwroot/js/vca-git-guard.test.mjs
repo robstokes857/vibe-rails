@@ -21,6 +21,8 @@ const {
     buildVcaExplanationViewModel,
     normalizeHookStatus
 } = await import(pathToFileURL(controllerModule).href);
+const { mountProjectHealthFixPickers, launchProjectHealthFix } = await import(
+    pathToFileURL(path.resolve('VibeRails/wwwroot/js/modules/project-health-fix-launcher.js')).href);
 
 test('detailed current hook status produces a protected health model', () => {
     const model = normalizeHookStatus({
@@ -315,17 +317,83 @@ test('VCA action queue puts blockers before acknowledgments and warnings', () =>
     assert.deepEqual(model.findings.map(finding => finding.rule), ['Blocker', 'Acknowledge', 'Warning']);
 });
 
-test('Fix rules opens a fresh managed terminal with an auto-submitted VCA brief', () => {
+function projectHealthLauncherHarness(t, { remembered = '', launch = () => true } = {}) {
+    const previousStorage = globalThis.localStorage;
+    const selects = new Map(['all', 'rules', 'quality'].map(scope => {
+        const handlers = new Map();
+        return [scope, {
+            value: '', dataset: { fixScope: scope }, isConnected: true, handlers,
+            addEventListener: (type, handler) => handlers.set(type, handler),
+            removeEventListener: (type, handler) => {
+                if (handlers.get(type) === handler) handlers.delete(type);
+            }
+        }];
+    }));
+    const buttons = new Map(['all', 'rules', 'quality'].map(scope => {
+        const attributes = new Map();
+        return [scope, {
+            dataset: { fixScope: scope }, isConnected: true, disabled: false,
+            innerHTML: 'Fix', textContent: 'Fix', querySelector: () => null,
+            setAttribute: (key, value) => attributes.set(key, value),
+            getAttribute: key => attributes.get(key) ?? null,
+            removeAttribute: key => attributes.delete(key)
+        }];
+    }));
+    const root = {
+        querySelectorAll: selector => selector.includes('data-project-health-fix-agent') ? [...selects.values()] : [],
+        querySelector: selector => {
+            const scope = selector.match(/data-fix-scope="([^"]+)"/)?.[1];
+            return (selector.includes('data-project-health-fix-agent') ? selects : buttons).get(scope) || null;
+        }
+    };
+    let stored = remembered;
+    globalThis.localStorage = { getItem: () => stored, setItem: (_key, value) => { stored = value; } };
+    t.after(() => { globalThis.localStorage = previousStorage; });
     const launches = [];
-    const controller = new RuleController({
-        terminalController: {
-            launchInFocus(options) { launches.push(options); }
+    const toasts = [];
+    const catalog = [
+        { cli: 'codex', key: 'base:codex' },
+        { cli: 'claude', key: 'base:claude' },
+        { cli: 'opencode', key: 'env:7:opencode' }
+    ];
+    const state = { mounted: 0, disposed: 0 };
+    const app = {
+        data: {
+            configs: { rootPath: 'C:\\source\\project' },
+            environments: [{ id: 7, name: 'Quality reviewer', cli: 'opencode' }]
         },
-        data: { configs: { rootPath: 'C:\\source\\project' } }
-    });
-    controller.lastVcaFixBrief = 'VCA VALIDATION: Commit blocked\n1. [STOP] Add tests';
+        llmPickerController: {
+            getEnabledItems(context) { assert.equal(context, 'sandbox'); return catalog; },
+            mount(element, options) {
+                assert.equal(options.context, 'sandbox');
+                element.value = options.selectedValue;
+                state.mounted += 1;
+                return () => { state.disposed += 1; };
+            },
+            setValue(element, value) { element.value = value; }
+        },
+        terminalController: { launchInFocus(options) { launches.push(options); return launch(options); } },
+        showModal() { assert.fail('Fix should launch directly without a modal'); },
+        showToast(...args) { toasts.push(args); }
+    };
+    const controller = new RuleController(app);
+    controller.viewRoot = root;
+    return {
+        controller, launches, selects, buttons, root, state, catalog, app, toasts,
+        stored: () => stored,
+        choose(scope, value) {
+            const select = selects.get(scope);
+            select.value = value;
+            select.handlers.get('change')?.({ target: select, currentTarget: select });
+        }
+    };
+}
 
-    controller.openFixTerminal();
+test('Fix rules directly launches the inline selected agent with the VCA brief', async t => {
+    const { controller, launches, choose } = projectHealthLauncherHarness(t);
+    controller.lastVcaFixBrief = 'VCA VALIDATION: Commit blocked\n1. [STOP] Add tests';
+    choose('rules', 'base:claude');
+    assert.equal(await controller.openFixTerminal(), true);
 
     assert.equal(launches.length, 1);
     assert.equal(launches[0].cli, 'claude');
@@ -336,25 +404,91 @@ test('Fix rules opens a fresh managed terminal with an auto-submitted VCA brief'
     assert.match(launches[0].initialPrompt, /Do not weaken, delete, or bypass a rule/i);
 });
 
-test('Project health uses the first enabled managed LLM from the shared picker order', () => {
-    const launches = [];
-    const controller = new RuleController({
-        llmPickerController: {
-            getEnabledItems(context) {
-                assert.equal(context, 'multi-run');
-                return [{ cli: 'codex', key: 'base:codex' }, { cli: 'claude', key: 'base:claude' }];
-            }
-        },
-        terminalController: { launchInFocus(options) { launches.push(options); } },
-        data: { configs: { rootPath: 'C:\\source\\project' } },
-        showToast() {}
-    });
-
-    assert.equal(controller.launchProjectHealthFix('quality'), true);
-    assert.equal(launches[0].cli, 'codex');
+test('inline fix pickers share preferences, synchronize choices, and dispose their listeners', t => {
+    const { app, root, selects, launches, choose, state, stored } = projectHealthLauncherHarness(t);
+    const dispose = mountProjectHealthFixPickers(app, root);
+    assert.equal(state.mounted, 3);
+    assert.deepEqual([...selects.values()].map(select => select.value), ['base:codex', 'base:codex', 'base:codex']);
+    assert.equal(launches.length, 0);
+    choose('quality', 'env:7:opencode');
+    assert.deepEqual([...selects.values()].map(select => select.value), ['env:7:opencode', 'env:7:opencode', 'env:7:opencode']);
+    assert.equal(stored(), 'env:7:opencode');
+    dispose();
+    assert.equal(state.disposed, 3);
+    assert.ok([...selects.values()].every(select => select.handlers.size === 0));
+    const disposeAgain = mountProjectHealthFixPickers(app, root);
+    assert.deepEqual([...selects.values()].map(select => select.value), ['env:7:opencode', 'env:7:opencode', 'env:7:opencode']);
+    disposeAgain();
 });
 
-test('Project health does not launch an agent outside a Git repository', () => {
+test('Project health launches the selected custom environment with the quality brief', async t => {
+    const { controller, launches, choose } = projectHealthLauncherHarness(t);
+    choose('quality', 'env:7:opencode');
+    assert.equal(await controller.launchProjectHealthFix('quality'), true);
+    assert.equal(launches[0].cli, 'opencode');
+    assert.equal(launches[0].environmentName, 'Quality reviewer');
+    assert.equal(launches[0].workingDirectory, 'C:\\source\\project');
+    assert.match(launches[0].initialPrompt, /CODE QUALITY/);
+    assert.doesNotMatch(launches[0].initialPrompt, /\nRULES\n/);
+});
+
+test('Project health keeps the selected agent after a launch failure and permits retry', async t => {
+    let shouldFail = true;
+    const { controller, launches, choose, selects, buttons, toasts } = projectHealthLauncherHarness(t, {
+        launch() { if (shouldFail) throw new Error('Terminal unavailable'); return true; }
+    });
+    choose('quality', 'env:7:opencode');
+    assert.equal(await controller.launchProjectHealthFix('quality'), false);
+    assert.match(toasts[0][1], /Terminal unavailable/);
+    assert.equal(buttons.get('quality').disabled, false);
+    assert.equal(selects.get('quality').value, 'env:7:opencode');
+    shouldFail = false;
+    assert.equal(await controller.launchProjectHealthFix('quality'), true);
+    assert.equal(launches.length, 2);
+});
+
+test('a pending Fix launch prevents duplicate launches and restores its button after failure', async t => {
+    let finish;
+    const { controller, launches, choose, buttons } = projectHealthLauncherHarness(t, {
+        launch: () => new Promise(resolve => { finish = resolve; })
+    });
+    choose('quality', 'base:codex');
+    const pending = controller.launchProjectHealthFix('quality');
+    assert.equal(buttons.get('quality').disabled, true);
+    assert.equal(await controller.launchProjectHealthFix('quality'), false);
+    assert.equal(launches.length, 1);
+    finish(false);
+    assert.equal(await pending, false);
+    assert.equal(buttons.get('quality').disabled, false);
+});
+
+test('Project health rejects missing environments without silently launching their base CLI', async t => {
+    const { controller, launches, choose, toasts } = projectHealthLauncherHarness(t);
+    choose('quality', 'env:99:codex');
+    assert.equal(await controller.launchProjectHealthFix('quality'), false);
+    assert.equal(launches.length, 0);
+    assert.ok(toasts.length > 0);
+});
+
+test('Project health picker replaces an unavailable remembered target with the shared first agent', t => {
+    const { app, root, selects } = projectHealthLauncherHarness(t, { remembered: 'env:99:codex' });
+    const dispose = mountProjectHealthFixPickers(app, root);
+    assert.equal(selects.get('quality').value, 'base:codex');
+    dispose();
+});
+
+test('direct fix launch refuses empty selections and plain shells without choosing a fallback', async t => {
+    const { app, launches, toasts } = projectHealthLauncherHarness(t);
+    for (const selectionValue of ['', 'base:shell']) {
+        assert.equal(await launchProjectHealthFix(app, {
+            title: 'Fix code quality', prompt: 'Fix this file.', workingDirectory: 'C:\\source\\project', selectionValue
+        }), false);
+    }
+    assert.equal(launches.length, 0);
+    assert.equal(toasts.length, 2);
+});
+
+test('Project health does not launch an agent outside a Git repository', async () => {
     const launches = [];
     const toasts = [];
     const controller = new RuleController({
@@ -364,9 +498,126 @@ test('Project health does not launch an agent outside a Git repository', () => {
     });
     controller.hookStatus = { inGitRepo: false };
 
-    assert.equal(controller.launchProjectHealthFix('all'), false);
+    assert.equal(await controller.launchProjectHealthFix('all'), false);
     assert.equal(launches.length, 0);
     assert.match(toasts[0][1], /Open a local Git repository/i);
+});
+
+function analyzerIgnoreHarness(t) {
+    const previousDocument = globalThis.document;
+    const modal = {
+        firstElementChild: null,
+        querySelector: selector => selector === '[data-analyzer-ignore-confirm]'
+            ? { addEventListener: (_type, handler) => { confirm = handler; } }
+            : selector === 'input[name="analyzer-ignore-reason"]:checked' ? { value: 'test' } : null,
+        querySelectorAll: () => []
+    };
+    globalThis.document = { getElementById: () => modal };
+    t.after(() => { globalThis.document = previousDocument; });
+    let cleanup;
+    let confirm;
+    let returned = 0;
+    const app = {
+        currentView: 'dashboard',
+        escapeHtml: value => value,
+        showModal(title, _content, options = {}) {
+            this.closeModal();
+            modal.firstElementChild = { title };
+            cleanup = options.onClose;
+        },
+        closeModal() {
+            const onClose = cleanup;
+            cleanup = null;
+            onClose?.();
+            modal.firstElementChild = null;
+        }
+    };
+    const controller = new RuleController(app);
+    controller.viewRoot = {};
+    controller.codeAnalyzerCache = { response: { success: true } };
+    controller.codeAnalyzerState = { selectedFilePath: 'src/Widget.cs', selectedMetricName: 'complexity' };
+    controller.openCodeQualityDetails = () => {
+        returned += 1;
+        modal.firstElementChild = { title: 'Code quality metrics' };
+    };
+    return { controller, app, modal, confirm: () => confirm(), returned: () => returned };
+}
+
+test('cancelling a report ignore returns after the reason dialog closes and preserves selection', async t => {
+    const { controller, app, returned } = analyzerIgnoreHarness(t);
+    controller.promptIgnoreAnalyzerFile({ path: 'src/Widget.cs' }, controller.createCodeQualityReportReturn());
+    app.closeModal();
+    assert.equal(returned(), 0, 'must not reopen while closeModal is still clearing its DOM');
+    await Promise.resolve();
+    assert.equal(returned(), 1);
+    assert.deepEqual(controller.codeAnalyzerState, {
+        selectedFilePath: 'src/Widget.cs', selectedMetricName: 'complexity'
+    });
+});
+
+test('leaving the page while dismissing ignore does not reopen the report', async t => {
+    const { controller, app, returned } = analyzerIgnoreHarness(t);
+    controller.promptIgnoreAnalyzerFile({ path: 'src/Widget.cs' }, controller.createCodeQualityReportReturn());
+    app.closeModal();
+    app.currentView = 'terminal-focus';
+    await Promise.resolve();
+    assert.equal(returned(), 0);
+});
+
+test('a remounted page or a replacement dialog prevents a stale report return', async t => {
+    const { controller, app, modal, returned } = analyzerIgnoreHarness(t);
+    const returnToOriginal = controller.createCodeQualityReportReturn();
+    controller.viewRoot = {};
+    assert.equal(returnToOriginal(), false);
+    controller.promptIgnoreAnalyzerDirectory({ directoryPaths: ['src'] }, controller.createCodeQualityReportReturn());
+    app.showModal('An error needs attention', 'Keep this dialog visible.');
+    await Promise.resolve();
+    assert.equal(returned(), 0);
+    assert.equal(modal.firstElementChild.title, 'An error needs attention');
+});
+
+test('confirming a directory ignore waits for its scan before returning to the report', async t => {
+    const { controller, confirm, returned } = analyzerIgnoreHarness(t);
+    let resolveMutation;
+    const completed = new Promise(resolve => { resolveMutation = resolve; });
+    controller.ignoreAnalyzerDirectories = async (paths, reasonKind, reasonText) => {
+        assert.deepEqual(paths, ['src']);
+        assert.equal(reasonKind, 'test');
+        assert.equal(reasonText, null);
+        await completed;
+    };
+    controller.promptIgnoreAnalyzerDirectory({ directoryPaths: ['src'] }, controller.createCodeQualityReportReturn());
+    const pending = confirm();
+    await Promise.resolve();
+    assert.equal(returned(), 0);
+    resolveMutation();
+    await pending;
+    assert.equal(returned(), 1);
+});
+
+test('an ignore failure dialog stays visible after the awaited operation returns', async t => {
+    const { controller, app, modal, confirm, returned } = analyzerIgnoreHarness(t);
+    controller.ignoreAnalyzerFile = async () => {
+        await Promise.resolve();
+        app.showModal('Could not ignore file', 'Request failed.');
+    };
+    controller.promptIgnoreAnalyzerFile({ path: 'src/Widget.cs' }, controller.createCodeQualityReportReturn());
+    await confirm();
+    assert.equal(returned(), 0);
+    assert.equal(modal.firstElementChild.title, 'Could not ignore file');
+});
+
+test('navigating during an ignore request prevents its completed scan from reopening the report', async t => {
+    const { controller, app, confirm, returned } = analyzerIgnoreHarness(t);
+    let finish;
+    controller.ignoreAnalyzerFile = () => new Promise(resolve => { finish = resolve; });
+    controller.promptIgnoreAnalyzerFile({ path: 'src/Widget.cs' }, controller.createCodeQualityReportReturn());
+    const pending = confirm();
+    app.currentView = 'terminal-focus';
+    controller.viewRoot = null;
+    finish();
+    await pending;
+    assert.equal(returned(), 0);
 });
 
 test('project-health prompts stay useful when one or both scans have no cached result', () => {

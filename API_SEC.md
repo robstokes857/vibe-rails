@@ -1,13 +1,13 @@
 # API authentication coverage
 
-Audit date: 2026-09-05
+Audit date: 2026-09-06
 
-Full production route/authentication reconciliation completed: 2026-09-05, covering the 168
-`/api/v1` method/path surfaces that existed then, nine protected non-`/api` API surfaces, and
+Full production route/authentication reconciliation completed: 2026-09-06, covering all 170
+current `/api/v1` method/path surfaces, nine protected non-`/api` API surfaces, and
 the three bootstrap/page/probe mappings. The only middleware bypasses remain exact
 `GET /health`, exact `GET /auth/bootstrap`, and global `OPTIONS` requests.
 
-That audit found no missing or removed endpoints and no additional endpoint lacking a
+This audit found no missing or removed endpoints and no additional endpoint lacking a
 valid session credential. No `SECURITY_ERROR.md` was needed. The existing one-credential
 page/static-file behavior and conditional proxy responses remain documented in section 2.
 Cookie and session-header authentication are alternative transports of the same secret;
@@ -130,7 +130,7 @@ discovery alone is insufficient if the same feature change is allowed to expand 
 set. The production listener set is now frozen above so a new match starts as a finding, not as
 an expectation.
 
-### Repository-wide listener result — 2026-09-05
+### Repository-wide listener result — 2026-09-06
 
 - Approved serving implementation: the main Kestrel host in `VibeRails/Program.cs`.
 - Rejected and removed before merge: `GrokLoopbackBridge`'s `HttpListener`.
@@ -172,7 +172,9 @@ lists.
   no application data.
 - `OPTIONS *` — `CookieAuthMiddleware` skips every CORS preflight request, regardless of
   path. These requests do not execute the verb-specific business handlers, but the auth
-  layer itself does not protect them.
+  layer itself does not protect them. Method-unrestricted `Map` routes (the proxy and
+  WebSocket surfaces) can receive non-preflight `OPTIONS`; enabled proxies still require
+  both headers in their relay gate, and WebSocket handlers reject non-upgrade requests.
 
 ### Neither normal credential, but protected another way
 
@@ -547,6 +549,18 @@ whitelist rejection of path-like sources, and the absence of mutating verbs.
 
 ## Audit observations
 
+- Full validation on 2026-09-06: compared all 170 documented `/api/v1` method/path entries
+  against source mappings, resolving the HTTP-relay constants and event-WebSocket mapping;
+  neither set had unmatched entries. Also inspected all nine non-`/api` API surfaces,
+  bootstrap/page/probe mappings, the registration aggregator, middleware ordering, the exact
+  three-case bypass predicate, credential validation, and proxy/control gates. Repeated both
+  repository-wide listener searches above, including untracked files: only the approved main
+  Kestrel host, the non-serving port probe, and test-only hosts matched. Existing targeted
+  tests passed: **96 passed, 0 failed, 0 skipped**, covering `CookieAuthMiddlewareTests`,
+  `AuthServiceTests`, `AuthRoutesTests`, all five LLM proxy route test classes,
+  `TokenSaverPauseRoutesTests`, `McpServerHttpTests`, and `InternalToolsRoutesTests`.
+  No additional authentication exception was found, so no `SECURITY_ERROR.md` was created.
+  This was source reconciliation plus targeted tests, not a live sweep of every endpoint.
 - Amendment on 2026-09-06: the Internal tools feature added `GET /api/v1/internal/logs` and
   `GET /api/v1/internal/uploads`, which the 2026-09-05 inventory did not list. Both are now in
   section 3 with their accepted raw-Serilog exposure, and the `/api/v1` count is 170. Verified

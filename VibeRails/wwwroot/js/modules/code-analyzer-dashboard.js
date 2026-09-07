@@ -5,6 +5,8 @@ import {
 import { ensureMonaco } from './monaco-loader.js';
 
 const CODE_ANALYZER_SESSIONS = new WeakMap();
+// MetricEngine.ComputeNPath saturates estimates at this value.
+const NPATH_DISPLAY_CAP = 1_000_000_000;
 
 const MONACO_LANGUAGE_BY_EXTENSION = Object.freeze({
     '.bash': 'shell',
@@ -144,8 +146,13 @@ function formatRating(value) {
 
 function formatMetricValue(metric) {
     if (!Number.isFinite(metric?.value)) return '—';
+    if (isCappedNPath(metric)) return '1B (cap)';
     if (metric.name === 'duplication') return `${(metric.value * 100).toFixed(1)}%`;
     return Number.isInteger(metric.value) ? String(metric.value) : metric.value.toFixed(1);
+}
+
+function isCappedNPath(metric) {
+    return metric?.name === 'npath_complexity' && metric.value >= NPATH_DISPLAY_CAP;
 }
 
 function formatThreshold(value, metric) {
@@ -546,7 +553,7 @@ export function renderCodeAnalyzerBrief(host, response, documentRef = globalThis
     // button that would open an empty report. Ignored entries remain actionable.
     const hasDetails = model.files.length > 0 || model.ignoredFileCount > 0;
     if (onOpenDetails && hasDetails) {
-        const open = element(documentRef, 'button', 'code-analyzer-brief-open');
+        const open = element(documentRef, 'button', 'btn btn-sm btn-outline-secondary code-analyzer-brief-open');
         open.type = 'button';
         open.title = 'View file and metric details';
         open.append(
@@ -586,7 +593,11 @@ function renderFileOverview(documentRef, file, onIgnoreFile, onIgnoreDirectory) 
         const introduced = file.introduced > 0 ? `+${file.introduced.toFixed(1)}` : file.introduced.toFixed(1);
         appendChip(documentRef, meta, 'This change', introduced);
     }
-    titleWrap.append(meta);
+    const context = element(documentRef, 'details', 'code-analyzer-file-context');
+    const contextSummary = element(documentRef, 'summary', '', 'File context');
+    contextSummary.tabIndex = 0;
+    context.append(contextSummary, meta);
+    titleWrap.append(context);
 
     const gradeBlock = element(documentRef, 'div', 'code-analyzer-file-grade-block');
     const gradeCopy = element(documentRef, 'span', 'code-analyzer-file-grade-copy');
@@ -597,7 +608,7 @@ function renderFileOverview(documentRef, file, onIgnoreFile, onIgnoreDirectory) 
     setTone(rating, qualityTone(file.health));
     gradeBlock.append(gradeCopy, rating);
     if (typeof onIgnoreFile === 'function') {
-        const ignoreButton = element(documentRef, 'button', 'code-analyzer-ignore-button');
+        const ignoreButton = element(documentRef, 'button', 'btn btn-sm btn-outline-secondary code-analyzer-ignore-button');
         ignoreButton.type = 'button';
         ignoreButton.title = 'Ignore this file — removes it from Code quality results';
         ignoreButton.append(icon(documentRef, 'fa-solid fa-eye-slash'), element(documentRef, 'span', '', 'Ignore'));
@@ -607,7 +618,7 @@ function renderFileOverview(documentRef, file, onIgnoreFile, onIgnoreDirectory) 
     // "Ignore folder" drops the whole directory containing this file. Disabled when
     // the file lives at the repo root (no folder to ignore without nuking everything).
     if (typeof onIgnoreDirectory === 'function' && file.folderPath) {
-        const folderButton = element(documentRef, 'button', 'code-analyzer-ignore-button code-analyzer-ignore-folder-button');
+        const folderButton = element(documentRef, 'button', 'btn btn-sm btn-outline-secondary code-analyzer-ignore-button code-analyzer-ignore-folder-button');
         folderButton.type = 'button';
         folderButton.title = `Ignore everything in ${file.folderPath}/ — removes the whole directory from Code quality results`;
         folderButton.append(icon(documentRef, 'fa-solid fa-folder-tree'), element(documentRef, 'span', '', 'Ignore folder'));
@@ -617,7 +628,7 @@ function renderFileOverview(documentRef, file, onIgnoreFile, onIgnoreDirectory) 
     titleRow.append(titleWrap, gradeBlock);
     overview.append(titleRow);
 
-    if (file.priorityMetric) {
+    if (file.priorityMetric && file.priorityMetric.score >= 55) {
         const finding = element(documentRef, 'div', 'code-analyzer-priority-finding');
         setTone(finding, mintLintConcernTone(file.priorityMetric.score));
         const mark = element(documentRef, 'span', 'code-analyzer-priority-icon');
@@ -631,7 +642,7 @@ function renderFileOverview(documentRef, file, onIgnoreFile, onIgnoreDirectory) 
             element(documentRef, 'strong', '', file.priorityMetric.source || file.name),
             element(documentRef, 'small', '', file.priorityMetric.line ? `Line ${file.priorityMetric.line}` : file.ratingLabel));
         finding.append(mark, findingCopy, location);
-        overview.append(finding);
+        context.append(finding);
     }
     return overview;
 }
@@ -641,7 +652,7 @@ function renderFileOverview(documentRef, file, onIgnoreFile, onIgnoreDirectory) 
  * how bad it is, the measured value with its direction, and what to do about it.
  * Rebuilt in place when the selected metric changes within the same file.
  */
-function renderSourceHeader(documentRef, file, metric) {
+function renderSourceHeader(documentRef, file, metric, onSelectMetric) {
     const header = element(documentRef, 'header', 'code-analyzer-code-head');
     const copy = element(documentRef, 'div', 'code-analyzer-code-copy');
     if (metric) {
@@ -650,11 +661,39 @@ function renderSourceHeader(documentRef, file, metric) {
             element(documentRef, 'h3', '', metric.label),
             element(documentRef, 'p', '', METRIC_GUIDANCE[metric.name]?.action
                 || 'Review the measured location and reduce the strongest contributor first.'));
+        if (isCappedNPath(metric)) {
+            copy.append(element(documentRef, 'p', 'code-analyzer-estimate-note',
+                'This estimate reached the analyzer’s 1-billion cap. It is not an exact path count.'));
+        }
     } else {
         copy.append(
             element(documentRef, 'span', 'code-analyzer-eyebrow', file.folder),
             element(documentRef, 'h3', '', file.name),
             element(documentRef, 'p', '', 'Select a metric to jump to the code behind it.'));
+    }
+    if (file.metrics.length && onSelectMetric) {
+        const picker = element(documentRef, 'label', 'code-analyzer-metric-picker');
+        picker.append(element(documentRef, 'span', '', 'Inspect metric'));
+        const select = element(documentRef, 'select', 'form-select form-select-sm');
+        select.setAttribute('aria-label', 'Inspect metric');
+        for (const category of file.categories) {
+            const group = element(documentRef, 'optgroup');
+            group.label = category.name;
+            for (const candidate of category.metrics) {
+                const option = element(documentRef, 'option', '', `${candidate.label} · ${concernSeverity(candidate.score)} · risk ${formatScore(candidate.score)}`);
+                option.value = String(file.metrics.indexOf(candidate));
+                option.selected = candidate === metric;
+                group.append(option);
+            }
+            select.append(group);
+        }
+        select.value = String(file.metrics.indexOf(metric));
+        select.addEventListener?.('change', () => {
+            const nextMetric = file.metrics[Number(select.value)];
+            if (nextMetric) onSelectMetric(nextMetric, true);
+        });
+        picker.append(select);
+        copy.append(picker);
     }
     header.append(copy);
 
@@ -666,7 +705,7 @@ function renderSourceHeader(documentRef, file, metric) {
 
         const measured = element(documentRef, 'span', 'code-analyzer-source-fact');
         measured.append(
-            element(documentRef, 'small', '', 'Measured'),
+            element(documentRef, 'small', '', metric.name === 'npath_complexity' ? 'Estimated paths' : 'Measured'),
             element(documentRef, 'strong', '', formatMetricValue(metric)));
         const hint = directionHint(metric.direction);
         if (hint) {
@@ -688,9 +727,9 @@ function renderSourceHeader(documentRef, file, metric) {
 }
 
 /** The source pane: header strip + Monaco shell + status bar for the selected file/metric. */
-function renderSourcePane(documentRef, file, metric) {
+function renderSourcePane(documentRef, file, metric, onSelectMetric) {
     const panel = element(documentRef, 'article', 'code-analyzer-panel-surface code-analyzer-code-panel');
-    const header = renderSourceHeader(documentRef, file, metric);
+    const header = renderSourceHeader(documentRef, file, metric, onSelectMetric);
     panel.append(header);
 
     const editorShell = element(documentRef, 'div', 'code-analyzer-monaco-shell');
@@ -760,10 +799,10 @@ function evidenceDecorationOptions(monaco, tone) {
     const colors = {
         danger: '#ef4444',
         warning: '#f59e0b',
-        success: '#10b981',
+        success: '#78b89a',
         // Legacy fallback suffix — same green as success so a healthy marker is
         // never blue (matches mintLintConcernTone folding "okay" into success).
-        okay: '#10b981'
+        okay: '#78b89a'
     };
     return {
         isWholeLine: true,
@@ -881,7 +920,7 @@ async function mountCodeEvidenceEditor(view, file, metric, session, fullSource =
     });
 }
 
-function renderMetricsPanel(documentRef, file, selectedMetric, onSelect) {
+function renderMetricsPanel(documentRef, file, selectedMetric, onSelect, expandedGroups) {
     const panel = element(documentRef, 'article', 'code-analyzer-panel-surface code-analyzer-metrics-panel');
     const header = element(documentRef, 'header', 'code-analyzer-metrics-head');
     const copy = element(documentRef, 'div');
@@ -900,12 +939,18 @@ function renderMetricsPanel(documentRef, file, selectedMetric, onSelect) {
     panel.append(header);
 
     const groups = element(documentRef, 'div', 'code-analyzer-metric-groups');
+    const metricRows = [];
     for (const category of file.categories) {
-        const group = element(documentRef, 'section', 'code-analyzer-metric-group');
-        const groupHead = element(documentRef, 'div', 'code-analyzer-metric-group-head');
+        const group = element(documentRef, 'details', 'code-analyzer-metric-group');
+        const groupKey = `${file.path}:${category.name}`;
+        const flagged = category.metrics.filter(metric => metric.score >= 55).length;
+        group.open = expandedGroups.has(groupKey) ? expandedGroups.get(groupKey) : flagged > 0;
+        group.addEventListener?.('toggle', () => expandedGroups.set(groupKey, group.open));
+        const groupHead = element(documentRef, 'summary', 'code-analyzer-metric-group-head');
+        groupHead.tabIndex = 0;
         groupHead.append(
             element(documentRef, 'strong', '', category.name),
-            element(documentRef, 'span', '', `${formatScore(category.score)} category risk`));
+            element(documentRef, 'span', '', flagged ? `${flagged} need attention` : `${category.metrics.length} healthy`));
         group.append(groupHead);
         const list = element(documentRef, 'div', 'code-analyzer-metric-list-dashboard');
         for (const metric of category.metrics) {
@@ -933,13 +978,22 @@ function renderMetricsPanel(documentRef, file, selectedMetric, onSelect) {
                 raw.append(element(documentRef, 'i', 'code-analyzer-direction-glyph', rowHint.arrow));
             }
             row.append(title, raw, concern, meter, threshold);
+            row.dataset.metricIndex = String(file.metrics.indexOf(metric));
             row.addEventListener?.('click', () => onSelect(metric));
             list.append(row);
+            metricRows.push({ row, metric, group });
         }
         group.append(list);
         groups.append(group);
     }
     panel.append(groups);
+    panel.setSelectedMetric = (selected, revealGroup = false) => {
+        for (const { row, metric, group } of metricRows) {
+            row.classList.toggle('active', metric === selected);
+            row.setAttribute('aria-pressed', String(metric === selected));
+            if (revealGroup && metric === selected) group.open = true;
+        }
+    };
     return panel;
 }
 
@@ -952,6 +1006,7 @@ function renderIgnoredFilesBox(documentRef, ignoredFiles, onRestoreFile) {
     if (!Array.isArray(ignoredFiles) || ignoredFiles.length === 0) return null;
     const ignoredBox = element(documentRef, 'details', 'code-analyzer-ignored-box');
     const summary = element(documentRef, 'summary');
+    summary.tabIndex = 0;
     summary.append(
         icon(documentRef, 'fa-solid fa-eye-slash'),
         element(documentRef, 'span', '', `Ignored files (${ignoredFiles.length})`));
@@ -966,7 +1021,7 @@ function renderIgnoredFilesBox(documentRef, ignoredFiles, onRestoreFile) {
         if (reason) copy.append(element(documentRef, 'small', '', reason));
         row.append(copy);
         if (typeof onRestoreFile === 'function') {
-            const restore = element(documentRef, 'button', 'code-analyzer-ignored-restore', 'Restore');
+            const restore = element(documentRef, 'button', 'btn btn-sm btn-outline-secondary code-analyzer-ignored-restore', 'Restore');
             restore.type = 'button';
             restore.title = `Scan ${entry.path} again`;
             restore.addEventListener?.('click', () => onRestoreFile(entry));
@@ -988,9 +1043,11 @@ function renderFileRail(documentRef, model, selectedFile, onSelect, ignoredFiles
     const rail = element(documentRef, 'aside', 'code-analyzer-panel-surface code-analyzer-file-rail');
     const head = element(documentRef, 'header', 'code-analyzer-rail-head');
     const title = element(documentRef, 'div', 'code-analyzer-rail-title');
+    const fileCount = element(documentRef, 'span', '', `${model.files.length} file${model.files.length === 1 ? '' : 's'}`);
+    fileCount.setAttribute('aria-live', 'polite');
     title.append(
         element(documentRef, 'h3', '', 'Changed files'),
-        element(documentRef, 'span', '', `${model.files.length} file${model.files.length === 1 ? '' : 's'}`));
+        fileCount);
     head.append(title);
     const search = element(documentRef, 'label', 'code-analyzer-search-box');
     search.append(icon(documentRef, 'fa-solid fa-magnifying-glass'));
@@ -1028,6 +1085,8 @@ function renderFileRail(documentRef, model, selectedFile, onSelect, ignoredFiles
     // Directories the user collapsed, keyed by folderPath. Lives in the rail's
     // closure so it survives filter/search repaints.
     const collapsedDirs = new Set();
+    const searchCollapsedDirs = new Set();
+    let fileRows = [];
 
     // One floating context menu for the whole rail (same pattern as the chat
     // history sidebar): each row's kebab opens it anchored to that row. It hangs
@@ -1161,12 +1220,28 @@ function renderFileRail(documentRef, model, selectedFile, onSelect, ignoredFiles
     const paintList = () => {
         closeContextMenu();
         const query = String(input.value || '').trim().toLowerCase();
+        const activeCollapsedDirs = query ? searchCollapsedDirs : collapsedDirs;
         const visible = model.files.filter(file =>
             (activeFilter === 'all' || file.severity === activeFilter) &&
             (!query || file.path.toLowerCase().includes(query)));
         list.replaceChildren();
+        fileRows = [];
+        fileCount.textContent = `${visible.length} of ${model.files.length} files`;
         if (!visible.length) {
             list.append(element(documentRef, 'p', 'code-analyzer-file-list-empty', 'No files match this filter.'));
+            const clear = element(documentRef, 'button', 'btn btn-sm btn-outline-secondary code-analyzer-clear-filters', 'Clear filters');
+            clear.type = 'button';
+            clear.addEventListener?.('click', () => {
+                input.value = '';
+                activeFilter = 'all';
+                for (const button of filterButtons) {
+                    button.classList.toggle('active', button.dataset.filter === 'all');
+                    button.setAttribute('aria-pressed', String(button.dataset.filter === 'all'));
+                }
+                paintList();
+                input.focus?.();
+            });
+            list.append(clear);
             return;
         }
 
@@ -1182,12 +1257,13 @@ function renderFileRail(documentRef, model, selectedFile, onSelect, ignoredFiles
         }
 
         for (const [folderPath, groupFiles] of groups) {
-            const collapsed = collapsedDirs.has(folderPath);
+            const collapsed = activeCollapsedDirs.has(folderPath);
             const header = element(documentRef, 'div', 'code-analyzer-dir-head');
             header.title = folderPath || 'repository root';
             header.setAttribute('role', 'button');
             header.setAttribute('aria-expanded', String(!collapsed));
             header.tabIndex = 0;
+            header.dataset.folderPath = folderPath;
 
             header.append(icon(documentRef,
                 `fa-solid ${collapsed ? 'fa-chevron-right' : 'fa-chevron-down'} code-analyzer-dir-chevron`));
@@ -1210,9 +1286,10 @@ function renderFileRail(documentRef, model, selectedFile, onSelect, ignoredFiles
             }
 
             const toggleGroup = () => {
-                if (collapsedDirs.has(folderPath)) collapsedDirs.delete(folderPath);
-                else collapsedDirs.add(folderPath);
+                if (activeCollapsedDirs.has(folderPath)) activeCollapsedDirs.delete(folderPath);
+                else activeCollapsedDirs.add(folderPath);
                 paintList();
+                Array.from(list.children).find(child => child.dataset?.folderPath === folderPath)?.focus?.({ preventScroll: true });
             };
             header.addEventListener?.('click', event => {
                 // The kebab (and the menu it opens) must not toggle the group.
@@ -1239,6 +1316,8 @@ function renderFileRail(documentRef, model, selectedFile, onSelect, ignoredFiles
                 item.setAttribute('role', 'button');
                 item.tabIndex = 0;
                 item.classList.toggle('active', file === activeFile);
+                item.setAttribute('aria-pressed', String(file === activeFile));
+                fileRows.push({ item, file });
                 item.title = file.path;
                 setTone(item, file.tone);
 
@@ -1284,6 +1363,7 @@ function renderFileRail(documentRef, model, selectedFile, onSelect, ignoredFiles
     // keystroke makes typing in the filter feel sticky on large scans / slow machines.
     let filterPaintTimer = null;
     input.addEventListener?.('input', () => {
+        searchCollapsedDirs.clear();
         if (filterPaintTimer) clearTimeout(filterPaintTimer);
         filterPaintTimer = setTimeout(() => {
             filterPaintTimer = null;
@@ -1311,9 +1391,13 @@ function renderFileRail(documentRef, model, selectedFile, onSelect, ignoredFiles
     rail.refresh = paintList;
     rail.setSelectedFile = (file) => {
         activeFile = file;
-        paintList();
+        for (const row of fileRows) {
+            row.item.classList.toggle('active', row.file === file);
+            row.item.setAttribute('aria-pressed', String(row.file === file));
+        }
     };
     rail.destroy = () => {
+        if (filterPaintTimer) clearTimeout(filterPaintTimer);
         closeContextMenu();
         documentRef.removeEventListener?.('click', onDocumentClick);
     };
@@ -1407,11 +1491,10 @@ export function renderCodeAnalyzerDashboard(container, response, documentRef = g
         const preserved = filesByPath.get(preserveState.selectedFilePath);
         if (preserved) {
             initialFile = preserved;
+            initialMetric = preserved.priorityMetric || preserved.metrics[0] || null;
             if (preserveState.selectedMetricName) {
                 const metricMatch = preserved.metrics.find(metric => metric.name === preserveState.selectedMetricName);
                 if (metricMatch) initialMetric = metricMatch;
-            } else {
-                initialMetric = preserved.priorityMetric || preserved.metrics[0] || null;
             }
         } else if (model.files.length) {
             // The selected file is gone — fall back to the next file at the same
@@ -1425,7 +1508,9 @@ export function renderCodeAnalyzerDashboard(container, response, documentRef = g
     let selectedFile = initialFile;
     let selectedMetric = initialMetric;
     let rail;
+    let metricsPanel;
     let evidenceView = null;
+    const expandedGroups = new Map();
     // Full file contents by path; null marks "asked, not available" so a metric click
     // never refetches a file that already failed.
     const sourceCache = new Map();
@@ -1480,7 +1565,7 @@ export function renderCodeAnalyzerDashboard(container, response, documentRef = g
     const paintEvidence = () => {
         disposeEvidenceEditor(session);
         sourceColumn.replaceChildren();
-        evidenceView = renderSourcePane(documentRef, selectedFile, selectedMetric);
+        evidenceView = renderSourcePane(documentRef, selectedFile, selectedMetric, selectMetric);
         sourceColumn.append(evidenceView.panel);
         mountEvidence();
     };
@@ -1498,7 +1583,7 @@ export function renderCodeAnalyzerDashboard(container, response, documentRef = g
             return;
         }
 
-        const freshHeader = renderSourceHeader(documentRef, selectedFile, selectedMetric);
+        const freshHeader = renderSourceHeader(documentRef, selectedFile, selectedMetric, selectMetric);
         evidenceView.header.replaceWith?.(freshHeader);
         evidenceView.header = freshHeader;
         if (evidenceView.position) {
@@ -1527,20 +1612,44 @@ export function renderCodeAnalyzerDashboard(container, response, documentRef = g
         }
     };
 
+    function selectMetric(metric, fromPicker = false) {
+        selectedMetric = metric;
+        metricsPanel?.setSelectedMetric?.(metric, fromPicker);
+        retargetEvidence();
+        if (fromPicker) evidenceView?.header.querySelector?.('select')?.focus?.({ preventScroll: true });
+        emitState();
+    }
+
     const paintReview = () => {
         review.replaceChildren();
-        review.append(renderFileOverview(documentRef, selectedFile, onIgnoreFile, onIgnoreDirectory));
+        const overview = renderFileOverview(documentRef, selectedFile, onIgnoreFile, onIgnoreDirectory);
+        const filePicker = element(documentRef, 'label', 'code-analyzer-file-picker');
+        filePicker.append(element(documentRef, 'span', '', 'Inspect file'));
+        const select = element(documentRef, 'select', 'form-select form-select-sm');
+        select.setAttribute('aria-label', 'Inspect file');
+        for (const file of model.files) {
+            const option = element(documentRef, 'option', '', file.path);
+            option.value = file.path;
+            option.selected = file === selectedFile;
+            select.append(option);
+        }
+        select.value = selectedFile.path;
+        select.addEventListener?.('change', () => {
+            const file = filesByPath.get(select.value);
+            if (!file) return;
+            selectFile(file);
+            review.querySelector?.('[aria-label="Inspect file"]')?.focus?.({ preventScroll: true });
+        });
+        filePicker.append(select);
+        overview.append(filePicker);
+        review.append(overview);
+        metricsPanel = null;
         if (!selectedMetric) {
             review.append(element(documentRef, 'div', 'code-analyzer-panel-surface code-analyzer-no-metrics', 'No metric detail was returned for this file.'));
             return;
         }
-        const selectMetric = metric => {
-            selectedMetric = metric;
-            paintReview();
-            retargetEvidence();
-            emitState();
-        };
-        review.append(renderMetricsPanel(documentRef, selectedFile, selectedMetric, selectMetric));
+        metricsPanel = renderMetricsPanel(documentRef, selectedFile, selectedMetric, selectMetric, expandedGroups);
+        review.append(metricsPanel);
     };
 
     const selectFile = file => {
@@ -1562,5 +1671,8 @@ export function renderCodeAnalyzerDashboard(container, response, documentRef = g
     container.append(workspace);
     paintReview();
     paintEvidence();
+    // Publish the resolved fallback too: restoring an ignored file must not steal
+    // selection back from the file the user is now reviewing.
+    emitState();
     return model.files.length;
 }

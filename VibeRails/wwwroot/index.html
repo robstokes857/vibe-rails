@@ -331,11 +331,6 @@
                     <h1>Rules and code quality</h1>
                     <p>See what needs attention, then hand the full fix to an agent.</p>
                 </div>
-                <button class="btn btn-primary project-health-fix-all" type="button"
-                    data-action="launch-health-fix" data-fix-scope="all">
-                    <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i>
-                    Fix rules &amp; code quality
-                </button>
             </header>
 
             <section class="project-health-guard" data-hook-health data-tone="neutral" aria-busy="true"
@@ -381,11 +376,18 @@
                                 <i class="fa-solid fa-sliders" aria-hidden="true"></i>
                                 Manage rules
                             </button>
-                            <button class="btn btn-sm btn-primary" type="button"
-                                data-action="launch-health-fix" data-fix-scope="rules">
-                                <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i>
-                                Fix rules
-                            </button>
+                            <div class="project-health-fix-controls">
+                                <label class="project-health-fix-picker">
+                                    <span class="visually-hidden">Agent for rules</span>
+                                    <select class="form-select" data-project-health-fix-agent data-fix-scope="rules"
+                                        aria-label="Agent for rules"></select>
+                                </label>
+                                <button class="btn btn-sm btn-outline-secondary" type="button"
+                                    data-action="launch-health-fix" data-fix-scope="rules">
+                                    <i class="fa-solid fa-bolt" aria-hidden="true"></i>
+                                    Fix rules
+                                </button>
+                            </div>
                         </div>
                     </header>
 
@@ -406,7 +408,7 @@
                     </div>
 
                     <div class="project-health-card-toolbar">
-                        <button class="project-health-details-toggle" type="button"
+                        <button class="btn btn-sm btn-outline-secondary project-health-details-toggle" type="button"
                             data-action="toggle-health-details" data-health-target="rules"
                             aria-expanded="false" aria-controls="project-health-rules-details">
                             <span>View rule results</span>
@@ -487,7 +489,7 @@
                         </div>
                         <div class="project-health-card-actions">
                             <details class="rules-action-menu">
-                                <summary aria-label="More scan options" title="More scan options">
+                                <summary class="btn btn-sm btn-outline-secondary" aria-label="More scan options" title="More scan options">
                                     <i class="fa-solid fa-ellipsis" aria-hidden="true"></i>
                                 </summary>
                                 <div class="rules-action-menu-popover" role="group" aria-label="Scan options">
@@ -514,11 +516,18 @@
                                 <i class="fa-solid fa-rotate-right" data-button-icon aria-hidden="true"></i>
                                 <span data-button-label>Scan again</span>
                             </button>
-                            <button class="btn btn-sm btn-primary" type="button"
-                                data-action="launch-health-fix" data-fix-scope="quality">
-                                <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i>
-                                Fix code quality
-                            </button>
+                            <div class="project-health-fix-controls">
+                                <label class="project-health-fix-picker">
+                                    <span class="visually-hidden">Agent for code quality</span>
+                                    <select class="form-select" data-project-health-fix-agent data-fix-scope="quality"
+                                        aria-label="Agent for code quality"></select>
+                                </label>
+                                <button class="btn btn-sm btn-outline-secondary" type="button"
+                                    data-action="launch-health-fix" data-fix-scope="quality">
+                                    <i class="fa-solid fa-bolt" aria-hidden="true"></i>
+                                    Fix code quality
+                                </button>
+                            </div>
                         </div>
                     </header>
 

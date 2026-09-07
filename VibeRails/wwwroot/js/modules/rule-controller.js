@@ -18,7 +18,7 @@ import {
     setSafeText,
     statusTone
 } from './git-guard-preflight.js';
-import { getEnabledLlmItems } from './pickers/llm-picker.js';
+import { launchProjectHealthFix, mountProjectHealthFixPickers } from './project-health-fix-launcher.js';
 
 function normalizeHookStateToken(value) {
     return String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
@@ -446,6 +446,8 @@ export class RuleController {
         // scan. A manual scan (or an ignore/restore that deliberately rescans) replaces this.
         this.codeAnalyzerCache = null;
         this.codeAnalyzerScanInProgress = null;
+        this.disposeHealthFixPickers = null;
+        this.healthFixLaunching = false;
     }
 
     loadCheckViolations() {
@@ -472,6 +474,8 @@ export class RuleController {
     }
 
     bindProjectHealthControls(root) {
+        this.disposeHealthFixPickers?.();
+        this.disposeHealthFixPickers = mountProjectHealthFixPickers(this.app, root);
         this.app.bindAction(root, '[data-action="manage-rules"]', () => {
             this.app.agentController?.openRuleManager?.();
         });
@@ -655,6 +659,8 @@ export class RuleController {
     }
 
     unload() {
+        this.disposeHealthFixPickers?.();
+        this.disposeHealthFixPickers = null;
         this.preflightRunner?.cancel();
         this.preflightRunner = null;
         disposeCodeAnalyzerDashboard(this.viewRoot?.querySelector?.('[data-code-analyzer-report]'));
@@ -1123,6 +1129,8 @@ export class RuleController {
             this.app.showToast('Code quality', 'Run a successful scan before opening the metrics.', 'info');
             return;
         }
+        const unpushed = this.codeAnalyzerCache.unpushed === true;
+        const returnToReport = this.createCodeQualityReportReturn();
 
         let report = null;
         let disposed = false;
@@ -1132,10 +1140,9 @@ export class RuleController {
             if (report) disposeCodeAnalyzerDashboard(report);
         };
         this.app.showModal('Code quality metrics', `
-            <div class="project-health-quality-modal">
+            <div class="project-health-quality-modal code-analyzer-panel">
                 <p class="project-health-quality-modal-intro">
-                    Higher health is better. Open a file to inspect its strongest risks, source evidence,
-                    and suggested next step.
+                    Select a file or metric to inspect its code. Higher quality scores are healthier.
                 </p>
                 <div class="code-analyzer-dashboard" data-project-health-quality-report></div>
             </div>`, { onClose: disposeReport });
@@ -1149,27 +1156,42 @@ export class RuleController {
 
         renderCodeAnalyzerDashboard(report, response, undefined, {
             fetchSource: path => this.app.apiCall(
-                `/api/v1/code-analyzer/source?path=${encodeURIComponent(path)}${this.lastAnalyzerUnpushed ? '&scope=unpushed' : ''}`,
+                `/api/v1/code-analyzer/source?path=${encodeURIComponent(path)}${unpushed ? '&scope=unpushed' : ''}`,
                 'GET',
                 null,
                 { showLoading: false }),
             ignoredFiles: this.analyzerIgnores || [],
             onIgnoreFile: file => {
                 disposeReport();
-                this.promptIgnoreAnalyzerFile(file);
+                this.promptIgnoreAnalyzerFile(file, returnToReport);
             },
             onIgnoreDirectory: payload => {
                 disposeReport();
-                this.promptIgnoreAnalyzerDirectory(payload);
+                this.promptIgnoreAnalyzerDirectory(payload, returnToReport);
             },
-            onRestoreFile: entry => {
+            onRestoreFile: async entry => {
                 disposeReport();
                 this.app.closeModal();
-                return this.restoreAnalyzerFile(entry);
+                await this.restoreAnalyzerFile(entry);
+                returnToReport();
             },
             preserveState: this.codeAnalyzerState || null,
             onStateChange: state => { this.codeAnalyzerState = state; }
         });
+    }
+
+    createCodeQualityReportReturn() {
+        const originRoot = this.viewRoot;
+        const originView = this.app.currentView;
+        return () => {
+            // Closing a reason dialog may also mean navigating or replacing it with
+            // another dialog. Only return when the original page still owns the UI.
+            if (this.viewRoot !== originRoot || this.app.currentView !== originView) return false;
+            if (document.getElementById('modal-container')?.firstElementChild) return false;
+            if (!this.codeAnalyzerCache?.response || this.codeAnalyzerCache.response.success === false) return false;
+            this.openCodeQualityDetails();
+            return true;
+        };
     }
 
     // ── Code quality ignore list ────────────────────────────────────────────
@@ -1186,7 +1208,7 @@ export class RuleController {
         return this.analyzerIgnores;
     }
 
-    promptIgnoreAnalyzerFile(file) {
+    promptIgnoreAnalyzerFile(file, onReturn = null) {
         const path = String(file?.path || '');
         if (!path) return;
         const safePath = this.app.escapeHtml(path);
@@ -1198,6 +1220,7 @@ export class RuleController {
                 </p>`,
             confirmLabel: 'Ignore file',
             confirmIcon: 'fa-eye-slash',
+            onReturn,
             onConfirm: (reasonKind, reasonText) =>
                 this.ignoreAnalyzerFile(path, reasonKind, reasonText)
         });
@@ -1209,7 +1232,7 @@ export class RuleController {
      * is a directory rule that catches everything under the folder, not just the
      * file the user clicked.
      */
-    promptIgnoreAnalyzerDirectory(payload) {
+    promptIgnoreAnalyzerDirectory(payload, onReturn = null) {
         const directoryPaths = Array.isArray(payload?.directoryPaths) && payload.directoryPaths.length
             ? payload.directoryPaths.filter(Boolean)
             : (payload?.file ? [directoryOf(payload.file.path)] : []);
@@ -1227,6 +1250,7 @@ export class RuleController {
                 </p>`,
             confirmLabel: valid.length === 1 ? 'Ignore directory' : `Ignore ${valid.length} directories`,
             confirmIcon: 'fa-folder-tree',
+            onReturn,
             onConfirm: (reasonKind, reasonText) =>
                 this.ignoreAnalyzerDirectories(valid, reasonKind, reasonText)
         });
@@ -1237,7 +1261,8 @@ export class RuleController {
      * radiogroup + free-text field and calls onConfirm(reasonKind, reasonText)
      * when the user confirms. reasonKind is null for "no reason".
      */
-    showAnalyzerIgnoreModal({ title, intro, confirmLabel, confirmIcon, onConfirm }) {
+    showAnalyzerIgnoreModal({ title, intro, confirmLabel, confirmIcon, onConfirm, onReturn = null }) {
+        let confirming = false;
         this.app.showModal(title, `
             <div class="analyzer-ignore-modal">
                 ${intro || ''}
@@ -1258,7 +1283,13 @@ export class RuleController {
                     </button>
                 </div>
             </div>
-        `);
+        `, {
+            onClose: () => {
+                // app.closeModal clears its DOM after cleanup. Wait until that has
+                // finished before opening the report again on Cancel, X, or Escape.
+                if (!confirming && onReturn) queueMicrotask(onReturn);
+            }
+        });
 
         const modal = document.getElementById('modal-container');
         const textInput = modal?.querySelector('[data-analyzer-ignore-text]');
@@ -1272,8 +1303,10 @@ export class RuleController {
         modal?.querySelector('[data-analyzer-ignore-confirm]')?.addEventListener('click', async () => {
             const reasonKind = modal.querySelector('input[name="analyzer-ignore-reason"]:checked')?.value || '';
             const reasonText = reasonKind === 'other' ? String(textInput?.value || '').trim() : '';
+            confirming = true;
             this.app.closeModal();
             await onConfirm(reasonKind || null, reasonText || null);
+            onReturn?.();
         }, { once: true });
     }
 
@@ -1675,7 +1708,8 @@ export class RuleController {
         if (icon) icon.className = `fa-solid ${iconClass}`;
     }
 
-    launchProjectHealthFix(scope = 'all') {
+    async launchProjectHealthFix(scope = 'all') {
+        if (this.healthFixLaunching) return false;
         if (this.hookStatus?.inGitRepo === false) {
             this.app.showToast(
                 'Project health',
@@ -1697,30 +1731,30 @@ export class RuleController {
             all: 'Fix project health'
         };
 
-        // Follow the user's shared LLM-list order instead of assuming Claude is
-        // installed. Older/unit-test hosts without the picker controller retain the
-        // historical Claude fallback.
-        const hasPickerCatalog = typeof this.app.llmPickerController?.getEnabledItems === 'function';
-        const launchTarget = hasPickerCatalog
-            ? getEnabledLlmItems(this.app, 'multi-run')[0] || null
-            : { cli: 'claude' };
-        if (!launchTarget?.cli) {
-            this.app.showToast(
-                'No LLM available',
-                'Enable at least one base LLM in the terminal LLM list, then try again.',
-                'warning');
-            return false;
+        const root = this.viewRoot;
+        const select = this.query(`[data-project-health-fix-agent][data-fix-scope="${normalizedScope}"]`);
+        const button = this.query(`[data-action="launch-health-fix"][data-fix-scope="${normalizedScope}"]`);
+        const buttonHtml = button?.innerHTML;
+        const wasDisabled = button?.disabled;
+        this.healthFixLaunching = true;
+        if (button) {
+            button.disabled = true;
+            button.textContent = 'Opening…';
         }
-
-        this.app.terminalController?.launchInFocus?.({
-            cli: launchTarget.cli,
-            workingDirectory: this.hookStatus?.repositoryPath || this.app.data?.configs?.rootPath || null,
-            title: labels[normalizedScope],
-            tabLabel: labels[normalizedScope],
-            initialPrompt: prompt,
-            forceNewTab: true
-        });
-        return true;
+        try {
+            return await launchProjectHealthFix(this.app, {
+                workingDirectory: this.hookStatus?.repositoryPath || this.app.data?.configs?.rootPath || null,
+                title: labels[normalizedScope],
+                prompt,
+                selectionValue: select?.value || ''
+            });
+        } finally {
+            this.healthFixLaunching = false;
+            if (button && this.viewRoot === root) {
+                button.disabled = wasDisabled;
+                button.innerHTML = buttonHtml;
+            }
+        }
     }
 
     // Compatibility alias for older markup/tests that used the VCA-only action name.

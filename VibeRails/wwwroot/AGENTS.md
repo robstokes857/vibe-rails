@@ -19,6 +19,7 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | [js/modules/sandbox-controller.js](js/modules/sandbox-controller.js) | Sandbox CRUD + launch terminals/VS Code into sandbox dirs |
 | [js/modules/dashboard-controller.js](js/modules/dashboard-controller.js) | Unified Project health page (Rules, VCA, Git Guard, and Code quality; no embedded terminal) |
 | [js/modules/code-analyzer-dashboard.js](js/modules/code-analyzer-dashboard.js) | Compact MintLint score card plus the modal file/metric/source report |
+| [js/modules/project-health-fix-launcher.js](js/modules/project-health-fix-launcher.js) | Inline shared agent/environment pickers beside Project health Fix actions; synchronizes and remembers the target for direct launch |
 | [js/modules/jobs-controller.js](js/modules/jobs-controller.js) | Automation page: ordered repository-script/Worker workflow editor, automation CRUD, per-action run details, recipes, and "Run now" (queues a native terminal run; `launchFromNav` for the nav launcher); owns the shared `PythonScriptsController` |
 | [js/modules/python-scripts-controller.js](js/modules/python-scripts-controller.js) | "Python scripts" section of the Automation page + shared lifecycle flows; also owns the PIN-gated MCP switch/configurator and typed parameter-to-argv mapping fields |
 | [js/modules/python-script-workbench.js](js/modules/python-script-workbench.js) | `python-script` view: Monaco editor beside a docked agent terminal for one script (see "Python script workbench" below) |
@@ -184,6 +185,16 @@ handlers — the step's own window shows the error, but nothing in it explains w
 started.
 
 ## Customizable LLM Pickers
+
+Project health's Fix actions use inline selectors with the shared `sandbox` picker context,
+including custom environments. Selecting an agent synchronizes all three Fix selectors and
+remembers the choice; each Fix button launches directly without an intermediate dialog.
+The page disposes its pickers on unload. The quality report keeps file context and healthy metric
+groups collapsed, with an `Inspect metric` selector beside the read-only source. On smaller
+windows, source precedes the detailed metrics; narrow windows also offer `Inspect file`.
+Keep the report's `code-analyzer-panel` class: it supplies theme variables and hides the
+source-loading overlay when Monaco is ready. Metric clicks retarget the existing editor;
+closing the report disposes the editor and file-rail listeners.
 
 `LlmPickerController` loads the resolved machine-wide catalog from
 `/api/v1/llm-picker/preferences` before the initial view renders. It mounts the native selects,

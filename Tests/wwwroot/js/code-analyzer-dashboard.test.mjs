@@ -465,6 +465,90 @@ test('code analyzer brief summarizes the scan for the Rules hub door card', () =
     assert.equal(host.children.length, 0);
 });
 
+function findElement(root, predicate) {
+    if (predicate(root)) return root;
+    for (const child of root.children || []) {
+        const match = findElement(child, predicate);
+        if (match) return match;
+    }
+    return null;
+}
+
+test('metric navigation keeps the list and expanded healthy categories in place', () => {
+    const container = new FakeElement('div');
+    const documentRef = { createElement: tagName => new FakeElement(tagName) };
+    const response = sampleResponse();
+    response.report.files[0].categories.push({
+        name: 'Size', score: 10, metrics: [{
+            name: 'lines_of_code', value: 20, score: 10, warn: 100, critical: 200,
+            line: 1, snippet: 'class PaymentProcessor { }'
+        }]
+    });
+    renderCodeAnalyzerDashboard(container, response, documentRef);
+    const panel = findElement(container, node => node.className.includes('code-analyzer-metrics-panel'));
+    const groups = findElement(panel, node => node.className === 'code-analyzer-metric-groups');
+    assert.equal(groups.children[0].open, true);
+    assert.equal(groups.children[1].open, false);
+    groups.children[1].open = true;
+    groups.children[1].fire('toggle');
+    const healthyRow = findElement(groups.children[1], node => node.className === 'code-analyzer-metric-row');
+    healthyRow.fire('click');
+    assert.equal(findElement(container, node => node.className.includes('code-analyzer-metrics-panel')), panel);
+    assert.equal(healthyRow.attributes.get('aria-pressed'), 'true');
+    assert.equal(groups.children[1].open, true);
+    const source = findElement(container, node => node.className === 'code-analyzer-code-evidence');
+    assert.equal(source.textContent, 'class PaymentProcessor { }');
+    disposeCodeAnalyzerDashboard(container);
+});
+
+test('reopening a file whose selected metric disappeared uses that files own metric', () => {
+    const container = new FakeElement('div');
+    const documentRef = { createElement: tagName => new FakeElement(tagName) };
+    const response = sampleResponse();
+    response.report.files.push({
+        file: 'src/Other.cs', score: 10, categories: [{
+            name: 'Size', score: 10, metrics: [{
+                name: 'lines_of_code', value: 2, score: 10, line: 1, snippet: 'class Other { }'
+            }]
+        }]
+    });
+    renderCodeAnalyzerDashboard(container, response, documentRef, {
+        preserveState: { selectedFilePath: 'src/Other.cs', selectedMetricName: 'removed_metric' }
+    });
+    const source = findElement(container, node => node.className === 'code-analyzer-code-evidence');
+    assert.equal(source.textContent, 'class Other { }');
+    disposeCodeAnalyzerDashboard(container);
+});
+
+test('ignoring the selected file publishes its replacement before any further clicks', () => {
+    const container = new FakeElement('div');
+    const documentRef = { createElement: tagName => new FakeElement(tagName) };
+    let state;
+    renderCodeAnalyzerDashboard(container, sampleResponse(), documentRef, {
+        preserveState: { selectedFilePath: 'ignored.cs', selectedIndex: 0 },
+        onStateChange: value => { state = value; }
+    });
+    assert.equal(state.selectedFilePath, 'src/Payments/PaymentProcessor.cs');
+    assert.equal(state.selectedMetricName, 'cognitive_complexity');
+    assert.equal(state.selectedIndex, 0);
+    disposeCodeAnalyzerDashboard(container);
+});
+
+test('NPath saturation is described as a capped estimate rather than an exact measurement', () => {
+    const container = new FakeElement('div');
+    const documentRef = { createElement: tagName => new FakeElement(tagName) };
+    const response = sampleResponse();
+    response.report.files[0].categories[0].metrics = [{
+        name: 'npath_complexity', value: 1_000_000_000, score: 100, warn: 1000, critical: 100000
+    }];
+    renderCodeAnalyzerDashboard(container, response, documentRef);
+    assert.equal(findElement(container, node => node.className === 'code-analyzer-metric-raw').textContent, '1B (cap)');
+    assert.ok(findElement(container, node => node.textContent === 'Estimated paths'));
+    const note = findElement(container, node => node.className === 'code-analyzer-estimate-note');
+    assert.match(note.textContent, /not an exact path count/);
+    disposeCodeAnalyzerDashboard(container);
+});
+
 test('code analyzer brief does not offer an empty metrics drill-down', () => {
     const documentRef = { createElement: tagName => new FakeElement(tagName) };
     const host = new FakeElement('section');
@@ -480,7 +564,7 @@ test('code analyzer brief does not offer an empty metrics drill-down', () => {
     });
 
     const brief = host.children[0];
-    assert.equal(brief.children.some(child => child.className === 'code-analyzer-brief-open'), false);
+    assert.equal(brief.children.some(child => child.className.split(/\s+/).includes('code-analyzer-brief-open')), false);
     assert.equal(opened, 0);
 });
 
@@ -493,7 +577,7 @@ test('Rules and Code quality share one Project health destination without a dock
     assert.equal((index.match(/<span(?: class="nav-label")?>QUALITY<\/span>/g) || []).length, 2);
     assert.equal((index.match(/data-action="navigate-home"/g) || []).length, 2);
 
-    // The unified page carries both summaries and all three agent actions, but never xterm.
+    // The unified page carries both summaries and the card-level agent actions, but never xterm.
     const agentsTemplate = index.match(/<template id="agents-template">([\s\S]*?)<\/template>/)[1];
     assert.doesNotMatch(agentsTemplate, /rules-localnav|role="tablist"|data-rules-tab/);
     assert.match(agentsTemplate, /Rules and code quality<\/h1>/);
@@ -501,7 +585,7 @@ test('Rules and Code quality share one Project health destination without a dock
     assert.match(agentsTemplate, /data-vca-quality-brief/);
     assert.match(agentsTemplate, /project-health-status-copy" role="status"[\s\S]*?aria-live="polite" aria-atomic="true"/);
     assert.match(agentsTemplate, /data-action="manage-rules"/);
-    assert.equal((agentsTemplate.match(/data-action="launch-health-fix"/g) || []).length, 3);
+    assert.equal((agentsTemplate.match(/data-action="launch-health-fix"/g) || []).length, 2);
     assert.doesNotMatch(agentsTemplate, /data-terminal-section|data-terminal-content|renderTerminalPanel/);
     assert.doesNotMatch(agentsTemplate, /data-code-analyzer-report|data-agent-file-tree|data-rules-files-door/);
 

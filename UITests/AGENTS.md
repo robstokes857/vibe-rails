@@ -48,6 +48,18 @@ Open the interactive Playwright UI to see tests running step-by-step:
 npx playwright test --ui
 ```
 
+### Focused Quality UX Tests (No Backend Required)
+
+```powershell
+npx playwright test --config playwright.quality.config.js
+```
+
+This starts a temporary local static server and runs `code-quality-ux.spec.js` against the real
+frontend, shared agent picker, and Monaco editor, with mocked API responses and launch dispatch.
+It needs no database or installed LLM CLI and does not change the standard suite's configuration.
+The tests cover compact actions, source visibility across window sizes, metric and file selection,
+keyboard access, modal cleanup, ignore/restore return flow, and agent/environment choice.
+
 ### View Report
 If a test fails, you can view the detailed HTML report:
 ```powershell
