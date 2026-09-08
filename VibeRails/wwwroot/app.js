@@ -17,6 +17,7 @@ import { VibeRailsAiController } from './js/modules/vibe-rails-ai-controller.js'
 import { McpController } from './js/modules/mcp-controller.js';
 import { JobController } from './js/modules/jobs-controller.js';
 import { PythonScriptWorkbench } from './js/modules/python-script-workbench.js';
+import { BoardController } from './js/modules/board-controller.js';
 import { LlmPickerController } from './js/modules/llm-picker-controller.js';
 import { AutomationNavLauncher } from './js/modules/automation-launcher.js';
 import { AppEventClient } from './js/modules/app-event-client.js';
@@ -58,6 +59,7 @@ export class VibeControlApp {
         this.mcpController = new McpController(this);
         this.jobController = new JobController(this);
         this.pythonScriptWorkbench = new PythonScriptWorkbench(this);
+        this.boardController = new BoardController(this);
         this.automationNavLauncher = new AutomationNavLauncher(this);
         this.appEventClient = new AppEventClient(this);
         this.lifecycleHeartbeatTimer = null;
@@ -655,7 +657,8 @@ export class VibeControlApp {
             'sandboxes',
             'vibe-rails-ai',
             'mcp',
-            'jobs'
+            'jobs',
+            'board'
         ]);
 
         return duplicateableViews.has(normalizedView) ? normalizedView : 'terminal-focus';
@@ -881,6 +884,7 @@ export class VibeControlApp {
         this.ruleController?.unload?.();
         this.jobController?.unload?.();
         this.pythonScriptWorkbench?.unload?.();
+        this.boardController?.unload?.();
         this.environmentController?.unload?.();
         this.sandboxController?.unload?.();
         this.updateActiveSubNav(view);
@@ -909,7 +913,8 @@ export class VibeControlApp {
             'vibe-rails-ai': () => this.vibeRailsAiController.loadView(),
             'mcp': () => this.mcpController.loadView(),
             'jobs': () => this.jobController.loadView(data),
-            'python-script': () => this.pythonScriptWorkbench.loadView(data)
+            'python-script': () => this.pythonScriptWorkbench.loadView(data),
+            'board': () => this.boardController.loadView(data)
         };
 
         const loadFunc = views[view];
@@ -941,16 +946,18 @@ export class VibeControlApp {
     applyViewLayoutState(view) {
         const isTerminalFocus = view === 'terminal-focus';
         const isGitGuardFocus = view === 'git-guard';
-        // Only the Python script workbench still needs the old viewport-filling shell.
+        // Viewport-filling shell (footer hidden, full-bleed container): the Python
+        // script workbench needs it for its editor/terminal split, and the board needs
+        // it so the lanes fill the height and scroll sideways while the page does not.
         // Project health is a normal, scrollable page now that its embedded terminal is gone.
-        const isRulesWorkspace = view === 'python-script';
+        const isFlowingShell = ['python-script', 'board'].includes(view);
         const layoutRoots = [document.documentElement, document.body];
 
         layoutRoots.forEach((element) => {
             element.classList.toggle('terminal-focus-active', isTerminalFocus);
             element.classList.toggle('vb-terminal-focus-active', isTerminalFocus);
             element.classList.toggle('git-guard-focus-active', isGitGuardFocus);
-            element.classList.toggle('vb-rules-workspace-active', isRulesWorkspace);
+            element.classList.toggle('vb-rules-workspace-active', isFlowingShell);
         });
 
         // Removed automatic collapsing of navbars in terminal focus mode
@@ -1295,7 +1302,7 @@ export class VibeControlApp {
 
         return Array.from(state.container.children || []).some(element => {
             if (element === state.dialog || element === state.backdrop) return false;
-            if (element.matches?.('.llm-picker-modal-layer, .vb-file-explorer-layer, .env-steps-modal-layer')) {
+            if (element.matches?.('.llm-picker-modal-layer, .vb-file-explorer-layer, .env-steps-modal-layer, .vb-diff-modal-layer')) {
                 return true;
             }
             return Boolean(element.querySelector?.(

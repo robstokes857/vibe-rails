@@ -171,7 +171,7 @@ html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body .
 }
 
 html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body .modal-content,
-html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body .sandbox-diff-modal .modal-content {
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body .vb-diff-modal .modal-content {
     background: color-mix(in srgb, var(--color-bg-surface) 88%, var(--color-bg-base) 12%);
 }
 
@@ -6457,13 +6457,13 @@ input.form-control:disabled {
    Sandbox Diff Modal
    ============================================ */
 
-.sandbox-diff-modal .modal-dialog {
+.vb-diff-modal .modal-dialog {
     max-width: 95vw;
     height: 90vh;
     margin: 5vh auto;
 }
 
-.sandbox-diff-modal .modal-content {
+.vb-diff-modal .modal-content {
     height: 100%;
     display: flex;
     flex-direction: column;
@@ -6471,13 +6471,13 @@ input.form-control:disabled {
     border: 1px solid var(--color-border);
 }
 
-.sandbox-diff-modal .modal-header {
+.vb-diff-modal .modal-header {
     background-color: #1e1e24;
     border-bottom: 1px solid #2b2b36;
     flex-shrink: 0;
 }
 
-.sandbox-diff-modal .modal-body {
+.vb-diff-modal .modal-body {
     flex: 1;
     display: flex;
     padding: 0;
@@ -6488,7 +6488,7 @@ input.form-control:disabled {
 /* "Open in text editor" — Monaco scratchpad modal. Monaco needs an explicitly
    sized flex container; the min-height: 0 on .modal-body is what lets the editor
    take real height (without it the editor collapses to 0px, as it would in the
-   auto-height app.showModal dialog). Mirrors .sandbox-diff-modal above. */
+   auto-height app.showModal dialog). Mirrors .vb-diff-modal above. */
 .vb-terminal-editor-modal .modal-dialog {
     max-width: 80vw;
     height: 80vh;
@@ -6529,7 +6529,7 @@ input.form-control:disabled {
     min-height: 0;
 }
 
-.sandbox-diff-sidebar {
+.vb-diff-sidebar {
     width: 240px;
     min-width: 240px;
     background-color: #1e1e24;
@@ -6538,7 +6538,13 @@ input.form-control:disabled {
     flex-shrink: 0;
 }
 
-.sandbox-diff-file-item {
+.vb-diff-file-item {
+    /* Now a <button> so the file list is keyboard reachable inside the layer's
+       focus trap; these four lines undo the default button chrome. */
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: 0;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -6553,18 +6559,18 @@ input.form-control:disabled {
     text-overflow: ellipsis;
 }
 
-.sandbox-diff-file-item:hover {
+.vb-diff-file-item:hover {
     background-color: #2b2b36;
     color: #f0f0f5;
 }
 
-.sandbox-diff-file-item.active {
+.vb-diff-file-item.active {
     background-color: #5b2a8640;
     color: #f0f0f5;
     border-left: 3px solid var(--color-primary);
 }
 
-.sandbox-diff-file-item .file-status {
+.vb-diff-file-item .file-status {
     font-size: 0.65rem;
     font-weight: 700;
     width: 18px;
@@ -6572,26 +6578,26 @@ input.form-control:disabled {
     flex-shrink: 0;
 }
 
-.sandbox-diff-file-item .file-status.added {
+.vb-diff-file-item .file-status.added {
     color: #4caf50;
 }
 
-.sandbox-diff-file-item .file-status.modified {
+.vb-diff-file-item .file-status.modified {
     color: #ffbd2e;
 }
 
-.sandbox-diff-file-item .file-status.deleted {
+.vb-diff-file-item .file-status.deleted {
     color: #e57373;
 }
 
-.sandbox-diff-main {
+.vb-diff-main {
     flex: 1;
     display: flex;
     flex-direction: column;
     min-width: 0;
 }
 
-.sandbox-diff-toolbar {
+.vb-diff-toolbar {
     display: flex;
     align-items: center;
     gap: 12px;
@@ -6601,7 +6607,7 @@ input.form-control:disabled {
     flex-shrink: 0;
 }
 
-.sandbox-diff-toolbar .diff-btn {
+.vb-diff-toolbar .diff-btn {
     padding: 3px 10px;
     font-size: 0.75rem;
     border-radius: 4px;
@@ -6612,37 +6618,37 @@ input.form-control:disabled {
     transition: all 0.15s ease;
 }
 
-.sandbox-diff-toolbar .diff-btn:hover {
+.vb-diff-toolbar .diff-btn:hover {
     background: var(--color-bg-surface-hover);
     color: #f0f0f5;
 }
 
-.sandbox-diff-toolbar .diff-btn.active {
+.vb-diff-toolbar .diff-btn.active {
     background: var(--color-primary);
     border-color: var(--color-primary);
     color: #f0f0f5;
 }
 
-.sandbox-diff-toolbar .diff-stat {
+.vb-diff-toolbar .diff-stat {
     font-size: 0.75rem;
     color: #9494a8;
     margin-left: auto;
 }
 
-.sandbox-diff-toolbar .diff-stat .added {
+.vb-diff-toolbar .diff-stat .added {
     color: #4caf50;
 }
 
-.sandbox-diff-toolbar .diff-stat .removed {
+.vb-diff-toolbar .diff-stat .removed {
     color: #e57373;
 }
 
-.sandbox-diff-editor-container {
+.vb-diff-editor-container {
     flex: 1;
     min-height: 0;
 }
 
-.sandbox-diff-statusbar {
+.vb-diff-statusbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -6655,14 +6661,39 @@ input.form-control:disabled {
     user-select: none;
 }
 
-.sandbox-diff-statusbar .status-left,
-.sandbox-diff-statusbar .status-right {
+.vb-diff-statusbar .status-left,
+.vb-diff-statusbar .status-right {
     display: flex;
     align-items: center;
     gap: 14px;
 }
 
-.sandbox-diff-empty {
+/* Nested-layer stacking for the shared diff modal. It opens over an existing
+   app.showModal dialog (a Board card editor), so it needs the same treatment
+   .env-steps-modal-layer gets rather than replacing the modal container. */
+.vb-diff-modal-layer > .vb-diff-modal { z-index: 1070; }
+.vb-diff-modal-layer > .vb-diff-modal-backdrop { z-index: 1065; }
+
+.vb-diff-sidebar-head {
+    padding: 8px 12px;
+    font-size: 0.75rem;
+    color: var(--color-text-muted, #94a3b8);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.vb-diff-file-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vb-diff-file-dir {
+    opacity: 0.5;
+}
+
+.vb-diff-empty {
     flex: 1;
     display: flex;
     align-items: center;
@@ -10599,8 +10630,11 @@ button.git-guard-menu-button:focus-visible {
    These selectors remain for backward-compatible detail routes and for the
    Python script editor/terminal workbench, which still uses the viewport shell. */
 
-/* Flowing shell. app.js now applies .vb-rules-workspace-active only to the
-   Python script workbench. */
+/* Flowing shell: viewport-filling, footer hidden, full-bleed container.
+   app.js applies .vb-rules-workspace-active from the isFlowingShell list in
+   applyViewLayoutState — currently the Python script workbench (editor/terminal
+   split) and the board (lanes fill the height and scroll sideways). The class
+   name is historical; it is not limited to the rules workspace. */
 body.vb-rules-workspace-active .app-main {
     min-height: 100dvh;
 }

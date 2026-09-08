@@ -1,4 +1,4 @@
-import { ensureMonaco } from './monaco-loader.js';
+import { openDiffModal } from './diff-modal.js';
 import { mountLlmPicker } from './pickers/llm-picker.js';
 import { parseLlmSelection } from './utils.js';
 
@@ -6,8 +6,7 @@ import { parseLlmSelection } from './utils.js';
 export class SandboxController {
     constructor(app) {
         this.app = app;
-        this._diffEditor = null;
-        this._diffEscapeCleanup = null;
+        this._diffModal = null;
         this._pickerDisposers = [];
     }
 
@@ -20,35 +19,12 @@ export class SandboxController {
         this._pickerDisposers.splice(0).forEach((dispose) => dispose?.());
     }
 
-    // Monaco diff editors do NOT dispose externally-set models with the editor, and
-    // app.closeModal() just blanks the container — without this, every diff view
-    // leaked a live DiffEditor (automaticLayout observer included) plus two
-    // TextModels holding the full before/after text of the last file shown.
+    // The diff viewer itself now lives in diff-modal.js (shared with the Board).
+    // Closing it disposes the Monaco editor and both of its models; this stays on
+    // the controller because unload() must still tear it down on view navigation.
     _disposeDiffEditor() {
-        this._diffEscapeCleanup?.();
-        this._diffEscapeCleanup = null;
-        const editor = this._diffEditor;
-        if (!editor) return;
-        this._diffEditor = null;
-        let model = null;
-        try { model = editor.getModel(); } catch (_) {}
-        try { editor.dispose(); } catch (_) {}
-        try { model?.original?.dispose(); } catch (_) {}
-        try { model?.modified?.dispose(); } catch (_) {}
-    }
-
-    _installDiffEscapeCleanup() {
-        this._diffEscapeCleanup?.();
-        const onKeydown = (event) => {
-            if (event.key !== 'Escape' || event.defaultPrevented) return;
-            // Monaco owns Escape for its own widgets, and app.js deliberately leaves
-            // those events alone. For every Escape that the app will use to dismiss
-            // the modal, tear down the editor first.
-            if (event.target?.closest?.('.monaco-editor')) return;
-            this._disposeDiffEditor();
-        };
-        document.addEventListener('keydown', onKeydown, true);
-        this._diffEscapeCleanup = () => document.removeEventListener('keydown', onKeydown, true);
+        this._diffModal?.close();
+        this._diffModal = null;
     }
 
     // Fetch sandboxes from API
@@ -438,223 +414,19 @@ export class SandboxController {
     // ============================================
 
     async showDiff(sandboxId, sandboxName) {
-        const escapedName = this.app.escapeHtml(sandboxName);
-
-        // Show loading modal
-        const modalContainer = document.getElementById('modal-container');
-        modalContainer.innerHTML = `
-            <div class="modal fade show d-block sandbox-diff-modal" tabindex="-1">
-                <div class="modal-dialog">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h5 class="modal-title">Code Changes &mdash; ${escapedName}</h5>
-                            <button type="button" class="btn-close" data-action="close-modal"></button>
-                        </div>
-                        <div class="modal-body">
-                            <div class="sandbox-diff-empty">Loading changes...</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-backdrop fade show"></div>
-        `;
-        // Bind close button (CSP-safe, this modal isn't created via showModal)
-        modalContainer.querySelectorAll('[data-action="close-modal"]')
-            .forEach(btn => btn.addEventListener('click', () => this.app.closeModal()));
-
         try {
-            // Start both in parallel, but check diff data before waiting for Monaco
-            const monacoPromise = ensureMonaco();
             const diffData = await this.app.apiCall(`/api/v1/sandboxes/${sandboxId}/diff`, 'GET');
-
             const files = (diffData && diffData.files) || [];
-
-            if (files.length === 0) {
-                modalContainer.querySelector('.sandbox-diff-empty').textContent = 'No changes detected in this sandbox.';
-                return;
-            }
-
-            // Only wait for Monaco if we have files to display
-            const monacoInstance = await monacoPromise;
-
-            if (!monacoInstance) {
-                this.app.closeModal();
-                this.app.showError('Failed to load Monaco Editor');
-                return;
-            }
-
-            // Build the full diff modal UI
-            this._renderDiffModal(escapedName, files, monacoInstance);
-
-        } catch (error) {
-            this.app.closeModal();
-            this.app.showError(`Failed to load diff: ${error.message}`);
-        }
-    }
-
-    _renderDiffModal(escapedName, files, monacoInstance) {
-        const modalContainer = document.getElementById('modal-container');
-
-        // Build file list HTML
-        const fileListHtml = files.map((f, i) => {
-            const status = !f.originalContent ? 'A' : !f.modifiedContent ? 'D' : 'M';
-            const statusClass = status === 'A' ? 'added' : status === 'D' ? 'deleted' : 'modified';
-            const fileName = f.fileName.split('/').pop();
-            const dirPath = f.fileName.includes('/') ? f.fileName.substring(0, f.fileName.lastIndexOf('/') + 1) : '';
-            return `<div class="sandbox-diff-file-item ${i === 0 ? 'active' : ''}" data-file-index="${i}" title="${this.app.escapeHtml(f.fileName)}">
-                <span class="file-status ${statusClass}">${status}</span>
-                <span><span style="opacity: 0.5;">${this.app.escapeHtml(dirPath)}</span>${this.app.escapeHtml(fileName)}</span>
-            </div>`;
-        }).join('');
-
-        modalContainer.innerHTML = `
-            <div class="modal fade show d-block sandbox-diff-modal" tabindex="-1">
-                <div class="modal-dialog">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h5 class="modal-title">Code Changes &mdash; ${escapedName}</h5>
-                            <button type="button" class="btn-close" data-action="close-modal"></button>
-                        </div>
-                        <div class="modal-body">
-                            <div class="sandbox-diff-sidebar">
-                                <div style="padding: 8px 12px; font-size: 0.75rem; color: #6A6A7D; text-transform: uppercase; letter-spacing: 0.5px;">
-                                    Changed Files (${files.length})
-                                </div>
-                                ${fileListHtml}
-                            </div>
-                            <div class="sandbox-diff-main">
-                                <div class="sandbox-diff-toolbar">
-                                    <button class="diff-btn active" id="diff-btn-side-by-side">Side by Side</button>
-                                    <button class="diff-btn" id="diff-btn-inline">Inline</button>
-                                    <div class="diff-stat" id="diff-stats">
-                                        <span class="added">+0</span>&nbsp;<span class="removed">-0</span>
-                                    </div>
-                                </div>
-                                <div class="sandbox-diff-editor-container" id="sandbox-diff-editor"></div>
-                                <div class="sandbox-diff-statusbar">
-                                    <div class="status-left">
-                                        <span id="diff-change-count">0 changes</span>
-                                    </div>
-                                    <div class="status-right">
-                                        <span>UTF-8</span>
-                                        <span id="diff-language">${this.app.escapeHtml(files[0]?.language || 'plaintext')}</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-backdrop fade show"></div>
-        `;
-
-        // Bind close button (CSP-safe, this modal isn't created via showModal).
-        // Dispose the editor on close — closeModal alone leaves it (and its two
-        // full-text models) alive behind the blanked container.
-        modalContainer.querySelectorAll('[data-action="close-modal"]')
-            .forEach(btn => btn.addEventListener('click', () => {
-                this._disposeDiffEditor();
-                this.app.closeModal();
-            }));
-
-        // Dispose any previous diff editor (and its models) before creating a new one
-        this._disposeDiffEditor();
-
-        // Create diff editor
-        const editorContainer = document.getElementById('sandbox-diff-editor');
-        const diffEditor = monacoInstance.editor.createDiffEditor(editorContainer, {
-            theme: 'viberails-dark',
-            automaticLayout: true,
-            fontSize: 14,
-            fontFamily: '"Cascadia Code", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace',
-            renderSideBySide: true,
-            enableSplitViewResizing: true,
-            renderIndicators: true,
-            renderMarginRevertIcon: true,
-            smoothScrolling: true,
-            padding: { top: 8 },
-            minimap: { enabled: false },
-            scrollBeyondLastLine: false,
-            originalEditable: false,
-            readOnly: true,
-        });
-
-        this._diffEditor = diffEditor;
-        this._installDiffEscapeCleanup();
-
-        // Load first file
-        this._loadFileInDiff(diffEditor, monacoInstance, files[0]);
-
-        // Update stats when diff is computed
-        diffEditor.onDidUpdateDiff(() => {
-            this._updateDiffStats(diffEditor);
-        });
-
-        // File list click handlers
-        const fileItems = modalContainer.querySelectorAll('.sandbox-diff-file-item');
-        fileItems.forEach(item => {
-            item.addEventListener('click', () => {
-                const idx = parseInt(item.getAttribute('data-file-index'));
-                fileItems.forEach(fi => fi.classList.remove('active'));
-                item.classList.add('active');
-                this._loadFileInDiff(diffEditor, monacoInstance, files[idx]);
-                const langEl = document.getElementById('diff-language');
-                if (langEl) langEl.textContent = files[idx].language || 'plaintext';
+            this._disposeDiffEditor();
+            this._diffModal = openDiffModal({
+                title: `Code changes — ${sandboxName}`,
+                files,
+                onClose: () => { this._diffModal = null; }
             });
-        });
-
-        // Side by side / inline toggles
-        const btnSideBySide = document.getElementById('diff-btn-side-by-side');
-        const btnInline = document.getElementById('diff-btn-inline');
-
-        btnSideBySide?.addEventListener('click', () => {
-            diffEditor.updateOptions({ renderSideBySide: true });
-            btnSideBySide.classList.add('active');
-            btnInline.classList.remove('active');
-        });
-
-        btnInline?.addEventListener('click', () => {
-            diffEditor.updateOptions({ renderSideBySide: false });
-            btnInline.classList.add('active');
-            btnSideBySide.classList.remove('active');
-        });
-    }
-
-    _loadFileInDiff(diffEditor, monacoInstance, file) {
-        const oldModel = diffEditor.getModel();
-        const originalModel = monacoInstance.editor.createModel(file.originalContent || '', file.language || 'plaintext');
-        const modifiedModel = monacoInstance.editor.createModel(file.modifiedContent || '', file.language || 'plaintext');
-        diffEditor.setModel({ original: originalModel, modified: modifiedModel });
-        if (oldModel) {
-            try { oldModel.original?.dispose(); } catch (_) {}
-            try { oldModel.modified?.dispose(); } catch (_) {}
-        }
-    }
-
-    _updateDiffStats(diffEditor) {
-        const changes = diffEditor.getLineChanges();
-        if (!changes) return;
-
-        let added = 0, removed = 0;
-        changes.forEach(change => {
-            if (change.modifiedEndLineNumber >= change.modifiedStartLineNumber) {
-                added += change.modifiedEndLineNumber - change.modifiedStartLineNumber + 1;
-            }
-            if (change.originalEndLineNumber >= change.originalStartLineNumber) {
-                removed += change.originalEndLineNumber - change.originalStartLineNumber + 1;
-            }
-            if (change.originalEndLineNumber === 0) removed -= 1;
-            if (change.modifiedEndLineNumber === 0) added -= 1;
-        });
-
-        const statsEl = document.getElementById('diff-stats');
-        if (statsEl) {
-            statsEl.querySelector('.added').textContent = '+' + added;
-            statsEl.querySelector('.removed').textContent = '-' + removed;
-        }
-        const countEl = document.getElementById('diff-change-count');
-        if (countEl) {
-            countEl.textContent = changes.length + ' change' + (changes.length !== 1 ? 's' : '');
+            await this._diffModal.ready;
+        } catch (error) {
+            this._disposeDiffEditor();
+            this.app.showError(`Failed to load diff: ${error.message}`);
         }
     }
 

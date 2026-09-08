@@ -25,6 +25,92 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | [js/modules/python-script-workbench.js](js/modules/python-script-workbench.js) | `python-script` view: Monaco editor beside a docked agent terminal for one script (see "Python script workbench" below) |
 | [js/modules/python-run-window.js](js/modules/python-run-window.js) | The little run window: typed inputs + free arguments + stdin in, exit code / output / return value out, no terminal (see "Python script run window" below) |
 | [js/modules/automation-launcher.js](js/modules/automation-launcher.js) | Nav "Launch" flyout (automations + Python scripts, unsigned ones disabled) and its order/show-hide customize modal over `/api/v1/automation-nav/preferences` |
+| [js/modules/board-controller.js](js/modules/board-controller.js) | `board` view: the lane board — drag cards between lanes, drag lanes to reorder, filter, and the card editor with comments |
+| [js/modules/board-api.js](js/modules/board-api.js) | Board data layer. **Still a local placeholder** (localStorage + seed); every function already has the shape of its real endpoint, so wiring the backend is a body-only change |
+| [js/modules/board-text.js](js/modules/board-text.js) | Renders a comment/description body. **Escape-first**: the input is escaped before any transform, so no sanitizer is needed and none is present |
+| [js/modules/diff-modal.js](js/modules/diff-modal.js) | Shared Monaco diff viewer as a nested modal layer. Used by Board commits and the sandbox "View Diff" |
+
+## Board
+
+The `board` nav destination (`board-template` in index.html, `BoardController`) is a lane board
+for the current project. It rides the `.vb-rules-workspace-active` flowing shell, so the lanes
+fill the viewport height and the board scrolls sideways while the page itself does not. Lanes are
+`flex: 1 1 0` with a 232px floor: they share the width evenly and only start scrolling once they
+cannot all fit.
+
+**The data layer is not wired to the backend yet.** `board-api.js` seeds a sample board into
+`localStorage` (in-memory when storage is blocked). Its function names and return shapes are the
+contract the real endpoints will honour, so swapping in `app.apiCall` is a body-only change and
+`board-controller.js` does not move. Until then the "Reset sample" action restores the seed.
+
+The view uses the app's shared surfaces rather than its own: `app.showModal` (upgraded to
+`modal-xl` for the card editor, the same way the rule and quality modals do it), `confirmDialog`
+for every delete, and `app.showToast` for results. It owns no toast stack, no Bootstrap modal, and
+no theme toggle. Drag and drop is the globally loaded Sortable; `unload()` destroys those
+instances, because they attach document-level listeners that outlive the view's DOM.
+
+### The card editor
+
+Laid out like a Jira / older Azure DevOps work item, not a tabbed dialog. The body flows top to
+bottom — title, description, then the comment thread at the bottom — and scrolls as one column.
+Everything *about* the card lives in the right rail: the fields, then Commits (git-commit icons)
+and Sessions (terminal icons — commits use `fa-code-branch`, which stays legible at 0.78rem where
+`fa-code-commit` reads as a faint dot). The rail's action bar is a sibling of its scrolling region,
+not a sticky element inside it, so Save is always reachable and never paints over the commit list.
+
+Buttons follow the app's outline register (`btn-outline-primary` / `-secondary` / `-danger`) rather
+than solid fills; there are no solid `btn-primary` buttons in this view. The composer's submit sits
+in a footer **below** the textarea, not in its toolbar.
+
+**Do not reintroduce tabs here** — they were tried and rejected.
+
+**Comment and description text is not Markdown.** `board-text.js` supports a deliberately tiny
+syntax: fenced code, inline code, `http(s)` autolinks and images. It escapes the entire input
+*before* any transform runs, so raw HTML never enters the pipeline and every tag in the output is
+one the renderer wrote itself. That is why there is no sanitizer here, and why adding a transform
+that interpolates unescaped user text would break the whole security story. The invariants are
+pinned in `Tests/wwwroot/js/board-text.test.mjs` — the CSP sets `script-src 'unsafe-inline'` with
+no nonce, so an injected handler *would* run; this renderer is the only thing standing in the way.
+
+Layout rules worth keeping: `pre.board-code` uses `white-space: pre` + `overflow-x: auto`, and
+every ancestor carries `min-width: 0` (including `grid-template-columns: 28px minmax(0, 1fr)` on
+`.board-comment`). Without that chain a wide stack trace widens the whole dialog. Long comment
+bodies clamp with a Show more expander, and the clamp class must be applied **before** measuring
+overflow — an unclamped body always reports `scrollHeight === clientHeight`, so measuring first
+detects nothing.
+
+**Measure synchronously, not in `requestAnimationFrame`.** Reading `scrollHeight` forces layout, so
+no frame is needed — and a frame never arrives while the page is occluded, which a backgrounded VS
+Code webview routinely is. The clamps, the composer's initial auto-size and the scroll-to-new-comment
+all depend on this; putting any of them behind rAF silently breaks them in the webview with nothing
+to re-measure later. (Same failure class as the cold-start `setTimeout` throttling documented in
+TERMINAL.md.)
+
+Images go through `BoardApi.addCardAttachmentAsync`, which returns a **URL**. The placeholder
+downscales client-side and returns a `data:` URL; the real backend will store bytes and return its
+own. The controller only ever sees a URL, so that swap changes nothing above the API. In the text
+an image is `![name](attachment:<id>)` and the id is resolved against the card's attachment
+records — a URL written into the text is never used as a `src`.
+
+### Commits, sessions, and the diff viewer
+
+Commits and sessions are placeholder data on the card. Clicking a commit opens `diff-modal.js`;
+clicking a session opens a stub modal. Both are **nested modal layers**, not `app.showModal` calls:
+`showModal` rebuilds `#modal-container` wholesale, which would destroy the card editor underneath
+and, on close, restore focus past both dialogs. The layers append themselves, `inert` the existing
+children, own their focus trap and Escape, and restore on close — the same pattern as
+`environment-steps.js`. Their classes are registered in `app.js`'s `hasActiveNestedModalLayer`.
+
+`diff-modal.js` is shared with `sandbox-controller.js`. Two behaviours must not regress: Monaco
+does **not** dispose externally-set models with the editor (each holds a whole file's text), so
+they are disposed explicitly and always before the container is removed; and an Escape raised from
+inside `.monaco-editor` belongs to Monaco's own widgets and must be left alone. Note that
+`monaco.editor.getDiffEditors()` accumulates and is never pruned on dispose — use
+`getModels().length` as the leak signal, which is what the e2e test asserts.
+
+Filters (search, assignee, priority, tag) persist per browser in
+`localStorage['viberails.board.filters.v1']`. Clicking a card's tag or avatar toggles that filter,
+which is why those two controls stop propagation before the card's own open handler runs.
 
 ## Internal tools modal
 
