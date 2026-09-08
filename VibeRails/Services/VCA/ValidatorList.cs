@@ -78,6 +78,9 @@ namespace VibeRails.Services.VCA
             ValidationContext? context,
             CancellationToken cancellation)
         {
+            if (CommitMessageWordRule.LooksLike(rule.RuleText) && !CommitMessageWordRule.TryParse(rule.RuleText, out _))
+                return false;
+
             // Parse the rule text to get the Rule enum
             if (!_rulesService.TryParse(rule.RuleText, out Rule parsedRule))
             {

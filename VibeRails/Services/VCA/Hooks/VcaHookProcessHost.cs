@@ -26,8 +26,19 @@ public static class VcaHookProcessHost
 
     public static bool IsRequested(string[] args) => VcaHookCommandParser.IsRequested(args);
 
-    public static async Task<int> RunAsync(
+    public static Task<int> RunAsync(
         string[] args,
+        TextWriter? output = null,
+        TextWriter? error = null,
+        TextReader? input = null,
+        CancellationToken cancellationToken = default)
+        => RunCoreAsync(args, null, output, error, input, cancellationToken);
+
+    // Tests exercise the real host with an isolated store instead of opening the current user's
+    // database. Production callers keep the same public entry point and service registrations.
+    internal static async Task<int> RunCoreAsync(
+        string[] args,
+        Action<IServiceCollection>? configureServices,
         TextWriter? output = null,
         TextWriter? error = null,
         TextReader? input = null,
@@ -107,6 +118,7 @@ public static class VcaHookProcessHost
             input,
             enableSpinner,
             style);
+        configureServices?.Invoke(services);
 
         await using var provider = services.BuildServiceProvider();
         var runner = provider.GetRequiredService<IVcaHookRunner>();

@@ -22,10 +22,36 @@ const PATH_LOCK_RULES = [
     }
 ];
 
+const COMMIT_WORD_RULE = 'Check commit message for';
+
+export function ruleFileDirectory(filePath) {
+    const normalized = String(filePath || '').replaceAll('\\', '/');
+    const slash = normalized.lastIndexOf('/');
+    if (slash < 0) throw new Error('Choose a directory for the rule file first.');
+    return slash === 2 && /^[a-z]:/i.test(normalized) ? normalized.slice(0, 3) : normalized.slice(0, slash) || '/';
+}
+
+export function relativeRulePath(filePath, pickedPath) {
+    const directory = ruleFileDirectory(filePath);
+    const picked = String(pickedPath || '').replaceAll('\\', '/');
+    const normalized = /^[a-z]:\/+$/i.test(picked) ? `${picked.slice(0, 2)}/` : picked.replace(/\/+$/, '') || '/';
+    if (normalized.split('/').includes('..')) throw new Error('Choose a path inside the rule file’s directory.');
+    const windows = /^[a-z]:/i.test(directory);
+    const compare = value => windows ? value.toLowerCase() : value;
+    if (compare(normalized) === compare(directory)) return '.';
+    const prefix = directory.endsWith('/') ? directory : `${directory}/`;
+    if (!compare(normalized).startsWith(compare(prefix))) {
+        throw new Error(`Choose a file or folder inside ${directory}. A lock cannot reach outside this rule file's directory.`);
+    }
+    return normalized.slice(prefix.length);
+}
+
 export function buildAgentFilePath(rawDirectory) {
     const directory = String(rawDirectory ?? '').trim();
     if (!directory) return null;
-    return `${directory.replace(/[\\/]+$/, '')}/vc.rules.md`;
+    const trimmed = directory.replace(/[\\/]+$/, '');
+    if (/(?:^|[\\/])vc\.rules\.md$/i.test(trimmed)) return trimmed;
+    return `${trimmed}/vc.rules.md`;
 }
 
 export class AgentController {
@@ -59,6 +85,50 @@ export class AgentController {
         return PATH_LOCK_RULES.some(definition => definition.template === ruleText);
     }
 
+    isCommitWordRule(ruleText) {
+        return /^Check commit message for(?:\s*:|$)/i.test(String(ruleText || ''));
+    }
+
+    buildCommitWordRuleText(rawWords) {
+        const raw = String(rawWords || '');
+        if (/[\x00-\x1f\x7f]/.test(raw)) throw new Error('Enter the forbidden words on one line, separated by commas, without control characters.');
+        const entered = raw.trim();
+        if (!entered) throw new Error('Enter at least one forbidden word or phrase, for example: WIP, fix later, temporary.');
+        const words = entered.split(',').map(word => word.trim());
+        if (words.some(word => !word)) throw new Error('Each comma must separate two words or phrases. Remove empty entries and the trailing comma.');
+        if (words.some(word => /^["']|["']$/.test(word))) throw new Error('Enter words or phrases without surrounding quotes, separated by commas.');
+        return `${COMMIT_WORD_RULE}: ${[...new Set(words)].join(', ')}`;
+    }
+
+    renderPathLockHelp(kind) {
+        return kind === 'directory'
+            ? `Examples: <code>src/generated</code> locks that subfolder; <code>.</code> locks the folder containing <code>vc.rules.md</code> and every subfolder. <code>/</code> is an absolute path and is not allowed.`
+            : `Example: <code>src/config.json</code>. The path is relative to the folder containing <code>vc.rules.md</code>. Use Browse for an existing file, or type a relative path to protect a future file.`;
+    }
+
+    async browseRulePath(agent, definition, input, button) {
+        if (!definition || !input || button?.disabled) return;
+        if (button) button.disabled = true;
+        try {
+            const result = await this.app.pickFileSystemEntry({
+                mode: definition.kind,
+                initialPath: ruleFileDirectory(agent.path),
+                title: definition.kind === 'file' ? 'Choose a file to lock' : 'Choose a directory to lock',
+                triggerElement: button
+            });
+            if (result.canceled || input.isConnected === false) return;
+            const relative = relativeRulePath(agent.path, result.path);
+            this.buildPathLockRuleText(definition.template, relative);
+            input.value = relative;
+            input.dispatchEvent?.(new Event('input', { bubbles: true }));
+            input.focus?.();
+        } catch (error) {
+            this.app.showToast('Path lock', error.message, 'warning');
+        } finally {
+            if (button) button.disabled = false;
+        }
+    }
+
     extractPathLockPath(ruleText) {
         const definition = this.getPathLockDefinition(ruleText);
         if (!definition || this.isPathLockTemplate(ruleText)) return '';
@@ -77,8 +147,8 @@ export class AgentController {
         if (!enteredPath) {
             throw new Error(`${definition.label} is required.`);
         }
-        if (/^(?:[a-z]:[\\/]|[\\/])/i.test(enteredPath)) {
-            throw new Error(`${definition.label} must be relative to the vc.rules.md directory.`);
+        if (/^(?:[a-z]:|[\\/])/i.test(enteredPath)) {
+            throw new Error(`${definition.label} must be relative to the vc.rules.md directory. ${definition.kind === 'directory' ? "Use '.' for this folder; '/' is an absolute path." : 'For example: src/config.json.'}`);
         }
         if (enteredPath.includes("'")) {
             throw new Error(`${definition.label} cannot contain a single quote.`);
@@ -91,11 +161,11 @@ export class AgentController {
         }
 
         let normalizedPath = enteredPath.replaceAll('\\', '/');
-        while (normalizedPath.startsWith('./')) normalizedPath = normalizedPath.slice(2);
         if (normalizedPath.split('/').includes('..')) {
             throw new Error(`${definition.label} cannot leave the vc.rules.md directory.`);
         }
-        if (!normalizedPath || (definition.kind === 'file' && normalizedPath === '.')) {
+        normalizedPath = normalizedPath.split('/').filter(part => part && part !== '.').join('/') || '.';
+        if (definition.kind === 'file' && normalizedPath === '.') {
             throw new Error(`${definition.label} must identify a file.`);
         }
         if (normalizedPath.length > 1) normalizedPath = normalizedPath.replace(/\/+$/, '');
@@ -116,19 +186,22 @@ export class AgentController {
                 <p class="text-muted">Enter a path relative to the directory containing this vc.rules.md.</p>
                 <div class="mb-3">
                     <label class="form-label" for="path-lock-rule-path">${definition.label}</label>
-                    <input class="form-control" id="path-lock-rule-path" type="text"
-                        placeholder="${definition.placeholder}" autocomplete="off" required>
-                    <small class="form-text text-muted">
-                        ${definition.kind === 'file'
-                            ? 'The exact file is protected from additions, edits, deletion, and renames.'
-                            : 'Every file at or below this directory is protected recursively.'}
-                    </small>
+                    <div class="input-group">
+                        <input class="form-control" id="path-lock-rule-path" type="text"
+                            placeholder="${definition.placeholder}" autocomplete="off" required>
+                        <button class="btn btn-outline-secondary" type="button" id="path-lock-rule-browse">Browse</button>
+                    </div>
+                    <small class="form-text text-muted">${this.renderPathLockHelp(definition.kind)}</small>
                 </div>
                 <div class="d-flex justify-content-end gap-2">
                     <button type="button" class="btn btn-outline-secondary" data-action="close-modal">Cancel</button>
                     <button type="submit" class="btn btn-primary">Choose enforcement</button>
                 </div>
             </form>`);
+
+        const browse = document.getElementById('path-lock-rule-browse');
+        browse?.addEventListener('click', () => this.browseRulePath(agent, definition,
+            document.getElementById('path-lock-rule-path'), browse));
 
         document.getElementById('path-lock-rule-form')?.addEventListener('submit', event => {
             event.preventDefault();
@@ -199,7 +272,7 @@ export class AgentController {
         this.app.showModal('Manage rules', `
             <div class="project-health-rule-manager" data-rule-manager-modal>
                 <header class="project-health-rule-manager-header">
-                    <p>Choose a <code>vc.rules.md</code> file, then add, remove, or change its enforcement.</p>
+                    <p>Choose a rule file to manage the rules for its folder and subfolders.</p>
                     <div class="d-flex gap-2">
                         <button class="btn btn-sm btn-outline-secondary" type="button"
                             data-rule-manager-refresh title="Reload rule files">
@@ -213,7 +286,13 @@ export class AgentController {
                     </div>
                 </header>
                 <div class="rules-files-split project-health-rule-manager-grid">
-                    <div class="rules-files-rail" data-agent-file-tree></div>
+                    <div class="rules-files-rail">
+                        <label class="form-label small" for="rule-file-search">Find a rule file</label>
+                        <input class="form-control form-control-sm mb-3" type="search" id="rule-file-search"
+                            data-rule-file-search placeholder="Filter by path or name" autocomplete="off">
+                        <div data-agent-file-tree></div>
+                        <p class="text-muted small mt-3" data-rule-file-search-empty hidden>No rule files match this search.</p>
+                    </div>
                     <div class="rules-files-detail" data-agent-rule-editor></div>
                 </div>
             </div>`);
@@ -227,8 +306,9 @@ export class AgentController {
         dialog?.classList.add('modal-xl', 'project-health-rule-modal-dialog');
 
         root.querySelector('[data-rule-manager-create]')?.addEventListener('click', () => {
-            this.app.navigate('agent-create');
+            this.navigateFromRuleManager('agent-create', {}, root);
         });
+        root.querySelector('[data-rule-file-search]')?.addEventListener('input', () => this.filterRuleFiles(root));
         root.querySelector('[data-rule-manager-refresh]')?.addEventListener('click', async event => {
             const button = event.currentTarget;
             button.disabled = true;
@@ -240,6 +320,38 @@ export class AgentController {
             }
         });
         this.renderAgentFileTree(root);
+    }
+
+    navigateFromRuleManager(view, data, root) {
+        if (root?.matches?.('[data-rule-manager-modal]') || root?.closest?.('[data-rule-manager-modal]')) {
+            // Save the modal destination on its parent history entry. Ordinary Back
+            // then restores it after the Quality page's asynchronous load completes.
+            this.app.closeModal();
+            const entry = this.app.navigationStack?.at(-1);
+            this.app.updateCurrentViewData({
+                ...(entry?.data || {}),
+                reopenRuleManager: true,
+                selectedAgentPath: this.selectedAgentPath
+            });
+        }
+        this.app.navigate(view, data);
+    }
+
+    filterRuleFiles(root) {
+        const query = String(root?.querySelector('[data-rule-file-search]')?.value || '').trim().toLowerCase();
+        let matches = 0;
+        root?.querySelectorAll('.agent-file-tree-item').forEach(item => {
+            const fullPath = item.querySelector?.('[data-agent-tree-index]')?.getAttribute('title') || '';
+            const visible = !query || `${item.textContent} ${fullPath}`.toLowerCase().includes(query);
+            item.hidden = !visible;
+            if (visible) matches++;
+        });
+        root?.querySelectorAll('.agent-files-group').forEach(group => {
+            group.hidden = Boolean(query) && !Array.from(group.querySelectorAll('.agent-file-tree-item')).some(item => !item.hidden);
+            if (query && group.matches('details')) group.open = true;
+        });
+        const empty = root?.querySelector('[data-rule-file-search-empty]');
+        if (empty) empty.hidden = !query || matches > 0;
     }
 
     // Rule CRUD can open while the rule manager itself is already an app modal. Keep
@@ -388,6 +500,8 @@ export class AgentController {
         }
 
         this.renderInlineRuleEditor(view);
+        this.updateAgentFileSelection(fileTree);
+        this.filterRuleFiles(view);
     }
 
     // Wire up the agent-file list rendered by app.renderLocalFileTree(): clicking a row
@@ -511,15 +625,17 @@ export class AgentController {
         host.innerHTML = `
             <header class="rules-files-detail-header">
                 <div class="rules-files-detail-title">
-                    <h3>${escape(viewModel.displayName)}</h3>
+                    <div class="rules-editor-name-row">
+                        <h3>${escape(viewModel.shortName || viewModel.displayName)}</h3>
+                        <button class="btn btn-sm btn-outline-secondary" type="button"
+                            data-rule-editor-rename title="Set a friendly searchable label; the filename remains vc.rules.md">
+                            <i class="fa-solid fa-pen" aria-hidden="true"></i> ${agent.customName ? 'Edit display name' : 'Set display name'}
+                        </button>
+                    </div>
                     <code>${escape(viewModel.relativePath)}</code>
+                    <p class="rules-file-scope">Applies to: <strong>${escape(viewModel.scopeLabel || 'This folder and its subfolders')}</strong></p>
                 </div>
                 <div class="rules-files-detail-actions">
-                    <button class="btn btn-sm btn-outline-secondary rules-icon-btn" type="button"
-                        data-rule-editor-rename title="Set this rule file's display name"
-                        aria-label="Set this rule file's display name">
-                        <i class="fa-solid fa-pen" aria-hidden="true"></i>
-                    </button>
                     <button class="btn btn-sm btn-outline-secondary" type="button" data-rule-editor-open
                         title="Open the full editor with the files this rule file covers">
                         Full editor
@@ -548,7 +664,7 @@ export class AgentController {
                 parentRoot: view
             }));
         host.querySelector('[data-rule-editor-open]')?.addEventListener('click',
-            () => this.app.navigate('agent-edit', agent));
+            () => this.navigateFromRuleManager('agent-edit', agent, view));
         host.querySelector('[data-rule-editor-add]')?.addEventListener('click',
             () => this.showInlineAddRule(agent, view));
 
@@ -590,12 +706,22 @@ export class AgentController {
         }
     }
 
+    refreshRuleSurface(root) {
+        if (root?.matches?.('[data-view="agent-edit"]')) {
+            if (!root.isConnected) return;
+            const agent = (this.app.data.agents || []).find(item => item.path === this.currentAgent?.path);
+            if (agent) this.loadAgentEdit(agent);
+            return;
+        }
+        this.renderAgentFileTree(root);
+    }
+
     showInlineAddRule(agent, root) {
         const available = this.app.data.availableRulesWithDescriptions || [];
         const existing = new Set((agent.rules || []).map(rule => rule.text));
         // Parameterized locks stay available so one vc.rules.md can protect multiple paths.
         const unused = available.filter(rule =>
-            this.isPathLockTemplate(rule.name) || !existing.has(rule.name));
+            this.isPathLockTemplate(rule.name) || this.isCommitWordRule(rule.name) || !existing.has(rule.name));
 
         if (unused.length === 0) {
             this.app.showToast('Add rule', 'Every available rule is already in this file.', 'info');
@@ -623,11 +749,18 @@ export class AgentController {
                 <div class="rules-add-rule-list">${options}</div>
                 <div class="mt-3 d-none" data-inline-path-lock-fields>
                     <label class="form-label" for="inline-path-lock-path" data-inline-path-lock-label>Path</label>
-                    <input class="form-control" id="inline-path-lock-path" name="inline-path-lock-path"
-                        type="text" autocomplete="off">
-                    <small class="form-text text-muted">
-                        Relative to this vc.rules.md directory. Directory locks include every descendant.
-                    </small>
+                    <div class="input-group">
+                        <input class="form-control" id="inline-path-lock-path" name="inline-path-lock-path"
+                            type="text" autocomplete="off">
+                        <button class="btn btn-outline-secondary" type="button" data-inline-path-lock-browse>Browse</button>
+                    </div>
+                    <small class="form-text text-muted" data-inline-path-lock-help></small>
+                </div>
+                <div class="mt-3 d-none" data-inline-commit-word-fields>
+                    <label class="form-label" for="inline-commit-words">Forbidden words or phrases</label>
+                    <input class="form-control" id="inline-commit-words" name="inline-commit-words" type="text"
+                        placeholder="WIP, fix later, temporary" autocomplete="off">
+                    <small class="form-text text-muted">Separate entries with commas, without quotes. Example: <code>WIP, fix later, temporary</code>. Matching ignores case and checks whole words or phrases. <code>WIP</code> matches <code>wip</code>, but not <code>swipe</code>.</small>
                 </div>
                 <div class="form-label mt-3 mb-2">Enforcement</div>
                 <div class="rules-add-rule-levels">${levels}</div>
@@ -645,14 +778,26 @@ export class AgentController {
             fields?.classList.toggle('d-none', !definition);
             const label = inlineForm?.querySelector('[data-inline-path-lock-label]');
             const input = inlineForm?.querySelector('input[name="inline-path-lock-path"]');
+            const help = inlineForm?.querySelector('[data-inline-path-lock-help]');
+            if (help && definition) help.innerHTML = this.renderPathLockHelp(definition.kind);
             if (label && definition) label.textContent = definition.label;
             if (input) {
                 input.placeholder = definition?.placeholder || '';
                 input.required = Boolean(definition);
             }
+            const commitWords = this.isCommitWordRule(selectedTemplate);
+            inlineForm?.querySelector('[data-inline-commit-word-fields]')?.classList.toggle('d-none', !commitWords);
+            const wordsInput = inlineForm?.querySelector('input[name="inline-commit-words"]');
+            if (wordsInput) wordsInput.required = commitWords;
         };
         inlineForm?.querySelectorAll('input[name="inline-rule-pick"]').forEach(input =>
             input.addEventListener('change', syncPathLockFields));
+        const browse = inlineForm?.querySelector('[data-inline-path-lock-browse]');
+        browse?.addEventListener('click', () => {
+            const template = inlineForm.querySelector('input[name="inline-rule-pick"]:checked')?.value;
+            return this.browseRulePath(agent, PATH_LOCK_RULES.find(item => item.template === template),
+                inlineForm.querySelector('input[name="inline-path-lock-path"]'), browse);
+        });
 
         inlineForm?.addEventListener('submit', async (event) => {
             event.preventDefault();
@@ -665,13 +810,16 @@ export class AgentController {
             }
             let ruleText;
             try {
-                ruleText = this.buildPathLockRuleText(
-                    ruleTemplate,
-                    form.querySelector('input[name="inline-path-lock-path"]')?.value);
+                ruleText = this.isCommitWordRule(ruleTemplate)
+                    ? this.buildCommitWordRuleText(form.querySelector('input[name="inline-commit-words"]')?.value)
+                    : this.buildPathLockRuleText(ruleTemplate, form.querySelector('input[name="inline-path-lock-path"]')?.value);
             } catch (error) {
-                this.app.showToast('Path lock', error.message, 'warning');
+                this.app.showToast('Rule settings', error.message, 'warning');
                 return;
             }
+            const submit = form.querySelector('button[type="submit"]');
+            if (submit?.disabled) return;
+            if (submit) submit.disabled = true;
             try {
                 await this.app.apiCall('/api/v1/agents/rules', 'POST', {
                     path: agent.path,
@@ -681,10 +829,12 @@ export class AgentController {
                 modal.close();
                 this.app.showToast('Rule added', `${ruleText} is now enforced at ${enforcement}.`, 'success');
                 await this.app.refreshDashboardData();
-                this.renderAgentFileTree(root);
+                this.refreshRuleSurface(root);
                 this.focusRuleManagerControl(root, ['[data-rule-editor-add]']);
             } catch {
                 this.app.showError('Failed to add rule');
+            } finally {
+                if (submit) submit.disabled = false;
             }
         });
     }
@@ -708,7 +858,7 @@ export class AgentController {
                 });
                 this.app.showToast('Rule removed', `${rule.text} no longer applies here.`, 'success');
                 await this.app.refreshDashboardData();
-                this.renderAgentFileTree(root);
+                this.refreshRuleSurface(root);
                 this.focusRuleManagerControl(root, ['[data-rule-editor-add]']);
             } catch {
                 this.app.showError('Failed to remove rule');
@@ -742,6 +892,7 @@ export class AgentController {
 
     loadAgentEdit(agent) {
         this.currentAgent = agent;
+        this.selectedAgentPath = agent.path;
         this.selectedRuleIndex = null;
 
         const content = document.getElementById('app-content');
@@ -754,24 +905,38 @@ export class AgentController {
         const root = fragment.querySelector('[data-view="agent-edit"]');
 
         if (root) {
+            const agentIndex = this.app.data.agents.findIndex(candidate => candidate.path === agent.path);
+            const viewModel = this.app.getAgentFileViewModel(agent, Math.max(agentIndex, 0));
             const displayName = root.querySelector('[data-agent-display-name]');
             if (displayName) {
-                const agentIndex = this.app.data.agents.findIndex(candidate => candidate.path === agent.path);
-                displayName.textContent = this.app.getAgentFileViewModel(agent, Math.max(agentIndex, 0)).displayName;
+                displayName.textContent = viewModel.shortName || viewModel.displayName;
             }
+            const displayNameAction = root.querySelector('[data-agent-display-name-action]');
+            if (displayNameAction) displayNameAction.textContent = agent.customName ? 'Edit display name' : 'Set display name';
 
             const path = root.querySelector('[data-agent-path]');
             if (path) {
                 path.textContent = agent.path;
             }
+            const scope = root.querySelector('[data-agent-scope]');
+            if (scope) scope.textContent = `Applies to: ${viewModel.scopeLabel || 'This folder and its subfolders'}`;
+            const ruleCount = root.querySelector('[data-agent-rule-count]');
+            if (ruleCount) ruleCount.textContent = String(agent.rules?.length || 0);
 
             const rules = root.querySelector('[data-agent-rules]');
             if (rules) {
                 rules.innerHTML = this.renderAgentRules(agent);
-                // Bind rule selection click handlers (CSP-safe, no inline onclick)
-                rules.querySelectorAll('[data-rule-select]').forEach(el => {
-                    const index = parseInt(el.dataset.ruleSelect);
-                    el.addEventListener('click', () => this.selectRule(el, index));
+                rules.querySelectorAll('[data-rule-edit]').forEach(button => {
+                    button.addEventListener('click', () => {
+                        const rule = agent.rules[Number(button.dataset.ruleEdit)];
+                        if (rule) this.showEnforcementPicker(agent, rule.text, true);
+                    });
+                });
+                rules.querySelectorAll('[data-rule-delete]').forEach(button => {
+                    button.addEventListener('click', () => {
+                        const rule = agent.rules[Number(button.dataset.ruleDelete)];
+                        if (rule) this.confirmInlineRemoveRule(agent, rule, root);
+                    });
                 });
             }
 
@@ -785,6 +950,7 @@ export class AgentController {
                 contentToggle.addEventListener('click', () => {
                     const isHidden = contentContainer.style.display === 'none';
                     contentContainer.style.display = isHidden ? 'block' : 'none';
+                    contentToggle.setAttribute('aria-expanded', String(isHidden));
 
                     const icon = contentToggle.querySelector('.toggle-icon');
                     if (icon) {
@@ -805,7 +971,7 @@ export class AgentController {
             }
 
             const actions = {
-                'add-rule': () => this.addRule(agent),
+                'add-rule': () => this.showInlineAddRule(agent, root),
                 'edit-rule': () => this.editRule(),
                 'remove-rule': () => this.removeRule(),
                 'validate-agent': () => this.validateAgent(agent),
@@ -820,21 +986,12 @@ export class AgentController {
                     element.addEventListener('click', handler);
                 }
 
-                // Dim edit/remove until a rule is selected. We deliberately keep
-                // them clickable so the handler's "select a rule first" toast can
-                // fire — a fully inert card just reads as a broken/dead button.
-                if (action === 'edit-rule' || action === 'remove-rule') {
-                    element.closest('.card').classList.add('disabled-card');
-                    element.style.opacity = '0.5';
-                }
-
-                // Hide "Edit in VS Code" button when running inside VS Code
-                if (action === 'edit-vscode' && window.__viberails_VSCODE__) {
-                    element.closest('.col-md-4')?.remove();
+                if (action === 'validate-agent' && !agent.rules?.length) {
+                    element.disabled = true;
+                    element.title = 'Add a rule before validating this file.';
                 }
             });
 
-            this.app.bindAction(root, '[data-action="go-back"]', () => this.app.goBack());
             this.app.bindAction(root, '[data-action="set-custom-agent-name"]', () => this.showAgentCustomNameModal(agent));
         }
 
@@ -843,7 +1000,10 @@ export class AgentController {
 
     renderAgentRules(agent) {
         if (!agent.rules || agent.rules.length === 0) {
-            return '<div class="alert alert-secondary border-0"><i class="me-2">ℹ️</i>No rules configured for this rule file.</div>';
+            return `<div class="rules-files-detail-empty mb-3">
+                <strong>No rules yet</strong>
+                <p>Use Add rule above to choose your first rule and its enforcement. Each rule will have its own Edit and Remove buttons.</p>
+            </div>`;
         }
 
         const getEnforcementBadge = (level) => {
@@ -856,29 +1016,20 @@ export class AgentController {
         };
 
         return `
-            <div class="d-flex flex-column gap-3 mb-4">
+            <ul class="rules-editor-rule-list">
                 ${agent.rules.map((rule, index) => `
-                    <div class="card rule-card border-0 shadow-sm" data-rule-select="${index}" data-rule-index="${index}" style="cursor:pointer;">
-                        <div class="card-body p-3 d-flex justify-content-between align-items-center">
-                            <div class="pe-3 d-flex align-items-center flex-grow-1">
-                                <span class="rule-icon me-3 text-muted">📜</span>
-                                <span class="fw-medium text-light" style="font-size: 1.05rem;">${this.app.escapeHtml(rule.text)}</span>
-                            </div>
-                            <div class="d-flex align-items-center gap-3">
-                                <button class="btn btn-sm btn-primary d-flex align-items-center gap-2">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                        <path d="M12.736 3.97a.733.733 0 0 1 1.047 0c.286.289.29.756.01 1.05L7.88 12.01a.733.733 0 0 1-1.065.02L3.217 8.384a.757.757 0 0 1 0-1.06.733.733 0 0 1 1.047 0l3.052 3.093 5.42-6.447z"/>
-                                    </svg>
-                                    Select
-                                </button>
-                                <div class="flex-shrink-0">
-                                    ${getEnforcementBadge(rule.enforcement)}
-                                </div>
-                            </div>
+                    <li class="rules-editor-rule-row" data-rule-index="${index}">
+                        <strong class="rules-rule-text">${this.app.escapeHtml(rule.text)}</strong>
+                        ${getEnforcementBadge(rule.enforcement)}
+                        <div class="rules-files-detail-actions">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" data-rule-edit="${index}"
+                                aria-label="Edit ${this.app.escapeHtml(rule.text)}"><i class="fa-solid fa-pen" aria-hidden="true"></i> Edit</button>
+                            <button type="button" class="btn btn-sm btn-outline-danger" data-rule-delete="${index}"
+                                aria-label="Remove ${this.app.escapeHtml(rule.text)}"><i class="fa-solid fa-trash" aria-hidden="true"></i> Remove</button>
                         </div>
-                    </div>
+                    </li>
                 `).join('')}
-            </div>
+            </ul>
         `;
     }
 
@@ -900,17 +1051,15 @@ export class AgentController {
     async loadAgentFiles(path, listElement, countBadge) {
         try {
             const response = await this.app.apiCall(`/api/v1/agents/files?path=${encodeURIComponent(path)}`, 'GET');
-            if (response && response.files && response.files.length > 0) {
-                const totalCount = response.totalCount || response.files.length;
+            const files = (response?.files || []).filter(file =>
+                !file.split(/[\\/]/).some(segment => segment.toLowerCase() === '.git'));
+            if (files.length > 0) {
+                const totalCount = files.length;
                 if (countBadge) {
                     countBadge.textContent = `${totalCount} files`;
                 }
 
-                // Build summary of top-level directories with file counts
-                const summary = this.buildDirectorySummary(response.files);
-                const summaryHtml = this.renderDirectorySummary(summary, totalCount);
-
-                listElement.innerHTML = summaryHtml;
+                listElement.innerHTML = this.renderAgentFileCards(files);
             } else {
                 if (countBadge) {
                     countBadge.textContent = '0 files';
@@ -924,90 +1073,26 @@ export class AgentController {
         }
     }
 
-    buildDirectorySummary(files) {
-        const summary = { dirs: {}, rootFiles: [] };
-
-        files.forEach(filePath => {
-            const parts = filePath.split(/[\\/]/);
-
-            // Skip hidden files/directories (starting with .)
-            if (parts[0].startsWith('.')) return;
-
-            if (parts.length === 1) {
-                // Root level file
-                summary.rootFiles.push(parts[0]);
-            } else {
-                // File in a directory
-                const topDir = parts[0];
-                if (!summary.dirs[topDir]) {
-                    summary.dirs[topDir] = { count: 0, subdirs: new Set() };
-                }
-                summary.dirs[topDir].count++;
-                if (parts.length > 2) {
-                    summary.dirs[topDir].subdirs.add(parts[1]);
-                }
-            }
-        });
-
-        return summary;
-    }
-
-    renderDirectorySummary(summary, totalCount) {
-        const maxItems = 12;
-        let html = '<div class="file-summary-grid">';
-        let itemCount = 0;
-
-        // Sort directories by file count (descending)
-        const sortedDirs = Object.entries(summary.dirs)
-            .sort((a, b) => b[1].count - a[1].count);
-
-        // Render directories
-        for (const [dirName, data] of sortedDirs) {
-            if (itemCount >= maxItems) break;
-
-            const subdirCount = data.subdirs.size;
-            const subdirText = subdirCount > 0 ? `${subdirCount} subdirs` : '';
-
-            html += `
-                <div class="file-summary-item dir-item">
-                    <div class="file-summary-icon dir-icon"></div>
-                    <div class="file-summary-info">
-                        <span class="file-summary-name">${this.app.escapeHtml(dirName)}</span>
-                        <span class="file-summary-meta">${data.count} files${subdirText ? ' · ' + subdirText : ''}</span>
-                    </div>
-                </div>
-            `;
-            itemCount++;
-        }
-
-        // Render root files (if any and space remaining)
-        for (const fileName of summary.rootFiles) {
-            if (itemCount >= maxItems) break;
-            const fileType = getFileTypeVisual(fileName);
-
-            html += `
-                <div class="file-summary-item file-item">
-                    <div class="file-summary-icon file-icon" title="${this.app.escapeHtml(fileType.name)}">
-                        <img src="${this.app.escapeHtml(fileType.iconPath)}" alt="${this.app.escapeHtml(fileType.name)} icon" loading="lazy">
+    renderAgentFileCards(files) {
+        return `<div class="file-summary-grid rules-editor-files-grid" role="list" tabindex="0" aria-label="Files covered by this rule file">
+            ${files.map(filePath => {
+                const normalized = String(filePath).replaceAll('\\', '/');
+                const parts = normalized.split('/');
+                const fileName = parts.pop();
+                const directory = parts.join('/');
+                const fileType = getFileTypeVisual(fileName);
+                return `<div class="file-summary-item file-item" role="listitem" title="${this.app.escapeHtml(normalized)}">
+                    <div class="file-summary-icon file-icon" aria-hidden="true">
+                        <img src="${this.app.escapeHtml(fileType.iconPath)}" alt="" loading="lazy">
                     </div>
                     <div class="file-summary-info">
                         <span class="file-summary-name">${this.app.escapeHtml(fileName)}</span>
                         <span class="file-summary-meta">${this.app.escapeHtml(fileType.name)}</span>
+                        ${directory ? `<span class="file-summary-path">${this.app.escapeHtml(directory)}/</span>` : ''}
                     </div>
-                </div>
-            `;
-            itemCount++;
-        }
-
-        html += '</div>';
-
-        // Add overflow indicator if needed
-        const totalItems = Object.keys(summary.dirs).length + summary.rootFiles.length;
-        if (totalItems > maxItems) {
-            html += `<div class="file-summary-overflow">+ ${totalItems - maxItems} more directories/files</div>`;
-        }
-
-        return html;
+                </div>`;
+            }).join('')}
+        </div>`;
     }
 
     async validateAgent(agent) {
@@ -1098,116 +1183,53 @@ export class AgentController {
         }
     }
 
+    // Compatibility entry point: every Add flow uses the same parameter fields.
     async addRule(agent) {
-        // Get available rules with descriptions from API data
-        const rulesWithDescriptions = this.app.data.availableRulesWithDescriptions || [];
-
-        // Filter out rules already in use
-        const existingRuleTexts = agent.rules.map(r => r.text);
-        const unusedRulesWithDescriptions = rulesWithDescriptions.filter(r =>
-            this.isPathLockTemplate(r.name) || !existingRuleTexts.includes(r.name));
-
-        if (unusedRulesWithDescriptions.length === 0) {
-            this.app.showToast('Add Rule', 'All available rules are already added', 'info');
-            return;
-        }
-
-        const ruleOptions = unusedRulesWithDescriptions.map(rule => `
-            <div class="list-group-item list-group-item-action" data-rule="${this.app.escapeHtml(rule.name)}" style="cursor: pointer;">
-                <div class="mb-1"><strong>${this.app.escapeHtml(rule.name)}</strong></div>
-                <small class="text-muted">${this.app.escapeHtml(rule.description)}</small>
-            </div>
-        `).join('');
-
-        this.app.showModal('Add Rule', `
-            <p class="text-muted mb-3">Select a rule to add to this rule file:</p>
-            <div class="list-group">
-                ${ruleOptions}
-            </div>
-        `);
-
-        // Bind click handlers - show enforcement picker after selecting rule
-        document.querySelectorAll('[data-rule]').forEach(el => {
-            el.addEventListener('click', () => {
-                const ruleText = el.dataset.rule;
-                if (this.isPathLockTemplate(ruleText)) {
-                    this.showPathLockPathPicker(agent, ruleText);
-                } else {
-                    this.showEnforcementPicker(agent, ruleText);
-                }
-            });
-        });
+        return this.showInlineAddRule(agent, document.querySelector('[data-view="agent-edit"]'));
     }
 
     showEnforcementPicker(agent, ruleText, isEdit = false) {
-        const currentEnforcement = isEdit ? agent.rules.find(r => r.text === ruleText)?.enforcement : null;
+        const currentEnforcement = isEdit ? agent.rules.find(rule => rule.text === ruleText)?.enforcement : 'WARN';
+        const levels = ENFORCEMENT_LEVELS.map(option => `
+            <label class="rules-add-rule-level">
+                <input type="radio" name="rule-enforcement" value="${option.value}" ${option.value === currentEnforcement ? 'checked' : ''}>
+                <span><strong>${option.value}</strong><small>${option.blurb}</small></span>
+            </label>`).join('');
+        this.app.showModal(isEdit ? 'Edit rule enforcement' : 'Add rule', `
+            <form id="rule-enforcement-form">
+                <p><strong>${this.app.escapeHtml(ruleText)}</strong></p>
+                <p class="text-muted small">${this.app.escapeHtml(agent.path || '')}</p>
+                <div class="form-label">Enforcement</div>
+                <div class="rules-add-rule-levels">${levels}</div>
+                <div class="d-flex justify-content-end gap-2 mt-4">
+                    <button type="button" class="btn btn-outline-secondary" data-action="close-modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">${isEdit ? 'Save enforcement' : 'Add rule'}</button>
+                </div>
+            </form>`);
 
-        this.app.showModal('Select Enforcement Level', `
-            <p class="text-muted mb-3">How should this rule be enforced?</p>
-            <p class="mb-4"><strong>${this.app.escapeHtml(ruleText)}</strong></p>
-            <div class="d-flex flex-column gap-3">
-                <div class="card enforcement-option ${currentEnforcement === 'WARN' ? 'border-warning' : ''}" data-enforcement="WARN" style="cursor: pointer;">
-                    <div class="card-body d-flex align-items-center gap-3">
-                        <span class="fs-3">⚠️</span>
-                        <div>
-                            <h6 class="mb-1">WARN</h6>
-                            <small class="text-muted">Warn the user about the violation but allow the action to proceed.</small>
-                        </div>
-                    </div>
-                </div>
-                <div class="card enforcement-option ${currentEnforcement === 'COMMIT' ? 'border-info' : ''}" data-enforcement="COMMIT" style="cursor: pointer;">
-                    <div class="card-body d-flex align-items-center gap-3">
-                        <span class="fs-3">💬</span>
-                        <div>
-                            <h6 class="mb-1">COMMIT</h6>
-                            <small class="text-muted">Require an explanation in the commit or PR message about why the rule was broken.</small>
-                        </div>
-                    </div>
-                </div>
-                <div class="card enforcement-option ${currentEnforcement === 'STOP' ? 'border-danger' : ''}" data-enforcement="STOP" style="cursor: pointer;">
-                    <div class="card-body d-flex align-items-center gap-3">
-                        <span class="fs-3">🛑</span>
-                        <div>
-                            <h6 class="mb-1">STOP</h6>
-                            <small class="text-muted">Block the commit or PR entirely until the violation is fixed.</small>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `);
-
-        // Bind click handlers for enforcement options
-        document.querySelectorAll('[data-enforcement]').forEach(el => {
-            el.addEventListener('click', async () => {
-                const enforcement = el.dataset.enforcement;
-                try {
-                    if (isEdit) {
-                        // Update existing rule's enforcement
-                        await this.app.apiCall('/api/v1/agents/rules/enforcement', 'PUT', {
-                            path: agent.path,
-                            ruleText: ruleText,
-                            enforcement: enforcement
-                        });
-                    } else {
-                        // Add new rule with enforcement
-                        await this.app.apiCall('/api/v1/agents/rules', 'POST', {
-                            path: agent.path,
-                            ruleText: ruleText,
-                            enforcement: enforcement
-                        });
-                    }
-                    this.app.closeModal();
-                    this.app.showToast('Success', isEdit ? 'Enforcement level updated' : 'Rule added successfully', 'success');
-                    await this.app.refreshDashboardData();
-                    // Reload the agent edit view with updated data
-                    const updatedAgent = this.app.data.agents.find(a => a.path === agent.path);
-                    if (updatedAgent) {
-                        this.loadAgentEdit(updatedAgent);
-                    }
-                } catch (error) {
-                    this.app.showError(isEdit ? 'Failed to update enforcement' : 'Failed to add rule');
-                }
-            });
+        document.getElementById?.('rule-enforcement-form')?.addEventListener('submit', async event => {
+            event.preventDefault();
+            const form = event.currentTarget;
+            const enforcement = form.querySelector('input[name="rule-enforcement"]:checked')?.value;
+            const submit = form.querySelector('button[type="submit"]');
+            if (!enforcement || submit.disabled) return;
+            submit.disabled = true;
+            try {
+                await this.app.apiCall(isEdit ? '/api/v1/agents/rules/enforcement' : '/api/v1/agents/rules', isEdit ? 'PUT' : 'POST', {
+                    path: agent.path,
+                    ruleText,
+                    enforcement
+                });
+                this.app.closeModal();
+                this.app.showToast('Rule updated', isEdit ? 'Enforcement level saved.' : 'Rule added.', 'success');
+                await this.app.refreshDashboardData();
+                const updatedAgent = this.app.data.agents.find(item => item.path === agent.path);
+                if (updatedAgent && this.app.currentView === 'agent-edit') this.loadAgentEdit(updatedAgent);
+            } catch {
+                this.app.showError(isEdit ? 'Failed to update enforcement' : 'Failed to add rule');
+            } finally {
+                submit.disabled = false;
+            }
         });
     }
 
@@ -1270,46 +1292,51 @@ export class AgentController {
 
     async editInVSCode(agent) {
         try {
+            if (window.__viberails_VSCODE__ && typeof window.__viberails_openFile__ === 'function') {
+                window.__viberails_openFile__(agent.path);
+                return;
+            }
             await this.app.apiCall('/api/v1/cli/launch/vscode', 'POST', { path: agent.path });
-            this.app.showToast('VS Code', `Opened ${agent.name} in VS Code`, 'success');
+            this.app.showToast('VS Code', `Opened ${agent.path} in VS Code`, 'success');
         } catch (error) {
-            this.app.showError(`Failed to open ${agent.name} in VS Code`);
+            this.app.showError(`Failed to open ${agent.path} in VS Code`);
         }
     }
 
     showAgentCustomNameModal(agent, { onSaved = null, parentRoot = null } = {}) {
-        const currentName = agent.customName || agent.name;
+        const currentName = agent.customName || '';
         const openedFromTree = parentRoot?.matches?.('[data-agent-file-tree]') === true;
 
-        const modal = this.openRuleCrudModal('Set Rule File Display Name', `
+        const modal = this.openRuleCrudModal(agent.customName ? 'Edit display name' : 'Set display name', `
             <form id="agent-custom-name-form">
+                <p class="text-muted small">${this.app.escapeHtml(agent.path)}</p>
                 <div class="mb-3">
-                    <label class="form-label">Custom Name</label>
-                    <input type="text" class="form-control" id="agent-custom-name" value="${this.app.escapeHtml(currentName)}" placeholder="${this.app.escapeHtml(currentName)}" required>
-                    <small class="form-text text-muted">Enter a friendly display name for this rule file.</small>
+                    <label class="form-label" for="agent-custom-name">Display name</label>
+                    <input type="text" class="form-control" id="agent-custom-name" value="${this.app.escapeHtml(currentName)}"
+                        placeholder="DB Rules for NoSQL DB 1" required>
+                    <small class="form-text text-muted">A friendly, searchable label, for example <strong>DB Rules for NoSQL DB 1</strong>.
+                        The file stays <code>vc.rules.md</code>; its path and scope stay the same.</small>
                 </div>
                 <div class="d-flex gap-2 justify-content-end">
-                    <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary d-flex align-items-center gap-2">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                            <path d="M11 2H9v3h2z"/>
-                            <path d="M1.5 0h11.586a1.5 1.5 0 0 1 1.06.44l1.415 1.414A1.5 1.5 0 0 1 16 2.914V14.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 0 14.5v-13A1.5 1.5 0 0 1 1.5 0M1 1.5v13a.5.5 0 0 0 .5.5H2v-4.5A1.5 1.5 0 0 1 3.5 9h9a1.5 1.5 0 0 1 1.5 1.5V15h.5a.5.5 0 0 0 .5-.5V2.914a.5.5 0 0 0-.146-.353l-1.415-1.415A.5.5 0 0 0 13.086 1H13v4.5A1.5 1.5 0 0 1 11.5 7h-7A1.5 1.5 0 0 1 3 5.5V1H1.5a.5.5 0 0 0-.5.5m3 4a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5V1H4zM3 15h10v-4.5a.5.5 0 0 0-.5-.5h-9a.5.5 0 0 0-.5.5z"/>
-                        </svg>
-                        Save Custom Name
-                    </button>
+                    <button type="button" class="btn btn-outline-secondary" data-action="close-modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save display name</button>
                 </div>
             </form>
         `, { parentRoot });
 
         modal.root?.querySelector?.('#agent-custom-name-form')?.addEventListener('submit', async (e) => {
             e.preventDefault();
-            const newName = modal.root.querySelector('#agent-custom-name').value;
+            const newName = modal.root.querySelector('#agent-custom-name').value.trim();
+            if (!newName) {
+                this.app.showToast('Display name', 'Enter a friendly display name.', 'warning');
+                return;
+            }
             try {
                 await this.app.apiCall('/api/v1/agents/name', 'PUT', {
                     path: agent.path,
                     customName: newName
                 });
-                this.app.showToast('Success', `Rule file name updated to "${newName}"`, 'success');
+                this.app.showToast('Success', `Display name saved as "${newName}"`, 'success');
                 modal.close();
                 // Refresh data, then let the caller decide how to re-render. The
                 // list passes onSaved to stay on the list; the editor view falls
@@ -1324,12 +1351,12 @@ export class AgentController {
                     this.focusRuleManagerControl(parentRoot, selectors);
                 } else {
                     const updatedAgent = this.app.data.agents.find(a => a.path === agent.path);
-                    if (updatedAgent) {
+                    if (updatedAgent && this.app.currentView === 'agent-edit') {
                         this.loadAgentEdit(updatedAgent);
                     }
                 }
             } catch (error) {
-                this.app.showError('Failed to update rule file name');
+                this.app.showError('Failed to save display name');
             }
         });
     }
@@ -1356,11 +1383,6 @@ export class AgentController {
 
         content.innerHTML = '';
         const fragment = this.app.cloneTemplate('agent-create-template');
-        const root = fragment.querySelector('[data-view="agent-create"]');
-
-        if (root) {
-            this.app.bindAction(root, '[data-action="go-back"]', () => this.app.goBack());
-        }
 
         content.appendChild(fragment);
         this.renderWizardStep();
@@ -1405,7 +1427,12 @@ export class AgentController {
     renderStep1Directory(container) {
         const rootPath = this.app.data.configs?.rootPath || '';
         const defaultPath = rootPath || '';
-        const stripAgentFileName = path => String(path || '').replace(/[\\/]AGENTS\.md$/i, '');
+        const stripAgentFileName = path => {
+            const value = String(path || '').trim();
+            return /[\\/]vc\.rules\.md[\\/]*$/i.test(value)
+                ? ruleFileDirectory(value.replace(/[\\/]+$/, ''))
+                : value;
+        };
         const directoryValue = stripAgentFileName(this.wizardState.directory || defaultPath);
 
         // Escape user data to prevent XSS
@@ -1479,14 +1506,19 @@ export class AgentController {
     renderStep2Rules(container) {
         // Use rules with descriptions if available
         const rulesWithDescriptions = this.app.data.availableRulesWithDescriptions || [];
+        const drafts = this.wizardState.ruleDrafts || {};
 
         const ruleCheckboxes = rulesWithDescriptions.map((rule, index) => {
             const lockDefinition = PATH_LOCK_RULES.find(item => item.template === rule.name);
+            const commitWordRule = this.isCommitWordRule(rule.name);
             const selectedRule = this.wizardState.selectedRules.find(selected =>
                 selected.text === rule.name
+                || (commitWordRule && this.isCommitWordRule(selected.text))
                 || (lockDefinition && this.getPathLockDefinition(selected.text)?.kind === lockDefinition.kind));
-            const isChecked = Boolean(selectedRule);
-            const lockPath = lockDefinition ? this.extractPathLockPath(selectedRule?.text) : '';
+            const draft = drafts[rule.name];
+            const isChecked = draft?.checked ?? Boolean(selectedRule);
+            const lockPath = draft?.path ?? (lockDefinition ? this.extractPathLockPath(selectedRule?.text) : '');
+            const words = draft?.words ?? selectedRule?.text.slice(COMMIT_WORD_RULE.length).replace(/^:\s*/, '') ?? '';
             return `
                 <div class="form-check mb-3 pb-2 border-bottom">
                     <input class="form-check-input" type="checkbox" id="rule-${index}"
@@ -1498,11 +1530,22 @@ export class AgentController {
                     ${lockDefinition ? `
                         <div class="mt-2 ms-4">
                             <label class="form-label small" for="path-lock-${index}">${lockDefinition.label}</label>
-                            <input class="form-control form-control-sm" id="path-lock-${index}"
-                                data-path-lock-index="${index}" type="text"
-                                value="${this.app.escapeHtml(lockPath)}"
-                                placeholder="${lockDefinition.placeholder}" autocomplete="off">
-                            <small class="form-text text-muted">Relative to this vc.rules.md directory.</small>
+                            <div class="input-group input-group-sm">
+                                <input class="form-control" id="path-lock-${index}"
+                                    data-path-lock-index="${index}" type="text"
+                                    value="${this.app.escapeHtml(lockPath)}"
+                                    placeholder="${lockDefinition.placeholder}" autocomplete="off">
+                                <button class="btn btn-outline-secondary" type="button" data-wizard-path-browse="${index}">Browse</button>
+                            </div>
+                            <small class="form-text text-muted">${this.renderPathLockHelp(lockDefinition.kind)}</small>
+                        </div>` : ''}
+                    ${commitWordRule ? `
+                        <div class="mt-2 ms-4">
+                            <label class="form-label small" for="commit-words-${index}">Forbidden words or phrases</label>
+                            <input class="form-control form-control-sm" id="commit-words-${index}" data-commit-words-index="${index}"
+                                type="text" placeholder="WIP, fix later, temporary" autocomplete="off"
+                                value="${this.app.escapeHtml(words)}">
+                            <small class="form-text text-muted">Use commas between entries, without quotes: <code>WIP, fix later, temporary</code>. Matches whole words or phrases, ignoring case; <code>WIP</code> does not match <code>swipe</code>.</small>
                         </div>` : ''}
                 </div>
             `;
@@ -1533,11 +1576,31 @@ export class AgentController {
         `;
 
         document.getElementById('wizard-prev-btn').addEventListener('click', () => {
+            this.captureWizardRuleDrafts(container);
             this.wizardState.currentStep = 1;
             this.renderWizardStep();
         });
 
+        container.querySelectorAll('[data-wizard-path-browse]').forEach(button => {
+            const index = Number(button.dataset.wizardPathBrowse);
+            const definition = PATH_LOCK_RULES.find(item => item.template === rulesWithDescriptions[index]?.name);
+            const input = container.querySelector(`[data-path-lock-index="${index}"]`);
+            button.addEventListener('click', () => this.browseRulePath(
+                { path: this.wizardState.directory }, definition, input, button));
+        });
+        container.querySelectorAll('[data-path-lock-index], [data-commit-words-index]').forEach(input => {
+            input.addEventListener('input', () => {
+                const index = input.dataset.pathLockIndex ?? input.dataset.commitWordsIndex;
+                const checkbox = container.querySelector(`#rule-${index}`);
+                if (input.value.trim() && checkbox && !checkbox.checked) {
+                    checkbox.checked = true;
+                    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            });
+        });
+
         document.getElementById('wizard-next-btn').addEventListener('click', () => {
+            this.captureWizardRuleDrafts(container);
             // Collect selected rules (preserving any existing enforcement levels)
             const checkboxes = container.querySelectorAll('input[type="checkbox"]:checked');
             const newSelectedRules = [];
@@ -1556,8 +1619,18 @@ export class AgentController {
                         return;
                     }
                 }
+                if (this.isCommitWordRule(ruleTemplate)) {
+                    try {
+                        const index = cb.id.replace('rule-', '');
+                        ruleText = this.buildCommitWordRuleText(container.querySelector(`[data-commit-words-index="${index}"]`)?.value);
+                    } catch (error) {
+                        this.app.showToast('Forbidden words', error.message, 'warning');
+                        return;
+                    }
+                }
                 const existingRule = this.wizardState.selectedRules.find(r =>
                     r.text === ruleText
+                    || (this.isCommitWordRule(ruleText) && this.isCommitWordRule(r.text))
                     || (lockDefinition && this.getPathLockDefinition(r.text)?.kind === lockDefinition.kind));
                 newSelectedRules.push({
                     text: ruleText,
@@ -1584,6 +1657,19 @@ export class AgentController {
                 btn.textContent = checkedCount > 0 ? `Next (${checkedCount} selected)` : 'Next';
             });
         });
+    }
+
+    captureWizardRuleDrafts(container) {
+        const drafts = {};
+        container.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+            const index = checkbox.id.replace('rule-', '');
+            drafts[checkbox.dataset.rule] = {
+                checked: checkbox.checked,
+                path: container.querySelector(`[data-path-lock-index="${index}"]`)?.value || '',
+                words: container.querySelector(`[data-commit-words-index="${index}"]`)?.value || ''
+            };
+        });
+        this.wizardState.ruleDrafts = drafts;
     }
 
     renderStep3Enforcement(container) {
@@ -1740,16 +1826,20 @@ export class AgentController {
     }
 
     async createAgent() {
+        const createButton = document.getElementById('wizard-create-btn');
+        if (createButton?.disabled) return;
+        if (createButton) createButton.disabled = true;
         try {
             // First create the rule file with just the rules (text only for the initial creation)
             const ruleTexts = this.wizardState.selectedRules.map(r => r.text);
 
-            await this.app.apiCall('/api/v1/agents', 'POST', {
+            const created = await this.app.apiCall('/api/v1/agents', 'POST', {
                 path: this.wizardState.directory,
                 rules: ruleTexts
             });
 
             // Now update enforcement levels for each rule
+            const failedEnforcements = [];
             for (const rule of this.wizardState.selectedRules) {
                 if (rule.enforcement !== 'WARN') { // WARN is the default
                     try {
@@ -1760,16 +1850,32 @@ export class AgentController {
                         });
                     } catch (enfError) {
                         console.warn(`Failed to set enforcement for rule: ${rule.text}`, enfError);
+                        failedEnforcements.push(rule.text);
                     }
                 }
             }
 
-            this.app.showToast('Success', 'Rule file created successfully!', 'success');
+            if (failedEnforcements.length) {
+                this.app.showToast('Rule file created', `Could not confirm enforcement for: ${failedEnforcements.join(', ')}. Check their levels in Manage rules.`, 'warning');
+            } else {
+                this.app.showToast('Success', 'Rule file created successfully!', 'success');
+            }
 
             // Refresh data and navigate to the new agent
             await this.app.refreshDashboardData();
 
-            const newAgent = this.app.data.agents.find(a => a.path === this.wizardState.directory);
+            const normalizePath = value => {
+                const normalized = String(value || '').replace(/\\/g, '/');
+                return /^[a-z]:/i.test(normalized) ? normalized.toLowerCase() : normalized;
+            };
+            const newAgent = this.app.data.agents.find(a => normalizePath(a.path) === normalizePath(created?.path || this.wizardState.directory));
+            if (this.app.currentView && this.app.currentView !== 'agent-create') return;
+            const parent = this.app.navigationStack?.at(-2);
+            if (parent?.data?.reopenRuleManager) {
+                parent.data.selectedAgentPath = newAgent?.path || created?.path || this.wizardState.directory;
+                this.app.goBack();
+                return;
+            }
             if (newAgent) {
                 this.app.navigate('agent-edit', newAgent);
             } else {
@@ -1778,6 +1884,8 @@ export class AgentController {
         } catch (error) {
             console.error('Failed to create rule file:', error);
             this.app.showError('Failed to create rule file. ' + (error.message || ''));
+        } finally {
+            if (createButton) createButton.disabled = false;
         }
     }
 }

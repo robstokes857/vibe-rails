@@ -340,7 +340,8 @@ function projectHealthLauncherHarness(t, { remembered = '', launch = () => true 
         }];
     }));
     const root = {
-        querySelectorAll: selector => selector.includes('data-project-health-fix-agent') ? [...selects.values()] : [],
+        querySelectorAll: selector => selector.includes('data-project-health-fix-agent') ? [...selects.values()]
+            : selector.includes('launch-health-fix') ? [...buttons.values()] : [],
         querySelector: selector => {
             const scope = selector.match(/data-fix-scope="([^"]+)"/)?.[1];
             return (selector.includes('data-project-health-fix-agent') ? selects : buttons).get(scope) || null;
@@ -378,6 +379,12 @@ function projectHealthLauncherHarness(t, { remembered = '', launch = () => true 
     };
     const controller = new RuleController(app);
     controller.viewRoot = root;
+    controller.hookStatus = { inGitRepo: true, repositoryPath: 'C:\\source\\project' };
+    controller.codeAnalyzerCache = {
+        repositoryPath: controller.hookStatus.repositoryPath,
+        response: { success: true, analyzedFileCount: 1, healthScore: 60 },
+        ignoredFiles: [], unpushed: false
+    };
     return {
         controller, launches, selects, buttons, root, state, catalog, app, toasts,
         stored: () => stored,
@@ -430,6 +437,125 @@ test('Project health launches the selected custom environment with the quality b
     assert.equal(launches[0].workingDirectory, 'C:\\source\\project');
     assert.match(launches[0].initialPrompt, /CODE QUALITY/);
     assert.doesNotMatch(launches[0].initialPrompt, /\nRULES\n/);
+});
+
+test('empty, pending, failed, and different-repository scans disable and guard Fix code quality', async t => {
+    const { controller, buttons, launches, choose } = projectHealthLauncherHarness(t);
+    choose('quality', 'base:claude');
+    for (const state of ['empty', 'pending', 'failed', 'other-repository', 'not-scanned']) {
+        controller.codeAnalyzerScanInProgress = state === 'pending' ? {} : null;
+        controller.codeAnalyzerCache = state === 'not-scanned' ? null : {
+            repositoryPath: state === 'other-repository' ? 'C:\\other' : controller.hookStatus.repositoryPath,
+            response: { success: state !== 'failed', analyzedFileCount: state === 'empty' ? 0 : 1 }
+        };
+        controller.setHealthFixButtonsDisabled(false);
+        assert.equal(buttons.get('quality').disabled, true, state);
+        assert.equal(buttons.get('rules').disabled, false, 'rules remain independently fixable');
+        assert.equal(await controller.launchProjectHealthFix('quality'), false, state);
+    }
+    assert.equal(launches.length, 0);
+});
+
+test('a successful scan with source changes enables Fix code quality after scanning finishes', t => {
+    const { controller, buttons } = projectHealthLauncherHarness(t);
+    controller.codeAnalyzerScanInProgress = {};
+    controller.setHealthFixButtonsDisabled(false);
+    assert.equal(buttons.get('quality').disabled, true);
+    controller.codeAnalyzerScanInProgress = null;
+    controller.setHealthFixButtonsDisabled(false);
+    assert.equal(buttons.get('quality').disabled, false);
+    assert.equal(buttons.get('quality').getAttribute('title'), null);
+});
+
+test('QUALITY binds its scan actions and console when its overview is mounted', () => {
+    const actions = new Map();
+    const root = { querySelector: () => null, querySelectorAll: () => [] };
+    const controller = new RuleController({
+        data: {}, bindAction: (_root, selector, action) => actions.set(selector, action)
+    });
+    controller.runRulesOverviewChecks = async () => true;
+    controller.attachRulesOverview(root);
+    assert.ok(controller.codeAnalyzerConsole instanceof VcaConsole);
+    let scans = 0;
+    controller.runCodeAnalyzer = () => { scans += 1; };
+    actions.get('[data-action="run-code-analyzer"]')();
+    actions.get('[data-action="run-code-analyzer-unpushed"]')();
+    assert.equal(scans, 2);
+});
+
+test('restoring a cached empty scan completes the new console instead of leaving it waiting', () => {
+    const output = fakeElement();
+    const meta = fakeElement('Waiting for analysis');
+    const root = fakeElement();
+    root.querySelector = selector => ({
+        '[data-code-analyzer-console]': root,
+        '[data-vca-console-output]': output,
+        '[data-vca-console-meta]': meta
+    })[selector] || null;
+    root.querySelectorAll = () => [];
+    const controller = new RuleController({ bindAction() {} });
+    controller.viewRoot = root;
+    controller.hookStatus = { inGitRepo: true, repositoryPath: 'C:\\source\\project' };
+    controller.codeAnalyzerCache = {
+        repositoryPath: controller.hookStatus.repositoryPath,
+        response: { success: true, analyzedFileCount: 0, output: 'No changed C# files.' }
+    };
+    controller.bindCodeQualityControls(root);
+    assert.equal(controller.restoreCodeAnalyzerCache(), true);
+    assert.equal(output.textContent, 'No changed C# files.');
+    assert.equal(meta.textContent, 'Scan complete · No changed source files');
+    assert.equal(root.getAttribute('aria-busy'), 'false');
+});
+
+test('an older hook status cannot switch Git Guard off after a newer status was rendered', async () => {
+    const pending = [];
+    const rendered = [];
+    const controller = new RuleController({ apiCall: () => new Promise(resolve => pending.push(resolve)) });
+    controller.setHookStatusLoading = () => {};
+    controller.renderHookStatus = status => rendered.push(status);
+    const first = controller.refreshHookStatus();
+    const second = controller.refreshHookStatus();
+    pending[1]({ isInstalled: true });
+    await second;
+    pending[0]({ isInstalled: false });
+    await first;
+    assert.deepEqual(rendered, [{ isInstalled: true }]);
+});
+
+test('the Git Guard badge and toggle agree for protected, missing, and stale hooks', () => {
+    const badge = fakeElement();
+    const toggle = fakeElement();
+    toggle.querySelector = () => null;
+    const controller = new RuleController({});
+    controller.viewRoot = {
+        querySelector: selector => ({
+            '[data-hook-status-badge]': badge,
+            '[data-action="toggle-hooks"]': toggle
+        })[selector] || null,
+        querySelectorAll: () => []
+    };
+    for (const [status, expectedBadge, checked] of [
+        [{ isInstalled: true }, 'Protected', 'true'],
+        [{ isInstalled: false }, 'Not installed', 'false'],
+        [{ isInstalled: true, needsRepair: true }, 'Repair needed', 'false']
+    ]) {
+        controller.renderHookStatus({ inGitRepo: true, ...status });
+        assert.equal(badge.textContent, expectedBadge);
+        assert.equal(toggle.getAttribute('aria-checked'), checked);
+    }
+});
+
+test('hook status checks from a closed view cannot overwrite the reopened QUALITY view', async () => {
+    let finish;
+    const controller = new RuleController({ apiCall: () => new Promise(resolve => { finish = resolve; }) });
+    controller.setHookStatusLoading = () => {};
+    controller.renderHookStatus = () => assert.fail('stale status must not render');
+    controller.viewRoot = {};
+    const pending = controller.refreshHookStatus();
+    controller.unload();
+    controller.viewRoot = {};
+    finish({ isInstalled: false });
+    await pending;
 });
 
 test('Project health keeps the selected agent after a launch failure and permits retry', async t => {

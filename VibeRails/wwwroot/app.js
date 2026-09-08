@@ -917,6 +917,13 @@ export class VibeControlApp {
             const navStartedAt = performance.now();
             const loadResult = loadFunc();
             Promise.resolve(loadResult).finally(() => {
+                // Rule management opens a full page for creation/details. Its Back
+                // destination is the same manager after the parent page has loaded.
+                if (this.currentView === view && this.navigationStack.at(-1)?.data === data && data.reopenRuleManager) {
+                    this.updateCurrentViewData({ ...data, reopenRuleManager: false });
+                    this.agentController.selectedAgentPath = data.selectedAgentPath || null;
+                    this.agentController.openRuleManager();
+                }
                 this.queueScrollPageToTop();
                 // [NavPerf] probe: view switches should feel instant. When one doesn't,
                 // this line plus the slow-API log in apiCall separates "backend was slow"
@@ -980,7 +987,10 @@ export class VibeControlApp {
             agent,
             index,
             displayName: scopeName,
+            shortName: agent.customName || fileName,
             relativePath: [...pathParts, fileName].join('/'),
+            scopePath: pathParts.join('/') || '.',
+            scopeLabel: pathParts.length ? `${pathParts.join('/')} and its subfolders` : 'Entire repository',
             ruleCount,
             hasRules: ruleCount > 0
         };
@@ -988,24 +998,29 @@ export class VibeControlApp {
 
     renderAgentFileItem(item, { empty = false } = {}) {
         const ruleLabel = `${item.ruleCount} ${item.ruleCount === 1 ? 'rule' : 'rules'}`;
+        const directory = item.scopePath === '.' ? 'Repository root'
+            : String(item.scopePath).split('/').map(part => this.escapeHtml(part)).join('/<wbr>');
         return `
             <div class="agent-file-tree-item${empty ? ' agent-file-tree-item--empty' : ''}">
                 <button type="button" class="agent-file-tree-open" data-agent-tree-index="${item.index}"
-                    aria-label="Open ${this.escapeHtml(item.displayName)}">
+                    aria-label="Open ${this.escapeHtml(item.relativePath)}" title="${this.escapeHtml(item.agent.path)}">
                     <span class="agent-file-tree-icon" aria-hidden="true">
                         <i class="fa-regular fa-file-lines"></i>
                     </span>
                     <span class="agent-file-tree-info">
-                        <span class="agent-file-tree-name text-truncate">${this.escapeHtml(item.displayName)}</span>
-                        <span class="agent-file-tree-path">${this.escapeHtml(item.relativePath)}</span>
+                        <span class="agent-file-tree-heading">
+                            <span class="agent-file-tree-name">${this.escapeHtml(item.shortName)}</span>
+                            <span class="agent-file-tree-badge${item.hasRules ? ' agent-file-tree-badge--active' : ''}">${ruleLabel}</span>
+                        </span>
+                        <span class="agent-file-tree-path">${directory}</span>
+                        <span class="agent-file-tree-scope">${item.scopePath === '.' ? 'Entire repository' : 'This folder and its subfolders'}</span>
                     </span>
                 </button>
-                <button type="button" class="btn btn-sm btn-link text-muted p-1 agent-file-tree-rename"
-                    data-agent-rename="${item.index}" title="Set display name">
+                <button type="button" class="btn btn-sm btn-outline-secondary agent-file-tree-rename"
+                    data-agent-rename="${item.index}" title="Set a friendly searchable label for ${this.escapeHtml(item.relativePath)}; the filename remains vc.rules.md">
                     <i class="fa-solid fa-pen" aria-hidden="true"></i>
-                    <span class="visually-hidden">Set display name for ${this.escapeHtml(item.displayName)}</span>
+                    ${item.agent.customName ? 'Edit display name' : 'Set display name'}
                 </button>
-                <span class="agent-file-tree-badge${item.hasRules ? ' agent-file-tree-badge--active' : ''}">${ruleLabel}</span>
             </div>`;
     }
 
@@ -1025,7 +1040,8 @@ export class VibeControlApp {
             `;
         }
 
-        const files = this.data.agents.map((agent, index) => this.getAgentFileViewModel(agent, index));
+        const files = this.data.agents.map((agent, index) => this.getAgentFileViewModel(agent, index))
+            .sort((a, b) => a.relativePath.localeCompare(b.relativePath, undefined, { numeric: true }));
         const configured = files.filter(file => file.hasRules);
         const empty = files.filter(file => !file.hasRules);
 
@@ -1047,7 +1063,7 @@ export class VibeControlApp {
                 </section>
 
                 ${empty.length > 0 ? `
-                    <details class="agent-files-group agent-files-unconfigured" data-agent-empty-group>
+                    <details class="agent-files-group agent-files-unconfigured" data-agent-empty-group open>
                         <summary>
                             <span class="agent-files-disclosure-icon" aria-hidden="true">
                                 <i class="fa-solid fa-chevron-right"></i>

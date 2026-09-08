@@ -42,9 +42,9 @@ internal sealed record AgentRuleDocument(
 /// <item>Fenced code blocks (<c>```</c> or <c>~~~</c>) are skipped everywhere, including inside a
 /// rules section. Prose that shows what a rule looks like is documentation, never policy.</item>
 /// <item>A rule is a list item in one of three forms: <c>- [STOP] Rule text</c>,
-/// <c>- Rule text (STOP)</c>, or a bare <c>- Rule text</c>, which means WARN. The bare form is not
-/// a leniency — it is what the Rules page writes when a rule is added without an explicit level,
-/// and the hook ignoring it was its own silent disagreement with the UI.</item>
+/// <c>- Rule text (STOP)</c>, or a bare <c>- Rule text</c>, which means WARN. The bare form remains
+/// supported for existing and hand-authored files. Service writers use an explicit WARN suffix so
+/// rule arguments ending in an enforcement-shaped phrase cannot be mistaken for the level.</item>
 /// <item>Recognizing a rule's <em>text</em> is not this type's job. It reports what the file
 /// declares; deciding whether a validator exists for it belongs to the caller, so that both
 /// callers can make the same decision from the same list.</item>

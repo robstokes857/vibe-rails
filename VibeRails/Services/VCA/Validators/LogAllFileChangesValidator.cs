@@ -28,6 +28,11 @@ namespace VibeRails.Services.VCA.Validators
             ValidationContext? context = null,
             CancellationToken ct = default)
         {
+            if (RuleFileDocumentation.IsDeclaringFile(filePath, sourceFile, rootPath))
+            {
+                return new RuleValidationResult(true);
+            }
+
             // Get documented files from the vc.rules.md Files section
             var documentedFiles = await _agentFileService.GetDocumentedFilesAsync(sourceFile, ct);
 

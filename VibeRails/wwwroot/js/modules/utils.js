@@ -491,10 +491,8 @@ export function enhanceLlmSelectWithTomSelect(selectEl, options = {}) {
         ts.on('dropdown_open', configureSearchInput);
     }
 
-    // Wrap TomSelect's body-parent positioning to (a) clear the inline width
-    // it sets to match the control (our content needs more room — see CSS
-    // .ts-dropdown min-width 320px / max-width 560px) and (b) flip above the
-    // control when the dropdown would otherwise overflow the viewport bottom.
+    // Body-mounted menus must fit the viewport, including their search and footer.
+    // Tom Select calls this on open, window resize, and document scrolling.
     const originalPosition = ts.positionDropdown.bind(ts);
     ts.positionDropdown = function () {
         originalPosition();
@@ -502,6 +500,25 @@ export function enhanceLlmSelectWithTomSelect(selectEl, options = {}) {
     };
     ts.on('dropdown_close', () => {
         ts.dropdown?.classList.remove('ts-dropdown-flipped');
+    });
+    const repositionOpenDropdown = () => {
+        if (ts.isOpen) ts.positionDropdown();
+    };
+    const repositionOnNestedScroll = event => {
+        // Element scroll events do not bubble. The vendor only watches document
+        // scroll, so a picker inside a scrolling panel needs capture. Scrolling
+        // the menu's own options must leave its position and scrollTop alone.
+        if (event.target === document || event.target === window || ts.dropdown?.contains(event.target)) return;
+        repositionOpenDropdown();
+    };
+    window.addEventListener('scroll', repositionOnNestedScroll, { capture: true, passive: true });
+    ts.on('type', repositionOpenDropdown);
+    window.visualViewport?.addEventListener('resize', repositionOpenDropdown);
+    window.visualViewport?.addEventListener('scroll', repositionOpenDropdown);
+    ts.on('destroy', () => {
+        window.removeEventListener('scroll', repositionOnNestedScroll, true);
+        window.visualViewport?.removeEventListener('resize', repositionOpenDropdown);
+        window.visualViewport?.removeEventListener('scroll', repositionOpenDropdown);
     });
 
     return ts;
@@ -580,24 +597,57 @@ function positionTomSelectDropdown(ts) {
     const dropdown = ts.dropdown;
     if (!wrapper || !dropdown) return;
 
-    // Reset before measuring so we get the natural placement first.
+    const content = ts.dropdown_content || dropdown.querySelector('.ts-dropdown-content');
+    // Measure chrome independently of the option list. Do not remove the list's
+    // cap while measuring: doing that clamps scrollTop during captured scroll
+    // events, making the last options impossible to reach.
     dropdown.classList.remove('ts-dropdown-flipped');
     dropdown.style.width = '';
+    dropdown.style.maxHeight = '';
+    dropdown.style.overflowY = '';
+    dropdown.style.marginTop = '0';
+    dropdown.style.marginBottom = '0';
 
     const margin = 8;
+    const gap = 4;
+    const viewport = window.visualViewport;
+    const viewportTop = viewport?.offsetTop || 0;
+    const viewportLeft = viewport?.offsetLeft || 0;
+    const viewportHeight = viewport?.height || window.innerHeight;
+    const viewportWidth = viewport?.width || window.innerWidth;
+    const availableWidth = Math.max(0, viewportWidth - margin * 2);
+    // Retain the shared picker sizing, while allowing even a narrow viewport
+    // to contain its minimum width and rightmost option text.
+    dropdown.style.minWidth = `${Math.min(320, availableWidth)}px`;
+    dropdown.style.maxWidth = `min(560px, 90vw, ${availableWidth}px)`;
     const wrapperRect = wrapper.getBoundingClientRect();
-    const dropdownHeight = dropdown.offsetHeight || dropdown.getBoundingClientRect().height || 200;
-    const spaceBelow = window.innerHeight - wrapperRect.bottom;
-    const spaceAbove = wrapperRect.top;
-
-    if (spaceBelow < dropdownHeight + margin && spaceAbove > spaceBelow) {
-        // Flip above. With dropdownParent='body' the dropdown is positioned in
-        // document coordinates, so we set `top` directly rather than rely on
-        // CSS bottom:100% (which is relative to body, not the wrapper).
-        const flippedTop = wrapperRect.top + window.scrollY - dropdownHeight - 4;
-        dropdown.style.top = `${flippedTop}px`;
-        dropdown.classList.add('ts-dropdown-flipped');
+    const currentHeight = dropdown.getBoundingClientRect().height;
+    const chromeHeight = currentHeight - (content?.getBoundingClientRect().height || 0);
+    const naturalHeight = chromeHeight + (content?.scrollHeight || 0);
+    const spaceBelow = Math.max(0, viewportTop + viewportHeight - margin - wrapperRect.bottom - gap);
+    const spaceAbove = Math.max(0, wrapperRect.top - viewportTop - margin - gap);
+    const flipped = spaceBelow < naturalHeight && spaceAbove > spaceBelow;
+    let availableHeight = flipped ? spaceAbove : spaceBelow;
+    const viewportLimit = Math.max(0, viewportHeight - margin * 2);
+    if (availableHeight < chromeHeight + 48) {
+        // With a keyboard or very short window neither side may fit even one
+        // option. Let the menu overlap the control and use the visible viewport.
+        availableHeight = viewportLimit;
     }
+    availableHeight = Math.min(availableHeight, viewportLimit);
+    if (content) content.style.setProperty('--ts-dropdown-available-height', `${Math.max(0, availableHeight - chromeHeight)}px`);
+    // Last resort for a viewport shorter than the search/footer themselves:
+    // make the complete menu scrollable so those controls remain reachable.
+    dropdown.style.maxHeight = `${viewportLimit}px`;
+    if (chromeHeight >= availableHeight) dropdown.style.overflowY = 'auto';
+
+    const bounds = dropdown.getBoundingClientRect();
+    const desiredTop = flipped ? wrapperRect.top - gap - bounds.height : wrapperRect.bottom + gap;
+    const top = Math.max(viewportTop + margin, Math.min(desiredTop, viewportTop + viewportHeight - margin - bounds.height));
+    const left = Math.max(viewportLeft + margin, Math.min(wrapperRect.left, viewportLeft + viewportWidth - margin - bounds.width));
+    dropdown.style.top = `${top + window.scrollY}px`;
+    dropdown.style.left = `${left + window.scrollX}px`;
+    dropdown.classList.toggle('ts-dropdown-flipped', flipped);
 }
 
 export function parseLlmSelection(selection, environments = []) {

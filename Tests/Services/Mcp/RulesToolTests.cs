@@ -105,8 +105,8 @@ public class RulesToolTests
     [Fact]
     public void ParseRules_ReadsBareBulletsAsWarn()
     {
-        // AgentFileService.AddRulesAsync writes bare "- rule" lines, so the hook ignoring them
-        // meant the Rules page could add a rule that never ran.
+        // Existing and hand-authored files may contain bare "- rule" lines. They retain the
+        // documented default WARN behavior even though service writers now emit explicit WARN.
         const string content = """
             ## Vibe Rails Rules
             - Log all file changes
@@ -454,6 +454,118 @@ public class RulesToolTests
         var finding = Assert.Single(report.Findings);
         Assert.Equal(VcaRuleFindingKind.Warning, finding.Kind);
         Assert.Contains("UNSUPPORTED", finding.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("vc.rules.md", "Log all file changes", GitStagedChangeKind.Added, false)]
+    [InlineData("vc.rules.md", "Log all file changes", GitStagedChangeKind.Modified, false)]
+    [InlineData("nested/vc.rules.md", "Log all file changes", GitStagedChangeKind.Added, false)]
+    [InlineData("nested/vc.rules.md", "Log all file changes", GitStagedChangeKind.Modified, true)]
+    [InlineData("vc.rules.md", "Log file changes > 5 lines", GitStagedChangeKind.Added, false)]
+    [InlineData("nested/vc.rules.md", "Log file changes > 5 lines", GitStagedChangeKind.Modified, true)]
+    [InlineData("vc.rules.md", "Log file changes > 10 lines", GitStagedChangeKind.Added, false)]
+    [InlineData("nested/vc.rules.md", "Log file changes > 10 lines", GitStagedChangeKind.Modified, true)]
+    public async Task ValidateVcaReportAsync_DocumentationRuleDoesNotRequireItsOwnFile(
+        string agentPath, string ruleText, GitStagedChangeKind changeKind, bool workingTreeScope)
+    {
+        var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "vca-self-documentation"));
+        var content = $"## Vibe Rails Rules\n- {ruleText} (STOP)\n";
+        var snapshot = new GitStagedSnapshot(
+            root,
+            [new GitStagedFileSnapshot(
+                agentPath, Path.Combine(root, agentPath), changeKind,
+                ExistsInIndex: true, IsBinary: false, ChangedLineCount: 20, Content: content)],
+            [new GitIndexTextFile(agentPath, content)]);
+
+        var report = await RulesTool.ValidateVcaReportAsync(
+            cancellationToken: TestContext.Current.CancellationToken,
+            stagedSnapshot: snapshot,
+            workingTreeScope: workingTreeScope);
+
+        Assert.False(report.HasStopViolation);
+        Assert.Empty(report.Findings);
+        Assert.Equal(1, report.ApplicableRuleCount);
+    }
+
+    [Theory]
+    [InlineData("app.cs")]
+    [InlineData("child/vc.rules.md")]
+    [InlineData("vc.rules.md.backup")]
+    public async Task ValidateVcaReportAsync_DocumentationRuleStillRequiresOtherChangedFiles(string changedPath)
+    {
+        var snapshot = CreateSnapshot(
+            "nested/vc.rules.md",
+            "## Vibe Rails Rules\n- Log all file changes (STOP)\n",
+            $"nested/{changedPath}");
+
+        var report = await RulesTool.ValidateVcaReportAsync(
+            cancellationToken: TestContext.Current.CancellationToken,
+            stagedSnapshot: snapshot);
+
+        Assert.True(report.HasStopViolation);
+        var finding = Assert.Single(report.Findings);
+        Assert.Equal("nested/vc.rules.md", finding.SourcePath);
+        Assert.Equal($"1 file(s) not documented in vc.rules.md Files section: nested/{changedPath}", finding.Reason);
+    }
+
+    [Theory]
+    [InlineData(5)]
+    [InlineData(10)]
+    public async Task ValidateVcaReportAsync_ChangedLinesRuleStillRequiresNestedPolicy(int threshold)
+    {
+        var snapshot = CreateSnapshot(
+            "vc.rules.md",
+            $"## Vibe Rails Rules\n- Log file changes > {threshold} lines (STOP)\n",
+            "nested/vc.rules.md");
+        snapshot = snapshot with
+        {
+            Files = snapshot.Files.Select(file => file with { ChangedLineCount = 20 }).ToList()
+        };
+
+        var report = await RulesTool.ValidateVcaReportAsync(
+            cancellationToken: TestContext.Current.CancellationToken,
+            stagedSnapshot: snapshot);
+
+        Assert.True(report.HasStopViolation);
+        var finding = Assert.Single(report.Findings);
+        Assert.Equal($"1 staged file delta(s) over {threshold} lines not documented: nested/vc.rules.md (20 staged lines changed)", finding.Reason);
+    }
+
+    [Theory]
+    [InlineData("WARN", VcaRuleFindingKind.Warning)]
+    [InlineData("COMMIT", VcaRuleFindingKind.AcknowledgmentRequired)]
+    [InlineData("STOP", VcaRuleFindingKind.Blocked)]
+    public async Task CommitMessageWords_UseSharedEnforcementAndDeferBeforeTheMessage(string enforcement, VcaRuleFindingKind expectedKind)
+    {
+        var snapshot = CreateSnapshot("nested/vc.rules.md",
+            $"## Vibe Rails Rules\n- Check commit message for: wip, do not merge ({enforcement})\n", "nested/app.cs");
+        var deferred = await RulesTool.ValidateVcaReportAsync(stagedSnapshot: snapshot, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(VcaRuleFindingKind.Deferred, Assert.Single(deferred.Findings).Kind);
+        var report = await RulesTool.ValidateVcaReportAsync(commitMessage: "WIP: DO NOT MERGE", validateCommitMessage: true, stagedSnapshot: snapshot, cancellationToken: TestContext.Current.CancellationToken);
+        var finding = Assert.Single(report.Findings);
+        Assert.Equal(expectedKind, finding.Kind);
+        Assert.Equal("nested/vc.rules.md", finding.SourcePath);
+        Assert.Contains("wip, do not merge", finding.Reason);
+        Assert.Equal(enforcement == "STOP", report.HasStopViolation);
+        Assert.Equal(enforcement == "COMMIT" ? 1 : 0, report.RequiredAcknowledgments.Count);
+        var passed = await RulesTool.ValidateVcaReportAsync(commitMessage: "Fix swipe handler", validateCommitMessage: true, stagedSnapshot: snapshot, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Empty(passed.Findings);
+    }
+
+    [Theory]
+    [InlineData("Check commit message for")]
+    [InlineData("Check commit message for: wip,,todo")]
+    public async Task CommitMessageWords_MalformedStopListWarnsWithoutBlockingEveryCommit(string text)
+    {
+        var snapshot = CreateSnapshot("vc.rules.md", $"## Vibe Rails Rules\n- {text} (STOP)\n", "app.cs");
+        foreach (var checkMessage in new[] { false, true })
+        {
+            var report = await RulesTool.ValidateVcaReportAsync(commitMessage: "Add app", validateCommitMessage: checkMessage, stagedSnapshot: snapshot, cancellationToken: TestContext.Current.CancellationToken);
+            Assert.False(report.HasStopViolation);
+            var finding = Assert.Single(report.Findings);
+            Assert.Equal(VcaRuleFindingKind.Warning, finding.Kind);
+            Assert.Contains("UNSUPPORTED", finding.Reason);
+        }
     }
 
     private static GitStagedSnapshot CreatePathLockSnapshot(

@@ -3,6 +3,7 @@ using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services;
+using RuleFileScope = VibeRails.Services.VCA.RuleFileScope;
 
 namespace VibeRails.Routes;
 
@@ -299,7 +300,8 @@ public static class AgentRoutes
         }).WithName("GetAgentFileContent");
 
         // GET /api/v1/agents/files?path={path} - Get files on disk that this rule file covers
-        // A vc.rules.md covers all files in its directory tree, except files claimed by a deeper vc.rules.md
+        // Parent rules also apply beneath nested policies. Omit only this declaring file,
+        // Git metadata, and linked paths from the on-disk listing.
         app.MapGet("/api/v1/agents/files", async (
             IAgentFileService agentService,
             string path,
@@ -317,45 +319,26 @@ public static class AgentRoutes
 
             try
             {
-                var agentDir = Path.GetDirectoryName(Path.GetFullPath(path));
-                if (agentDir is null)
+                var normalizedPath = Path.GetFullPath(path);
+                var comparison = OperatingSystem.IsWindows()
+                    ? StringComparison.OrdinalIgnoreCase
+                    : StringComparison.Ordinal;
+                var allAgentFiles = await agentService.GetAgentFiles(cancellationToken);
+                if (!allAgentFiles.Any(file => Path.GetFullPath(file).Equals(normalizedPath, comparison)))
                 {
-                    return Results.BadRequest(new ErrorResponse("Could not determine directory for the given path"));
+                    return Results.BadRequest(new ErrorResponse("Path is not a rule file in this repository."));
                 }
 
-                // Find all other vc.rules.md files to determine subdirectories that are claimed by deeper rule files
-                var allAgentFiles = await agentService.GetAgentFiles(cancellationToken);
-                var deeperAgentDirs = allAgentFiles
-                    .Select(a => Path.GetDirectoryName(Path.GetFullPath(a)))
-                    .Where(d => d is not null
-                        && d.Length > agentDir.Length
-                        && d.StartsWith(agentDir, StringComparison.OrdinalIgnoreCase))
-                    .Cast<string>()
-                    .ToList();
-
-                // Enumerate all files in this rule file's directory
-                var allFiles = Directory.EnumerateFiles(agentDir, "*.*", SearchOption.AllDirectories)
-                    .Where(f =>
-                    {
-                        var name = Path.GetFileName(f);
-                        // Skip vc.rules.md files themselves
-                        if (name.Equals("vc.rules.md", StringComparison.OrdinalIgnoreCase))
-                            return false;
-
-                        // Skip files claimed by a deeper agent
-                        var fileDir = Path.GetDirectoryName(Path.GetFullPath(f));
-                        if (fileDir is null) return false;
-                        return !deeperAgentDirs.Any(d =>
-                            fileDir.StartsWith(d, StringComparison.OrdinalIgnoreCase));
-                    })
-                    .Select(f => Path.GetRelativePath(agentDir, f).Replace('\\', '/'))
-                    .OrderBy(f => f)
-                    .ToList();
+                var allFiles = RuleFileScope.ListFiles(normalizedPath, cancellationToken);
 
                 return Results.Ok(new AgentDocumentedFilesResponse(
                     Files: allFiles,
                     TotalCount: allFiles.Count
                 ));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {

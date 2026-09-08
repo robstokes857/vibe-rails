@@ -799,10 +799,10 @@ function evidenceDecorationOptions(monaco, tone) {
     const colors = {
         danger: '#ef4444',
         warning: '#f59e0b',
-        success: '#78b89a',
+        success: '#10b981',
         // Legacy fallback suffix — same green as success so a healthy marker is
         // never blue (matches mintLintConcernTone folding "okay" into success).
-        okay: '#78b89a'
+        okay: '#10b981'
     };
     return {
         isWholeLine: true,

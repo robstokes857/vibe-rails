@@ -6,7 +6,12 @@ module.exports = defineConfig({
     testMatch: 'code-quality-ux.spec.js',
     workers: 1,
     reporter: 'list',
-    use: { headless: true, baseURL: 'http://127.0.0.1:18763' },
+    use: {
+        headless: true,
+        baseURL: 'http://127.0.0.1:18763',
+        screenshot: 'only-on-failure',
+        trace: 'retain-on-failure'
+    },
     webServer: {
         command: 'node node_modules/http-server/bin/http-server ../VibeRails/wwwroot -a 127.0.0.1 -p 18763 -c-1',
         cwd: __dirname,

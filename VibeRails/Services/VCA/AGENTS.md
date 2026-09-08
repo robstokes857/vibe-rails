@@ -71,8 +71,9 @@ Documentation that shows what a rule looks like is documentation. This is not a 
 - Log all file changes             ← bare form, means WARN
 ```
 
-The bare form matters: `AgentFileService.AddRulesAsync` writes bare `- {rule}` lines, so a reader
-that required an explicit level would ignore rules the Rules page had just added.
+The bare form remains supported for existing and hand-authored files. `AgentFileService` writes an
+explicit `(WARN)` for new default-level rules so an argument ending in `(STOP)`, `(WARN)`,
+`(COMMIT)`, `(SKIP)`, or `(DISABLED)` cannot be mistaken for the rule's enforcement suffix.
 
 Enforcement tokens are case-insensitive: `WARN`, `COMMIT`, `STOP`, `SKIP`, `DISABLED`.
 
@@ -83,6 +84,14 @@ A rule applies to changed files under the directory of the `vc.rules.md` that de
 files in scope are not evaluated and do not count toward "applicable rule(s)".
 
 Duplicate rules from the same source file are collapsed (`RulesTool.AddRuleIfNew`).
+
+As of 2026-09-07, file-change documentation rules (`Log all file changes` and `Log file changes
+> N lines`) treat their declaring vc.rules.md as implicit documentation. Creating or editing that
+file does not require adding a Files entry for itself. This exemption applies only to that exact
+declaring file: a parent policy still requires documentation for nested vc.rules.md files, and
+other changed files remain subject to the rule. `RuleFileDocumentation` shares the identity check
+between Git Guard, the Rules page, and legacy validators; staged-hook regression tests cover new
+and existing policy files.
 
 ### 6. Parameterized path locks
 
@@ -97,6 +106,17 @@ keeps a STOP rule editable and removable; other vc.rules.md files beneath a dire
 ordinary protected content.
 
 ## Enforcement levels
+
+As of 2026-09-07, `Check commit message for: wip, temporary, do not merge` uses
+`CommitMessageWordRule` for syntax and matching across Git Guard and the legacy validator.
+It accepts a plain comma-separated list of whole words or literal phrases, trims entries,
+deduplicates ignoring case, and matches case-insensitively with non-word characters (or the
+message ends) around the literal entry. This preserves whole-word matching and also lets terms
+such as `TODO:`, `C++`, and `[skip]` match naturally. Empty entries, quote wrappers, and control
+characters are rejected by all rule writers.
+The bare catalog template remains selectable but is not a complete rule. Existing malformed
+lists produce an explicit unsupported warning, even at STOP; valid lists defer until commit-msg.
+Rules-page validation reports the same configuration error or a clear deferred result.
 
 | Level | Pre-commit | Commit-msg | Meaning |
 | --- | --- | --- | --- |
@@ -200,6 +220,12 @@ author junk. Reads no longer filter, so hand-edited junk is shown rather than hi
 `VcaHookEndToEndTests` builds throwaway Git repositories and runs the real hook host against them.
 Prefer adding cases there for anything that touches what blocks a commit — it is the only layer
 that exercises staging, scoping, and exit codes together.
+
+As of 2026-09-07, these tests use the host's internal `RunCoreAsync` service override to point the
+real `JobStore` at a per-test database under the throwaway repository's `.git` directory. Keep this
+isolation: using the default live user database caused SQLite lock contention with a running app
+and made the popup's 20-second completion test time out. Production `RunAsync` retains its normal
+service registrations.
 
 ## Hook removal
 

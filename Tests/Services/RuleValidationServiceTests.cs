@@ -60,6 +60,59 @@ namespace Tests.Services
         }
 
         [Fact]
+        public async Task ValidateWithSourceAsync_LogAllChangesExemptsOnlyItsDeclaringFile()
+        {
+            var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "rule-documentation-tests"));
+            var source = Path.Combine(root, "nested", "vc.rules.md");
+            var agents = new Mock<IAgentFileService>();
+            agents.Setup(x => x.GetDocumentedFilesAsync(source, It.IsAny<CancellationToken>()))
+                .ReturnsAsync([]);
+            var service = new RuleValidationService(new RulesService(), agents.Object);
+
+            var result = await service.ValidateWithSourceAsync(
+                ["nested/vc.rules.md", "nested/child/vc.rules.md", "nested/app.cs", "outside.txt"],
+                [new RuleWithSource(new RuleWithEnforcement("Log all file changes", Enforcement.STOP), source)],
+                root,
+                TestContext.Current.CancellationToken);
+
+            var validation = Assert.Single(result.Results);
+            Assert.False(validation.Passed);
+            Assert.Equal(["nested/child/vc.rules.md", "nested/app.cs"], validation.AffectedFiles);
+        }
+
+        [Theory]
+        [InlineData("Log all file changes")]
+        [InlineData("Log file changes > 5 lines")]
+        [InlineData("Log file changes > 10 lines")]
+        public async Task ValidateWithSourceAsync_DocumentationRulesPassWhenOnlyTheirOwnFileChanges(string ruleText)
+        {
+            var root = Path.Combine(Path.GetTempPath(), $"rule-documentation-{Guid.NewGuid():N}");
+            var source = Path.Combine(root, "vc.rules.md");
+            Directory.CreateDirectory(root);
+            try
+            {
+                await File.WriteAllLinesAsync(source, Enumerable.Repeat("Policy notes", 20), TestContext.Current.CancellationToken);
+                var agents = new Mock<IAgentFileService>();
+                agents.Setup(x => x.GetDocumentedFilesAsync(source, It.IsAny<CancellationToken>()))
+                    .ReturnsAsync([]);
+                var service = new RuleValidationService(new RulesService(), agents.Object);
+
+                var result = await service.ValidateWithSourceAsync(
+                    ["./vc.rules.md"],
+                    [new RuleWithSource(new RuleWithEnforcement(ruleText, Enforcement.STOP), source)],
+                    root,
+                    TestContext.Current.CancellationToken);
+
+                Assert.True(Assert.Single(result.Results).Passed);
+            }
+            finally
+            {
+                File.Delete(source);
+                Directory.Delete(root);
+            }
+        }
+
+        [Fact]
         public async Task ValidateWithSourceAsync_DirectoryLockIsPathBoundaryAware()
         {
             var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "rule-validation-locks"));

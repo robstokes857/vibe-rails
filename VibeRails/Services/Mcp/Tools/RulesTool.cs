@@ -635,6 +635,7 @@ public class RulesTool
             var documentedFiles = ParseDocumentedFiles(sourceAgent, gitRoot);
             var undocumentedFiles = stagedFiles
                 .Select(file => file.RelativePath)
+                .Where(path => !RuleFileDocumentation.IsDeclaringFile(path, sourceAgent.FullPath, gitRoot))
                 .Where(path => !documentedFiles.Contains(path))
                 .ToList();
 
@@ -648,7 +649,7 @@ public class RulesTool
                     $"{undocumentedFiles.Count} file(s) not documented in vc.rules.md Files section: {fileList}{suffix}");
             }
 
-            return RuleValidationResult.Pass($"All {stagedFiles.Count} changed file(s) are documented");
+            return RuleValidationResult.Pass("All changed files requiring documentation are documented");
         }
 
         if (ruleLower.Contains("file changes", StringComparison.Ordinal)
@@ -661,7 +662,10 @@ public class RulesTool
                     "UNSUPPORTED: changed-lines rule is missing a numeric '> N lines' threshold.");
             }
 
-            var uncountableFiles = stagedFiles
+            var filesRequiringDocumentation = stagedFiles
+                .Where(file => !RuleFileDocumentation.IsDeclaringFile(file.RelativePath, sourceAgent.FullPath, gitRoot))
+                .ToList();
+            var uncountableFiles = filesRequiringDocumentation
                 .Where(file => file.ChangedLineCount is null)
                 .Select(file => file.RelativePath)
                 .ToList();
@@ -672,7 +676,7 @@ public class RulesTool
             }
 
             var documentedFiles = ParseDocumentedFiles(sourceAgent, gitRoot);
-            var violations = stagedFiles
+            var violations = filesRequiringDocumentation
                 .Where(file => file.ChangedLineCount > threshold)
                 .Where(file => !documentedFiles.Contains(file.RelativePath))
                 .Select(file => $"{file.RelativePath} ({file.ChangedLineCount} staged lines changed)")
@@ -749,22 +753,11 @@ public class RulesTool
                     $"{packageFiles.Count} package file(s) changed: {string.Join(", ", packageFiles.Take(3))}");
         }
 
-        if (ruleLower.Contains("check commit message for", StringComparison.Ordinal))
+        if (CommitMessageWordRule.LooksLike(ruleText))
         {
-            var wordsMatch = Regex.Match(ruleText, @":\s*(.+)$");
-            var forbiddenWords = wordsMatch.Success
-                ? wordsMatch.Groups[1].Value
-                    .Split(',')
-                    .Select(word => word.Trim())
-                    .Where(word => word.Length > 0)
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList()
-                : [];
-
-            if (forbiddenWords.Count == 0)
+            if (!CommitMessageWordRule.TryParse(ruleText, out var wordRule))
             {
-                return RuleValidationResult.Violation(
-                    "UNSUPPORTED: commit-message rule has no comma-separated forbidden words after ':'.");
+                return RuleValidationResult.Unrecognized($"UNSUPPORTED: invalid commit-message word list. {CommitMessageWordRule.SyntaxHelp}");
             }
 
             if (!validateCommitMessage)
@@ -772,12 +765,7 @@ public class RulesTool
                 return RuleValidationResult.Deferred("will be checked against the final commit message by commit-msg");
             }
 
-            var foundWords = forbiddenWords
-                .Where(word => Regex.IsMatch(
-                    commitMessage ?? string.Empty,
-                    $@"\b{Regex.Escape(word)}\b",
-                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
-                .ToList();
+            var foundWords = wordRule.FindMatches(commitMessage);
 
             return foundWords.Count == 0
                 ? RuleValidationResult.Pass("Commit message contains no forbidden words")
@@ -791,7 +779,7 @@ public class RulesTool
     }
 
     private static bool IsCommitMessageRule(string ruleText) =>
-        ruleText.Contains("check commit message for", StringComparison.OrdinalIgnoreCase);
+        CommitMessageWordRule.LooksLike(ruleText);
 
     private static string DescribePathLockChange(StagedFileSnapshot file)
     {

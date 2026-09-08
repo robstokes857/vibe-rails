@@ -106,16 +106,16 @@ namespace VibeRails.Services
             { Rule.RequireTestCoverageMinimum100, "Require test coverage minimum 100%" },
             { Rule.SkipTestCoverage, "Skip test coverage" },
             { Rule.PackageChangeDetected, "Package file changes" },
-            { Rule.CheckCommitMessageForWords, "Check commit message for" },
+            { Rule.CheckCommitMessageForWords, CommitMessageWordRule.Template },
             { Rule.FileLock, PathLockRule.FileTemplate },
             { Rule.DirectoryLock, PathLockRule.DirectoryTemplate }
         };
 
         private static Dictionary<Rule, string> _descriptions = new Dictionary<Rule, string>()
         {
-            { Rule.LogAllFileChanges, "Requires all changed files to be documented in the vc.rules.md 'Files' section. The LLM must add entries for each file it modifies so changes are tracked." },
-            { Rule.LogFileChangesOver5Lines, "Requires files with more than 5 lines changed to be documented in the vc.rules.md 'Files' section. Smaller changes are allowed without documentation." },
-            { Rule.LogFileChangesOver10Lines, "Requires files with more than 10 lines changed to be documented in the vc.rules.md 'Files' section. Smaller changes are allowed without documentation." },
+            { Rule.LogAllFileChanges, "Requires changed files to be documented in this vc.rules.md 'Files' section. This rule file itself does not need an entry; other changed files, including nested rule files, do." },
+            { Rule.LogFileChangesOver5Lines, "Requires files with more than 5 lines changed to be documented in this vc.rules.md 'Files' section. Smaller changes and this rule file itself do not need an entry." },
+            { Rule.LogFileChangesOver10Lines, "Requires files with more than 10 lines changed to be documented in this vc.rules.md 'Files' section. Smaller changes and this rule file itself do not need an entry." },
             { Rule.CyclomaticComplexityUnder20, "Enforces that changed files have cyclomatic complexity under 20. High complexity code is harder to test and maintain." },
             { Rule.CyclomaticComplexityUnder35, "Enforces that changed files have cyclomatic complexity under 35. Allows moderately complex code while preventing excessive complexity." },
             { Rule.CyclomaticComplexityUnder60, "Enforces that changed files have cyclomatic complexity under 60. A lenient threshold for legacy codebases." },
@@ -126,7 +126,7 @@ namespace VibeRails.Services
             { Rule.RequireTestCoverageMinimum100, "Requires 100% test coverage for changed code files. Full coverage is mandatory." },
             { Rule.SkipTestCoverage, "Disables test coverage checking for this project or directory." },
             { Rule.PackageChangeDetected, "Detects changes to package/dependency files (package.json, .csproj, requirements.txt, etc.) and alerts or blocks based on enforcement level." },
-            { Rule.CheckCommitMessageForWords, "Checks commit messages for specific forbidden words (CSV list). Useful for catching recurring LLM mistakes. Format: 'Check commit message for: word1,word2,word3'" },
+            { Rule.CheckCommitMessageForWords, "Checks the final commit message for forbidden whole words or phrases, ignoring case. Enter a plain comma-separated list, for example: Check commit message for: wip, temporary, do not merge. Do not wrap entries in quotes." },
             { Rule.FileLock, "Warns or blocks when the exact file path is added, modified, deleted, or renamed. The path is relative to the declaring vc.rules.md. Format: File Lock('path/to/file')" },
             { Rule.DirectoryLock, "Warns or blocks when any file at or below the directory is added, modified, deleted, or renamed. The path is relative to the declaring vc.rules.md. Format: Directory Lock('path/to/directory')" }
         };
@@ -163,9 +163,7 @@ namespace VibeRails.Services
                 return true;
             }
 
-            const string commitMessagePrefix = "Check commit message for";
-            if (value.Equals(commitMessagePrefix, StringComparison.OrdinalIgnoreCase)
-                || value.StartsWith(commitMessagePrefix + ":", StringComparison.OrdinalIgnoreCase))
+            if (CommitMessageWordRule.TryParse(value, out _))
             {
                 rule = Rule.CheckCommitMessageForWords;
                 return true;
@@ -180,6 +178,7 @@ namespace VibeRails.Services
             {
                 foreach (var kvp in _keyValuePairs)
                 {
+                    if (kvp.Key == Rule.CheckCommitMessageForWords) continue;
                     if (kvp.Value.Equals(trimmed, StringComparison.OrdinalIgnoreCase))
                     {
                         rule = kvp.Key;

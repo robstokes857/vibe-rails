@@ -1,4 +1,8 @@
 using System.Diagnostics;
+using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using VibeRails.DB;
 using VibeRails.Services.VCA.Hooks;
 using Xunit;
 
@@ -103,6 +107,49 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("0 applicable rule(s)", result.Output);
+    }
+
+    [Theory]
+    [InlineData("vc.rules.md")]
+    [InlineData("nested/vc.rules.md")]
+    public async Task PreCommit_DocumentationRulesAllowCreatingAndEditingTheirDeclaringFile(string policyPath)
+    {
+        var content = """
+            # Policy
+            ## Vibe Rails Rules
+            - Log all file changes (STOP)
+            - Log file changes > 5 lines (STOP)
+            - Log file changes > 10 lines (STOP)
+            ## Notes
+            """ + "\n" + string.Join('\n', Enumerable.Repeat("Policy documentation.", 20)) + "\n";
+        await WriteAsync(policyPath, content);
+        await RunGitAsync("add", policyPath);
+
+        var addedResult = await RunHookAsync("pre-commit");
+        Assert.Equal(0, addedResult.ExitCode);
+        Assert.Contains("PASS: All VCA rules satisfied", addedResult.Output);
+
+        await RunGitAsync("commit", "-m", "Add policy");
+        await WriteAsync(policyPath, content.Replace("Policy documentation.", "Updated policy documentation."));
+        await RunGitAsync("add", policyPath);
+
+        var modifiedResult = await RunHookAsync("pre-commit");
+        Assert.Equal(0, modifiedResult.ExitCode);
+        Assert.Contains("PASS: All VCA rules satisfied", modifiedResult.Output);
+    }
+
+    [Fact]
+    public async Task PreCommit_ParentDocumentationRuleStillRequiresNestedPolicyFile()
+    {
+        const string policy = "## Vibe Rails Rules\n- Log all file changes (STOP)\n";
+        await WriteAsync("vc.rules.md", policy);
+        await WriteAsync("nested/vc.rules.md", policy);
+        await RunGitAsync("add", "vc.rules.md", "nested/vc.rules.md");
+
+        var result = await RunHookAsync("pre-commit");
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("1 file(s) not documented in vc.rules.md Files section: nested/vc.rules.md", result.Output);
     }
 
     [Fact]
@@ -240,6 +287,24 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
         var passed = await RunHookAsync("commit-msg", messagePath);
         Assert.Equal(0, passed.ExitCode);
         Assert.Contains("No VCA commit acknowledgments were required", passed.Output);
+    }
+
+    [Fact]
+    public async Task CommitMessageWordRule_MalformedExistingStopTemplateWarnsAtBothHooks()
+    {
+        await WriteAsync("vc.rules.md", "## Vibe Rails Rules\n- Check commit message for (STOP)\n");
+        await WriteAsync("src/app.cs", "class App { }\n");
+        await RunGitAsync("add", "vc.rules.md", "src/app.cs");
+        var preCommit = await RunHookAsync("pre-commit");
+        Assert.Equal(0, preCommit.ExitCode);
+        Assert.Contains("UNSUPPORTED: invalid commit-message word list", preCommit.Output);
+        Assert.Contains("[WARN] Check commit message for", preCommit.Output);
+
+        var messagePath = Path.Combine(_repositoryPath, "COMMIT_EDITMSG");
+        await File.WriteAllTextAsync(messagePath, "Add app\n", TestContext.Current.CancellationToken);
+        var commitMessage = await RunHookAsync("commit-msg", messagePath);
+        Assert.Equal(0, commitMessage.ExitCode);
+        Assert.Contains("UNSUPPORTED: invalid commit-message word list", commitMessage.Output);
     }
 
     [Fact]
@@ -444,7 +509,7 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
 
         using var transcript = new StringWriter();
         using var input = new NeverCompletingTextReader();
-        var runTask = VcaHookProcessHost.RunAsync(
+        var runTask = RunIsolatedHookAsync(
             [
                 "--vca-hook", "pre-commit",
                 "--workdir", _repositoryPath,
@@ -482,7 +547,7 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
 
         using var transcript = new StringWriter();
         using var input = new StringReader(Environment.NewLine);
-        var exitCode = await VcaHookProcessHost.RunAsync(
+        var exitCode = await RunIsolatedHookAsync(
             [
                 "--vca-hook", "pre-commit",
                 "--workdir", _repositoryPath,
@@ -523,12 +588,35 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
             args.Add(commitMessagePath);
         }
 
-        var exitCode = await VcaHookProcessHost.RunAsync(
+        var exitCode = await RunIsolatedHookAsync(
             args.ToArray(),
             transcript,
             transcript,
             cancellationToken: TestContext.Current.CancellationToken);
         return (exitCode, transcript.ToString());
+    }
+
+    private Task<int> RunIsolatedHookAsync(
+        string[] args,
+        TextWriter output,
+        TextWriter error,
+        TextReader? input = null,
+        CancellationToken cancellationToken = default)
+    {
+        // Keep real automation-store behavior while preventing these throwaway repositories from
+        // opening or locking the developer's live state.db. The .git location is outside the diff.
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = Path.Combine(_repositoryPath, ".git", "vca-test-state.db"),
+            Pooling = false
+        }.ToString();
+        return VcaHookProcessHost.RunCoreAsync(
+            args,
+            services => services.Replace(ServiceDescriptor.Singleton<IJobStore>(_ => new JobStore(connectionString))),
+            output,
+            error,
+            input,
+            cancellationToken);
     }
 
     private async Task WriteAsync(string relativePath, string content)

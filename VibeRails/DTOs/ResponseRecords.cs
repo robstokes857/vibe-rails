@@ -12,6 +12,8 @@ namespace VibeRails.DTOs
     public record ErrorResponse(string Error);
 
     // CLI Launch DTOs
+    public record LaunchVsCodeRequest(string? Path = null);
+
     public record LaunchCliRequest(
         string? WorkingDirectory = null,
         string? EnvironmentName = null,
@@ -1443,6 +1445,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(List<LLM_Environment>))]
     [JsonSerializable(typeof(Dictionary<string, string>))]
     [JsonSerializable(typeof(LaunchCliRequest))]
+    [JsonSerializable(typeof(LaunchVsCodeRequest))]
     [JsonSerializable(typeof(LaunchCliResponse))]
     [JsonSerializable(typeof(SessionResponse))]
     [JsonSerializable(typeof(SessionLogResponse))]

@@ -31,6 +31,11 @@ namespace VibeRails.Services.VCA.Validators
             ValidationContext? context = null,
             CancellationToken ct = default)
         {
+            if (RuleFileDocumentation.IsDeclaringFile(filePath, sourceFile, rootPath))
+            {
+                return new RuleValidationResult(true);
+            }
+
             var fullPath = Path.Combine(rootPath, filePath);
             if (!await _fileReader.ExistsAsync(fullPath, ct))
                 return new RuleValidationResult(true);

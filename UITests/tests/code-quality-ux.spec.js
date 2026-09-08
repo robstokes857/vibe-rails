@@ -65,8 +65,9 @@ function scanResponse() {
     };
 }
 
-async function installQualityApi(page) {
+async function installQualityApi(page, { empty = false } = {}) {
     const sourceRequests = [];
+    const scanRequests = [];
     let ignoredFiles = [];
     if (process.env.VIBERAILS_QUALITY_STATIC === '1') {
         await page.addInitScript(() => sessionStorage.setItem('viberails_tab', 'quality-fixture'));
@@ -98,9 +99,18 @@ async function installQualityApi(page) {
     await page.route('**/api/v1/hooks/preview', route => route.fulfill({ json: {
         success: true, status: 'passed', output: 'No rule violations.', violations: []
     } }));
-    await page.route('**/api/v1/code-analyzer', route => {
+    await page.route(/\/api\/v1\/code-analyzer(?:\?.*)?$/, route => {
+        scanRequests.push(new URL(route.request().url()).search);
         const response = scanResponse();
         response.report.files = response.report.files.filter(file => !ignoredFiles.some(entry => entry.path === file.file));
+        if (empty) {
+            response.report.files = [];
+            response.report.score = null;
+            response.report.rating = null;
+            response.healthScore = null;
+            response.rating = null;
+            response.output = 'Scan complete. No changed source files to analyze.';
+        }
         response.analyzedFileCount = response.report.files.length;
         return route.fulfill({ json: response });
     });
@@ -119,7 +129,7 @@ async function installQualityApi(page) {
             content: Array.from({ length: 80 }, (_, index) => `// ${filePath}: source line ${index + 1}`).join('\n')
         } });
     });
-    return { sourceRequests };
+    return { sourceRequests, scanRequests };
 }
 
 async function openQuality(page) {
@@ -428,6 +438,12 @@ for (const viewport of [{ width: 1366, height: 768 }, { width: 390, height: 844 
             const picker = page.locator(`select[data-project-health-fix-agent][data-fix-scope="${scope}"]`);
             const control = await inlineAgentControl(picker);
             const button = page.locator(`[data-action="launch-health-fix"][data-fix-scope="${scope}"]`);
+            const group = button.locator('..');
+            await expect(group).toHaveAttribute('role', 'group');
+            await expect(button).toContainText(scope === 'rules' ? 'Fix rules with:' : 'Fix code quality with:');
+            await expect(button.locator('.fa-screwdriver-wrench')).toHaveCount(1);
+            expect(await group.evaluate(element => element.firstElementChild.tagName)).toBe('BUTTON');
+            expect(await group.evaluate(element => getComputedStyle(element).borderTopWidth)).toBe('1px');
             await expect(control).toBeVisible();
             await expect(button).toBeVisible();
             const controlBounds = await control.boundingBox();
@@ -437,8 +453,159 @@ for (const viewport of [{ width: 1366, height: 768 }, { width: 390, height: 844 
             expect(controlBounds.x + controlBounds.width).toBeLessThanOrEqual(viewport.width);
             expect(buttonBounds.x + buttonBounds.width).toBeLessThanOrEqual(viewport.width);
             expect(buttonBounds.height).toBeLessThanOrEqual(52);
+            if (viewport.width > 520) {
+                expect(buttonBounds.x + buttonBounds.width).toBeLessThanOrEqual(controlBounds.x);
+            } else {
+                expect(buttonBounds.y + buttonBounds.height).toBeLessThanOrEqual(controlBounds.y + 1);
+            }
         }
         expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
         await page.screenshot({ path: testInfo.outputPath('quality-inline-fix.png'), fullPage: true });
     });
 }
+
+test('an empty code scan completes its transcript and cannot launch a repair agent', async ({ page }) => {
+    await installQualityApi(page, { empty: true });
+    const brief = await openQuality(page);
+    await expect(brief).toContainText('No changed code');
+    const quality = page.locator('.project-health-quality');
+    const fix = quality.locator('[data-action="launch-health-fix"]');
+    await expect(fix).toBeDisabled();
+    await expect(fix).toHaveAttribute('title', /No changed source files to fix/);
+    await quality.getByText('Technical details', { exact: true }).click();
+    await expect(quality.locator('[data-vca-console-meta]')).toHaveText('Scan complete · No changed source files');
+    await expect(quality.locator('[data-vca-console-output]')).toContainText('No changed source files to analyze');
+    await expect(quality).toHaveAttribute('aria-busy', 'false');
+    await expect(brief.getByRole('button', { name: 'View metrics' })).toHaveCount(0);
+
+    await page.evaluate(() => {
+        window.__qualityLaunches = [];
+        window.app.terminalController.launchInFocus = async options => {
+            window.__qualityLaunches.push(options);
+            return true;
+        };
+    });
+    // A programmatic click also exercises the controller's guard, rather than
+    // depending solely on the browser suppressing disabled button clicks.
+    await fix.dispatchEvent('click');
+    await expect.poll(() => page.evaluate(() => window.__qualityLaunches.length)).toBe(0);
+    await expect(fix).toBeDisabled();
+});
+
+test('returning to QUALITY restores the completed empty transcript without rescanning', async ({ page }) => {
+    const { scanRequests } = await installQualityApi(page, { empty: true });
+    await openQuality(page);
+    await expect.poll(() => scanRequests.length).toBe(1);
+    await page.locator('[data-action="navigate"][data-view="environments"]:visible').click();
+    await expect(page.locator('#app-content [data-view="environments"]')).toBeVisible();
+    await page.locator('[data-action="navigate-home"]:visible').click();
+    const quality = page.locator('.project-health-quality');
+    await expect(quality.locator('[data-vca-quality-brief]')).toContainText('No changed code');
+    await expect(quality.locator('[data-vca-console-meta]')).toHaveText('Scan complete · No changed source files');
+    await expect(quality.locator('[data-action="launch-health-fix"]')).toBeDisabled();
+    expect(scanRequests).toHaveLength(1);
+});
+
+test('QUALITY scan again and unpushed controls request a new scan from the overview', async ({ page }) => {
+    const { scanRequests } = await installQualityApi(page);
+    await openQuality(page);
+    const quality = page.locator('.project-health-quality');
+    await quality.getByRole('button', { name: 'Scan again', exact: true }).click();
+    await expect.poll(() => scanRequests.length).toBe(2);
+    await expect(quality.locator('[data-vca-console-output]')).toHaveText('Fixture scan complete.');
+    await quality.getByLabel('More scan options', { exact: true }).click();
+    await quality.getByRole('button', { name: 'Scan unpushed commits', exact: true }).click();
+    await expect.poll(() => scanRequests).toEqual(['', '', '?scope=unpushed']);
+    await expect(quality).toHaveAttribute('aria-busy', 'false');
+    await expect(quality.locator('[data-action="launch-health-fix"]')).toBeEnabled();
+});
+
+async function openLongViewportPicker(page, top) {
+    await installQualityApi(page);
+    await openQuality(page);
+    const picker = page.locator('select[data-project-health-fix-agent][data-fix-scope="rules"]');
+    await inlineAgentControl(picker);
+    await picker.evaluate((select, top) => {
+        const ts = select.tomselect;
+        // Exercise the shared picker at the same viewport anchors used by cards,
+        // sticky toolbars, and modals, with a catalog longer than either side fits.
+        document.body.appendChild(ts.wrapper);
+        Object.assign(ts.wrapper.style, { position: 'fixed', top: `${top}px`, right: '12px', width: '180px', zIndex: '1099' });
+        for (let index = 0; index < 24; index++) {
+            ts.addOption({ value: `fixture:${index}`, text: `Review environment ${index}`, cli: 'codex' });
+        }
+        ts.refreshOptions(false);
+    }, top);
+    await picker.evaluate(select => select.tomselect.open());
+    const dropdown = page.locator('.ts-dropdown:visible');
+    await expect(dropdown).toBeVisible();
+    return { picker, dropdown };
+}
+
+async function expectDropdownInsideViewport(page, dropdown) {
+    const bounds = await dropdown.boundingBox();
+    const viewport = page.viewportSize();
+    expect(bounds.x).toBeGreaterThanOrEqual(7);
+    expect(bounds.y).toBeGreaterThanOrEqual(7);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewport.width - 7);
+    expect(bounds.y + bounds.height).toBeLessThanOrEqual(viewport.height - 7);
+    await expect(dropdown.locator('.dropdown-input')).toBeInViewport({ ratio: 1 });
+    await expect(dropdown.locator('.llm-picker-customize-button')).toBeInViewport({ ratio: 1 });
+    // The host's sidebar/main width transition takes 250 ms at the mobile breakpoint.
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+}
+
+for (const anchor of [{ label: 'top', top: 16 }, { label: 'middle', top: 282 }, { label: 'bottom', top: 492 }]) {
+    test(`long shared agent picker near viewport ${anchor.label} keeps search, footer, and every option reachable`, async ({ page }) => {
+        await page.setViewportSize({ width: 1295, height: 560 });
+        const { dropdown } = await openLongViewportPicker(page, anchor.top);
+        await expectDropdownInsideViewport(page, dropdown);
+        const content = dropdown.locator('.ts-dropdown-content');
+        expect(await content.evaluate(node => node.scrollHeight > node.clientHeight)).toBe(true);
+        const last = dropdown.locator('[data-selectable]').last();
+        await last.scrollIntoViewIfNeeded();
+        await expect(last).toBeInViewport({ ratio: 1 });
+        const first = dropdown.locator('[data-selectable]').first();
+        await first.scrollIntoViewIfNeeded();
+        await expect(first).toBeInViewport({ ratio: 1 });
+        await expectDropdownInsideViewport(page, dropdown);
+    });
+}
+
+test('open shared agent picker refits after resize and filtering without clipping the footer', async ({ page }) => {
+    await page.setViewportSize({ width: 1295, height: 560 });
+    const { picker, dropdown } = await openLongViewportPicker(page, 282);
+    await page.setViewportSize({ width: 390, height: 320 });
+    await expect.poll(async () => (await dropdown.boundingBox()).x + (await dropdown.boundingBox()).width).toBeLessThanOrEqual(383);
+    await expectDropdownInsideViewport(page, dropdown);
+    await dropdown.locator('.dropdown-input').fill('Review environment 23');
+    await expect(dropdown.locator('[data-selectable]')).toHaveCount(1);
+    await expectDropdownInsideViewport(page, dropdown);
+    await dropdown.locator('[data-selectable]').click();
+    await expect(picker).toHaveValue('fixture:23');
+    await expect(dropdown).toBeHidden();
+});
+
+test('shared agent picker follows its control when an inner panel scrolls', async ({ page }) => {
+    await page.setViewportSize({ width: 1295, height: 560 });
+    const { picker, dropdown } = await openLongViewportPicker(page, 166);
+    await picker.evaluate(select => {
+        const ts = select.tomselect;
+        ts.close();
+        const panel = document.createElement('div');
+        panel.dataset.pickerScrollPanel = '';
+        Object.assign(panel.style, { position: 'fixed', top: '16px', left: '100px', width: '220px', height: '240px', overflow: 'auto' });
+        const before = document.createElement('div');
+        before.style.height = '150px';
+        const after = document.createElement('div');
+        after.style.height = '300px';
+        Object.assign(ts.wrapper.style, { position: 'relative', top: '', right: '', width: '180px' });
+        panel.append(before, ts.wrapper, after);
+        document.body.appendChild(panel);
+        ts.open();
+    });
+    const initialTop = (await dropdown.boundingBox()).y;
+    await page.locator('[data-picker-scroll-panel]').evaluate(panel => { panel.scrollTop = 80; });
+    await expect.poll(async () => Math.round((await dropdown.boundingBox()).y - initialTop)).toBe(-80);
+    await expectDropdownInsideViewport(page, dropdown);
+});

@@ -47,6 +47,27 @@ namespace Tests.Services.VCA
             Assert.True(result);
         }
 
+        [Theory]
+        [InlineData("WIP: add app", false)]
+        [InlineData("Add swipe handler", true)]
+        public async Task CommitMessageWords_RegistryUsesTheSharedValidator(string message, bool expected)
+        {
+            var parsed = Rule.CheckCommitMessageForWords;
+            const string text = "Check commit message for: wip";
+            _mockRulesService.Setup(service => service.TryParse(text, out parsed)).Returns(true);
+            var result = await _validatorList.IsGoodCodeAsync("app.cs", new(text, Enforcement.STOP),
+                "vc.rules.md", "/repo", new ValidationContext(message), TestContext.Current.CancellationToken);
+            Assert.Equal(expected, result);
+        }
+
+        [Fact]
+        public async Task CommitMessageWords_RegistryDoesNotSilentlyPassBareTemplate()
+        {
+            var result = await _validatorList.IsGoodCodeAsync("app.cs", new(CommitMessageWordRule.Template, Enforcement.STOP),
+                "vc.rules.md", "/repo", null, TestContext.Current.CancellationToken);
+            Assert.False(result);
+        }
+
         [Fact]
         public async Task IsGoodCodeAsync_WithPackageFile_ShouldReturnFalseWhenValidationRuns()
         {

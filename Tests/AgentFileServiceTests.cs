@@ -37,6 +37,60 @@ public class AgentFileServiceTests : IDisposable
         return filePath;
     }
 
+    [Theory]
+    [InlineData("Check commit message for")]
+    [InlineData("Check commit message for:")]
+    [InlineData("Check commit message for: wip,,todo")]
+    [InlineData("Check commit message for: \"wip\"")]
+    [InlineData("Check commit message for: do\t not merge")]
+    [InlineData("Check commit message for: wip\n- Package file changes (STOP)")]
+    public async Task CommitMessageWords_AllWritersRejectMalformedListsWithoutChangingTheFile(string text)
+    {
+        var service = new AgentFileService(_mockGitService, new RulesService());
+        const string original = "## Vibe Rails Rules\n\n## Files\n";
+        var path = await CreateTestAgentFile(original);
+        await Assert.ThrowsAsync<ArgumentException>(() => service.CreateAgentFileAsync(path, TestContext.Current.CancellationToken, text));
+        Assert.Equal(original, await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ArgumentException>(() => service.AddRulesAsync(path, TestContext.Current.CancellationToken, text));
+        Assert.Equal(original, await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ArgumentException>(() => service.AddRuleWithEnforcementAsync(path, text, Enforcement.STOP, TestContext.Current.CancellationToken));
+        Assert.Equal(original, await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
+    [InlineData("WARN")]
+    [InlineData("COMMIT")]
+    [InlineData("STOP")]
+    [InlineData("SKIP")]
+    [InlineData("DISABLED")]
+    public async Task CommitMessageWords_AllWritersPreserveAListEndingInAnEnforcementToken(string token)
+    {
+        var service = new AgentFileService(_mockGitService, new RulesService());
+        var text = $"Check commit message for: WIP, ({token})";
+        var path = Path.Combine(_testDirectory, "vc.rules.md");
+        await service.CreateAgentFileAsync(path, TestContext.Current.CancellationToken, text);
+        var created = Assert.Single(await service.GetRulesWithEnforcementAsync(path, TestContext.Current.CancellationToken));
+        Assert.Equal(text, created.RuleText);
+        Assert.Equal(Enforcement.WARN, created.Enforcement);
+
+        await service.UpdateRuleEnforcementAsync(path, text, Enforcement.COMMIT, TestContext.Current.CancellationToken);
+        var updated = Assert.Single(await service.GetRulesWithEnforcementAsync(path, TestContext.Current.CancellationToken));
+        Assert.Equal(text, updated.RuleText);
+        Assert.Equal(Enforcement.COMMIT, updated.Enforcement);
+
+        await File.WriteAllTextAsync(path, "## Vibe Rails Rules\n", TestContext.Current.CancellationToken);
+        await service.AddRulesAsync(path, TestContext.Current.CancellationToken, text);
+        var added = Assert.Single(await service.GetRulesWithEnforcementAsync(path, TestContext.Current.CancellationToken));
+        Assert.Equal(text, added.RuleText);
+        Assert.Equal(Enforcement.WARN, added.Enforcement);
+
+        await File.WriteAllTextAsync(path, "## Vibe Rails Rules\n", TestContext.Current.CancellationToken);
+        await service.AddRuleWithEnforcementAsync(path, text, Enforcement.STOP, TestContext.Current.CancellationToken);
+        var rule = Assert.Single(await service.GetRulesWithEnforcementAsync(path, TestContext.Current.CancellationToken));
+        Assert.Equal(text, rule.RuleText);
+        Assert.Equal(Enforcement.STOP, rule.Enforcement);
+    }
+
     // ===========================================
     // GetRulesAsync Tests
     // ===========================================

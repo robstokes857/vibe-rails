@@ -448,6 +448,7 @@ export class RuleController {
         this.codeAnalyzerScanInProgress = null;
         this.disposeHealthFixPickers = null;
         this.healthFixLaunching = false;
+        this.hookStatusRequestId = 0;
     }
 
     loadCheckViolations() {
@@ -462,11 +463,11 @@ export class RuleController {
         this.unload();
         this.focusedMode = false;
         this.viewRoot = root;
-        // The hub hosts Git Guard and the validation console. The code-quality scan
-        // still runs from here — its compact brief is the hub's door card — but the
-        // full workbench (and its controls) live on the 'code-quality' view.
+        // Both cards own a console and scan controls; the full metrics workbench
+        // is opened separately from the Code quality brief.
         this.bindGuardControls(root);
         this.bindValidationControls(root);
+        this.bindCodeQualityControls(root);
         this.bindProjectHealthControls(root);
         this.bindActionMenuAutoClose(root);
         this.renderRuleInventorySummary();
@@ -574,6 +575,8 @@ export class RuleController {
 
         this.lastAnalyzerUnpushed = cache.unpushed;
         this.analyzerIgnores = cache.ignoredFiles;
+        if (cache.response) this.codeAnalyzerConsole?.complete(cache.response);
+        else this.codeAnalyzerConsole?.fail(cache.error || 'The previous code quality scan failed. Scan again to retry.');
         this.renderCodeAnalyzerSummary(cache.response);
         return true;
     }
@@ -659,6 +662,7 @@ export class RuleController {
     }
 
     unload() {
+        this.hookStatusRequestId += 1;
         this.disposeHealthFixPickers?.();
         this.disposeHealthFixPickers = null;
         this.preflightRunner?.cancel();
@@ -716,12 +720,16 @@ export class RuleController {
     }
 
     async refreshHookStatus() {
+        const requestId = ++this.hookStatusRequestId;
+        const root = this.viewRoot;
         this.setHookStatusLoading(true);
 
         try {
             const status = await this.app.apiCall('/api/v1/hooks/status', 'GET', null, { showLoading: false });
+            if (requestId !== this.hookStatusRequestId || this.viewRoot !== root) return;
             this.renderHookStatus(status);
         } catch (error) {
+            if (requestId !== this.hookStatusRequestId || this.viewRoot !== root) return;
             this.renderHookStatus({
                 inGitRepo: false,
                 isInstalled: false,
@@ -956,8 +964,26 @@ export class RuleController {
     }
 
     setHealthFixButtonsDisabled(disabled) {
-        this.viewRoot?.querySelectorAll('[data-action="launch-health-fix"]')
-            .forEach(button => this.setButtonDisabled(button, disabled));
+        this.viewRoot?.querySelectorAll?.('[data-action="launch-health-fix"]')
+            .forEach(button => {
+                const reason = button.dataset.fixScope === 'quality' ? this.getCodeQualityFixUnavailableReason() : '';
+                this.setButtonDisabled(button, disabled || Boolean(reason));
+                if (reason) button.setAttribute('title', reason);
+                else button.removeAttribute('title');
+            });
+    }
+
+    getCodeQualityFixUnavailableReason() {
+        if (this.codeAnalyzerScanInProgress) return 'Wait for the code quality scan to finish.';
+        const cache = this.codeAnalyzerCache;
+        if (!cache?.response || cache.response.success === false
+            || cache.repositoryPath !== this.hookStatus?.repositoryPath) {
+            return 'Run a successful code quality scan before asking an agent to fix it.';
+        }
+        if (buildCodeAnalyzerSummary(cache.response).analyzedFileCount === 0) {
+            return 'No changed source files to fix. Change a supported source file, then scan again.';
+        }
+        return '';
     }
 
     async runHookPreview() {
@@ -992,6 +1018,7 @@ export class RuleController {
             && this.codeAnalyzerScanInProgress.repositoryPath === repositoryPath) return false;
 
         this.codeAnalyzerScanInProgress = { repositoryPath };
+        this.setHealthFixButtonsDisabled(!this.hookStatus?.inGitRepo);
         // Remember the scope so ignore/restore rescans replay it instead of silently reverting to
         // the working-tree scope, and so the source pane can request the matching revision.
         this.lastAnalyzerUnpushed = unpushed === true;
@@ -1018,24 +1045,25 @@ export class RuleController {
                 this.fetchAnalyzerIgnores()
             ]);
             this.codeAnalyzerConsole?.complete(response);
-            this.renderCodeAnalyzerSummary(response);
             this.codeAnalyzerCache = {
                 repositoryPath,
                 response,
                 ignoredFiles: this.analyzerIgnores || [],
                 unpushed: this.lastAnalyzerUnpushed
             };
+            this.renderCodeAnalyzerSummary(response);
         } catch (error) {
             this.codeAnalyzerConsole?.fail(error);
-            this.renderCodeAnalyzerSummary(null);
             // A failed automatic scan should not repeat every time this view remounts. The user
             // can retry it with the refresh button after addressing the reported problem.
             this.codeAnalyzerCache = {
                 repositoryPath,
                 response: null,
+                error: error?.message,
                 ignoredFiles: this.analyzerIgnores || [],
                 unpushed: this.lastAnalyzerUnpushed
             };
+            this.renderCodeAnalyzerSummary(null);
         } finally {
             if (this.codeAnalyzerScanInProgress
                 && this.codeAnalyzerScanInProgress.repositoryPath === repositoryPath) {
@@ -1043,6 +1071,7 @@ export class RuleController {
             }
             this.setButtonBusy(button, false);
             this.setCodeAnalyzerUtilityButtonsDisabled(false);
+            this.setHealthFixButtonsDisabled(!this.hookStatus?.inGitRepo);
         }
     }
 
@@ -1057,6 +1086,7 @@ export class RuleController {
     }
 
     renderCodeAnalyzerSummary(response) {
+        this.setHealthFixButtonsDisabled(!this.hookStatus?.inGitRepo);
         const empty = this.query('[data-code-analyzer-empty]');
         const reportContainer = this.query('[data-code-analyzer-report]');
         const briefHost = this.query('[data-vca-quality-brief]');
@@ -1080,6 +1110,12 @@ export class RuleController {
         // The Validation screen carries the compact scan summary; the Code quality
         // section's nav badge reads the score from the report container's dataset.
         const summary = buildCodeAnalyzerSummary(response);
+        if (summary.analyzedFileCount === 0) {
+            this.codeAnalyzerConsole?.write(response.output || 'Scan complete. No changed source files to analyze.\nChange a supported source file, then scan again.');
+            this.codeAnalyzerConsole?.finishStream({
+                tone: 'neutral', state: 'Complete', meta: 'Scan complete · No changed source files'
+            });
+        }
         renderCodeAnalyzerBrief(briefHost, response, undefined, {
             onOpenDetails: () => this.openCodeQualityDetails()
         });
@@ -1721,6 +1757,13 @@ export class RuleController {
         const normalizedScope = ['rules', 'quality', 'all'].includes(String(scope).toLowerCase())
             ? String(scope).toLowerCase()
             : 'all';
+        if (normalizedScope === 'quality') {
+            const reason = this.getCodeQualityFixUnavailableReason();
+            if (reason) {
+                this.app.showToast('Code quality', reason, 'info');
+                return false;
+            }
+        }
         const prompt = buildProjectHealthFixPrompt(normalizedScope, {
             vcaFixBrief: this.lastVcaFixBrief,
             codeAnalyzerResponse: this.codeAnalyzerCache?.response || null

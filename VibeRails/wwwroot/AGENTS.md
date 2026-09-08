@@ -184,6 +184,29 @@ A failed **pre-launch** step aborts the launch, and the reason arrives separatel
 handlers — the step's own window shows the error, but nothing in it explains why the tab never
 started.
 
+## Rule management forms
+
+`agent-controller.js` owns the Manage rules modal, full editor, and new-file wizard.
+The manager shows searchable directory paths and scope. Add uses the same form in the
+manager and full editor; the editor has explicit per-rule Edit/Remove actions. Back from
+creation/details restores the selected manager through the parent route's
+`reopenRuleManager` data, consumed after that route loads. Do not bind `go-back` locally:
+`app.js` already handles it globally, and a second listener pops history twice.
+The full editor keeps individual file cards visible above Rules, using each file's type
+icon and filename. Large scopes scroll within the card grid. Display-name controls sit
+beside the name and use Set/Edit display name; the value is a friendly searchable label
+only, and does not rename `vc.rules.md` or change its path/scope.
+
+Parameterized rules need their arguments before any write. File Lock and Directory Lock
+use the shared `app.pickFileSystemEntry` with file/directory mode; `relativeRulePath`
+converts the absolute selection relative to the declaring `vc.rules.md` directory and
+rejects selections outside it. `Directory Lock('.')` includes that directory and every
+subfolder; `/` is absolute and invalid. Keep Browse and these examples in Add and wizard
+forms. `Check commit message for` requires a plain comma-separated list of forbidden
+whole words/phrases (case insensitive), such as `WIP, fix later, temporary`. The frontend
+materializes `Check commit message for: ...`; empty lists/entries, control characters,
+and CSV quote wrappers are rejected. Backend write validation remains authoritative.
+
 ## Customizable LLM Pickers
 
 Project health's Fix actions use inline selectors with the shared `sandbox` picker context,

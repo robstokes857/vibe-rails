@@ -55,6 +55,17 @@ namespace VibeRails.Services.VCA
                 {
                     totalRules++;
 
+                    if (CommitMessageWordRule.LooksLike(ruleWithSource.Rule.RuleText)
+                        && !CommitMessageWordRule.TryParse(ruleWithSource.Rule.RuleText, out _))
+                    {
+                        // A malformed list describes no check. Report it without making a
+                        // hand-edited STOP template block every unrelated change.
+                        results.Add(new FileValidationResult(filePath, ruleWithSource.Rule.RuleText,
+                            Enforcement.WARN, false, ruleWithSource.SourceFile,
+                            $"UNSUPPORTED: invalid commit-message word list. {CommitMessageWordRule.SyntaxHelp}"));
+                        continue;
+                    }
+
                     var isValid = await _validatorList.IsGoodCodeAsync(
                         filePath,
                         ruleWithSource.Rule,

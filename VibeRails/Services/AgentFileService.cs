@@ -88,6 +88,11 @@ namespace VibeRails.Services
         {
             EnsureSingleLineRule(ruleText);
 
+            if (CommitMessageWordRule.LooksLike(ruleText) && !CommitMessageWordRule.TryParse(ruleText, out _))
+            {
+                throw new ArgumentException($"Invalid commit-message word list. {CommitMessageWordRule.SyntaxHelp}");
+            }
+
             if (!PathLockRule.TryParse(ruleText, out var pathLock))
             {
                 if (PathLockRule.LooksLikePathLock(ruleText))
@@ -196,7 +201,7 @@ namespace VibeRails.Services
             sb.AppendLine(STRINGS.RULE_HEADER);
             foreach (var rule in rules)
             {
-                sb.AppendLine($"- {rule}");
+                sb.AppendLine($"- {EnforcementParser.FormatRuleWithEnforcement(rule, Enforcement.WARN)}");
             }
             sb.AppendLine();
             sb.AppendLine(STRINGS.FILE_HEADER);
@@ -254,7 +259,8 @@ namespace VibeRails.Services
                 await ValidateRuleTextForWriteAsync(path, rule, cancellationToken);
                 if (_rulesService.TryParse(rule, out Rule _))
                 {
-                    lines.Insert(insertIndex, $"- {rule}");
+                    var formattedRule = EnforcementParser.FormatRuleWithEnforcement(rule, Enforcement.WARN);
+                    lines.Insert(insertIndex, $"- {formattedRule}");
                     insertIndex++;
                 }
             }

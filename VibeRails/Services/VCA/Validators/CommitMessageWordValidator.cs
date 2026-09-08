@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using VibeRails.Services;
 
 namespace VibeRails.Services.VCA.Validators
@@ -18,22 +17,20 @@ namespace VibeRails.Services.VCA.Validators
             ValidationContext? context = null,
             CancellationToken ct = default)
         {
-            var words = ExtractWordsFromRuleText(rule.RuleText);
-
-            if (words.Count == 0)
+            if (!CommitMessageWordRule.TryParse(rule.RuleText, out var wordRule))
             {
                 return Task.FromResult(new RuleValidationResult(
-                    true,
-                    "No words specified in rule"));
+                    false,
+                    $"UNSUPPORTED: invalid commit-message word list. {CommitMessageWordRule.SyntaxHelp}"));
             }
 
             var commitMessage = context?.CommitMessage;
-            if (string.IsNullOrEmpty(commitMessage))
+            if (commitMessage is null)
             {
-                return Task.FromResult(new RuleValidationResult(true));
+                return Task.FromResult(new RuleValidationResult(true, "Deferred: checked against the final commit message by commit-msg."));
             }
 
-            var foundWords = FindForbiddenWords(commitMessage, words);
+            var foundWords = wordRule.FindMatches(commitMessage);
 
             if (foundWords.Count > 0)
             {
@@ -45,37 +42,5 @@ namespace VibeRails.Services.VCA.Validators
             return Task.FromResult(new RuleValidationResult(true));
         }
 
-        private List<string> ExtractWordsFromRuleText(string ruleText)
-        {
-            var match = Regex.Match(ruleText, @":\s*(.+)$");
-            if (!match.Success)
-            {
-                return new List<string>();
-            }
-
-            return match.Groups[1].Value
-                .Split(',')
-                .Select(w => w.Trim())
-                .Where(w => !string.IsNullOrWhiteSpace(w))
-                .ToList();
-        }
-
-        private List<string> FindForbiddenWords(string commitMessage, List<string> words)
-        {
-            var foundWords = new List<string>();
-
-            foreach (var word in words)
-            {
-                var escapedWord = Regex.Escape(word);
-                var pattern = $@"\b{escapedWord}\b";
-
-                if (Regex.IsMatch(commitMessage, pattern, RegexOptions.IgnoreCase))
-                {
-                    foundWords.Add(word);
-                }
-            }
-
-            return foundWords;
-        }
     }
 }

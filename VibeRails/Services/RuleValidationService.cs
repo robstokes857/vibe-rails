@@ -49,6 +49,11 @@ namespace VibeRails.Services
 
             foreach (var rule in rules)
             {
+                if (CommitMessageWordRule.LooksLike(rule.RuleText))
+                {
+                    results.Add(ValidateCommitMessageConfiguration(rule));
+                    continue;
+                }
                 if (!_rulesService.TryParse(rule.RuleText, out Rule parsedRule))
                 {
                     results.Add(new ValidationResult(
@@ -99,6 +104,12 @@ namespace VibeRails.Services
                 var rule = ruleWithSource.Rule;
                 var sourceFile = ruleWithSource.SourceFile;
 
+                if (CommitMessageWordRule.LooksLike(rule.RuleText))
+                {
+                    results.Add(ValidateCommitMessageConfiguration(rule));
+                    continue;
+                }
+
                 if (!_rulesService.TryParse(rule.RuleText, out Rule parsedRule))
                 {
                     results.Add(new ValidationResult(
@@ -140,6 +151,13 @@ namespace VibeRails.Services
             return new ValidationResultSet(results);
         }
 
+        private static ValidationResult ValidateCommitMessageConfiguration(RuleWithEnforcement rule) =>
+            CommitMessageWordRule.TryParse(rule.RuleText, out _)
+                ? new ValidationResult(rule.RuleText, rule.Enforcement, true,
+                    "Deferred: checked against the final commit message by commit-msg.")
+                : new ValidationResult(rule.RuleText, Enforcement.WARN, false,
+                    $"UNSUPPORTED: invalid commit-message word list. {CommitMessageWordRule.SyntaxHelp}");
+
         private async Task<ValidationResult> ValidateLogAllFileChangesWithSource(
             List<string> files, RuleWithEnforcement rule, string sourceFile, string rootPath,
             CancellationToken cancellationToken)
@@ -154,6 +172,7 @@ namespace VibeRails.Services
 
             // Find files that were changed but not documented
             var undocumentedFiles = files
+                .Where(f => !RuleFileDocumentation.IsDeclaringFile(f, sourceFile, rootPath))
                 .Where(f => !normalizedDocumented.Contains(NormalizePath(f, rootPath)))
                 .ToList();
 
@@ -171,7 +190,7 @@ namespace VibeRails.Services
                 rule.RuleText,
                 rule.Enforcement,
                 true,
-                $"All {files.Count} changed file(s) are documented",
+                "All changed files requiring documentation are documented",
                 null);
         }
 
@@ -190,6 +209,8 @@ namespace VibeRails.Services
 
             foreach (var file in files)
             {
+                if (RuleFileDocumentation.IsDeclaringFile(file, sourceFile, rootPath)) continue;
+
                 var fullPath = Path.Combine(rootPath, file);
                 if (!File.Exists(fullPath)) continue;
 

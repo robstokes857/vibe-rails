@@ -60,17 +60,12 @@ public static class CliLaunchRoutes
             ));
         }).WithName("LaunchCli");
 
-        app.MapPost("/api/v1/cli/launch/vscode", () =>
+        app.MapPost("/api/v1/cli/launch/vscode", (LaunchVsCodeRequest? request) =>
         {
             try
             {
-                var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "code",
-                    Arguments = ".",
-                    WorkingDirectory = launchDirectory,
-                    UseShellExecute = true
-                });
+                var startInfo = VsCodeLauncher.CreateStartInfo(launchDirectory, request?.Path);
+                using var process = System.Diagnostics.Process.Start(startInfo);
 
                 if (process == null)
                 {
@@ -80,7 +75,9 @@ public static class CliLaunchRoutes
                 return Results.Ok(new LaunchCliResponse(
                     Success: true,
                     ExitCode: 0,
-                    Message: $"VS Code launched in {launchDirectory}",
+                    Message: string.IsNullOrWhiteSpace(request?.Path)
+                        ? $"VS Code launched in {launchDirectory}"
+                        : $"Opened {System.IO.Path.GetFileName(request.Path)} in VS Code",
                     StandardOutput: "",
                     StandardError: ""
                 ));
