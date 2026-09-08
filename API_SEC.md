@@ -1,8 +1,8 @@
 # API authentication coverage
 
-Audit date: 2026-09-07
+Audit date: 2026-09-08
 
-Full production route/authentication reconciliation completed: 2026-09-07, covering all 170
+Full production route/authentication reconciliation completed: 2026-09-08, covering all 170
 current `/api/v1` method/path surfaces, nine protected non-`/api` API surfaces, and
 the three bootstrap/page/probe mappings. The only middleware bypasses remain exact
 `GET /health`, exact `GET /auth/bootstrap`, and global `OPTIONS` requests.
@@ -130,7 +130,7 @@ discovery alone is insufficient if the same feature change is allowed to expand 
 set. The production listener set is now frozen above so a new match starts as a finding, not as
 an expectation.
 
-### Repository-wide listener result — 2026-09-07
+### Repository-wide listener result — 2026-09-08
 
 - Approved serving implementation: the main Kestrel host in `VibeRails/Program.cs`.
 - Rejected and removed before merge: `GrokLoopbackBridge`'s `HttpListener`.
@@ -549,6 +549,28 @@ whitelist rejection of path-like sources, and the absence of mutating verbs.
 
 ## Audit observations
 
+- Full validation on 2026-09-08: reconciled all **182 mapped route surfaces** against the
+  current working tree, including untracked source files. The 170 `/api/v1` method/path
+  entries matched in both directions: no missing or removed endpoints. Also verified the
+  nine protected non-`/api` API surfaces and three bootstrap/page/probe mappings, resolving
+  constant-based proxy/control/HTTP-relay paths and the inherited event-WebSocket mapping.
+  Inspected route registration, middleware ordering, session/tab validation, bootstrap
+  code expiry and single-use consumption, and the shared proxy/control authentication gate.
+  Both repository-wide listener searches found only the main Kestrel host, the non-serving
+  port probe, and test-only hosts; no additional production request listener was found.
+  The only session-authentication exceptions remain `GET /health`, `OPTIONS *`, and
+  `GET /auth/bootstrap?code={one-time-code}&redirect={local-path}`. All `/api/v1` business
+  handlers require both session and tab credentials. Session-only page/static loads and
+  conditional proxy responses remain as documented in section 2.
+  Existing targeted tests passed: **96 passed, 0 failed, 0 skipped**, covering
+  `CookieAuthMiddlewareTests`, `AuthServiceTests`, `AuthRoutesTests`, all five LLM proxy
+  route test classes, `TokenSaverPauseRoutesTests`, `McpServerHttpTests`, and
+  `InternalToolsRoutesTests`. The default build encountered DLL locks from running
+  Visual Studio/VibeRails processes; the successful run used
+  `-p:OutputPath=bin/ApiSecAudit/` to build current source separately.
+  No additional endpoint lacking a session credential was found, so no `SECURITY_ERROR.md`
+  was created. This was source reconciliation plus targeted tests, not a live sweep of
+  every endpoint.
 - Full validation on 2026-09-07: reconciled all **182 mapped route surfaces** against the
   current working tree, including uncommitted changes: 170 `/api/v1` mappings, nine protected
   non-`/api` API surfaces, and three bootstrap/page/probe mappings. Resolved constant-based

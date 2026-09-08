@@ -113,6 +113,11 @@
                     <i class="fa-solid fa-play" aria-hidden="true"></i>
                 </button>
             </div>
+            <button class="app-subnav-link" data-action="navigate" data-view="board"
+                title="Board — plan work across lanes">
+                <i class="fa-solid fa-clipboard-list me-1"></i>
+                <span>Board</span>
+            </button>
             <button class="app-subnav-link" data-action="navigate-settings" title="Application Settings">
                 <img src="assets/img/icons/sliders-solid-full.svg" alt="" class="me-1 icon-light settings-card-cog">
                 <span>Settings</span>
@@ -183,6 +188,11 @@
                         <i class="fa-solid fa-play" aria-hidden="true"></i>
                     </button>
                 </div>
+                <button class="app-subnav-link" data-action="navigate" data-view="board"
+                    title="Board — plan work across lanes">
+                    <i class="fa-solid fa-clipboard-list nav-icon"></i>
+                    <span class="nav-label">Board</span>
+                </button>
                 <button class="app-subnav-link" data-action="navigate-settings" title="Application Settings">
                     <img src="assets/img/icons/sliders-solid-full.svg" alt="" class="nav-icon icon-light settings-card-cog">
                     <span class="nav-label">Settings</span>
@@ -3503,6 +3513,1248 @@
                     <iframe class="mcp-remote-frame" data-mcp-remote-frame title="Isolated remote MCP inspector"
                         sandbox="allow-scripts" referrerpolicy="no-referrer" src="mcp-remote.html"></iframe>
                 </section>
+            </div>
+        </div>
+    </template>
+
+    <!-- Lane board (view 'board'). Rides the .vb-rules-workspace-active flowing
+         shell so the lanes fill the viewport and scroll sideways while the page
+         itself does not. Data still comes from the local placeholder in
+         js/modules/board-api.js. -->
+    <template id="board-template">
+        <div class="view board-view" data-view="board">
+            <style>
+                /* Every colour carries a fallback: an undefined custom property
+                   invalidates the whole declaration and paints the panel transparent. */
+                .board-view {
+                    display: flex;
+                    flex: 1 1 auto;
+                    flex-direction: column;
+                    min-height: 0;
+                    min-width: 0;
+                    gap: 0.85rem;
+                    color: var(--color-text, #f8fafc);
+                }
+
+                .board-view.is-loading .board-canvas {
+                    opacity: 0.45;
+                    pointer-events: none;
+                }
+
+                /* Header ------------------------------------------------- */
+                .board-view .board-header {
+                    display: flex;
+                    align-items: flex-end;
+                    justify-content: space-between;
+                    gap: 1.5rem;
+                    flex-wrap: wrap;
+                }
+
+                .board-view .board-heading {
+                    min-width: 0;
+                }
+
+                .board-view .board-eyebrow {
+                    display: block;
+                    margin-bottom: 4px;
+                    color: var(--color-accent, #06b6d4);
+                    font-size: 0.72rem;
+                    font-weight: 700;
+                    letter-spacing: 0.12em;
+                    text-transform: uppercase;
+                }
+
+                .board-view .board-heading h1 {
+                    margin: 0;
+                    color: var(--color-text, #f8fafc);
+                    font-size: clamp(1.4rem, 3vw, 1.9rem);
+                    font-weight: 700;
+                    letter-spacing: -0.035em;
+                }
+
+                .board-view .board-heading p {
+                    margin: 5px 0 0;
+                    color: var(--color-text-muted, #94a3b8);
+                    font-size: 0.9rem;
+                }
+
+                .board-view .board-header-actions {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                    flex-wrap: wrap;
+                }
+
+                .board-view .board-header-actions .btn {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.4rem;
+                    white-space: nowrap;
+                }
+
+                /* Toolbar ------------------------------------------------ */
+                .board-view .board-toolbar {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                    flex-wrap: wrap;
+                    padding: 0.6rem 0.75rem;
+                    border: 1px solid var(--color-border, #334155);
+                    border-radius: 8px;
+                    background: var(--color-bg-surface, #1e1e1e);
+                }
+
+                .board-view .board-search {
+                    position: relative;
+                    flex: 1 1 220px;
+                    min-width: 180px;
+                    max-width: 340px;
+                }
+
+                .board-view .board-search > i {
+                    position: absolute;
+                    left: 0.65rem;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    color: var(--color-text-muted, #94a3b8);
+                    font-size: 0.78rem;
+                    pointer-events: none;
+                }
+
+                .board-view .board-control {
+                    min-height: 34px;
+                    padding: 0.35rem 0.6rem;
+                    border-radius: 4px;
+                    border: 1px solid var(--color-border, #334155);
+                    background: var(--color-bg-base, #121212);
+                    color: var(--color-text, #f8fafc);
+                    font: inherit;
+                    font-size: 0.82rem;
+                    line-height: 1.35;
+                }
+
+                .board-view select.board-control {
+                    min-width: 130px;
+                    cursor: pointer;
+                }
+
+                .board-view .board-control:focus {
+                    outline: none;
+                    border-color: var(--color-primary, #3b82f6);
+                    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+                }
+
+                /* After .board-control: its padding shorthand would otherwise
+                   reset the room reserved for the search icon. */
+                .board-view .board-search-input {
+                    width: 100%;
+                    padding-left: 2rem;
+                }
+
+                .board-view .board-clear-filters {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.35rem;
+                    min-height: 34px;
+                    padding: 0.35rem 0.6rem;
+                    border-radius: 4px;
+                    border: 1px solid var(--color-border, #334155);
+                    background: transparent;
+                    color: var(--color-text-muted, #94a3b8);
+                    font-size: 0.78rem;
+                    font-weight: 600;
+                    cursor: pointer;
+                }
+
+                .board-view .board-clear-filters:hover {
+                    color: var(--color-text, #f8fafc);
+                    border-color: var(--color-primary, #3b82f6);
+                }
+
+                .board-view .board-stats {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.9rem;
+                    margin-left: auto;
+                    padding-left: 0.5rem;
+                    flex-wrap: wrap;
+                }
+
+                .board-view .board-stat {
+                    color: var(--color-text-muted, #94a3b8);
+                    font-size: 0.74rem;
+                    white-space: nowrap;
+                }
+
+                .board-view .board-stat strong {
+                    color: var(--color-text, #f8fafc);
+                    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+                    font-weight: 600;
+                }
+
+                .board-view .board-stat.is-warn strong {
+                    color: var(--color-warning, #f59e0b);
+                }
+
+                /* Canvas and lanes --------------------------------------- */
+                .board-view .board-canvas {
+                    display: flex;
+                    align-items: stretch;
+                    gap: 0.6rem;
+                    flex: 1 1 auto;
+                    min-height: 260px;
+                    overflow-x: auto;
+                    overflow-y: hidden;
+                    padding-bottom: 0.35rem;
+                }
+
+                .board-view .board-lanes {
+                    display: flex;
+                    align-items: stretch;
+                    gap: 0.6rem;
+                    flex: 1 1 auto;
+                    min-width: 0;
+                    height: 100%;
+                }
+
+                .board-view .board-lane {
+                    position: relative;
+                    display: flex;
+                    flex-direction: column;
+                    flex: 1 1 0;
+                    /* Floor, not a target: lanes share the width evenly and only
+                       start scrolling sideways once they cannot all fit. Five lanes
+                       fit a 1280px-wide content area without a scrollbar. */
+                    min-width: 232px;
+                    min-height: 0;
+                    height: 100%;
+                    border: 1px solid var(--color-border, #334155);
+                    border-radius: 8px;
+                    background: var(--color-bg-surface, #1e1e1e);
+                }
+
+                .board-view .board-lane::before {
+                    content: "";
+                    position: absolute;
+                    top: 0;
+                    left: 0.75rem;
+                    right: 0.75rem;
+                    height: 3px;
+                    border-radius: 0 0 3px 3px;
+                    background: var(--lane-color, var(--color-primary, #3b82f6));
+                }
+
+                .board-view .board-lane.is-drop-target {
+                    border-color: var(--color-primary, #3b82f6);
+                    background: color-mix(in srgb, var(--color-primary, #3b82f6) 8%, var(--color-bg-surface, #1e1e1e));
+                }
+
+                .board-view .board-lane.is-over-wip .board-wip {
+                    color: var(--color-danger, #ef4444);
+                    background: color-mix(in srgb, var(--color-danger, #ef4444) 16%, transparent);
+                }
+
+                .board-view .board-lane-head {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.4rem;
+                    padding: 0.7rem 0.5rem 0.45rem 0.55rem;
+                }
+
+                .board-view .board-lane-grip,
+                .board-view .board-icon-btn {
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 26px;
+                    height: 26px;
+                    flex: none;
+                    padding: 0;
+                    border: 1px solid transparent;
+                    border-radius: 4px;
+                    background: transparent;
+                    color: var(--color-text-muted, #94a3b8);
+                    font-size: 0.8rem;
+                    cursor: pointer;
+                }
+
+                .board-view .board-lane-grip {
+                    cursor: grab;
+                }
+
+                .board-view .board-lane-grip:hover,
+                .board-view .board-icon-btn:hover {
+                    color: var(--color-text, #f8fafc);
+                    background: var(--color-bg-surface-hover, #2c2c2c);
+                }
+
+                .board-view .board-lane-title {
+                    flex: 1;
+                    min-width: 0;
+                    margin: 0;
+                    font-size: 0.85rem;
+                    font-weight: 700;
+                    letter-spacing: -0.01em;
+                    color: var(--color-text, #f8fafc);
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                }
+
+                .board-view .board-wip {
+                    flex: none;
+                    padding: 1px 7px;
+                    border-radius: 999px;
+                    background: var(--color-bg-elevated, #232323);
+                    color: var(--color-text-muted, #94a3b8);
+                    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+                    font-size: 0.7rem;
+                }
+
+                .board-view .board-lane-list {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 0.4rem;
+                    flex: 1 1 auto;
+                    min-height: 48px;
+                    overflow-y: auto;
+                    padding: 0.25rem 0.5rem 0.5rem;
+                }
+
+                .board-view .board-lane-empty {
+                    margin: 0;
+                    padding: 1rem 0.7rem;
+                    border: 1px dashed var(--color-border, #334155);
+                    border-radius: 6px;
+                    color: var(--color-text-muted, #94a3b8);
+                    font-size: 0.78rem;
+                    line-height: 1.4;
+                    text-align: center;
+                }
+
+                .board-view .board-quick-add {
+                    padding: 0 0.5rem 0.55rem;
+                }
+
+                .board-view .board-quick-add-input {
+                    width: 100%;
+                    min-height: 32px;
+                    padding: 0.3rem 0.5rem;
+                    border: 1px solid var(--color-border, #334155);
+                    border-radius: 4px;
+                    background: var(--color-bg-base, #121212);
+                    color: var(--color-text, #f8fafc);
+                    font: inherit;
+                    font-size: 0.8rem;
+                }
+
+                .board-view .board-quick-add-input:focus {
+                    outline: none;
+                    border-color: var(--color-primary, #3b82f6);
+                    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+                }
+
+                .board-view .board-add-lane {
+                    display: flex;
+                    flex: 0 0 42px;
+                    width: 42px;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 0.4rem;
+                    align-self: stretch;
+                    border: 1px dashed var(--color-border, #334155);
+                    border-radius: 8px;
+                    background: transparent;
+                    color: var(--color-text-muted, #94a3b8);
+                    font-size: 0.7rem;
+                    font-weight: 600;
+                    cursor: pointer;
+                }
+
+                .board-view .board-add-lane span {
+                    writing-mode: vertical-rl;
+                    letter-spacing: 0.08em;
+                    text-transform: uppercase;
+                }
+
+                .board-view .board-add-lane:hover {
+                    color: var(--color-text, #f8fafc);
+                    border-color: var(--color-primary, #3b82f6);
+                    background: color-mix(in srgb, var(--color-primary, #3b82f6) 8%, transparent);
+                }
+
+                /* Cards --------------------------------------------------- */
+                .board-view .board-card {
+                    display: grid;
+                    grid-template-columns: 3px 1fr;
+                    overflow: hidden;
+                    border: 1px solid var(--color-border, #334155);
+                    border-radius: 6px;
+                    background: var(--color-bg-elevated, #232323);
+                    cursor: pointer;
+                    user-select: none;
+                }
+
+                .board-view .board-card:hover,
+                .board-view .board-card:focus-visible {
+                    border-color: color-mix(in srgb, var(--color-primary, #3b82f6) 45%, var(--color-border, #334155));
+                    background: var(--color-bg-surface-hover, #2c2c2c);
+                }
+
+                .board-view .board-card.is-ghost {
+                    opacity: 0.35;
+                }
+
+                .board-view .board-card.is-dragging {
+                    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+                }
+
+                .board-view .board-card.is-blocked {
+                    background-image: repeating-linear-gradient(-55deg,
+                            transparent,
+                            transparent 8px,
+                            color-mix(in srgb, var(--color-warning, #f59e0b) 9%, transparent) 8px,
+                            color-mix(in srgb, var(--color-warning, #f59e0b) 9%, transparent) 16px);
+                }
+
+                .board-view .board-card-rail {
+                    background: var(--color-primary, #3b82f6);
+                }
+
+                .board-view .board-card-rail[data-priority="critical"] { background: var(--color-danger, #ef4444); }
+                .board-view .board-card-rail[data-priority="high"] { background: var(--color-warning, #f59e0b); }
+                .board-view .board-card-rail[data-priority="medium"] { background: var(--color-primary, #3b82f6); }
+                .board-view .board-card-rail[data-priority="low"] { background: var(--color-secondary, #64748b); }
+
+                .board-view .board-card-body {
+                    min-width: 0;
+                    padding: 0.45rem 0.55rem 0.5rem;
+                }
+
+                .board-view .board-card-top {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    gap: 0.5rem;
+                    margin-bottom: 0.2rem;
+                }
+
+                .board-view .board-key {
+                    color: var(--color-text-muted, #94a3b8);
+                    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+                    font-size: 0.68rem;
+                }
+
+                .board-view .board-points {
+                    min-width: 1.4rem;
+                    padding: 1px 5px;
+                    border-radius: 4px;
+                    background: var(--color-bg-surface, #1e1e1e);
+                    color: var(--color-text, #f8fafc);
+                    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+                    font-size: 0.68rem;
+                    text-align: center;
+                }
+
+                .board-view .board-card-title {
+                    margin: 0 0 0.45rem;
+                    color: var(--color-text, #f8fafc);
+                    font-size: 0.85rem;
+                    font-weight: 600;
+                    line-height: 1.3;
+                    letter-spacing: -0.01em;
+                }
+
+                .board-view .board-card-meta {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    gap: 0.5rem;
+                }
+
+                .board-view .board-tags {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 0.2rem;
+                    min-width: 0;
+                }
+
+                .board-view .board-tag {
+                    padding: 1px 6px;
+                    border: 0;
+                    border-radius: 4px;
+                    background: var(--color-bg-surface, #1e1e1e);
+                    color: var(--color-text-muted, #94a3b8);
+                    font-size: 0.66rem;
+                    font-weight: 600;
+                    cursor: pointer;
+                }
+
+                .board-view .board-tag:hover,
+                .board-view .board-tag.is-on {
+                    background: color-mix(in srgb, var(--color-primary, #3b82f6) 22%, var(--color-bg-surface, #1e1e1e));
+                    color: var(--color-text, #f8fafc);
+                }
+
+                .board-view .board-card-aside {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.35rem;
+                    flex: none;
+                }
+
+                .board-view .board-blocked {
+                    color: var(--color-warning, #f59e0b);
+                    font-size: 0.75rem;
+                }
+
+                /* Avatars are shared with the card editor, which renders outside
+                   .board-view inside #modal-container. */
+                .board-avatar {
+                    display: inline-grid;
+                    place-items: center;
+                    flex: none;
+                    border-radius: 50%;
+                    color: #0e1218;
+                    font-size: 0.62rem;
+                    font-weight: 700;
+                    letter-spacing: -0.02em;
+                }
+
+                .board-avatar.is-empty {
+                    border: 1px dashed var(--color-border, #334155);
+                    background: var(--color-bg-surface, #1e1e1e);
+                    color: var(--color-text-muted, #94a3b8);
+                }
+
+                /* Card / lane editors (rendered into #modal-container) ----- */
+                .board-card-modal-dialog .modal-body {
+                    padding: 0;
+                }
+
+                .board-card-editor {
+                    display: grid;
+                    grid-template-columns: minmax(0, 1.55fr) minmax(230px, 0.7fr);
+                    /* Bounded so the panels scroll inside the dialog rather than the
+                       dialog growing without limit behind a long comment thread. */
+                    height: min(74vh, 700px);
+                    min-height: 420px;
+                }
+
+                .board-card-editor .board-editor-main {
+                    display: flex;
+                    flex-direction: column;
+                    /* min-width/min-height:0 all the way down the flex chain is what
+                       stops a wide code block from widening the whole dialog. */
+                    min-width: 0;
+                    min-height: 0;
+                    padding: 1.1rem 1.25rem 1.25rem;
+                    border-right: 1px solid var(--color-border, #334155);
+                    /* One scroll for the whole body: description at the top, the
+                       comment thread at the bottom, as a work item reads. */
+                    overflow-y: auto;
+                }
+
+                .board-card-editor .board-editor-side {
+                    display: flex;
+                    flex-direction: column;
+                    min-height: 0;
+                    padding: 0;
+                    overflow: hidden;
+                }
+
+                /* Only this scrolls. The action bar below is a sibling, so Save is
+                   always reachable without floating over the commit list. */
+                .board-side-scroll {
+                    display: flex;
+                    flex: 1 1 auto;
+                    flex-direction: column;
+                    gap: 1.1rem;
+                    min-height: 0;
+                    overflow-y: auto;
+                    padding: 1.1rem 1.15rem 0.6rem;
+                }
+
+                .board-side-fields {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 0.7rem;
+                }
+
+                /* Commits / sessions rail -------------------------------- */
+                .board-side-section {
+                    display: flex;
+                    flex-direction: column;
+                    min-width: 0;
+                }
+
+                .board-side-list {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 0.15rem;
+                    min-width: 0;
+                }
+
+                .board-side-empty {
+                    margin: 0.1rem 0 0;
+                    color: var(--color-text-muted, #94a3b8);
+                    font-size: 0.75rem;
+                }
+
+                .board-side-row {
+                    display: flex;
+                    align-items: stretch;
+                    min-width: 0;
+                    border-radius: 4px;
+                }
+
+                .board-side-row:hover {
+                    background: var(--color-bg-surface-hover, #2c2c2c);
+                }
+
+                .board-side-main {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                    flex: 1 1 auto;
+                    min-width: 0;
+                    padding: 0.32rem 0.35rem;
+                    border: 0;
+                    background: none;
+                    color: inherit;
+                    text-align: left;
+                    cursor: pointer;
+                }
+
+                .board-side-icon {
+                    flex: none;
+                    width: 1rem;
+                    color: var(--color-text-muted, #94a3b8);
+                    font-size: 0.78rem;
+                    text-align: center;
+                }
+
+                .board-side-row:hover .board-side-icon {
+                    color: var(--color-accent, #06b6d4);
+                }
+
+                .board-side-text {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 0;
+                    flex: 1 1 auto;
+                    min-width: 0;
+                }
+
+                .board-side-title,
+                .board-side-sub {
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                }
+
+                .board-side-title {
+                    color: var(--color-text, #f8fafc);
+                    font-size: 0.78rem;
+                    font-weight: 600;
+                }
+
+                .board-side-sub {
+                    color: var(--color-text-muted, #94a3b8);
+                    font-size: 0.7rem;
+                }
+
+                .board-side-remove {
+                    flex: none;
+                    width: 22px;
+                    padding: 0;
+                    border: 0;
+                    border-radius: 4px;
+                    background: none;
+                    color: var(--color-text-muted, #94a3b8);
+                    font-size: 0.7rem;
+                    opacity: 0;
+                    cursor: pointer;
+                }
+
+                .board-side-row:hover .board-side-remove,
+                .board-side-remove:focus-visible {
+                    opacity: 1;
+                }
+
+                .board-side-remove:hover {
+                    color: var(--color-danger, #ef4444);
+                }
+
+                .board-side-form {
+                    display: flex;
+                    gap: 0.3rem;
+                    margin-top: 0.4rem;
+                    min-width: 0;
+                }
+
+                .board-side-form input {
+                    flex: 1 1 auto;
+                    min-width: 0;
+                    font-size: 0.75rem;
+                }
+
+                .board-side-form input[name="sha"] {
+                    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+                }
+
+                /* Same register as .btn-outline-primary: transparent, coloured
+                   border and text, subtle tint on hover. */
+                .board-side-add {
+                    flex: none;
+                    width: 30px;
+                    border: 1px solid var(--color-border, #334155);
+                    border-radius: 4px;
+                    background: transparent;
+                    color: var(--color-text-muted, #94a3b8);
+                    font-size: 0.72rem;
+                    cursor: pointer;
+                }
+
+                .board-side-add:hover {
+                    color: var(--color-primary, #3b82f6);
+                    border-color: var(--color-primary, #3b82f6);
+                    background: rgba(59, 130, 246, 0.1);
+                }
+
+                /* Card body: flows top to bottom like a Jira work item. Title,
+                   description, then the comment thread at the bottom. The whole
+                   column scrolls as one; nothing scrolls inside it. */
+                .board-block {
+                    display: flex;
+                    flex-direction: column;
+                    min-width: 0;
+                    margin-top: 1.15rem;
+                }
+
+                .board-block-label,
+                .board-side-label {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.45rem;
+                    margin: 0 0 0.5rem;
+                    padding-bottom: 0.3rem;
+                    border-bottom: 1px solid var(--color-border, #334155);
+                    color: var(--color-text-muted, #94a3b8);
+                    font-size: 0.7rem;
+                    font-weight: 700;
+                    letter-spacing: 0.09em;
+                    text-transform: uppercase;
+                }
+
+                .board-count {
+                    min-width: 1.15rem;
+                    padding: 0 0.32rem;
+                    border-radius: 999px;
+                    background: var(--color-bg-surface-hover, #2c2c2c);
+                    color: var(--color-text-muted, #94a3b8);
+                    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+                    font-size: 0.66rem;
+                    letter-spacing: 0;
+                    text-align: center;
+                }
+
+                .board-activity .board-comments:not(:empty) {
+                    margin-bottom: 0.9rem;
+                }
+
+                .board-editor-label {
+                    display: block;
+                    margin: 0 0 0.3rem;
+                    color: var(--color-text-muted, #94a3b8);
+                    font-size: 0.72rem;
+                    font-weight: 700;
+                }
+
+                /* Bootstrap lays .form-check out with a floated input pulled left by
+                   -1.5em, which escapes this panel's narrower padding and clips the
+                   box against the divider. An explicit flex row does not care how
+                   much padding the panel has. */
+                .board-card-editor .board-editor-side .form-check {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                    margin: 0;
+                    padding-left: 0;
+                    min-height: 0;
+                }
+
+                .board-card-editor .board-editor-side .form-check-input {
+                    flex: none;
+                    float: none;
+                    margin: 0;
+                }
+
+                .board-card-editor .board-editor-side .form-check-label {
+                    color: var(--color-text, #f8fafc);
+                    font-size: 0.84rem;
+                }
+
+                .board-card-editor .board-editor-title {
+                    font-size: 1.05rem;
+                    font-weight: 600;
+                    letter-spacing: -0.02em;
+                }
+
+                .board-card-editor .board-editor-description {
+                    min-height: 120px;
+                    resize: vertical;
+                }
+
+                .board-card-editor .board-editor-comments-head {
+                    margin: 1.1rem 0 0.3rem;
+                    color: var(--color-text, #f8fafc);
+                    font-size: 0.78rem;
+                    font-weight: 700;
+                }
+
+                .board-editor-muted {
+                    margin: 0;
+                    color: var(--color-text-muted, #94a3b8);
+                    font-size: 0.8rem;
+                }
+
+                .board-comments {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 0.9rem;
+                    flex: 1 1 auto;
+                    min-height: 60px;
+                    min-width: 0;
+                    overflow-y: auto;
+                    padding: 0.15rem 0.15rem 0.5rem 0;
+                }
+
+                .board-comment {
+                    display: grid;
+                    /* minmax(0, 1fr), not 1fr: a grid track defaults to min-content,
+                       which would let a wide code block push the dialog wider. */
+                    grid-template-columns: 26px minmax(0, 1fr);
+                    gap: 0.5rem;
+                }
+
+                /* Composer ------------------------------------------------ */
+                .board-composer {
+                    display: flex;
+                    flex-direction: column;
+                    min-width: 0;
+                    border: 1px solid var(--color-border, #334155);
+                    border-radius: 6px;
+                    background: var(--color-bg-base, #121212);
+                }
+
+                .board-composer.is-drop-target {
+                    border-color: var(--color-primary, #3b82f6);
+                    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.18);
+                }
+
+                .board-composer-toolbar {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.35rem;
+                    padding: 0.3rem 0.4rem;
+                    border-bottom: 1px solid var(--color-border, #334155);
+                }
+
+                .board-composer-btn {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.3rem;
+                    padding: 0.2rem 0.45rem;
+                    border: 1px solid transparent;
+                    border-radius: 4px;
+                    background: transparent;
+                    color: var(--color-text-muted, #94a3b8);
+                    font-size: 0.75rem;
+                    font-weight: 600;
+                    cursor: pointer;
+                }
+
+                .board-composer-btn:hover:not(:disabled) {
+                    color: var(--color-text, #f8fafc);
+                    background: var(--color-bg-surface-hover, #2c2c2c);
+                }
+
+                .board-composer-btn:disabled {
+                    opacity: 0.45;
+                    cursor: not-allowed;
+                }
+
+                .board-composer-hint {
+                    color: var(--color-text-muted, #94a3b8);
+                    font-size: 0.7rem;
+                    margin-left: 0.15rem;
+                }
+
+                .board-composer-footer {
+                    display: flex;
+                    justify-content: flex-end;
+                    padding: 0.4rem 0.45rem 0.45rem;
+                    border-top: 1px solid var(--color-border, #334155);
+                }
+
+                .board-composer-input {
+                    width: 100%;
+                    min-height: 76px;
+                    /* Auto-grows in JS up to here, then scrolls internally. */
+                    max-height: 320px;
+                    padding: 0.55rem 0.65rem;
+                    border: 0;
+                    border-radius: 0;
+                    background: transparent;
+                    color: var(--color-text, #f8fafc);
+                    font: inherit;
+                    font-size: 0.85rem;
+                    line-height: 1.5;
+                    resize: none;
+                    overflow-y: auto;
+                }
+
+                .board-composer-input:focus {
+                    outline: none;
+                    box-shadow: none;
+                    background: transparent;
+                    color: var(--color-text, #f8fafc);
+                }
+
+                .board-composer-busy {
+                    padding: 0.3rem 0.65rem 0.45rem;
+                    color: var(--color-text-muted, #94a3b8);
+                    font-size: 0.72rem;
+                }
+
+                /* The description gets a roomier box than a comment reply. */
+                .board-block:first-of-type .board-composer-input {
+                    min-height: 140px;
+                    max-height: none;
+                }
+
+                .board-comment-content {
+                    min-width: 0;
+                }
+
+                .board-comment-meta {
+                    display: flex;
+                    justify-content: space-between;
+                    gap: 0.5rem;
+                    color: var(--color-text-muted, #94a3b8);
+                    font-size: 0.72rem;
+                }
+
+                .board-comment-author {
+                    color: var(--color-text, #f8fafc);
+                    font-weight: 600;
+                }
+
+                .board-comment-body {
+                    margin: 2px 0 0;
+                    min-width: 0;
+                    font-size: 0.84rem;
+                    line-height: 1.5;
+                    white-space: pre-wrap;
+                    overflow-wrap: anywhere;
+                }
+
+                /* A long comment is clamped until the reader asks for the rest. */
+                .board-comment-body.is-clamped {
+                    max-height: 15.5em;
+                    overflow: hidden;
+                    mask-image: linear-gradient(to bottom, #000 78%, transparent 100%);
+                    -webkit-mask-image: linear-gradient(to bottom, #000 78%, transparent 100%);
+                }
+
+                .board-comment-more {
+                    margin-top: 0.25rem;
+                    padding: 0;
+                    border: 0;
+                    background: none;
+                    color: var(--color-primary, #3b82f6);
+                    font-size: 0.75rem;
+                    font-weight: 600;
+                    cursor: pointer;
+                }
+
+                .board-comment-more:hover { text-decoration: underline; }
+
+                .board-code-wrap {
+                    max-width: 100%;
+                    min-width: 0;
+                    margin: 0.45rem 0;
+                    border: 1px solid var(--color-border, #334155);
+                    border-radius: 6px;
+                    background: var(--color-bg-base, #121212);
+                }
+
+                .board-code-lang {
+                    display: block;
+                    padding: 0.2rem 0.6rem;
+                    border-bottom: 1px solid var(--color-border, #334155);
+                    color: var(--color-text-muted, #94a3b8);
+                    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+                    font-size: 0.68rem;
+                    text-transform: lowercase;
+                }
+
+                pre.board-code {
+                    margin: 0;
+                    padding: 0.55rem 0.7rem;
+                    /* The whole point: a 300-character line scrolls HERE and never
+                       widens the dialog. Needs pre (not pre-wrap) plus the
+                       min-width:0 chain on every ancestor. */
+                    white-space: pre;
+                    overflow-x: auto;
+                    max-width: 100%;
+                    color: var(--color-text, #f8fafc);
+                    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Mono', monospace;
+                    font-size: 0.78rem;
+                    line-height: 1.45;
+                    tab-size: 4;
+                }
+
+                pre.board-code code {
+                    padding: 0;
+                    background: none;
+                    color: inherit;
+                    font-size: inherit;
+                }
+
+                code.board-inline-code {
+                    padding: 0.1em 0.35em;
+                    border-radius: 4px;
+                    background: color-mix(in srgb, var(--color-accent, #06b6d4) 14%, transparent);
+                    color: var(--color-accent, #06b6d4);
+                    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+                    font-size: 0.85em;
+                    overflow-wrap: anywhere;
+                }
+
+                img.board-image {
+                    display: block;
+                    max-width: 100%;
+                    max-height: 320px;
+                    width: auto;
+                    margin: 0.45rem 0;
+                    border: 1px solid var(--color-border, #334155);
+                    border-radius: 6px;
+                    cursor: zoom-in;
+                    object-fit: contain;
+                }
+
+                .board-comment-form {
+                    display: flex;
+                    gap: 0.5rem;
+                    margin-top: 0.7rem;
+                }
+
+                .board-editor-actions {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    gap: 0.5rem;
+                    /* Outside the scrolling region: Save is always reachable, and it
+                       never paints over the commit list the way a sticky bar did. */
+                    flex: none;
+                    padding: 0.7rem 1.15rem 0.9rem;
+                    background: var(--color-bg-base, #121212);
+                    border-top: 1px solid var(--color-border, #334155);
+                }
+
+                .board-editor-actions .btn {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.35rem;
+                }
+
+                /* Commit / session lists ---------------------------------- */
+                .board-list {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 0.35rem;
+                    min-width: 0;
+                    padding-bottom: 0.5rem;
+                }
+
+                .board-list-row {
+                    display: flex;
+                    align-items: stretch;
+                    gap: 0.25rem;
+                    min-width: 0;
+                    border: 1px solid var(--color-border, #334155);
+                    border-radius: 6px;
+                    background: var(--color-bg-elevated, #232323);
+                }
+
+                .board-list-row:hover {
+                    border-color: color-mix(in srgb, var(--color-primary, #3b82f6) 45%, var(--color-border, #334155));
+                }
+
+                .board-list-main {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.6rem;
+                    flex: 1 1 auto;
+                    min-width: 0;
+                    padding: 0.5rem 0.6rem;
+                    border: 0;
+                    border-radius: 6px;
+                    background: none;
+                    color: inherit;
+                    text-align: left;
+                    cursor: pointer;
+                }
+
+                .board-list-text {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 1px;
+                    flex: 1 1 auto;
+                    min-width: 0;
+                }
+
+                .board-list-title {
+                    color: var(--color-text, #f8fafc);
+                    font-size: 0.82rem;
+                    font-weight: 600;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                }
+
+                .board-list-sub {
+                    color: var(--color-text-muted, #94a3b8);
+                    font-size: 0.72rem;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                }
+
+                .board-sha {
+                    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+                    font-size: 0.72rem;
+                    color: var(--color-accent, #06b6d4);
+                }
+
+                .board-list-lead,
+                .board-list-icon {
+                    flex: none;
+                    color: var(--color-text-muted, #94a3b8);
+                    font-size: 0.8rem;
+                }
+
+                .board-list-row:hover .board-list-icon { color: var(--color-primary, #3b82f6); }
+
+                .board-inline-form {
+                    display: flex;
+                    gap: 0.4rem;
+                    flex: none;
+                    padding-top: 0.5rem;
+                    border-top: 1px solid var(--color-border, #334155);
+                }
+
+                .board-inline-form input { min-width: 0; }
+                .board-inline-form input[name="sha"] {
+                    flex: 0 1 12rem;
+                    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+                }
+                .board-inline-form input[name="message"],
+                .board-inline-form input[name="displayName"] { flex: 1 1 auto; }
+
+                /* Session stub modal (nested layer, like the diff viewer). */
+                .board-session-layer > .board-session-modal { z-index: 1070; }
+                .board-session-layer > .board-session-backdrop { z-index: 1065; }
+
+                .board-swatches {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 0.5rem;
+                }
+
+                .board-swatch {
+                    width: 26px;
+                    height: 26px;
+                    flex: none;
+                    padding: 0;
+                    border: 2px solid transparent;
+                    border-radius: 50%;
+                    cursor: pointer;
+                }
+
+                .board-swatch.is-on {
+                    outline: 2px solid var(--color-text, #f8fafc);
+                    outline-offset: 2px;
+                }
+
+                @media (max-width: 860px) {
+                    .board-card-editor {
+                        grid-template-columns: 1fr;
+                    }
+
+                    .board-card-editor .board-editor-main {
+                        border-right: 0;
+                        border-bottom: 1px solid var(--color-border, #334155);
+                    }
+
+                    .board-view .board-stats {
+                        margin-left: 0;
+                        padding-left: 0;
+                    }
+                }
+            </style>
+
+            <header class="board-header">
+                <div class="board-heading">
+                    <span class="board-eyebrow">Planning</span>
+                    <h1>Board</h1>
+                    <p>Move work across lanes, flag what is blocked, and keep the next thing to build visible.</p>
+                </div>
+                <div class="board-header-actions">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-board-action="reset-data"
+                        title="Restore the sample board and discard local changes">
+                        <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
+                        <span>Reset sample</span>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" data-board-action="new-card">
+                        <i class="fa-solid fa-plus" aria-hidden="true"></i>
+                        <span>New card</span>
+                    </button>
+                </div>
+            </header>
+
+            <div class="board-toolbar">
+                <div class="board-search">
+                    <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                    <input type="search" class="board-control board-search-input" data-board-search
+                        placeholder="Search cards" autocomplete="off" aria-label="Search cards">
+                </div>
+                <select class="board-control" data-board-filter-assignee aria-label="Filter by assignee"></select>
+                <select class="board-control" data-board-filter-priority aria-label="Filter by priority">
+                    <option value="">Any priority</option>
+                    <option value="critical">Critical</option>
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                </select>
+                <select class="board-control" data-board-filter-tag aria-label="Filter by tag"></select>
+                <button type="button" class="board-clear-filters" data-board-clear-filters
+                    data-board-action="clear-filters" hidden>
+                    <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                    <span>Clear</span>
+                </button>
+                <div class="board-stats" data-board-stats></div>
+            </div>
+
+            <div class="board-canvas" data-board-canvas>
+                <div class="board-lanes" data-board-lanes></div>
+                <button type="button" class="board-add-lane" data-board-action="add-lane" title="Add a lane">
+                    <i class="fa-solid fa-plus" aria-hidden="true"></i>
+                    <span>Lane</span>
+                </button>
             </div>
         </div>
     </template>
