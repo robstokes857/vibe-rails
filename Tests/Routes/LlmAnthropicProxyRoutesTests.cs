@@ -101,6 +101,23 @@ public class LlmAnthropicProxyRoutesTests
         Assert.Equal("/llm/anthropic/v1/messages", exchange.Path);
         Assert.Equal(200, exchange.StatusCode);
         Assert.Equal("{\"type\":\"message\"}", exchange.Response);
+        // This request carried no terminal-session header, so it records NULL — the compatibility
+        // contract for everything launched before attribution existed.
+        Assert.Null(exchange.SessionId);
+    }
+
+    [Fact]
+    public async Task TerminalSessionHeader_IsRecordedOnTheExchangeAndStrippedUpstream()
+    {
+        var result = await SendAsync(
+            "/llm/anthropic/v1/messages", MessagesBody("clean output"), tokenSaverEnabled: false,
+            TestContext.Current.CancellationToken, terminalSessionId: "sess-relay-1");
+
+        var exchange = Assert.Single(result.Exchanges);
+        Assert.Equal("sess-relay-1", exchange.SessionId);
+
+        // Local-only header, exactly like the auth tokens: api.anthropic.com must never see it.
+        Assert.Null(result.UpstreamTerminalSessionHeader);
     }
 
     [Fact]
@@ -190,12 +207,13 @@ public class LlmAnthropicProxyRoutesTests
         long? UpstreamContentLength,
         StubTokenSavingsStore Savings,
         List<LlmProxyExchange> Exchanges,
-        List<AppEvent> Events);
+        List<AppEvent> Events,
+        string? UpstreamTerminalSessionHeader);
 
     private static async Task<ProxyResult> SendAsync(
         string path, string body, bool tokenSaverEnabled, CancellationToken cancellationToken,
         MinifyFlags? flags = null, CondenseOptions condense = default,
-        IReadOnlyList<string>? allowlist = null)
+        IReadOnlyList<string>? allowlist = null, string? terminalSessionId = null)
     {
         // Port 0 = kernel-assigned: parallel Kestrel-hosted test classes can race a find-then-rebind
         // port picker, so bind ephemeral and read the real address after start.
@@ -240,6 +258,9 @@ public class LlmAnthropicProxyRoutesTests
                 HttpMethod.Post, new Uri(new Uri(app.Urls.First()), path));
             request.Headers.TryAddWithoutValidation(LlmProxyClaudeConfig.SessionHeaderName, SessionToken);
             request.Headers.TryAddWithoutValidation(LlmProxyClaudeConfig.TabHeaderName, TabToken);
+            if (terminalSessionId is not null)
+                request.Headers.TryAddWithoutValidation(
+                    LlmProxyCodexConfig.TerminalSessionHeaderName, terminalSessionId);
             request.Content = new StringContent(body, Encoding.UTF8, "application/json");
 
             using var response = await SharedClient.SendAsync(request, cancellationToken);
@@ -251,7 +272,8 @@ public class LlmAnthropicProxyRoutesTests
                 upstreamHandler.RequestContentLength,
                 savingsStore,
                 [.. exchanges.Records],
-                [.. events]);
+                [.. events],
+                upstreamHandler.TerminalSessionHeader);
         }
         finally
         {
@@ -313,10 +335,17 @@ public class LlmAnthropicProxyRoutesTests
         public byte[] RequestBody { get; private set; } = [];
         public long? RequestContentLength { get; private set; }
 
+        /// <summary>The terminal-session correlation header as it arrived upstream, if ever —
+        /// the relay must strip it alongside the auth tokens.</summary>
+        public string? TerminalSessionHeader { get; private set; }
+
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)
         {
             RequestContentLength = request.Content?.Headers.ContentLength;
+            if (request.Headers.TryGetValues(
+                    LlmProxyCodexConfig.TerminalSessionHeaderName, out var values))
+                TerminalSessionHeader = string.Join(",", values);
             RequestBody = request.Content is null
                 ? []
                 : await request.Content.ReadAsByteArrayAsync(cancellationToken);

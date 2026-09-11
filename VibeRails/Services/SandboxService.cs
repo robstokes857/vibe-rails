@@ -382,7 +382,7 @@ namespace VibeRails.Services
             }
         }
 
-        private static string GetLanguageFromExtension(string filePath)
+        internal static string GetLanguageFromExtension(string filePath)
         {
             var ext = Path.GetExtension(filePath).TrimStart('.').ToLowerInvariant();
             return ext switch

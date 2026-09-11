@@ -9,5 +9,6 @@ public interface ICommandService
     /// Shared by both CLI and Web paths.
     /// </summary>
     Task<PreparedTerminalSession> PrepareSessionAsync(
-        LLM llm, string? envName, string[]? extraArgs, string? initialPrompt = null, string summary = "");
+        LLM llm, string? envName, string[]? extraArgs, string? initialPrompt = null, string summary = "",
+        string? sessionId = null);
 }

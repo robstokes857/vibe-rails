@@ -7,8 +7,18 @@ function createModal(title, onClose) {
 
     const hdr = document.createElement('div');
     hdr.style.cssText = 'display:flex;align-items:center;padding:8px 12px;border-bottom:1px solid #444;flex-shrink:0;gap:8px;';
-    hdr.innerHTML = `<span style="color:#ccc;font-size:13px;font-family:monospace;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${title}</span>`
-        + `<button style="background:none;border:none;color:#aaa;cursor:pointer;font-size:20px;line-height:1;padding:0 4px;">&times;</button>`;
+
+    const titleEl = document.createElement('span');
+    titleEl.style.cssText = 'color:#ccc;font-size:13px;font-family:monospace;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    titleEl.textContent = title ?? '';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.style.cssText = 'background:none;border:none;color:#aaa;cursor:pointer;font-size:20px;line-height:1;padding:0 4px;';
+    closeBtn.textContent = '\u00d7';
+    closeBtn.setAttribute('aria-label', 'Close');
+
+    hdr.append(titleEl, closeBtn);
 
     const body = document.createElement('div');
     body.style.cssText = 'flex:1;overflow:hidden;position:relative;';
@@ -19,9 +29,21 @@ function createModal(title, onClose) {
 
     const close = () => { onClose?.(); overlay.remove(); };
     overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
-    hdr.querySelector('button').addEventListener('click', close);
+    closeBtn.addEventListener('click', close);
 
     return { body, close };
+}
+
+/**
+ * Frame index to dump instantly before playing. `frames.length` means the requested
+ * instant is at or past the last frame — stay finished; do not call play(), which
+ * would treat that index as Restart.
+ */
+export function resolveReplaySeekIndex(frames, seekToMs, leadInMs = 1500) {
+    if (seekToMs == null || !frames?.length) return 0;
+    const from = Math.max(0, seekToMs - leadInMs);
+    const idx = frames.findIndex(frame => frame.delayMs >= from);
+    return idx < 0 ? frames.length : idx;
 }
 
 function getApiBaseUrl() {
@@ -151,7 +173,13 @@ export async function showTranscriptModal(sessionId) {
     });
 }
 
-export async function showReplayModal(sessionId) {
+/**
+ * @param {string} sessionId
+ * @param {{ seekToUtc?: string|number|Date }} [options] — a wall-clock instant to jump to (a board
+ *   comment's createdAt). Playback fast-forwards to a moment before it, marks it in the toolbar,
+ *   and then plays at the selected speed so the reader sees the context leading up to it.
+ */
+export async function showReplayModal(sessionId, { seekToUtc = null } = {}) {
     let term = null;
     let playbackTimer = null;
     let onWindowResize = null;
@@ -256,10 +284,18 @@ export async function showReplayModal(sessionId) {
     let initialRows = 40;
     let maxCols = initialCols;
     let maxRows = initialRows;
+    let seekToMs = null; // offset into the recording to fast-forward to, when seekToUtc was given
     try {
         const json = await fetchJson(`/api/v1/chatHistory/${encodeURIComponent(sessionId)}/terminal-replay`);
         initialCols = json.initialCols || 120;
         initialRows = json.initialRows || 40;
+        if (seekToUtc != null && json.startedUtc) {
+            const target = new Date(seekToUtc).getTime();
+            const started = new Date(json.startedUtc).getTime();
+            if (Number.isFinite(target) && Number.isFinite(started)) {
+                seekToMs = Math.max(0, target - started);
+            }
+        }
         frames = (json.frames || []).map(f => ({
             data: Uint8Array.from(atob(f.data), c => c.charCodeAt(0)),
             delayMs: f.delayMs
@@ -445,5 +481,28 @@ export async function showReplayModal(sessionId) {
     term.reset();
     term.resize(initialCols, initialRows);
     updateDimensions(initialCols, initialRows);
+
+    // Seek: dump every frame before the target instantly, then play from there so the moment
+    // itself arrives at normal speed. A short lead-in keeps the context that produced it.
+    if (seekToMs != null) {
+        const idx = resolveReplaySeekIndex(frames, seekToMs);
+        while (frameIndex < idx) {
+            applyPendingResizes(frameIndex);
+            term.write(frames[frameIndex].data);
+            frameIndex++;
+        }
+        const marker = document.createElement('span');
+        marker.style.cssText = 'color:#9cdcfe;font-size:11px;font-family:monospace;white-space:nowrap;';
+        const secs = Math.round(seekToMs / 1000);
+        marker.textContent = `↳ jumped to ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')} into the session`;
+        toolbar.insertBefore(marker, progress);
+        updateProgress();
+    }
+    if (frameIndex >= frames.length) {
+        playing = false;
+        playBtn.textContent = '\u21BB';
+        playBtn.title = 'Restart';
+        return;
+    }
     play();
 }

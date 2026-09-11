@@ -37,13 +37,15 @@ public sealed class CommitMessageCoAuthorCleanerTests : IDisposable
             "Body mentions Co-authored-by: in prose.\r\n\r\n" +
             "Co-authored-by: Claude <noreply@anthropic.com>\r\n" +
             "\tCO-AUTHORED-BY : Codex <codex@openai.com>\r\n" +
+            "Claude-Session: 01234567-89ab-cdef-0123-456789abcdef\r\n" +
+            "\tclAuDe-SeSsIoN \t: another-session\r\n" +
             "Signed-off-by: Developer <dev@example.com>\r\n";
         await File.WriteAllTextAsync(path, original, TestContext.Current.CancellationToken);
         var cleaner = new CommitMessageCoAuthorCleaner(() => true);
 
         var removed = await cleaner.RemoveAsync(path, TestContext.Current.CancellationToken);
 
-        Assert.Equal(2, removed);
+        Assert.Equal(4, removed);
         Assert.Equal(
             "Implement feature\r\n\r\n" +
             "Body mentions Co-authored-by: in prose.\r\n\r\n" +
@@ -56,7 +58,8 @@ public sealed class CommitMessageCoAuthorCleanerTests : IDisposable
     {
         var path = Path.Combine(_tempDirectory, "COMMIT_EDITMSG-disabled");
         const string original =
-            "Implement feature\n\nCo-authored-by: Claude <noreply@anthropic.com>\n";
+            "Implement feature\n\nCo-authored-by: Claude <noreply@anthropic.com>\n" +
+            "Claude-Session: 01234567-89ab-cdef-0123-456789abcdef\n";
         await File.WriteAllTextAsync(path, original, TestContext.Current.CancellationToken);
         var cleaner = new CommitMessageCoAuthorCleaner(() => false);
 
@@ -68,55 +71,76 @@ public sealed class CommitMessageCoAuthorCleanerTests : IDisposable
             await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken));
     }
 
-    [Fact]
-    public void RemoveTrailers_RemovesOrphanedBlankLineAtEndButKeepsComments()
+    [Theory]
+    [InlineData("Co-authored-by")]
+    [InlineData("Claude-Session")]
+    public void RemoveTrailers_RemovesOrphanedBlankLineAtEndButKeepsComments(string token)
     {
-        const string original =
+        var original =
             "Implement feature\n\n" +
-            "# Co-authored-by: example from the commit template\n" +
-            "Co-authored-by: Claude <noreply@anthropic.com>\n\n";
+            $"# {token}: example from the commit template\n" +
+            $"{token}: value\n\n";
 
         var cleaned = CommitMessageCoAuthorCleaner.RemoveTrailers(original, out var removed);
 
         Assert.Equal(1, removed);
         Assert.Equal(
-            "Implement feature\n\n# Co-authored-by: example from the commit template\n",
+            $"Implement feature\n\n# {token}: example from the commit template\n",
             cleaned);
     }
 
-    [Fact]
-    public void RemoveTrailers_KeepsABodyParagraphThatOpensWithTheToken()
+    [Theory]
+    [InlineData("Co-authored-by")]
+    [InlineData("Claude-Session")]
+    public void RemoveTrailers_KeepsABodyParagraphThatOpensWithTheToken(string token)
     {
         // The setting promises to remove trailers. A trailer block is terminal, so a paragraph in
         // the body that happens to start with the token is prose — deleting it silently rewrites
         // what the author wrote about the very feature they are describing.
-        const string original =
+        var original =
             "Fix the attribution bug\n\n" +
-            "Co-authored-by: is the trailer GitHub reads for attribution, and we were\n" +
+            $"{token}: is a trailer added by the CLI, and we were\n" +
             "deleting it from body text as well as from the trailer block.\n\n" +
-            "Co-authored-by: Claude <noreply@anthropic.com>\n";
+            $"{token}: value\n";
 
         var cleaned = CommitMessageCoAuthorCleaner.RemoveTrailers(original, out var removed);
 
         Assert.Equal(1, removed);
         Assert.Equal(
             "Fix the attribution bug\n\n" +
-            "Co-authored-by: is the trailer GitHub reads for attribution, and we were\n" +
+            $"{token}: is a trailer added by the CLI, and we were\n" +
             "deleting it from body text as well as from the trailer block.\n",
             cleaned);
     }
 
-    [Fact]
-    public void RemoveTrailers_SingleParagraphMessageHasNoTrailerBlock()
+    [Theory]
+    [InlineData("Co-authored-by")]
+    [InlineData("Claude-Session")]
+    public void RemoveTrailers_SingleParagraphMessageHasNoTrailerBlock(string token)
     {
         // Git's rule, and the reason the body case above is even decidable: the first paragraph is
         // the description, so a message with no blank line in it has no trailers at all.
-        const string original = "Co-authored-by: Claude <noreply@anthropic.com>\n";
+        var original = $"{token}: value\n";
 
         var cleaned = CommitMessageCoAuthorCleaner.RemoveTrailers(original, out var removed);
 
         Assert.Equal(0, removed);
         Assert.Equal(original, cleaned);
+    }
+
+    [Theory]
+    [InlineData("Claude-Session-Id: keep")]
+    [InlineData("X-Claude-Session: keep")]
+    [InlineData("Claude-Sessions: keep")]
+    [InlineData("Claude-Session=keep")]
+    public void RemoveTrailers_KeepsSimilarTokens(string line)
+    {
+        var original = $"Implement feature\n\n{line}\nClaude-Session: remove\n";
+
+        var cleaned = CommitMessageCoAuthorCleaner.RemoveTrailers(original, out var removed);
+
+        Assert.Equal(1, removed);
+        Assert.Equal($"Implement feature\n\n{line}\n", cleaned);
     }
 
     [Fact]
@@ -139,15 +163,17 @@ public sealed class CommitMessageCoAuthorCleanerTests : IDisposable
             cleaned);
     }
 
-    [Fact]
-    public void RemoveTrailers_TakesWrappedContinuationLinesWithTheirTrailer()
+    [Theory]
+    [InlineData("Co-authored-by")]
+    [InlineData("Claude-Session")]
+    public void RemoveTrailers_TakesWrappedContinuationLinesWithTheirTrailer(string token)
     {
         // Git folds an indented line into the value above it. Removing the trailer without its
-        // continuation would strand the tail of a co-author's address as a line of its own.
-        const string original =
+        // continuation would strand the tail of its value as a line of its own.
+        var original =
             "Implement it\n\n" +
-            "Co-authored-by: A Very Long Name\n" +
-            "    <verylong@example.com>\n" +
+            $"{token}: a wrapped\n" +
+            "    value\n" +
             "Signed-off-by: Developer <dev@example.com>\n";
 
         var cleaned = CommitMessageCoAuthorCleaner.RemoveTrailers(original, out var removed);
@@ -158,32 +184,36 @@ public sealed class CommitMessageCoAuthorCleanerTests : IDisposable
             cleaned);
     }
 
-    [Fact]
-    public void RemoveTrailers_IgnoresEverythingBelowTheScissorsLine()
+    [Theory]
+    [InlineData("Co-authored-by")]
+    [InlineData("Claude-Session")]
+    public void RemoveTrailers_IgnoresEverythingBelowTheScissorsLine(string token)
     {
         // `git commit --verbose` appends an UNCOMMENTED diff below the scissors, and the hook sees
         // the raw file. Without the cut, that diff is the message's final paragraph — so the real
-        // trailer would be out of scope while any Co-authored-by line inside the diff was in it.
-        const string original =
+        // trailer would be out of scope while any matching line inside the diff was in it.
+        var original =
             "Fix the thing\n\n" +
-            "Co-authored-by: Claude <noreply@anthropic.com>\n\n" +
+            $"{token}: value\n\n" +
             "# ------------------------ >8 ------------------------\n" +
             "# Do not modify or remove the line above.\n" +
             "diff --git a/x b/x\n" +
             "@@ -1 +1 @@\n" +
-            "-Co-authored-by: was here\n" +
-            "+Co-authored-by: still here\n";
+            $"-{token}: was here\n" +
+            $"+{token}: still here\n";
 
         var cleaned = CommitMessageCoAuthorCleaner.RemoveTrailers(original, out var removed);
 
         Assert.Equal(1, removed);
-        Assert.DoesNotContain("Co-authored-by: Claude", cleaned, StringComparison.Ordinal);
-        Assert.Contains("-Co-authored-by: was here", cleaned, StringComparison.Ordinal);
-        Assert.Contains("+Co-authored-by: still here", cleaned, StringComparison.Ordinal);
+        Assert.DoesNotContain($"{token}: value", cleaned, StringComparison.Ordinal);
+        Assert.Contains($"-{token}: was here", cleaned, StringComparison.Ordinal);
+        Assert.Contains($"+{token}: still here", cleaned, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task RemoveAsync_PreservesTheByteOrderMarkAndNonAsciiBytesItDidNotTouch()
+    [Theory]
+    [InlineData("Co-authored-by")]
+    [InlineData("Claude-Session")]
+    public async Task RemoveAsync_PreservesTheByteOrderMarkAndNonAsciiBytesItDidNotTouch(string token)
     {
         // The message file is written in i18n.commitEncoding, which this class never learns. It
         // edits bytes rather than re-encoding text, so a BOM and any multi-byte characters survive
@@ -193,7 +223,7 @@ public sealed class CommitMessageCoAuthorCleanerTests : IDisposable
         var original = Concat(
             preamble,
             System.Text.Encoding.UTF8.GetBytes(
-                "Fix the café bug\n\nCo-authored-by: Claude <noreply@anthropic.com>\n"));
+                $"Fix the café bug\n\n{token}: value\n"));
         var expected = Concat(preamble, System.Text.Encoding.UTF8.GetBytes("Fix the café bug\n"));
         await File.WriteAllBytesAsync(path, original, TestContext.Current.CancellationToken);
         var cleaner = new CommitMessageCoAuthorCleaner(() => true);
@@ -206,8 +236,10 @@ public sealed class CommitMessageCoAuthorCleanerTests : IDisposable
             await File.ReadAllBytesAsync(path, TestContext.Current.CancellationToken));
     }
 
-    [Fact]
-    public async Task RemoveAsync_SkipsUtf16FilesRatherThanCorruptingThem()
+    [Theory]
+    [InlineData("Co-authored-by")]
+    [InlineData("Claude-Session")]
+    public async Task RemoveAsync_SkipsUtf16FilesRatherThanCorruptingThem(string token)
     {
         // The byte round trip holds for every ASCII-compatible encoding, which is all of them in
         // practice — but not UTF-16, where writing back through it would mangle the message.
@@ -216,7 +248,7 @@ public sealed class CommitMessageCoAuthorCleanerTests : IDisposable
         var original = Concat(
             System.Text.Encoding.Unicode.GetPreamble(),
             System.Text.Encoding.Unicode.GetBytes(
-                "Fix the thing\n\nCo-authored-by: Claude <noreply@anthropic.com>\n"));
+                $"Fix the thing\n\n{token}: value\n"));
         await File.WriteAllBytesAsync(path, original, TestContext.Current.CancellationToken);
         var cleaner = new CommitMessageCoAuthorCleaner(() => true);
 

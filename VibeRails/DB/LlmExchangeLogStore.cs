@@ -55,12 +55,24 @@ public sealed class LlmExchangeLogStore : ILlmExchangeLogStore, IDisposable
             CharsBefore       INTEGER NOT NULL,
             CharsAfter        INTEGER NOT NULL,
             ResponseChars     INTEGER NOT NULL,
-            ElapsedMs         INTEGER NOT NULL
+            ElapsedMs         INTEGER NOT NULL,
+            SessionId         TEXT    NULL
         )
         """;
 
+    // Nullable on purpose: rows written before session attribution existed — and requests launched
+    // without a session — have no value, and none is ever invented for them. Nullable is what makes
+    // the column backward AND forward compatible: old binaries writing old-shape inserts against a
+    // migrated database keep working, and new binaries against an unmigrated file get the column
+    // added on first write.
+    private const string AddSessionIdColumn =
+        "ALTER TABLE ProxyExchanges ADD COLUMN SessionId TEXT";
+
     private const string CreateCreatedIndex =
         "CREATE INDEX IF NOT EXISTS IX_ProxyExchanges_CreatedUTC ON ProxyExchanges(CreatedUTC DESC)";
+
+    private const string CreateSessionIdIndex =
+        "CREATE INDEX IF NOT EXISTS IX_ProxyExchanges_SessionId ON ProxyExchanges(SessionId)";
 
     // Plain INSERT, not INSERT OR REPLACE: every Id is a fresh Guid, so a conflict would mean a
     // real bug upstream and should surface as one rather than silently overwrite a captured row.
@@ -68,11 +80,11 @@ public sealed class LlmExchangeLogStore : ILlmExchangeLogStore, IDisposable
         INSERT INTO ProxyExchanges (
             Id, CreatedUTC, Provider, Method, Path, StatusCode,
             RequestBefore, RequestAfter, ResponseBody, ResponseTruncated,
-            CharsBefore, CharsAfter, ResponseChars, ElapsedMs)
+            CharsBefore, CharsAfter, ResponseChars, ElapsedMs, SessionId)
         VALUES (
             $id, $createdUTC, $provider, $method, $path, $statusCode,
             $requestBefore, $requestAfter, $responseBody, $responseTruncated,
-            $charsBefore, $charsAfter, $responseChars, $elapsedMs)
+            $charsBefore, $charsAfter, $responseChars, $elapsedMs, $sessionId)
         """;
 
     private readonly string _connectionString;
@@ -212,6 +224,7 @@ public sealed class LlmExchangeLogStore : ILlmExchangeLogStore, IDisposable
         insert.Parameters.AddWithValue("$charsAfter", exchange.RequestBytesAfter);
         insert.Parameters.AddWithValue("$responseChars", exchange.Response.Length);
         insert.Parameters.AddWithValue("$elapsedMs", exchange.ElapsedMs);
+        insert.Parameters.AddWithValue("$sessionId", (object?)exchange.SessionId ?? DBNull.Value);
         await insert.ExecuteNonQueryAsync();
     }
 
@@ -229,6 +242,22 @@ public sealed class LlmExchangeLogStore : ILlmExchangeLogStore, IDisposable
             {
                 await ExecuteAsync(connection, CreateTable);
                 await ExecuteAsync(connection, CreateCreatedIndex);
+                // Migration for files written before the column existed. CREATE TABLE above is a
+                // no-op on them, so without this their inserts would fail on the new $sessionId
+                // parameter — a schema change must never invalidate the existing capture log.
+                // Swallowing "duplicate column" keeps it idempotent, the same benign-failure
+                // approach SqlStrings.MigrationStatements takes in state.db.
+                try
+                {
+                    await ExecuteAsync(connection, AddSessionIdColumn);
+                }
+                catch (SqliteException ex) when (ex.SqliteErrorCode == 1)
+                {
+                    // SqliteErrorCode 1 covers "duplicate column name" — the column is already
+                    // there, which is exactly the desired end state.
+                }
+
+                await ExecuteAsync(connection, CreateSessionIdIndex);
                 _schemaReady = true;
             }
             return connection;

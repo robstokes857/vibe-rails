@@ -16,8 +16,8 @@ namespace VibeRails.Services.Mcp;
 /// MCP server is a child process the CLI owns and talks to over pipes, so it is inherently scoped
 /// to the spawning process and needs no token.
 ///
-/// Exposes the SAME two tools as the in-process HTTP server (<see cref="RulesTool"/> and
-/// <see cref="SessionSearchTool"/>), so the two transports stay in lockstep.
+/// Exposes the SAME tools as the in-process HTTP server (rules, session search, token saver,
+/// Python scripts, and the kanban <see cref="BoardTool"/>), so the two transports stay in lockstep.
 ///
 /// CRITICAL: nothing may be written to stdout except MCP protocol frames. Default host console
 /// logging is cleared; the static Serilog logger (configured in Program.cs) writes to file only,
@@ -31,11 +31,24 @@ public static class McpStdioHost
 
     public static async Task RunAsync(string[] args)
     {
-        var builder = Host.CreateApplicationBuilder(args);
+        // Content root pinned to the install directory (not the CLI's cwd, which this child inherits)
+        // so appsettings.json is found and VibeRails:InstallDirName is honoured — the same shape as
+        // JobDaemonProcessHost. Without this the host only ever found state.db through the
+        // PathConstants fallback, and the board store below needs the real state path.
+        var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+        {
+            Args = args,
+            ContentRootPath = AppContext.BaseDirectory
+        });
 
         // Strip the default console logger so nothing pollutes the stdio transport. File logging
         // still flows through the static Serilog logger configured in Program.cs.
         builder.Logging.ClearProviders();
+        builder.Configuration.AddJsonFile(
+            Path.Combine(AppContext.BaseDirectory, "appsettings.json"),
+            optional: true,
+            reloadOnChange: false);
+        InitializeRuntimePaths(builder.Configuration["VibeRails:InstallDirName"]);
 
         ConfigureServices(builder.Services);
 
@@ -58,6 +71,29 @@ public static class McpStdioHost
         {
             Log.Information("[MCP] Stdio server stopped. processId={ProcessId}", Environment.ProcessId);
         }
+    }
+
+    /// <summary>
+    /// Makes <c>ParserConfigs.GetStatePath()</c> answer in this process. Idempotent: a host that
+    /// already initialised (tests, or a future embedding) keeps its state path.
+    /// </summary>
+    internal static void InitializeRuntimePaths(string? installDirectoryName)
+    {
+        if (!string.IsNullOrWhiteSpace(VibeRails.Utils.ParserConfigs.GetStatePath()))
+            return;
+        VibeRails.Utils.GlobalRuntimePaths.Initialize(
+            string.IsNullOrWhiteSpace(installDirectoryName)
+                ? VibeRails.Utils.PathConstants.DEFAULT_INSTALL_DIR_NAME
+                : installDirectoryName);
+    }
+
+    /// <summary>State.db for this process: the configured path, else the default install directory.</summary>
+    internal static string ResolveStatePath()
+    {
+        var configured = VibeRails.Utils.ParserConfigs.GetStatePath();
+        return string.IsNullOrWhiteSpace(configured)
+            ? Path.Combine(VibeRails.Utils.PathConstants.GetInstallDirPath(), VibeRails.Utils.PathConstants.STATE_FILENAME)
+            : configured;
     }
 
     /// <summary>
@@ -102,6 +138,18 @@ public static class McpStdioHost
         services.AddSingleton<VibeRails.Services.PythonScripts.IPythonScriptMcpService,
             VibeRails.Services.PythonScripts.PythonScriptMcpService>();
         services.AddScoped<PythonScriptTool>();
+        // Kanban board tools. Backed by the board's own SQLite store (it owns its schema, so no
+        // Repository migration pass runs in this short-lived child) and scoped to the project by
+        // the CLI's inherited cwd / the launching session — see BoardProjectResolver. This is what
+        // lets an LLM pick up a card from ANY terminal, not only a VibeRails tab. No live tab host
+        // here, so linked sessions never report as open from this transport.
+        services.AddSingleton<VibeRails.Services.Board.IBoardStore>(_ => new VibeRails.Services.Board.BoardStore(
+            $"Data Source={ResolveStatePath()};Mode=ReadWriteCreate;Cache=Shared"));
+        services.AddSingleton<VibeRails.Services.Board.IBoardProjectResolver, VibeRails.Services.Board.BoardProjectResolver>();
+        services.AddSingleton<VibeRails.Services.Board.IBoardCommitService, VibeRails.Services.Board.BoardCommitService>();
+        services.AddSingleton<VibeRails.Services.Board.IBoardLiveSessionProbe, VibeRails.Services.Board.NullBoardLiveSessionProbe>();
+        services.AddScoped<VibeRails.Services.Board.IBoardService, VibeRails.Services.Board.BoardService>();
+        services.AddScoped<BoardTool>();
         // HostShellTools (run_shell_command) and WebResearchTools (web_search/web_fetch) are
         // intentionally not exposed for now (security review 2026-07-02); mirrors MapRegisterServices.
         // Classes kept in-tree for re-add.
@@ -116,6 +164,7 @@ public static class McpStdioHost
             .WithTools<SessionSearchTool>()
             .WithTools<TokenSaverTool>()
             .WithTools<PythonScriptTool>()
+            .WithTools<BoardTool>()
             .WithPythonScriptTools();
     }
 }

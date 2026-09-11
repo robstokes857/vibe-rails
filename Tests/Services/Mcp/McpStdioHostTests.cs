@@ -54,4 +54,23 @@ public class McpStdioHostTests
         Assert.Contains(services, d => d.ServiceType == typeof(TokenSaverTool));
         Assert.Contains(services, d => d.ServiceType == typeof(IHttpClientFactory));
     }
+
+    [Fact]
+    public void ConfigureServices_RegistersTheBoardToolAndItsOwnStore()
+    {
+        // The kanban tools must work from ANY terminal (the CLI spawns `vb mcp` with no VibeRails
+        // tab involved), so the stdio host carries the board store + service itself — the store is
+        // registered as a lazy factory so this test never opens state.db.
+        var services = new ServiceCollection();
+        McpStdioHost.ConfigureServices(services);
+
+        Assert.Contains(services, d => d.ServiceType == typeof(BoardTool));
+        Assert.Contains(services, d => d.ServiceType == typeof(VibeRails.Services.Board.IBoardStore));
+        Assert.Contains(services, d => d.ServiceType == typeof(VibeRails.Services.Board.IBoardService));
+        Assert.Contains(services, d => d.ServiceType == typeof(VibeRails.Services.Board.IBoardProjectResolver));
+        Assert.Contains(services, d => d.ServiceType == typeof(VibeRails.Services.Board.IBoardCommitService));
+        Assert.Contains(services, d => d.ServiceType == typeof(VibeRails.Services.Board.IBoardLiveSessionProbe));
+        // No dashboard repository in this short-lived child: its constructor runs the full migration pass.
+        Assert.DoesNotContain(services, d => d.ServiceType == typeof(VibeRails.DB.IRepository));
+    }
 }

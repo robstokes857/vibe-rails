@@ -1299,6 +1299,8 @@ export class VibeControlApp {
     hasActiveNestedModalLayer(state = this.modalState) {
         if (!state?.container) return false;
         if (document.querySelector?.('.vb-confirm-overlay')) return true;
+        // The board's session replay mounts on document.body (session-viewer.js), not in the container.
+        if (document.querySelector?.('.vb-session-replay-layer')) return true;
 
         return Array.from(state.container.children || []).some(element => {
             if (element === state.dialog || element === state.backdrop) return false;
@@ -1587,6 +1589,7 @@ export class VibeControlApp {
             }
             return await response.json();
         } catch (error) {
+            if (error?.name === 'AbortError') throw error;
             if (this.isHostUnreachableError(error)) {
                 this.notifyHostUnreachable();
                 const hostError = new Error(this.getHostUnreachableMessage());

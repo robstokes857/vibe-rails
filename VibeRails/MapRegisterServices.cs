@@ -80,6 +80,16 @@ namespace VibeRails
 
             serviceCollection.AddScoped<IFileService, FileService>();
 
+            if (isActiveRootBackendProcess)
+            {
+                serviceCollection.AddHttpClient("signing-key-registration")
+                    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+                serviceCollection.AddSingleton<Services.SigningKeys.SigningKeyStore>();
+                serviceCollection.AddSingleton(sp => new Services.SigningKeys.SigningKeyService(
+                    sp.GetRequiredService<IHttpClientFactory>().CreateClient("signing-key-registration"),
+                    sp.GetRequiredService<Services.SigningKeys.SigningKeyStore>(), () => Config.LoadFresh().ApiKey));
+            }
+
             // Host filesystem metadata is exposed only by an active root backend. Terminal-tab
             // children and `vb --env` hosts never map the corresponding route.
             if (isActiveRootBackendProcess)
@@ -151,6 +161,24 @@ namespace VibeRails
             // same reason as the other state.db stores: one writer, connection-per-operation.
             serviceCollection.AddSingleton<ICodeAnalyzerIgnoreStore>(_ => new CodeAnalyzerIgnoreStore(
                 $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared"));
+            // Kanban board (Services/Board). Own store on state.db like the others above — it owns its
+            // schema so the stdio MCP host can construct the same store without Repository's migration
+            // pass. The launch service is root-only because it drives the in-process tab host; the live
+            // session probe is what turns "linked session" into "open tab" on the board.
+            serviceCollection.AddSingleton<Services.Board.IBoardStore>(_ => new Services.Board.BoardStore(
+                $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared"));
+            serviceCollection.AddSingleton<Services.Board.IBoardProjectResolver, Services.Board.BoardProjectResolver>();
+            serviceCollection.AddSingleton<Services.Board.IBoardCommitService, Services.Board.BoardCommitService>();
+            serviceCollection.AddScoped<Services.Board.IBoardService, Services.Board.BoardService>();
+            if (isActiveRootBackendProcess)
+            {
+                serviceCollection.AddSingleton<Services.Board.IBoardLiveSessionProbe, Services.Board.TerminalTabLiveSessionProbe>();
+                serviceCollection.AddScoped<Services.Board.IBoardLaunchService, Services.Board.BoardLaunchService>();
+            }
+            else
+            {
+                serviceCollection.AddSingleton<Services.Board.IBoardLiveSessionProbe, Services.Board.NullBoardLiveSessionProbe>();
+            }
             serviceCollection.AddAutomationRuntime(
                 hostScheduler: isActiveRootBackendProcess && !isFakeCliTestProcess);
             // Scoped because it reads steps through the scoped IRepository, matching TerminalRunner
@@ -262,6 +290,9 @@ namespace VibeRails
                 });
                 serviceCollection.AddScoped<TokenSaverTool>();
                 serviceCollection.AddScoped<PythonScriptTool>();
+                // Kanban board tools (ctor-injected board services). Registered here AND in
+                // McpStdioHost.ConfigureServices — the two transports must expose the same tools.
+                serviceCollection.AddScoped<BoardTool>();
                 // run_shell_command (HostShellTools) and web_search/web_fetch (WebResearchTools) are
                 // intentionally not exposed for now (security review 2026-07-02). Classes kept in-tree;
                 // to restore, re-add AddScoped<...>() here, WithTools<...>() in the chain below, and the
@@ -277,6 +308,7 @@ namespace VibeRails
                     .WithTools<SessionSearchTool>()
                     .WithTools<TokenSaverTool>()
                     .WithTools<PythonScriptTool>()
+                    .WithTools<BoardTool>()
                     .WithPythonScriptTools();
             }
 

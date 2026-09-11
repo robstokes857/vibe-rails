@@ -6,10 +6,17 @@
 // reorder, filter the whole board down to a slice, and open a card for the full
 // editor with comments.
 //
-// Data comes from board-api.js, which is still a local placeholder — see the
-// header of that file for the swap to real endpoints. Everything in this file
-// is already written against those async functions, so it does not change when
-// the backend lands.
+// Data comes from board-api.js, a thin client over /api/v1/board/* (the board is
+// per project; the server scopes every call). Cards are work items for LLMs: the
+// assignee is an LLM picker key (base:claude / env:7:codex), "Start work" opens a
+// terminal tab with the card prepended to that LLM's initial message, and the
+// LLM reads/updates the card over the viberails-mcp board tools. A card's
+// Sessions rail lists those terminals; a live one shows a dot on the lane card.
+//
+// TODO(board): "Auto Launch" — an option on the card (and/or a lane) so that
+// dropping an assigned card into that lane starts work by itself. Not built yet;
+// see the plan from 2026-09-09. The server side would live next to the launch
+// route (BoardLaunchService).
 //
 // UI conventions this view follows (shared with the rest of the app):
 //   - app.showModal / app.closeModal for the card and lane editors
@@ -17,17 +24,21 @@
 //   - app.showToast for success/failure, never a bespoke toast stack
 //   - Font Awesome icons and the --color-* theme tokens
 
-import { escapeHtml, confirmDialog } from './utils.js';
+import { escapeHtml, confirmDialog, parseLlmSelection, getCliBrand } from './utils.js';
+import { mountLlmPicker, setLlmPickerValue, getEnabledLlmItems } from './pickers/llm-picker.js';
 import { BoardApi } from './board-api.js';
-import { renderCommentHtml, wrapSelectionAsCode } from './board-text.js';
+import { renderCommentHtml, wrapSelectionAsCode, toPlainPreview } from './board-text.js';
 import { openDiffModal } from './diff-modal.js';
+import * as SessionDebug from './session-viewer.js';
 
 const PRIORITIES = ['critical', 'high', 'medium', 'low'];
 const POINTS = [1, 2, 3, 5, 8, 13];
 const LANE_COLORS = ['#64748b', '#3b82f6', '#06b6d4', '#f59e0b', '#10b981', '#a855f7', '#ec4899'];
 const FILTERS_STORAGE_KEY = 'viberails.board.filters.v1';
 
-const emptyFilters = () => ({ q: '', assigneeId: '', priority: '', tag: '' });
+const emptyFilters = () => ({ q: '', assignee: '', priority: '', tag: '' });
+// Task-key namespace for the terminal tab that works a card (see wwwroot/AGENTS.md).
+const CARD_TASK_KEY = cardId => `board-card:${cardId}`;
 
 export class BoardController {
     constructor(app) {
@@ -38,12 +49,15 @@ export class BoardController {
         // navigation: the diff one owns a Monaco editor and two models.
         this.diffModal = null;
         this.sessionLayer = null;
+        // Disposer for the LLM picker mounted in the card editor's Assignee field.
+        this.assigneePickerDispose = null;
+        this._openCardGeneration = 0;
+        this._openCardAbort = null;
+        BoardApi.attach(app);
         this.state = {
             columns: [],
             cards: [],
-            members: [],
             filters: emptyFilters(),
-            editingCardId: null,
             editingColumnId: null,
             editingColumnColor: LANE_COLORS[1]
         };
@@ -70,12 +84,10 @@ export class BoardController {
         this.setBusy(true);
         let columns;
         let cards;
-        let members;
         try {
-            [columns, cards, members] = await Promise.all([
+            [columns, cards] = await Promise.all([
                 BoardApi.getBoardColumnsAsync(),
-                BoardApi.getBoardCardsAsync(),
-                BoardApi.getBoardMembersAsync()
+                BoardApi.getBoardCardsAsync()
             ]);
         } catch (error) {
             // The view stayed mounted, so the failure belongs on screen, not in the console only.
@@ -91,16 +103,24 @@ export class BoardController {
 
         this.state.columns = columns;
         this.state.cards = cards;
-        this.state.members = members;
         this.setBusy(false);
         this.renderAll();
     }
 
     unload() {
+        this._openCardGeneration += 1;
+        this._openCardAbort?.abort();
+        this._openCardAbort = null;
         this.destroySortables();
         this.closeDiffModal();
         this.closeSessionModal();
+        this.disposeAssigneePicker();
         this.root = null;
+    }
+
+    disposeAssigneePicker() {
+        try { this.assigneePickerDispose?.(); } catch { /* already torn down */ }
+        this.assigneePickerDispose = null;
     }
 
     setBusy(busy) {
@@ -133,8 +153,41 @@ export class BoardController {
     // Derived data
     // ============================================
 
-    memberById(id) {
-        return this.state.members.find(m => m.id === id) || null;
+    // An assignee is an LLM picker key. Label comes from the picker catalog
+    // (which knows environment names), then from the raw key; the avatar is the
+    // CLI's brand mark, the closest thing an LLM has to a face.
+    assigneeInfo(selection) {
+        const key = String(selection || '').trim();
+        if (!key) return null;
+        let item = null;
+        try {
+            item = getEnabledLlmItems(this.app, 'sandbox').find(entry => entry.key === key) || null;
+        } catch {
+            item = null;
+        }
+        const parsed = parseLlmSelection(key, this.app.data?.environments || []);
+        const cli = item?.cli || parsed?.cli || '';
+        const brand = getCliBrand(cli);
+        const label = item?.label || parsed?.displayName || parsed?.environmentName || brand?.label || key;
+        return { key, cli, label, logo: brand?.logo || '', logoFilter: brand?.logoFilter || '', color: brand?.accentColor || '#64748b' };
+    }
+
+    // Comment authors are either the user ("You") or an agent session.
+    authorInfo(author) {
+        if (!author) return null;
+        if (author.kind === 'user') {
+            return { key: 'user', cli: '', label: author.label || 'You', logo: '', logoFilter: '', color: '#3b82f6', initials: 'ME' };
+        }
+        const brand = getCliBrand(author.cli || '');
+        return {
+            key: `agent:${author.cli || ''}`,
+            cli: author.cli || '',
+            label: author.label || 'Agent',
+            logo: brand?.logo || '',
+            logoFilter: brand?.logoFilter || '',
+            color: brand?.accentColor || '#64748b',
+            initials: 'AI'
+        };
     }
 
     columnById(id) {
@@ -148,7 +201,7 @@ export class BoardController {
             const haystack = [card.key, card.title, card.description, ...(card.tags || [])].join(' ').toLowerCase();
             if (!haystack.includes(query)) return false;
         }
-        if (filters.assigneeId && card.assigneeId !== filters.assigneeId) return false;
+        if (filters.assignee && card.assignee !== filters.assignee) return false;
         if (filters.priority && card.priority !== filters.priority) return false;
         if (filters.tag && !(card.tags || []).includes(filters.tag)) return false;
         return true;
@@ -158,6 +211,18 @@ export class BoardController {
         return this.state.cards.filter(card => this.cardMatches(card));
     }
 
+    // Distinct assignees present on the board, for the toolbar filter.
+    allAssignees() {
+        const seen = new Map();
+        this.state.cards.forEach(card => {
+            const key = String(card.assignee || '');
+            if (!key || seen.has(key)) return;
+            const info = this.assigneeInfo(key);
+            if (info) seen.set(key, info);
+        });
+        return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label));
+    }
+
     allTags() {
         const tags = new Set();
         this.state.cards.forEach(card => (card.tags || []).forEach(tag => tags.add(tag)));
@@ -165,8 +230,8 @@ export class BoardController {
     }
 
     hasActiveFilters() {
-        const { q, assigneeId, priority, tag } = this.state.filters;
-        return Boolean(q.trim() || assigneeId || priority || tag);
+        const { q, assignee, priority, tag } = this.state.filters;
+        return Boolean(q.trim() || assignee || priority || tag);
     }
 
     stats() {
@@ -227,7 +292,7 @@ export class BoardController {
                 this.renderAll();
             });
         };
-        bindSelect('[data-board-filter-assignee]', 'assigneeId');
+        bindSelect('[data-board-filter-assignee]', 'assignee');
         bindSelect('[data-board-filter-priority]', 'priority');
         bindSelect('[data-board-filter-tag]', 'tag');
     }
@@ -253,10 +318,11 @@ export class BoardController {
 
         const assignee = this.query('[data-board-filter-assignee]');
         if (assignee) {
-            assignee.innerHTML = '<option value="">Anyone</option>'
-                + this.state.members.map(member =>
-                    `<option value="${escapeHtml(member.id)}">${escapeHtml(member.name)}</option>`).join('');
-            assignee.value = this.state.filters.assigneeId;
+            assignee.innerHTML = '<option value="">Any LLM</option>'
+                + this.allAssignees().map(info =>
+                    `<option value="${escapeHtml(info.key)}">${escapeHtml(info.label)}</option>`).join('');
+            assignee.value = this.state.filters.assignee;
+            assignee.title = assignee.selectedOptions[0]?.textContent || '';
         }
 
         const priority = this.query('[data-board-filter-priority]');
@@ -277,25 +343,56 @@ export class BoardController {
         if (clear) clear.hidden = !this.hasActiveFilters();
     }
 
-    avatarHtml(member, size = 22) {
-        if (!member) {
+    // info comes from assigneeInfo()/authorInfo(). A CLI brand mark when there is
+    // one, initials on the brand colour otherwise; the lane-card variant is a
+    // click-to-filter control, the comment variant is not.
+    avatarHtml(info, size = 22, { filterable = true } = {}) {
+        if (!info) {
             return `<span class="board-avatar is-empty" style="width:${size}px;height:${size}px"
                 title="Unassigned" aria-label="Unassigned">?</span>`;
         }
         const fontSize = Math.max(9, Math.round(size * 0.38));
-        return `<span class="board-avatar" data-assignee-id="${escapeHtml(member.id)}" role="button" tabindex="-1"
-            title="${escapeHtml(member.name)} — click to filter"
-            style="width:${size}px;height:${size}px;background:${escapeHtml(member.color)};font-size:${fontSize}px"
-            >${escapeHtml(member.initials)}</span>`;
+        const initials = info.initials || info.label.replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || '?';
+        const logoStyle = info.logoFilter ? ` style="filter:${escapeHtml(info.logoFilter)}"` : '';
+        const face = info.logo
+            ? `<img class="board-avatar-logo" src="${escapeHtml(info.logo)}" alt="" loading="lazy"${logoStyle}>`
+            : escapeHtml(initials);
+        const filterAttrs = filterable
+            ? ` data-assignee-id="${escapeHtml(info.key)}" role="button" tabindex="-1" title="${escapeHtml(info.label)} — click to filter"`
+            : ` title="${escapeHtml(info.label)}"`;
+        // A logo needs contrast with its own brand colour (Claude's orange mark on Claude's orange
+        // accent is a blank disc), so it sits on the surface inside an accent ring.
+        const paint = info.logo
+            ? `background:var(--color-bg-surface, #1e1e1e);border-color:${escapeHtml(info.color)}`
+            : `background:${escapeHtml(info.color)}`;
+        return `<span class="board-avatar${info.logo ? ' has-logo' : ''}"${filterAttrs}
+            style="width:${size}px;height:${size}px;${paint};font-size:${fontSize}px"
+            >${face}</span>`;
     }
 
     renderCard(card) {
-        const member = this.memberById(card.assigneeId);
+        const member = this.assigneeInfo(card.assignee);
+        const live = card.activeTabId
+            ? `<span class="board-live-dot" title="A terminal session is working this card" aria-label="Session open"></span>`
+            : '';
         const tags = (card.tags || []).slice(0, 3).map(tag => {
             const active = tag === this.state.filters.tag ? ' is-on' : '';
             return `<button type="button" class="board-tag${active}" data-board-action="filter-tag"
                 data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</button>`;
         }).join('');
+        const excerpt = toPlainPreview(card.description || '', 110);
+        const commentCount = Number(card.commentCount) || 0;
+        const comments = commentCount > 0
+            ? `<span class="board-card-comments" title="${commentCount} comment${commentCount === 1 ? '' : 's'}">
+                <i class="fa-regular fa-comment" aria-hidden="true"></i>${commentCount}</span>`
+            : '';
+        // The assignee is an LLM, and which one is the point of the card — so it gets a name, not
+        // just a mark. The chip is the click-to-filter control; the avatar inside it is inert.
+        const assignee = member
+            ? `<span class="board-assignee-chip" data-assignee-id="${escapeHtml(member.key)}" role="button" tabindex="-1"
+                title="${escapeHtml(member.label)} — click to filter"
+                >${this.avatarHtml(member, 18, { filterable: false })}<span class="board-assignee-name">${escapeHtml(member.label)}</span></span>`
+            : `<span class="board-assignee-chip is-empty" title="Unassigned">${this.avatarHtml(null, 18)}<span class="board-assignee-name">Unassigned</span></span>`;
 
         return `
             <article class="board-card${card.blocked ? ' is-blocked' : ''}" data-card-id="${escapeHtml(card.id)}"
@@ -305,17 +402,23 @@ export class BoardController {
                 <div class="board-card-body">
                     <div class="board-card-top">
                         <span class="board-key">${escapeHtml(card.key)}</span>
-                        ${card.points != null ? `<span class="board-points" title="Story points">${escapeHtml(card.points)}</span>` : ''}
+                        <span class="board-card-top-right">
+                            <span class="board-priority-chip" data-priority="${escapeHtml(card.priority)}">${escapeHtml(card.priority)}</span>
+                            ${card.points != null ? `<span class="board-points" title="Story points">${escapeHtml(card.points)}</span>` : ''}
+                        </span>
                     </div>
                     <h3 class="board-card-title">${escapeHtml(card.title)}</h3>
+                    ${excerpt ? `<p class="board-card-excerpt">${escapeHtml(excerpt)}</p>` : ''}
                     <div class="board-card-meta">
                         <div class="board-tags">${tags}</div>
                         <div class="board-card-aside">
+                            ${live}
                             ${card.blocked ? `<i class="fa-solid fa-triangle-exclamation board-blocked"
                                 title="Blocked" aria-hidden="true"></i>` : ''}
-                            ${this.avatarHtml(member, 22)}
+                            ${comments}
                         </div>
                     </div>
+                    <div class="board-card-foot">${assignee}</div>
                 </div>
             </article>`;
     }
@@ -517,7 +620,7 @@ export class BoardController {
         if (avatar && cardEl) {
             event.stopPropagation();
             const id = avatar.dataset.assigneeId;
-            this.state.filters.assigneeId = this.state.filters.assigneeId === id ? '' : id;
+            this.state.filters.assignee = this.state.filters.assignee === id ? '' : id;
             this.persistFilters();
             this.renderAll();
             return;
@@ -542,9 +645,6 @@ export class BoardController {
                 this.state.filters = emptyFilters();
                 this.persistFilters();
                 this.renderAll();
-                break;
-            case 'reset-data':
-                this.resetBoardData();
                 break;
             default:
                 break;
@@ -577,24 +677,32 @@ export class BoardController {
     // commits and its sessions — sits in the right-hand rail.
 
     async openCardEditor(cardId) {
+        const generation = ++this._openCardGeneration;
+        this._openCardAbort?.abort();
+        const abort = new AbortController();
+        this._openCardAbort = abort;
+
         let card = null;
         if (cardId) {
-            card = this.state.cards.find(c => c.id === cardId) || null;
-            if (!card) {
-                try {
-                    card = await BoardApi.getBoardCardAsync(cardId);
-                } catch (error) {
-                    this.app.showToast('Board', error?.message || 'That card could not be opened.', 'error');
+            // Always the server's copy: the lane list carries summaries only, and an
+            // LLM may have commented on or moved this card since the board loaded.
+            try {
+                card = await BoardApi.getBoardCardAsync(cardId, { signal: abort.signal });
+            } catch (error) {
+                if (abort.signal.aborted || error?.name === 'AbortError' || generation !== this._openCardGeneration)
                     return;
-                }
+                this.app.showToast('Board', error?.message || 'That card could not be opened.', 'error');
+                return;
             }
         }
 
-        this.state.editingCardId = card?.id || null;
+        if (generation !== this._openCardGeneration) return;
+
         const columnId = card?.columnId || this.state.columns[0]?.id || '';
 
         this.app.showModal(card ? `${card.key} · Card` : 'New card', `
             <div class="board-card-editor" data-board-card-editor data-card-id="${escapeHtml(card?.id || '')}">
+                <div class="board-editor-scroll">
                 <div class="board-editor-main">
                     <input type="text" class="form-control board-editor-title" id="board-card-title"
                         placeholder="What needs to happen" value="${escapeHtml(card?.title || '')}"
@@ -605,6 +713,7 @@ export class BoardController {
                         ${this.composerMarkup({
                             name: 'description',
                             value: card?.description || '',
+                            preview: true,
                             placeholder: 'Context, repro steps, links. Use Code for a snippet.'
                         })}
                     </section>
@@ -635,13 +744,14 @@ export class BoardController {
                             </select>
                         </div>
                         <div>
-                            <label class="board-editor-label" for="board-card-assignee">Assignee</label>
-                            <select class="form-select form-select-sm" id="board-card-assignee">
-                                <option value="">Unassigned</option>
-                                ${this.state.members.map(member => `
-                                    <option value="${escapeHtml(member.id)}"${member.id === card?.assigneeId ? ' selected' : ''}>${escapeHtml(member.name)}</option>
-                                `).join('')}
-                            </select>
+                            <label class="board-editor-label" for="board-card-assignee">Assignee (LLM)</label>
+                            <div class="board-assignee-row">
+                                <select class="form-select form-select-sm" id="board-card-assignee" aria-label="Assignee"></select>
+                                <button type="button" class="board-side-remove board-assignee-clear" data-board-clear-assignee
+                                    title="Unassign" aria-label="Unassign">
+                                    <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                                </button>
+                            </div>
                         </div>
                         <div class="row g-2">
                             <div class="col-6">
@@ -700,7 +810,7 @@ export class BoardController {
                         ${card ? `
                         <form class="board-side-form" data-board-add-session>
                             <input type="text" class="form-control form-control-sm" name="displayName"
-                                placeholder="Name a session" autocomplete="off" aria-label="Session name">
+                                placeholder="Paste a session id" autocomplete="off" aria-label="Session id or name">
                             <button type="submit" class="board-side-add" title="Add this session" aria-label="Add this session">
                                 <i class="fa-solid fa-plus" aria-hidden="true"></i>
                             </button>
@@ -708,25 +818,44 @@ export class BoardController {
                     </section>
 
                     </div>
+                </aside>
+                </div>
 
                     <div class="board-editor-actions">
                         ${card ? `<button type="button" class="btn btn-sm btn-outline-danger" data-board-delete-card>
                             <i class="fa-solid fa-trash" aria-hidden="true"></i> Delete
                         </button>` : '<span></span>'}
-                        <button type="button" class="btn btn-sm btn-outline-primary" data-board-save-card>Save</button>
+                        <span class="board-editor-actions-main">
+                            ${card ? `<button type="button" class="btn btn-sm btn-success" data-board-start-work
+                                title="Open a terminal for the assigned LLM with this card as its first message">
+                                <i class="fa-solid fa-play" aria-hidden="true"></i> <span data-board-start-work-label>Start work</span>
+                            </button>` : ''}
+                            <button type="button" class="btn btn-sm btn-outline-primary" data-board-save-card>Save</button>
+                        </span>
                     </div>
-                </aside>
             </div>
-        `, { onClose: () => { this.state.editingCardId = null; } });
+        `, { onClose: () => { this.disposeAssigneePicker(); } });
+
+        if (generation !== this._openCardGeneration) return;
 
         const container = document.getElementById('modal-container');
         const dialog = container?.querySelector('.modal-dialog');
-        dialog?.classList.remove('modal-lg');
+        // app.showModal always ships modal-dialog-scrollable, which puts a
+        // scrollbar on .modal-body. This editor owns its own scroller, so that
+        // extra bar has to come off or the dialog shows two.
+        dialog?.classList.remove('modal-lg', 'modal-dialog-scrollable');
         dialog?.classList.add('modal-xl', 'board-card-modal-dialog');
 
         const editor = container?.querySelector('[data-board-card-editor]');
         if (!editor) return;
         this.bindCardEditor(editor, card);
+    }
+
+    // The card id lives on the editor (data-card-id), not on controller state.
+    // showModal replacement runs the previous editor's onClose, which used to
+    // clear a shared editingCardId and turn the next Save into a create.
+    cardIdFromEditor(editor) {
+        return String(editor?.dataset?.cardId || '').trim() || null;
     }
 
     bindCardEditor(editor, card) {
@@ -741,7 +870,23 @@ export class BoardController {
         });
 
         editor.querySelector('[data-board-save-card]')?.addEventListener('click', () => this.saveCard(editor));
-        editor.querySelector('[data-board-delete-card]')?.addEventListener('click', () => this.deleteCurrentCard());
+        editor.querySelector('[data-board-delete-card]')?.addEventListener('click', () => this.deleteCurrentCard(editor));
+        editor.querySelector('[data-board-start-work]')?.addEventListener('click', () => this.startWork(editor, card));
+
+        // The Assignee field is the app-wide LLM picker ('sandbox' context: saved
+        // environments plus the bare CLIs, never a shell, never a Worker).
+        const assigneeSelect = editor.querySelector('#board-card-assignee');
+        if (assigneeSelect) {
+            this.disposeAssigneePicker();
+            this.assigneePickerDispose = mountLlmPicker(this.app, assigneeSelect, {
+                context: 'sandbox',
+                placeholder: 'Unassigned',
+                selectedValue: card?.assignee || ''
+            });
+            editor.querySelector('[data-board-clear-assignee]')?.addEventListener('click', () => {
+                setLlmPickerValue(this.app, assigneeSelect, '');
+            });
+        }
 
         editor.querySelector('[data-board-add-commit]')?.addEventListener('submit', event => {
             event.preventDefault();
@@ -768,7 +913,7 @@ export class BoardController {
     // Composer (shared by the description and comments)
     // ============================================
 
-    composerMarkup({ name, value = '', placeholder = '', disabled = false, submitLabel = '' }) {
+    composerMarkup({ name, value = '', placeholder = '', disabled = false, submitLabel = '', preview = false }) {
         const off = disabled ? ' disabled' : '';
         return `
             <div class="board-composer" data-board-composer="${name}">
@@ -782,9 +927,12 @@ export class BoardController {
                         <i class="fa-regular fa-image" aria-hidden="true"></i><span>Image</span>
                     </button>
                     <span class="board-composer-hint">Paste or drop an image</span>
+                    ${preview ? `<button type="button" class="board-composer-btn ms-auto"
+                        data-board-composer-toggle aria-label="Preview description"${off}>Preview</button>` : ''}
                 </div>
                 <textarea class="form-control board-composer-input" data-board-composer-input
                     placeholder="${escapeHtml(placeholder)}" rows="3"${off}>${escapeHtml(value)}</textarea>
+                ${preview ? '<div class="board-comment-body board-description-preview" data-board-composer-preview hidden></div>' : ''}
                 <input type="file" accept="image/*" hidden data-board-composer-file multiple>
                 <div class="board-composer-busy" data-board-composer-busy hidden>Adding image…</div>
                 ${submitLabel ? `<div class="board-composer-footer">
@@ -802,13 +950,40 @@ export class BoardController {
 
         const autoGrow = () => {
             input.style.height = 'auto';
-            // Grow with the content up to the CSS max-height, then let it scroll.
-            input.style.height = `${input.scrollHeight}px`;
+            const needed = input.scrollHeight;
+            // Drop the inline height first so a flex parent (the create-card
+            // description) can size the box. Only lock a pixel height when the
+            // text is taller than that allocation.
+            input.style.height = '';
+            if (needed > input.clientHeight + 1) {
+                input.style.height = `${needed}px`;
+            }
         };
+        const preview = composer.querySelector('[data-board-composer-preview]');
+        const toggle = composer.querySelector('[data-board-composer-toggle]');
+        const renderPreview = () => {
+            if (preview) preview.innerHTML = renderCommentHtml(input.value, { attachments: card?.attachments || [] });
+        };
+        const setPreview = viewing => {
+            if (!preview || !toggle) return;
+            renderPreview();
+            preview.hidden = !viewing;
+            input.hidden = viewing;
+            composer.querySelectorAll('[data-board-composer-action="code"], [data-board-composer-action="image"], .board-composer-hint')
+                .forEach(element => { element.hidden = viewing; });
+            toggle.textContent = viewing ? 'Edit' : 'Preview';
+            toggle.setAttribute('aria-label', viewing ? 'Edit description' : 'Preview description');
+            if (!viewing) autoGrow();
+        };
+        toggle?.addEventListener('click', () => {
+            setPreview(preview.hidden);
+            if (preview.hidden) input.focus();
+        });
         input.addEventListener('input', autoGrow);
         // Sized now rather than on the next frame: an occluded page never gets one,
         // and the description box would open at its one-line default.
         autoGrow();
+        setPreview(Boolean(input.value.trim()));
 
         const submit = () => {
             if (!onSubmit) return;
@@ -917,20 +1092,36 @@ export class BoardController {
 
         const attachments = card?.attachments || [];
         host.innerHTML = comments.map(comment => {
-            const author = this.memberById(comment.authorId);
+            const author = this.authorInfo(comment.author);
+            // An agent comment knows the terminal session that wrote it and when: the link replays
+            // that session seeked to this moment (session-viewer.js seekToUtc).
+            const sessionId = comment.author?.kind === 'agent' ? String(comment.author.sessionId || '') : '';
+            const jump = sessionId
+                ? `<button type="button" class="board-comment-jump" data-board-comment-jump="${escapeHtml(sessionId)}"
+                    data-board-comment-at="${escapeHtml(comment.createdAt || '')}"
+                    title="Replay the session at the moment this was written">
+                    <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> in session</button>`
+                : '';
             return `
-                <article class="board-comment">
-                    ${this.avatarHtml(author, 28)}
+                <article class="board-comment${comment.author?.kind === 'agent' ? ' is-agent' : ''}">
+                    ${this.avatarHtml(author, 28, { filterable: false })}
                     <div class="board-comment-content">
                         <div class="board-comment-meta">
-                            <span class="board-comment-author">${escapeHtml(author?.name || 'Someone')}</span>
-                            <span>${escapeHtml(this.formatDateTime(comment.createdAt))}</span>
+                            <span class="board-comment-author">${escapeHtml(author?.label || 'Someone')}</span>
+                            <span class="board-comment-when">${jump}${escapeHtml(this.formatDateTime(comment.createdAt))}</span>
                         </div>
                         <div class="board-comment-body" data-board-comment-body>${renderCommentHtml(comment.body, { attachments })}</div>
                         <button type="button" class="board-comment-more" data-board-comment-more hidden>Show more</button>
                     </div>
                 </article>`;
         }).join('');
+
+        host.querySelectorAll('[data-board-comment-jump]').forEach(button => {
+            button.addEventListener('click', event => {
+                event.stopPropagation();
+                this.openSessionReplay({ id: button.dataset.boardCommentJump }, { seekToUtc: button.dataset.boardCommentAt || null });
+            });
+        });
 
         // Measure NOW: reading scrollHeight forces a synchronous layout, so this
         // does not need to wait for a frame. That matters because
@@ -969,14 +1160,13 @@ export class BoardController {
     }
 
     async postComment(editor, body) {
-        if (!this.state.editingCardId) return;
+        const cardId = this.cardIdFromEditor(editor);
+        if (!cardId) return;
         const composerInput = editor.querySelector('[data-board-composer="comment"] [data-board-composer-input]');
         try {
-            await BoardApi.addBoardCommentAsync(this.state.editingCardId, {
-                body,
-                authorId: this.state.members[0]?.id || null
-            });
-            const card = await this.reloadEditingCard();
+            await BoardApi.addBoardCommentAsync(cardId, { body });
+            const card = await this.reloadEditingCard(editor);
+            if (!card) return;
             if (composerInput) {
                 composerInput.value = '';
                 composerInput.style.height = 'auto';
@@ -987,8 +1177,8 @@ export class BoardController {
             // new comment into view rather than leaving the reader where they were.
             // Synchronous for the same reason as the clamps: no frame is delivered
             // while the page is occluded.
-            const main = editor.querySelector('.board-editor-main');
-            if (main) main.scrollTop = main.scrollHeight;
+            const scroller = editor.querySelector('.board-editor-scroll');
+            if (scroller) scroller.scrollTop = scroller.scrollHeight;
             composerInput?.focus();
         } catch (error) {
             this.app.showToast('Board', error?.message || 'Failed to post the comment.', 'error');
@@ -1062,14 +1252,13 @@ export class BoardController {
 
     async addCommit(editor, formData) {
         const sha = String(formData.get('sha') || '').trim();
-        const message = String(formData.get('message') || '').trim();
         try {
-            await BoardApi.addCardCommitAsync(this.state.editingCardId, {
-                sha,
-                message: message || '(no message)',
-                author: this.state.members[0]?.name || 'You'
-            });
-            const card = await this.reloadEditingCard();
+            // The server reads author/message/date from the project's git history.
+            const cardId = this.cardIdFromEditor(editor);
+            if (!cardId) return;
+            await BoardApi.addCardCommitAsync(cardId, { sha });
+            const card = await this.reloadEditingCard(editor);
+            if (!card) return;
             this.renderCommitsPanel(editor, card);
             this.updateSectionCount(editor, 'commits', card.commits.length);
             editor.querySelector('[data-board-add-commit]')?.reset();
@@ -1081,7 +1270,8 @@ export class BoardController {
     async removeCommit(editor, card, sha) {
         try {
             await BoardApi.removeCardCommitAsync(card.id, sha);
-            const fresh = await this.reloadEditingCard();
+            const fresh = await this.reloadEditingCard(editor);
+            if (!fresh) return;
             this.renderCommitsPanel(editor, fresh);
             this.updateSectionCount(editor, 'commits', fresh.commits.length);
         } catch (error) {
@@ -1094,6 +1284,7 @@ export class BoardController {
     // ============================================
 
     renderSessionsPanel(editor, card) {
+        this.updateStartWorkButton(editor, card);
         const host = editor.querySelector('[data-board-sessions]');
         if (!host) return;
         const sessions = card?.sessions || [];
@@ -1103,26 +1294,36 @@ export class BoardController {
             return;
         }
 
-        host.innerHTML = sessions.map(session => `
-            <div class="board-side-row" data-session-id="${escapeHtml(session.id)}">
+        host.innerHTML = sessions.map(session => {
+            const when = this.formatDateTime(session.createdAt);
+            const status = session.active ? 'open' : 'ended';
+            const sub = [when, session.cli ? getCliBrand(session.cli)?.label || session.cli : '', status].filter(Boolean).join(' · ');
+            return `
+            <div class="board-side-row${session.active ? ' is-live' : ''}" data-session-id="${escapeHtml(session.id)}">
                 <button type="button" class="board-side-main" data-board-open-session="${escapeHtml(session.id)}"
-                    title="${escapeHtml(session.displayName)}">
-                    <i class="fa-solid fa-terminal board-side-icon" aria-hidden="true"></i>
+                    title="${escapeHtml(session.active ? 'Open this terminal tab' : 'Replay this session')}">
+                    <i class="fa-solid ${session.active ? 'fa-terminal' : 'fa-clock-rotate-left'} board-side-icon" aria-hidden="true"></i>
                     <span class="board-side-text">
-                        <span class="board-side-title">${escapeHtml(session.displayName)}</span>
-                        <span class="board-side-sub board-sha">${escapeHtml(session.id.slice(0, 8))}</span>
+                        <span class="board-side-title">${session.active ? '<span class="board-live-dot" aria-hidden="true"></span>' : ''}${escapeHtml(session.displayName)}</span>
+                        <span class="board-side-sub">${escapeHtml(sub)}</span>
                     </span>
                 </button>
                 <button type="button" class="board-side-remove" data-board-remove-session="${escapeHtml(session.id)}"
                     title="Remove this session" aria-label="Remove session ${escapeHtml(session.displayName)}">
                     <i class="fa-solid fa-xmark" aria-hidden="true"></i>
                 </button>
-            </div>`).join('');
+            </div>`;
+        }).join('');
 
         host.querySelectorAll('[data-board-open-session]').forEach(button => {
             button.addEventListener('click', () => {
                 const session = sessions.find(item => item.id === button.dataset.boardOpenSession);
-                if (session) this.openSessionModal(session);
+                if (!session) return;
+                if (session.active && session.tabId) {
+                    this.focusSessionTab(card, session);
+                } else {
+                    this.openSessionReplay(session);
+                }
             });
         });
         host.querySelectorAll('[data-board-remove-session]').forEach(button => {
@@ -1130,79 +1331,58 @@ export class BoardController {
         });
     }
 
-    // Stub for now: a session is an id and a name. The body is a deliberate
-    // placeholder until sessions are tied to real captured VibeRails sessions.
-    // Opened as a nested layer for the same reason the diff viewer is one: the
-    // card editor underneath must survive and get focus back.
-    openSessionModal(session) {
-        this.closeSessionModal();
-        const host = document.getElementById('modal-container');
-        if (!host) return;
-
-        const layer = document.createElement('div');
-        layer.className = 'llm-picker-modal-layer board-session-layer';
-        layer.innerHTML = `
-            <div class="modal fade show d-block board-session-modal" tabindex="-1" role="dialog" aria-modal="true"
-                aria-label="${escapeHtml(session.displayName)}">
-                <div class="modal-dialog modal-dialog-centered">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <div>
-                                <h5 class="modal-title">
-                                    <i class="fa-solid fa-terminal" aria-hidden="true"></i>
-                                    ${escapeHtml(session.displayName)}
-                                </h5>
-                                <p class="board-sha mb-0">${escapeHtml(session.id)}</p>
-                            </div>
-                            <button type="button" class="btn-close" data-board-session-close aria-label="Close"></button>
-                        </div>
-                        <div class="modal-body">
-                            <p class="board-editor-muted mb-0">
-                                Session content is not wired up yet. This will show the captured
-                                working session once the backend records them.
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-backdrop fade show board-session-backdrop"></div>`;
-
-        const underlying = Array.from(host.children).map(element => ({
-            element,
-            inert: Boolean(element.inert),
-            ariaHidden: element.getAttribute('aria-hidden')
-        }));
-        underlying.forEach(({ element }) => {
-            element.inert = true;
-            element.setAttribute('aria-hidden', 'true');
+    // A live session's row jumps to its terminal tab: adopt it into whatever
+    // terminal panel is on screen, else go to the Terminals view with it focused
+    // (the same fallback the Python "run interactive" flow uses).
+    async focusSessionTab(card, session) {
+        const terminal = this.app.terminalController;
+        const tabId = session.tabId;
+        if (!terminal || !tabId) return;
+        terminal.rememberTabLaunch?.(tabId, {
+            selection: session.selection || null,
+            label: card?.key || session.displayName,
+            title: `${card?.key || ''} · ${card?.title || session.displayName}`.replace(/^ · /, ''),
+            taskKey: CARD_TASK_KEY(card?.id || session.id),
+            workingDirectory: null
         });
-        const previousFocus = document.activeElement;
-        host.appendChild(layer);
+        this.app.closeModal();
+        if (!(await terminal.adoptLaunchedTab?.(tabId))) {
+            this.app.navigate?.('terminal-focus', { preferredTabId: tabId, preferredSelection: session.selection || null });
+        }
+    }
 
-        const close = () => {
-            document.removeEventListener('keydown', onKeydown, true);
-            layer.remove();
-            underlying.forEach(({ element, inert, ariaHidden }) => {
-                if (!element.isConnected) return;
-                element.inert = inert;
-                if (ariaHidden == null) element.removeAttribute('aria-hidden');
-                else element.setAttribute('aria-hidden', ariaHidden);
-            });
-            if (previousFocus?.isConnected) {
-                try { previousFocus.focus({ preventScroll: true }); } catch { /* detached */ }
-            }
-            this.sessionLayer = null;
-        };
+    // An ended session replays in the shared terminal replay modal (session-viewer.js — the same
+    // one the chat history sidebar's "Replay Session" opens). It mounts its own overlay on
+    // document.body above the card editor, so the editor survives; what it lacks is Escape
+    // handling and a way to close it from here, so this wraps it: Escape (captured, so the
+    // editor's own handler never sees it) closes the replay, and navigation closes it too.
+    openSessionReplay(session, { seekToUtc = null } = {}) {
+        this.closeSessionModal();
+        const before = document.body.lastElementChild;
+        void SessionDebug.showReplayModal(session.id, { seekToUtc });
+        const overlay = document.body.lastElementChild;
+        if (!overlay || overlay === before) return;
+        overlay.classList.add('vb-session-replay-layer');
+
         const onKeydown = event => {
             if (event.key !== 'Escape' || event.defaultPrevented) return;
+            if (!overlay.isConnected) {
+                document.removeEventListener('keydown', onKeydown, true);
+                this.sessionLayer = null;
+                return;
+            }
             event.preventDefault();
             event.stopImmediatePropagation();
             close();
         };
+        const close = () => {
+            document.removeEventListener('keydown', onKeydown, true);
+            // The replay modal's own close (disposes the xterm instance) hangs off its × button.
+            if (overlay.isConnected) overlay.querySelector('button')?.click();
+            this.sessionLayer = null;
+        };
         document.addEventListener('keydown', onKeydown, true);
-        layer.querySelector('[data-board-session-close]')?.addEventListener('click', close);
         this.sessionLayer = { close };
-        requestAnimationFrame(() => layer.querySelector('[data-board-session-close]')?.focus());
     }
 
     closeSessionModal() {
@@ -1210,12 +1390,20 @@ export class BoardController {
         this.sessionLayer = null;
     }
 
+    // Links a session by hand. A pasted session id (dashed GUID or 32 hex chars) becomes the link
+    // itself, so a terminal that was not started from the card can still be replayed from it;
+    // anything else is just a name for a placeholder entry.
     async addSession(editor, formData) {
+        const text = String(formData.get('displayName') || '').trim();
+        const isSessionId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$|^[0-9a-f]{32}$/i.test(text);
         try {
-            await BoardApi.addCardSessionAsync(this.state.editingCardId, {
-                displayName: String(formData.get('displayName') || '').trim()
-            });
-            const card = await this.reloadEditingCard();
+            const cardId = this.cardIdFromEditor(editor);
+            if (!cardId) return;
+            await BoardApi.addCardSessionAsync(cardId, isSessionId
+                ? { id: text, displayName: `Session ${text.slice(0, 8)}` }
+                : { displayName: text });
+            const card = await this.reloadEditingCard(editor);
+            if (!card) return;
             this.renderSessionsPanel(editor, card);
             this.updateSectionCount(editor, 'sessions', card.sessions.length);
             editor.querySelector('[data-board-add-session]')?.reset();
@@ -1227,7 +1415,8 @@ export class BoardController {
     async removeSession(editor, card, sessionId) {
         try {
             await BoardApi.removeCardSessionAsync(card.id, sessionId);
-            const fresh = await this.reloadEditingCard();
+            const fresh = await this.reloadEditingCard(editor);
+            if (!fresh) return;
             this.renderSessionsPanel(editor, fresh);
             this.updateSectionCount(editor, 'sessions', fresh.sessions.length);
         } catch (error) {
@@ -1237,8 +1426,10 @@ export class BoardController {
 
     // Re-reads the open card and keeps the board's copy in step, so a panel
     // re-render and the tile behind the dialog never disagree.
-    async reloadEditingCard() {
-        const card = await BoardApi.getBoardCardAsync(this.state.editingCardId);
+    async reloadEditingCard(editor) {
+        const cardId = this.cardIdFromEditor(editor);
+        if (!cardId) return null;
+        const card = await BoardApi.getBoardCardAsync(cardId);
         const index = this.state.cards.findIndex(c => c.id === card.id);
         if (index >= 0) this.state.cards[index] = card;
         return card;
@@ -1250,7 +1441,7 @@ export class BoardController {
             title: value('#board-card-title').trim(),
             description: value('[data-board-composer="description"] [data-board-composer-input]'),
             columnId: value('#board-card-lane'),
-            assigneeId: value('#board-card-assignee') || null,
+            assignee: value('#board-card-assignee'),
             priority: value('#board-card-priority'),
             points: value('#board-card-points'),
             tags: value('#board-card-tags').split(',').map(tag => tag.trim()).filter(Boolean),
@@ -1258,17 +1449,23 @@ export class BoardController {
         };
     }
 
-    async saveCard(editor) {
-        const payload = this.readCardForm(editor);
+    validateCardTitle(editor, payload) {
         if (!payload.title) {
             this.app.showToast('Board', 'A card needs a title.', 'warning');
             editor.querySelector('#board-card-title')?.focus();
-            return;
+            return false;
         }
+        return true;
+    }
+
+    async saveCard(editor) {
+        const payload = this.readCardForm(editor);
+        if (!this.validateCardTitle(editor, payload)) return;
 
         try {
-            if (this.state.editingCardId) {
-                await BoardApi.updateBoardCardAsync(this.state.editingCardId, payload);
+            const cardId = this.cardIdFromEditor(editor);
+            if (cardId) {
+                await BoardApi.updateBoardCardAsync(cardId, payload);
                 this.app.showToast('Board', 'Card saved.', 'success');
             } else {
                 const created = await BoardApi.createBoardCardAsync(payload);
@@ -1281,9 +1478,80 @@ export class BoardController {
         }
     }
 
-    async deleteCurrentCard() {
-        if (!this.state.editingCardId) return;
-        const card = this.state.cards.find(c => c.id === this.state.editingCardId);
+    // "Start work": the server opens a terminal tab for the assignee with the card
+    // prepended to that environment's Initial Message, links the session to the
+    // card, and hands back the tab id. Unsaved edits in the editor are saved first
+    // so the LLM reads what is on screen.
+    hasRunningSession(card) {
+        return Boolean(card?.activeSessionId || card?.sessions?.some(session => session.active));
+    }
+
+    updateStartWorkButton(editor, card) {
+        const button = editor.querySelector('[data-board-start-work]');
+        if (!button) return;
+        const running = this.hasRunningSession(card);
+        button.disabled = running;
+        button.title = running
+            ? 'An agent is already running on this card. Open it from Sessions.'
+            : 'Open a terminal for the assigned LLM with this card as its first message';
+        const label = button.querySelector?.('[data-board-start-work-label]');
+        if (label) label.textContent = running ? 'Agent running' : 'Start work';
+    }
+
+    async startWork(editor, card) {
+        if (!card?.id) return;
+        if (this.hasRunningSession(card)) {
+            this.updateStartWorkButton(editor, card);
+            return;
+        }
+        const button = editor.querySelector('[data-board-start-work]');
+        if (button?.disabled) return;
+        const payload = this.readCardForm(editor);
+        if (!this.validateCardTitle(editor, payload)) return;
+        if (!payload.assignee) {
+            this.app.showToast('Board', 'Assign an LLM to this card first.', 'warning');
+            editor.querySelector('#board-card-assignee')?.tomselect?.focus?.();
+            return;
+        }
+        if (button) button.disabled = true;
+        try {
+            const saved = await BoardApi.updateBoardCardAsync(card.id, payload);
+            if (this.hasRunningSession(saved)) {
+                this.updateStartWorkButton(editor, saved);
+                this.app.showToast('Board', 'An agent is already running on this card. Open it from Sessions.', 'info');
+                return;
+            }
+            const result = await BoardApi.launchBoardCardAsync(card.id, { selection: payload.assignee });
+            const tabId = String(result?.tabId || '').trim();
+            if (!tabId) throw new Error('The launch did not return a terminal tab.');
+
+            const info = this.assigneeInfo(result.selection || payload.assignee);
+            this.app.terminalController?.rememberTabLaunch?.(tabId, {
+                selection: result.selection || payload.assignee,
+                label: result.cardKey || card.key,
+                title: `${result.cardKey || card.key} · ${payload.title || card.title}`,
+                taskKey: CARD_TASK_KEY(card.id),
+                accentColor: info?.color || null,
+                workingDirectory: result.workingDirectory || null
+            });
+            this.app.closeModal();
+            this.app.showToast('Board', `${result.cardKey || card.key} handed to ${info?.label || 'the LLM'}.`, 'success');
+            if (!(await this.app.terminalController?.adoptLaunchedTab?.(tabId))) {
+                this.app.navigate?.('terminal-focus', {
+                    preferredTabId: tabId,
+                    preferredSelection: result.selection || payload.assignee
+                });
+            }
+        } catch (error) {
+            this.app.showToast('Board', error?.message || 'Failed to start work on the card.', 'error');
+            if (button) button.disabled = false;
+        }
+    }
+
+    async deleteCurrentCard(editor) {
+        const cardId = this.cardIdFromEditor(editor);
+        if (!cardId) return;
+        const card = this.state.cards.find(c => c.id === cardId);
         const confirmed = await confirmDialog({
             title: 'Delete card',
             message: `Delete ${card?.key || 'this card'}? This cannot be undone.`,
@@ -1293,7 +1561,7 @@ export class BoardController {
         if (!confirmed) return;
 
         try {
-            await BoardApi.deleteBoardCardAsync(this.state.editingCardId);
+            await BoardApi.deleteBoardCardAsync(cardId);
             this.app.closeModal();
             this.app.showToast('Board', 'Card deleted.', 'success');
             await this.refresh();
@@ -1420,30 +1688,6 @@ export class BoardController {
             await this.refresh();
         } catch (error) {
             this.app.showToast('Board', error?.message || 'Failed to delete the lane.', 'error');
-        }
-    }
-
-    // ============================================
-    // Sample data
-    // ============================================
-
-    async resetBoardData() {
-        const confirmed = await confirmDialog({
-            title: 'Reset board',
-            message: 'Restore the sample board? Every card and lane you have changed here is discarded.',
-            confirmLabel: 'Reset',
-            danger: true
-        });
-        if (!confirmed) return;
-
-        try {
-            await BoardApi.resetBoardDataAsync();
-            this.state.filters = emptyFilters();
-            this.persistFilters();
-            await this.loadView();
-            this.app.showToast('Board', 'Sample board restored.', 'success');
-        } catch (error) {
-            this.app.showToast('Board', error?.message || 'Failed to reset the board.', 'error');
         }
     }
 }

@@ -12,7 +12,16 @@ const MCP_ARG_EXAMPLES = {
     get_shell_command_status: { jobId: 'shell-...' },
     cancel_shell_command: { jobId: 'shell-...' },
     web_search: { query: 'Model Context Protocol', maxResults: 5 },
-    web_fetch: { url: 'https://example.com', maxChars: 12000 }
+    web_fetch: { url: 'https://example.com', maxChars: 12000 },
+    // Kanban board tools (BoardTool). Card arguments take a key like VB-1.
+    list_board_columns: {},
+    list_board_cards: {},
+    get_board_card: { card: 'VB-1' },
+    create_board_card: { title: 'Try the board from MCP', column: 'Backlog', priority: 'medium' },
+    update_board_card: { card: 'VB-1', priority: 'high' },
+    move_board_card: { card: 'VB-1', column: 'Review' },
+    add_board_comment: { card: 'VB-1', body: 'Progress note from the MCP Explorer.' },
+    link_board_commit: { card: 'VB-1', sha: 'abc1234' }
 };
 
 export class McpController {

@@ -326,6 +326,10 @@ public sealed class SessionDataExportRepositoryTests : IDisposable
             Assert.Equal(parentId, session.GetProperty("parentSessionId").GetString());
             Assert.Equal("Investigate bytes", session.GetProperty("sessionDisplayName").GetString());
             Assert.Equal("job-run-42", session.GetProperty("jobRunId").GetString());
+            Assert.True(
+                firstJson.AsSpan().IndexOf("\"userInputs\""u8)
+                    < firstJson.AsSpan().IndexOf("\"sessionLogs\""u8),
+                "userInputs must precede the log arrays so the server can capture them without scanning BLOBs.");
             Assert.False(session.TryGetProperty("processed", out _));
             Assert.False(session.TryGetProperty("ownerPid", out _));
             Assert.False(session.TryGetProperty("exportedUtc", out _));

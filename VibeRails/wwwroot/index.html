@@ -81,6 +81,11 @@
                 <img src="assets/img/icons/terminal-solid-full.svg" alt="" class="me-1 icon-light">
                 <span>Terminals</span>
             </button>
+            <button class="app-subnav-link" data-action="navigate" data-view="board"
+                title="Board — plan work across lanes">
+                <i class="fa-solid fa-clipboard-list me-1"></i>
+                <span>Board</span>
+            </button>
             <button class="app-subnav-link" data-action="navigate-home"
                 title="Rules, Git Guard, and code quality">
                 <i class="fa-solid fa-shield-halved me-1"></i>
@@ -113,11 +118,6 @@
                     <i class="fa-solid fa-play" aria-hidden="true"></i>
                 </button>
             </div>
-            <button class="app-subnav-link" data-action="navigate" data-view="board"
-                title="Board — plan work across lanes">
-                <i class="fa-solid fa-clipboard-list me-1"></i>
-                <span>Board</span>
-            </button>
             <button class="app-subnav-link" data-action="navigate-settings" title="Application Settings">
                 <img src="assets/img/icons/sliders-solid-full.svg" alt="" class="me-1 icon-light settings-card-cog">
                 <span>Settings</span>
@@ -156,6 +156,11 @@
                     <img src="assets/img/icons/terminal-solid-full.svg" alt="" class="nav-icon icon-light">
                     <span class="nav-label">Terminals</span>
                 </button>
+                <button class="app-subnav-link" data-action="navigate" data-view="board"
+                    title="Board — plan work across lanes">
+                    <i class="fa-solid fa-clipboard-list nav-icon"></i>
+                    <span class="nav-label">Board</span>
+                </button>
                 <button class="app-subnav-link" data-action="navigate-home"
                     title="Rules, Git Guard, and code quality">
                     <i class="fa-solid fa-shield-halved nav-icon"></i>
@@ -188,11 +193,6 @@
                         <i class="fa-solid fa-play" aria-hidden="true"></i>
                     </button>
                 </div>
-                <button class="app-subnav-link" data-action="navigate" data-view="board"
-                    title="Board — plan work across lanes">
-                    <i class="fa-solid fa-clipboard-list nav-icon"></i>
-                    <span class="nav-label">Board</span>
-                </button>
                 <button class="app-subnav-link" data-action="navigate-settings" title="Application Settings">
                     <img src="assets/img/icons/sliders-solid-full.svg" alt="" class="nav-icon icon-light settings-card-cog">
                     <span class="nav-label">Settings</span>
@@ -1258,52 +1258,22 @@
                     <h4 class="text-uppercase fw-bold mb-0" style="letter-spacing: 0.05em;"><span class="text-gradient">Application Settings</span></h4>
                 </div>
             </div>
-            <div class="row justify-content-center">
-                <div class="col-md-8 col-lg-6 mb-4">
-                    <div class="sandbox-item-card mb-3 text-start">
-                        <div class="mb-3">
-                            <span class="sandbox-item-name">Remote PIN Lock</span>
-                        </div>
-                        <div class="pin-section-row mb-3">
-                            <div>
-                                <div class="form-label mb-1">PIN Status</div>
-                                <div id="pin-status-badge" class="pin-status-badge not-set">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor"
-                                        viewBox="0 0 16 16">
-                                        <path
-                                            d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2m3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2" />
-                                    </svg>
-                                    Not Set
-                                </div>
-                            </div>
-                            <div class="pin-section-actions">
-                                <button type="button"
-                                    class="btn btn-outline-primary btn-sm d-flex align-items-center gap-2"
-                                    id="btn-set-pin">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor"
-                                        viewBox="0 0 16 16">
-                                        <path
-                                            d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2m3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2" />
-                                    </svg>
-                                    Set PIN
-                                </button>
-                                <button type="button"
-                                    class="btn btn-outline-danger btn-sm d-flex align-items-center gap-2"
-                                    id="btn-clear-pin" style="display:none!important">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor"
-                                        viewBox="0 0 16 16">
-                                        <path
-                                            d="M2.146 2.854a.5.5 0 1 1 .708-.708L8 7.293l5.146-5.147a.5.5 0 0 1 .708.708L8.707 8l5.147 5.146a.5.5 0 0 1-.708.708L8 8.707l-5.146 5.147a.5.5 0 0 1-.708-.708L7.293 8z" />
-                                    </svg>
-                                    Clear PIN
-                                </button>
-                            </div>
-                        </div>
-                        <small class="form-text text-muted">Protect remote viewer access with a 4–6 digit PIN
-                            challenge</small>
+            <div class="row justify-content-center mb-4">
+                <div class="col-md-8 col-lg-6">
+                    <div class="settings-tabs" role="tablist" aria-label="Settings sections">
+                        <button type="button" class="settings-tab" role="tab" id="settings-tab-general"
+                            aria-controls="settings-panel-general" aria-selected="true" data-settings-tab="general">General</button>
+                        <button type="button" class="settings-tab" role="tab" id="settings-tab-llm"
+                            aria-controls="settings-panel-llm" aria-selected="false" tabindex="-1" data-settings-tab="llm">LLMs</button>
+                        <button type="button" class="settings-tab" role="tab" id="settings-tab-git"
+                            aria-controls="settings-panel-git" aria-selected="false" tabindex="-1" data-settings-tab="git">Git</button>
+                        <button type="button" class="settings-tab" role="tab" id="settings-tab-keys"
+                            aria-controls="settings-panel-keys" aria-selected="false" tabindex="-1" data-settings-tab="keys">KEYS</button>
                     </div>
                 </div>
             </div>
+            <div class="settings-panel" id="settings-panel-llm" role="tabpanel" aria-labelledby="settings-tab-llm"
+                tabindex="0" hidden>
             <div class="row justify-content-center">
                 <div class="col-md-8 col-lg-6 mb-4">
                     <div class="sandbox-item-card text-start">
@@ -1410,46 +1380,8 @@
                     </div>
                 </div>
             </div>
-            <div class="row justify-content-center" data-project-identity-card hidden>
-                <div class="col-md-8 col-lg-6 mb-4">
-                    <div class="sandbox-item-card project-identity-card text-start">
-                        <div class="project-identity-icon" aria-hidden="true">
-                            <i class="fa-solid fa-folder-tree"></i>
-                        </div>
-                        <div class="project-identity-copy">
-                            <span class="sandbox-item-name">Project identity</span>
-                            <strong data-project-display-name>Project</strong>
-                            <small data-project-root-path></small>
-                            <p>Choose the friendly name used in VibeRails tabs and project labels.</p>
-                        </div>
-                        <button class="btn btn-sm btn-outline-primary" type="button" data-action="rename-project">
-                            <i class="fa-solid fa-pen-to-square me-1" aria-hidden="true"></i>
-                            Change name
-                        </button>
-                    </div>
-                </div>
-            </div>
             <div class="row justify-content-center">
-                <div class="col-md-8 col-lg-6 mb-4">
-                    <div class="sandbox-item-card text-start">
-                        <div class="mb-3">
-                            <span class="sandbox-item-name">Git Commit Settings</span>
-                        </div>
-                        <div class="form-check form-switch">
-                            <input class="form-check-input" type="checkbox"
-                                id="setting-remove-co-author-trailers">
-                            <label class="form-check-label" for="setting-remove-co-author-trailers">
-                                Remove co-author tags
-                            </label>
-                        </div>
-                        <small class="form-text text-muted">When Git Guard's <code>commit-msg</code> hook runs,
-                            remove every <code>Co-authored-by:</code> trailer before Git creates the commit.
-                            Enabled by default.</small>
-                    </div>
-                </div>
-            </div>
-            <div class="row justify-content-center">
-                <div class="col-md-8 col-lg-6 mb-4">
+                <div class="col-md-8 col-lg-6">
                     <div class="sandbox-item-card text-start">
                         <div class="mb-3">
                             <span class="sandbox-item-name">Token Saver</span>
@@ -1496,6 +1428,74 @@
                                 before, after, and the stage trace — so Vibe AI can show what compression actually
                                 did. Uncapped: captures hold verbatim command output and grow without bound.</small>
                         </div>
+                    </div>
+                </div>
+            </div>
+            </div>
+            <div class="settings-panel" id="settings-panel-general" role="tabpanel" aria-labelledby="settings-tab-general"
+                tabindex="0">
+            <div class="row justify-content-center">
+                <div class="col-md-8 col-lg-6 mb-4">
+                    <div class="sandbox-item-card mb-3 text-start">
+                        <div class="mb-3">
+                            <span class="sandbox-item-name">Remote PIN Lock</span>
+                        </div>
+                        <div class="pin-section-row mb-3">
+                            <div>
+                                <div class="form-label mb-1">PIN Status</div>
+                                <div id="pin-status-badge" class="pin-status-badge not-set">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor"
+                                        viewBox="0 0 16 16">
+                                        <path
+                                            d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2m3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2" />
+                                    </svg>
+                                    Not Set
+                                </div>
+                            </div>
+                            <div class="pin-section-actions">
+                                <button type="button"
+                                    class="btn btn-outline-primary btn-sm d-flex align-items-center gap-2"
+                                    id="btn-set-pin">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor"
+                                        viewBox="0 0 16 16">
+                                        <path
+                                            d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2m3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2" />
+                                    </svg>
+                                    Set PIN
+                                </button>
+                                <button type="button"
+                                    class="btn btn-outline-danger btn-sm d-flex align-items-center gap-2"
+                                    id="btn-clear-pin" style="display:none!important">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor"
+                                        viewBox="0 0 16 16">
+                                        <path
+                                            d="M2.146 2.854a.5.5 0 1 1 .708-.708L8 7.293l5.146-5.147a.5.5 0 0 1 .708.708L8.707 8l5.147 5.146a.5.5 0 0 1-.708.708L8 8.707l-5.146 5.147a.5.5 0 0 1-.708-.708L7.293 8z" />
+                                    </svg>
+                                    Clear PIN
+                                </button>
+                            </div>
+                        </div>
+                        <small class="form-text text-muted">Protect remote viewer access with a 4–6 digit PIN
+                            challenge</small>
+                    </div>
+                </div>
+            </div>
+            <div class="row justify-content-center" data-project-identity-card hidden>
+                <div class="col-md-8 col-lg-6 mb-4">
+                    <div class="sandbox-item-card project-identity-card text-start">
+                        <div class="project-identity-icon" aria-hidden="true">
+                            <i class="fa-solid fa-folder-tree"></i>
+                        </div>
+                        <div class="project-identity-copy">
+                            <span class="sandbox-item-name">Project identity</span>
+                            <strong data-project-display-name>Project</strong>
+                            <small data-project-root-path></small>
+                            <p>Choose the friendly name used in VibeRails tabs and project labels.</p>
+                        </div>
+                        <button class="btn btn-sm btn-outline-primary" type="button" data-action="rename-project">
+                            <i class="fa-solid fa-pen-to-square me-1" aria-hidden="true"></i>
+                            Change name
+                        </button>
                     </div>
                 </div>
             </div>
@@ -1603,6 +1603,38 @@
                                 <small class="form-text text-muted">Use VS Code colors in the embedded terminal</small>
                             </div>
                         </form>
+                    </div>
+                </div>
+            </div>
+            </div>
+            <div class="settings-panel" id="settings-panel-git" role="tabpanel" aria-labelledby="settings-tab-git"
+                tabindex="0" hidden>
+            <div class="row justify-content-center">
+                <div class="col-md-8 col-lg-6 mb-4">
+                    <div class="sandbox-item-card text-start">
+                        <div class="mb-3">
+                            <span class="sandbox-item-name">Git Commit Settings</span>
+                        </div>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox"
+                                id="setting-remove-co-author-trailers">
+                            <label class="form-check-label" for="setting-remove-co-author-trailers">
+                                Remove co-author and Claude session tags
+                            </label>
+                        </div>
+                        <small class="form-text text-muted">When Git Guard's <code>commit-msg</code> hook runs,
+                            remove every <code>Co-authored-by:</code> and <code>Claude-Session:</code> trailer
+                            before Git creates the commit.
+                            Enabled by default.</small>
+                    </div>
+                </div>
+            </div>
+            </div>
+            <div class="settings-panel" id="settings-panel-keys" role="tabpanel" aria-labelledby="settings-tab-keys"
+                tabindex="0" hidden>
+                <div class="row justify-content-center">
+                    <div class="col-md-8 col-lg-6 mb-4" data-settings-keys>
+                        <p class="text-muted" role="status">Open KEYS to manage your signing keys.</p>
                     </div>
                 </div>
             </div>
@@ -3519,8 +3551,8 @@
 
     <!-- Lane board (view 'board'). Rides the .vb-rules-workspace-active flowing
          shell so the lanes fill the viewport and scroll sideways while the page
-         itself does not. Data still comes from the local placeholder in
-         js/modules/board-api.js. -->
+         itself does not. Data comes from js/modules/board-api.js, a thin client
+         over /api/v1/board/*. -->
     <template id="board-template">
         <div class="view board-view" data-view="board">
             <style>
@@ -3539,57 +3571,6 @@
                 .board-view.is-loading .board-canvas {
                     opacity: 0.45;
                     pointer-events: none;
-                }
-
-                /* Header ------------------------------------------------- */
-                .board-view .board-header {
-                    display: flex;
-                    align-items: flex-end;
-                    justify-content: space-between;
-                    gap: 1.5rem;
-                    flex-wrap: wrap;
-                }
-
-                .board-view .board-heading {
-                    min-width: 0;
-                }
-
-                .board-view .board-eyebrow {
-                    display: block;
-                    margin-bottom: 4px;
-                    color: var(--color-accent, #06b6d4);
-                    font-size: 0.72rem;
-                    font-weight: 700;
-                    letter-spacing: 0.12em;
-                    text-transform: uppercase;
-                }
-
-                .board-view .board-heading h1 {
-                    margin: 0;
-                    color: var(--color-text, #f8fafc);
-                    font-size: clamp(1.4rem, 3vw, 1.9rem);
-                    font-weight: 700;
-                    letter-spacing: -0.035em;
-                }
-
-                .board-view .board-heading p {
-                    margin: 5px 0 0;
-                    color: var(--color-text-muted, #94a3b8);
-                    font-size: 0.9rem;
-                }
-
-                .board-view .board-header-actions {
-                    display: flex;
-                    align-items: center;
-                    gap: 0.5rem;
-                    flex-wrap: wrap;
-                }
-
-                .board-view .board-header-actions .btn {
-                    display: inline-flex;
-                    align-items: center;
-                    gap: 0.4rem;
-                    white-space: nowrap;
                 }
 
                 /* Toolbar ------------------------------------------------ */
@@ -3631,6 +3612,17 @@
                     font: inherit;
                     font-size: 0.82rem;
                     line-height: 1.35;
+                }
+
+                /* The LLM filter lists environment names, which can be long: cap the control and
+                   ellipsise the selected label (the native popup still shows full names; the
+                   tooltip carries the full selected name). */
+                .board-view select[data-board-filter-assignee] {
+                    min-width: 150px;
+                    max-width: 240px;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
                 }
 
                 .board-view select.board-control {
@@ -3958,12 +3950,92 @@
                 }
 
                 .board-view .board-card-title {
-                    margin: 0 0 0.45rem;
+                    margin: 0 0 0.35rem;
                     color: var(--color-text, #f8fafc);
                     font-size: 0.85rem;
                     font-weight: 600;
                     line-height: 1.3;
                     letter-spacing: -0.01em;
+                }
+
+                .board-view .board-card-top-right {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.3rem;
+                }
+
+                .board-view .board-priority-chip {
+                    padding: 1px 6px;
+                    border-radius: 999px;
+                    font-size: 0.62rem;
+                    font-weight: 600;
+                    letter-spacing: 0.04em;
+                    text-transform: uppercase;
+                    color: var(--color-text-muted, #94a3b8);
+                    border: 1px solid var(--color-border, #334155);
+                }
+
+                .board-view .board-priority-chip[data-priority="critical"] { color: #fb7185; border-color: color-mix(in srgb, #fb7185 45%, transparent); }
+                .board-view .board-priority-chip[data-priority="high"] { color: #f59e0b; border-color: color-mix(in srgb, #f59e0b 45%, transparent); }
+                .board-view .board-priority-chip[data-priority="low"] { color: #5bc98a; border-color: color-mix(in srgb, #5bc98a 45%, transparent); }
+
+                /* One-line description preview under the title. */
+                .board-view .board-card-excerpt {
+                    margin: 0 0 0.45rem;
+                    color: var(--color-text-muted, #94a3b8);
+                    font-size: 0.74rem;
+                    line-height: 1.35;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                }
+
+                .board-view .board-card-comments {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.25rem;
+                    color: var(--color-text-muted, #94a3b8);
+                    font-size: 0.7rem;
+                }
+
+                /* Assignee row: avatar + name, the click-to-filter control. */
+                .board-view .board-card-foot {
+                    display: flex;
+                    align-items: center;
+                    margin-top: 0.45rem;
+                    padding-top: 0.4rem;
+                    border-top: 1px solid color-mix(in srgb, var(--color-border, #334155) 60%, transparent);
+                }
+
+                .board-assignee-chip {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.4rem;
+                    max-width: 100%;
+                    min-width: 0;
+                    padding: 2px 8px 2px 2px;
+                    border-radius: 999px;
+                    background: var(--color-bg-surface, #1e1e1e);
+                    color: var(--color-text, #f8fafc);
+                    font-size: 0.72rem;
+                    font-weight: 500;
+                    cursor: pointer;
+                }
+
+                .board-assignee-chip:hover {
+                    background: color-mix(in srgb, var(--color-primary, #3b82f6) 18%, var(--color-bg-surface, #1e1e1e));
+                }
+
+                .board-assignee-chip.is-empty {
+                    color: var(--color-text-muted, #94a3b8);
+                    cursor: default;
+                }
+
+                .board-assignee-name {
+                    min-width: 0;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
                 }
 
                 .board-view .board-card-meta {
@@ -4028,18 +4100,102 @@
                     color: var(--color-text-muted, #94a3b8);
                 }
 
+                /* An assignee is an LLM: the avatar is its CLI brand mark on the
+                   brand colour (same mark the LLM picker rows use). */
+                .board-avatar.has-logo {
+                    padding: 2px;
+                    box-sizing: border-box;
+                    border: 1.5px solid var(--color-border, #334155); /* colour set inline to the brand accent */
+                }
+
+                .board-avatar-logo {
+                    width: 100%;
+                    height: 100%;
+                    object-fit: contain;
+                    border-radius: 50%;
+                }
+
+                /* A terminal session is working this card right now. */
+                .board-live-dot {
+                    display: inline-block;
+                    flex: none;
+                    width: 8px;
+                    height: 8px;
+                    margin-right: 0.3rem;
+                    border-radius: 50%;
+                    background: #22c55e;
+                    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.55);
+                    animation: board-live-pulse 1.8s ease-out infinite;
+                }
+
+                .board-card-aside .board-live-dot {
+                    margin-right: 0;
+                }
+
+                @keyframes board-live-pulse {
+                    0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.55); }
+                    70% { box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }
+                    100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+                }
+
+                @media (prefers-reduced-motion: reduce) {
+                    .board-live-dot { animation: none; }
+                }
+
                 /* Card / lane editors (rendered into #modal-container) ----- */
+                /* Fill the overlay. Bootstrap's default scrollable dialog is a
+                   short box (capped around 700px) sitting inside a scrolling
+                   overlay — that is the double scrollbar. Height lives on the
+                   dialog; overflow lives on .board-editor-scroll, nowhere else. */
+                .modal:has(.board-card-modal-dialog) {
+                    overflow: hidden;
+                }
+
+                .board-card-modal-dialog {
+                    width: min(1140px, calc(100vw - 2rem));
+                    max-width: 1140px;
+                    height: calc(100% - 2rem);
+                    max-height: calc(100% - 2rem);
+                    margin: 1rem auto;
+                }
+
+                .board-card-modal-dialog .modal-content {
+                    height: 100%;
+                    max-height: 100%;
+                    display: flex;
+                    flex-direction: column;
+                    overflow: hidden;
+                }
+
                 .board-card-modal-dialog .modal-body {
+                    display: flex;
+                    flex: 1 1 auto;
+                    flex-direction: column;
+                    min-height: 0;
                     padding: 0;
+                    overflow: hidden;
                 }
 
                 .board-card-editor {
+                    display: flex;
+                    flex: 1 1 auto;
+                    flex-direction: column;
+                    min-width: 0;
+                    min-height: 0;
+                    height: 100%;
+                }
+
+                /* The one scrollbar: both columns move together. Save sits in
+                   a sibling footer so it never scrolls away and never paints
+                   over the commit list. */
+                .board-editor-scroll {
                     display: grid;
                     grid-template-columns: minmax(0, 1.55fr) minmax(230px, 0.7fr);
-                    /* Bounded so the panels scroll inside the dialog rather than the
-                       dialog growing without limit behind a long comment thread. */
-                    height: min(74vh, 700px);
-                    min-height: 420px;
+                    flex: 1 1 auto;
+                    min-width: 0;
+                    min-height: 0;
+                    overflow-x: hidden;
+                    overflow-y: auto;
                 }
 
                 .board-card-editor .board-editor-main {
@@ -4051,9 +4207,7 @@
                     min-height: 0;
                     padding: 1.1rem 1.25rem 1.25rem;
                     border-right: 1px solid var(--color-border, #334155);
-                    /* One scroll for the whole body: description at the top, the
-                       comment thread at the bottom, as a work item reads. */
-                    overflow-y: auto;
+                    overflow: visible;
                 }
 
                 .board-card-editor .board-editor-side {
@@ -4061,18 +4215,16 @@
                     flex-direction: column;
                     min-height: 0;
                     padding: 0;
-                    overflow: hidden;
+                    overflow: visible;
                 }
 
-                /* Only this scrolls. The action bar below is a sibling, so Save is
-                   always reachable without floating over the commit list. */
                 .board-side-scroll {
                     display: flex;
                     flex: 1 1 auto;
                     flex-direction: column;
                     gap: 1.1rem;
                     min-height: 0;
-                    overflow-y: auto;
+                    overflow: visible;
                     padding: 1.1rem 1.15rem 0.6rem;
                 }
 
@@ -4323,20 +4475,32 @@
                 .board-comments {
                     display: flex;
                     flex-direction: column;
-                    gap: 0.9rem;
-                    flex: 1 1 auto;
+                    gap: 0.75rem;
                     min-height: 60px;
                     min-width: 0;
-                    overflow-y: auto;
-                    padding: 0.15rem 0.15rem 0.5rem 0;
+                    overflow: visible;
+                    padding: 0.15rem 0.15rem 0.6rem 0;
                 }
 
+                /* Each comment is its own block: a surface, a border, and a header row that
+                   sits apart from the body — so a thread reads as separate entries rather
+                   than one run of text. Agent comments get an accent rail on the left. */
                 .board-comment {
                     display: grid;
                     /* minmax(0, 1fr), not 1fr: a grid track defaults to min-content,
                        which would let a wide code block push the dialog wider. */
-                    grid-template-columns: 26px minmax(0, 1fr);
-                    gap: 0.5rem;
+                    grid-template-columns: 28px minmax(0, 1fr);
+                    gap: 0.6rem;
+                    padding: 0.6rem 0.75rem 0.65rem 0.65rem;
+                    border: 1px solid var(--color-border, #334155);
+                    border-left: 3px solid var(--color-border, #334155);
+                    border-radius: 8px;
+                    background: var(--color-bg-surface, #1e1e1e);
+                }
+
+                .board-comment.is-agent {
+                    border-left-color: var(--color-primary, #3b82f6);
+                    background: color-mix(in srgb, var(--color-primary, #3b82f6) 6%, var(--color-bg-surface, #1e1e1e));
                 }
 
                 /* Composer ------------------------------------------------ */
@@ -4423,16 +4587,45 @@
                     color: var(--color-text, #f8fafc);
                 }
 
+                .board-composer [hidden] {
+                    display: none !important;
+                }
+
+                .board-description-preview {
+                    min-width: 0;
+                    padding: 0.55rem 0.65rem;
+                }
+
                 .board-composer-busy {
                     padding: 0.3rem 0.65rem 0.45rem;
                     color: var(--color-text-muted, #94a3b8);
                     font-size: 0.72rem;
                 }
 
-                /* The description gets a roomier box than a comment reply. */
+                /* The description gets a roomier box than a comment reply.
+                   No max-height: it grows with the text and the editor
+                   scroller takes over, so this box never grows a second bar.
+                   On a new card the leftover column height goes to this box
+                   so the taller dialog is writing space, not empty gray. */
                 .board-block:first-of-type .board-composer-input {
-                    min-height: 140px;
+                    min-height: 240px;
                     max-height: none;
+                    overflow-y: hidden;
+                }
+
+                .board-card-editor[data-card-id=""] .board-block:first-of-type {
+                    flex: 1 1 auto;
+                    min-height: 0;
+                }
+
+                .board-card-editor[data-card-id=""] .board-block:first-of-type .board-composer,
+                .board-card-editor[data-card-id=""] .board-block:first-of-type .board-composer-input {
+                    flex: 1 1 auto;
+                    min-height: 0;
+                }
+
+                .board-card-editor[data-card-id=""] .board-block:first-of-type .board-composer-input {
+                    min-height: 240px;
                 }
 
                 .board-comment-content {
@@ -4441,8 +4634,12 @@
 
                 .board-comment-meta {
                     display: flex;
+                    align-items: baseline;
                     justify-content: space-between;
                     gap: 0.5rem;
+                    padding-bottom: 0.35rem;
+                    margin-bottom: 0.4rem;
+                    border-bottom: 1px solid color-mix(in srgb, var(--color-border, #334155) 55%, transparent);
                     color: var(--color-text-muted, #94a3b8);
                     font-size: 0.72rem;
                 }
@@ -4452,8 +4649,36 @@
                     font-weight: 600;
                 }
 
+                .board-comment-when {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.6rem;
+                    flex: none;
+                }
+
+                /* "in session": replays the agent's terminal seeked to this comment's moment. */
+                .board-comment-jump {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.3rem;
+                    padding: 1px 7px;
+                    border: 1px solid color-mix(in srgb, var(--color-primary, #3b82f6) 45%, transparent);
+                    border-radius: 999px;
+                    background: transparent;
+                    color: var(--color-primary, #3b82f6);
+                    font: inherit;
+                    font-size: 0.68rem;
+                    font-weight: 600;
+                    cursor: pointer;
+                }
+
+                .board-comment-jump:hover,
+                .board-comment-jump:focus-visible {
+                    background: color-mix(in srgb, var(--color-primary, #3b82f6) 16%, transparent);
+                }
+
                 .board-comment-body {
-                    margin: 2px 0 0;
+                    margin: 0;
                     min-width: 0;
                     font-size: 0.84rem;
                     line-height: 1.5;
@@ -4557,8 +4782,8 @@
                     align-items: center;
                     justify-content: space-between;
                     gap: 0.5rem;
-                    /* Outside the scrolling region: Save is always reachable, and it
-                       never paints over the commit list the way a sticky bar did. */
+                    /* Sibling of .board-editor-scroll: Save is always reachable, and
+                       it never paints over the commit list the way a sticky bar did. */
                     flex: none;
                     padding: 0.7rem 1.15rem 0.9rem;
                     background: var(--color-bg-base, #121212);
@@ -4569,6 +4794,47 @@
                     display: inline-flex;
                     align-items: center;
                     gap: 0.35rem;
+                }
+
+                .board-editor-actions-main {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                }
+
+                /* Assignee = the LLM picker (Tom Select) plus an unassign button. */
+                .board-assignee-row {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.35rem;
+                }
+
+                .board-assignee-row .ts-wrapper,
+                .board-assignee-row > select {
+                    flex: 1 1 auto;
+                    min-width: 0;
+                }
+
+                .board-assignee-clear {
+                    flex: none;
+                }
+
+                .board-side-row.is-live .board-side-title {
+                    display: inline-flex;
+                    align-items: center;
+                }
+
+                .board-comment.is-agent .board-comment-author::after {
+                    content: 'agent';
+                    margin-left: 0.4rem;
+                    padding: 0 0.35rem;
+                    border-radius: 999px;
+                    font-size: 0.62rem;
+                    font-weight: 600;
+                    text-transform: uppercase;
+                    letter-spacing: 0.04em;
+                    color: var(--color-text-muted, #94a3b8);
+                    border: 1px solid var(--color-border, #334155);
                 }
 
                 /* Commit / session lists ---------------------------------- */
@@ -4691,8 +4957,12 @@
                 }
 
                 @media (max-width: 860px) {
-                    .board-card-editor {
+                    .board-editor-scroll {
                         grid-template-columns: 1fr;
+                        /* Stacked rows must fit their content rather than shrink
+                           into the viewport and paint over the following panel. */
+                        grid-auto-rows: max-content;
+                        align-content: start;
                     }
 
                     .board-card-editor .board-editor-main {
@@ -4707,26 +4977,17 @@
                 }
             </style>
 
-            <header class="board-header">
-                <div class="board-heading">
-                    <span class="board-eyebrow">Planning</span>
-                    <h1>Board</h1>
-                    <p>Move work across lanes, flag what is blocked, and keep the next thing to build visible.</p>
-                </div>
-                <div class="board-header-actions">
-                    <button type="button" class="btn btn-sm btn-outline-secondary" data-board-action="reset-data"
-                        title="Restore the sample board and discard local changes">
-                        <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
-                        <span>Reset sample</span>
-                    </button>
-                    <button type="button" class="btn btn-sm btn-outline-primary" data-board-action="new-card">
-                        <i class="fa-solid fa-plus" aria-hidden="true"></i>
-                        <span>New card</span>
-                    </button>
+            <header class="row justify-content-center text-center">
+                <div class="col-md-8 col-lg-6 mb-3">
+                    <h4 class="text-uppercase fw-bold mb-0" style="letter-spacing: 0.05em;"><span class="text-gradient">Vibe Board</span></h4>
                 </div>
             </header>
 
             <div class="board-toolbar">
+                <button type="button" class="btn btn-sm btn-outline-primary text-nowrap" data-board-action="new-card">
+                    <i class="fa-solid fa-plus" aria-hidden="true"></i>
+                    <span>New card</span>
+                </button>
                 <div class="board-search">
                     <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
                     <input type="search" class="board-control board-search-input" data-board-search

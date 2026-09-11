@@ -39,10 +39,45 @@ public sealed class LlmProxyZaiConfigTests
 
         var xai = provider.GetProperty("xai").GetProperty("options");
         Assert.Equal(
-            "http://127.0.0.1:4321/llm/xai/v1",
-            xai.GetProperty("baseURL").GetString());
+            "http://127.0.0.1:4321/llm/zai/api/paas/v4",
+            zai.GetProperty("baseURL").GetString());
         var xaiHeaders = xai.GetProperty("headers");
         Assert.Equal("session-\"quoted", xaiHeaders.GetProperty("viberails_session").GetString());
         Assert.Equal("tab\\slash", xaiHeaders.GetProperty("viberails_tab").GetString());
+    }
+
+    [Fact]
+    public void BuildOpencodeConfigContent_IncludesTerminalSessionHeaderWhenProvided()
+    {
+        var json = LlmProxyZaiConfig.BuildOpencodeConfigContent(
+            "http://127.0.0.1:4321/",
+            "session-abc",
+            "tab-xyz",
+            " sess-42 ");
+
+        using var document = JsonDocument.Parse(json);
+        var provider = document.RootElement.GetProperty("provider");
+        foreach (var name in new[] { "zai", "xai" })
+        {
+            var headers = provider.GetProperty(name).GetProperty("options").GetProperty("headers");
+            Assert.Equal("sess-42", headers.GetProperty("viberails_terminal_session").GetString());
+        }
+    }
+
+    [Fact]
+    public void BuildOpencodeConfigContent_OmitsTerminalSessionHeaderWhenUnknown()
+    {
+        var json = LlmProxyZaiConfig.BuildOpencodeConfigContent(
+            "http://127.0.0.1:4321/",
+            "session-abc",
+            "tab-xyz");
+
+        using var document = JsonDocument.Parse(json);
+        var provider = document.RootElement.GetProperty("provider");
+        foreach (var name in new[] { "zai", "xai" })
+        {
+            var headers = provider.GetProperty(name).GetProperty("options").GetProperty("headers");
+            Assert.Equal(2, headers.EnumerateObject().Count());
+        }
     }
 }

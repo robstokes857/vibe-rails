@@ -10,6 +10,8 @@ using Xunit;
 
 namespace Tests.Services;
 
+// ParserConfigs.SetGitState is process-global: serialise with the other tests that mutate it.
+[Collection("ProcessEnvIsolation")]
 public sealed class AutomationNavPreferenceServiceTests : IDisposable
 {
     private const string ProjectPath = @"C:\test\automation-nav-project";

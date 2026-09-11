@@ -21,7 +21,8 @@ public sealed class LlmExchangeLogStoreTests : IDisposable
         string requestBefore = "{\"before\":1}",
         string requestAfter = "{\"after\":1}",
         string response = "data: {}\n\n",
-        bool truncated = false) =>
+        bool truncated = false,
+        string? sessionId = null) =>
         new(
             Guid.NewGuid(),
             "anthropic",
@@ -32,7 +33,8 @@ public sealed class LlmExchangeLogStoreTests : IDisposable
             requestAfter,
             response,
             truncated,
-            ElapsedMs: 1234);
+            ElapsedMs: 1234,
+            SessionId: sessionId);
 
     [Fact]
     public async Task Record_WritesTheWholeExchange()
@@ -87,6 +89,71 @@ public sealed class LlmExchangeLogStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Record_PersistsSessionIdWhenPresent()
+    {
+        using var store = new LlmExchangeLogStore(ConnectionString);
+
+        store.Record(Exchange(sessionId: "0f8c2a11-5c82-4f6e-9d1a-3b7e8f2c4a55"));
+        await store.WaitForDrainAsync();
+
+        Assert.Equal("0f8c2a11-5c82-4f6e-9d1a-3b7e8f2c4a55", ReadSingle().SessionId);
+    }
+
+    [Fact]
+    public async Task Record_LeavesSessionIdNullWhenAbsent()
+    {
+        // Requests launched before session attribution (or without a session) are the documented
+        // NULL case — never a placeholder, never a guess.
+        using var store = new LlmExchangeLogStore(ConnectionString);
+
+        store.Record(Exchange());
+        await store.WaitForDrainAsync();
+
+        Assert.Null(ReadSingle().SessionId);
+    }
+
+    [Fact]
+    public async Task Record_MigratesPreExistingDatabaseWithoutSessionIdColumn()
+    {
+        // The exact on-disk shape every existing proxy_exchanges.db has: created by the old
+        // CREATE TABLE, no SessionId column. The first write after upgrade must ALTER it in
+        // place rather than fail the insert (which would count as a drop — a hole in the log).
+        using (var connection = new SqliteConnection(ConnectionString))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE ProxyExchanges (
+                    Id                TEXT    NOT NULL PRIMARY KEY,
+                    CreatedUTC        TEXT    NOT NULL,
+                    Provider          TEXT    NOT NULL,
+                    Method            TEXT    NOT NULL,
+                    Path              TEXT    NOT NULL,
+                    StatusCode        INTEGER NOT NULL,
+                    RequestBefore     TEXT    NOT NULL,
+                    RequestAfter      TEXT    NOT NULL,
+                    ResponseBody      TEXT    NOT NULL,
+                    ResponseTruncated INTEGER NOT NULL,
+                    CharsBefore       INTEGER NOT NULL,
+                    CharsAfter        INTEGER NOT NULL,
+                    ResponseChars     INTEGER NOT NULL,
+                    ElapsedMs         INTEGER NOT NULL
+                )
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        using (var store = new LlmExchangeLogStore(ConnectionString))
+        {
+            store.Record(Exchange(sessionId: "sess-legacy-upgrade"));
+            await store.WaitForDrainAsync();
+            Assert.Equal(0, store.DroppedWrites);
+        }
+
+        Assert.Equal("sess-legacy-upgrade", ReadSingle().SessionId);
+    }
+
+    [Fact]
     public void Record_OversizeExchange_IsDroppedNotQueued()
     {
         using var store = new LlmExchangeLogStore(ConnectionString, queueCapacity: 4, maxQueuedChars: 64);
@@ -129,7 +196,7 @@ public sealed class LlmExchangeLogStoreTests : IDisposable
         using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT Id, Provider, Method, Path, StatusCode, RequestBefore, RequestAfter,
-                   ResponseBody, ResponseTruncated, CharsBefore, CharsAfter, ElapsedMs
+                   ResponseBody, ResponseTruncated, CharsBefore, CharsAfter, ElapsedMs, SessionId
             FROM ProxyExchanges
             """;
         using var reader = command.ExecuteReader();
@@ -137,7 +204,8 @@ public sealed class LlmExchangeLogStoreTests : IDisposable
         var row = new ExchangeRow(
             reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
             reader.GetInt32(4), reader.GetString(5), reader.GetString(6), reader.GetString(7),
-            reader.GetBoolean(8), reader.GetInt32(9), reader.GetInt32(10), reader.GetInt32(11));
+            reader.GetBoolean(8), reader.GetInt32(9), reader.GetInt32(10), reader.GetInt32(11),
+            reader.IsDBNull(12) ? null : reader.GetString(12));
         Assert.False(reader.Read(), "Expected exactly one exchange row.");
         return row;
     }
@@ -145,7 +213,7 @@ public sealed class LlmExchangeLogStoreTests : IDisposable
     private sealed record ExchangeRow(
         string Id, string Provider, string Method, string Path, int StatusCode,
         string RequestBefore, string RequestAfter, string ResponseBody, bool ResponseTruncated,
-        int CharsBefore, int CharsAfter, int ElapsedMs);
+        int CharsBefore, int CharsAfter, int ElapsedMs, string? SessionId);
 
     public void Dispose()
     {

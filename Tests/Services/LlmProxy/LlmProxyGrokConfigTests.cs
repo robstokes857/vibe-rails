@@ -85,8 +85,10 @@ public sealed class LlmProxyGrokConfigTests
         Assert.DoesNotContain("[model.grok-4.6]", merged);
         Assert.Contains(LlmProxyGrokConfig.SessionHeaderName, merged);
         Assert.Contains(LlmProxyGrokConfig.TabHeaderName, merged);
+        Assert.Contains(LlmProxyGrokConfig.TerminalSessionHeaderName, merged);
         Assert.Contains(LlmProxyGrokConfig.SessionTokenVariable, merged);
         Assert.Contains(LlmProxyGrokConfig.TabTokenVariable, merged);
+        Assert.Contains(LlmProxyGrokConfig.TerminalSessionVariable, merged);
         Assert.DoesNotContain("base_url", merged);
         Assert.DoesNotContain("cli_chat_proxy_base_url", merged);
     }
@@ -119,19 +121,46 @@ public sealed class LlmProxyGrokConfigTests
             [model."grok-4.6".env_http_headers]
             viberails_session = "VIBERAILS_LLM_PROXY_SESSION_TOKEN"
             viberails_tab = "VIBERAILS_LLM_PROXY_TAB_TOKEN"
+            viberails_terminal_session = "VIBERAILS_LLM_PROXY_SESSION_ID"
 
             [model.grok-build.env_http_headers]
             viberails_session = "VIBERAILS_LLM_PROXY_SESSION_TOKEN"
             viberails_tab = "VIBERAILS_LLM_PROXY_TAB_TOKEN"
+            viberails_terminal_session = "VIBERAILS_LLM_PROXY_SESSION_ID"
 
             [model."grok-4.5".env_http_headers]
             viberails_session = "VIBERAILS_LLM_PROXY_SESSION_TOKEN"
             viberails_tab = "VIBERAILS_LLM_PROXY_TAB_TOKEN"
+            viberails_terminal_session = "VIBERAILS_LLM_PROXY_SESSION_ID"
             """;
 
         var merged = LlmProxyGrokConfig.MergeEnvHttpHeaders(grokNormalized);
 
         Assert.Equal(grokNormalized, merged);
+    }
+
+    [Fact]
+    public void MergeEnvHttpHeaders_UpgradesTwoMappingFileWrittenBeforeTerminalSessionHeader()
+    {
+        // A config.toml written by the two-header era (or normalized by grok from it) must gain
+        // the terminal-session mapping in place, without dropping anything already there.
+        const string existing = """
+            [model."grok-4.6".env_http_headers]
+            viberails_session = "VIBERAILS_LLM_PROXY_SESSION_TOKEN"
+            viberails_tab = "VIBERAILS_LLM_PROXY_TAB_TOKEN"
+
+            [model.grok-build]
+            env_http_headers = { "viberails_session" = "VIBERAILS_LLM_PROXY_SESSION_TOKEN", "viberails_tab" = "VIBERAILS_LLM_PROXY_TAB_TOKEN" }
+            """;
+
+        var merged = LlmProxyGrokConfig.MergeEnvHttpHeaders(existing);
+
+        Assert.Contains(LlmProxyGrokConfig.TerminalSessionHeaderName, merged);
+        Assert.Contains(LlmProxyGrokConfig.TerminalSessionVariable, merged);
+        Assert.True(LlmProxyGrokConfig.ContainsMappedEnvHttpHeaders(merged, "grok-4.6"));
+        Assert.True(LlmProxyGrokConfig.ContainsMappedEnvHttpHeaders(merged, "grok-build"));
+        // And the upgrade itself is stable: a second pass changes nothing.
+        Assert.Equal(merged, LlmProxyGrokConfig.MergeEnvHttpHeaders(merged));
     }
 
     [Fact]

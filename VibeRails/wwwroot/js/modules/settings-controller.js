@@ -1,5 +1,6 @@
 import { showDataExportModal } from './data-export-modal.js';
 import { confirmDialog } from './utils.js';
+import { SettingsKeysPanel } from './settings-keys.js';
 
 export class SettingsController {
     constructor(app) {
@@ -16,6 +17,7 @@ export class SettingsController {
         this._dataExportConfigured = false;
         this._dataExportSizeBytes = null;
         this._settingsRoot = null;
+        this._keysPanel = null;
         // In-app leave-confirm (window.confirm is a silent no-op in the VS Code
         // webview). A field so tests can substitute a resolved value.
         this.confirmLeave = confirmDialog;
@@ -67,6 +69,7 @@ export class SettingsController {
         if (root) {
             this._settingsRoot = root;
             this.app.bindAction(root, '[data-action="go-back"]', () => this.app.goBack());
+            this._initSettingsTabs(root);
 
             const projectIdentityCard = root.querySelector('[data-project-identity-card]');
             if (projectIdentityCard && this.app.data.isInGit) {
@@ -316,6 +319,8 @@ export class SettingsController {
     }
 
     unload() {
+        this._keysPanel?.unload();
+        this._keysPanel = null;
         if (this._removeNavigationGuard) {
             this._removeNavigationGuard();
             this._removeNavigationGuard = null;
@@ -700,6 +705,61 @@ export class SettingsController {
     _getGrokLlmProxyMode(root) {
         const selected = root.querySelector('input[name="setting-grok-llm-proxy-mode"]:checked');
         return selected?.value === 'api' ? 'api' : 'subscription';
+    }
+
+    // ── Section tabs ───────────────────────────────────────────────────────
+
+    // Panels (and every input inside them) stay in the DOM; only visibility
+    // changes. Dirty tracking, the save bar, and form submission therefore keep
+    // reading controls that live on a hidden tab.
+    _initSettingsTabs(root) {
+        const tablist = root.querySelector('.settings-tabs');
+        if (!tablist) return;
+
+        const tabs = Array.from(tablist.querySelectorAll('[role="tab"]'));
+        if (tabs.length === 0) return;
+
+        const panelFor = (tab) => root.querySelector(`#${tab.getAttribute('aria-controls')}`);
+
+        const selectTab = (id, focusTab = false) => {
+            tabs.forEach((tab) => {
+                const selected = tab.dataset.settingsTab === id;
+                tab.setAttribute('aria-selected', String(selected));
+                tab.tabIndex = selected ? 0 : -1;
+                const panel = panelFor(tab);
+                if (panel) panel.hidden = !selected;
+            });
+            if (focusTab) {
+                tabs.find((tab) => tab.dataset.settingsTab === id)?.focus();
+            }
+            if (id === 'keys') {
+                const container = root.querySelector('[data-settings-keys]');
+                if (container) {
+                    this._keysPanel ??= new SettingsKeysPanel(this.app, container);
+                    void this._keysPanel.activate();
+                }
+            } else {
+                this._keysPanel?.clearSecrets();
+            }
+        };
+
+        tablist.addEventListener('click', (event) => {
+            const tab = event.target.closest('[data-settings-tab]');
+            if (tab) selectTab(tab.dataset.settingsTab);
+        });
+
+        tablist.addEventListener('keydown', (event) => {
+            const current = tabs.indexOf(event.target);
+            if (current === -1) return;
+            let next = -1;
+            if (event.key === 'ArrowRight') next = (current + 1) % tabs.length;
+            else if (event.key === 'ArrowLeft') next = (current + tabs.length - 1) % tabs.length;
+            else if (event.key === 'Home') next = 0;
+            else if (event.key === 'End') next = tabs.length - 1;
+            if (next === -1) return;
+            event.preventDefault();
+            selectTab(tabs[next].dataset.settingsTab, true);
+        });
     }
 
     // ── PIN section ────────────────────────────────────────────────────────

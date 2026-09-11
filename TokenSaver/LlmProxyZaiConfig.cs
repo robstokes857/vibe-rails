@@ -41,6 +41,7 @@ public static class LlmProxyZaiConfig
     // validates one contract regardless of which CLI is calling.
     public const string SessionHeaderName = LlmProxyCodexConfig.SessionHeaderName;
     public const string TabHeaderName = LlmProxyCodexConfig.TabHeaderName;
+    public const string TerminalSessionHeaderName = LlmProxyCodexConfig.TerminalSessionHeaderName;
 
     /// <summary>Env var OpenCode reads for inline JSON config overrides (high precedence).</summary>
     public const string ConfigContentVariable = "OPENCODE_CONFIG_CONTENT";
@@ -67,7 +68,11 @@ public static class LlmProxyZaiConfig
     /// anonymous object: the TokenSaver library is AOT-conscious (see the rewriters' no-DOM/no-
     /// reflection rule), and reflection-based serialization of anonymous types is not AOT-safe.
     /// </summary>
-    public static string BuildOpencodeConfigContent(string apiBaseUrl, string sessionToken, string tabToken)
+    public static string BuildOpencodeConfigContent(
+        string apiBaseUrl,
+        string sessionToken,
+        string tabToken,
+        string? terminalSessionId = null)
     {
         var baseUrl = BuildZaiBaseUrl(apiBaseUrl);
 
@@ -84,13 +89,14 @@ public static class LlmProxyZaiConfig
         writer.WriteStartObject();
         writer.WritePropertyName("provider"u8);
         writer.WriteStartObject();
-        WriteProviderOverride(writer, "zai"u8, baseUrl, sessionToken, tabToken);
+        WriteProviderOverride(writer, "zai"u8, baseUrl, sessionToken, tabToken, terminalSessionId);
         WriteProviderOverride(
             writer,
             "xai"u8,
             LlmProxyXaiConfig.BuildXaiBaseUrl(apiBaseUrl),
             sessionToken,
-            tabToken);
+            tabToken,
+            terminalSessionId);
         writer.WriteEndObject();
         writer.WriteEndObject();
         writer.Flush();
@@ -103,7 +109,8 @@ public static class LlmProxyZaiConfig
         ReadOnlySpan<byte> providerName,
         string baseUrl,
         string sessionToken,
-        string tabToken)
+        string tabToken,
+        string? terminalSessionId)
     {
         writer.WritePropertyName(providerName);
         writer.WriteStartObject();
@@ -114,6 +121,8 @@ public static class LlmProxyZaiConfig
         writer.WriteStartObject();
         writer.WriteString(SessionHeaderName, sessionToken);
         writer.WriteString(TabHeaderName, tabToken);
+        if (!string.IsNullOrWhiteSpace(terminalSessionId))
+            writer.WriteString(TerminalSessionHeaderName, terminalSessionId.Trim());
         writer.WriteEndObject();
         writer.WriteEndObject();
         writer.WriteEndObject();

@@ -45,6 +45,11 @@ public interface ILlmProxyExchangeSink
 /// <paramref name="ResponseTruncated"/> marks a response that exceeded the capture cap. The client
 /// still received it in full — only the retained copy is short — so a truncated record is evidence
 /// about a large response, never evidence of a broken one.
+///
+/// <paramref name="SessionId"/> is the terminal <c>Sessions.Id</c> the request belongs to, read from
+/// the <c>viberails_terminal_session</c> correlation header. It is NULL for rows written before the
+/// header existed and for requests launched without a session — deliberately nullable, never
+/// backfilled, and never a join guarantee.
 /// </summary>
 public sealed record LlmProxyExchange(
     Guid Id,
@@ -56,7 +61,8 @@ public sealed record LlmProxyExchange(
     string RequestAfter,
     string Response,
     bool ResponseTruncated,
-    int ElapsedMs)
+    int ElapsedMs,
+    string? SessionId = null)
 {
     public int RequestBytesBefore => RequestBefore.Length;
 

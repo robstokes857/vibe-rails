@@ -10,7 +10,8 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 |------|---------|
 | [app.js](app.js) | Central controller, routing, API layer |
 | [js/modules/internal-tools-modal.js](js/modules/internal-tools-modal.js) | Triple-click the brand icon to open Internal tools: About/version, retained upload attempts, and filterable application/Demon logs and feature journal; lazy loaded with bounded pages and no polling |
-| [js/modules/settings-controller.js](js/modules/settings-controller.js) | App settings, including the off-by-default **Share session data** switch gated by a saved API key and configured export endpoint, plus the legacy one-shot **Export Data** button and progress modal ([js/modules/data-export-modal.js](js/modules/data-export-modal.js)) |
+| [js/modules/settings-controller.js](js/modules/settings-controller.js) | App settings, split into General / LLMs / Git / KEYS section tabs (panels stay in the DOM so dirty tracking and the save bar keep reading hidden-tab controls; `_initSettingsTabs` owns click + arrow-key switching); includes the off-by-default **Share session data** switch gated by a saved API key and configured export endpoint, plus the legacy one-shot **Export Data** button and progress modal ([js/modules/data-export-modal.js](js/modules/data-export-modal.js)) |
+| [js/modules/settings-keys.js](js/modules/settings-keys.js) | Lazy KEYS panel: create password-protected RSA-4096 keys, sync public keys to the saved API-key account, download public/encrypted private PEMs, and sign a message/file into public-verification JSON. Independent of the settings save bar. |
 | [js/modules/terminal-multitab.js](js/modules/terminal-multitab.js) | Reusable xterm.js terminal manager with per-tab lifecycle and environment picker |
 | [js/modules/llm-picker-controller.js](js/modules/llm-picker-controller.js) | Shared launch-picker catalog, Tom Select lifecycle, customization modal, and live preference refresh |
 | [js/modules/terminal-token-compression.js](js/modules/terminal-token-compression.js) | Persistent token-savings meter and per-tab pause-badge display (the per-tab on/off toggle was removed 2026-07-19; the saver is now per-LLM in Settings) |
@@ -26,9 +27,28 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | [js/modules/python-run-window.js](js/modules/python-run-window.js) | The little run window: typed inputs + free arguments + stdin in, exit code / output / return value out, no terminal (see "Python script run window" below) |
 | [js/modules/automation-launcher.js](js/modules/automation-launcher.js) | Nav "Launch" flyout (automations + Python scripts, unsigned ones disabled) and its order/show-hide customize modal over `/api/v1/automation-nav/preferences` |
 | [js/modules/board-controller.js](js/modules/board-controller.js) | `board` view: the lane board — drag cards between lanes, drag lanes to reorder, filter, and the card editor with comments |
-| [js/modules/board-api.js](js/modules/board-api.js) | Board data layer. **Still a local placeholder** (localStorage + seed); every function already has the shape of its real endpoint, so wiring the backend is a body-only change |
+| [js/modules/board-api.js](js/modules/board-api.js) | Board data layer: a thin client over `/api/v1/board/*` (every call rides `app.apiCall`, so cookie + tab header apply). `BoardApi.attach(app)` once from the controller |
 | [js/modules/board-text.js](js/modules/board-text.js) | Renders a comment/description body. **Escape-first**: the input is escaped before any transform, so no sanitizer is needed and none is present |
 | [js/modules/diff-modal.js](js/modules/diff-modal.js) | Shared Monaco diff viewer as a nested modal layer. Used by Board commits and the sandbox "View Diff" |
+
+## Settings signing keys
+
+KEYS initializes and fetches only when selected. Its create, backup, and sign forms are separate
+from `app-settings-form` and excluded from settings dirty tracking. Reopening KEYS refreshes the
+saved API-key status. Public keys sync on creation when that credential exists; existing keys have
+an explicit Sync public key action, which asks for the key password so the backend can prove
+possession with a registration challenge. The account link opens `https://viberails.ai/Keys` for stored
+public keys and validation history. The panel explains that successful public verification reveals
+the signer's account email.
+
+PIN/password validation counts Unicode code points (4–128, nonblank); confirmation must match
+exactly. Never normalize or trim the password, save it in browser storage, or retain it in panel
+state. Password fields clear after every attempted operation, on section changes, on pagehide,
+and on unload. Unload aborts pending requests and prevents late results from triggering downloads.
+Only encrypted private PEM backup bytes may leave the backend. Public metadata is escaped before
+rendering. Signing preserves exact UTF-8 message bytes or file bytes, bounded to 64 KiB before
+base64 encoding. The resulting JSON is for
+`POST https://viberails.ai/public/api/v1/signatures/verify`, using RSA-PSS-SHA256.
 
 ## Board
 
@@ -38,10 +58,37 @@ fill the viewport height and the board scrolls sideways while the page itself do
 `flex: 1 1 0` with a 232px floor: they share the width evenly and only start scrolling once they
 cannot all fit.
 
-**The data layer is not wired to the backend yet.** `board-api.js` seeds a sample board into
-`localStorage` (in-memory when storage is blocked). Its function names and return shapes are the
-contract the real endpoints will honour, so swapping in `app.apiCall` is a body-only change and
-`board-controller.js` does not move. Until then the "Reset sample" action restores the seed.
+The page heading is **Vibe Board**, using the same centered, uppercase gradient heading as
+Application Settings. New card lives in the board toolbar.
+
+**The board is per project and server-backed.** `board-api.js` is a thin client over
+`/api/v1/board/*` (`VibeRails/Routes/BoardRoutes.cs`, root backend only); the server scopes every
+call to the open workspace, so the client never sends a project path. The list endpoint returns
+card **summaries** (no comments/commits/sessions/attachments, plus `commentCount`,
+`activeSessionId`, `activeTabId`); `getBoardCardAsync` returns the full card, which is why
+`openCardEditor` always re-fetches — an LLM may have commented on or moved the card since the
+board loaded. There is no "Reset sample" any more; a new project starts with five empty lanes.
+
+**Cards are work items for LLMs.** `card.assignee` is an LLM picker key (`base:claude`,
+`env:7:codex`), never a person: the editor's Assignee field is `mountLlmPicker(app, select,
+{ context: 'sandbox' })` from `pickers/llm-picker.js` (environments + bare CLIs, no shell, no
+Automation Workers) with an unassign button beside it; `assigneeInfo()` turns a key into a label
+(from the picker catalog) and a CLI-brand avatar (`getCliBrand`), and the toolbar's assignee
+filter lists the keys present on the board. **Start work** (`startWork`) saves the form, POSTs
+`/cards/{id}/launch`, then does exactly what the Python "run interactive" flow does:
+`terminalController.rememberTabLaunch(tabId, { taskKey: 'board-card:<cardId>', … })` →
+`adoptLaunchedTab(tabId)` → fallback `navigate('terminal-focus', { preferredTabId })`. The
+server composes the LLM's first message from the card and prepends it to the environment's
+Initial Message (`Services/Board/BoardPromptComposer.cs`), then links the session to the card.
+Task-key namespace: `board-card:<cardId>` (keep it distinct from `python-script*:`).
+
+Start work becomes a disabled **Agent running** button when the card has an active linked
+session. The save response is checked again before launching, and the backend refuses a launch
+when its live tab list already contains one of the card's linked sessions.
+
+`TODO(board)`: an **Auto Launch** option (per card and/or per lane) so dropping an assigned card
+into a lane starts work by itself — noted in the controller header and `BoardLaunchService`;
+not built.
 
 The view uses the app's shared surfaces rather than its own: `app.showModal` (upgraded to
 `modal-xl` for the card editor, the same way the rule and quality modals do it), `confirmDialog`
@@ -51,18 +98,26 @@ instances, because they attach document-level listeners that outlive the view's 
 
 ### The card editor
 
-Laid out like a Jira / older Azure DevOps work item, not a tabbed dialog. The body flows top to
-bottom — title, description, then the comment thread at the bottom — and scrolls as one column.
-Everything *about* the card lives in the right rail: the fields, then Commits (git-commit icons)
-and Sessions (terminal icons — commits use `fa-code-branch`, which stays legible at 0.78rem where
-`fa-code-commit` reads as a faint dot). The rail's action bar is a sibling of its scrolling region,
-not a sticky element inside it, so Save is always reachable and never paints over the commit list.
+Laid out like a Jira / older Azure DevOps work item, not a tabbed dialog. The dialog fills the
+viewport (`height: calc(100% - 2rem)`); `app.showModal`'s `modal-dialog-scrollable` class is
+stripped so `.modal-body` does not grow a second scrollbar. One region scrolls:
+`.board-editor-scroll` (both columns together). The body flows top to bottom — title, description,
+then the comment thread at the bottom. Everything *about* the card lives in the right rail: the
+fields, then Commits (git-commit icons) and Sessions (terminal icons — commits use `fa-code-branch`,
+which stays legible at 0.78rem where `fa-code-commit` reads as a faint dot). Save/Delete sit in a
+footer sibling of that scroller, so they stay reachable and never paint over the commit list.
+The viewport-fill + single-scroller layout is pinned in
+`Tests/wwwroot/js/board-card-modal.test.mjs`.
 
 Buttons follow the app's outline register (`btn-outline-primary` / `-secondary` / `-danger`) rather
 than solid fills; there are no solid `btn-primary` buttons in this view. The composer's submit sits
 in a footer **below** the textarea, not in its toolbar.
 
 **Do not reintroduce tabs here** — they were tried and rejected.
+
+Descriptions open as rendered text (including attached images), with an Edit/Preview toggle
+in the composer toolbar. Empty descriptions start in edit mode. The textarea remains the source
+for Save and Start work in either mode; preview uses the same attachment-aware renderer as comments.
 
 **Comment and description text is not Markdown.** `board-text.js` supports a deliberately tiny
 syntax: fenced code, inline code, `http(s)` autolinks and images. It escapes the entire input
@@ -86,16 +141,35 @@ all depend on this; putting any of them behind rAF silently breaks them in the w
 to re-measure later. (Same failure class as the cold-start `setTimeout` throttling documented in
 TERMINAL.md.)
 
-Images go through `BoardApi.addCardAttachmentAsync`, which returns a **URL**. The placeholder
-downscales client-side and returns a `data:` URL; the real backend will store bytes and return its
-own. The controller only ever sees a URL, so that swap changes nothing above the API. In the text
+Images go through `BoardApi.addCardAttachmentAsync`, which returns a **URL**. The client
+downscales, the server stores the `data:` URL text (image types only, size-capped) and hands it
+back inside the full card; a served-URL route would be a body-only change in `board-api.js`
+because the controller only ever sees a URL. In the text
 an image is `![name](attachment:<id>)` and the id is resolved against the card's attachment
 records — a URL written into the text is never used as a `src`.
 
 ### Commits, sessions, and the diff viewer
 
-Commits and sessions are placeholder data on the card. Clicking a commit opens `diff-modal.js`;
-clicking a session opens a stub modal. Both are **nested modal layers**, not `app.showModal` calls:
+Linking a commit sends only the sha. The server captures metadata and before/after file contents
+from the current checkout and saves the link and code snapshot atomically. The diff endpoint
+reads only that snapshot in the shape the sandbox viewer uses, so deleted workspaces do not
+break saved code history. A failed capture creates no link. More than 60 changed files is
+rejected; large text previews keep 400,000 characters and a truncation marker. Older links
+without snapshots must be unlinked and linked again while their checkout is available.
+Sessions are the terminal sessions linked to the card — by Start work
+(origin `launch`), by an LLM touching the card over MCP (`mcp`), or by hand (`manual`); a live
+one (`session.active`, computed server-side from the open tabs) shows the pulsing
+`.board-live-dot` on the lane card and its row jumps to the tab (`focusSessionTab`, adopt or
+navigate). Clicking a commit opens `diff-modal.js`; clicking an ended session opens the shared
+terminal replay (`session-viewer.js` `showReplayModal`, the chat-history sidebar's "Replay
+Session"), which mounts its own overlay on `document.body` — the controller wraps it so Escape
+closes the replay (captured) and `app.hasActiveNestedModalLayer` recognises
+`.vb-session-replay-layer`. Card session rows offer open/replay and unlink. Pasting a
+session id into the Sessions form links that session by hand. Agent comments carry
+`author.sessionId`; their "in session" pill opens the same replay with `seekToUtc: createdAt` —
+the player fast-forwards to 1.5 s before that wall-clock instant (offset against the replay's
+`startedUtc`) and plays on from there, so the reader sees the tool call that wrote the comment. Comments carry `author: { kind: 'user'|'agent', label, cli }` — the UI posts as
+"You", agent comments come from the MCP tools and get an "agent" pill. Both are **nested modal layers**, not `app.showModal` calls:
 `showModal` rebuilds `#modal-container` wholesale, which would destroy the card editor underneath
 and, on close, restore focus past both dialogs. The layers append themselves, `inert` the existing
 children, own their focus trap and Escape, and restore on close — the same pattern as

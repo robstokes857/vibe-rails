@@ -47,7 +47,7 @@ public sealed class VcaHookRunner : IVcaHookRunner
                 {
                     var suffix = removedCount == 1 ? "trailer" : "trailers";
                     await _presenter.WriteWarningAsync(
-                        $"Removed {removedCount} Co-authored-by {suffix} from the commit message.");
+                        $"Removed {removedCount} {suffix} from the commit message (Co-authored-by / Claude-Session cleanup).");
                 }
             }
 

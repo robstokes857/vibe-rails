@@ -169,7 +169,7 @@ public static class VcaHookProcessHost
             {
                 var suffix = removed == 1 ? "trailer" : "trailers";
                 await output.WriteLineAsync(
-                    $"VibeRails removed {removed} Co-authored-by {suffix} from the commit message.");
+                    $"VibeRails removed {removed} {suffix} from the commit message (Co-authored-by / Claude-Session cleanup).");
             }
         }
         catch (OperationCanceledException)
@@ -178,7 +178,7 @@ public static class VcaHookProcessHost
         }
         catch (Exception ex)
         {
-            Log.Warning(ex, "Commit-message co-author cleanup failed");
+            Log.Warning(ex, "Commit-message trailer cleanup failed");
             await error.WriteLineAsync(
                 "VibeRails could not apply commit-message cleanup; the message was left unchanged.");
         }

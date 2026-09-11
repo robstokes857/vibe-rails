@@ -8,13 +8,13 @@ const modulePath = path.resolve('VibeRails/wwwroot/js/modules/settings-controlle
 const indexPath = path.resolve('VibeRails/wwwroot/index.html');
 const { SettingsController } = await import(pathToFileURL(modulePath).href);
 
-test('settings page exposes the default-on co-author removal control', () => {
+test('settings page exposes the default-on co-author and Claude session removal control', () => {
     const html = readFileSync(indexPath, 'utf8');
     const source = readFileSync(modulePath, 'utf8');
 
     assert.match(html, /id="setting-remove-co-author-trailers"/);
-    assert.match(html, /Remove co-author tags/);
-    assert.match(html, /remove every <code>Co-authored-by:<\/code> trailer/);
+    assert.match(html, /Remove co-author and Claude session tags/);
+    assert.match(html, /remove every <code>Co-authored-by:<\/code> and <code>Claude-Session:<\/code> trailer/);
     assert.match(source, /removeCoAuthorTrailers:\s*true/);
 });
 
@@ -92,6 +92,113 @@ test('saving settings sends the co-author removal choice', async () => {
     assert.equal(calls[0].body.removeCoAuthorTrailers, false);
     assert.equal(calls[0].body.showVibeAiUi, false);
     assert.equal(calls[0].body.dataExportOptIn, true);
+});
+
+test('settings page groups its cards under a section tab bar', () => {
+    const html = readFileSync(indexPath, 'utf8');
+
+    assert.match(html, /class="settings-tabs" role="tablist" aria-label="Settings sections"/);
+    for (const id of ['general', 'llm', 'git', 'keys']) {
+        assert.match(html, new RegExp(`id="settings-tab-${id}"`));
+        assert.match(html, new RegExp(`id="settings-panel-${id}" role="tabpanel"`));
+    }
+    // General is the default tab; the other panels start hidden.
+    assert.match(html, /id="settings-tab-general"[\s\S]{0,120}aria-selected="true"/);
+    assert.match(html, /id="settings-tab-llm"[\s\S]{0,120}aria-selected="false"/);
+    assert.match(html, /id="settings-panel-llm"[\s\S]{0,120}hidden/);
+    // Like settings stay on their own tabs.
+    assert.match(html, /id="settings-panel-llm"[\s\S]*?Codex Settings[\s\S]*?Token Saver/);
+    assert.match(html, /id="settings-panel-git"[\s\S]*?Git Commit Settings/);
+    assert.match(html, /id="settings-panel-general"[\s\S]*?Remote PIN Lock[\s\S]*?Application Settings/);
+});
+
+test('every tracked settings control survives the tabbed layout', () => {
+    const html = readFileSync(indexPath, 'utf8');
+    const source = readFileSync(modulePath, 'utf8');
+
+    const block = source.match(/_trackedSettingsSelector\(\)\s*\{[\s\S]*?\.join/)[0];
+    const selectors = [...block.matchAll(/'([^']+)'/g)].map(match => match[1]);
+    assert.ok(selectors.length >= 15, 'expected the full tracked selector list');
+
+    for (const selector of selectors) {
+        if (selector.startsWith('#')) {
+            assert.ok(html.includes(`id="${selector.slice(1)}"`), `${selector} is missing from the page`);
+        } else {
+            const name = /name="([^"]+)"/.exec(selector)?.[1];
+            assert.ok(name && html.includes(`name="${name}"`), `${selector} is missing from the page`);
+        }
+    }
+});
+
+test('settings tabs switch panels without removing any controls', () => {
+    globalThis.window = { VibeRailsPerformance: null };
+
+    const ids = ['general', 'llm', 'git', 'keys'];
+    const panels = Object.fromEntries(ids.map(id => [id, { hidden: id !== 'general' }]));
+    const tabs = ids.map(id => {
+        const tab = {
+            dataset: { settingsTab: id },
+            tabIndex: id === 'general' ? 0 : -1,
+            selected: String(id === 'general'),
+            focusCount: 0,
+            listeners: {},
+            getAttribute: name => name === 'aria-controls' ? `settings-panel-${id}` : null,
+            setAttribute(name, value) { if (name === 'aria-selected') tab.selected = String(value); },
+            addEventListener(type, fn) { (tab.listeners[type] ??= []).push(fn); },
+            focus() { tab.focusCount += 1; },
+            closest: () => tab
+        };
+        return tab;
+    });
+    const tablist = {
+        listeners: {},
+        addEventListener(type, fn) { (tablist.listeners[type] ??= []).push(fn); },
+        querySelectorAll: () => tabs
+    };
+    const root = {
+        querySelector(selector) {
+            if (selector === '.settings-tabs') return tablist;
+            if (selector === '[data-settings-keys]') return {};
+            const match = /^#settings-panel-(general|llm|git|keys)$/.exec(selector);
+            return match ? panels[match[1]] : null;
+        }
+    };
+
+    const controller = new SettingsController({});
+    let keysActivations = 0;
+    let secretClears = 0;
+    controller._keysPanel = {
+        activate() { keysActivations += 1; },
+        clearSecrets() { secretClears += 1; }
+    };
+    controller._initSettingsTabs(root);
+    assert.equal(keysActivations, 0, 'keys are not fetched when settings initializes');
+
+    // Clicking the LLMs tab (delegated through the tablist) shows only its panel.
+    tablist.listeners.click.forEach(fn => fn({ target: tabs[1] }));
+    assert.equal(panels.llm.hidden, false);
+    assert.equal(panels.general.hidden, true);
+    assert.equal(panels.git.hidden, true);
+    assert.equal(tabs[1].selected, 'true');
+    assert.equal(tabs[1].tabIndex, 0);
+    assert.equal(tabs[0].selected, 'false');
+    assert.equal(tabs[0].tabIndex, -1);
+
+    // ArrowRight from LLMs moves to Git and focuses it.
+    tablist.listeners.keydown.forEach(fn =>
+        fn({ target: tabs[1], key: 'ArrowRight', preventDefault() {} }));
+    assert.equal(panels.git.hidden, false);
+    assert.equal(panels.llm.hidden, true);
+    assert.equal(tabs[2].focusCount, 1);
+
+    // ArrowLeft wraps from General to KEYS, lazily activating its independent forms.
+    tablist.listeners.keydown.forEach(fn =>
+        fn({ target: tabs[0], key: 'ArrowLeft', preventDefault() {} }));
+    assert.equal(panels.keys.hidden, false);
+    assert.equal(tabs[3].focusCount, 1);
+    assert.equal(keysActivations, 1);
+    tablist.listeners.click.forEach(fn => fn({ target: tabs[0] }));
+    assert.equal(secretClears, 3, 'leaving KEYS clears key passwords');
 });
 
 test('a dirty settings form blocks navigation, asks in-app, and replays on yes', async () => {

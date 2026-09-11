@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace TokenSaver;
 
 /// <summary>
@@ -18,6 +20,7 @@ public static class LlmProxyClaudeConfig
     // validates one contract regardless of which CLI is calling.
     public const string SessionHeaderName = LlmProxyCodexConfig.SessionHeaderName;
     public const string TabHeaderName = LlmProxyCodexConfig.TabHeaderName;
+    public const string TerminalSessionHeaderName = LlmProxyCodexConfig.TerminalSessionHeaderName;
 
     // Env vars Claude Code honors. Values are literal (no interpolation), so we embed real tokens.
     public const string BaseUrlVariable = "ANTHROPIC_BASE_URL";
@@ -32,14 +35,20 @@ public static class LlmProxyClaudeConfig
 
     /// <summary>
     /// Builds the <c>ANTHROPIC_CUSTOM_HEADERS</c> value: newline-separated <c>Name: Value</c> pairs
-    /// carrying the session/tab tokens the proxy validates. These ride an env var (not a CLI arg),
-    /// so the token values never surface in the process command line.
+    /// carrying the session/tab tokens the proxy validates plus, when known, the terminal-session
+    /// correlation header. These ride an env var (not a CLI arg), so the values never surface in the
+    /// process command line.
     /// </summary>
-    public static string BuildCustomHeaders(string sessionToken, string tabToken)
+    public static string BuildCustomHeaders(
+        string sessionToken, string tabToken, string? terminalSessionId = null)
     {
-        return string.Concat(
-            SessionHeaderName, ": ", sessionToken, "\n",
-            TabHeaderName, ": ", tabToken);
+        var builder = new StringBuilder();
+        builder.Append(SessionHeaderName).Append(": ").Append(sessionToken).Append('\n');
+        builder.Append(TabHeaderName).Append(": ").Append(tabToken);
+        if (!string.IsNullOrWhiteSpace(terminalSessionId))
+            builder.Append('\n').Append(TerminalSessionHeaderName).Append(": ")
+                .Append(terminalSessionId.Trim());
+        return builder.ToString();
     }
 
     /// <summary>
@@ -47,12 +56,12 @@ public static class LlmProxyClaudeConfig
     /// environment at the <c>CommandService</c> seam.
     /// </summary>
     public static IReadOnlyDictionary<string, string> BuildClaudeProxyEnvironment(
-        string apiBaseUrl, string sessionToken, string tabToken)
+        string apiBaseUrl, string sessionToken, string tabToken, string? terminalSessionId = null)
     {
         return new Dictionary<string, string>
         {
             [BaseUrlVariable] = BuildAnthropicBaseUrl(apiBaseUrl),
-            [CustomHeadersVariable] = BuildCustomHeaders(sessionToken, tabToken)
+            [CustomHeadersVariable] = BuildCustomHeaders(sessionToken, tabToken, terminalSessionId)
         };
     }
 }
