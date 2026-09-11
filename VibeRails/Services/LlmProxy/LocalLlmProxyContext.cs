@@ -22,6 +22,15 @@ public sealed class LocalLlmProxyContext : ILocalLlmProxyContext
     public const string TabTokenVariable = "VIBERAILS_LLM_PROXY_TAB_TOKEN";
 
     /// <summary>
+    /// Terminal session id for the <c>viberails_terminal_session</c> correlation header — the
+    /// <c>Sessions.Id</c> the exchange log attributes relayed traffic to. Mirrors
+    /// <see cref="LlmProxyGrokConfig.TerminalSessionVariable"/> in the library (same literal, two
+    /// homes, like the token variables) because the library cannot reference host types. Only set
+    /// when a launch has a session; absent means the exchange records a NULL session id.
+    /// </summary>
+    public const string SessionIdVariable = "VIBERAILS_LLM_PROXY_SESSION_ID";
+
+    /// <summary>
     /// The proxy host a CLI-spawned helper should talk to, e.g. an MCP server started by
     /// <c>claude mcp add ... -- vb mcp</c>. Every provider already reaches the proxy, but by a
     /// different route: Claude reads <c>ANTHROPIC_BASE_URL</c>, Codex gets its base URL in a

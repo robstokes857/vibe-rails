@@ -190,6 +190,101 @@ namespace VibeRails.DTOs
         string? EnvironmentName = null
     );
 
+    // ---------------------------------------------------------------- Kanban board (Services/Board)
+    // Wire names are what wwwroot/js/modules/board-api.js already consumes. Points and WipLimit are
+    // JsonElement so a PUT can say "leave alone" (omitted), "clear" (null / ""), or "set" (number).
+    public record BoardColumnResponse(string Id, string Name, int? WipLimit, int Position, string Color);
+    public record BoardColumnListResponse(List<BoardColumnResponse> Columns);
+    public record CreateBoardColumnRequest(string? Name = null, JsonElement WipLimit = default, string? Color = null);
+    public record UpdateBoardColumnRequest(string? Name = null, JsonElement WipLimit = default, string? Color = null);
+    public record ReorderBoardColumnsRequest(List<string>? OrderedIds = null);
+    public record DeleteBoardColumnResponse(bool Ok, string MovedToColumnId, int MovedCards);
+    public record BoardAuthorDto(string Kind, string Label, string? Cli, string? SessionId = null);
+    public record BoardCommentDto(string Id, BoardAuthorDto Author, string Body, DateTime CreatedAt);
+    public record BoardSessionDto(
+        string Id,
+        string? TabId,
+        string DisplayName,
+        string Cli,
+        string Selection,
+        string Origin,
+        DateTime CreatedAt,
+        bool Active);
+    public record BoardAttachmentDto(string Id, string Name, string Url, string MimeType, long Bytes, DateTime CreatedAt);
+    public record BoardCommitDto(string Sha, string ShortSha, string Author, string Message, DateTime CommittedAt);
+    public record BoardCardSummaryResponse(
+        string Id,
+        string Key,
+        string ColumnId,
+        int Position,
+        string Title,
+        string Description,
+        string? Assignee,
+        string Priority,
+        int? Points,
+        List<string> Tags,
+        bool Blocked,
+        int CommentCount,
+        string? ActiveSessionId,
+        string? ActiveTabId,
+        DateTime CreatedAt,
+        DateTime UpdatedAt);
+    public record BoardCardListResponse(List<BoardCardSummaryResponse> Cards);
+    public record BoardCardResponse(
+        string Id,
+        string Key,
+        string ColumnId,
+        int Position,
+        string Title,
+        string Description,
+        string? Assignee,
+        string Priority,
+        int? Points,
+        List<string> Tags,
+        bool Blocked,
+        int CommentCount,
+        string? ActiveSessionId,
+        string? ActiveTabId,
+        DateTime CreatedAt,
+        DateTime UpdatedAt,
+        List<BoardCommentDto> Comments,
+        List<BoardCommitDto> Commits,
+        List<BoardSessionDto> Sessions,
+        List<BoardAttachmentDto> Attachments);
+    public record CreateBoardCardRequest(
+        string? Title = null,
+        string? ColumnId = null,
+        string? Description = null,
+        string? Assignee = null,
+        string? Priority = null,
+        JsonElement Points = default,
+        List<string>? Tags = null,
+        bool? Blocked = null);
+    public record UpdateBoardCardRequest(
+        string? Title = null,
+        string? ColumnId = null,
+        string? Description = null,
+        string? Assignee = null,
+        string? Priority = null,
+        JsonElement Points = default,
+        List<string>? Tags = null,
+        bool? Blocked = null);
+    public record MoveBoardCardRequest(string? ColumnId = null, int? Position = null);
+    public record AddBoardCommentRequest(string? Body = null);
+    public record AddBoardAttachmentRequest(string? Name = null, string? DataUrl = null, long? Bytes = null, string? MimeType = null);
+    public record LinkBoardCommitRequest(string? Sha = null);
+    public record AddBoardSessionRequest(string? Id = null, string? DisplayName = null);
+    public record UpdateBoardSessionRequest(string? DisplayName = null);
+    public record LaunchBoardCardRequest(string? Selection = null);
+    public record LaunchBoardCardResponse(
+        string TabId,
+        string? SessionId,
+        string? Cli,
+        string? WorkingDirectory,
+        string CardId,
+        string CardKey,
+        string Selection);
+
     public record SandboxDiffFileResponse(
         string FileName,
         string Language,
@@ -1354,7 +1449,10 @@ namespace VibeRails.DTOs
         int InitialCols,
         int InitialRows,
         List<TerminalReplayChunk> Chunks,
-        List<TerminalReplayFrame> Frames
+        List<TerminalReplayFrame> Frames,
+        // Absolute UTC instant of frame 0, so a caller holding a wall-clock timestamp (a board
+        // comment's createdAt) can seek the replay to that moment: offset = t - StartedUtc.
+        DateTime? StartedUtc = null
     );
 
     public record ChatHistoryItem(
@@ -1693,8 +1791,52 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(CompressionPreviewRequest))]
     [JsonSerializable(typeof(CompressionPreviewResponse))]
     // Remote PIN DTOs
+    // Signing keys (public API projections never include the encrypted-at-rest store record).
+    [JsonSerializable(typeof(SigningKeyListResponse))]
+    [JsonSerializable(typeof(CreateSigningKeyRequest))]
+    [JsonSerializable(typeof(SigningKeyPasswordRequest))]
+    [JsonSerializable(typeof(SignPayloadRequest))]
+    [JsonSerializable(typeof(SigningKeyMutationResponse))]
+    [JsonSerializable(typeof(SigningKeyExportResponse))]
+    [JsonSerializable(typeof(SignedPayloadResponse))]
+    [JsonSerializable(typeof(RegisterSigningKeyRequest))]
+    [JsonSerializable(typeof(SigningKeyChallengeRequest))]
+    [JsonSerializable(typeof(SigningKeyChallengeResponse))]
+    [JsonSerializable(typeof(RegisteredSigningKeyResponse))]
     [JsonSerializable(typeof(SetPinRequest))]
     [JsonSerializable(typeof(PinStatusResponse))]
+    // Kanban board DTOs
+    [JsonSerializable(typeof(BoardColumnResponse))]
+    [JsonSerializable(typeof(List<BoardColumnResponse>))]
+    [JsonSerializable(typeof(BoardColumnListResponse))]
+    [JsonSerializable(typeof(CreateBoardColumnRequest))]
+    [JsonSerializable(typeof(UpdateBoardColumnRequest))]
+    [JsonSerializable(typeof(ReorderBoardColumnsRequest))]
+    [JsonSerializable(typeof(DeleteBoardColumnResponse))]
+    [JsonSerializable(typeof(BoardAuthorDto))]
+    [JsonSerializable(typeof(BoardCommentDto))]
+    [JsonSerializable(typeof(List<BoardCommentDto>))]
+    [JsonSerializable(typeof(BoardSessionDto))]
+    [JsonSerializable(typeof(List<BoardSessionDto>))]
+    [JsonSerializable(typeof(BoardAttachmentDto))]
+    [JsonSerializable(typeof(List<BoardAttachmentDto>))]
+    [JsonSerializable(typeof(BoardCommitDto))]
+    [JsonSerializable(typeof(List<BoardCommitDto>))]
+    [JsonSerializable(typeof(BoardCardSummaryResponse))]
+    [JsonSerializable(typeof(List<BoardCardSummaryResponse>))]
+    [JsonSerializable(typeof(BoardCardListResponse))]
+    [JsonSerializable(typeof(BoardCardResponse))]
+    [JsonSerializable(typeof(CreateBoardCardRequest))]
+    [JsonSerializable(typeof(UpdateBoardCardRequest))]
+    [JsonSerializable(typeof(MoveBoardCardRequest))]
+    [JsonSerializable(typeof(AddBoardCommentRequest))]
+    [JsonSerializable(typeof(AddBoardAttachmentRequest))]
+    [JsonSerializable(typeof(LinkBoardCommitRequest))]
+    [JsonSerializable(typeof(AddBoardSessionRequest))]
+    [JsonSerializable(typeof(UpdateBoardSessionRequest))]
+    [JsonSerializable(typeof(LaunchBoardCardRequest))]
+    [JsonSerializable(typeof(LaunchBoardCardResponse))]
+    [JsonSerializable(typeof(JsonElement))]
     // BERT explorer DTOs
     [JsonSerializable(typeof(BertStatusResponse))]
     [JsonSerializable(typeof(BertFileChangeResponse))]

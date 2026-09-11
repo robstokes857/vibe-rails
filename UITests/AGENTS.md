@@ -60,6 +60,16 @@ It needs no database or installed LLM CLI and does not change the standard suite
 The tests cover compact actions, source visibility across window sizes, metric and file selection,
 keyboard access, modal cleanup, ignore/restore return flow, and agent/environment choice.
 
+### Focused Board UX Tests (No Backend Required)
+
+```powershell
+npx playwright test --config playwright.board.config.js
+```
+
+Uses the real frontend with mocked board APIs to verify the Settings-style heading, description
+image rendering/editing/upload, save/reopen, running-agent controls, and desktop/narrow layouts.
+It starts a temporary static server and never touches the machine's board database.
+
 ### View Report
 If a test fails, you can view the detailed HTML report:
 ```powershell

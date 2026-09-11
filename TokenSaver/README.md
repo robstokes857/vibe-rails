@@ -235,7 +235,10 @@ to diagnose from the symptom (a slow, expensive session).
 ## Following one request through the system
 
 1. **`LlmAnthropicProxyRoutes.cs`** maps the proxy endpoint. Auth-gated
-   (`ILlmProxyAuthGate`) — session **and** tab, not session alone.
+   (`ILlmProxyAuthGate`) — session **and** tab, not session alone. A third local header,
+   `viberails_terminal_session`, may also ride the request: it carries the terminal
+   `Sessions.Id` for exchange-log attribution, is **not** a credential (the gate never
+   validates it), and is stripped with the auth headers before the upstream hop.
 2. **`AnthropicBodyTransform.TryTransformAsync`** decides whether this request is even
    a candidate: POST, path ends `/v1/messages`, JSON content type, body present.
    Anything else returns `null` → the relay streams it untouched.
@@ -476,7 +479,10 @@ Host-side implementations live in `VibeRails/`:
   (`~/.vibe_rails/proxy_exchanges.db`), never state.db. Every authenticated exchange handled by
   any proxy route is logged; there is no settings flag or UI toggle. This is the artifact to reach
   for when judging where compression could go next, because unlike a stage trace it stays valid
-  after the stages change.
+  after the stages change. Rows carry a nullable `SessionId` (the terminal `Sessions.Id` from the
+  `viberails_terminal_session` header): NULL for everything written before attribution existed
+  and for session-less launches — old rows are never backfilled. The column is added to existing
+  files by an idempotent `ALTER TABLE` on first write after the upgrade.
 - `VibeRails/DB/TokenSavingsStore.cs` — the byte tally.
 - `VibeRails/Routes/CompressionCaptureRoutes.cs` — captures, catalog, preview.
 - `VibeRails/Routes/TokenSaverPauseRoutes.cs` — the pause/resume/status control surface (see [Pausing](#pausing--the-agents-escape-hatch)).

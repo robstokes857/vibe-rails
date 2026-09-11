@@ -285,6 +285,39 @@ public sealed class AppJsonSerializerContextTests
     }
 
     [Fact]
+    public void BoardCommentDto_KeepsTheNamesTheBoardReads()
+    {
+        var json = JsonSerializer.Serialize(
+            new BoardCommentDto("cm_1", new BoardAuthorDto("agent", "Claude VB-1", "claude", "sess-1"), "done",
+                new DateTime(2026, 9, 9, 12, 30, 0, DateTimeKind.Utc)),
+            AppJsonSerializerContext.Default.BoardCommentDto);
+
+        Assert.Equal(
+            """{"id":"cm_1","author":{"kind":"agent","label":"Claude VB-1","cli":"claude","sessionId":"sess-1"},"body":"done","createdAt":"2026-09-09T12:30:00Z"}""",
+            json);
+    }
+
+    [Fact]
+    public void UpdateBoardCardRequest_TellsOmittedFromNullFromEmpty()
+    {
+        // Omitted: points stays Undefined and tags stays null (leave alone). Present: "" / null / []
+        // are the "clear" forms board-api.js sends from the card form.
+        var omitted = JsonSerializer.Deserialize("""{"title":"x"}""", AppJsonSerializerContext.Default.UpdateBoardCardRequest)!;
+        Assert.Equal(JsonValueKind.Undefined, omitted.Points.ValueKind);
+        Assert.Null(omitted.Tags);
+        Assert.Null(omitted.Assignee);
+
+        var cleared = JsonSerializer.Deserialize("""{"points":"","tags":[],"assignee":"","blocked":true}""", AppJsonSerializerContext.Default.UpdateBoardCardRequest)!;
+        Assert.Equal(JsonValueKind.String, cleared.Points.ValueKind);
+        Assert.Empty(cleared.Tags!);
+        Assert.Equal("", cleared.Assignee);
+        Assert.True(cleared.Blocked);
+
+        var nulled = JsonSerializer.Deserialize("""{"points":null}""", AppJsonSerializerContext.Default.UpdateBoardCardRequest)!;
+        Assert.Equal(JsonValueKind.Null, nulled.Points.ValueKind);
+    }
+
+    [Fact]
     public void EnvironmentStepDto_KeepsTheNamesTheStepsEditorReads()
     {
         var json = JsonSerializer.Serialize(

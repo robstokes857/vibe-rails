@@ -8584,6 +8584,68 @@ input.form-control:disabled {
     flex-shrink: 0;
 }
 
+/* ── Settings section tabs ────────────────────────────────────────────────── */
+.settings-tabs {
+    display: flex;
+    gap: 0.25rem;
+    padding: 0.25rem;
+    overflow-x: auto;
+    background: var(--color-bg-surface, #1e1e1e);
+    border: 1px solid var(--color-border, #334155);
+    border-radius: 8px;
+}
+
+.settings-tab {
+    flex: 1 1 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.55rem 0.75rem;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 0.85rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.settings-tab:hover {
+    color: var(--color-text, #f8fafc);
+    background: var(--color-bg-surface-hover, #2c2c2c);
+}
+
+.settings-tab[aria-selected="true"] {
+    color: var(--color-accent, #06b6d4);
+    background: color-mix(in srgb, var(--color-accent, #06b6d4) 14%, transparent);
+}
+
+.settings-tab:focus-visible {
+    outline: 2px solid var(--color-primary, #3b82f6);
+    outline-offset: -2px;
+}
+
+.settings-panel[hidden] {
+    display: none;
+}
+
+/* Key operations save immediately. Keep the shared bar only for pending settings. */
+#settings-panel-keys:not([hidden]) + .settings-save-bar:not(.is-dirty) {
+    display: none;
+}
+
+.settings-key-item + .settings-key-item {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--color-border, #334155);
+}
+
+.settings-key-fingerprint {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
 /* ── PIN Entry Modal ──────────────────────────────────────────────────────── */
 .pin-modal-dialog {
     max-width: 420px;

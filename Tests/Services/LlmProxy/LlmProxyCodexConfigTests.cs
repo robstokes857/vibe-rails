@@ -46,4 +46,34 @@ public class LlmProxyCodexConfigTests
         Assert.Contains(LocalLlmProxyContext.TabTokenVariable, joined);
         Assert.DoesNotContain("chatgpt_base_url", joined);
     }
+
+    [Fact]
+    public void BuildCodexProxyArgs_MapsTerminalSessionHeaderToEnvVarWhenProvided()
+    {
+        var args = LlmProxyCodexConfig.BuildCodexProxyArgs(
+            "http://127.0.0.1:4321",
+            CodexLlmProxySettings.ModeSubscription,
+            LocalLlmProxyContext.SessionTokenVariable,
+            LocalLlmProxyContext.TabTokenVariable,
+            LocalLlmProxyContext.SessionIdVariable);
+        var joined = string.Join(' ', args);
+
+        Assert.Contains(
+            $"env_http_headers.{LlmProxyCodexConfig.TerminalSessionHeaderName}="
+            + $"\"{LocalLlmProxyContext.SessionIdVariable}\"",
+            joined);
+    }
+
+    [Fact]
+    public void BuildCodexProxyArgs_OmitsTerminalSessionMappingWhenNull()
+    {
+        // A session-less launch must not point env_http_headers at a variable that does not exist.
+        var args = LlmProxyCodexConfig.BuildCodexProxyArgs(
+            "http://127.0.0.1:4321",
+            CodexLlmProxySettings.ModeSubscription,
+            LocalLlmProxyContext.SessionTokenVariable,
+            LocalLlmProxyContext.TabTokenVariable);
+
+        Assert.DoesNotContain(LlmProxyCodexConfig.TerminalSessionHeaderName, string.Join(' ', args));
+    }
 }

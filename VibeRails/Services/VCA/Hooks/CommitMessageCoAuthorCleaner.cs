@@ -10,7 +10,7 @@ public interface ICommitMessageCoAuthorCleaner
 }
 
 /// <summary>
-/// Removes Git/GitHub <c>Co-authored-by:</c> trailers from the proposed commit message when the
+/// Removes <c>Co-authored-by:</c> and <c>Claude-Session:</c> trailers from the proposed commit message when the
 /// default-on Git Guard policy is enabled. The hook edits Git's message file before any VCA rule
 /// reads it, so both the policy and commit-message validation see the text Git will record.
 ///
@@ -21,8 +21,6 @@ public interface ICommitMessageCoAuthorCleaner
 /// </summary>
 public sealed class CommitMessageCoAuthorCleaner : ICommitMessageCoAuthorCleaner
 {
-    private const string TrailerToken = "Co-authored-by";
-
     /// <summary>Git's default <c>core.commentChar</c>. Comment lines never survive into the commit.</summary>
     private const char CommentChar = '#';
 
@@ -73,7 +71,7 @@ public sealed class CommitMessageCoAuthorCleaner : ICommitMessageCoAuthorCleaner
             // can be pointed at, which is all of them in practice — but not for UTF-16/32, where it
             // would corrupt the message. Removing a trailer is not worth that risk.
             Log.Warning(
-                "Skipping Co-authored-by cleanup: {Path} is UTF-16/UTF-32 encoded",
+                "Skipping commit-message trailer cleanup: {Path} is UTF-16/UTF-32 encoded",
                 commitMessagePath);
             return 0;
         }
@@ -112,7 +110,7 @@ public sealed class CommitMessageCoAuthorCleaner : ICommitMessageCoAuthorCleaner
         var index = blockStart;
         while (index < blockEnd)
         {
-            if (!IsCoAuthorTrailer(LineText(commitMessage, lines[index])))
+            if (!IsRemovedTrailer(LineText(commitMessage, lines[index])))
             {
                 index++;
                 continue;
@@ -123,13 +121,13 @@ public sealed class CommitMessageCoAuthorCleaner : ICommitMessageCoAuthorCleaner
 
             // A trailer's value may wrap onto following indented lines, which Git folds back into
             // the value above. They go with the trailer they belong to, or removal would leave the
-            // tail of a co-author's name stranded as a line of its own. An indented line that is
-            // itself a co-author trailer is handled by the outer loop instead: the match below
+            // tail of a trailer's value stranded as a line of its own. An indented line that is
+            // itself a removable trailer is handled by the outer loop instead: the match below
             // tolerates leading whitespace, because that is how these are written in the wild.
             while (index < blockEnd)
             {
                 var continuation = LineText(commitMessage, lines[index]);
-                if (!IsContinuation(continuation) || IsCoAuthorTrailer(continuation))
+                if (!IsContinuation(continuation) || IsRemovedTrailer(continuation))
                 {
                     break;
                 }
@@ -230,18 +228,21 @@ public sealed class CommitMessageCoAuthorCleaner : ICommitMessageCoAuthorCleaner
 
     /// <summary>
     /// The tolerant match for what this policy removes: the token, optional horizontal whitespace on
-    /// either side, then a colon. Leading whitespace is allowed because an indented co-author line is
+    /// either side, then a colon. Leading whitespace is allowed because an indented trailer line is
     /// common in hand-edited messages, even though Git would read it as a continuation.
     /// </summary>
-    private static bool IsCoAuthorTrailer(ReadOnlySpan<char> line)
+    private static bool IsRemovedTrailer(ReadOnlySpan<char> line) =>
+        HasTrailerToken(line, "Co-authored-by") || HasTrailerToken(line, "Claude-Session");
+
+    private static bool HasTrailerToken(ReadOnlySpan<char> line, string token)
     {
         line = TrimStartHorizontalWhitespace(line);
-        if (!line.StartsWith(TrailerToken, StringComparison.OrdinalIgnoreCase))
+        if (!line.StartsWith(token, StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
 
-        line = TrimStartHorizontalWhitespace(line[TrailerToken.Length..]);
+        line = TrimStartHorizontalWhitespace(line[token.Length..]);
         return !line.IsEmpty && line[0] == ':';
     }
 
@@ -404,7 +405,7 @@ public sealed class CommitMessageCoAuthorCleaner : ICommitMessageCoAuthorCleaner
             // could not be read at all — and the operation it guards edits the author's message
             // irreversibly. Skipping cleanup for one commit is recoverable; rewriting a message for
             // someone who had switched the policy off is not.
-            Log.Warning(ex, "Unable to read the co-author trailer setting; skipping commit-message cleanup");
+            Log.Warning(ex, "Unable to read the trailer removal setting; skipping commit-message cleanup");
             return false;
         }
     }

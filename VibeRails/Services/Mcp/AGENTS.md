@@ -57,9 +57,56 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 | `resume_token_saver` | `TokenSaverTool.ResumeTokenSaver` | Restores token compression immediately, ending an active pause early. |
 | `get_token_saver_status` | `TokenSaverTool.GetTokenSaverStatus` | Reports whether compression is active and whether a pause window is open. |
 | `python_script_signing_help` | `PythonScriptTool.PythonScriptSigningHelp` | Explains signing and lists scripts plus explicit MCP exposure. |
+| `list_board_columns` | `BoardTool.ListBoardColumns` | Lanes of this project's kanban board with WIP limits and card counts. |
+| `list_board_cards` | `BoardTool.ListBoardCards` | Cards on the board (key, lane, priority, title, assignee, comment count, session open); optional lane/assignee filters. |
+| `get_board_card` | `BoardTool.GetBoardCard` | One card in full: fields, description, comments, linked commits, sessions, attachment names. `card` omitted = the card this terminal was launched for. |
+| `create_board_card` | `BoardTool.CreateBoardCard` | New card (title, description, lane, priority, tags). |
+| `update_board_card` | `BoardTool.UpdateBoardCard` | Partial field update (title, description, priority, points, tags, blocked). |
+| `move_board_card` | `BoardTool.MoveBoardCard` | Move a card to a lane (by name or id), optionally at a position. |
+| `add_board_comment` | `BoardTool.AddBoardComment` | Append a comment, attributed to the launching session (or "Agent"). |
+| `link_board_commit` | `BoardTool.LinkBoardCommit` | Capture a commit from the terminal's checkout and atomically save its sha, metadata and changed-code snapshot on the card. |
 | user-defined | `PythonScriptMcpService` dynamic handler | Runs one user-configured, still-signed Python script with its declared typed inputs mapped to argv. |
 
 > The wire names are what tool callers use. Calling `SearchHistory` (PascalCase) returns "Unknown tool".
+
+### Kanban board tools (`BoardTool`)
+
+Instance tool (ctor-injected `IBoardService`, `IBoardProjectResolver`, `IBoardStore`), registered in
+**both** transports and backed by the board's own SQLite store (`Services/Board/BoardStore.cs`)
+rather than by HTTP calls to a root backend — so an LLM can pick up a card from *any* terminal that
+has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
+
+- **Project**: `BoardProjectResolver` — the dashboard root path when this process has one (root
+  backend), else the card the launching terminal session is linked to
+  (`VIBERAILS_TOOL_CURRENT_SESSION_ID` → `BoardCardSessions`; this is what makes sandbox/worktree
+  clones resolve to the right project), else the git root above the CLI's inherited cwd, else cwd.
+- **Commit capture**: `GitWorkingDirectory` resolves the actual checkout independently of the
+  source board. Stdio uses the CLI's inherited cwd/git root; the dashboard uses its project root.
+  No repository path is accepted from a tool argument. Capture resolves the full sha, reads the
+  before/after blobs, then saves the link and `BoardCommitSnapshots` row in one transaction.
+  Viewing never consults Git. Capture errors leave no link. More than 60 files is rejected;
+  individual file previews retain at most 400,000 characters plus a visible truncation marker.
+- **Card default**: every `card` argument accepts a key (`VB-12`) or an id; omitted, it means the
+  card the session was launched for. A VibeRails session that touches a card it is not yet linked
+  to gets linked with origin `mcp`, so the card's Sessions rail shows it.
+- **Attribution**: `add_board_comment` resolves the launching `Sessions` row's environment name
+  or CLI, falling back to its board session link, else "Agent". This works on the first comment
+  before auto-linking. Generic historical labels with a session id are resolved on read; comments
+  without a session id cannot be attributed retroactively. The dashboard UI comments as "You".
+  Managed Codex launches explicitly forward the current session/tab environment-variable names
+  via the per-launch `mcp_servers.viberails-mcp.env_vars` override, because stdio inheritance is
+  filtered. Values are not persisted in shared config. See the [official MCP reference](https://developers.openai.com/codex/mcp/).
+- **Capability boundary**: read / append / move / link only — there is deliberately no delete
+  tool, no attachment tool, and the only process spawned is `git` with a regex-validated hex sha
+  via an argument list (`Services/Git/GitCli.cs`). Failures return `FAIL: …` sentences; detail
+  goes to the file log. Worst case from an injected prompt is board vandalism, visible and
+  reversible in the UI.
+- **Stdio host**: `McpStdioHost.RunAsync` now pins the content root to the install directory, loads
+  `appsettings.json` and calls `GlobalRuntimePaths.Initialize`, so `ParserConfigs.GetStatePath()`
+  answers in the child (and `VibeRails:InstallDirName` is honoured). `IRepository` is still not
+  registered there: its constructor runs the full migration pass on every spawn.
+- The "Start work" launch prompt (`BoardPromptComposer`) tells the LLM to begin with
+  `get_board_card`, record progress with `add_board_comment`, move the card, and link commits.
 
 Dynamic Python tools are stored in `~/.vibe_rails/python_script_mcp.json`. They are appended to the
 static tool collection through `WithPythonScriptTools()` in both transports. List and call handlers
@@ -99,7 +146,7 @@ launched with the proxy's base-URL env var and its two proxy tokens, and a spawn
 inherits that environment, so it can call the exact proxy whose output it is reading. That also
 makes the pause per-tab for free: the only proxy this tool can reach is its own tab's.
 
-`CommandService.AddProxyContactDetails` stamps the same three variables on every proxied launch,
+`CommandService.AddProxyContactDetails` stamps the same variables on every proxied launch,
 regardless of provider:
 
 | Variable | Purpose |
@@ -107,6 +154,7 @@ regardless of provider:
 | `VIBERAILS_LLM_PROXY_BASE` | The proxy host to call. |
 | `VIBERAILS_LLM_PROXY_SESSION_TOKEN` | Session half of the proxy auth contract. |
 | `VIBERAILS_LLM_PROXY_TAB_TOKEN` | Tab half — required; session alone is not enough. |
+| `VIBERAILS_LLM_PROXY_SESSION_ID` | Optional: the terminal `Sessions.Id` behind the `viberails_terminal_session` correlation header (exchange-log attribution; Codex/Grok resolve it via `env_http_headers`). Only stamped when the launch has a session. |
 
 Stating them uniformly is the point: each CLI learns the proxy differently (Claude via
 `ANTHROPIC_BASE_URL`, Codex via a `--config` arg, OpenCode via JSON in `OPENCODE_CONFIG_CONTENT`),
@@ -215,4 +263,4 @@ avoid `WithToolsFromAssembly()` (reflection scan) — it is the AOT-unsafe varia
 
 ---
 
-**Last checked**: 2026-08-21 by Codex
+**Last checked**: 2026-09-09 by Claude (added BoardTool + stdio runtime-path init)

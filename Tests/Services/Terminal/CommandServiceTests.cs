@@ -167,6 +167,22 @@ public class CommandServiceTests : IDisposable
         Assert.DoesNotContain("llm/openai", prepared.Command);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PrepareSession_Codex_ForwardsSessionIdentityToMcpByName(bool proxyEnabled)
+    {
+        var service = CreateService(codexLlmProxyEnabled: proxyEnabled);
+        const string sessionId = "session-private-to-this-launch";
+        var prepared = await service.PrepareSessionAsync(LLM.Codex, null, null, sessionId: sessionId);
+        const string forwarding = "mcp_servers.viberails-mcp.env_vars=[\"VIBERAILS_TOOL_CURRENT_SESSION_ID\",\"VIBERAILS_TOOL_CURRENT_TAB_ID\"]";
+
+        Assert.Contains(forwarding, prepared.Argv!);
+        Assert.Contains("mcp_servers.viberails-mcp.env_vars", prepared.LaunchCommand);
+        Assert.DoesNotContain(sessionId, prepared.Command);
+        Assert.DoesNotContain(prepared.SetupCommands, command => command.Contains("env_vars"));
+    }
+
     [Fact]
     public async Task PrepareSession_Codex_SkipsProxyWhenProviderIsExplicit()
     {

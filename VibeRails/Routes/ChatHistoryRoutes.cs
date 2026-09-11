@@ -229,7 +229,9 @@ public static class ChatHistoryRoutes
             var initialCols = enrichedChunks.Count > 0 ? enrichedChunks[0].Cols : 120;
             var initialRows = enrichedChunks.Count > 0 ? enrichedChunks[0].Rows : 40;
 
-            return Results.Ok(new TerminalReplayResponse(sessionId, initialCols, initialRows, enrichedChunks, frames));
+            return Results.Ok(new TerminalReplayResponse(
+                sessionId, initialCols, initialRows, enrichedChunks, frames,
+                StartedUtc: DateTime.SpecifyKind(startTime, DateTimeKind.Utc)));
         }).WithName("GetTerminalReplay");
 
         app.MapGet("/api/v1/chatHistory/{sessionId}/summary", async (

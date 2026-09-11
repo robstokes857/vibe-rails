@@ -8,7 +8,8 @@ namespace TokenSaver;
 /// <c>env_http_headers</c> shape: Grok is pointed at
 /// <c>/llm/cli-chat</c> → <c>cli-chat-proxy.grok.com</c> through
 /// <c>GROK_CLI_CHAT_PROXY_BASE_URL</c> only, and sends
-/// <c>viberails_session</c> / <c>viberails_tab</c> via
+/// <c>viberails_session</c> / <c>viberails_tab</c> plus the
+/// <c>viberails_terminal_session</c> correlation header via
 /// <c>env_http_headers</c> in the user's <c>~/.grok/config.toml</c>.
 /// Token values stay in the process environment (see
 /// <c>LocalLlmProxyContext</c>), never in the file or on argv.
@@ -28,10 +29,19 @@ public static class LlmProxyGrokConfig
 
     public const string SessionHeaderName = LlmProxyCodexConfig.SessionHeaderName;
     public const string TabHeaderName = LlmProxyCodexConfig.TabHeaderName;
+    public const string TerminalSessionHeaderName = LlmProxyCodexConfig.TerminalSessionHeaderName;
 
     // Names only — the values are read from the process env when Grok builds its HTTP client.
     public const string SessionTokenVariable = "VIBERAILS_LLM_PROXY_SESSION_TOKEN";
     public const string TabTokenVariable = "VIBERAILS_LLM_PROXY_TAB_TOKEN";
+
+    /// <summary>
+    /// Env var holding the terminal session id for the <c>viberails_terminal_session</c> correlation
+    /// header. Sibling of the two token variables: grok resolves the name at request time, so the
+    /// value never needs to be rewritten into the file. When unset (session-less launch), grok sends
+    /// no value and the proxy records a NULL session id.
+    /// </summary>
+    public const string TerminalSessionVariable = "VIBERAILS_LLM_PROXY_SESSION_ID";
 
     public const string UserConfigFileName = "config.toml";
     public const string DefaultHomeDirectoryName = ".grok";
@@ -43,6 +53,17 @@ public static class LlmProxyGrokConfig
     public static readonly string[] HeaderMappedModels = ["grok-4.6", "grok-build", "grok-4.5"];
 
     public static string BuildEnvHttpHeadersInlineTable() =>
+        "{ " +
+        $"\"{SessionHeaderName}\" = \"{SessionTokenVariable}\", " +
+        $"\"{TabHeaderName}\" = \"{TabTokenVariable}\", " +
+        $"\"{TerminalSessionHeaderName}\" = \"{TerminalSessionVariable}\"" +
+        " }";
+
+    /// <summary>
+    /// The two-header inline table an older VibeRails wrote. Kept only so the legacy phantom-section
+    /// removal still recognizes those bodies as ours to delete — never emitted again.
+    /// </summary>
+    private static string BuildLegacyTwoHeaderInlineTable() =>
         "{ " +
         $"\"{SessionHeaderName}\" = \"{SessionTokenVariable}\", " +
         $"\"{TabHeaderName}\" = \"{TabTokenVariable}\"" +
@@ -107,11 +128,11 @@ public static class LlmProxyGrokConfig
             return false;
 
         var nested = ExtractSection(toml, NestedHeadersTableHeader(model));
-        if (nested is not null && SectionHasBothMappings(nested))
+        if (nested is not null && SectionHasAllHeaderMappings(nested))
             return true;
 
         var section = ExtractSection(toml, ModelTableHeader(model));
-        return section is not null && SectionHasBothMappings(section);
+        return section is not null && SectionHasAllHeaderMappings(section);
     }
 
     private static string EnsureModelEnvHttpHeaders(string toml, string model)
@@ -119,7 +140,7 @@ public static class LlmProxyGrokConfig
         var nestedHeader = NestedHeadersTableHeader(model);
         var nested = ExtractSection(toml, nestedHeader);
         if (nested is not null)
-            return SectionHasBothMappings(nested)
+            return SectionHasAllHeaderMappings(nested)
                 ? toml
                 : UpsertNestedHeaderAssignments(toml, nestedHeader, nested);
 
@@ -137,7 +158,7 @@ public static class LlmProxyGrokConfig
             return toml + suffix;
         }
 
-        if (SectionHasBothMappings(section))
+        if (SectionHasAllHeaderMappings(section))
             return toml;
 
         return ReplaceSection(toml, header, WithInlineEnvHttpHeaders(section));
@@ -181,6 +202,8 @@ public static class LlmProxyGrokConfig
             updated = AppendAssignment(updated, SessionHeaderName, SessionTokenVariable);
         if (!ContainsHeaderMapping(section, TabHeaderName, TabTokenVariable))
             updated = AppendAssignment(updated, TabHeaderName, TabTokenVariable);
+        if (!ContainsHeaderMapping(section, TerminalSessionHeaderName, TerminalSessionVariable))
+            updated = AppendAssignment(updated, TerminalSessionHeaderName, TerminalSessionVariable);
         return ReplaceSection(toml, header, updated);
     }
 
@@ -193,9 +216,13 @@ public static class LlmProxyGrokConfig
         return builder.ToString();
     }
 
-    private static bool SectionHasBothMappings(string section) =>
+    /// <summary>True when the section maps every header the proxy contract currently requires.
+    /// A file written before the terminal-session header existed fails this check and is upgraded
+    /// in place by the merge — that is the self-upgrade path, not an error.</summary>
+    private static bool SectionHasAllHeaderMappings(string section) =>
         ContainsHeaderMapping(section, SessionHeaderName, SessionTokenVariable)
-        && ContainsHeaderMapping(section, TabHeaderName, TabTokenVariable);
+        && ContainsHeaderMapping(section, TabHeaderName, TabTokenVariable)
+        && ContainsHeaderMapping(section, TerminalSessionHeaderName, TerminalSessionVariable);
 
     private static bool ContainsHeaderMapping(string section, string headerName, string envVarName)
     {
@@ -205,8 +232,7 @@ public static class LlmProxyGrokConfig
 
     private static string MergeInlineEnvHttpHeadersLine(string line)
     {
-        if (ContainsHeaderMapping(line, SessionHeaderName, SessionTokenVariable)
-            && ContainsHeaderMapping(line, TabHeaderName, TabTokenVariable))
+        if (SectionHasAllHeaderMappings(line))
         {
             return line;
         }
@@ -222,6 +248,8 @@ public static class LlmProxyGrokConfig
             additions.Add($"\"{SessionHeaderName}\" = \"{SessionTokenVariable}\"");
         if (!ContainsHeaderMapping(inner, TabHeaderName, TabTokenVariable))
             additions.Add($"\"{TabHeaderName}\" = \"{TabTokenVariable}\"");
+        if (!ContainsHeaderMapping(inner, TerminalSessionHeaderName, TerminalSessionVariable))
+            additions.Add($"\"{TerminalSessionHeaderName}\" = \"{TerminalSessionVariable}\"");
         if (additions.Count == 0)
             return line;
 
@@ -291,7 +319,8 @@ public static class LlmProxyGrokConfig
             if (trimmed.Length == 0)
                 continue;
             if (IsOurMappingPair(trimmed, SessionHeaderName, SessionTokenVariable)
-                || IsOurMappingPair(trimmed, TabHeaderName, TabTokenVariable))
+                || IsOurMappingPair(trimmed, TabHeaderName, TabTokenVariable)
+                || IsOurMappingPair(trimmed, TerminalSessionHeaderName, TerminalSessionVariable))
             {
                 sawMapping = true;
                 continue;
@@ -311,10 +340,14 @@ public static class LlmProxyGrokConfig
             var trimmed = line.Trim();
             if (trimmed.Length == 0)
                 continue;
-            if (!sawAssignment && string.Equals(
+            if (!sawAssignment && (string.Equals(
                 NormalizeSpaces(trimmed),
                 "env_http_headers = " + BuildEnvHttpHeadersInlineTable(),
-                StringComparison.Ordinal))
+                StringComparison.Ordinal)
+                || string.Equals(
+                    NormalizeSpaces(trimmed),
+                    "env_http_headers = " + BuildLegacyTwoHeaderInlineTable(),
+                    StringComparison.Ordinal)))
             {
                 sawAssignment = true;
                 continue;

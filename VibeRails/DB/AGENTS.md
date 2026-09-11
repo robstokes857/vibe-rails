@@ -403,7 +403,7 @@ CREATE TABLE IF NOT EXISTS SessionLogs (
 | `LogSessionOutputAsync(sessionId, content, isError)` | Append terminal output (byte buffer) |
 | `CompleteSessionAsync(sessionId, exitCode)` | Mark session as ended |
 | `GetOldestUnexportedSessionIdAsync(endedBeforeUtc, ct)` | Oldest settled session without an export ACK |
-| `WriteSessionExportAsync(sessionId, destination, ct)` | Stream a deterministic session envelope from one read transaction |
+| `WriteSessionExportAsync(sessionId, destination, ct)` | Stream a deterministic session envelope from one read transaction. `userInputs` is written immediately after `session` so the server can project prompts into SQL without scanning log BLOBs. |
 | `MarkSessionExportedAsync(sessionId, exportedUtc, ct)` | Set `ExportedUTC` after a matching remote ACK without touching `Processed` |
 | `GetRecentSessionsAsync(limit, ct)` | Recent sessions ordered by `StartedUTC DESC` |
 | `GetSessionWithLogsAsync(sessionId, ct)` | Session with all log entries |
@@ -695,6 +695,46 @@ submitted `Environments.Hidden` values in one SQLite transaction. The resolver i
 appends newly supported CLIs/Environments in canonical order, and returns contiguous positions to
 the browser. Reset removes the cache document and makes supported custom Environments visible.
 
+### Kanban board tables (Board*)
+
+Owned by `Services/Board/BoardStore.cs` (singleton, own connection string, `EnsureSchema()` in its
+constructor — the JobStore pattern), **not** by `Repository.InitStatements`. That is what lets the
+stdio MCP host (`vb mcp`) construct the store without running the dashboard's migration pass.
+Every row is scoped by `ProjectPath` (the git root of the open workspace, normalised, NOCASE on
+Windows/macOS) and the project path never comes from a request — `BoardProjectResolver` derives
+it (dashboard root path → the launching terminal session's card → git root of cwd → cwd).
+
+```sql
+BoardColumns      (Id TEXT PK, ProjectPath, Name, WipLimit NULL, Position, Color, CreatedUTC, UpdatedUTC)
+BoardCards        (Id TEXT PK, ProjectPath, Number, ColumnId → BoardColumns, Position, Title, Description,
+                   Assignee NULL, Priority, Points NULL, Tags JSON, Blocked, CreatedUTC, UpdatedUTC,
+                   UNIQUE(ProjectPath, Number))
+BoardCardSequences (ProjectPath TEXT PK, LastNumber)
+BoardComments     (Id TEXT PK, CardId → BoardCards CASCADE, AuthorKind 'user'|'agent', AuthorLabel,
+                   AuthorCli NULL, SessionId NULL, Body, CreatedUTC)
+BoardCardSessions (SessionId TEXT PK, CardId → BoardCards CASCADE, TabId NULL, Selection, Cli,
+                   DisplayName, Origin 'launch'|'mcp'|'manual', CreatedUTC)
+BoardAttachments  (Id TEXT PK, CardId → BoardCards CASCADE, Name, MimeType, Bytes, DataUrl, CreatedUTC)
+BoardCommits      (CardId → BoardCards CASCADE, Sha, Author, Message, CommittedUTC, LinkedUTC, PK(CardId, Sha))
+BoardCommitSnapshots (CardId, Sha → BoardCommits CASCADE, SnapshotJson, PK(CardId, Sha))
+```
+
+- A card's display key is `VB-{Number}`; `BoardCardSequences` allocates increasing per-project
+  numbers inside the card insert transaction. Its high-water mark survives deleting every card
+  and restarting; schema initialization seeds it from existing cards without decreasing it.
+  Lookups accept the id or the key. Positions are dense `0..n-1` per lane after every
+  create/move/delete (`WriteCardPositionsAsync`).
+- `Assignee` is an LLM picker key (`base:claude` / `env:7:codex`), validated by `BoardSelection`.
+- `BoardCardSessions.SessionId` is the terminal `Sessions.Id` (no FK: sessions are written by other
+  processes). "Live" is computed at read time by the root backend from its in-memory tab host.
+- Deleting the last lane is refused; deleting another lane moves its cards to the left-most one.
+- Attachments hold the (downscaled) `data:` URL text; there is no served image route.
+- A commit link and its changed-code snapshot are inserted in one transaction, after Git capture
+  succeeds. `SnapshotJson` uses the existing AOT `SandboxDiffResponse` shape (file name, language,
+  before/after content, total changes). Viewing reads only the saved snapshot, so deleting a
+  workspace cannot break it. The table is created additively; older metadata-only links report
+  that they must be unlinked and linked again to capture their code.
+
 ### Automated Jobs Tables
 
 Created by `JobStore.cs` (`JobStore.SchemaSql`), **not** `SqlStrings` — but they live in the same
@@ -868,6 +908,7 @@ CREATE TABLE IF NOT EXISTS JobSchedulerLease (
 
 Sandboxes, AgentMetadata, TokenSavings, CompressionCaptures, CodeAnalyzerIgnores,
 ProjectCache, and GlobalCache have **no foreign key relationships** — they are fully independent
+(the Board* tables relate only to each other; see their section)
 tables. `Environments` is referenced by the compatibility mirror `Jobs.EnvironmentId` and by
 `JobActions.EnvironmentId` (both `ON DELETE SET NULL` — see the Automated Jobs Tables above), and
 by `EnvironmentSteps.EnvironmentId` (`ON DELETE CASCADE` — a
@@ -975,4 +1016,4 @@ ChatSummary               TokenSavings / CompressionCaptures
 
 ---
 
-*Last checked: 2026-09-01T00:00:00Z by Codex*
+*Last checked: 2026-09-09 by Claude (added the Board* tables)*

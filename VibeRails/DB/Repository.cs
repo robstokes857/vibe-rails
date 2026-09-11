@@ -1710,51 +1710,9 @@ namespace VibeRails.DB
             WriteNullableString(writer, "jobRunId", jobRunId);
             writer.WriteEndObject();
 
-            writer.WritePropertyName("sessionLogs");
-            writer.WriteStartArray();
-            await using (var cmd = connection.CreateCommand())
-            {
-                cmd.Transaction = transaction;
-                cmd.CommandText = SqlStrings.SelectSessionLogsForExport;
-                cmd.Parameters.AddWithValue("$sessionId", sessionId);
-                await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
-                while (await reader.ReadAsync(cancellationToken))
-                {
-                    writer.WriteStartObject();
-                    writer.WriteNumber("id", reader.GetInt64(0));
-                    writer.WriteString("timestampUtc", reader.GetString(1));
-                    writer.WriteBase64String("rawBytes", (byte[])reader[2]);
-                    writer.WriteBoolean("isError", reader.GetInt32(3) != 0);
-                    writer.WriteEndObject();
-                    await FlushIfPendingAsync(writer, cancellationToken);
-                }
-            }
-            writer.WriteEndArray();
-
-            writer.WritePropertyName("terminalSessionLogs");
-            writer.WriteStartArray();
-            await using (var cmd = connection.CreateCommand())
-            {
-                cmd.Transaction = transaction;
-                cmd.CommandText = SqlStrings.SelectTerminalSessionLogsForExport;
-                cmd.Parameters.AddWithValue("$sessionId", sessionId);
-                await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
-                while (await reader.ReadAsync(cancellationToken))
-                {
-                    writer.WriteStartObject();
-                    writer.WriteNumber("id", reader.GetInt64(0));
-                    writer.WriteNumber("sequence", reader.GetInt32(1));
-                    writer.WriteBoolean("isAlternateScreen", reader.GetInt32(2) != 0);
-                    writer.WriteBase64String("rawBytes", (byte[])reader[3]);
-                    writer.WriteNumber("cols", reader.GetInt32(4));
-                    writer.WriteNumber("rows", reader.GetInt32(5));
-                    writer.WriteString("timestampUtc", reader.GetString(6));
-                    writer.WriteEndObject();
-                    await FlushIfPendingAsync(writer, cancellationToken);
-                }
-            }
-            writer.WriteEndArray();
-
+            // userInputs are written before the log BLOBs so the server can copy them into SQL
+            // without scanning SessionLogs / TerminalSessionLogs. Historical envelopes still have
+            // the arrays the other way around; the capture parser handles both orders.
             writer.WritePropertyName("userInputs");
             writer.WriteStartArray();
             await using (var cmd = connection.CreateCommand())
@@ -1806,6 +1764,51 @@ namespace VibeRails.DB
                 {
                     writer.WriteEndArray();
                     writer.WriteEndObject();
+                }
+            }
+            writer.WriteEndArray();
+
+            writer.WritePropertyName("sessionLogs");
+            writer.WriteStartArray();
+            await using (var cmd = connection.CreateCommand())
+            {
+                cmd.Transaction = transaction;
+                cmd.CommandText = SqlStrings.SelectSessionLogsForExport;
+                cmd.Parameters.AddWithValue("$sessionId", sessionId);
+                await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    writer.WriteStartObject();
+                    writer.WriteNumber("id", reader.GetInt64(0));
+                    writer.WriteString("timestampUtc", reader.GetString(1));
+                    writer.WriteBase64String("rawBytes", (byte[])reader[2]);
+                    writer.WriteBoolean("isError", reader.GetInt32(3) != 0);
+                    writer.WriteEndObject();
+                    await FlushIfPendingAsync(writer, cancellationToken);
+                }
+            }
+            writer.WriteEndArray();
+
+            writer.WritePropertyName("terminalSessionLogs");
+            writer.WriteStartArray();
+            await using (var cmd = connection.CreateCommand())
+            {
+                cmd.Transaction = transaction;
+                cmd.CommandText = SqlStrings.SelectTerminalSessionLogsForExport;
+                cmd.Parameters.AddWithValue("$sessionId", sessionId);
+                await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    writer.WriteStartObject();
+                    writer.WriteNumber("id", reader.GetInt64(0));
+                    writer.WriteNumber("sequence", reader.GetInt32(1));
+                    writer.WriteBoolean("isAlternateScreen", reader.GetInt32(2) != 0);
+                    writer.WriteBase64String("rawBytes", (byte[])reader[3]);
+                    writer.WriteNumber("cols", reader.GetInt32(4));
+                    writer.WriteNumber("rows", reader.GetInt32(5));
+                    writer.WriteString("timestampUtc", reader.GetString(6));
+                    writer.WriteEndObject();
+                    await FlushIfPendingAsync(writer, cancellationToken);
                 }
             }
             writer.WriteEndArray();

@@ -127,7 +127,8 @@ public class TerminalRunner
             }
 
             var sessionTitle = ResolveSessionTitle(workDir, title);
-            var preparedSession = await _commandService.PrepareSessionAsync(llm, envName, extraArgs, initialPrompt, summary);
+            var preparedSession = await _commandService.PrepareSessionAsync(
+                llm, envName, extraArgs, initialPrompt, summary, sessionId);
             foreach (var kvp in _toolApiContext.BuildEnvironment(sessionId))
             {
                 preparedSession.Environment[kvp.Key] = kvp.Value;

@@ -1,8 +1,37 @@
 # API authentication coverage
 
-Audit date: 2026-09-08
+Audit date: 2026-09-11
 
-Full production route/authentication reconciliation completed: 2026-09-08, covering all 170
+Full production route/authentication reconciliation completed: 2026-09-11, covering
+the current working tree, including uncommitted and untracked source. All 210 mapped
+surfaces match this inventory in both directions: 198 `/api/v1` method/path surfaces,
+nine protected non-`/api` API surfaces, and three bootstrap/page/probe mappings. No
+endpoint needs adding or removing. The existing inventory includes the untracked board
+and signing-key routes, the signing-key route group, and constant-based route paths.
+The only session-authentication exceptions are exact `GET /health`, global `OPTIONS`,
+and exact `GET /auth/bootstrap` with its single-use, expiring code. No additional
+endpoint lacking a valid session credential was found, so no `SECURITY_ERROR.md` was
+created. Session-only page/static loads and conditional proxy responses remain as
+documented in section 2. Both repository-wide listener searches found only the main
+Kestrel host, the non-serving port probe, and test-only hosts. Targeted authentication
+and route tests passed: **101 passed, 0 failed, 0 skipped**. See Audit observations for
+scope and validation details.
+
+Signing-key amendment: 2026-09-09. Five authenticated active-root settings routes were
+added, bringing the current inventory to 175 `/api/v1` surfaces and 187 total mapped
+surfaces. The frozen listener set and middleware bypass list are unchanged. The full
+2026-09-08 audit below remains historical; this amendment checks the new routes and
+repeats route enumeration and both repository-wide listener searches. Only the main
+Kestrel host, the non-serving port probe, and test-only Kestrel hosts matched; no other
+production listener was found. New route round-trip/authentication tests and the
+existing `CookieAuthMiddlewareTests` passed (31 tests).
+
+Kanban board inventory reconciled: 2026-09-09 (the 23 authenticated, active-root-only
+`/api/v1/board/*` routes added to section 3, bringing the `/api/v1` count from 175 to 198; the
+board's MCP tools ride the existing `/mcp` surface and the stdio `vb mcp` host, which adds no
+listener — see that section for why the stdio host needs no credential).
+
+Historical production route/authentication reconciliation: 2026-09-08, covering all 170
 current `/api/v1` method/path surfaces, nine protected non-`/api` API surfaces, and
 the three bootstrap/page/probe mappings. The only middleware bypasses remain exact
 `GET /health`, exact `GET /auth/bootstrap`, and global `OPTIONS` requests.
@@ -130,7 +159,7 @@ discovery alone is insufficient if the same feature change is allowed to expand 
 set. The production listener set is now frozen above so a new match starts as a finding, not as
 an expectation.
 
-### Repository-wide listener result — 2026-09-08
+### Repository-wide listener result — 2026-09-11
 
 - Approved serving implementation: the main Kestrel host in `VibeRails/Program.cs`.
 - Rejected and removed before merge: `GrokLoopbackBridge`'s `HttpListener`.
@@ -157,11 +186,17 @@ In the lists below, **both** means a valid `viberails_session` credential **and*
 session-scoped browser credential (`viberails_tab`), which the implementation calls the
 *tab token*.
 
+`viberails_terminal_session` is not a credential. LLM-proxy requests may carry it as a
+correlation header (the terminal `Sessions.Id` behind the exchange log's `SessionId`
+column); the auth gate does not validate it, and the relay strips it — like the two real
+credentials — before the upstream provider hop. Spoofing it can only mislabel the
+spoofer's own local exchange rows.
+
 Authentication is enforced primarily by
 [`CookieAuthMiddleware`](VibeRails/Middleware/CookieAuthMiddleware.cs). The LLM proxy
 routes additionally use
-[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 182 mapped route
-surfaces in this inventory: 170 `/api/v1` method/path mappings, nine non-`/api` protected
+[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 210 mapped route
+surfaces in this inventory: 198 `/api/v1` method/path mappings, nine non-`/api` protected
 API surfaces, and three bootstrap/page/probe routes. Static-file middleware and the
 global `OPTIONS` behavior are noted separately because they are not finite mapped-route
 lists.
@@ -343,6 +378,35 @@ WebSocket handshakes use the session cookie/subprotocol plus the tab-token subpr
 - `PUT /api/v1/http-relay/test/posts/{id:int}`
 - `DELETE /api/v1/http-relay/test/posts/{id:int}`
 
+### Signing keys (5; active root backend only)
+
+- `GET /api/v1/settings/keys` — public metadata only, never the encrypted private-key file;
+  also lists, by file name only, any stray or damaged file skipped in the key folder.
+- `POST /api/v1/settings/keys` — RSA-4096 generation; a nonblank 8–128 character password
+  that is not digits only is mandatory (password entropy is the only protection for a copied
+  key file or backup, so a numeric PIN is refused; the dashboard sends NFC). The private key
+  is persisted only as encrypted PKCS#8 using AES-256-CBC and PBKDF2-SHA256 (600,000
+  iterations), in the user's private signing-key directory.
+- `POST /api/v1/settings/keys/{id:guid}/sync` — password required to answer an
+  API-key-authenticated, domain-separated proof-of-possession challenge before registering
+  the public key at the fixed HTTPS viberails.ai destination. Redirects are disabled.
+- `POST /api/v1/settings/keys/{id:guid}/export` — password required; encrypted PEM only.
+- `POST /api/v1/settings/keys/{id:guid}/sign` — password required; RSA-PSS/SHA256 signs
+  the exact decoded bytes of a bounded base64 payload (64 KiB maximum) and returns the
+  public key and fingerprint alongside the signature; payloads carrying the registration
+  challenge prefix are refused.
+
+All five routes require the existing session and tab credentials. Responses are no-store,
+request bodies are capped at 96 KiB, failed unlocks are throttled in each backend process,
+and file operations serialize across dashboard processes. No password, private key,
+or ordinary signing payload is sent to the cloud by these routes: registration sends public
+PEM, name, challenge ID, and proof signature, with the saved API key in `X-Api-Key` over
+fixed-destination HTTPS. Explicit verification calls made by clients
+to the separately hosted public cloud endpoint necessarily send their payload and signature.
+Successful public verification discloses the signer's verified account email, explicitly
+requested by the owner; the desktop KEYS panel describes that disclosure before creation.
+No local endpoint is anonymous and no production listener was added.
+
 ### Automation navigation preferences (3)
 
 - `GET /api/v1/automation-nav/preferences`
@@ -508,6 +572,44 @@ transcript text out of messages and exception text; do not rely on the Logs view
 hidden. `Tests/Routes/InternalToolsRoutesTests.cs` pins the two-credential requirement, the
 whitelist rejection of path-like sources, and the absence of mutating verbs.
 
+### Kanban board (23; active root backend only)
+
+All mapped by `BoardRoutes.Map` under `if (isActiveRootBackend)`; every path contains `/api/`,
+so both credentials are enforced by the middleware with no route-level registration. The
+project is always `ParserConfigs.GetRootPath()` — never a value from the request — so a caller
+cannot read or write another project's board through this surface.
+
+- `GET /api/v1/board/columns`, `POST /api/v1/board/columns`, `PUT /api/v1/board/columns/order`,
+  `PUT /api/v1/board/columns/{columnId}`, `DELETE /api/v1/board/columns/{columnId}` — lanes.
+- `GET /api/v1/board/cards`, `POST /api/v1/board/cards`, `GET /api/v1/board/cards/{card}`,
+  `PUT /api/v1/board/cards/{card}`, `DELETE /api/v1/board/cards/{card}`,
+  `POST /api/v1/board/cards/{card}/move` — cards (`{card}` is an id or a `VB-n` key).
+- `POST /api/v1/board/cards/{card}/launch` — "Start work": creates a terminal tab through the
+  in-process tab host and starts the assigned LLM with the card prepended to the environment's
+  Initial Message. Same capability class as `POST /api/v1/terminal/tabs/{tabId}/start`, which
+  is why the tab credential matters here. The environment is resolved by id and must be
+  visible in the current project; there is no fallback by name.
+- `POST /api/v1/board/cards/{card}/comments`,
+  `POST /api/v1/board/cards/{card}/attachments`,
+  `DELETE /api/v1/board/cards/{card}/attachments/{attachmentId}` — comments and inline image attachments (data URLs,
+  image types only, size-capped; returned only inside the card body, so no unauthenticated
+  image path was added).
+- `GET /api/v1/board/cards/{card}/commits`, `POST /api/v1/board/cards/{card}/commits`,
+  `DELETE /api/v1/board/cards/{card}/commits/{sha}`,
+  `GET /api/v1/board/cards/{card}/commits/{sha}/diff` —
+  linked commits. `git` runs only with an argument list and a regex-validated hex sha (never a
+  shell string, never a ref expression) inside the project directory.
+- `GET /api/v1/board/cards/{card}/sessions`, `POST /api/v1/board/cards/{card}/sessions`,
+  `PUT /api/v1/board/cards/{card}/sessions/{sessionId}`,
+  `DELETE /api/v1/board/cards/{card}/sessions/{sessionId}` — the card ↔ terminal-session links.
+
+MCP note: the same board operations (minus any delete) are exposed as `*_board_*` tools on
+`/mcp` (both credentials) and on the stdio `vb mcp` host. The stdio host reads and writes
+`state.db` directly rather than calling this API, so a CLI in any terminal can work a card
+without a VibeRails tab; the host is a child process of the CLI over pipes and remains
+unauthenticated by design. `Tests/Routes/BoardRoutesTests.cs` pins the two-credential
+requirement and the launch composition; `Tests/Services/Mcp/BoardToolTests.cs` pins the tools.
+
 ### Local filesystem browser (1)
 
 - `GET /api/v1/filesystem/entries` — mapped only by an active root-backend process and
@@ -549,6 +651,73 @@ whitelist rejection of path-like sources, and the absence of mutating verbs.
 
 ## Audit observations
 
+- Full validation on 2026-09-11: compared the current categorized inventory against all
+  **210 mapped route surfaces** in the working tree, including untracked source:
+  **198 `/api/v1` mappings**, nine protected non-`/api` API surfaces, and three
+  bootstrap/page/probe mappings. Neither direction had unmatched method/path pairs.
+  Resolved the signing-key route group, constant-based HTTP-relay/proxy/control paths,
+  and inherited event-WebSocket mapping; checked the production registration aggregator
+  and searched for other routing and middleware branches.
+  Verified middleware ordering, exact GET health/bootstrap and global OPTIONS exceptions,
+  session/tab validation, bootstrap code expiry and single-use consumption, and shared
+  proxy/control authentication. Every other endpoint requires a valid session credential;
+  all `/api/v1` business handlers additionally require the tab credential. The existing
+  session-only page/static and conditional proxy behavior remains documented in section 2.
+  Both mandatory repository-wide listener searches found only the approved main Kestrel
+  host, non-serving port probe, and test-only hosts; the cross-runtime search had no matches.
+  No additional endpoint lacking session authentication was found, so no
+  `SECURITY_ERROR.md` was created.
+  Ran `dotnet test Tests/Tests.csproj --no-restore --verbosity quiet` with a
+  `FullyQualifiedName` filter covering `CookieAuthMiddlewareTests`, `AuthServiceTests`,
+  `AuthRoutesTests`, all five LLM proxy route test classes, `TokenSaverPauseRoutesTests`,
+  `McpServerHttpTests`, `InternalToolsRoutesTests`, `SigningKeyRoutesTests`, and
+  `BoardRoutesTests`: **101 passed, 0 failed, 0 skipped**. This was source reconciliation
+  plus targeted tests, not a live request sweep of every production endpoint.
+
+- Full validation on 2026-09-10: reconciled all **210 mapped route surfaces**, including
+  uncommitted and untracked source: 198 `/api/v1` mappings, nine protected non-`/api`
+  API surfaces, and three bootstrap/page/probe mappings. Compared method/path pairs in
+  both directions, resolving the signing-key route group, proxy/control/HTTP-relay
+  constants, and inherited event-WebSocket mapping. No missing or removed endpoints;
+  corrected stale current totals and expanded abbreviated board inventory paths.
+  Inspected route registration, production middleware ordering, session/tab validation,
+  the exact three-case bypass predicate, bootstrap expiry and single-use consumption,
+  and the shared proxy/control gate. All `/api/v1` business handlers require both
+  credentials. Page/static loads and conditional proxy responses retain the session-only
+  behavior documented in section 2; cookie and session header are alternative transports
+  of the same credential, not independent factors.
+  Both mandatory repository-wide listener searches found only the approved main Kestrel
+  host, non-serving loopback port probe, and test-only Kestrel hosts. No additional
+  production listener or endpoint lacking a valid session credential was found, so no
+  `SECURITY_ERROR.md` was created.
+  Existing targeted tests passed: **101 passed, 0 failed, 0 skipped**, covering
+  `CookieAuthMiddlewareTests`, `AuthServiceTests`, `AuthRoutesTests`, all five LLM proxy
+  route test classes, `TokenSaverPauseRoutesTests`, `McpServerHttpTests`,
+  `InternalToolsRoutesTests`, `SigningKeyRoutesTests`, and `BoardRoutesTests`.
+  Ran `dotnet test Tests/Tests.csproj` with a filter for those classes and
+  `-p:OutputPath=bin/ApiSecAudit/`. This was source reconciliation plus targeted tests,
+  not a live request sweep of every production endpoint. Earlier dated observations
+  below retain their historical counts and test results.
+- Full validation on 2026-09-09: reconciled all **187 mapped route surfaces** against
+  the current working tree, including untracked source. Compared method/path pairs in
+  both directions, resolving the signing-key route group, constant-based proxy/control/
+  HTTP-relay paths, and inherited event-WebSocket mapping. No missing or removed entries.
+  Inspected the registration aggregator, production middleware ordering, exact three-case
+  bypass predicate, session/tab validation, bootstrap expiry and single-use consumption,
+  and shared proxy/control authentication gate. All 175 `/api/v1` business mappings
+  require both session and tab credentials before their handlers run. Both mandatory
+  repository-wide listener searches found only the approved main Kestrel host, transient
+  non-serving port probe, and test-only Kestrel hosts; no other production network
+  request listener was found.
+  Existing targeted tests passed: **97 passed, 0 failed, 0 skipped**, covering
+  `CookieAuthMiddlewareTests`, `AuthServiceTests`, `AuthRoutesTests`, all five LLM proxy
+  route test classes, `TokenSaverPauseRoutesTests`, `McpServerHttpTests`,
+  `InternalToolsRoutesTests`, and `SigningKeyRoutesTests`. Ran `dotnet test
+  Tests/Tests.csproj` with a filter for those classes and
+  `-p:OutputPath=bin/ApiSecAudit/` to build current source separately from running apps.
+  No additional endpoint lacking a valid session credential was found, so no
+  `SECURITY_ERROR.md` was created. This was source reconciliation plus targeted tests,
+  not a live request sweep of every production endpoint.
 - Full validation on 2026-09-08: reconciled all **182 mapped route surfaces** against the
   current working tree, including untracked source files. The 170 `/api/v1` method/path
   entries matched in both directions: no missing or removed endpoints. Also verified the

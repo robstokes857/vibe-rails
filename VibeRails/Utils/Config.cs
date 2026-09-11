@@ -53,7 +53,8 @@ public class Settings
 
     // Git Guard commit-msg policy. Default-on for both new settings files and older files that
     // predate this property: System.Text.Json leaves the initializer in place when the key is
-    // absent. The standalone hook process reloads this value for every commit.
+    // absent. The standalone hook process reloads this value for every commit. Covers both
+    // Co-authored-by and Claude-Session trailers; keep the persisted name for existing settings.
     public bool RemoveCoAuthorTrailers { get; set; } = true;
 
     // Hand-edit escape hatch, deliberately not exposed in any UI: a non-null list of stage/scope

@@ -70,6 +70,28 @@ public class LlmProxyClaudeConfigTests : IDisposable
     }
 
     [Fact]
+    public void BuildCustomHeaders_AppendsTerminalSessionLineWhenProvided()
+    {
+        var headers = LlmProxyClaudeConfig.BuildCustomHeaders(
+            "session-abc", "tab-xyz", " 0f8c2a11-5c82-4f6e-9d1a-3b7e8f2c4a55 ");
+
+        Assert.Equal(
+            "viberails_session: session-abc\nviberails_tab: tab-xyz\n"
+            + "viberails_terminal_session: 0f8c2a11-5c82-4f6e-9d1a-3b7e8f2c4a55",
+            headers);
+    }
+
+    [Fact]
+    public void BuildCustomHeaders_OmitsTerminalSessionLineWhenUnknown()
+    {
+        // Session-less launches (and older call sites) must produce the exact two-line value the
+        // proxy has always accepted — no trailing newline, no empty header.
+        var headers = LlmProxyClaudeConfig.BuildCustomHeaders("session-abc", "tab-xyz", null);
+
+        Assert.Equal("viberails_session: session-abc\nviberails_tab: tab-xyz", headers);
+    }
+
+    [Fact]
     public void BuildCustomHeaders_UsesTheHeaderNamesTheProxyValidates()
     {
         // The proxy auth-gate (LlmAnthropicProxyRoutes.IsProxyHeaderAuthenticated) reads these
@@ -157,6 +179,31 @@ public class LlmProxyClaudeConfigTests : IDisposable
         Assert.False(
             prepared.Environment.ContainsKey("ANTHROPIC_CUSTOM_HEADERS"),
             $"ANTHROPIC_CUSTOM_HEADERS must only be set for LLM.Claude, not {llm}.");
+    }
+
+    [Fact]
+    public async Task PrepareSession_Claude_EmbedsTerminalSessionIdInCustomHeaders()
+    {
+        var service = CreateService(claudeLlmProxyEnabled: true);
+
+        var prepared = await service.PrepareSessionAsync(
+            LLM.Claude, envName: null, extraArgs: null, sessionId: "sess-1234");
+
+        Assert.True(
+            prepared.Environment.TryGetValue("ANTHROPIC_CUSTOM_HEADERS", out var customHeaders));
+        Assert.EndsWith("viberails_terminal_session: sess-1234", customHeaders);
+    }
+
+    [Fact]
+    public async Task PrepareSession_Claude_OmitsTerminalSessionHeaderWithoutSession()
+    {
+        var service = CreateService(claudeLlmProxyEnabled: true);
+
+        var prepared = await service.PrepareSessionAsync(LLM.Claude, envName: null, extraArgs: null);
+
+        Assert.True(
+            prepared.Environment.TryGetValue("ANTHROPIC_CUSTOM_HEADERS", out var customHeaders));
+        Assert.DoesNotContain("viberails_terminal_session", customHeaders);
     }
 
     private static CommandService CreateService(bool codexLlmProxyEnabled = false, bool claudeLlmProxyEnabled = false)

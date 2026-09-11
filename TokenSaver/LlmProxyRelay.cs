@@ -32,15 +32,17 @@ internal static class LlmProxyRelay
     };
 
     // Local-only headers stripped before forwarding upstream: per-hop specifics plus the proxy's own
-    // auth handshake (cookie + session/tab tokens), so the upstream provider never receives
-    // VibeRails' local auth secrets. The session/tab header names are shared across both providers.
+    // auth handshake (cookie + session/tab tokens) and the terminal-session correlation header, so
+    // the upstream provider never receives VibeRails' local auth secrets or session identifiers.
+    // The session/tab header names are shared across both providers.
     private static readonly HashSet<string> LocalOnlyHeaders = new(StringComparer.OrdinalIgnoreCase)
     {
         "Host",
         "Content-Length",
         "Cookie",
         LlmProxyCodexConfig.SessionHeaderName,
-        LlmProxyCodexConfig.TabHeaderName
+        LlmProxyCodexConfig.TabHeaderName,
+        LlmProxyCodexConfig.TerminalSessionHeaderName
     };
 
     // Stripped so the upstream answers in plain text. The relay tees response bytes straight into
@@ -281,6 +283,10 @@ internal static class LlmProxyRelay
         private readonly string _method = request.Method;
         // Path only, never the query string — same rule the activity ping follows.
         private readonly string _path = request.Path.Value ?? "/";
+        // Correlation metadata, not auth: the terminal session this request belongs to, or null when
+        // the launching path predates the header. Trimmed so an empty value reads as absent.
+        private readonly string? _sessionId = EmptyToNull(
+            request.Headers[LlmProxyCodexConfig.TerminalSessionHeaderName].FirstOrDefault());
         private readonly MemoryStream _response = new();
         private byte[]? _requestBefore;
         private byte[]? _requestAfter;
@@ -330,8 +336,12 @@ internal static class LlmProxyRelay
                 Encoding.UTF8.GetString(
                     responseBytes, 0, CompleteUtf8Length(responseBytes, responseLength)),
                 _responseTruncated,
-                (int)Stopwatch.GetElapsedTime(_startedTicks).TotalMilliseconds);
+                (int)Stopwatch.GetElapsedTime(_startedTicks).TotalMilliseconds,
+                _sessionId);
         }
+
+        private static string? EmptyToNull(string? value) =>
+            string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
         /// <summary>
         /// Drops an incomplete UTF-8 sequence from the end of a truncated capture. The byte cap

@@ -1,6 +1,7 @@
 using Serilog;
 using TokenSaver;
 using VibeRails.Interfaces;
+using VibeRails.Services.AgentTools;
 using VibeRails.Services.Environments;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.LlmProxy;
@@ -81,7 +82,8 @@ public class CommandService : ICommandService
     }
 
     public async Task<PreparedTerminalSession> PrepareSessionAsync(
-        LLM llm, string? envName, string[]? extraArgs, string? initialPrompt = null, string summary = "")
+        LLM llm, string? envName, string[]? extraArgs, string? initialPrompt = null, string summary = "",
+        string? sessionId = null)
     {
         if (Environment.GetEnvironmentVariable("VIBERAILS_TEST_FAKE_CLI") == "1")
         {
@@ -136,7 +138,15 @@ public class CommandService : ICommandService
         // One fresh snapshot for the whole prepare so the enabled/mode fields can't tear across a
         // concurrent settings save and the launch hits the disk once, not once per field.
         var proxySettings = _llmProxySettings.GetSettings();
-        var launchArgs = BuildLaunchArgs(llm, extraArgs, proxySettings);
+        var launchArgs = BuildLaunchArgs(llm, extraArgs, proxySettings, sessionId);
+        if (llm == LLM.Codex && !string.IsNullOrWhiteSpace(sessionId))
+        {
+            // Codex filters its stdio server environment. Forward identity by NAME
+            // at launch time so parallel sessions never persist each other's ids in
+            // a shared config.toml. The same argv serves shell and direct launches.
+            launchArgs = [.. launchArgs, "--config",
+                $"mcp_servers.{VibeRailsMcpServerName}.env_vars=[\"{LocalToolApiContext.CurrentSessionIdVariable}\",\"{LocalToolApiContext.CurrentTabIdVariable}\"]"];
+        }
         var cliCommand = launchArgs.Length > 0
             ? $"{cli} {BuildSafeArgString(launchArgs)}"
             : cli;
@@ -209,7 +219,7 @@ public class CommandService : ICommandService
         // added by TerminalRunner intentionally continue to target the root agent-tool API.
         if (ShouldUseCodexProxy(llm, extraArgs, proxySettings))
         {
-            AddProxyContactDetails(environment, LlmProxyProvider.Codex);
+            AddProxyContactDetails(environment, LlmProxyProvider.Codex, sessionId);
         }
 
         // If Claude proxying is enabled separately, route Claude Code's Anthropic API traffic
@@ -226,10 +236,11 @@ public class CommandService : ICommandService
             var claudeProxyEnv = LlmProxyClaudeConfig.BuildClaudeProxyEnvironment(
                 _llmProxyContext.ApiBaseUrl,
                 _llmProxyContext.SessionToken,
-                _llmProxyContext.TabToken);
+                _llmProxyContext.TabToken,
+                sessionId);
             foreach (var kvp in claudeProxyEnv)
                 environment[kvp.Key] = kvp.Value;
-            AddProxyContactDetails(environment, LlmProxyProvider.Claude);
+            AddProxyContactDetails(environment, LlmProxyProvider.Claude, sessionId);
         }
 
         // If OpenCode proxying is enabled, route OpenCode's zai (Z.AI/GLM) and xai
@@ -249,11 +260,12 @@ public class CommandService : ICommandService
             && string.IsNullOrEmpty(inheritedOpenCodeConfig);
         if (openCodeProxyActive)
         {
-            AddProxyContactDetails(environment, LlmProxyProvider.OpenCode);
+            AddProxyContactDetails(environment, LlmProxyProvider.OpenCode, sessionId);
             environment[LlmProxyZaiConfig.ConfigContentVariable] = LlmProxyZaiConfig.BuildOpencodeConfigContent(
                 _llmProxyContext.ApiBaseUrl,
                 _llmProxyContext.SessionToken,
-                _llmProxyContext.TabToken);
+                _llmProxyContext.TabToken,
+                sessionId);
         }
 
         // Native Grok uses /llm/cli-chat. Subscription keeps grok login (no GROK_MODELS_BASE_URL);
@@ -275,7 +287,7 @@ public class CommandService : ICommandService
                 proxySettings.GrokLlmProxyMode);
             foreach (var kvp in grokProxyEnv)
                 environment[kvp.Key] = kvp.Value;
-            AddProxyContactDetails(environment, LlmProxyProvider.Grok);
+            AddProxyContactDetails(environment, LlmProxyProvider.Grok, sessionId);
             await EnsureGrokProxyHeadersAsync();
         }
 
@@ -317,11 +329,17 @@ public class CommandService : ICommandService
     /// </summary>
     private void AddProxyContactDetails(
         Dictionary<string, string> environment,
-        LlmProxyProvider provider)
+        LlmProxyProvider provider,
+        string? sessionId = null)
     {
         environment[LocalLlmProxyContext.BaseUrlVariable] = _llmProxyContext.ApiBaseUrl;
         environment[LocalLlmProxyContext.SessionTokenVariable] = _llmProxyContext.SessionToken;
         environment[LocalLlmProxyContext.TabTokenVariable] = _llmProxyContext.TabToken;
+        // The terminal-session correlation value: Codex and Grok resolve it by name at request time
+        // (env_http_headers), so one variable serves both. Omitted when there is no session — those
+        // exchanges intentionally record a NULL session id rather than a guessed one.
+        if (!string.IsNullOrWhiteSpace(sessionId))
+            environment[LocalLlmProxyContext.SessionIdVariable] = sessionId.Trim();
         _llmProxySessionState.RecordProxiedLaunch(provider);
     }
 
@@ -381,7 +399,8 @@ public class CommandService : ICommandService
         _ => llm.ToString().ToLower()
     };
 
-    private string[] BuildLaunchArgs(LLM llm, string[]? extraArgs, LlmProxySettings proxySettings)
+    private string[] BuildLaunchArgs(
+        LLM llm, string[]? extraArgs, LlmProxySettings proxySettings, string? sessionId = null)
     {
         if (!ShouldUseCodexProxy(llm, extraArgs, proxySettings))
             return extraArgs ?? [];
@@ -390,7 +409,8 @@ public class CommandService : ICommandService
             _llmProxyContext.ApiBaseUrl,
             proxySettings.CodexLlmProxyMode,
             LocalLlmProxyContext.SessionTokenVariable,
-            LocalLlmProxyContext.TabTokenVariable);
+            LocalLlmProxyContext.TabTokenVariable,
+            string.IsNullOrWhiteSpace(sessionId) ? null : LocalLlmProxyContext.SessionIdVariable);
         if (extraArgs is not { Length: > 0 })
             return proxyArgs;
 

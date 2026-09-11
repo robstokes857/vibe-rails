@@ -49,6 +49,8 @@ public static class RouteExtensions
         LlmSettingsRoutes.Map(app);
         UpdateRoutes.Map(app);
         AppSettingsRoutes.Map(app);
+        if (isActiveRootBackend)
+            SigningKeyRoutes.Map(app);
         HttpRelayRoutes.Map(app);
         // Legacy one-shot full-database export (Settings modal "Export Data" button).
         // Active root backend only: terminal-tab children do not serve the Settings workflow.
@@ -58,6 +60,9 @@ public static class RouteExtensions
             DataExportRoutes.Map(app);
         if (isActiveRootBackend)
             InternalToolsRoutes.Map(app);
+        // Kanban board: dashboard-only surface, and its launch endpoint needs the in-process tab host.
+        if (isActiveRootBackend)
+            BoardRoutes.Map(app);
         PinRoutes.Map(app);
         PushRoutes.Map(app);
         LifecycleRoutes.Map(app);
