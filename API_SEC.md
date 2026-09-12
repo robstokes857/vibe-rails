@@ -1,13 +1,13 @@
 # API authentication coverage
 
-Audit date: 2026-09-11
+Audit date: 2026-09-12
 
-Full production route/authentication reconciliation completed: 2026-09-11, covering
+Full production route/authentication reconciliation completed: 2026-09-12, covering
 the current working tree, including uncommitted and untracked source. All 210 mapped
 surfaces match this inventory in both directions: 198 `/api/v1` method/path surfaces,
 nine protected non-`/api` API surfaces, and three bootstrap/page/probe mappings. No
-endpoint needs adding or removing. The existing inventory includes the untracked board
-and signing-key routes, the signing-key route group, and constant-based route paths.
+endpoint needs adding or removing. The existing inventory includes the board and
+signing-key routes, the signing-key route group, and constant-based route paths.
 The only session-authentication exceptions are exact `GET /health`, global `OPTIONS`,
 and exact `GET /auth/bootstrap` with its single-use, expiring code. No additional
 endpoint lacking a valid session credential was found, so no `SECURITY_ERROR.md` was
@@ -16,6 +16,10 @@ documented in section 2. Both repository-wide listener searches found only the m
 Kestrel host, the non-serving port probe, and test-only hosts. Targeted authentication
 and route tests passed: **101 passed, 0 failed, 0 skipped**. See Audit observations for
 scope and validation details.
+
+Historical production route/authentication reconciliation: 2026-09-11, covering the
+same 210 mapped surfaces against the then-current tree. The frozen listener set and
+three-case middleware bypass were unchanged. That observation remains below.
 
 Signing-key amendment: 2026-09-09. Five authenticated active-root settings routes were
 added, bringing the current inventory to 175 `/api/v1` surfaces and 187 total mapped
@@ -159,14 +163,19 @@ discovery alone is insufficient if the same feature change is allowed to expand 
 set. The production listener set is now frozen above so a new match starts as a finding, not as
 an expectation.
 
-### Repository-wide listener result — 2026-09-11
+### Repository-wide listener result — 2026-09-12
 
 - Approved serving implementation: the main Kestrel host in `VibeRails/Program.cs`.
 - Rejected and removed before merge: `GrokLoopbackBridge`'s `HttpListener`.
 - Non-serving production match: `PortFinder`'s transient loopback `TcpListener` port probe.
 - Test-only matches: isolated Kestrel hosts under `Tests/**`.
+- Not a production HTTP listener: `VibeRails.Daemon`'s `NamedPipeServerStream` control
+  pipe (`PING`/`STATUS`/`KICK`/`SHUTDOWN`, `PipeOptions.CurrentUserOnly`, bounded framing).
+  Local current-user IPC; it does not accept network requests and is outside the frozen
+  HTTP listener set.
 - No other production .NET accept loop and no JavaScript/TypeScript, Python, or PowerShell
-  server/listener implementation was found.
+  server/listener implementation was found. Monaco vendor bundles matched the JS search
+  as minified editor source only.
 
 ## Terminology used in this report
 
@@ -650,6 +659,34 @@ requirement and the launch composition; `Tests/Services/Mcp/BoardToolTests.cs` p
 - `WS /api/v1/terminal/tabs/{tabId}/ws`
 
 ## Audit observations
+
+- Full validation on 2026-09-12 (kanban VB-5): compared the current categorized inventory
+  against all **210 mapped route surfaces** in the working tree, including untracked
+  source: **198 `/api/v1` mappings**, nine protected non-`/api` API surfaces, and three
+  bootstrap/page/probe mappings. Method/path pairs matched in both directions after
+  resolving the signing-key `MapGroup`, HTTP-relay/proxy/control constants, and inherited
+  event-WebSocket mapping. No missing or removed endpoints.
+  Inspected the production registration aggregator (`Routes.cs` + `Program.cs` MCP/git-guard
+  maps), middleware ordering (request log → security headers → CORS → WebSockets →
+  `CookieAuthMiddleware` → static files → endpoints), the exact three-case bypass
+  predicate, session/tab validation, bootstrap expiry and single-use consumption, redirect
+  normalization, and the shared proxy/control `ILlmProxyAuthGate`.
+  `HostShellTools` and `WebResearchTools` remain in-tree and unregistered on both HTTP and
+  stdio MCP hosts (security review 2026-07-02). Dynamic signed-Python MCP tools still
+  require user PIN approval plus explicit dashboard exposure.
+  Both mandatory repository-wide listener searches found only the approved main Kestrel
+  host, non-serving port probe, and test-only hosts; the daemon named pipe is current-user
+  IPC, not an HTTP acceptor. The cross-runtime search had no production matches.
+  No additional endpoint lacking a valid session credential was found, so no
+  `SECURITY_ERROR.md` was created. All `/api/v1` business handlers require both
+  credentials; page/static loads and conditional proxy responses retain the session-only
+  behavior documented in section 2.
+  Ran `dotnet test Tests/Tests.csproj -p:OutputPath=bin/ApiSecAudit/` with a
+  `FullyQualifiedName` filter covering `CookieAuthMiddlewareTests`, `AuthServiceTests`,
+  `AuthRoutesTests`, all five LLM proxy route test classes, `TokenSaverPauseRoutesTests`,
+  `McpServerHttpTests`, `InternalToolsRoutesTests`, `SigningKeyRoutesTests`, and
+  `BoardRoutesTests`: **101 passed, 0 failed, 0 skipped**. This was source reconciliation
+  plus targeted tests, not a live request sweep of every production endpoint.
 
 - Full validation on 2026-09-11: compared the current categorized inventory against all
   **210 mapped route surfaces** in the working tree, including untracked source:
