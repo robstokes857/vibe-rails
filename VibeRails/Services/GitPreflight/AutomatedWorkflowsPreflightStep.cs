@@ -12,8 +12,7 @@ namespace VibeRails.Services.GitPreflight;
 /// the only preflight stage that can stop a commit.
 /// </summary>
 public sealed class AutomatedWorkflowsPreflightStep(
-    IJobStoreAccessor? jobStoreAccessor = null,
-    IJobDaemonKicker? daemonKicker = null) : IGitPreflightStep
+    IJobStoreAccessor? jobStoreAccessor = null) : IGitPreflightStep
 {
     public const string Id = "automated-workflows";
 
@@ -115,7 +114,6 @@ public sealed class AutomatedWorkflowsPreflightStep(
                 "[Jobs] Queued {Count} before-commit run(s) for {Repository}",
                 runIds.Count,
                 projectPath);
-            await JobDaemonWakeup.TryKickAsync(daemonKicker, CancellationToken.None);
         }
 
         return await FinishAsync(context, GitPreflightStepStatus.Passed, message, cancellationToken);

@@ -30,6 +30,8 @@ public sealed class LlmPickerPreferenceService(IRepository repository) : ILlmPic
         new("codex", "Codex"),
         new("glm-5.2", "GLM 5.2"),
         new("glm-5.3", "GLM 5.3"),
+        new("deepseek-v4-pro", "DeepSeek V4 Pro"),
+        new("kimi-k3", "Kimi K3"),
         new("grok-4.6", "Grok 4.6"),
         new("opencode", "OpenCode"),
         new("copilot", "Copilot"),

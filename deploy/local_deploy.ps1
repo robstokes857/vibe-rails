@@ -107,97 +107,6 @@ function Assert-NoDestinationReparsePoints {
     }
 }
 
-function Get-VbdStatus {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Executable
-    )
-
-    $json = (& $Executable --job-daemon-service status --json 2>$null | Out-String).Trim()
-    $exitCode = $LASTEXITCODE
-    if ($exitCode -ne 0 -or [string]::IsNullOrWhiteSpace($json)) {
-        throw "VBD status command failed with exit code $exitCode."
-    }
-
-    try {
-        $status = $json | ConvertFrom-Json -ErrorAction Stop
-    } catch {
-        throw "VBD status command returned invalid JSON: $($_.Exception.Message)"
-    }
-
-    $propertyNames = @($status.PSObject.Properties.Name)
-    if ($propertyNames -notcontains "isInstalled" -or $propertyNames -notcontains "isRunning") {
-        throw "VBD status JSON did not contain isInstalled and isRunning."
-    }
-
-    return $status
-}
-
-function Invoke-VbdAction {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Executable,
-
-        [Parameter(Mandatory = $true)]
-        [ValidateSet("stop", "repair", "start")]
-        [string]$Action
-    )
-
-    try {
-        & $Executable --job-daemon-service $Action | Out-Host
-        return $LASTEXITCODE -eq 0
-    } catch {
-        Write-Host "VBD $Action command failed: $($_.Exception.Message)" -ForegroundColor Red
-        return $false
-    }
-}
-
-function Wait-VbdRunningState {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Executable,
-
-        [Parameter(Mandatory = $true)]
-        [bool]$ExpectedRunning,
-
-        [int]$TimeoutSeconds = 10
-    )
-
-    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
-    do {
-        try {
-            $status = Get-VbdStatus -Executable $Executable
-            if ([bool]$status.isRunning -eq $ExpectedRunning) {
-                return $true
-            }
-        } catch {
-            # Retry while Task Scheduler settles the current-user task state.
-        }
-        Start-Sleep -Milliseconds 250
-    } while ([DateTime]::UtcNow -lt $deadline)
-
-    return $false
-}
-
-function Wait-ProcessExit {
-    param(
-        [Parameter(Mandatory = $true)]
-        [int]$TargetProcessId,
-
-        [int]$TimeoutSeconds = 10
-    )
-
-    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
-    do {
-        if (-not (Get-Process -Id $TargetProcessId -ErrorAction SilentlyContinue)) {
-            return $true
-        }
-        Start-Sleep -Milliseconds 250
-    } while ([DateTime]::UtcNow -lt $deadline)
-
-    return $false
-}
-
 function Wait-ExecutableReadyForReplacement {
     param(
         [Parameter(Mandatory = $true)]
@@ -231,26 +140,6 @@ function Wait-ExecutableReadyForReplacement {
     } while ([DateTime]::UtcNow -lt $deadline)
 
     return $false
-}
-
-function Show-VbdRecoveryCommands {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Executable,
-
-        [Parameter(Mandatory = $true)]
-        [bool]$WasRunning
-    )
-
-    $quotedExecutable = $Executable.Replace("'", "''")
-    Write-Host ""
-    Write-Host "VBD could not be restored automatically." -ForegroundColor Red
-    Write-Host "After resolving the deploy error, run these current-user commands:" -ForegroundColor Yellow
-    Write-Host "  & '$quotedExecutable' --job-daemon-service repair" -ForegroundColor White
-    if ($WasRunning) {
-        Write-Host "  & '$quotedExecutable' --job-daemon-service start" -ForegroundColor White
-    }
-    Write-Host ""
 }
 
 function Remove-DeployStagingDirectory {
@@ -302,9 +191,6 @@ $payloadDir = Join-Path $stageDir "payload"
 New-Item -ItemType Directory -Path $stageDir | Out-Null
 New-Item -ItemType Directory -Path $payloadDir | Out-Null
 
-$daemonWasInstalled = $false
-$daemonWasRunning = $false
-$recoveryNeeded = $false
 
 try {
     # Copy into a private stage so a partially written publish directory can never
@@ -316,53 +202,7 @@ try {
     Assert-StableInstallTarget -Path $InstallDir
     Write-Host "Publish payload validated." -ForegroundColor Green
 
-    $stagedExecutable = Join-Path $payloadDir "vb.exe"
-    try {
-        $daemonStatus = Get-VbdStatus -Executable $stagedExecutable
-    } catch {
-        throw "Could not determine VBD state from the staged build. $($_.Exception.Message) The installed application was not changed."
-    }
-
-    $daemonState = [string]$daemonStatus.state
-    $daemonWasInstalled = [bool]$daemonStatus.isInstalled
-    # isReachable guards against a status whose isRunning was computed while the process
-    # was still starting; either signal means a live daemon must stop before file swaps.
-    $daemonWasRunning = ([bool]$daemonStatus.isRunning) -or ([bool]$daemonStatus.isReachable)
-    $daemonProcessId = if ($null -ne $daemonStatus.pid) { [int]$daemonStatus.pid } else { $null }
-
-    # An Error state means VBD's own view of the registration is broken; an Unavailable
-    # state alongside an active daemon/registration means lifecycle control (including
-    # stop) cannot work. Proceeding would replace files under a running daemon.
-    if ($daemonState -eq "Error") {
-        throw "VBD reported lifecycle state 'Error' ($($daemonStatus.lastError)). Resolve it (vb --job-daemon-service status) and retry. The installed application was not changed."
-    }
-    if ($daemonState -eq "Unavailable" -and ($daemonWasInstalled -or $daemonWasRunning)) {
-        throw "VBD lifecycle support is unavailable while a VBD process or registration appears active ($($daemonStatus.lastError)). Resolve it and retry. The installed application was not changed."
-    }
-    if ($daemonWasInstalled) {
-        $daemonState = if ($daemonWasRunning) { "running" } else { "stopped" }
-        Write-Host "Detected installed VBD ($daemonState)." -ForegroundColor Cyan
-    } else {
-        Write-Host "VBD is not installed for the current user." -ForegroundColor Cyan
-    }
-
-    if ($daemonWasInstalled -or $daemonWasRunning) {
-        Write-Host "Ensuring VBD is stopped before replacing files..." -ForegroundColor Cyan
-        $recoveryNeeded = $true
-        if (-not (Invoke-VbdAction -Executable $stagedExecutable -Action "stop")) {
-            throw "Could not stop VBD. The installed application was not changed."
-        }
-        if (-not (Wait-VbdRunningState -Executable $stagedExecutable -ExpectedRunning $false)) {
-            throw "VBD did not stop within 10 seconds. The installed application was not changed."
-        }
-        if ($null -ne $daemonProcessId -and -not (Wait-ProcessExit -TargetProcessId $daemonProcessId)) {
-            throw "The previous VBD process (PID $daemonProcessId) did not exit within 10 seconds. The installed application was not changed."
-        }
-        Write-Host "VBD stopped." -ForegroundColor Green
-    }
-
     # Other dashboard/terminal vb processes also hold vb.exe open on Windows.
-    # Preserve local_deploy's existing behavior after giving VBD a graceful stop.
     $vbProcs = Get-Process -Name "vb" -ErrorAction SilentlyContinue
     if ($vbProcs) {
         Write-Host "Stopping remaining running vb processes for local deploy..." -ForegroundColor Yellow
@@ -379,9 +219,6 @@ try {
     if (-not (Test-Path -LiteralPath $InstallDir)) {
         New-Item -ItemType Directory -Path $InstallDir | Out-Null
     }
-    if ($daemonWasInstalled) {
-        $recoveryNeeded = $true
-    }
 
     Assert-NoDestinationReparsePoints -PayloadDir $payloadDir -InstallDir $InstallDir
 
@@ -392,41 +229,11 @@ try {
         Copy-Item -LiteralPath $item.FullName -Destination $InstallDir -Recurse -Force
     }
 
-    $installedExecutable = Join-Path $InstallDir "vb.exe"
-    if ($daemonWasInstalled) {
-        Write-Host "Repairing current-user VBD registration..." -ForegroundColor Cyan
-        if (-not (Invoke-VbdAction -Executable $installedExecutable -Action "repair")) {
-            throw "VBD registration repair failed."
-        }
-    }
-
-    if ($daemonWasRunning) {
-        Write-Host "Restarting VBD because it was running before the deploy..." -ForegroundColor Cyan
-        if (-not (Invoke-VbdAction -Executable $installedExecutable -Action "start")) {
-            throw "VBD restart failed."
-        }
-        if (-not (Wait-VbdRunningState -Executable $installedExecutable -ExpectedRunning $true)) {
-            throw "VBD did not report running within 10 seconds after restart."
-        }
-        Write-Host "VBD restarted." -ForegroundColor Green
-    } elseif ($daemonWasInstalled) {
-        Write-Host "VBD registration repaired; it remains stopped." -ForegroundColor Green
-    }
-
-    if ($daemonWasInstalled -or $daemonWasRunning) {
-        $recoveryNeeded = $false
-    }
-
     Write-Host ""
     Write-Host "Deploy complete!" -ForegroundColor Green
     Write-Host "Run 'vb --launch-web' to test." -ForegroundColor Yellow
     Write-Host ""
 } catch {
-    if ($recoveryNeeded) {
-        Show-VbdRecoveryCommands `
-            -Executable (Join-Path $InstallDir "vb.exe") `
-            -WasRunning $daemonWasRunning
-    }
     throw
 } finally {
     Remove-DeployStagingDirectory -Path $stageDir

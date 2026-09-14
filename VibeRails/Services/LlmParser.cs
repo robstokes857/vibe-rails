@@ -14,14 +14,17 @@ public sealed class LlmParser : ILlmParser
         Enum.GetValues<LLM>().Where(llm => llm != LLM.NotSet).ToList().AsReadOnly();
 
     // C# enum names can't contain hyphens or periods, so the wire strings
-    // "glm-5.2" / "grok-4.6" / "glm-5.3" can't round-trip through Enum.TryParse. Map them
-    // explicitly here. Glm52 / Glm53 launch `opencode` with a pinned --model flag;
-    // Grok46 launches the native `grok` binary (see CommandService.PrepareSession).
+    // "glm-5.2" / "grok-4.6" / "glm-5.3" / "deepseek-v4-pro" / "kimi-k3" can't round-trip
+    // through Enum.TryParse. Map them explicitly here. Glm52 / Glm53 / DeepSeekV4Pro / KimiK3
+    // launch `opencode` with a pinned --model flag; Grok46 launches the native `grok` binary
+    // (see CommandService.PrepareSession).
     private static readonly Dictionary<string, LLM> SpecialCaseMap = new(StringComparer.OrdinalIgnoreCase)
     {
         ["glm-5.2"] = LLM.Glm52,
         ["grok-4.6"] = LLM.Grok46,
-        ["glm-5.3"] = LLM.Glm53
+        ["glm-5.3"] = LLM.Glm53,
+        ["deepseek-v4-pro"] = LLM.DeepSeekV4Pro,
+        ["kimi-k3"] = LLM.KimiK3
     };
 
     private static readonly Dictionary<LLM, string> SpecialCaseWireNames =
@@ -54,10 +57,11 @@ public sealed class LlmParser : ILlmParser
     public string Normalize(LLM llm) => ToWireName(llm);
 
     // Reverse of Parse: maps an LLM enum back to the exact wire string the frontend keys on —
-    // "glm-5.2" / "grok-4.6" / "glm-5.3" for the hyphenated wire names, the canonical enum name otherwise. Every outbound
-    // boundary (session Cli persistence, PublishSessionStart, ActiveCli, parent-cli links, the
-    // environments API) must round-trip through here so wire names match what Parse accepts and what
-    // the frontend filter/brand maps expect. Static so callers without ILlmParser injected can use it.
+    // "glm-5.2" / "grok-4.6" / "glm-5.3" / "deepseek-v4-pro" / "kimi-k3" for the hyphenated
+    // wire names, the canonical enum name otherwise. Every outbound boundary (session Cli persistence, PublishSessionStart,
+    // ActiveCli, parent-cli links, the environments API) must round-trip through here so wire
+    // names match what Parse accepts and what the frontend filter/brand maps expect. Static so
+    // callers without ILlmParser injected can use it.
     public static string ToWireName(LLM llm)
     {
         if (llm == LLM.NotSet)

@@ -8,7 +8,9 @@ export function getLlmName(llmEnum) {
         6: 'OpenCode',
         7: 'GLM 5.2',
         8: 'Grok 4.6',
-        9: 'GLM 5.3'
+        9: 'GLM 5.3',
+        10: 'DeepSeek V4 Pro',
+        11: 'Kimi K3'
     };
     return names[llmEnum] || 'Unknown';
 }
@@ -46,6 +48,9 @@ export function formatRelativeTime(dateString) {
 
 export function getCliBrand(cli) {
     const key = (cli || '').toLowerCase();
+    const isLightSurface = typeof document !== 'undefined'
+        && (document.body?.classList.contains('vscode-light')
+            || document.body?.classList.contains('vscode-high-contrast-light'));
 
     // Helper to get asset path (works in both browser and VS Code webview)
     const getAssetPath = (relativePath) => {
@@ -119,6 +124,22 @@ export function getCliBrand(cli) {
             className: 'badge-cli-glm',
             accentColor: '#1F63EC'
         },
+        'deepseek-v4-pro': {
+            label: 'DeepSeek V4 Pro',
+            logo: getAssetPath('assets/img/deepseek-color.png'),
+            className: 'badge-cli-deepseek',
+            // Brand blue drawn from deepseek-color.png.
+            accentColor: '#4D6BFE'
+        },
+        'kimi-k3': {
+            label: 'Kimi K3',
+            // Kimi supplies monochrome marks for both surfaces. VS Code applies these body
+            // classes before the dashboard renders, so every shared brand-logo renderer gets
+            // the contrasting asset without needing surface-specific markup.
+            logo: getAssetPath(`assets/img/${isLightSurface ? 'kimi_dark' : 'kimi'}.png`),
+            className: 'badge-cli-kimi',
+            accentColor: isLightSurface ? '#000000' : '#ffffff'
+        },
         'grok-4.6': {
             label: 'Grok 4.6',
             logo: getAssetPath('assets/img/grok.svg'),
@@ -144,6 +165,8 @@ export const BASE_LLM_CHOICES = Object.freeze([
     { cli: 'codex', label: 'Codex' },
     { cli: 'glm-5.2', label: 'GLM 5.2' },
     { cli: 'glm-5.3', label: 'GLM 5.3' },
+    { cli: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
+    { cli: 'kimi-k3', label: 'Kimi K3' },
     { cli: 'grok-4.6', label: 'Grok 4.6' },
     { cli: 'opencode', label: 'OpenCode' },
     { cli: 'copilot', label: 'Copilot' },
@@ -537,8 +560,8 @@ function mountLlmPickerFooter(ts, selectEl, onCustomize) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'llm-picker-customize-button';
-    button.setAttribute('aria-label', 'Customize LLM list');
-    button.innerHTML = '<i class="fa-solid fa-gear" aria-hidden="true"></i><span>Customize LLM list</span>';
+    button.setAttribute('aria-label', 'View/Edit all LLMs');
+    button.innerHTML = '<i class="fa-solid fa-gear" aria-hidden="true"></i><span>View/Edit all LLMs</span>';
     footer.appendChild(button);
     ts.dropdown.appendChild(footer);
 

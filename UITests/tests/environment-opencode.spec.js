@@ -55,6 +55,11 @@ test.describe('OpenCode environment form – Model field', () => {
             'openai/gpt-5.2',
             'openai/gpt-5.1-codex',
             'google/gemini-3-pro',
+            'zai/glm-5.2',
+            'zai-coding-plan/glm-5.3',
+            'deepseek/deepseek-v4-pro',
+            'moonshotai/kimi-k3',
+            'xai/grok-4.6',
             'opencode/gpt-5.1-codex',
         ];
 

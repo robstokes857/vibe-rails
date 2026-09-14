@@ -134,6 +134,8 @@ existence in another project is not itself disclosed.
 | 7 | Glm52 | Pseudo-CLI: OpenCode launched with a pinned `--model` flag. `LlmParser` special-cases the string `"glm-5.2"` |
 | 8 | Grok46 | Native Grok Build CLI. Binary is `grok` (not `grok46`). `LlmParser` special-cases the string `"grok-4.6"`. Token Saver reuses `/llm/xai` → `api.x.ai` (same OpenCode proxy flag). Do not set `GROK_HOME`. |
 | 9 | Glm53 | Pseudo-CLI: OpenCode launched with `--model=zai-coding-plan/glm-5.3` (glm-5.3 exists only under the `zai-coding-plan` provider). `LlmParser` special-cases the string `"glm-5.3"`. Traffic goes direct to Z.AI — the OpenCode proxy does not remap `zai-coding-plan`. |
+| 10 | DeepSeekV4Pro | Pseudo-CLI: OpenCode launched with `--model=deepseek/deepseek-v4-pro`. `LlmParser` special-cases the string `"deepseek-v4-pro"`. Traffic goes direct to DeepSeek — the OpenCode proxy does not remap the `deepseek` provider. |
+| 11 | KimiK3 | Pseudo-CLI: OpenCode launched with `--model=moonshotai/kimi-k3`. `LlmParser` special-cases the string `"kimi-k3"`. Traffic goes direct to Moonshot AI — the OpenCode proxy does not remap the `moonshotai` provider. |
 
 **Key operations:**
 

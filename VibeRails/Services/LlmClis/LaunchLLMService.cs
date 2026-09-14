@@ -51,9 +51,9 @@ namespace VibeRails.Services.LlmClis
                 LLM.Antigravity => _antigravityLauncher,
                 LLM.Copilot => _copilotLauncher,
                 LLM.Grok46 => _grokLauncher,
-                // Glm52 / Glm53 are OpenCode-backed pseudo-CLIs — they reuse the OpenCode
-                // launcher (the --model pin is injected by CommandService.PrepareSession).
-                LLM.OpenCode or LLM.Glm52 or LLM.Glm53 => _opencodeLauncher,
+                // Glm52 / Glm53 / DeepSeekV4Pro / KimiK3 are OpenCode-backed pseudo-CLIs — they
+                // reuse the OpenCode launcher (the --model pin is injected by CommandService.PrepareSession).
+                LLM.OpenCode or LLM.Glm52 or LLM.Glm53 or LLM.DeepSeekV4Pro or LLM.KimiK3 => _opencodeLauncher,
                 _ => throw new ArgumentException($"Unsupported LLM type: {llm}")
             };
         }

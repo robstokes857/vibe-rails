@@ -4,6 +4,7 @@ import {
     confirmDialog,
     escapeHtml,
     getCliBrand,
+    isConfirmDialogOpen,
     populateLlmSelectionItemsSelect
 } from './utils.js';
 
@@ -380,8 +381,8 @@ export class LlmPickerController {
                     <div class="modal-content">
                         <div class="modal-header">
                             <div>
-                                <h5 class="modal-title" id="llm-picker-modal-title">Customize LLM list</h5>
-                                <p class="text-muted small mb-0">Choose what appears in launch pickers and arrange each section.</p>
+                                <h5 class="modal-title" id="llm-picker-modal-title">View/Edit all LLMs</h5>
+                                <p class="text-muted small mb-0">Launch any LLM, including hidden ones. Save visibility and order changes before launching.</p>
                             </div>
                             <button type="button" class="btn-close" data-llm-picker-action="cancel"
                                     aria-label="Close LLM list customization"></button>
@@ -432,6 +433,10 @@ export class LlmPickerController {
             pending: false,
             draggingKey: null,
             originSelect,
+            launchWorkingDirectory: this.pickerBySelect.get(originSelect)?.configuration.getLaunchWorkingDirectory?.()
+                || this.app.data.configs?.rootPath
+                || this.app.data.configs?.launchDirectory
+                || null,
             triggerElement,
             underlying,
             observer: null,
@@ -482,7 +487,7 @@ export class LlmPickerController {
         const key = escapeHtml(item.key);
         const label = escapeHtml(item.label);
         return `
-            <div class="llm-picker-modal-row${item.enabled ? '' : ' is-hidden'}"
+            <div class="llm-picker-modal-row has-launch-action${item.enabled ? '' : ' is-hidden'}"
                  data-llm-picker-key="${key}" data-llm-picker-group-name="${escapeHtml(item.group)}">
                 <span class="llm-picker-drag-handle" draggable="true" role="button" tabindex="0"
                       aria-label="Drag ${label} to reorder" title="Drag to reorder">
@@ -506,6 +511,10 @@ export class LlmPickerController {
                         <i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
                     </button>
                 </div>
+                <button type="button" class="btn btn-sm btn-outline-primary llm-picker-launch-button"
+                        data-llm-picker-launch aria-label="Launch ${label}">
+                    <i class="fa-solid fa-play" aria-hidden="true"></i> Launch
+                </button>
             </div>`;
     }
 
@@ -523,6 +532,7 @@ export class LlmPickerController {
             });
 
         state.keydownHandler = (event) => {
+            if (isConfirmDialogOpen()) return;
             if (this.modalState !== state) return;
             if (event.key === 'Escape') {
                 event.preventDefault();
@@ -540,6 +550,9 @@ export class LlmPickerController {
         if (!state) return;
         state.layer.querySelectorAll('.llm-picker-modal-row').forEach((row) => {
             const key = row.dataset.llmPickerKey;
+            row.querySelector('[data-llm-picker-launch]')?.addEventListener('click', () => {
+                void this._launchModalItem(key);
+            });
             row.querySelector('[data-llm-picker-enabled]')?.addEventListener('change', (event) => {
                 const item = state.items.find((candidate) => candidate.key === key);
                 if (!item) return;
@@ -592,7 +605,7 @@ export class LlmPickerController {
     _moveModalItem(key, direction) {
         const state = this.modalState;
         const item = state?.items.find((candidate) => candidate.key === key);
-        if (!state || !item) return;
+        if (!state || state.pending || !item) return;
         const groupItems = state.items.filter((candidate) => candidate.group === item.group);
         const currentIndex = groupItems.findIndex((candidate) => candidate.key === key);
         const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
@@ -607,7 +620,7 @@ export class LlmPickerController {
 
     _dropModalItem(sourceKey, targetKey, after) {
         const state = this.modalState;
-        if (!state || !sourceKey || sourceKey === targetKey) return;
+        if (!state || state.pending || !sourceKey || sourceKey === targetKey) return;
         const source = state.items.find((item) => item.key === sourceKey);
         const target = state.items.find((item) => item.key === targetKey);
         if (!source || !target || source.group !== target.group) return;
@@ -618,6 +631,47 @@ export class LlmPickerController {
         state.items.splice(targetIndex + (after ? 1 : 0), 0, source);
         state.dirty = true;
         this._renderModalGroups();
+    }
+
+    async _launchModalItem(key) {
+        const state = this.modalState;
+        const item = state?.items.find((candidate) => candidate.key === key);
+        if (!state || state.disposed || state.pending || !item) return;
+
+        const environment = item.kind === 'environment'
+            ? (this.app.data.environments || []).find((candidate) =>
+                Number(candidate.id) === item.environmentId
+                && String(candidate.cli).toLowerCase() === item.cli
+                && !candidate.automationWorker)
+            : null;
+        if (item.kind === 'environment' && !environment?.name) {
+            this._showModalError('This environment is no longer available. Reopen the list to refresh it.');
+            return;
+        }
+
+        this._showModalError('');
+        this._setModalPending(true, 'Save');
+        try {
+            // Visibility only controls the pickers. A one-off launch never saves the
+            // modal draft or enables the item, and environments retain their profile.
+            const opened = await this.app.terminalController.launchInFocus({
+                cli: item.cli,
+                environmentName: environment?.name || null,
+                workingDirectory: state.launchWorkingDirectory,
+                title: environment?.name || item.label,
+                tabLabel: environment?.name || item.label,
+                forceNewTab: true
+            });
+            if (opened !== false && this.modalState === state) {
+                this._closeCustomizationModal({ restoreFocus: false });
+            }
+        } catch (error) {
+            if (this.modalState === state) {
+                this._showModalError(error?.message || 'Could not launch this LLM.');
+            }
+        } finally {
+            if (this.modalState === state) this._setModalPending(false);
+        }
     }
 
     async _savePreferences() {
@@ -696,7 +750,7 @@ export class LlmPickerController {
         });
     }
 
-    _setModalPending(pending) {
+    _setModalPending(pending, pendingLabel = 'Saving…') {
         const state = this.modalState;
         if (!state) return;
         state.pending = pending;
@@ -708,7 +762,7 @@ export class LlmPickerController {
             handle.setAttribute('aria-disabled', String(pending));
         });
         const save = state.layer.querySelector('[data-llm-picker-action="save"]');
-        if (save) save.textContent = pending ? 'Saving…' : 'Save';
+        if (save) save.textContent = pending ? pendingLabel : 'Save';
         if (!pending) this._renderModalGroups();
     }
 

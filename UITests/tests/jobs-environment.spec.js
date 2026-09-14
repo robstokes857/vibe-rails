@@ -73,6 +73,8 @@ function createFixtureState() {
         ['opencode', 'OpenCode'],
         ['glm-5.2', 'GLM 5.2'],
         ['glm-5.3', 'GLM 5.3'],
+        ['deepseek-v4-pro', 'DeepSeek V4 Pro'],
+        ['kimi-k3', 'Kimi K3'],
         ['grok-4.6', 'Grok 4.6'],
         ['antigravity', 'Antigravity'],
         ['copilot', 'Copilot'],
@@ -209,31 +211,6 @@ async function installStatefulApi(page) {
         }
         if (method === 'GET' && path === '/api/v1/jobs/runs') {
             return respond({ runs: [] });
-        }
-        // Keep the page's VBD probe deterministic and read-only. Lifecycle mutation behavior is
-        // covered by controller tests; this editor fixture must never inspect or change the
-        // developer account's real per-user background registration.
-        if (method === 'GET' && path === '/api/v1/jobs/demon') {
-            return respond({
-                state: 'NotInstalled',
-                platform: 'test',
-                isSupported: true,
-                isInstalled: false,
-                isRunning: false,
-                isReachable: false,
-                registrationIsCurrent: false,
-                currentVersion: 'test',
-                daemonVersion: null,
-                protocolVersion: 1,
-                pid: null,
-                startedUtc: null,
-                uptimeSeconds: null,
-                lastCycleUtc: null,
-                ownsSchedulerLease: null,
-                lastError: null,
-                platformLimitation: 'Test fixture background execution is disabled.',
-                allowedActions: ['install']
-            });
         }
         // The Python scripts section reads the developer's real ~/.vibe_rails/scripts
         // through the fallback; keep this spec deterministic (and read-only) instead.

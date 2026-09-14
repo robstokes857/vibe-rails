@@ -26,7 +26,6 @@ public sealed class JobService(
     IRepository repository,
     IJobExecutableResolver executableResolver,
     IJobScheduler scheduler,
-    IJobDaemonKicker? daemonKicker = null,
     IAutomationScriptService? automationScriptService = null) : IJobService
 {
     private const int MaximumNameLength = 100;
@@ -108,7 +107,6 @@ public sealed class JobService(
         // it. Kick only wakes that loop early; it deliberately does NOT reserve the run here, so
         // there is exactly one launcher and one kind of window an Automation can run in.
         scheduler.Kick();
-        await JobDaemonWakeup.TryKickAsync(daemonKicker, CancellationToken.None);
         return new JobActionResponse(true, "Automation queued.", runId);
     }
 
@@ -258,7 +256,6 @@ public sealed class JobService(
         var retryId = await store.EnqueueRetryAsync(runId, cancellationToken)
             ?? throw JobServiceException.Conflict("Only completed runs for active Automations can be retried.");
         scheduler.Kick();
-        await JobDaemonWakeup.TryKickAsync(daemonKicker, CancellationToken.None);
         return new JobActionResponse(true, "Automation retry queued.", retryId);
     }
 
@@ -373,7 +370,8 @@ public sealed class JobService(
                     ?? throw JobServiceException.BadRequest("The selected Environment no longer exists.");
 
                 if (environment.LLM is not (LLM.Codex or LLM.Claude or LLM.Antigravity
-                    or LLM.Copilot or LLM.OpenCode or LLM.Glm52 or LLM.Grok46 or LLM.Glm53))
+                    or LLM.Copilot or LLM.OpenCode or LLM.Glm52 or LLM.Grok46 or LLM.Glm53 or LLM.DeepSeekV4Pro
+                    or LLM.KimiK3))
                 {
                     throw JobServiceException.BadRequest("The selected LLM cannot run as an Automation.");
                 }

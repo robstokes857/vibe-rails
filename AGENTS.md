@@ -28,7 +28,7 @@ record security violations in `SECURITY_ERROR.md` for the owner to review.
 - **Environment Management** - Configure separate environments for different LLM providers with custom args and prompts. Launch environments directly in the Web UI terminal with the "Web UI" button or select from the terminal's environment dropdown
 - **Sandbox Management** - Create isolated git clone sandboxes for parallel AI workflows. Shallow clones current branch with all dirty/untracked files. Launch terminals or VS Code directly into sandbox directories.
 - **Session Logging** - Track and monitor all CLI session history and outputs
-- **Background Automations (Preview)** - Ordered workflows of repository `.py`, `.ps1`, and `.sh` scripts plus at most one optional Worker; the opt-in current-user VibeRails Demon runs the durable scheduler while the dashboard is closed
+- **Automations** - Ordered workflows of repository `.py`, `.ps1`, and `.sh` scripts plus at most one optional Worker, on a schedule or a commit trigger; they run while a VibeRails root backend is open
 - **MCP Integration** - Custom Model Context Protocol server with specialized tools
 
 ## Technology Stack
@@ -41,7 +41,6 @@ record security violations in `SECURITY_ERROR.md` for the owner to review.
 - **ModelContextProtocol.AspNetCore** (v2.0.0) - ASP.NET Core integration for the in-process MCP server
 - **Pty.Net** - Cross-platform pseudo-terminal support (inlined fork, ConPTY only)
 - **PyBridge** - AOT-friendly Python process and session runner (in-tree library)
-- **VibeRails.Daemon** - In-tree current-user lifecycle, single-instance, and bounded IPC library for the VibeRails Demon
 
 ### Frontend
 - **Vanilla JavaScript** - No framework dependencies
@@ -99,7 +98,7 @@ vibe-rails/
 │   ├── DTOs/                       # Data transfer objects
 │   │   ├── ResponseRecords.cs      # API response types
 │   │   ├── Sandbox.cs              # Sandbox entity model
-│   │   ├── LLM.cs                  # LLM enum (NotSet, Codex, Claude, Antigravity, Copilot, Shell, OpenCode, Glm52, Grok46, Glm53)
+│   │   ├── LLM.cs                  # LLM enum (NotSet, Codex, Claude, Antigravity, Copilot, Shell, OpenCode, Glm52, Grok46, Glm53, DeepSeekV4Pro, KimiK3)
 │   │   ├── LLM_Environment.cs      # Environment configuration
 │   │   ├── McpDtos.cs              # MCP protocol DTOs
 │   │   └── StateFileObject.cs
@@ -130,7 +129,6 @@ vibe-rails/
 │
 ├── Pty.Net/                        # Cross-platform PTY library (inlined fork, ConPTY only)
 ├── PyBridge/                       # AOT-friendly Python runner library (in-tree)
-├── VibeRails.Daemon/               # Current-user daemon lifecycle + bounded local IPC project
 │
 ├── Tests/                          # xUnit test suite
 │   ├── AgentFileServiceTests.cs
@@ -195,16 +193,19 @@ vb --git-guard
 - VCA is the only preflight stage that can block a commit; automated workflows enqueue before-commit Automations without waiting on them
 - The native pre-commit hook uses the same shared pipeline and console event presentation
 
-#### 5. VibeRails Demon Mode (Preview)
-```bash
-vb --job-daemon
-```
-- Internal current-user background host installed from the Automation page
-- Uses a lean Generic Host: no Kestrel, browser, MCP, BERT, or dashboard maintenance graph
-- Runs the existing SQLite-backed Automation scheduler and native-terminal launch pipeline
-- Shares `JobSchedulerLease` with open root dashboards, so only one process drains queued work
-- Serves only bounded current-user `PING`, `STATUS`, `KICK`, and `SHUTDOWN` pipe commands
-- Lifecycle/IPC primitives live in the standalone `VibeRails.Daemon` project
+#### 5. Background Automations — there is no background host
+
+Automations run only while a VibeRails root backend is open. There is no daemon, no operating-system
+registration, and no `--job-daemon` process role.
+
+A per-user background host (VibeRails Demon, "VBD") existed and was deleted on 2026-09-13, along
+with the `VibeRails.Daemon` project, every `JobDaemon*` service, the seven `/api/v1/jobs/demon`
+routes, and the VBD orchestration in the installer scripts. The retrospective — what it was, every
+design we held, what we tried, and why none of it worked — is at `vibe-books/deamon/deamon_retro.md`.
+
+**Read that retrospective before proposing anything that registers VibeRails with the operating
+system.** We do not currently know a good way to do it, and the document is explicit that its
+contents are a record of mistakes rather than a starting point.
 
 The old CLI management commands (`vb env`, `vb validate`, `vb hooks`, etc.) are no longer part of the supported surface. Use the Web UI, VS Code extension, or REST APIs for those workflows.
 
@@ -213,8 +214,7 @@ The old CLI management commands (`vb env`, `vb validate`, `vb hooks`, etc.) are 
 > (automated workflow run; script-only runs do not need `--env`), `vb --job-trigger`
 > (post-commit job enqueue), and `vb --job-tick`
 > (compatibility tombstone for the retired OS Jobs scheduler — recognized and exits before the
-> web host starts). Installers also use `vb --job-daemon-service <status|stop|repair|start>` as a
-> hidden update-maintenance surface. These are invoked internally by the main app, installers, or
+> web host starts). These are invoked internally by the main app, installers, or
 > git hooks, not typed by end users.
 
 ### Component Interaction Flow
@@ -475,7 +475,7 @@ changing their behavior.
   Worker's Project/Persistent/PerRun workspace resolution for every script in that workflow.
 - `JobRunner` executes snapshots from top to bottom, records per-action status/output, stops at the
   first failure, and retains the existing global timeout, cancellation, overlap guard, scheduler,
-  Demon, and Worker terminal-session replay behavior.
+  and Worker terminal-session replay behavior.
 
 #### McpClientService ([Services/Mcp/McpClientService.cs](VibeRails/Services/Mcp/McpClientService.cs))
 **Purpose**: Custom MCP client service layer built on ModelContextProtocol NuGet package
@@ -596,11 +596,6 @@ tools (security review 2026-07-02).
 **Session Logging**:
 - `GET /api/v1/sessions/{sessionId}/logs` - Get session logs
 - `GET /api/v1/sessions/recent` - Recent sessions
-
-**VibeRails Demon lifecycle** (authenticated, active-root-backend only):
-- `GET /api/v1/jobs/demon` - OS registration plus live VBD health
-- `POST /api/v1/jobs/demon/install` | `/start` | `/stop` | `/restart` | `/repair` - Current-user lifecycle actions
-- `DELETE /api/v1/jobs/demon` - Remove only the background registration; Automation data remains
 
 **Automation workflows**:
 - `GET|POST /api/v1/jobs`, `GET|PUT|DELETE /api/v1/jobs/{id}` - List/create/read/update/remove workflows
@@ -946,15 +941,15 @@ each attempt to its latest event before applying filters. The Logs route accepts
 (API default), `application`, or `daemon`. `DiagnosticLogReader` reads bounded tails of existing
 Serilog `logs/vb-*.log` and `logs/vbd-*.log` files on demand, with a two-second cache and no
 writer changes. The UI defaults to Application logs; upload drill-down selects the Feature journal.
+Serilog writes those application and Demon files at Information and above, so a scheduler cycle
+that enqueued, launched or reaped work leaves a record. A Warning-only file sink was tried and
+reverted: it made a healthy run and a dead scheduler look identical on disk, and it hid the only
+audit line recording that executables in `~/.vibe_rails` had been replaced.
+`builder.Logging.SetMinimumLevel` does not affect these files — the host clears MEL providers and
+the file sink is the static Serilog logger in `Program.cs`.
 Routes are authenticated and mapped
 only on active root backends. See [README.md](README.md#internal-tools-and-feature-logs) for
 the extension recipe, retention, status semantics, and best-effort persistence limits.
-
-Enable verbose logging in [Program.cs](VibeRails/Program.cs):
-```csharp
-// Modify logging level
-builder.Logging.SetMinimumLevel(LogLevel.Debug);
-```
 
 ## Contributing Guidelines
 

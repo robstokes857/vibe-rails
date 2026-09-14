@@ -34,8 +34,6 @@ using VibeRails.Services.GitPreflight;
 using VibeRails.Services.Jobs;
 using VibeRails.Services.HttpRelay;
 using VibeRails.Services.Diagnostics;
-using VibeRails.Daemon;
-using VibeRails.Daemon.Ipc;
 
 namespace VibeRails
 {
@@ -196,15 +194,7 @@ namespace VibeRails
                 Serilog.Log.Warning(
                     "[Jobs] Automation scheduler NOT registered: VIBERAILS_TEST_FAKE_CLI=1 marks this as a UI-test host");
             }
-            serviceCollection.AddSingleton<ICurrentUserIdentityProvider, CurrentUserIdentityProvider>();
-            serviceCollection.AddSingleton<IDaemonControlClient, DaemonControlClient>();
-            // A provider, not a one-time Resolve(): a singleton resolution latches File.Exists
-            // (vb.exe) for the process lifetime, so a dashboard started before the payload was
-            // installed would report VBD Unavailable until restarted.
-            serviceCollection.AddSingleton<IJobDaemonRegistrationProvider, JobDaemonRegistrationProvider>();
-            serviceCollection.AddSingleton<IJobDaemonKicker, JobDaemonKicker>();
             serviceCollection.AddScoped<IJobService, JobService>();
-            serviceCollection.AddSingleton<IJobDaemonLifecycleService, JobDaemonLifecycleService>();
             // Singleton for the same reason as the savings tally: one ordered writer, so concurrent
             // relays serialize capture inserts, re-sight counts, and clears before reaching SQLite.
             serviceCollection.AddSingleton<ICompressionCaptureStore>(_ => new CompressionCaptureStore(
@@ -461,9 +451,7 @@ namespace VibeRails
         {
             var arguments = args as string[] ?? args.ToArray();
             var parsed = ArgumentParser.Parse(arguments);
-            return !JobDaemonProcessHost.IsRequested(arguments)
-                   && !JobDaemonMaintenanceProcessHost.IsRequested(arguments)
-                   && !IsTerminalTabChildProcess(arguments)
+            return !IsTerminalTabChildProcess(arguments)
                    && !parsed.IsLMBootstrap
                    && parsed.JobRunId is null;
         }

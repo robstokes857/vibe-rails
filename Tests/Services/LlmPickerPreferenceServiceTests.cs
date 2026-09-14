@@ -23,13 +23,13 @@ public sealed class LlmPickerPreferenceServiceTests
         var response = await service.GetAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(
-            ["base:claude", "base:codex", "base:glm-5.2", "base:glm-5.3", "base:grok-4.6",
-             "base:opencode", "base:copilot", "base:antigravity", "base:shell"],
+            ["base:claude", "base:codex", "base:glm-5.2", "base:glm-5.3", "base:deepseek-v4-pro",
+             "base:kimi-k3", "base:grok-4.6", "base:opencode", "base:copilot", "base:antigravity", "base:shell"],
             response.Items.Where(item => item.Kind == "base").Select(item => item.Key));
         Assert.True(response.Items.Single(item => item.Key == "env:10:claude").Enabled);
         Assert.False(response.Items.Single(item => item.Key == "env:11:codex").Enabled);
         Assert.Equal(
-            Enumerable.Range(0, 9),
+            Enumerable.Range(0, 11),
             response.Items.Where(item => item.Kind == "base").Select(item => item.Order));
     }
 
@@ -106,7 +106,9 @@ public sealed class LlmPickerPreferenceServiceTests
         Assert.Equal("base:claude", response.Items[1].Key);
         Assert.Equal("base:glm-5.2", response.Items[2].Key);
         Assert.Equal("base:glm-5.3", response.Items[3].Key);
-        Assert.Equal("base:grok-4.6", response.Items[4].Key);
+        Assert.Equal("base:deepseek-v4-pro", response.Items[4].Key);
+        Assert.Equal("base:kimi-k3", response.Items[5].Key);
+        Assert.Equal("base:grok-4.6", response.Items[6].Key);
         Assert.DoesNotContain(response.Items, item => item.Key.Contains("999", StringComparison.Ordinal));
         Assert.Equal(
             ["env:30:claude", "env:31:opencode"],

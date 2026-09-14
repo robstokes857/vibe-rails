@@ -57,35 +57,19 @@ Then verify installation:
 vb --version
 ```
 
-## Updates, VBD Recovery, and Rollback
+## Updates and Rollback
 
 Re-run the same one-line installer to update. The installer downloads and validates
 the complete release in a private staging directory before changing
-`~/.vibe_rails`. If VibeRails Demon (VBD) is installed, the installer stops it,
-overlays application files without deleting the database or other user data,
-repairs its current-user registration, and restarts it only when it was running
-before the update.
-
-If VBD repair or restart fails, the installer prints exact recovery commands for
-the installed executable. The general forms are:
-
-```powershell
-# Windows
-& "$HOME\.vibe_rails\vb.exe" --job-daemon-service repair
-& "$HOME\.vibe_rails\vb.exe" --job-daemon-service start # only if previously running
-```
-
-```bash
-# Linux/macOS
-"$HOME/.vibe_rails/vb" --job-daemon-service repair
-"$HOME/.vibe_rails/vb" --job-daemon-service start # only if previously running
-```
+`~/.vibe_rails`, then overlays application files without deleting the database or
+any other user data. Close running VibeRails windows first: the installer refuses
+to replace `vb.exe` while it is still in use.
 
 The installer does not perform an automatic binary or database rollback. To
 return to an older release, first back up `~/.vibe_rails/state.db`, then use the
 older platform archive and checksum from GitHub Releases and repeat the same
-stop, overlay, repair, and conditional-start sequence. A binary rollback does
-not reverse database migrations; check that release's notes before reverting.
+overlay. A binary rollback does not reverse database migrations; check that
+release's notes before reverting.
 
 ## Usage
 

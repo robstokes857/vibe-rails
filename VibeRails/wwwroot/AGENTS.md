@@ -266,7 +266,7 @@ paused via the `pause_token_saver` / `resume_token_saver` MCP tools.
 ## Terminal Environment Integration
 
 The terminal dropdown shows two groups:
-- **Base CLIs**: Claude, Codex, GLM 5.2, GLM 5.3, OpenCode, Copilot, Antigravity (each shown as "(default)") — resolved to its executable server-side (Antigravity → `agy`)
+- **Base CLIs**: Claude, Codex, GLM 5.2, GLM 5.3, DeepSeek V4 Pro, Kimi K3, Grok 4.6, OpenCode, Copilot, Antigravity (each shown as "(default)") — resolved to its executable server-side (Antigravity → `agy`)
 - **Custom Environments**: User-created environments — spawned directly via the tab start endpoint
 
 ## Automation workflow editor
@@ -415,8 +415,12 @@ emitting the same `data-action="sandbox-*"` handlers the Sandboxes card uses
 (`bindSandboxGitActions` binds both). The Sandboxes card renders only sandboxes with no
 `environmentId`, so releasing a workspace moves it back there with no extra plumbing.
 
-The three launch contexts add a persistent **Customize LLM list** footer to their dropdowns. Its
-nested modal changes visibility and within-group order globally. A disabled selection that is
+The three launch contexts add a persistent **View/Edit all LLMs** footer to their dropdowns. Its
+nested modal changes visibility and within-group order globally. Every row also offers **Launch**,
+including hidden items, through the existing focused Web Terminal flow. Launch never saves draft
+preferences or enables an item; custom environments are resolved by id from the current catalog's
+environment data. Picker owners can pass `getLaunchWorkingDirectory` to retain their sandbox or
+terminal host directory; otherwise launch uses the project directory. A disabled selection that is
 already referenced is reinserted with a `(hidden)` label so editing another field cannot silently
 clear it. The Environment provider picker deliberately has no customization footer, and Chat
 History remains unfiltered so launch preferences never hide historical sessions.

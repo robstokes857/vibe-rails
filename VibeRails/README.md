@@ -870,10 +870,9 @@ dotnet run
 
 ### Debug Logging
 
-Enable verbose logging in [Program.cs](VibeRails/Program.cs:1):
-```csharp
-builder.Logging.SetMinimumLevel(LogLevel.Debug);
-```
+Application diagnostic files (`~/.vibe_rails/logs/vb-*.log`) record Information and above. Those
+files are the Internal tools Application source and are written by the static Serilog logger in
+`Program.cs`; changing `builder.Logging.SetMinimumLevel` does not affect them.
 
 ---
 

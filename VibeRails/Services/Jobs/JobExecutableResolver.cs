@@ -22,7 +22,7 @@ public sealed class JobExecutableResolver : IJobExecutableResolver
             LLM.Antigravity => "agy",
             LLM.Copilot => "copilot",
             LLM.Grok46 => "grok",
-            LLM.OpenCode or LLM.Glm52 or LLM.Glm53 => "opencode",
+            LLM.OpenCode or LLM.Glm52 or LLM.Glm53 or LLM.DeepSeekV4Pro or LLM.KimiK3 => "opencode",
             _ => null
         };
         if (command is null)

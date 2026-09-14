@@ -425,7 +425,7 @@ export class BoardController {
 
     emptyLaneCopy(column, filteredOut) {
         if (filteredOut) return 'No cards match these filters.';
-        if (this.isDoneLane(column)) return 'Nothing shipped yet.';
+        if (this.isDoneLane(column)) return 'Nothing done yet.';
         if (/review/i.test(column.name)) return 'Park a card here when it is ready for eyes.';
         if (/build|progress/i.test(column.name)) return 'Drag work in, or add a card below.';
         if (/ready|next/i.test(column.name)) return 'Queue the next thing to build.';

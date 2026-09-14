@@ -1850,7 +1850,8 @@ class TerminalManager {
         this._headerPickerDisposer = mountLlmPicker(this.app, this.headerSelect, {
             context: 'terminal',
             placeholder: 'Select LLM...',
-            includeDefaultSuffix: true
+            includeDefaultSuffix: true,
+            getLaunchWorkingDirectory: () => this.getDefaultWorkingDirectory()
         });
     }
 

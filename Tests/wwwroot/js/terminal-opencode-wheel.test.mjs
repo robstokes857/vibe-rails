@@ -38,11 +38,13 @@ test('right-pane input-row wheel still becomes PageDown', () => {
     assert.equal(translate(wheel(65, RIGHT_COL, INPUT_ROW)), '\x1b[6~');
 });
 
-test('glm-5.2 and glm-5.3 use the same gate', () => {
+test('glm-5.2, glm-5.3, deepseek-v4-pro, and kimi-k3 use the same gate', () => {
     const left = wheel(64, LEFT_COL, MID_ROW);
     const right = wheel(65, RIGHT_COL, MID_ROW);
     assert.equal(translate(left, { cli: 'glm-5.2' }), '\x1b[5~');
     assert.equal(translate(right, { cli: 'GLM-5.3' }), right);
+    assert.equal(translate(left, { cli: 'deepseek-v4-pro' }), '\x1b[5~');
+    assert.equal(translate(left, { cli: 'kimi-k3' }), '\x1b[5~');
 });
 
 test('non-OpenCode CLIs are unchanged', () => {

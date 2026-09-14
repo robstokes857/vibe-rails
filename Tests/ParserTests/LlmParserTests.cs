@@ -57,6 +57,22 @@ public class LlmParserTests
         Assert.Equal(LLM.Glm53, result);
     }
 
+    [Fact]
+    public void Parse_ReturnsDeepSeekV4Pro_ForDeepSeekV4ProString()
+    {
+        var result = _parser.Parse("deepseek-v4-pro");
+
+        Assert.Equal(LLM.DeepSeekV4Pro, result);
+    }
+
+    [Fact]
+    public void Parse_ReturnsKimiK3_ForKimiK3String()
+    {
+        var result = _parser.Parse("kimi-k3");
+
+        Assert.Equal(LLM.KimiK3, result);
+    }
+
     [Theory]
     [InlineData("GLM-5.2")]
     [InlineData("Glm-5.2")]
@@ -90,6 +106,28 @@ public class LlmParserTests
         Assert.Equal(LLM.Glm53, result);
     }
 
+    [Theory]
+    [InlineData("DEEPSEEK-V4-PRO")]
+    [InlineData("DeepSeek-V4-Pro")]
+    [InlineData(" deepseek-v4-pro ")]
+    public void Parse_HandlesDeepSeekV4ProCaseInsensitiveAndWhitespace(string input)
+    {
+        var result = _parser.Parse(input);
+
+        Assert.Equal(LLM.DeepSeekV4Pro, result);
+    }
+
+    [Theory]
+    [InlineData("KIMI-K3")]
+    [InlineData("Kimi-K3")]
+    [InlineData(" kimi-k3 ")]
+    public void Parse_HandlesKimiK3CaseInsensitiveAndWhitespace(string input)
+    {
+        var result = _parser.Parse(input);
+
+        Assert.Equal(LLM.KimiK3, result);
+    }
+
     [Fact]
     public void Normalize_ReturnsWireFormat_ForGlm52()
     {
@@ -114,6 +152,22 @@ public class LlmParserTests
         var result = _parser.Normalize("glm-5.3");
 
         Assert.Equal("glm-5.3", result);
+    }
+
+    [Fact]
+    public void Normalize_ReturnsWireFormat_ForDeepSeekV4Pro()
+    {
+        var result = _parser.Normalize("deepseek-v4-pro");
+
+        Assert.Equal("deepseek-v4-pro", result);
+    }
+
+    [Fact]
+    public void Normalize_ReturnsWireFormat_ForKimiK3()
+    {
+        var result = _parser.Normalize("kimi-k3");
+
+        Assert.Equal("kimi-k3", result);
     }
 
     [Fact]
@@ -144,12 +198,16 @@ public class LlmParserTests
         Assert.Contains(LLM.Glm52, _parser.All);
         Assert.Contains(LLM.Grok46, _parser.All);
         Assert.Contains(LLM.Glm53, _parser.All);
+        Assert.Contains(LLM.DeepSeekV4Pro, _parser.All);
+        Assert.Contains(LLM.KimiK3, _parser.All);
     }
 
     [Theory]
     [InlineData(LLM.Glm52, "glm-5.2")]
     [InlineData(LLM.Grok46, "grok-4.6")]
     [InlineData(LLM.Glm53, "glm-5.3")]
+    [InlineData(LLM.DeepSeekV4Pro, "deepseek-v4-pro")]
+    [InlineData(LLM.KimiK3, "kimi-k3")]
     [InlineData(LLM.Claude, "Claude")]
     [InlineData(LLM.Codex, "Codex")]
     public void ToWireName_ReturnsWireFormat_ForEnumValue(LLM llm, string expected)

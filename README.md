@@ -19,7 +19,7 @@
 - **Token Savings** - Learn your codebase and how you describe it, providing LLMs with smart file hints to reduce token usage and costs
 - **Rule Files (`vc.rules.md`)** - Create and manage VibeRails rule files that gate every commit with WARN/COMMIT/STOP enforcement
 - **Web Terminal** - Launch CLIs directly in the browser with xterm.js. Select base CLIs (Claude, Codex, Antigravity, Copilot, OpenCode, GLM 5.2, Grok 4.6) or custom environments from a visual dropdown with optgroups
-- **Background Automations (Preview)** - Opt in to the per-user VibeRails Demon so scheduled Automations continue while the dashboard is closed.
+- **Automations** - Ordered workflows of repository `.py`, `.ps1`, and `.sh` scripts plus at most one optional Worker, on a schedule or a commit trigger. They run while VibeRails is open.
 
 ---
 
@@ -83,7 +83,8 @@ transcripts remain in Chat History.
 The application and Demon sources read the existing Serilog files directly from
 `~/.vibe_rails/logs/vb-*.log` and `vbd-*.log`, including entries written before this UI existed.
 They do not copy, rewrite, or migrate the files, and do not change the existing log writers.
-The leading category tag, such as `[Jobs]`, `[Startup]`, or `[DataExport]`, populates the feature
+The file writer records Information and above, so a scheduler cycle that did work is visible on
+disk. The leading category tag, such as `[Jobs]`, `[Startup]`, or `[DataExport]`, populates the feature
 filter; messages without a tag appear under `general`. Severity filters recognize the existing
 three-letter log levels. Details show the source filename and multiline exception text.
 Existing timestamps are local wall-clock time; the reader converts them to UTC for ordering

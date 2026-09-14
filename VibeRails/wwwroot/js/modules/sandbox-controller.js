@@ -219,7 +219,7 @@ export class SandboxController {
             // CLI select
             const cliSelect = node.querySelector('[data-sandbox-cli-select]');
             if (cliSelect) {
-                this.populateSandboxCliSelect(cliSelect);
+                this.populateSandboxCliSelect(cliSelect, sb.path);
             }
 
             // Helper to resolve CLI selection — returns null and shakes if nothing selected
@@ -292,11 +292,12 @@ export class SandboxController {
         container.appendChild(fragment);
     }
 
-    populateSandboxCliSelect(selectEl) {
+    populateSandboxCliSelect(selectEl, workingDirectory = null) {
         const dispose = mountLlmPicker(this.app, selectEl, {
             context: 'sandbox',
             placeholder: 'Select CLI...',
-            includeDefaultSuffix: false
+            includeDefaultSuffix: false,
+            getLaunchWorkingDirectory: () => workingDirectory
         });
         this._pickerDisposers.push(dispose);
         return dispose;

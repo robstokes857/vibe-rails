@@ -22,18 +22,19 @@ string launchDirectory = Directory.GetCurrentDirectory();
 // Get the executable's directory (where wwwroot lives)
 string exeDirectory = AppContext.BaseDirectory;
 string webRootPath = Path.Combine(exeDirectory, "wwwroot");
-var isJobDaemonProcess = JobDaemonProcessHost.IsRequested(args);
-var isJobDaemonMaintenanceProcess = JobDaemonMaintenanceProcessHost.IsRequested(args);
 
 // Configure Serilog — file sink to ~/.vibe_rails/logs/
 var installDir = PathConstants.GetInstallDirPath();
 PrivateFilePermissions.EnsureDirectory(installDir);
 var logDir = Path.Combine(installDir, "logs");
 PrivateFilePermissions.EnsureDirectory(logDir);
+// Information, not Warning: these files are the only durable record of what the scheduler did,
+// and "[Jobs] Scheduler cycle complete" is how an Automation that did not fire gets diagnosed.
+// A Warning-only file sink made a healthy run and a dead scheduler look identical on disk.
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Information()
     .WriteTo.File(
-        Path.Combine(logDir, isJobDaemonProcess ? "vbd-.log" : "vb-.log"),
+        Path.Combine(logDir, "vb-.log"),
         rollingInterval: RollingInterval.Day,
         retainedFileCountLimit: 7,
         buffered: false,
@@ -121,23 +122,6 @@ AppDomain.CurrentDomain.ProcessExit += (_, _) =>
         ShutdownDiagnostics.FormatSnapshot(snapshot));
     Log.CloseAndFlush();
 };
-
-// Installer-only lifecycle maintenance: branch before every application host so update scripts
-// can inspect/stop/repair/start VBD without binding an HTTP port or loading dashboard services.
-if (isJobDaemonMaintenanceProcess)
-{
-    Environment.ExitCode = await JobDaemonMaintenanceProcessHost.RunAsync(args);
-    return;
-}
-
-// VibeRails Demon: the current-user background Automation host. Branch before every other host
-// setup so this role never discovers a port, constructs Kestrel, opens a browser, or loads the
-// dashboard/MCP/model graph.
-if (isJobDaemonProcess)
-{
-    Environment.ExitCode = await JobDaemonProcessHost.RunAsync(args);
-    return;
-}
 
 // MCP stdio server mode: `vb mcp`. Speaks MCP over stdin/stdout for CLIs that spawn it
 // (claude/codex `mcp add`). No web server, no port, no auth — stdio is inherently scoped to the

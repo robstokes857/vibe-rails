@@ -567,7 +567,7 @@ export class EnvironmentController {
                         <input class="form-check-input" type="checkbox" id="env-hidden" ${hiddenChecked ? 'checked' : ''}>
                         <label class="form-check-label" for="env-hidden">Hide from launch pickers</label>
                     </div>
-                    <small class="form-text text-muted">Keeps this environment out of the terminal/sandbox LLM dropdowns when they get too full. It can still be launched from here and used by Automations, and you can change this later from the picker's "Customize LLM list".</small>
+                    <small class="form-text text-muted">Keeps this environment out of the terminal/sandbox LLM dropdowns when they get too full. It can still be launched from here and used by Automations, and you can change this later from the picker's "View/Edit all LLMs".</small>
                 </div>`;
 
         // Automation Workers only need two honest choices: run in the live project or start
@@ -858,13 +858,17 @@ export class EnvironmentController {
         return null;
     }
 
-    // GLM 5.2 and GLM 5.3 are OpenCode-backed pseudo-CLIs: they launch `opencode`
-    // with a pinned --model flag. They share the OpenCode settings form, env handling, and arg
-    // builder, so most call sites route through this helper instead of checking === 'opencode'.
-    // Native Grok 4.6 is NOT OpenCode-backed — use isNativeGrokCli.
+    // GLM 5.2, GLM 5.3, DeepSeek V4 Pro, and Kimi K3 are OpenCode-backed pseudo-CLIs: they launch
+    // `opencode` with a pinned --model flag. They share the OpenCode settings form, env handling,
+    // and arg builder, so most call sites route through this helper instead of checking
+    // === 'opencode'. Native Grok 4.6 is NOT OpenCode-backed — use isNativeGrokCli.
     isOpencodeBackedCli(cli) {
         const cliLower = (cli || '').toLowerCase();
-        return cliLower === 'opencode' || cliLower === 'glm-5.2' || cliLower === 'glm-5.3';
+        return cliLower === 'opencode'
+            || cliLower === 'glm-5.2'
+            || cliLower === 'glm-5.3'
+            || cliLower === 'deepseek-v4-pro'
+            || cliLower === 'kimi-k3';
     }
 
     isNativeGrokCli(cli) {
@@ -877,6 +881,8 @@ export class EnvironmentController {
         const cliLower = (cli || '').toLowerCase();
         if (cliLower === 'glm-5.2') return 'zai/glm-5.2';
         if (cliLower === 'glm-5.3') return 'zai-coding-plan/glm-5.3';
+        if (cliLower === 'deepseek-v4-pro') return 'deepseek/deepseek-v4-pro';
+        if (cliLower === 'kimi-k3') return 'moonshotai/kimi-k3';
         return null;
     }
 
@@ -1490,6 +1496,8 @@ export class EnvironmentController {
             ['google/gemini-3-pro', 'google/gemini-3-pro'],
             ['zai/glm-5.2', 'zai/glm-5.2'],
             ['zai-coding-plan/glm-5.3', 'zai-coding-plan/glm-5.3'],
+            ['deepseek/deepseek-v4-pro', 'deepseek/deepseek-v4-pro'],
+            ['moonshotai/kimi-k3', 'moonshotai/kimi-k3'],
             ['xai/grok-4.6', 'xai/grok-4.6'],
             ['opencode/gpt-5.1-codex', 'opencode/gpt-5.1-codex (Zen)'],
         ];
@@ -2214,7 +2222,8 @@ export class EnvironmentController {
     }
 
     // The display names the Initial Message wording uses — matching the product's own voice
-    // (the Antigravity CLI is spoken of as "agy", GLM 5.2 / GLM 5.3 are not called OpenCode).
+    // (the Antigravity CLI is spoken of as "agy", GLM 5.2 / GLM 5.3 / DeepSeek V4 Pro / Kimi K3
+    // are not called OpenCode).
     cliDisplayName(cli) {
         const cliLower = (cli || '').toLowerCase();
         if (cliLower === 'claude') return 'Claude';
@@ -2223,6 +2232,8 @@ export class EnvironmentController {
         if (cliLower === 'antigravity') return 'agy';
         if (cliLower === 'glm-5.2') return 'GLM 5.2';
         if (cliLower === 'glm-5.3') return 'GLM 5.3';
+        if (cliLower === 'deepseek-v4-pro') return 'DeepSeek V4 Pro';
+        if (cliLower === 'kimi-k3') return 'Kimi K3';
         if (cliLower === 'grok-4.6') return 'Grok 4.6';
         if (cliLower === 'opencode') return 'OpenCode';
         return 'the CLI';
@@ -2517,4 +2528,3 @@ export class EnvironmentController {
         }, { preselectedEnvId: envId });
     }
 }
-

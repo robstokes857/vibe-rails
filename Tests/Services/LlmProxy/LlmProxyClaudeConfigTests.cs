@@ -167,6 +167,8 @@ public class LlmProxyClaudeConfigTests : IDisposable
     [InlineData(LLM.Glm52)]
     [InlineData(LLM.Grok46)]
     [InlineData(LLM.Glm53)]
+    [InlineData(LLM.DeepSeekV4Pro)]
+    [InlineData(LLM.KimiK3)]
     public async Task PrepareSession_NonClaude_DoesNotSetAnthropicProxyEnv(LLM llm)
     {
         var service = CreateService();

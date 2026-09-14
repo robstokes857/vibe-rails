@@ -1319,7 +1319,7 @@ export class ChatHistorySidebar {
     _getLlmFilterOptions() {
         return [
             { value: 'reset', label: 'Reset', logoHtml: '<i class="fa-solid fa-rotate-left"></i>' },
-            ...['claude', 'codex', 'opencode', 'glm-5.2', 'glm-5.3', 'grok-4.6', 'antigravity', 'copilot'].map((cli) => {
+            ...['claude', 'codex', 'opencode', 'glm-5.2', 'glm-5.3', 'deepseek-v4-pro', 'kimi-k3', 'grok-4.6', 'antigravity', 'copilot'].map((cli) => {
                 const brand = this.app.getCliBrand(cli);
                 return {
                     value: cli,

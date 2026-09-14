@@ -224,7 +224,7 @@ grok mcp add --scope user viberails-mcp -- "<path-to-vb>" mcp
 
 OpenCode 1.18.8 supports the non-interactive local-command form shown above. It has no matching
 `mcp remove` command, but adding the same name replaces that entry, so OpenCode and the
-OpenCode-backed pseudo-CLIs (GLM 5.2 / GLM 5.3)
+OpenCode-backed pseudo-CLIs (GLM 5.2 / GLM 5.3 / DeepSeek V4 Pro / Kimi K3)
 launches run one add command immediately before launch. On Windows, `CommandService` invokes
 the npm `opencode.cmd` shim because PowerShell consumes the `--` separator when routing through
 `opencode.ps1`; Unix launches use `opencode`. Native Grok uses remove-first plus

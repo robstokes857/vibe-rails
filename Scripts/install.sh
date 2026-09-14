@@ -219,29 +219,6 @@ validate_install_target() {
     fi
 }
 
-get_vbd_status() {
-    local executable="$1"
-    local json
-    local compact_json
-
-    if ! json=$("$executable" --job-daemon-service status --json 2>/dev/null); then
-        echo "VBD status command failed." >&2
-        return 1
-    fi
-
-    compact_json=$(printf '%s' "$json" | tr -d '\r\n')
-    if ! grep -Eq '"isInstalled"[[:space:]]*:[[:space:]]*(true|false)' <<<"$compact_json"; then
-        echo "VBD status JSON did not contain isInstalled." >&2
-        return 1
-    fi
-    if ! grep -Eq '"isRunning"[[:space:]]*:[[:space:]]*(true|false)' <<<"$compact_json"; then
-        echo "VBD status JSON did not contain isRunning." >&2
-        return 1
-    fi
-
-    printf '%s' "$compact_json"
-}
-
 json_boolean_is_true() {
     local json="$1"
     local property_name="$2"
@@ -272,58 +249,6 @@ assert_no_destination_links() {
             return 1
         fi
     done < <(find "$payload_dir" -mindepth 1 -print0)
-}
-
-wait_for_vbd_running_state() {
-    local executable="$1"
-    local expected_running="$2"
-    local deadline=$((SECONDS + 10))
-    local status_json
-    local is_running
-
-    while (( SECONDS < deadline )); do
-        if status_json=$(get_vbd_status "$executable" 2>/dev/null); then
-            is_running=false
-            if json_boolean_is_true "$status_json" "isRunning"; then
-                is_running=true
-            fi
-            if [ "$is_running" = "$expected_running" ]; then
-                return 0
-            fi
-        fi
-        sleep 0.25
-    done
-
-    return 1
-}
-
-wait_for_process_exit() {
-    local target_pid="$1"
-    local deadline=$((SECONDS + 10))
-
-    while kill -0 "$target_pid" 2>/dev/null; do
-        if (( SECONDS >= deadline )); then
-            return 1
-        fi
-        sleep 0.25
-    done
-
-    return 0
-}
-
-print_vbd_recovery_commands() {
-    local installed_executable="$INSTALL_DIR/vb"
-    local quoted_executable
-    printf -v quoted_executable '%q' "$installed_executable"
-
-    echo "" >&2
-    echo -e "${RED}VBD could not be restored automatically.${NC}" >&2
-    echo -e "${YELLOW}After resolving the installation error, run these current-user commands:${NC}" >&2
-    echo "  $quoted_executable --job-daemon-service repair" >&2
-    if [ "$DAEMON_WAS_RUNNING" = true ]; then
-        echo "  $quoted_executable --job-daemon-service start" >&2
-    fi
-    echo "" >&2
 }
 
 # Detect OS
@@ -396,22 +321,16 @@ if [ -z "$CHECKSUM_URL" ]; then
 fi
 
 # Create a private, random staging directory. The archive is fully extracted and
-# validated here before the live installation or VBD process is touched.
+# validated here before the live installation is touched.
 TEMP_ROOT="${TMPDIR:-/tmp}"
 TEMP_DIR=$(mktemp -d "$TEMP_ROOT/vibe_rails_install.XXXXXXXX")
 chmod 700 "$TEMP_DIR"
 PAYLOAD_DIR="$TEMP_DIR/payload"
 mkdir -m 700 "$PAYLOAD_DIR"
 
-DAEMON_WAS_INSTALLED=false
-DAEMON_WAS_RUNNING=false
-RECOVERY_NEEDED=false
 
 cleanup() {
     local exit_code="$1"
-    if [ "$exit_code" -ne 0 ] && [ "$RECOVERY_NEEDED" = true ]; then
-        print_vbd_recovery_commands
-    fi
     if [ -n "${TEMP_DIR:-}" ] && [ -d "$TEMP_DIR" ]; then
         rm -rf -- "$TEMP_DIR"
     fi
@@ -450,92 +369,12 @@ validate_install_target
 chmod +x "$PAYLOAD_DIR/vb"
 echo -e "${GREEN}Release payload validated.${NC}"
 
-# The staged binary can inspect and control the stable current-user registration even if
-# the old installed executable is absent or predates this command. On hosts that refuse to
-# execute a fresh download from TMPDIR (noexec mounts, AV), fall back to the installed
-# executable; if neither can answer, VBD cannot have been registered by a pre-VBD build,
-# so treat it as not installed instead of failing the whole install.
-VBD_EXECUTABLE="$PAYLOAD_DIR/vb"
-if ! VBD_STATUS_JSON=$(get_vbd_status "$PAYLOAD_DIR/vb"); then
-    echo -e "${YELLOW}Staged VBD probe failed (TMPDIR may be mounted noexec).${NC}"
-    VBD_STATUS_JSON=""
-    if [ -x "$INSTALL_DIR/vb" ]; then
-        echo -e "${YELLOW}Falling back to the installed executable for the VBD probe...${NC}"
-        if VBD_STATUS_JSON=$(get_vbd_status "$INSTALL_DIR/vb"); then
-            VBD_EXECUTABLE="$INSTALL_DIR/vb"
-        else
-            VBD_STATUS_JSON=""
-            echo -e "${YELLOW}WARNING: VBD state could not be determined (the installed executable may predate VBD). Assuming it is not installed.${NC}"
-        fi
-    fi
-fi
-
-VBD_PROCESS_ID=""
-if [ -n "$VBD_STATUS_JSON" ]; then
-    VBD_STATE=$(json_string_value "$VBD_STATUS_JSON" "state" | tr '[:upper:]' '[:lower:]')
-    if json_boolean_is_true "$VBD_STATUS_JSON" "isInstalled"; then
-        DAEMON_WAS_INSTALLED=true
-    fi
-    # isReachable guards against a status whose isRunning was computed while the process
-    # was still starting; either signal means a live daemon must stop before file swaps.
-    if json_boolean_is_true "$VBD_STATUS_JSON" "isRunning" ||
-        json_boolean_is_true "$VBD_STATUS_JSON" "isReachable"; then
-        DAEMON_WAS_RUNNING=true
-    fi
-    VBD_PROCESS_ID=$(printf '%s' "$VBD_STATUS_JSON" |
-        sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')
-
-    # An Error state means VBD's own view of the registration is broken; an Unavailable state
-    # alongside an active daemon/registration means lifecycle control (including stop) cannot
-    # work. Proceeding would replace files under a running daemon.
-    if [ "$VBD_STATE" = "error" ]; then
-        echo -e "${RED}Error: VBD reported lifecycle state 'Error'. Resolve it (vb --job-daemon-service status) and retry. The existing installation was not changed.${NC}" >&2
-        exit 1
-    fi
-    if [ "$VBD_STATE" = "unavailable" ] &&
-        { [ "$DAEMON_WAS_INSTALLED" = true ] || [ "$DAEMON_WAS_RUNNING" = true ]; }; then
-        echo -e "${RED}Error: VBD lifecycle support is unavailable while a VBD process or registration appears active. Resolve it and retry. The existing installation was not changed.${NC}" >&2
-        exit 1
-    fi
-fi
-
-if [ "$DAEMON_WAS_INSTALLED" = true ]; then
-    if [ "$DAEMON_WAS_RUNNING" = true ]; then
-        echo -e "${CYAN}Detected installed VBD (running).${NC}"
-    else
-        echo -e "${CYAN}Detected installed VBD (stopped).${NC}"
-    fi
-else
-    echo -e "${CYAN}VBD is not installed for the current user.${NC}"
-fi
-
-if [ "$DAEMON_WAS_INSTALLED" = true ] || [ "$DAEMON_WAS_RUNNING" = true ]; then
-    echo -e "${CYAN}Ensuring VBD is stopped before replacing files...${NC}"
-    RECOVERY_NEEDED=true
-    if ! "$VBD_EXECUTABLE" --job-daemon-service stop; then
-        echo -e "${RED}Error: Could not stop VBD. The existing installation was not changed.${NC}" >&2
-        exit 1
-    fi
-    if ! wait_for_vbd_running_state "$VBD_EXECUTABLE" false; then
-        echo -e "${RED}Error: VBD did not stop within 10 seconds. The existing installation was not changed.${NC}" >&2
-        exit 1
-    fi
-    if [ -n "$VBD_PROCESS_ID" ] && ! wait_for_process_exit "$VBD_PROCESS_ID"; then
-        echo -e "${RED}Error: The previous VBD process (PID $VBD_PROCESS_ID) did not exit within 10 seconds. The existing installation was not changed.${NC}" >&2
-        exit 1
-    fi
-    echo -e "${GREEN}VBD stopped.${NC}"
-fi
-
 # Overlay release files without deleting ~/.vibe_rails, which also contains
 # state.db, environments, logs, models, sandboxes, and user scripts.
 if [ ! -d "$INSTALL_DIR" ]; then
     mkdir -m 700 "$INSTALL_DIR"
 fi
 validate_install_target
-if [ "$DAEMON_WAS_INSTALLED" = true ]; then
-    RECOVERY_NEEDED=true
-fi
 assert_no_destination_links "$PAYLOAD_DIR" "$INSTALL_DIR"
 echo -e "${CYAN}Installing application files to $INSTALL_DIR...${NC}"
 cp -R "$PAYLOAD_DIR"/. "$INSTALL_DIR"/
@@ -544,33 +383,6 @@ install_bertv2_assets "$INSTALL_DIR"
 
 # Make binary executable
 chmod +x "$INSTALL_DIR/vb"
-
-if [ "$DAEMON_WAS_INSTALLED" = true ]; then
-    echo -e "${CYAN}Repairing current-user VBD registration...${NC}"
-    if ! "$INSTALL_DIR/vb" --job-daemon-service repair; then
-        echo -e "${RED}Error: VBD registration repair failed.${NC}" >&2
-        exit 1
-    fi
-fi
-
-if [ "$DAEMON_WAS_RUNNING" = true ]; then
-    echo -e "${CYAN}Restarting VBD because it was running before the update...${NC}"
-    if ! "$INSTALL_DIR/vb" --job-daemon-service start; then
-        echo -e "${RED}Error: VBD restart failed.${NC}" >&2
-        exit 1
-    fi
-    if ! wait_for_vbd_running_state "$INSTALL_DIR/vb" true; then
-        echo -e "${RED}Error: VBD did not report running within 10 seconds after restart.${NC}" >&2
-        exit 1
-    fi
-    echo -e "${GREEN}VBD restarted.${NC}"
-elif [ "$DAEMON_WAS_INSTALLED" = true ]; then
-    echo -e "${GREEN}VBD registration repaired; it remains stopped.${NC}"
-fi
-
-if [ "$DAEMON_WAS_INSTALLED" = true ] || [ "$DAEMON_WAS_RUNNING" = true ]; then
-    RECOVERY_NEEDED=false
-fi
 
 # Add to PATH in shell rc files
 add_to_path() {

@@ -32,9 +32,9 @@ public static class McpStdioHost
     public static async Task RunAsync(string[] args)
     {
         // Content root pinned to the install directory (not the CLI's cwd, which this child inherits)
-        // so appsettings.json is found and VibeRails:InstallDirName is honoured — the same shape as
-        // JobDaemonProcessHost. Without this the host only ever found state.db through the
-        // PathConstants fallback, and the board store below needs the real state path.
+        // so appsettings.json is found and VibeRails:InstallDirName is honoured. Without this the
+        // host only ever found state.db through the PathConstants fallback, and the board store
+        // below needs the real state path.
         var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
         {
             Args = args,

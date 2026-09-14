@@ -1114,7 +1114,7 @@ public sealed class BoardStore : IBoardStore
         ("Ready", 8, "#3b82f6"),
         ("Build", 4, "#06b6d4"),
         ("Review", 3, "#f59e0b"),
-        ("Shipped", null, "#10b981")
+        ("Done", null, "#10b981")
     ];
 
     private static readonly string SchemaSql = $"""

@@ -17,6 +17,8 @@ test('only native grok-4.6 is gated', () => {
     assert.equal(isNativeGrokCli('claude'), false);
     assert.equal(isNativeGrokCli('codex'), false);
     assert.equal(isNativeGrokCli('glm-5.3'), false);
+    assert.equal(isNativeGrokCli('deepseek-v4-pro'), false);
+    assert.equal(isNativeGrokCli('kimi-k3'), false);
     assert.equal(isNativeGrokCli('xai/grok-4.6'), false);
     assert.equal(isNativeGrokCli(''), false);
     assert.equal(isNativeGrokCli(undefined), false);

@@ -17,8 +17,8 @@ All launchers build commands using the unified `--env` flag:
 Only `--env` is supported for environment bootstrap mode. `ILlmParser.Parse()` does steps 1–2
 and returns `LLM.NotSet` for anything else; the caller (`CliLoop.RunTerminalWithWebAsync`) then
 performs step 3:
-1. The special-case strings `"glm-5.2"` / `"grok-4.6"` / `"glm-5.3"` (can't be a C# enum name) →
-   GLM 5.2 / GLM 5.3 are OpenCode-backed pseudo-CLI base launches; `"grok-4.6"` is the native Grok Build CLI
+1. The special-case strings `"glm-5.2"` / `"grok-4.6"` / `"glm-5.3"` / `"deepseek-v4-pro"` / `"kimi-k3"` (can't be a C# enum name) →
+   GLM 5.2 / GLM 5.3 / DeepSeek V4 Pro / Kimi K3 are OpenCode-backed pseudo-CLI base launches; `"grok-4.6"` is the native Grok Build CLI
 2. If it matches an LLM enum name (claude/codex/antigravity/copilot/shell/opencode, case-insensitive)
    → base CLI launch
 3. Otherwise → custom environment name, looked up in DB via `FindEnvironmentByNameAsync()`
@@ -42,7 +42,7 @@ IBaseLlmCliLauncher (Interface)
     └── LaunchLLMService (Orchestrator - selects launcher by LLM type)
 ```
 
-> **Pseudo-CLIs:** `LLM.Glm52` and `LLM.Glm53` (OpenCode launched with a pinned `--model` flag)
+> **Pseudo-CLIs:** `LLM.Glm52`, `LLM.Glm53`, `LLM.DeepSeekV4Pro`, and `LLM.KimiK3` (OpenCode launched with a pinned `--model` flag)
 > reuse `IOpencodeLlmCliLauncher`. Their binary is `opencode` (mapped in
 > `CommandService.PrepareSessionAsync`), and the model arg is injected server-side. `LLM.Grok46`
 > is the native Grok Build CLI (`GrokLlmCliLauncher`, binary `grok`, pin `-m`/`--model=grok-4.6`).

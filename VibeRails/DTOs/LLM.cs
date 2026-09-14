@@ -28,6 +28,14 @@ namespace VibeRails.Services
         // LlmParser still special-cases the wire name "grok-4.6". Do not route this
         // through OpenCode.
         Grok46,
-        Glm53
+        Glm53,
+
+        // OpenCode-backed pseudo-CLI: DeepSeek V4 Pro. LlmParser special-cases the
+        // hyphenated wire name "deepseek-v4-pro" to this value.
+        DeepSeekV4Pro,
+
+        // OpenCode-backed pseudo-CLI: Kimi K3 (Moonshot AI). LlmParser special-cases the
+        // hyphenated wire name "kimi-k3" to this value.
+        KimiK3
     }
 }

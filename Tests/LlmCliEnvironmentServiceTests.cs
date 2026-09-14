@@ -414,6 +414,54 @@ public class LlmCliEnvironmentServiceTests
     }
 
     [Fact]
+    public void GetEnvironmentVariables_DeepSeekV4ProUsesIsolatedXdgConfigRoot()
+    {
+        var originalEnvPath = ParserConfigs.GetEnvPath();
+        var configuredEnvRoot = Path.Combine(Path.GetTempPath(), $"viberails-deepseek-{Guid.NewGuid():N}");
+        var expectedPath = Path.GetFullPath(Path.Combine(configuredEnvRoot, "review"));
+        var service = CreateService(Mock.Of<IFileService>());
+
+        ParserConfigs.SetEnvPath(configuredEnvRoot);
+
+        try
+        {
+            var variables = service.GetEnvironmentVariables("review", LLM.DeepSeekV4Pro);
+
+            Assert.Equal(expectedPath, variables["XDG_CONFIG_HOME"]);
+            Assert.DoesNotContain("OPENCODE_CONFIG_DIR", variables.Keys);
+            Assert.DoesNotContain("XDG_DATA_HOME", variables.Keys);
+        }
+        finally
+        {
+            ParserConfigs.SetEnvPath(originalEnvPath);
+        }
+    }
+
+    [Fact]
+    public void GetEnvironmentVariables_KimiK3UsesIsolatedXdgConfigRoot()
+    {
+        var originalEnvPath = ParserConfigs.GetEnvPath();
+        var configuredEnvRoot = Path.Combine(Path.GetTempPath(), $"viberails-kimi-{Guid.NewGuid():N}");
+        var expectedPath = Path.GetFullPath(Path.Combine(configuredEnvRoot, "review"));
+        var service = CreateService(Mock.Of<IFileService>());
+
+        ParserConfigs.SetEnvPath(configuredEnvRoot);
+
+        try
+        {
+            var variables = service.GetEnvironmentVariables("review", LLM.KimiK3);
+
+            Assert.Equal(expectedPath, variables["XDG_CONFIG_HOME"]);
+            Assert.DoesNotContain("OPENCODE_CONFIG_DIR", variables.Keys);
+            Assert.DoesNotContain("XDG_DATA_HOME", variables.Keys);
+        }
+        finally
+        {
+            ParserConfigs.SetEnvPath(originalEnvPath);
+        }
+    }
+
+    [Fact]
     public void OpencodeLauncher_UsesIsolatedXdgConfigRoot()
     {
         var originalEnvPath = ParserConfigs.GetEnvPath();

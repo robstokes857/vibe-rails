@@ -23,7 +23,6 @@ public sealed class JobServiceTests : IDisposable
     private readonly Mock<IRepository> _repository = new();
     private readonly Mock<IJobExecutableResolver> _executableResolver = new();
     private readonly Mock<IJobScheduler> _scheduler = new();
-    private readonly Mock<IJobDaemonKicker> _daemonKicker = new();
     private readonly Mock<IAutomationScriptService> _automationScriptService = new();
 
     public JobServiceTests()
@@ -480,16 +479,13 @@ public sealed class JobServiceTests : IDisposable
         Assert.Equal("manual-run", response.RunId);
         Assert.Contains("queued", response.Message, StringComparison.OrdinalIgnoreCase);
         _scheduler.Verify(s => s.Kick(), Times.Once);
-        _daemonKicker.Verify(
-            candidate => candidate.KickAsync(CancellationToken.None),
-            Times.Once);
         _store.Verify(
             s => s.TryMarkLaunchedAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
     [Fact]
-    public async Task RetryRun_QueuesForTheSchedulerAndWakesTheDaemon()
+    public async Task RetryRun_QueuesForTheScheduler()
     {
         var source = new JobRunRecord(
             "source-run",
@@ -525,35 +521,6 @@ public sealed class JobServiceTests : IDisposable
 
         Assert.Equal("retry-run", response.RunId);
         _scheduler.Verify(candidate => candidate.Kick(), Times.Once);
-        _daemonKicker.Verify(
-            candidate => candidate.KickAsync(CancellationToken.None),
-            Times.Once);
-    }
-
-    [Fact]
-    public async Task RunNow_DaemonWakeupFailureDoesNotLoseTheDurablyQueuedRun()
-    {
-        _store
-            .Setup(candidate => candidate.GetJobAsync(7, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Record() with { Id = 7 });
-        _store
-            .Setup(candidate => candidate.EnqueueManualRunAsync(7, CancellationToken.None))
-            .ReturnsAsync("manual-run");
-        _executableResolver.Setup(candidate => candidate.Resolve(LLM.Claude)).Returns("claude");
-        _daemonKicker
-            .Setup(candidate => candidate.KickAsync(CancellationToken.None))
-            .ThrowsAsync(new IOException("control pipe unavailable"));
-
-        var response = await Service().RunNowAsync(
-            7,
-            TestContext.Current.CancellationToken);
-
-        Assert.True(response.Success);
-        Assert.Equal("manual-run", response.RunId);
-        _scheduler.Verify(candidate => candidate.Kick(), Times.Once);
-        _daemonKicker.Verify(
-            candidate => candidate.KickAsync(CancellationToken.None),
-            Times.Once);
     }
 
     private JobService Service() => new(
@@ -561,7 +528,6 @@ public sealed class JobServiceTests : IDisposable
         _repository.Object,
         _executableResolver.Object,
         _scheduler.Object,
-        _daemonKicker.Object,
         _automationScriptService.Object);
 
     private void WithEnvironment(

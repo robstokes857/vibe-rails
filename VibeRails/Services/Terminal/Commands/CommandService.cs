@@ -64,7 +64,9 @@ public class CommandService : ICommandService
         LLM.OpenCode,
         LLM.Glm52,
         LLM.Grok46,
-        LLM.Glm53
+        LLM.Glm53,
+        LLM.DeepSeekV4Pro,
+        LLM.KimiK3
     };
 
     public CommandService(
@@ -132,6 +134,8 @@ public class CommandService : ICommandService
                 LLM.Glm52 => WithPinnedModel(extraArgs, "zai/glm-5.2"),
                 LLM.Grok46 => WithPinnedModel(extraArgs, "grok-4.6"),
                 LLM.Glm53 => WithPinnedModel(extraArgs, "zai-coding-plan/glm-5.3"),
+                LLM.DeepSeekV4Pro => WithPinnedModel(extraArgs, "deepseek/deepseek-v4-pro"),
+                LLM.KimiK3 => WithPinnedModel(extraArgs, "moonshotai/kimi-k3"),
                 _ => extraArgs
             };
         }
@@ -165,9 +169,9 @@ public class CommandService : ICommandService
                 LLM.Antigravity => $"{cliCommand} --prompt-interactive={quoted}",
                 // OpenCode's TUI treats a positional arg as the [project] path, not a prompt,
                 // so the initial prompt must ride on --prompt (never the default branch).
-                // Glm52 / Glm53 are OpenCode under the hood and share the --prompt convention.
+                // Glm52 / Glm53 / DeepSeekV4Pro / KimiK3 are OpenCode under the hood and share the --prompt convention.
                 // Native Grok takes a trailing positional as the first TUI turn; -p is headless.
-                LLM.OpenCode or LLM.Glm52 or LLM.Glm53 => $"{cliCommand} --prompt={quoted}",
+                LLM.OpenCode or LLM.Glm52 or LLM.Glm53 or LLM.DeepSeekV4Pro or LLM.KimiK3 => $"{cliCommand} --prompt={quoted}",
                 _ => $"{cliCommand} {quoted}"
             };
 
@@ -248,14 +252,15 @@ public class CommandService : ICommandService
         // env-var-only — no opencode.json is written: OPENCODE_CONFIG_CONTENT carries an inline
         // JSON override of both providers' baseURL + auth headers (see LlmProxyZaiConfig).
         // Skip if the caller already set OPENCODE_CONFIG_CONTENT, so an explicit value is
-        // respected rather than clobbered. Glm52 and Glm53 are included because they
-        // are OpenCode-backed pseudo-CLIs. Note the injected config only remaps the zai/xai
-        // providers, so Glm53's pinned zai-coding-plan model is NOT proxied — it talks to
-        // Z.AI directly (deliberate).
+        // respected rather than clobbered. Glm52, Glm53, DeepSeekV4Pro, and KimiK3 are included
+        // because they are OpenCode-backed pseudo-CLIs. Note the injected config only remaps the
+        // zai/xai providers, so Glm53's pinned zai-coding-plan model, DeepSeekV4Pro's pinned
+        // deepseek model, and KimiK3's pinned moonshotai model are NOT proxied — they talk to
+        // their providers directly (deliberate).
         var inheritedOpenCodeConfig = Environment.GetEnvironmentVariable(
             LlmProxyZaiConfig.ConfigContentVariable);
         var openCodeProxyActive = proxySettings.OpenCodeLlmProxyLaunchEnabled
-            && (llm == LLM.OpenCode || llm == LLM.Glm52 || llm == LLM.Glm53)
+            && (llm == LLM.OpenCode || llm == LLM.Glm52 || llm == LLM.Glm53 || llm == LLM.DeepSeekV4Pro || llm == LLM.KimiK3)
             && !environment.ContainsKey(LlmProxyZaiConfig.ConfigContentVariable)
             && string.IsNullOrEmpty(inheritedOpenCodeConfig);
         if (openCodeProxyActive)
@@ -385,7 +390,7 @@ public class CommandService : ICommandService
     /// <summary>
     /// Every CLI's enum name lowercased is its executable — except Antigravity (binary <c>agy</c>),
     /// native Grok (binary <c>grok</c>, not <c>grok46</c>), and the OpenCode-backed
-    /// pseudo-CLIs Glm52 / Glm53 (binary <c>opencode</c>).
+    /// pseudo-CLIs Glm52 / Glm53 / DeepSeekV4Pro / KimiK3 (binary <c>opencode</c>).
     ///
     /// Must stay in step with <c>IBaseLlmCliLauncher.CliExecutable</c>, which is the same mapping
     /// expressed per-launcher for the native-terminal path. The two agree today; Antigravity is the
@@ -395,7 +400,7 @@ public class CommandService : ICommandService
     {
         LLM.Antigravity => "agy",
         LLM.Grok46 => "grok",
-        LLM.Glm52 or LLM.Glm53 => "opencode",
+        LLM.Glm52 or LLM.Glm53 or LLM.DeepSeekV4Pro or LLM.KimiK3 => "opencode",
         _ => llm.ToString().ToLower()
     };
 
@@ -549,7 +554,7 @@ public class CommandService : ICommandService
             LLM.Grok46 => (
                 SuppressCommandOutput($"grok mcp remove {VibeRailsMcpServerName}"),
                 $"grok mcp add --scope user {VibeRailsMcpServerName} -- {serverCommand}"),
-            LLM.OpenCode or LLM.Glm52 or LLM.Glm53 => (
+            LLM.OpenCode or LLM.Glm52 or LLM.Glm53 or LLM.DeepSeekV4Pro or LLM.KimiK3 => (
                 null,
                 $"{openCodeExecutable} mcp add {VibeRailsMcpServerName} -- {serverCommand}"),
             _ => (null, null)

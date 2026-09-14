@@ -30,6 +30,7 @@ public sealed class EnvironmentRoutesNameCollisionTests
     [InlineData("COPILOT")]
     [InlineData("  claude  ")]  // the name is trimmed before it is stored, so it has to be trimmed before it is checked
     [InlineData("3")]           // Enum.TryParse accepts the underlying numbers, so digits shadow a CLI too
+    [InlineData("kimi-k3")]     // no dot, so the character rules pass it and the CLI check below is what refuses it
     public async Task CreateEnvironment_RefusesANameThatResolvesToACli(string name)
     {
         var (app, repository) = await StartAppAsync();
@@ -63,6 +64,7 @@ public sealed class EnvironmentRoutesNameCollisionTests
     [InlineData("glm-5.2")]
     [InlineData("grok-4.6")]
     [InlineData("glm-5.3")]
+    [InlineData("deepseek-v4-pro")]
     public async Task CreateEnvironment_RefusesThePseudoCliName_ViaTheCharacterRulesThatRunFirst(string name)
     {
         // Hyphenated pseudo-CLI wire names also resolve to a CLI, but their period is already

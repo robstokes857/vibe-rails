@@ -1,10 +1,17 @@
 # API authentication coverage
 
-Audit date: 2026-09-12
+Audit date: 2026-09-14
 
-Full production route/authentication reconciliation completed: 2026-09-12, covering
-the current working tree, including uncommitted and untracked source. All 210 mapped
-surfaces match this inventory in both directions: 198 `/api/v1` method/path surfaces,
+Rechecked after removing the seven VibeRails Demon lifecycle routes: all 203 mapped
+surfaces match the current working tree (191 under `/api/v1`), with no missing entries.
+Both mandatory listener searches and the targeted authentication suite were repeated:
+**101 passed,
+0 failed, 0 skipped**. The three permitted authentication exceptions remain unchanged;
+no insecure endpoint was found and no `SECURITY_ERROR.md` was needed.
+
+Full production route/authentication reconciliation completed: 2026-09-14, covering
+the current working tree, including uncommitted and untracked source. All 203 mapped
+surfaces match this inventory in both directions: 191 `/api/v1` method/path surfaces,
 nine protected non-`/api` API surfaces, and three bootstrap/page/probe mappings. No
 endpoint needs adding or removing. The existing inventory includes the board and
 signing-key routes, the signing-key route group, and constant-based route paths.
@@ -17,9 +24,10 @@ Kestrel host, the non-serving port probe, and test-only hosts. Targeted authenti
 and route tests passed: **101 passed, 0 failed, 0 skipped**. See Audit observations for
 scope and validation details.
 
-Historical production route/authentication reconciliation: 2026-09-11, covering the
-same 210 mapped surfaces against the then-current tree. The frozen listener set and
-three-case middleware bypass were unchanged. That observation remains below.
+Historical production route/authentication reconciliations on 2026-09-12 and 2026-09-11
+covered the 210 mapped surfaces present before the Demon lifecycle routes were removed.
+The frozen listener set and three-case middleware bypass were unchanged. Those observations
+remain below with their historical counts.
 
 Signing-key amendment: 2026-09-09. Five authenticated active-root settings routes were
 added, bringing the current inventory to 175 `/api/v1` surfaces and 187 total mapped
@@ -169,10 +177,9 @@ an expectation.
 - Rejected and removed before merge: `GrokLoopbackBridge`'s `HttpListener`.
 - Non-serving production match: `PortFinder`'s transient loopback `TcpListener` port probe.
 - Test-only matches: isolated Kestrel hosts under `Tests/**`.
-- Not a production HTTP listener: `VibeRails.Daemon`'s `NamedPipeServerStream` control
-  pipe (`PING`/`STATUS`/`KICK`/`SHUTDOWN`, `PipeOptions.CurrentUserOnly`, bounded framing).
-  Local current-user IPC; it does not accept network requests and is outside the frozen
-  HTTP listener set.
+- Removed 2026-09-13: `VibeRails.Daemon`'s current-user `NamedPipeServerStream` control pipe was
+  deleted along with the VibeRails Demon feature. It was never an HTTP listener, so its removal
+  does not change the frozen listener set.
 - No other production .NET accept loop and no JavaScript/TypeScript, Python, or PowerShell
   server/listener implementation was found. Monaco vendor bundles matched the JS search
   as minified editor source only.
@@ -191,9 +198,9 @@ The code does not have two independent credentials named “auth Cookie” and
    subprotocol.
 
 In the lists below, **both** means a valid `viberails_session` credential **and** a valid
-`viberails_tab` credential. This treats “SessionToken” in the request as the second,
-session-scoped browser credential (`viberails_tab`), which the implementation calls the
-*tab token*.
+`viberails_tab` credential. The session token is `viberails_session`, whether sent in
+a cookie or header; `viberails_tab` is a separate *tab token*. No endpoint requires
+both the cookie and a duplicate session header.
 
 `viberails_terminal_session` is not a credential. LLM-proxy requests may carry it as a
 correlation header (the terminal `Sessions.Id` behind the exchange log's `SessionId`
@@ -204,8 +211,8 @@ spoofer's own local exchange rows.
 Authentication is enforced primarily by
 [`CookieAuthMiddleware`](VibeRails/Middleware/CookieAuthMiddleware.cs). The LLM proxy
 routes additionally use
-[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 210 mapped route
-surfaces in this inventory: 198 `/api/v1` method/path mappings, nine non-`/api` protected
+[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 203 mapped route
+surfaces in this inventory: 191 `/api/v1` method/path mappings, nine non-`/api` protected
 API surfaces, and three bootstrap/page/probe routes. Static-file middleware and the
 global `OPTIONS` behavior are noted separately because they are not finite mapped-route
 lists.
@@ -510,15 +517,11 @@ No local endpoint is anonymous and no production listener was added.
 - `POST /api/v1/jobs/runs/{runId}/cancel`
 - `POST /api/v1/jobs/runs/{runId}/retry`
 
-### VibeRails Demon lifecycle (7; active root backend only)
+### VibeRails Demon lifecycle — REMOVED 2026-09-13
 
-- `GET /api/v1/jobs/demon`
-- `POST /api/v1/jobs/demon/install`
-- `POST /api/v1/jobs/demon/start`
-- `POST /api/v1/jobs/demon/stop`
-- `POST /api/v1/jobs/demon/restart`
-- `POST /api/v1/jobs/demon/repair`
-- `DELETE /api/v1/jobs/demon`
+The seven `/api/v1/jobs/demon` surfaces were deleted with the VibeRails Demon feature and no longer
+exist in the tree. The current counts and inventory above exclude them. Nothing else in this
+inventory changed — the removal deleted routes, it did not alter any authentication rule.
 
 ### Lifecycle and app events (4)
 
@@ -660,8 +663,15 @@ requirement and the launch composition; `Tests/Services/Mcp/BoardToolTests.cs` p
 
 ## Audit observations
 
+- Full validation on 2026-09-14: reconciled all **203 mapped route surfaces** in the current
+  working tree, including uncommitted and untracked source: **191 `/api/v1` mappings**, nine
+  protected non-`/api` API surfaces, and three bootstrap/page/probe mappings. The seven removed
+  VibeRails Demon lifecycle routes account for the difference from the 2026-09-12 inventory.
+  Method/path pairs matched in both directions, the listener set was unchanged, and the three
+  permitted authentication exceptions remained exact `GET /health`, global `OPTIONS`, and exact
+  `GET /auth/bootstrap`.
 - Full validation on 2026-09-12 (kanban VB-5): compared the current categorized inventory
-  against all **210 mapped route surfaces** in the working tree, including untracked
+  against all **210 mapped route surfaces** in the then-current working tree, including untracked
   source: **198 `/api/v1` mappings**, nine protected non-`/api` API surfaces, and three
   bootstrap/page/probe mappings. Method/path pairs matched in both directions after
   resolving the signing-key `MapGroup`, HTTP-relay/proxy/control constants, and inherited

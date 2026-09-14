@@ -1,4 +1,4 @@
-export const OPENCODE_WHEEL_CLIS = new Set(['opencode', 'glm-5.2', 'glm-5.3']);
+export const OPENCODE_WHEEL_CLIS = new Set(['opencode', 'glm-5.2', 'glm-5.3', 'deepseek-v4-pro', 'kimi-k3']);
 export const OPENCODE_RIGHT_PANE_COL_RATIO = 0.62;
 export const OPENCODE_INPUT_GUARD_ROWS = 8;
 

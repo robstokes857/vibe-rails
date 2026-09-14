@@ -208,6 +208,8 @@ public class CommandServiceTests : IDisposable
     [InlineData(LLM.Glm52)]
     [InlineData(LLM.Grok46)]
     [InlineData(LLM.Glm53)]
+    [InlineData(LLM.DeepSeekV4Pro)]
+    [InlineData(LLM.KimiK3)]
     public async Task PrepareSession_NonClaude_DoesNotSetForceSyncOutputEnvVar(LLM llm)
     {
         var service = CreateService();
@@ -259,6 +261,8 @@ public class CommandServiceTests : IDisposable
     [InlineData(LLM.OpenCode)]
     [InlineData(LLM.Glm52)]
     [InlineData(LLM.Glm53)]
+    [InlineData(LLM.DeepSeekV4Pro)]
+    [InlineData(LLM.KimiK3)]
     public async Task PrepareSession_OpenCodeBackedClis_AddVibeRailsMcpBeforeLaunch(LLM llm)
     {
         var service = CreateService();
@@ -614,6 +618,158 @@ public class CommandServiceTests : IDisposable
         Assert.True(
             prepared.Environment.ContainsKey("XDG_CONFIG_HOME"),
             "GLM 5.3 must share OpenCode's XDG_CONFIG_HOME env isolation.");
+    }
+
+    [Fact]
+    public async Task PrepareSession_DeepSeekV4Pro_UsesOpencodeExecutableWithPinnedModel()
+    {
+        var service = CreateService();
+
+        // DeepSeek V4 Pro is a pseudo-CLI backed by OpenCode. The binary is `opencode` (not
+        // `deepseekv4pro`), and base CLI launches inject --model=deepseek/deepseek-v4-pro.
+        var prepared = await service.PrepareSessionAsync(LLM.DeepSeekV4Pro, envName: null, extraArgs: null);
+
+        Assert.Equal("opencode --model=deepseek/deepseek-v4-pro", prepared.LaunchCommand);
+        Assert.Equal("opencode", prepared.Executable);
+    }
+
+    [Fact]
+    public async Task PrepareSession_DeepSeekV4Pro_PassesPromptViaPromptFlag()
+    {
+        var service = CreateService();
+
+        var prepared = await service.PrepareSessionAsync(
+            LLM.DeepSeekV4Pro, envName: null, extraArgs: null, initialPrompt: "hello world");
+
+        Assert.StartsWith("opencode --model=deepseek/deepseek-v4-pro --prompt=", prepared.LaunchCommand);
+    }
+
+    [Fact]
+    public async Task PrepareSession_DeepSeekV4Pro_InjectsOpenCodeProxyConfigWithoutRemappingDeepseekProvider()
+    {
+        // DeepSeek V4 Pro is OpenCode-backed, so the OpenCode proxy config is injected — but it
+        // only remaps the zai/xai providers. The pinned deepseek provider must NOT appear in the
+        // injected config: its traffic deliberately goes direct to DeepSeek (no token saver).
+        var service = CreateService(openCodeLlmProxyEnabled: true);
+
+        var prepared = await service.PrepareSessionAsync(LLM.DeepSeekV4Pro, envName: null, extraArgs: null);
+
+        Assert.True(prepared.OpenCodeProxyActive);
+        Assert.Equal(
+            "test-session-token",
+            prepared.Environment[LocalLlmProxyContext.SessionTokenVariable]);
+        Assert.Equal(
+            "test-tab-token",
+            prepared.Environment[LocalLlmProxyContext.TabTokenVariable]);
+        var config = prepared.Environment[LlmProxyZaiConfig.ConfigContentVariable];
+        Assert.Contains("http://127.0.0.1:4321/llm/zai/api/paas/v4", config);
+        Assert.Contains("http://127.0.0.1:4321/llm/xai/v1", config);
+        Assert.DoesNotContain("deepseek", config);
+    }
+
+    [Fact]
+    public async Task PrepareSession_DeepSeekV4Pro_DoesNotInjectModelWhenEnvIsSet()
+    {
+        var service = CreateService();
+
+        var prepared = await service.PrepareSessionAsync(
+            LLM.DeepSeekV4Pro,
+            envName: "my-deepseek-env",
+            extraArgs: ["--model=deepseek/deepseek-v4-pro", "--auto"]);
+
+        Assert.Equal("opencode --model=deepseek/deepseek-v4-pro --auto", prepared.LaunchCommand);
+        Assert.Equal(
+            1,
+            prepared.LaunchCommand.Split(' ').Count(tok => tok.StartsWith("--model")));
+    }
+
+    [Fact]
+    public async Task PrepareSession_DeepSeekV4Pro_SetsXdgConfigHomeForEnvIsolation()
+    {
+        var service = CreateService();
+
+        var prepared = await service.PrepareSessionAsync(
+            LLM.DeepSeekV4Pro, envName: "my-deepseek-env", extraArgs: null);
+
+        Assert.True(
+            prepared.Environment.ContainsKey("XDG_CONFIG_HOME"),
+            "DeepSeek V4 Pro must share OpenCode's XDG_CONFIG_HOME env isolation.");
+    }
+
+    [Fact]
+    public async Task PrepareSession_KimiK3_UsesOpencodeExecutableWithPinnedModel()
+    {
+        var service = CreateService();
+
+        // Kimi K3 is a pseudo-CLI backed by OpenCode. The binary is `opencode` (not
+        // `kimik3`), and base CLI launches inject --model=moonshotai/kimi-k3.
+        var prepared = await service.PrepareSessionAsync(LLM.KimiK3, envName: null, extraArgs: null);
+
+        Assert.Equal("opencode --model=moonshotai/kimi-k3", prepared.LaunchCommand);
+        Assert.Equal("opencode", prepared.Executable);
+    }
+
+    [Fact]
+    public async Task PrepareSession_KimiK3_PassesPromptViaPromptFlag()
+    {
+        var service = CreateService();
+
+        var prepared = await service.PrepareSessionAsync(
+            LLM.KimiK3, envName: null, extraArgs: null, initialPrompt: "hello world");
+
+        Assert.StartsWith("opencode --model=moonshotai/kimi-k3 --prompt=", prepared.LaunchCommand);
+    }
+
+    [Fact]
+    public async Task PrepareSession_KimiK3_InjectsOpenCodeProxyConfigWithoutRemappingMoonshotaiProvider()
+    {
+        // Kimi K3 is OpenCode-backed, so the OpenCode proxy config is injected — but it
+        // only remaps the zai/xai providers. The pinned moonshotai provider must NOT appear in
+        // the injected config: its traffic deliberately goes direct to Moonshot AI (no token saver).
+        var service = CreateService(openCodeLlmProxyEnabled: true);
+
+        var prepared = await service.PrepareSessionAsync(LLM.KimiK3, envName: null, extraArgs: null);
+
+        Assert.True(prepared.OpenCodeProxyActive);
+        Assert.Equal(
+            "test-session-token",
+            prepared.Environment[LocalLlmProxyContext.SessionTokenVariable]);
+        Assert.Equal(
+            "test-tab-token",
+            prepared.Environment[LocalLlmProxyContext.TabTokenVariable]);
+        var config = prepared.Environment[LlmProxyZaiConfig.ConfigContentVariable];
+        Assert.Contains("http://127.0.0.1:4321/llm/zai/api/paas/v4", config);
+        Assert.Contains("http://127.0.0.1:4321/llm/xai/v1", config);
+        Assert.DoesNotContain("moonshotai", config);
+    }
+
+    [Fact]
+    public async Task PrepareSession_KimiK3_DoesNotInjectModelWhenEnvIsSet()
+    {
+        var service = CreateService();
+
+        var prepared = await service.PrepareSessionAsync(
+            LLM.KimiK3,
+            envName: "my-kimi-env",
+            extraArgs: ["--model=moonshotai/kimi-k3", "--auto"]);
+
+        Assert.Equal("opencode --model=moonshotai/kimi-k3 --auto", prepared.LaunchCommand);
+        Assert.Equal(
+            1,
+            prepared.LaunchCommand.Split(' ').Count(tok => tok.StartsWith("--model")));
+    }
+
+    [Fact]
+    public async Task PrepareSession_KimiK3_SetsXdgConfigHomeForEnvIsolation()
+    {
+        var service = CreateService();
+
+        var prepared = await service.PrepareSessionAsync(
+            LLM.KimiK3, envName: "my-kimi-env", extraArgs: null);
+
+        Assert.True(
+            prepared.Environment.ContainsKey("XDG_CONFIG_HOME"),
+            "Kimi K3 must share OpenCode's XDG_CONFIG_HOME env isolation.");
     }
 
     [Fact]

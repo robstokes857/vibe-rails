@@ -415,7 +415,7 @@ export class VibeRailsAiController {
             else if (cli.includes('antigravity')) cliBuckets.antigravity += w;
             else if (cli.includes('copilot') || cli.includes('ghc')) cliBuckets.copilot += w;
             else if (cli.includes('grok')) cliBuckets.grok += w;
-            else if (cli.includes('opencode') || cli.includes('glm-5.2') || cli.includes('glm-5.3')) cliBuckets.opencode += w;
+            else if (cli.includes('opencode') || cli.includes('glm-5.2') || cli.includes('glm-5.3') || cli.includes('deepseek') || cli.includes('kimi')) cliBuckets.opencode += w;
             else if (cli) cliBuckets.other += w;
         }
         const cliEntries = [

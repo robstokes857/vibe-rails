@@ -107,131 +107,6 @@ function Assert-NoDestinationReparsePoints {
     }
 }
 
-function Resolve-VbdProbe {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$StagedExecutable,
-
-        [Parameter(Mandatory = $true)]
-        [string]$InstalledExecutable
-    )
-
-    # Prefer the staged (new) executable, but a hardened host can block executing a freshly
-    # downloaded binary from TEMP (AV, AppLocker). Fall back to the installed executable; if
-    # neither can answer, VBD cannot have been registered by a pre-VBD build, so treat it as
-    # not installed instead of failing every install on such machines.
-    try {
-        return @{ Executable = $StagedExecutable; Status = (Get-VbdStatus -Executable $StagedExecutable) }
-    } catch {
-        Write-Host "Staged VBD probe failed: $($_.Exception.Message)" -ForegroundColor Yellow
-    }
-
-    if (Test-Path -LiteralPath $InstalledExecutable -PathType Leaf) {
-        Write-Host "Falling back to the installed executable for the VBD probe..." -ForegroundColor Yellow
-        try {
-            return @{ Executable = $InstalledExecutable; Status = (Get-VbdStatus -Executable $InstalledExecutable) }
-        } catch {
-            Write-Host "Installed VBD probe also failed: $($_.Exception.Message)" -ForegroundColor Yellow
-        }
-        Write-Host "WARNING: VBD state could not be determined (the installed executable may predate VBD). Assuming it is not installed." -ForegroundColor Yellow
-    }
-
-    return @{ Executable = $null; Status = $null }
-}
-
-function Get-VbdStatus {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Executable
-    )
-
-    $json = (& $Executable --job-daemon-service status --json 2>$null | Out-String).Trim()
-    $exitCode = $LASTEXITCODE
-    if ($exitCode -ne 0 -or [string]::IsNullOrWhiteSpace($json)) {
-        throw "VBD status command failed with exit code $exitCode."
-    }
-
-    try {
-        $status = $json | ConvertFrom-Json -ErrorAction Stop
-    } catch {
-        throw "VBD status command returned invalid JSON: $($_.Exception.Message)"
-    }
-
-    $propertyNames = @($status.PSObject.Properties.Name)
-    if ($propertyNames -notcontains "isInstalled" -or $propertyNames -notcontains "isRunning") {
-        throw "VBD status JSON did not contain isInstalled and isRunning."
-    }
-
-    return $status
-}
-
-function Invoke-VbdAction {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Executable,
-
-        [Parameter(Mandatory = $true)]
-        [ValidateSet("stop", "repair", "start")]
-        [string]$Action
-    )
-
-    try {
-        & $Executable --job-daemon-service $Action | Out-Host
-        return $LASTEXITCODE -eq 0
-    } catch {
-        Write-Host "VBD $Action command failed: $($_.Exception.Message)" -ForegroundColor Red
-        return $false
-    }
-}
-
-function Wait-VbdRunningState {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Executable,
-
-        [Parameter(Mandatory = $true)]
-        [bool]$ExpectedRunning,
-
-        [int]$TimeoutSeconds = 10
-    )
-
-    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
-    do {
-        try {
-            $status = Get-VbdStatus -Executable $Executable
-            if ([bool]$status.isRunning -eq $ExpectedRunning) {
-                return $true
-            }
-        } catch {
-            # Lifecycle registration can take a moment to settle. Retry until
-            # the bounded deadline and report failure to the caller.
-        }
-
-        Start-Sleep -Milliseconds 250
-    } while ([DateTime]::UtcNow -lt $deadline)
-
-    return $false
-}
-
-function Wait-ProcessExit {
-    param(
-        [Parameter(Mandatory = $true)]
-        [int]$TargetProcessId,
-
-        [int]$TimeoutSeconds = 10
-    )
-
-    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
-    do {
-        if (-not (Get-Process -Id $TargetProcessId -ErrorAction SilentlyContinue)) {
-            return $true
-        }
-        Start-Sleep -Milliseconds 250
-    } while ([DateTime]::UtcNow -lt $deadline)
-
-    return $false
-}
-
 function Wait-ExecutableReadyForReplacement {
     param(
         [Parameter(Mandatory = $true)]
@@ -265,26 +140,6 @@ function Wait-ExecutableReadyForReplacement {
     } while ([DateTime]::UtcNow -lt $deadline)
 
     return $false
-}
-
-function Show-VbdRecoveryCommands {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Executable,
-
-        [Parameter(Mandatory = $true)]
-        [bool]$WasRunning
-    )
-
-    $quotedExecutable = $Executable.Replace("'", "''")
-    Write-Host ""
-    Write-Host "VBD could not be restored automatically." -ForegroundColor Red
-    Write-Host "After resolving the installation error, run these current-user commands:" -ForegroundColor Yellow
-    Write-Host "  & '$quotedExecutable' --job-daemon-service repair" -ForegroundColor White
-    if ($WasRunning) {
-        Write-Host "  & '$quotedExecutable' --job-daemon-service start" -ForegroundColor White
-    }
-    Write-Host ""
 }
 
 function Remove-InstallerStagingDirectory {
@@ -407,15 +262,12 @@ $zipUrl = $zipAsset.browser_download_url
 $checksumUrl = $checksumAsset.browser_download_url
 
 # Create a private, random staging directory. The release is fully extracted and
-# validated here before the live installation or VBD process is touched.
+# validated here before the live installation is touched.
 $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "vibe_rails_install_$([Guid]::NewGuid().ToString('N'))"
 $payloadDir = Join-Path $tempDir "payload"
 New-Item -ItemType Directory -Path $tempDir | Out-Null
 New-Item -ItemType Directory -Path $payloadDir | Out-Null
 
-$daemonWasInstalled = $false
-$daemonWasRunning = $false
-$recoveryNeeded = $false
 
 try {
     # Download files
@@ -444,60 +296,6 @@ try {
     Assert-StableInstallTarget -Path $InstallDir
     Write-Host "Release payload validated." -ForegroundColor Green
 
-    # Use the new staged executable to inspect and control the stable current-user
-    # registration, falling back to the installed executable on hosts that refuse
-    # to execute a freshly downloaded binary from TEMP.
-    $stagedExecutable = Join-Path $payloadDir "vb.exe"
-    $probe = Resolve-VbdProbe `
-        -StagedExecutable $stagedExecutable `
-        -InstalledExecutable (Join-Path $InstallDir "vb.exe")
-    $daemonStatus = $probe.Status
-    $vbdExecutable = if ($null -ne $probe.Executable) { $probe.Executable } else { $stagedExecutable }
-
-    $daemonWasInstalled = $false
-    $daemonWasRunning = $false
-    $daemonProcessId = $null
-    if ($null -ne $daemonStatus) {
-        $daemonState = [string]$daemonStatus.state
-        $daemonWasInstalled = [bool]$daemonStatus.isInstalled
-        # isReachable guards against a status whose isRunning was computed while the
-        # process was still starting; either signal means a live daemon must stop first.
-        $daemonWasRunning = ([bool]$daemonStatus.isRunning) -or ([bool]$daemonStatus.isReachable)
-        $daemonProcessId = if ($null -ne $daemonStatus.pid) { [int]$daemonStatus.pid } else { $null }
-
-        # An Error state means VBD's own view of the registration is broken; an Unavailable
-        # state alongside an active daemon/registration means lifecycle control (including
-        # stop) cannot work. Proceeding would replace files under a running daemon.
-        if ($daemonState -eq "Error") {
-            throw "VBD reported lifecycle state 'Error' ($($daemonStatus.lastError)). Resolve it (vb --job-daemon-service status) and retry. The existing installation was not changed."
-        }
-        if ($daemonState -eq "Unavailable" -and ($daemonWasInstalled -or $daemonWasRunning)) {
-            throw "VBD lifecycle support is unavailable while a VBD process or registration appears active ($($daemonStatus.lastError)). Resolve it and retry. The existing installation was not changed."
-        }
-    }
-
-    if ($daemonWasInstalled) {
-        $daemonStateLabel = if ($daemonWasRunning) { "running" } else { "stopped" }
-        Write-Host "Detected installed VBD ($daemonStateLabel)." -ForegroundColor Cyan
-    } else {
-        Write-Host "VBD is not installed for the current user." -ForegroundColor Cyan
-    }
-
-    if ($daemonWasInstalled -or $daemonWasRunning) {
-        Write-Host "Ensuring VBD is stopped before replacing files..." -ForegroundColor Cyan
-        $recoveryNeeded = $true
-        if (-not (Invoke-VbdAction -Executable $vbdExecutable -Action "stop")) {
-            throw "Could not stop VBD. The existing installation was not changed."
-        }
-        if (-not (Wait-VbdRunningState -Executable $vbdExecutable -ExpectedRunning $false)) {
-            throw "VBD did not stop within 10 seconds. The existing installation was not changed."
-        }
-        if ($null -ne $daemonProcessId -and -not (Wait-ProcessExit -TargetProcessId $daemonProcessId)) {
-            throw "The previous VBD process (PID $daemonProcessId) did not exit within 10 seconds. The existing installation was not changed."
-        }
-        Write-Host "VBD stopped." -ForegroundColor Green
-    }
-
     $existingExecutable = Join-Path $InstallDir "vb.exe"
     Assert-StableInstallTarget -Path $InstallDir
     if (-not (Wait-ExecutableReadyForReplacement -Executable $existingExecutable)) {
@@ -509,9 +307,6 @@ try {
     if (-not (Test-Path -LiteralPath $InstallDir)) {
         New-Item -ItemType Directory -Path $InstallDir | Out-Null
     }
-    if ($daemonWasInstalled) {
-        $recoveryNeeded = $true
-    }
 
     Assert-NoDestinationReparsePoints -PayloadDir $payloadDir -InstallDir $InstallDir
 
@@ -521,31 +316,6 @@ try {
     }
 
     Install-BertV2ModelAssets -RootDir $InstallDir
-
-    $installedExecutable = Join-Path $InstallDir "vb.exe"
-    if ($daemonWasInstalled) {
-        Write-Host "Repairing current-user VBD registration..." -ForegroundColor Cyan
-        if (-not (Invoke-VbdAction -Executable $installedExecutable -Action "repair")) {
-            throw "VBD registration repair failed."
-        }
-    }
-
-    if ($daemonWasRunning) {
-        Write-Host "Restarting VBD because it was running before the update..." -ForegroundColor Cyan
-        if (-not (Invoke-VbdAction -Executable $installedExecutable -Action "start")) {
-            throw "VBD restart failed."
-        }
-        if (-not (Wait-VbdRunningState -Executable $installedExecutable -ExpectedRunning $true)) {
-            throw "VBD did not report running within 10 seconds after restart."
-        }
-        Write-Host "VBD restarted." -ForegroundColor Green
-    } elseif ($daemonWasInstalled) {
-        Write-Host "VBD registration repaired; it remains stopped." -ForegroundColor Green
-    }
-
-    if ($daemonWasInstalled -or $daemonWasRunning) {
-        $recoveryNeeded = $false
-    }
 
     # Add to PATH
     $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -571,11 +341,6 @@ try {
     Write-Host ""
 
 } catch {
-    if ($recoveryNeeded) {
-        Show-VbdRecoveryCommands `
-            -Executable (Join-Path $InstallDir "vb.exe") `
-            -WasRunning $daemonWasRunning
-    }
     throw
 } finally {
     Remove-InstallerStagingDirectory -Path $tempDir
