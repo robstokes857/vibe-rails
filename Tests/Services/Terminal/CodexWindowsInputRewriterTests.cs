@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text;
+using Moq;
 using Pty.Net;
 using VibeRails.Services;
 using VibeRails.Services.Terminal;
@@ -14,6 +15,71 @@ public sealed class CodexWindowsInputRewriterTests
 
     private static readonly byte[] Win32ShiftEnterBytes =
         Encoding.ASCII.GetBytes(CodexWindowsInputRewriter.Win32ShiftEnterDown);
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(false, false)]
+    public async Task SemanticEscape_RecordsLogicalKeyAndUsesTerminalEncoding(bool rewrite, bool afterLineFeed)
+    {
+        var writer = new MemoryStream();
+        await using var terminal = CreateTerminal(writer, rewrite);
+        var state = new Mock<ITerminalStateService>();
+        if (afterLineFeed)
+            await terminal.WriteInputBytesAsync("\n"u8.ToArray(), TestContext.Current.CancellationToken);
+
+        await TerminalIoRouter.RouteEscapeKeyAsync(state.Object, terminal, "test-session",
+            TerminalIoSource.LocalWebUi, TestContext.Current.CancellationToken);
+
+        state.Verify(s => s.RecordInput("test-session", "\u001b", TerminalIoSource.LocalWebUi), Times.Once);
+        state.VerifyNoOtherCalls();
+        var expectedPrefix = !afterLineFeed ? Array.Empty<byte>() : rewrite ? Win32ShiftEnterBytes : "\n"u8.ToArray();
+        Assert.Equal(Concat(expectedPrefix, Encoding.ASCII.GetBytes(rewrite && afterLineFeed
+            ? "\u001b[27;1;27;1;0;1_\u001b[27;1;27;0;0;1_"
+            : "\u001b")), writer.ToArray());
+    }
+
+    [Fact]
+    public async Task SemanticEscape_PasteAndCrLfDoNotEnableWin32Encoding()
+    {
+        var writer = new MemoryStream();
+        await using var terminal = CreateTerminal(writer, rewrite: true);
+        var input = "\u001b[200~a\nb\u001b[201~\r\n";
+        await terminal.WriteInputBytesAsync(Encoding.ASCII.GetBytes(input), TestContext.Current.CancellationToken);
+        await terminal.WriteEscapeKeyAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(Encoding.ASCII.GetBytes(input + "\u001b"), writer.ToArray());
+    }
+
+    [Fact]
+    public async Task SemanticEscape_WaitsForPriorPtyWrite()
+    {
+        var writer = new BlockingFirstWriteStream();
+        await using var terminal = CreateTerminal(writer, rewrite: true);
+        var ct = TestContext.Current.CancellationToken;
+        var first = terminal.WriteInputBytesAsync("\n"u8.ToArray(), ct);
+        await writer.FirstWriteEntered;
+        var escape = terminal.WriteEscapeKeyAsync(ct);
+        Assert.Equal(1, writer.WriteCallCount);
+        Assert.False(escape.IsCompleted);
+        writer.ReleaseFirstWrite();
+        await Task.WhenAll(first, escape);
+        Assert.Equal(Concat(Win32ShiftEnterBytes, Encoding.ASCII.GetBytes(CodexWindowsInputRewriter.Win32EscapeKey)), writer.WrittenBytes);
+    }
+
+    [Fact]
+    public async Task RawEscape_RemainsAByteStreamEvenAfterModifiedEnter()
+    {
+        var writer = new MemoryStream();
+        await using var terminal = CreateTerminal(writer, rewrite: true);
+        var ct = TestContext.Current.CancellationToken;
+        await terminal.WriteInputBytesAsync("\n"u8.ToArray(), ct);
+        await terminal.WriteInputBytesAsync(new byte[] { 0x1B }, ct);
+        await terminal.WriteInputBytesAsync("[200~a\nb"u8.ToArray(), ct);
+        await terminal.WriteInputBytesAsync(new byte[] { 0x1B }, ct);
+        await terminal.WriteInputBytesAsync("[201~"u8.ToArray(), ct);
+        Assert.Equal(Concat(Win32ShiftEnterBytes, Encoding.ASCII.GetBytes("\u001b[200~a\nb\u001b[201~")), writer.ToArray());
+    }
 
     [Fact]
     public void ShouldRewrite_CodexOnWindows_IsTrue()

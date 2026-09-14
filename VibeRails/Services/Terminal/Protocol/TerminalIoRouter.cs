@@ -96,6 +96,21 @@ public readonly record struct TerminalRemoteCommandEvent(
 /// </summary>
 public static class TerminalIoRouter
 {
+    /// <summary>
+    /// Routes a known physical Escape key, retaining the logical ESC for input
+    /// observers while Terminal selects the platform-specific encoding.
+    /// </summary>
+    public static async Task RouteEscapeKeyAsync(
+        ITerminalStateService stateService,
+        Terminal terminal,
+        string sessionId,
+        TerminalIoSource source,
+        CancellationToken ct = default)
+    {
+        stateService.RecordInput(sessionId, "\u001b", source);
+        await terminal.WriteEscapeKeyAsync(ct);
+    }
+
     public static async Task RouteInputAsync(
         ITerminalStateService stateService,
         Terminal terminal,

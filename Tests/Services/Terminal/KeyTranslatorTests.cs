@@ -5,6 +5,18 @@ namespace Tests.Services.Terminal;
 
 public class KeyTranslatorTests
 {
+    [Theory]
+    [InlineData(false, false, false, true)]
+    [InlineData(true, false, false, false)]
+    [InlineData(false, true, false, false)]
+    [InlineData(false, false, true, false)]
+    public void IsUnmodifiedEscape_PreservesModifierDistinction(bool shift, bool alt, bool control, bool expected)
+    {
+        Assert.Equal(expected, KeyTranslator.IsUnmodifiedEscape(
+            new ConsoleKeyInfo('\u001b', ConsoleKey.Escape, shift, alt, control)));
+        Assert.False(KeyTranslator.IsUnmodifiedEscape(new ConsoleKeyInfo('x', ConsoleKey.X, false, false, false)));
+    }
+
     [Fact]
     public void TranslateKey_ShiftEnter_DefaultMode_RemainsCarriageReturn()
     {

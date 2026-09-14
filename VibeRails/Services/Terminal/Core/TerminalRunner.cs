@@ -485,6 +485,17 @@ public class TerminalRunner
                                     return;
                                 }
 
+                                if (string.Equals(command, TerminalControlProtocol.EscapeCommandName, StringComparison.Ordinal))
+                                {
+                                    if (!TerminalControlProtocol.IsEscapeCommand(command, payload))
+                                        return;
+
+                                    await NotifyRemoteTakeoverAsync("input");
+                                    await TerminalIoRouter.RouteEscapeKeyAsync(
+                                        _stateService, terminal, sessionId, TerminalIoSource.RemoteWebUi);
+                                    return;
+                                }
+
                                 _stateService.RecordRemoteCommand(sessionId, command, payload, TerminalIoSource.RemoteWebUi);
                             }
                             finally
@@ -1047,6 +1058,12 @@ public class TerminalRunner
             }
 
             var key = Console.ReadKey(intercept: true);
+            if (modifiedEnterAsLineFeed && KeyTranslator.IsUnmodifiedEscape(key))
+            {
+                await TerminalIoRouter.RouteEscapeKeyAsync(
+                    _stateService, terminal, sessionId, TerminalIoSource.LocalCli, ct);
+                continue;
+            }
             var input = KeyTranslator.TranslateKey(key, modifiedEnterAsLineFeed);
             if (!string.IsNullOrEmpty(input))
             {

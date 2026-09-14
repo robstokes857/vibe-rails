@@ -11,6 +11,10 @@ namespace VibeRails.Services.Terminal;
 public sealed class CodexWindowsInputRewriter
 {
     public const string Win32ShiftEnterDown = "\u001b[13;28;0;1;16;1_";
+    // ConPTY stops eagerly dispatching bare ESC after seeing any Win32 input
+    // record (including Shift+Enter). Encode a known physical Escape explicitly.
+    // This is used by the semantic key route, never by the raw-stream Rewrite.
+    public const string Win32EscapeKey = "\u001b[27;1;27;1;0;1_\u001b[27;1;27;0;0;1_";
 
     private static readonly byte[] s_win32ShiftEnterDownBytes =
         Encoding.ASCII.GetBytes(Win32ShiftEnterDown);
@@ -21,6 +25,12 @@ public sealed class CodexWindowsInputRewriter
     private bool _csiHasOnlyDigits;
     private bool _inBracketedPaste;
     private bool _previousWasCarriageReturn;
+
+    /// <summary>
+    /// Whether this stream has produced a Win32 Shift+Enter record. ConPTY keeps
+    /// its Win32-input parsing behavior for the rest of the session once seen.
+    /// </summary>
+    public bool HasRewrittenLineFeed { get; private set; }
 
     public static bool ShouldRewrite(LLM llm) =>
         OperatingSystem.IsWindows() && llm == LLM.Codex;
@@ -50,6 +60,7 @@ public sealed class CodexWindowsInputRewriter
 
             if (rewrite)
             {
+                HasRewrittenLineFeed = true;
                 output ??= StartOutput(bytes, i);
                 Append(output, s_win32ShiftEnterDownBytes);
             }

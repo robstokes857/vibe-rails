@@ -3,6 +3,7 @@ import { translateOpenCodeMouseWheel } from './terminal-opencode-wheel.js';
 import { createGrokPastePayload, isNativeGrokCli } from './terminal-grok-paste.js';
 
 const RESIZE_PREFIX = '__resize__:';
+const ESCAPE_KEY_COMMAND = '__cmd__:escape';
 
 // Trailing-edge debounce for the outgoing `__resize__` message to the PTY.
 // Each new `onFitChange` callback restarts this timer (scheduleResizeToPty()
@@ -174,6 +175,32 @@ export class TerminalTab {
         });
     }
 
+    _handleEscapeKey(event) {
+        const isEscape = event.key === 'Escape' || event.keyCode === 27;
+        if ((this.state.cli || '').toLowerCase() !== 'codex'
+            || !isEscape || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey
+            || event.isComposing || event.keyCode === 229
+            || (event.type !== 'keydown' && event.type !== 'keypress')) {
+            return true;
+        }
+
+        // After our Windows Shift+Enter record, ConPTY treats bare ESC as the
+        // start of an incomplete sequence. Preserve physical-key intent so the
+        // backend can encode Escape explicitly, without rewriting ESC bytes in
+        // paste, ANSI replies or fragmented input. This handler belongs to xterm;
+        // editor widgets and dialogs retain their own Escape behavior.
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.type === 'keydown') {
+            this.statusController?.onTerminalData('\x1b');
+            this.vibeTerminal?.scrollToBottom();
+            if (this.hasOpenSocket()) {
+                this.socket.send(ESCAPE_KEY_COMMAND);
+            }
+        }
+        return false;
+    }
+
     ensureTerminal() {
         if (this.vibeTerminal || !this.state.ui?.terminalElement) {
             return;
@@ -210,6 +237,10 @@ export class TerminalTab {
         });
 
         this.vibeTerminal.addCustomKeyEventHandler((event) => {
+            if (!this._handleEscapeKey(event)) {
+                return false;
+            }
+
             const isModifiedEnter = ((event.key || '') === 'Enter' || event.keyCode === 13)
                 && !event.altKey
                 && !event.metaKey

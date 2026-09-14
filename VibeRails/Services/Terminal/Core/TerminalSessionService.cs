@@ -496,6 +496,14 @@ public class TerminalSessionService : ITerminalSessionService
                     continue;
                 }
 
+                if (result.MessageType == WebSocketMessageType.Text &&
+                    TerminalControlProtocol.IsEscapeCommand(input))
+                {
+                    await TerminalIoRouter.RouteEscapeKeyAsync(
+                        stateService, terminal, sessionId, TerminalIoSource.LocalWebUi, ct);
+                    continue;
+                }
+
                 // A reserved control frame that reached this point failed to parse —
                 // a bug on the sending side, not something the user typed. Dropping
                 // it is the only safe move: routing would write the literal frame to
