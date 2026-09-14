@@ -27,6 +27,9 @@ public sealed class Terminal : IAsyncDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly SemaphoreSlim _stdinWriteGate = new(1, 1);
     private readonly CodexWindowsInputRewriter _codexWindowsInputRewriter = new();
+    private static readonly byte[] s_win32EscapeKeyBytes =
+        System.Text.Encoding.ASCII.GetBytes(CodexWindowsInputRewriter.Win32EscapeKey);
+    private static readonly byte[] s_escapeKeyBytes = [0x1B];
     private readonly Lock _subscriberLock = new();
     private readonly List<ITerminalConsumer> _consumers = [];
     private readonly TerminalEmulator.Terminal _emulator;
@@ -325,6 +328,31 @@ public sealed class Terminal : IAsyncDisposable
                 ? _codexWindowsInputRewriter.Rewrite(buffer)
                 : buffer;
             await WriteBytesCoreAsync(ptyBytes, ct);
+        }
+        finally
+        {
+            _stdinWriteGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Writes a known physical Escape key. A raw input chunk containing ESC is
+    /// deliberately not treated as this event because it may begin a split CSI.
+    /// Shares the raw-write gate and sequence boundary handling with other input.
+    /// </summary>
+    internal async Task WriteEscapeKeyAsync(CancellationToken ct = default)
+    {
+        await _stdinWriteGate.WaitAsync(ct);
+        try
+        {
+            // Sending a Win32 Escape before the first rewritten LF would itself
+            // switch ConPTY into its persistent Win32-input parsing behavior.
+            // Read the state under the same gate that advances and writes it.
+            var bytes = EncodeBareLineFeedAsWin32ShiftEnter && _codexWindowsInputRewriter.HasRewrittenLineFeed
+                ? s_win32EscapeKeyBytes
+                : s_escapeKeyBytes;
+            _codexWindowsInputRewriter.BreakInputSequence();
+            await WriteBytesCoreAsync(bytes, ct);
         }
         finally
         {

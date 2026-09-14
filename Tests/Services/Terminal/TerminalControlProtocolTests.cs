@@ -13,6 +13,20 @@ namespace Tests.Services.Terminal;
 public sealed class TerminalControlProtocolTests
 {
     [Theory]
+    [InlineData("__cmd__:escape", true)]
+    [InlineData("__cmd__:escape:", false)]
+    [InlineData("__cmd__:escape:payload", false)]
+    [InlineData("__cmd__:Escape", false)]
+    [InlineData("__cmd__:escape\n", false)]
+    [InlineData("\u001b", false)]
+    public void IsEscapeCommand_RequiresExactSemanticKeyFrame(string frame, bool expected)
+    {
+        Assert.Equal(expected, TerminalControlProtocol.IsEscapeCommand(frame));
+        if (TerminalControlProtocol.TryParseCommand(frame, out var command, out var payload))
+            Assert.Equal(expected, TerminalControlProtocol.IsEscapeCommand(command, payload));
+    }
+
+    [Theory]
     [InlineData("__resize__:120,40", 120, 40)]
     [InlineData("__resize__: 120 , 40 ", 120, 40)]
     [InlineData("__resize__:10,5", 10, 5)]

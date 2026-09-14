@@ -6,6 +6,12 @@ namespace VibeRails.Services.Terminal;
 /// </summary>
 public static class KeyTranslator
 {
+    /// <summary>
+    /// Identifies a physical Escape key without changing modified key bindings.
+    /// </summary>
+    public static bool IsUnmodifiedEscape(ConsoleKeyInfo key) =>
+        key.Key == ConsoleKey.Escape && key.Modifiers == 0;
+
     public static string TranslateKey(
         ConsoleKeyInfo key,
         bool modifiedEnterAsLineFeed = false)

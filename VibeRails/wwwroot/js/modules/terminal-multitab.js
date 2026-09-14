@@ -1812,6 +1812,13 @@ class TerminalManager {
                 event.preventDefault();
                 cancel();
             }
+            // Removing the focused rename input otherwise leaves keyboard input
+            // on body. Restore only for keyboard completion; blur belongs to the
+            // control the user clicked or Tabbed to.
+            if (event.key === 'Enter' || event.key === 'Escape') {
+                if (this.activeTabId === tabId) tab.instance.focusInput();
+                else button.focus({ preventScroll: true });
+            }
             event.stopPropagation();
         };
         const onBlur = () => commit();

@@ -56,6 +56,7 @@ Commands:
 - `__disconnect_browser__[:reason]`
 - `__resize__:{cols},{rows}`
 - `__cmd__:{command}[:payload]` — structured command prefix framework (e.g. `__cmd__:replay`)
+- `__cmd__:escape` — physical, unmodified Escape key; no payload (including an empty payload) is accepted. Added 2026-09-14; see the semantic key route below.
 - PIN challenge protocol (sent as plain text, not `__cmd__:`):
   - `__PIN__:{pin}` — PIN challenge response from the viewer
   - `__LOCKED__` / `__UNLOCKED__` — lock-state frames
@@ -254,6 +255,17 @@ Notes:
 Single I/O funnel and hook point.
 
 Responsibilities:
+- `RouteEscapeKeyAsync(...)` (2026-09-14): records logical ESC, then uses the
+  terminal's serialized semantic key write. On Codex/Windows, after this terminal
+  has emitted its first rewritten LF (Win32 Shift+Enter), Escape is encoded as
+  Win32 Escape down/up. Before that trigger and for other platforms/CLIs it stays
+  raw ESC. The first Win32 record changes ConPTY's persistent input parsing, so a
+  later bare ESC can remain pending and combine with the next character as Alt.
+  Only known physical keyboard events use this route (`__cmd__:escape` or native
+  `ConsoleKey.Escape`); generic input chunks retain their byte-stream contract,
+  including one-byte ESC fragments of CSI/paste. Remote commands remain behind
+  the existing authorization and takeover gate. Real ConPTY regression coverage:
+  `Tests/Services/Terminal/ConPtyEscapeKeyTests.cs`.
 - `RouteInputAsync(...)`:
   - decodes a semantic copy for `ITerminalStateService.RecordInput(...)`, so Codex history still records LF
   - forwards the caller's original byte memory to `Terminal.WriteInputBytesAsync(...)`; PTY-bound input is never decoded and re-encoded

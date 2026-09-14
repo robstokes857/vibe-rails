@@ -16,6 +16,8 @@ internal static class TerminalControlProtocol
     public const string ReplayCommand = "__replay__";
     public const string ReplayCommandName = "replay";
     public const string ReplayCommandFrame = CommandPrefix + ReplayCommandName;
+    public const string EscapeCommandName = "escape";
+    public const string EscapeCommandFrame = CommandPrefix + EscapeCommandName;
     public const string BrowserDisconnectedCommand = "__browser_disconnected__";
     public const string DisconnectBrowserCommand = "__disconnect_browser__";
     public const string ResizePrefix = "__resize__:";
@@ -193,6 +195,20 @@ internal static class TerminalControlProtocol
             && payload is null
             && string.Equals(command, ReplayCommandName, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// Recognizes the exact physical Escape command with no payload. A raw
+    /// one-byte ESC may instead begin a fragmented ANSI sequence or paste marker.
+    /// </summary>
+    public static bool IsEscapeCommand(string input) =>
+        string.Equals(input, EscapeCommandFrame, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Recognizes a parsed physical Escape command and rejects any payload,
+    /// including an empty payload after a trailing colon.
+    /// </summary>
+    public static bool IsEscapeCommand(string command, string? payload) =>
+        payload is null && string.Equals(command, EscapeCommandName, StringComparison.Ordinal);
 
     private static bool IsValidCommandName(string command)
     {

@@ -178,7 +178,7 @@ test.describe('terminal-multitab', () => {
 
         expect(captured).toEqual([
             '\x1b[200~first line\nsecond line\nthird line\nfourth line\x1b[201~',
-            '\x1b',
+            '__cmd__:escape',
         ]);
     });
 
