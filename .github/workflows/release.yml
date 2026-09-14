@@ -409,6 +409,31 @@ jobs:
             exit 1
           fi
 
+          # Publish the most-used platform first. Any package that cannot reach the
+          # Marketplace aborts this step, so whichever target sorts first in the glob is
+          # the only one guaranteed a turn: v1.10.8 spent both of its attempts retrying
+          # darwin-arm64 ("Request timeout: /_apis/gallery", a fixed 180s ceiling) and
+          # never reached linux-x64 or win32-x64. --skip-duplicate below keeps retries
+          # idempotent, so a re-run only has to clear the targets still missing.
+          publish_order=(win32-x64 linux-x64 darwin-arm64)
+          ordered=()
+          remaining=("${packages[@]}")
+          for target in "${publish_order[@]}"; do
+            unmatched=()
+            for package in "${remaining[@]}"; do
+              if [[ "$(basename "$package")" == *"-${target}-"* ]]; then
+                ordered+=("$package")
+              else
+                unmatched+=("$package")
+              fi
+            done
+            remaining=("${unmatched[@]}")
+          done
+
+          # A target missing from publish_order still publishes, just last, so adding a
+          # platform to the build matrix can never silently skip publishing it.
+          ordered+=("${remaining[@]}")
+
           publish_with_retry() {
             local package="$1"
             local max_attempts=5
@@ -432,7 +457,7 @@ jobs:
             done
           }
 
-          for package in "${packages[@]}"; do
+          for package in "${ordered[@]}"; do
             publish_with_retry "$package"
           done
 
