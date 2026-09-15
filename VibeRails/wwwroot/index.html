@@ -4235,6 +4235,32 @@
                 }
 
                 /* Commits / sessions rail -------------------------------- */
+                .board-card-modal-dialog .modal-title {
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                }
+                .board-attachment-list, .board-history-list {
+                    min-width: 0;
+                    margin-bottom: 0.5rem;
+                }
+                .board-attachment-row {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                    min-width: 0;
+                    padding: 0.4rem 0;
+                }
+                .board-attachment-row > .board-side-copy { flex: 1; min-width: 0; }
+                .board-history-revision {
+                    margin: 0.6rem 0;
+                    font-size: 0.75rem;
+                    overflow-wrap: anywhere;
+                }
+                .board-history-revision summary, [data-board-history-details] > summary { cursor: pointer; }
+                .board-history-events { padding-left: 1rem; }
+                .board-history-events li { margin: 0.4rem 0; }
+                [data-board-launch-options]:empty { display: none; }
                 .board-side-section {
                     display: flex;
                     flex-direction: column;

@@ -883,6 +883,16 @@ export class VibeTerminal {
                     return false;
                 }
 
+                // A terminal opened while its host was display:none (a background tab
+                // reconnected after navigation) has no measured cell metrics until
+                // xterm re-measures on becoming visible. FitAddon.fit() silently
+                // no-ops in that window, so don't record the pass: the next fit
+                // (ResizeObserver / scheduled pass) must actually run.
+                if (typeof this._fitAddon.proposeDimensions === 'function'
+                    && !this._fitAddon.proposeDimensions()) {
+                    return false;
+                }
+
                 this._lastFitWidth = width;
                 this._lastFitHeight = height;
 
@@ -898,6 +908,29 @@ export class VibeTerminal {
 
         if (notify) {
             this._notifyFitChange(forceNotify);
+        }
+        return true;
+    }
+
+    // Pin the grid to a known geometry without measuring the host. Used for a
+    // hidden (display:none) tab that reconnects in the background: its panel
+    // cannot be fitted, but every tab panel shares the visible tab's container
+    // and font, so the visible tab's PTY geometry is the right grid for the
+    // incoming snapshot. Returns true when the grid changed.
+    resize(cols, rows) {
+        if (!this._terminal) return false;
+        const nextCols = Math.floor(Number(cols));
+        const nextRows = Math.floor(Number(rows));
+        if (!Number.isFinite(nextCols) || !Number.isFinite(nextRows) || nextCols < 1 || nextRows < 1) {
+            return false;
+        }
+        if (this._terminal.cols === nextCols && this._terminal.rows === nextRows) {
+            return false;
+        }
+        try {
+            this._terminal.resize(nextCols, nextRows);
+        } catch {
+            return false;
         }
         return true;
     }

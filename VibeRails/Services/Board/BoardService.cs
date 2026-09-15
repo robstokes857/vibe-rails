@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using VibeRails.DTOs;
+using VibeRails.Services.LlmClis;
 
 namespace VibeRails.Services.Board;
 
@@ -7,7 +8,7 @@ namespace VibeRails.Services.Board;
 /// Board rules and wire mapping shared by the HTTP routes (dashboard) and the MCP tools. Has no
 /// dependency on the dashboard's service graph so the stdio MCP host can construct it.
 /// </summary>
-public interface IBoardService
+public partial interface IBoardService
 {
     Task<BoardColumnListResponse> GetColumnsAsync(string projectPath, CancellationToken cancellationToken = default);
     Task<BoardColumnResponse> CreateColumnAsync(string projectPath, CreateBoardColumnRequest request, CancellationToken cancellationToken = default);
@@ -17,10 +18,12 @@ public interface IBoardService
 
     Task<BoardCardListResponse> GetCardsAsync(string projectPath, CancellationToken cancellationToken = default);
     Task<BoardCardResponse?> GetCardAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
-    Task<BoardCardResponse> CreateCardAsync(string projectPath, CreateBoardCardRequest request, CancellationToken cancellationToken = default);
-    Task<BoardCardResponse?> UpdateCardAsync(string projectPath, string idOrKey, UpdateBoardCardRequest request, CancellationToken cancellationToken = default);
+    Task<BoardCardResponse> CreateCardAsync(string projectPath, CreateBoardCardRequest request, CancellationToken cancellationToken = default, BoardAuthor? author = null);
+    Task<BoardCardResponse?> UpdateCardAsync(string projectPath, string idOrKey, UpdateBoardCardRequest request, CancellationToken cancellationToken = default, BoardAuthor? author = null);
     Task<bool> DeleteCardAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
     Task<BoardCardResponse?> MoveCardAsync(string projectPath, string idOrKey, string columnIdOrName, int? position, CancellationToken cancellationToken = default);
+
+    Task<BoardDescriptionHistoryResponse?> GetDescriptionHistoryAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
 
     Task<BoardCommentDto?> AddCommentAsync(string projectPath, string idOrKey, BoardAuthor author, string body, CancellationToken cancellationToken = default);
     Task<BoardAttachmentDto?> AddAttachmentAsync(string projectPath, string idOrKey, AddBoardAttachmentRequest request, CancellationToken cancellationToken = default);
@@ -52,7 +55,6 @@ public sealed partial class BoardService(
     public const int MaxTags = 20;
     public const int MaxTagLength = 40;
     public const int MaxAttachmentsPerCard = 12;
-    public const int MaxAttachmentDataUrlLength = 400_000;
     public const int MaxColumnNameLength = 60;
     public const int MaxSessionIdLength = 36;
     public static readonly IReadOnlyList<int> AllowedPoints = [1, 2, 3, 5, 8, 13];
@@ -143,7 +145,7 @@ public sealed partial class BoardService(
     public Task<BoardCardRecord?> FindCardAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default) =>
         store.FindCardAsync(projectPath, idOrKey, cancellationToken);
 
-    public async Task<BoardCardResponse> CreateCardAsync(string projectPath, CreateBoardCardRequest request, CancellationToken cancellationToken = default)
+    public async Task<BoardCardResponse> CreateCardAsync(string projectPath, CreateBoardCardRequest request, CancellationToken cancellationToken = default, BoardAuthor? author = null)
     {
         var title = NormalizeTitle(request.Title) ?? throw new BoardValidationException("Title is required.");
         // A brand-new project's first card may arrive over MCP before anything listed the lanes.
@@ -156,11 +158,13 @@ public sealed partial class BoardService(
             NormalizePriority(request.Priority) ?? BoardPriorities.Default,
             NormalizePoints(request.Points),
             NormalizeTags(request.Tags) ?? [],
-            request.Blocked ?? false), cancellationToken);
+            request.Blocked ?? false,
+            NormalizeBaseOptions(NormalizeAssignee(request.Assignee), request.BaseLlmOptions),
+            author), cancellationToken);
         return (await GetCardAsync(projectPath, card.Id, cancellationToken))!;
     }
 
-    public async Task<BoardCardResponse?> UpdateCardAsync(string projectPath, string idOrKey, UpdateBoardCardRequest request, CancellationToken cancellationToken = default)
+    public async Task<BoardCardResponse?> UpdateCardAsync(string projectPath, string idOrKey, UpdateBoardCardRequest request, CancellationToken cancellationToken = default, BoardAuthor? author = null)
     {
         var existing = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
         if (existing is null)
@@ -179,6 +183,16 @@ public sealed partial class BoardService(
         var points = clearPoints ? null : NormalizePoints(request.Points);
         var clearAssignee = request.Assignee is not null && string.IsNullOrWhiteSpace(request.Assignee);
         var assignee = clearAssignee ? null : NormalizeAssignee(request.Assignee);
+        var finalAssignee = clearAssignee ? null : assignee ?? existing.Assignee;
+        var assigneeChanged = !string.Equals(finalAssignee, existing.Assignee, StringComparison.Ordinal);
+        var options = request.ClearBaseLlmOptions || request.BaseLlmOptions is null ? null : NormalizeBaseOptions(finalAssignee, request.BaseLlmOptions);
+        var clearOptions = request.ClearBaseLlmOptions || assigneeChanged
+            || (request.BaseLlmOptions is not null && options is null);
+        if (options is not null) clearOptions = false;
+        if (request.ExpectedDescriptionRevision is < 1)
+            throw new BoardValidationException("Description revision must be a positive number.");
+        var activeSessionIds = request.Description is null ? null
+            : (await liveSessions.GetLiveSessionsAsync(cancellationToken)).Keys.ToList();
 
         var patch = new BoardCardPatch(
             Title: title,
@@ -190,9 +204,16 @@ public sealed partial class BoardService(
             ClearPoints: clearPoints,
             Tags: NormalizeTags(request.Tags),
             Blocked: request.Blocked,
-            ColumnId: request.ColumnId);
+            ColumnId: request.ColumnId,
+            ExpectedDescriptionRevision: request.ExpectedDescriptionRevision,
+            BaseLlmOptions: options,
+            ClearBaseLlmOptions: clearOptions,
+            Author: author,
+            ActiveSessionIds: activeSessionIds);
         var updated = await store.UpdateCardAsync(projectPath, existing.Id, patch, cancellationToken);
-        return updated is null ? null : await GetCardAsync(projectPath, updated.Id, cancellationToken);
+        if (updated is null) return null;
+        var detail = await store.GetCardDetailAsync(projectPath, updated.Id, cancellationToken);
+        return detail is null ? null : await ToDetailAsync(detail with { Card = updated }, cancellationToken);
     }
 
     public async Task<bool> DeleteCardAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default)
@@ -216,6 +237,9 @@ public sealed partial class BoardService(
 
     // ------------------------------------------------------------------ rails
 
+    public Task<BoardDescriptionHistoryResponse?> GetDescriptionHistoryAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default) =>
+        store.GetDescriptionHistoryAsync(projectPath, idOrKey, cancellationToken);
+
     public async Task<BoardCommentDto?> AddCommentAsync(string projectPath, string idOrKey, BoardAuthor author, string body, CancellationToken cancellationToken = default)
     {
         var text = body?.Trim() ?? string.Empty;
@@ -232,25 +256,14 @@ public sealed partial class BoardService(
 
     public async Task<BoardAttachmentDto?> AddAttachmentAsync(string projectPath, string idOrKey, AddBoardAttachmentRequest request, CancellationToken cancellationToken = default)
     {
-        var dataUrl = request.DataUrl?.Trim() ?? string.Empty;
-        var match = ImageDataUrlPattern().Match(dataUrl);
-        if (!match.Success)
-            throw new BoardValidationException("Attachments must be PNG, JPEG, GIF or WebP images.");
-        if (dataUrl.Length > MaxAttachmentDataUrlLength)
-            throw new BoardValidationException("That image is too large to attach (max ~300 KB).");
-
-        var detail = await store.GetCardDetailAsync(projectPath, idOrKey, cancellationToken);
-        if (detail is null)
+        var content = DecodeAttachmentDataUrl(request.DataUrl);
+        var card = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
+        if (card is null)
             return null;
-        if (detail.Attachments.Count >= MaxAttachmentsPerCard)
-            throw new BoardValidationException($"A card can hold at most {MaxAttachmentsPerCard} attachments.");
-
-        var name = (request.Name ?? "image").Trim();
-        if (name.Length == 0) name = "image";
-        if (name.Length > 120) name = name[..120];
-        var mimeType = "image/" + match.Groups["type"].Value.ToLowerInvariant();
-        var bytes = request.Bytes is > 0 ? request.Bytes.Value : dataUrl.Length;
-        var attachment = await store.AddAttachmentAsync(projectPath, detail.Card.Id, name, mimeType, bytes, dataUrl, cancellationToken);
+        var name = NormalizeAttachmentName(request.Name);
+        var mimeType = DetectAttachmentMimeType(name, content);
+        // The browser's declared byte count and MIME type are never authoritative.
+        var attachment = await store.AddAttachmentContentAsync(projectPath, card.Id, name, mimeType, content, cancellationToken);
         return attachment is null ? null : ToDto(attachment);
     }
 
@@ -384,12 +397,14 @@ public sealed partial class BoardService(
             comments,
             detail.Commits.Select(ToDto).ToList(),
             detail.Sessions.Select(s => ToDto(s, live)).ToList(),
-            detail.Attachments.Select(ToDto).ToList());
+            detail.Attachments.Select(ToDto).ToList(),
+            detail.Card.DescriptionRevision, detail.Card.BaseLlmOptions, detail.Card.DescriptionChanged);
     }
 
     internal static BoardCardSummaryResponse ToSummary(BoardCardRecord card, string? activeSessionId, string? activeTabId) => new(
         card.Id, card.Key, card.ColumnId, card.Position, card.Title, card.Description, card.Assignee, card.Priority,
-        card.Points, card.Tags.ToList(), card.Blocked, card.CommentCount, activeSessionId, activeTabId, card.CreatedUtc, card.UpdatedUtc);
+        card.Points, card.Tags.ToList(), card.Blocked, card.CommentCount, activeSessionId, activeTabId, card.CreatedUtc, card.UpdatedUtc,
+        card.DescriptionRevision, card.BaseLlmOptions);
 
     internal static BoardColumnResponse ToDto(BoardColumnRecord column) =>
         new(column.Id, column.Name, column.WipLimit, column.Position, column.Color);
@@ -510,6 +525,14 @@ public sealed partial class BoardService(
         if (!BoardSelection.TryParse(text, out var selection))
             throw new BoardValidationException("Assignee must be an LLM picker key like base:claude or env:7:codex.");
         return selection!.Key;
+    }
+
+    private static BaseLlmOptions? NormalizeBaseOptions(string? selection, BaseLlmOptions? options)
+    {
+        if (options is null || !BoardSelection.TryParse(selection, out var parsed) || parsed is null || parsed.IsEnvironment)
+            return null;
+        try { return BaseLlmOptionsBuilder.Normalize(parsed.Llm, options); }
+        catch (ArgumentException ex) { throw new BoardValidationException(ex.Message); }
     }
 
     internal static IReadOnlyList<string>? NormalizeTags(List<string>? tags)

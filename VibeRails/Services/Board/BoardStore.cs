@@ -6,7 +6,7 @@ using VibeRails.DTOs;
 
 namespace VibeRails.Services.Board;
 
-public interface IBoardStore
+public partial interface IBoardStore
 {
     Task<bool> EnsureDefaultColumnsAsync(string projectPath, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<BoardColumnRecord>> GetColumnsAsync(string projectPath, CancellationToken cancellationToken = default);
@@ -33,7 +33,6 @@ public interface IBoardStore
     Task<BoardAuthor?> FindSessionAuthorAsync(string sessionId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<BoardSessionRecord>> GetSessionsForProjectAsync(string projectPath, CancellationToken cancellationToken = default);
 
-    Task<BoardAttachmentRecord?> AddAttachmentAsync(string projectPath, string cardId, string name, string mimeType, long bytes, string dataUrl, CancellationToken cancellationToken = default);
     Task<bool> DeleteAttachmentAsync(string projectPath, string cardId, string attachmentId, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<BoardCommitRecord>> GetCommitsAsync(string projectPath, string cardId, CancellationToken cancellationToken = default);
@@ -51,7 +50,7 @@ public interface IBoardStore
 /// Every row is scoped by <c>ProjectPath</c> (the git root the board belongs to). Callers never
 /// pass a project path they got from a request — see <see cref="IBoardProjectResolver"/>.
 /// </summary>
-public sealed class BoardStore : IBoardStore
+public sealed partial class BoardStore : IBoardStore
 {
     private readonly string _connectionString;
 
@@ -312,10 +311,15 @@ public sealed class BoardStore : IBoardStore
             insert.Parameters.AddWithValue("$updated", ToDb(now));
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
+        await WriteBaseLlmOptionsAsync(connection, transaction, id, card.BaseLlmOptions, cancellationToken);
+        var revision = await AppendDescriptionRevisionAsync(connection, transaction,
+            new BoardCardRecord(id, project, number, column.Id, position, card.Title, card.Description,
+                card.Assignee, card.Priority, card.Points, card.Tags, card.Blocked, 0, now, now, 0),
+            card.Description, "created", card.Author ?? BoardAuthor.User(), null, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         return new BoardCardRecord(id, project, number, column.Id, position, card.Title, card.Description,
-            card.Assignee, card.Priority, card.Points, card.Tags, card.Blocked, 0, now, now);
+            card.Assignee, card.Priority, card.Points, card.Tags, card.Blocked, 0, now, now, revision, card.BaseLlmOptions);
     }
 
     public async Task<BoardCardRecord?> UpdateCardAsync(string projectPath, string cardId, BoardCardPatch patch, CancellationToken cancellationToken = default)
@@ -326,6 +330,10 @@ public sealed class BoardStore : IBoardStore
         var existing = await ReadCardAsync(connection, transaction, project, cardId, cancellationToken);
         if (existing is null)
             return null;
+
+        if (patch.Description is not null && patch.ExpectedDescriptionRevision is int expected
+            && expected != existing.DescriptionRevision)
+            throw new BoardConflictException("The card description changed while you were editing. Reload it before saving your changes.");
 
         var moving = !string.IsNullOrWhiteSpace(patch.ColumnId)
             && !string.Equals(patch.ColumnId.Trim(), existing.ColumnId, StringComparison.Ordinal);
@@ -352,7 +360,9 @@ public sealed class BoardStore : IBoardStore
             Points = patch.ClearPoints ? null : (patch.Points ?? existing.Points),
             Tags = patch.Tags ?? existing.Tags,
             Blocked = patch.Blocked ?? existing.Blocked,
-            UpdatedUtc = DateTime.UtcNow
+            UpdatedUtc = DateTime.UtcNow,
+            BaseLlmOptions = patch.ClearBaseLlmOptions ? null : patch.BaseLlmOptions ?? existing.BaseLlmOptions,
+            DescriptionChanged = patch.Description is not null && patch.Description != existing.Description
         };
 
         await using (var command = connection.CreateCommand())
@@ -377,13 +387,23 @@ public sealed class BoardStore : IBoardStore
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
+        if (patch.ClearBaseLlmOptions || patch.BaseLlmOptions is not null)
+            await WriteBaseLlmOptionsAsync(connection, transaction, updated.Id, updated.BaseLlmOptions, cancellationToken);
+        if (updated.DescriptionChanged)
+        {
+            var author = patch.Author ?? BoardAuthor.User();
+            var revision = await AppendDescriptionRevisionAsync(connection, transaction, existing, updated.Description,
+                author.Kind, author, patch.ActiveSessionIds, cancellationToken);
+            updated = updated with { DescriptionRevision = revision };
+        }
+
         if (moving)
         {
             await RenumberColumnAsync(connection, transaction, existing.ColumnId, cancellationToken);
             await RenumberColumnAsync(connection, transaction, columnId, cancellationToken);
         }
         await transaction.CommitAsync(cancellationToken);
-        return await ReadCardAsync(connection, null, project, updated.Id, cancellationToken);
+        return updated;
     }
 
     public async Task<bool> DeleteCardAsync(string projectPath, string cardId, CancellationToken cancellationToken = default)
@@ -641,37 +661,6 @@ public sealed class BoardStore : IBoardStore
 
     // ------------------------------------------------------------------ attachments
 
-    public async Task<BoardAttachmentRecord?> AddAttachmentAsync(string projectPath, string cardId, string name, string mimeType, long bytes, string dataUrl, CancellationToken cancellationToken = default)
-    {
-        var project = NormalizeProjectPath(projectPath);
-        await using var connection = await OpenAsync(cancellationToken);
-        await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
-        var card = await ReadCardAsync(connection, transaction, project, cardId, cancellationToken);
-        if (card is null)
-            return null;
-
-        var record = new BoardAttachmentRecord(NewId("att"), card.Id, name, mimeType, bytes, dataUrl, DateTime.UtcNow);
-        await using (var insert = connection.CreateCommand())
-        {
-            insert.Transaction = transaction;
-            insert.CommandText = """
-                INSERT INTO BoardAttachments (Id, CardId, Name, MimeType, Bytes, DataUrl, CreatedUTC)
-                VALUES ($id, $card, $name, $mime, $bytes, $data, $created);
-                """;
-            insert.Parameters.AddWithValue("$id", record.Id);
-            insert.Parameters.AddWithValue("$card", record.CardId);
-            insert.Parameters.AddWithValue("$name", record.Name);
-            insert.Parameters.AddWithValue("$mime", record.MimeType);
-            insert.Parameters.AddWithValue("$bytes", record.Bytes);
-            insert.Parameters.AddWithValue("$data", record.DataUrl);
-            insert.Parameters.AddWithValue("$created", ToDb(record.CreatedUtc));
-            await insert.ExecuteNonQueryAsync(cancellationToken);
-        }
-        await TouchCardAsync(connection, transaction, card.Id, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-        return record;
-    }
-
     public async Task<bool> DeleteAttachmentAsync(string projectPath, string cardId, string attachmentId, CancellationToken cancellationToken = default)
     {
         var project = NormalizeProjectPath(projectPath);
@@ -684,13 +673,17 @@ public sealed class BoardStore : IBoardStore
         await using (var delete = connection.CreateCommand())
         {
             delete.Transaction = transaction;
-            delete.CommandText = "DELETE FROM BoardAttachments WHERE Id = $id AND CardId = $card;";
+            delete.CommandText = "UPDATE BoardAttachments SET DeletedUTC = $deleted WHERE Id = $id AND CardId = $card AND DeletedUTC IS NULL;";
+            delete.Parameters.AddWithValue("$deleted", ToDb(DateTime.UtcNow));
             delete.Parameters.AddWithValue("$id", attachmentId);
             delete.Parameters.AddWithValue("$card", card.Id);
             removed = await delete.ExecuteNonQueryAsync(cancellationToken) > 0;
         }
         if (removed)
+        {
+            await AppendDescriptionRevisionAsync(connection, transaction, card, card.Description, "attachments", BoardAuthor.User(), null, cancellationToken);
             await TouchCardAsync(connection, transaction, card.Id, cancellationToken);
+        }
         await transaction.CommitAsync(cancellationToken);
         return removed;
     }
@@ -799,7 +792,9 @@ public sealed class BoardStore : IBoardStore
     private const string CardSelectSql = """
         SELECT c.Id, c.ProjectPath, c.Number, c.ColumnId, c.Position, c.Title, c.Description, c.Assignee, c.Priority,
                c.Points, c.Tags, c.Blocked, c.CreatedUTC, c.UpdatedUTC,
-               (SELECT COUNT(*) FROM BoardComments m WHERE m.CardId = c.Id) AS CommentCount
+               (SELECT COUNT(*) FROM BoardComments m WHERE m.CardId = c.Id) AS CommentCount,
+               COALESCE((SELECT MAX(r.Revision) FROM BoardDescriptionRevisions r WHERE r.CardId = c.Id), 0),
+               (SELECT o.OptionsJson FROM BoardCardOptions o WHERE o.CardId = c.Id)
         FROM BoardCards c
         """;
 
@@ -874,7 +869,9 @@ public sealed class BoardStore : IBoardStore
         reader.GetInt32(11) != 0,
         reader.GetInt32(14),
         ParseDb(reader.GetString(12)),
-        ParseDb(reader.GetString(13)));
+        ParseDb(reader.GetString(13)),
+        reader.GetInt32(15),
+        reader.IsDBNull(16) ? null : JsonSerializer.Deserialize(reader.GetString(16), AppJsonSerializerContext.Default.BaseLlmOptions));
 
     private static async Task<IReadOnlyList<BoardCommentRecord>> ReadCommentsAsync(SqliteConnection connection, string cardId, CancellationToken cancellationToken)
     {
@@ -927,7 +924,7 @@ public sealed class BoardStore : IBoardStore
     private static async Task<IReadOnlyList<BoardAttachmentRecord>> ReadAttachmentsAsync(SqliteConnection connection, string cardId, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, CardId, Name, MimeType, Bytes, DataUrl, CreatedUTC FROM BoardAttachments WHERE CardId = $card ORDER BY CreatedUTC, Id;";
+        command.CommandText = "SELECT Id, CardId, Name, MimeType, Bytes, DataUrl, CreatedUTC FROM BoardAttachments WHERE CardId = $card AND DeletedUTC IS NULL ORDER BY CreatedUTC, Id;";
         command.Parameters.AddWithValue("$card", cardId);
         var attachments = new List<BoardAttachmentRecord>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -1075,8 +1072,12 @@ public sealed class BoardStore : IBoardStore
         command.Transaction = transaction;
         command.CommandText = SchemaSql;
         command.ExecuteNonQuery();
+        EnsureAttachmentSchema(connection, transaction);
+        EnsureDescriptionSchema(connection, transaction);
         transaction.Commit();
     }
+
+    static partial void EnsureAttachmentSchema(SqliteConnection connection, SqliteTransaction transaction);
 
     private static string NewId(string prefix) => prefix + "_" + Guid.NewGuid().ToString("N")[..12];
 

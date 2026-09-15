@@ -1,6 +1,7 @@
 import { VibeTerminal } from './vibe-terminal.js';
 import { translateOpenCodeMouseWheel } from './terminal-opencode-wheel.js';
 import { createGrokPastePayload, isNativeGrokCli } from './terminal-grok-paste.js';
+import { TerminalAutoReconnect, isAutoReconnectEnabled } from './terminal-reconnect.js';
 
 const RESIZE_PREFIX = '__resize__:';
 const ESCAPE_KEY_COMMAND = '__cmd__:escape';
@@ -83,6 +84,21 @@ export class TerminalTab {
         this._connectFocusTimeouts = [];
         this.statusController = null;
 
+        // Auto-reconnect (terminal-reconnect.js). `_autoConnectDeferred` marks a
+        // tab the manager wanted to reconnect in the background but could not pin
+        // to a trustworthy geometry yet — activation connects it instead. The
+        // first-replay promise lets the manager stagger background reconnects
+        // behind the active tab's snapshot.
+        this._autoConnectDeferred = false;
+        this._firstReplayPromise = null;
+        this._firstReplayResolve = null;
+        this.autoReconnect = new TerminalAutoReconnect({
+            attempt: () => { void this.manager?.autoReconnectTab?.(this); },
+            canAttempt: () => this.state.hasActiveSession === true
+                && !this.hasOpenSocket()
+                && this.state.status !== 'connecting'
+        });
+
         // Discovery-nudge counter: length of the current run of plain typed
         // characters since the last Enter. Purely passive — we only count, never
         // buffer the text or send anything to the PTY. Reset on Enter/Ctrl+C.
@@ -92,6 +108,56 @@ export class TerminalTab {
 
     hasOpenSocket() {
         return this.socket && this.socket.readyState === WebSocket.OPEN;
+    }
+
+    markAutoConnectDeferred() {
+        this._autoConnectDeferred = true;
+    }
+
+    clearAutoConnectDeferred() {
+        this._autoConnectDeferred = false;
+    }
+
+    // Activation connects a tab only when auto-reconnect still owes it a
+    // connection: the background pass skipped it (nothing visible to pin a grid
+    // from) or a retry is counting down. Plain tab selection stays UI-only
+    // otherwise (2026-03-07: selection must not imply reconnect).
+    wantsConnectOnActivate() {
+        if (!this.state.hasActiveSession || this.hasOpenSocket()) {
+            return false;
+        }
+        if (!isAutoReconnectEnabled()) {
+            return false;
+        }
+        return this._autoConnectDeferred || this.autoReconnect?.isPending() === true;
+    }
+
+    // Resolves once the current socket has flushed its first chunk (the server
+    // snapshot), when it closes, or after timeoutMs — whichever comes first.
+    // Never rejects. Resolved immediately when no connect is in flight.
+    whenFirstReplay(timeoutMs = 0) {
+        const pending = this._firstReplayPromise;
+        if (!pending) {
+            return Promise.resolve();
+        }
+        if (!(timeoutMs > 0)) {
+            return pending;
+        }
+        return new Promise((resolve) => {
+            const timeoutId = window.setTimeout(resolve, timeoutMs);
+            pending.then(() => {
+                clearTimeout(timeoutId);
+                resolve();
+            });
+        });
+    }
+
+    _resolveFirstReplay() {
+        const resolve = this._firstReplayResolve;
+        this._firstReplayResolve = null;
+        if (resolve) {
+            resolve();
+        }
     }
 
     // Inject a block of text into the live PTY exactly as a clipboard paste would
@@ -313,9 +379,10 @@ export class TerminalTab {
         }
     }
 
-    writeData(data) {
-        this.vibeTerminal?.write(data);
-    }
+    // Deliberately no writeData()/local-echo helper. The only bytes that reach the terminal are
+    // the ones the server sent (flushPendingChunks) — anything this client invents would be an
+    // artifact the server's emulator does not have, drawn into a frame a TUI positions absolutely.
+    // Status belongs in the tab chrome. See the socket.onclose comment.
 
     openSearch() {
         if (!this.vibeTerminal) {
@@ -413,6 +480,10 @@ export class TerminalTab {
         this.clearConnectFocusTimeouts();
         this.clearPendingResizeToPty();
         this._initialConnectActive = false;
+        // Deliberate close: drop any armed retry (the attempt budget is kept) and
+        // release anyone waiting on this socket's first replay.
+        this.autoReconnect?.cancel();
+        this._resolveFirstReplay();
         this.vibeTerminal?.restoreSuppressedCursor?.();
         if (!this.socket) {
             return;
@@ -650,12 +721,13 @@ export class TerminalTab {
         this.vibeTerminal?.stopResizeHandling();
     }
 
-    async connect() {
+    async connect({ pinnedGeometry = null } = {}) {
         if (!this.state.hasActiveSession) {
             return false;
         }
 
         this.disconnectSocketOnly();
+        this._autoConnectDeferred = false;
         // Reuse the live xterm DOM across reconnects. Recreating it remounts
         // xterm's DOM children, and the synchronous fit() below can then
         // measure cell metrics before the browser paints them. Reusing the DOM
@@ -674,8 +746,24 @@ export class TerminalTab {
         // Fit now that the container is visible (showTerminal was called before
         // connect in activateTab). This gives us the real cols/rows to send to
         // the backend so it can resize the PTY *before* sending the replay.
+        //
+        // A background (display:none) tab cannot be measured, so the manager pins
+        // it to the visible tab's PTY geometry instead: xterm is resized to those
+        // dims so the snapshot paints at the right width, and the same dims go in
+        // the URL so the server's pre-resize is a same-size no-op. A hidden tab
+        // must never fall through to fit(): fit() refuses a 0x0 host, xterm would
+        // keep its 120x40 constructor default, and the URL hint would resize the
+        // PTY to a size nothing on screen has.
+        const pinned = pinnedGeometry && !this.isActive
+            && Number.isFinite(pinnedGeometry.cols) && Number.isFinite(pinnedGeometry.rows)
+            ? pinnedGeometry
+            : null;
         if (this.vibeTerminal) {
-            this.vibeTerminal.fit({ force: true, notify: false });
+            if (pinned) {
+                this.vibeTerminal.resize(pinned.cols, pinned.rows);
+            } else {
+                this.vibeTerminal.fit({ force: true, notify: false });
+            }
         }
         const preConnectCols = this.vibeTerminal?.cols;
         const preConnectRows = this.vibeTerminal?.rows;
@@ -709,6 +797,9 @@ export class TerminalTab {
         const urlCols = preConnectDimsLookSane ? preConnectCols : 0;
         const urlRows = preConnectDimsLookSane ? preConnectRows : 0;
         const wsUrl = this.manager.getWebSocketUrl(this.state.id, urlCols, urlRows);
+        this._firstReplayPromise = new Promise((resolve) => {
+            this._firstReplayResolve = resolve;
+        });
         const socket = new WebSocket(wsUrl, tabToken ? [tabToken] : []);
         socket.binaryType = 'arraybuffer';
         this.socket = socket;
@@ -724,6 +815,7 @@ export class TerminalTab {
 
                 opened = true;
                 this.state.status = 'connected';
+                this.autoReconnect?.handleOpen();
                 this.statusController?.onSocketOpen();
                 this.manager.updateUi();
 
@@ -782,6 +874,10 @@ export class TerminalTab {
                     data = merged;
                 }
                 pendingChunks = [];
+                this._resolveFirstReplay();
+                // Data arrived, so the root→child→PTY path is real: this is what clears the
+                // auto-reconnect budget, not the socket merely opening (see terminal-reconnect.js).
+                this.autoReconnect?.handleHealthy();
                 if (!replayFocusDone) {
                     replayBytesBeforeFirstRender += data.byteLength;
                 }
@@ -856,14 +952,29 @@ export class TerminalTab {
                 this.lastResizeSignature = null;
 
                 this.state.status = this.state.hasActiveSession ? 'disconnected' : 'not-started';
+                this._resolveFirstReplay();
                 if (this.state.hasActiveSession) {
                     this.statusController?.onSocketClose();
+                    // Unexpected close: retry with backoff — but never after a
+                    // takeover (two viewers auto-reconnecting would steal the
+                    // session from each other forever) and never for a session
+                    // the server says is gone. Our own closes null `this.socket`
+                    // first and never reach this handler.
+                    this.autoReconnect?.handleClose({
+                        code: event.code,
+                        reason: event.reason,
+                        hasActiveSession: true
+                    });
                 }
-                if (this.terminal && this.state.hasActiveSession) {
-                    const reason = event.reason || 'Terminal disconnected';
-                    const color = reason.includes('taken over') ? '33' : '90';
-                    this.writeData(`\r\n\x1b[${color}m[${reason}]\x1b[0m\r\n`);
-                }
+                // NOTHING is written into the terminal here, deliberately. This used to print
+                // "[reason] (reconnecting in 2s)" into the buffer. A TUI owns the whole screen
+                // and draws with absolute cursor positioning, so injecting two newlines and SGR
+                // colour mid-frame scrolls the viewport, clobbers the colour state the app was
+                // part-way through setting, and leaves an artifact that exists only on this
+                // client — the server's emulator never saw it, so the reconnect snapshot paints
+                // straight over it and the two disagree until the next full repaint. Disconnect
+                // and retry state belong in the tab chrome (state.status + statusController),
+                // never in the byte stream the CLI believes it owns.
 
                 this.manager.updateUi();
                 if (!opened) {
@@ -894,6 +1005,8 @@ export class TerminalTab {
             this.state.status = 'connecting';
             this.manager.updateUi();
             this.disconnect({ disposeTerminal: true, preserveStatus: true });
+            // A fresh session starts with a fresh retry budget.
+            this.autoReconnect?.reset();
             if (body.resumeSessionId) {
                 this.statusController?.markResumedSession();
             } else if (this._launchHasInitialPrompt(body)) {

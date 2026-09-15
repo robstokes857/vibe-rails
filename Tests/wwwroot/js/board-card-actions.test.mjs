@@ -125,6 +125,89 @@ test('Start work waits for the current edits to save before launching', async ()
     assert.equal(h.closed, true);
 });
 
+test('Start work records the full card label and stays on the board', async () => {
+    const h = harness();
+    let metadata;
+    h.app.navigate = () => assert.fail('must not navigate');
+    h.app.terminalController = {
+        rememberTabLaunch: (tabId, value) => { assert.equal(tabId, 'tab-1'); metadata = value; },
+        adoptLaunchedTab: () => assert.fail('must not focus or adopt the launched tab')
+    };
+    await h.controller.startWork(h.editor, h.card);
+    assert.equal(metadata.label, 'VB-1 · Edited title');
+    assert.equal(metadata.title, 'VB-1 · Edited title');
+});
+
+test('description saves submit the revision seen by the editor', async () => {
+    const h = harness();
+    h.editor.dataset.descriptionRevision = '4';
+    await h.controller.saveCard(h.editor);
+    assert.equal(h.calls[0].body.expectedDescriptionRevision, 4);
+});
+
+test('saving a description never sends terminal input to a running agent', async () => {
+    const h = harness();
+    h.app.apiCall = async (url, method, body) => {
+        h.calls.push({ url, method, body });
+        return { ...h.card, descriptionChanged: true, descriptionRevision: 2, sessions: [{ id: 'live', active: true }] };
+    };
+    await h.controller.saveCard(h.editor);
+    // One PUT and nothing else: there is no notify surface to reach even with a live session.
+    assert.equal(h.calls.length, 1);
+    assert.equal(h.calls[0].method, 'PUT');
+});
+
+test('a queued upload that fails after create says the card was saved', async () => {
+    const h = harness();
+    h.editor.dataset.cardId = '';
+    h.editor._boardCard = { pendingAttachments: [{ name: 'notes.zip', dataUrl: 'data:application/zip;base64,AAAA' }] };
+    h.controller.renderAttachmentsPanel = () => {};
+    h.app.apiCall = async (url, method, body) => {
+        h.calls.push({ url, method, body });
+        if (url.endsWith('/attachments')) throw new Error('Disk full');
+        return { id: 'card_new', key: 'VB-2' };
+    };
+
+    await h.controller.saveCard(h.editor);
+
+    assert.equal(h.editor.dataset.cardId, 'card_new', 'retrying Save must not create a second card');
+    assert.deepEqual(h.toasts.at(-1), ['Board', 'VB-2 was saved, but a file did not upload. Disk full', 'warning']);
+});
+
+test('a partial upload failure refreshes the revision token so the advertised retry can succeed', async () => {
+    const h = harness();
+    h.editor.dataset.cardId = 'card-1';
+    h.editor.dataset.descriptionRevision = '1';
+    h.editor._boardCard = {
+        id: 'card-1',
+        pendingAttachments: [
+            { name: 'a.zip', dataUrl: 'data:application/zip;base64,AAAA' },
+            { name: 'b.zip', dataUrl: 'data:application/zip;base64,AAAA' }
+        ]
+    };
+    h.controller.renderAttachmentsPanel = () => {};
+    let uploads = 0;
+    h.app.apiCall = async (url, method, body) => {
+        h.calls.push({ url, method, body });
+        if (url.endsWith('/attachments')) {
+            uploads += 1;
+            if (uploads === 1) return { id: 'att_1', name: 'a.zip' };
+            throw new Error('Disk full');
+        }
+        // Each upload that landed appended a description revision server-side.
+        return { id: 'card-1', key: 'VB-1', descriptionRevision: method === 'GET' ? 2 : 1 };
+    };
+
+    await h.controller.saveCard(h.editor);
+
+    // Without re-reading it, Save again would PUT expectedDescriptionRevision 1 against a card
+    // already at 2 and fail with a spurious "changed while you were editing" conflict — stranding
+    // the remaining files behind an error the user cannot clear without reopening the card.
+    assert.equal(h.editor.dataset.descriptionRevision, '2');
+    assert.equal(h.controller.readCardForm(h.editor).expectedDescriptionRevision, 2);
+    assert.deepEqual(h.toasts.at(-1), ['Board', 'VB-1 was saved, but a file did not upload. Disk full', 'warning']);
+});
+
 test('Start work keeps edits open and skips launch if saving fails', async () => {
     const h = harness();
     const apiCall = h.app.apiCall;

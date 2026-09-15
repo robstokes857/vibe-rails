@@ -75,12 +75,20 @@ board loaded. There is no "Reset sample" any more; a new project starts with fiv
 Automation Workers) with an unassign button beside it; `assigneeInfo()` turns a key into a label
 (from the picker catalog) and a CLI-brand avatar (`getCliBrand`), and the toolbar's assignee
 filter lists the keys present on the board. **Start work** (`startWork`) saves the form, POSTs
-`/cards/{id}/launch`, then does exactly what the Python "run interactive" flow does:
-`terminalController.rememberTabLaunch(tabId, { taskKey: 'board-card:<cardId>', … })` →
-`adoptLaunchedTab(tabId)` → fallback `navigate('terminal-focus', { preferredTabId })`. The
+`/cards/{id}/launch`, remembers the tab with `taskKey: 'board-card:<cardId>'`, and refreshes
+the board without adopting/focusing the terminal or navigating away. Creating or saving a
+card never launches an agent. Sessions is the explicit way to open its terminal. The
 server composes the LLM's first message from the card and prepends it to the environment's
 Initial Message (`Services/Board/BoardPromptComposer.cs`), then links the session to the card.
 Task-key namespace: `board-card:<cardId>` (keep it distinct from `python-script*:`).
+
+Card headings, launch session names, and remembered terminal labels use `VB-n · Card title`.
+Base assignees show `board-launch-options.js` controls for model, effort, and start mode;
+saved environments keep their own configuration. The pinned model catalog is shared with
+Environments through `llm-model-catalog.js`. Choices persist on the card and reach the backend
+as typed `baseLlmOptions`, never browser-built CLI argument strings. Changing/unassigning the
+provider clears those controls. Picker mount is asynchronous: initialize controls using the
+saved assignee, and explicitly clear them after the picker's silent unassign operation.
 
 Start work becomes a disabled **Agent running** button when the card has an active linked
 session. The save response is checked again before launching, and the backend refuses a launch
@@ -141,12 +149,48 @@ all depend on this; putting any of them behind rAF silently breaks them in the w
 to re-measure later. (Same failure class as the cold-start `setTimeout` throttling documented in
 TERMINAL.md.)
 
-Images go through `BoardApi.addCardAttachmentAsync`, which returns a **URL**. The client
-downscales, the server stores the `data:` URL text (image types only, size-capped) and hands it
-back inside the full card; a served-URL route would be a body-only change in `board-api.js`
-because the controller only ever sees a URL. In the text
-an image is `![name](attachment:<id>)` and the id is resolved against the card's attachment
-records — a URL written into the text is never used as a `src`.
+Attachments accept any file, preserving its original bytes. There is **no size limit**, per file
+or per card — only the count is bounded (12 current files), because that is a list someone has to
+scan rather than a number of bytes. The upload route lifts Kestrel's body limit in middleware; a
+`RequestSizeLimitAttribute` on a minimal-API endpoint does nothing, because only the MVC filter
+pipeline honours it, so the documented cap used to be a no-op sitting under Kestrel's 30 MB
+default. New-card uploads queue in the editor until Save; existing-card uploads persist
+immediately. Small verified raster images keep
+their inline `data:` previews for `![name](attachment:<id>)`; other content loads with both
+credentials through `/attachments/{id}/content` using `app.apiCall(..., {responseType:'blob'})`.
+No credential is placed in a URL, and no uploaded file is served from static assets.
+
+`board-attachments.js` owns a nested, disposable viewer: TXT **and Markdown** both reach the
+DOM through textContent, so Markdown previews as its own source and no Markdown parser or
+HTML sanitizer is vendored; PDF.js paints canvas pages without document scripting,
+annotations, XFA, or eval. Other file types only download as octet-stream. Uploaded
+filenames and metadata remain untrusted. Close/unload aborts requests, terminates PDF work,
+and revokes Blob URLs.
+
+`assets/board` holds exactly one dependency — PDF.js, as `pdf.min.js` plus
+`pdf.worker.min.js`. Its CMaps, standard fonts and Wasm decoders are deliberately not
+vendored (194 files and 6.4 MB against 1.7 MB for the renderer), so CJK text and PDFs that
+omit the base-14 fonts fall back to system faces. Read `assets/board/README.md` before
+upgrading or before adding a frontend library here: rendered Markdown costs a parser plus a
+sanitizer to re-earn what textContent gives for free.
+
+Description history stays in an expandable rail section, with immutable text snapshots and
+separate session launch/edit/read events. The editor sends its `expectedDescriptionRevision`;
+stale saves fail without discarding the typed text. Attachment changes also advance the context
+revision, so refresh that token only when the server description still matches the editor's
+original saved description. History lists each revision's files by id and name only — never their
+bytes — so opening the rail costs one small response however many screenshots the card carries,
+and the per-file buttons fetch content through the same authenticated route as the card. A read
+event can come from a session this card does not own (reads never link), so it renders with the
+short session id plus the note naming the card that agent is actually working.
+
+**Saving a description never sends terminal input.** There is no notify endpoint: it was removed
+2026-09-15 because the sequence it sent — two Escapes, the text, Enter — opens Claude Code's rewind
+menu on an idle prompt rather than clearing it, so the message and its Enter landed in that menu and
+could restore a checkpoint. Nothing else on the board types into a terminal either: the Codex
+plan-mode handshake that did was removed the same day, so every launch option is a command-line
+argument decided before the CLI starts. Do not reintroduce a "tell the running agent" action, or
+any other write into a live TUI.
 
 ### Commits, sessions, and the diff viewer
 
@@ -268,6 +312,22 @@ paused via the `pause_token_saver` / `resume_token_saver` MCP tools.
 The terminal dropdown shows two groups:
 - **Base CLIs**: Claude, Codex, GLM 5.2, GLM 5.3, DeepSeek V4 Pro, Kimi K3, Grok 4.6, OpenCode, Copilot, Antigravity (each shown as "(default)") — resolved to its executable server-side (Antigravity → `agy`)
 - **Custom Environments**: User-created environments — spawned directly via the tab start endpoint
+
+## Terminal auto-reconnect
+
+Navigation destroys the `TerminalManager` (every xterm + WebSocket). On re-entry the restored
+manager reconnects the active tab at once and then `scheduleBackgroundReconnect()` brings the
+other restored tabs back one at a time, each hidden xterm pinned to the visible tab's PTY geometry
+(`terminal-reconnect.js` → `resolveHiddenConnectGeometry`): a `display:none` host cannot be
+fitted, and shipping xterm's 120×40 constructor default in the WS URL would resize the PTY to a
+size nothing on screen has. An unexpected socket close retries with backoff (2 s doubling to 30 s,
+five attempts) through `TerminalAutoReconnect`; a "Session taken over" close is never retried
+(two viewers would steal the session from each other forever), and plain tab clicks still pass
+`connectIfNeeded: false` — selection is not a reconnect. Kill switch: Terminal settings →
+Rendering → Auto-reconnect (`viberails_terminal_autoReconnect` = `off`). Tests:
+`Tests/wwwroot/js/terminal-reconnect.test.mjs`, `UITests/tests/terminal-reconnect.spec.js`
+(the fake CLI echoes its command line, so assert replay fidelity as text equality, never as a
+marker count).
 
 ## Automation workflow editor
 

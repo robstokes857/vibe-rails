@@ -1,16 +1,57 @@
 # API authentication coverage
 
-Audit date: 2026-09-14
+Audit date: 2026-09-15
 
-Rechecked after removing the seven VibeRails Demon lifecycle routes: all 203 mapped
-surfaces match the current working tree (191 under `/api/v1`), with no missing entries.
+Full route/authentication reconciliation (2026-09-15): **205 mapped surfaces**, including
+**193 under `/api/v1`**, nine protected non-`/api` API surfaces, and three bootstrap/page/probe
+mappings. The current inventory matches the working tree in both directions, including
+uncommitted and untracked source; no endpoint needs adding or removing. Corrected the stale
+totals in the terminology section below. The only session-authentication exceptions remain
+exact `GET /health`, global `OPTIONS`, and exact `GET /auth/bootstrap` with its single-use,
+expiring code. Every other endpoint requires a valid session credential; `/api/v1`, MCP,
+WebSocket upgrades, and enabled proxy operations additionally require the tab credential.
+Session-only page/static loads and conditional proxy responses remain documented in section 2.
+Both mandatory listener searches found only the main Kestrel host, the non-serving port probe,
+and test-only hosts; the cross-runtime search had no matches. No insecure endpoint or additional
+production listener was found, so no `SECURITY_ERROR.md` was created. Targeted authentication
+and route tests passed: **103 passed, 0 failed, 0 skipped**. See Audit observations for scope.
+
+Board usability amendment (2026-09-14, revised 2026-09-15): two active-root board mappings were
+added: description history and attachment content downloads. A third, explicit agent notification,
+was added and then **removed** on 2026-09-15 — see the Kanban board section for why. The inventory
+is **205 mapped surfaces**, **193 under `/api/v1`**, including **25 board routes**. Both surviving
+additions require both credentials and server-derived project scope.
+The combined board/terminal/CLI-authorization/authentication regression suite passed **437 tests**. Route
+enumeration and both mandatory listener searches were repeated: only the existing main
+Kestrel listener, non-serving port probe, and test-only hosts matched; the cross-runtime
+search had no matches. No listener or middleware bypass was added. This amendment covers
+the new board capabilities; the preceding full authentication reconciliation follows.
+
+Board MCP authorization amendment (2026-09-14): Board **Start work** explicitly sets the
+default-false `AuthorizeBoardTools` launch field, including when a saved environment is
+selected. The authenticated terminal-start API forwards this explicit choice; card text,
+titles and environment names cannot enable it. `BoardMcpAuthorization` enumerates exactly
+nine Board tools, with no server wildcard, unrelated MCP tools, dynamic Python tools, global
+approval-policy change or sandbox bypass. Codex, Claude, Copilot and Grok receive per-tool
+argv grants; OpenCode and its variants receive per-tool `OPENCODE_PERMISSION` entries.
+The latter retains unrelated inherited rules and conservatively skips matching inherited
+environment deny rules. Native CLI configuration precedence and managed policies still
+apply. Antigravity receives only the explicit authorization prompt because a narrow native
+grant is unverified. Grants live only in the launched process, never in shared settings or
+MCP registration commands. No route, listener, credential exception or middleware change
+was introduced by this amendment. Route enumeration and both listener searches were repeated
+with the same results recorded above. Installed Codex 0.154.0 accepted the per-tool config
+in an isolated offline `mcp get` check; live provider approval behavior was not exercised.
+
+Prior full check after removing the seven VibeRails Demon lifecycle routes: all 203 mapped
+surfaces matched that working tree (191 under `/api/v1`), with no missing entries.
 Both mandatory listener searches and the targeted authentication suite were repeated:
 **101 passed,
 0 failed, 0 skipped**. The three permitted authentication exceptions remain unchanged;
 no insecure endpoint was found and no `SECURITY_ERROR.md` was needed.
 
-Full production route/authentication reconciliation completed: 2026-09-14, covering
-the current working tree, including uncommitted and untracked source. All 203 mapped
+Full production route/authentication reconciliation completed before this board amendment
+on 2026-09-14, including uncommitted and untracked source. All 203 mapped
 surfaces match this inventory in both directions: 191 `/api/v1` method/path surfaces,
 nine protected non-`/api` API surfaces, and three bootstrap/page/probe mappings. No
 endpoint needs adding or removing. The existing inventory includes the board and
@@ -171,7 +212,7 @@ discovery alone is insufficient if the same feature change is allowed to expand 
 set. The production listener set is now frozen above so a new match starts as a finding, not as
 an expectation.
 
-### Repository-wide listener result — 2026-09-12
+### Repository-wide listener result — 2026-09-15
 
 - Approved serving implementation: the main Kestrel host in `VibeRails/Program.cs`.
 - Rejected and removed before merge: `GrokLoopbackBridge`'s `HttpListener`.
@@ -181,8 +222,7 @@ an expectation.
   deleted along with the VibeRails Demon feature. It was never an HTTP listener, so its removal
   does not change the frozen listener set.
 - No other production .NET accept loop and no JavaScript/TypeScript, Python, or PowerShell
-  server/listener implementation was found. Monaco vendor bundles matched the JS search
-  as minified editor source only.
+  server/listener implementation was found. The cross-runtime search had no matches.
 
 ## Terminology used in this report
 
@@ -211,8 +251,8 @@ spoofer's own local exchange rows.
 Authentication is enforced primarily by
 [`CookieAuthMiddleware`](VibeRails/Middleware/CookieAuthMiddleware.cs). The LLM proxy
 routes additionally use
-[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 203 mapped route
-surfaces in this inventory: 191 `/api/v1` method/path mappings, nine non-`/api` protected
+[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 205 mapped route
+surfaces in this inventory: 193 `/api/v1` method/path mappings, nine non-`/api` protected
 API surfaces, and three bootstrap/page/probe routes. Static-file middleware and the
 global `OPTIONS` behavior are noted separately because they are not finite mapped-route
 lists.
@@ -584,7 +624,7 @@ transcript text out of messages and exception text; do not rely on the Logs view
 hidden. `Tests/Routes/InternalToolsRoutesTests.cs` pins the two-credential requirement, the
 whitelist rejection of path-like sources, and the absence of mutating verbs.
 
-### Kanban board (23; active root backend only)
+### Kanban board (25; active root backend only)
 
 All mapped by `BoardRoutes.Map` under `if (isActiveRootBackend)`; every path contains `/api/`,
 so both credentials are enforced by the middleware with no route-level registration. The
@@ -601,11 +641,43 @@ cannot read or write another project's board through this surface.
   Initial Message. Same capability class as `POST /api/v1/terminal/tabs/{tabId}/start`, which
   is why the tab credential matters here. The environment is resolved by id and must be
   visible in the current project; there is no fallback by name.
+- `GET /api/v1/board/cards/{card}/history` — immutable description/attachment revisions and
+  session associations. Existing cards import a current baseline; no past session text is invented.
+  Revisions list their files by id and name only — never the bytes — so the response size does not
+  grow with revisions × attachments. Read-only: no transaction, no write lock.
+
+**Terminal input reachable from the board.** The description-notification route
+(`POST /api/v1/board/cards/{card}/revisions/{revision:int}/notify`) was **removed 2026-09-15**:
+it forwarded two semantic Escapes, fixed text and Enter to an agent that was already working, and
+on an idle Claude Code prompt a double Escape opens the rewind menu rather than clearing a draft —
+so the text and its Enter were delivered into that menu, where they could restore a checkpoint. It
+had never been exercised against a live CLI.
+
+**No board route sends terminal input**, and as of 2026-09-15 no route anywhere types into a
+running TUI. The Codex plan-mode handshake that did — reached from this same launch route, and
+briefly documented here as a narrower exception — was removed alongside the notification route:
+it sent `/plan` + Enter and then the card text as a bracketed paste + Enter, deciding when to type
+by screen-scraping the TUI for readiness. Every launch option is now a command-line argument fixed
+before the process starts; session options are set at spawn time or not at all. Any new "message
+the agent" surface is a fresh capability decision and must be validated against each provider's
+real TUI before it ships.
 - `POST /api/v1/board/cards/{card}/comments`,
   `POST /api/v1/board/cards/{card}/attachments`,
-  `DELETE /api/v1/board/cards/{card}/attachments/{attachmentId}` — comments and inline image attachments (data URLs,
-  image types only, size-capped; returned only inside the card body, so no unauthenticated
-  image path was added).
+  `DELETE /api/v1/board/cards/{card}/attachments/{attachmentId}` — comments and file attachments.
+  Upload bytes are base64-decoded and counted by the server; supplied MIME/byte counts are
+  untrusted. There is deliberately **no upload size limit** — only 12 current files per card.
+  Kestrel's body limit is lifted for this one path in middleware, which is the only place it can
+  be lifted: a `RequestSizeLimitAttribute` on a minimal-API endpoint is inert (only the MVC filter
+  pipeline reads it), so the previously documented 29 MB cap never applied and Kestrel's 30 MB
+  default silently governed instead. This is a local single-user surface behind both credentials;
+  the bound on what it can store is the user's own disk. File names are display labels, never
+  filesystem paths. Bytes remain immutable in SQLite, outside static files.
+- `GET /api/v1/board/cards/{card}/attachments/{attachmentId}/content` — authenticated bytes
+  scoped to that card/project, including removed files only when retained by its history.
+  Responses force octet-stream attachment disposition, nosniff, no-store and sandbox CSP.
+  Preview fetches carry both credentials; URLs contain no secrets. Markdown and TXT both reach
+  the DOM only through textContent — no Markdown renderer or HTML sanitizer is shipped — and
+  PDFs paint canvases without active document layers.
 - `GET /api/v1/board/cards/{card}/commits`, `POST /api/v1/board/cards/{card}/commits`,
   `DELETE /api/v1/board/cards/{card}/commits/{sha}`,
   `GET /api/v1/board/cards/{card}/commits/{sha}/diff` —
@@ -615,10 +687,14 @@ cannot read or write another project's board through this surface.
   `PUT /api/v1/board/cards/{card}/sessions/{sessionId}`,
   `DELETE /api/v1/board/cards/{card}/sessions/{sessionId}` — the card ↔ terminal-session links.
 
-MCP note: the same board operations (minus any delete) are exposed as `*_board_*` tools on
+MCP note: reads through these tools never link the calling session to the card (a session links to
+exactly one card, and linking on read let a browsing session claim a card it was not working); a
+cross-card read is recorded against the card that was read, annotated with the reader's own card
+key. Writes still link. The same board operations (minus any delete or terminal input) are exposed as `*_board_*` tools on
 `/mcp` (both credentials) and on the stdio `vb mcp` host. The stdio host reads and writes
 `state.db` directly rather than calling this API, so a CLI in any terminal can work a card
-without a VibeRails tab; the host is a child process of the CLI over pipes and remains
+without a VibeRails tab; `read_board_attachment` adds bounded UTF-8 Markdown/TXT reads using
+card/project-scoped IDs, not paths. The host is a child process of the CLI over pipes and remains
 unauthenticated by design. `Tests/Routes/BoardRoutesTests.cs` pins the two-credential
 requirement and the launch composition; `Tests/Services/Mcp/BoardToolTests.cs` pins the tools.
 
@@ -662,6 +738,26 @@ requirement and the launch composition; `Tests/Services/Mcp/BoardToolTests.cs` p
 - `WS /api/v1/terminal/tabs/{tabId}/ws`
 
 ## Audit observations
+
+- Full validation on 2026-09-15: reconciled **205 mapped route surfaces**, including
+  **193 `/api/v1` mappings**, against the working tree, including uncommitted and untracked
+  source. No missing or removed method/path pairs. Resolved the signing-key route group,
+  HTTP-relay/proxy/control constants, and inherited event-WebSocket mapping; checked the
+  production registration aggregator and searched for other routing and middleware branches.
+  Inspected middleware ordering (authentication precedes static files and endpoint handlers),
+  the exact three-case bypass predicate, session/tab validation, bootstrap expiry and single-use
+  consumption, redirect normalization, and the shared proxy/control authentication gate.
+  The board attachment-size middleware runs after authentication and does not bypass it.
+  Both mandatory repository-wide listener searches found only the approved main Kestrel host,
+  non-serving loopback port probe, and test-only Kestrel hosts. The cross-runtime search had
+  no matches. No additional endpoint lacking a valid session credential was found.
+  Ran `dotnet test Tests/Tests.csproj -p:OutputPath=bin/ApiSecAudit/ --verbosity quiet` with a
+  `FullyQualifiedName` filter covering `CookieAuthMiddlewareTests`, `AuthServiceTests`,
+  `AuthRoutesTests`, all five LLM proxy route test classes, `TokenSaverPauseRoutesTests`,
+  `McpServerHttpTests`, `InternalToolsRoutesTests`, `SigningKeyRoutesTests`, and
+  `BoardRoutesTests`: **103 passed, 0 failed, 0 skipped**. The build reported one existing
+  xUnit2029 assertion-style warning in `BoardStoreTests.cs`. This was source reconciliation
+  plus targeted tests, not a live request sweep of every production endpoint.
 
 - Full validation on 2026-09-14: reconciled all **203 mapped route surfaces** in the current
   working tree, including uncommitted and untracked source: **191 `/api/v1` mappings**, nine

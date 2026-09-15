@@ -1,3 +1,5 @@
+import { AUTO_RECONNECT_STORAGE_KEY } from './terminal-reconnect.js';
+
 const RENDERER_LABELS = {
     webgl: 'WebGL',
     canvas: 'Canvas',
@@ -57,6 +59,13 @@ export function renderTerminalSettingsPanelHtml() {
                                 <select id="terminal-settings-resize-debounce">
                                     <option value="default">Standard (140&nbsp;ms)</option>
                                     <option value="extended">Extended (2&nbsp;s, experimental)</option>
+                                </select>
+                            </div>
+                            <div class="vb-terminal-settings-row">
+                                <label title="Reconnect every tab after you navigate away and back (the active tab first, the rest one at a time), and retry with backoff when a tab's connection drops. A session taken over by another viewer always waits for you. Off restores the explicit Connect button behaviour.">Auto-reconnect</label>
+                                <select id="terminal-settings-auto-reconnect">
+                                    <option value="on">On (all tabs)</option>
+                                    <option value="off">Off (Connect button)</option>
                                 </select>
                             </div>
                         </div>
@@ -119,6 +128,7 @@ export class TerminalSettings {
         this._rendererSelect = null;
         this._rendererStatusEl = null;
         this._resizeDebounceSelect = null;
+        this._autoReconnectSelect = null;
         this._computerNameInput = null;
         this._themeListEl = null;
         this._sectionToggles = [];
@@ -154,6 +164,13 @@ export class TerminalSettings {
         catch { return 'default'; }
     }
 
+    // Consumed by terminal-reconnect.js (isAutoReconnectEnabled) via the shared
+    // AUTO_RECONNECT_STORAGE_KEY. Anything but 'off' means on.
+    loadAutoReconnect() {
+        try { return localStorage.getItem(AUTO_RECONNECT_STORAGE_KEY) === 'off' ? 'off' : 'on'; }
+        catch { return 'on'; }
+    }
+
     loadComputerName() {
         const value = this._manager.app?.appSettings?.computerName;
         return typeof value === 'string' ? value : '';
@@ -169,6 +186,7 @@ export class TerminalSettings {
         this._rendererSelect    = this._container.querySelector('#terminal-settings-renderer');
         this._rendererStatusEl  = this._container.querySelector('#terminal-settings-renderer-active');
         this._resizeDebounceSelect = this._container.querySelector('#terminal-settings-resize-debounce');
+        this._autoReconnectSelect = this._container.querySelector('#terminal-settings-auto-reconnect');
         this._computerNameInput = this._container.querySelector('#terminal-settings-computer-name');
         this._themeListEl       = this._container.querySelector('#vb-terminal-settings-theme-list');
         this._sectionToggles    = Array.from(this._container.querySelectorAll('[data-settings-toggle]'));
@@ -191,6 +209,7 @@ export class TerminalSettings {
         });
         this._rendererSelect?.addEventListener('change', (e) => this.applyRendererPreference(e.target.value));
         this._resizeDebounceSelect?.addEventListener('change', (e) => this.applyResizeDebounce(e.target.value));
+        this._autoReconnectSelect?.addEventListener('change', (e) => this.applyAutoReconnect(e.target.value));
         this._computerNameInput?.addEventListener('change', (e) => {
             void this.saveComputerName(e.target.value);
         });
@@ -244,6 +263,7 @@ export class TerminalSettings {
 
         if (this._rendererSelect) this._rendererSelect.value = this.loadRenderer();
         if (this._resizeDebounceSelect) this._resizeDebounceSelect.value = this.loadResizeDebounce();
+        if (this._autoReconnectSelect) this._autoReconnectSelect.value = this.loadAutoReconnect();
         if (this._computerNameInput) {
             this._computerNameInput.value = this.loadComputerName();
             // Show the live machine name (the blank-field default) as the placeholder.
@@ -350,6 +370,13 @@ export class TerminalSettings {
         // takes effect on the next resize event — no tab restart needed.
         const normalized = value === 'extended' ? 'extended' : 'default';
         try { localStorage.setItem('viberails_terminal_resizeDebounce', normalized); } catch {}
+    }
+
+    applyAutoReconnect(value) {
+        // Read at decision time (navigation restore, socket close, activation), so
+        // it takes effect on the next disconnect — no tab restart needed.
+        const normalized = value === 'off' ? 'off' : 'on';
+        try { localStorage.setItem(AUTO_RECONNECT_STORAGE_KEY, normalized); } catch {}
     }
 
     async saveComputerName(value) {

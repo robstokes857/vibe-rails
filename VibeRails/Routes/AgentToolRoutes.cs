@@ -78,7 +78,17 @@ public static class AgentToolRoutes
 
             try
             {
-                var response = await tools.SendInputAsync(tabId, request, cancellationToken);
+                // Narrowed the way the sibling route above already narrows its body: this one bound
+                // TerminalInputRequest straight from JSON, so `escapeCount: 2` was reachable by any
+                // authenticated caller. Two Escapes on an idle Claude Code prompt open the rewind
+                // menu rather than clearing a draft, so the text and its Enter land inside that menu
+                // and can restore a checkpoint — the exact sequence the board's description
+                // notification was deleted for on 2026-09-15. Pinned to 0 until some caller has
+                // verified an escape sequence against each provider's live TUI.
+                var response = await tools.SendInputAsync(
+                    tabId,
+                    new TerminalInputRequest(request.Text, request.Submit, request.ExpectedSessionId, EscapeCount: 0, request.Paste),
+                    cancellationToken);
                 return response.Success
                     ? Results.Ok(response)
                     : Results.BadRequest(new ErrorResponse(response.Message));

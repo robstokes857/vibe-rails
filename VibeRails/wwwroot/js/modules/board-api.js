@@ -116,6 +116,15 @@ async function deleteCardAttachmentAsync(cardId, attachmentId) {
     return { ok: true };
 }
 
+async function getCardAttachmentContentAsync(cardId, attachmentId, extra = {}) {
+    return call(`/cards/${enc(cardId)}/attachments/${enc(attachmentId)}/content`, 'GET', null,
+        { ...extra, responseType: 'blob' });
+}
+
+async function getCardDescriptionHistoryAsync(cardId, extra = {}) {
+    return call(`/cards/${enc(cardId)}/history`, 'GET', null, extra);
+}
+
 // ---------------------------------------------- commits
 
 async function getCardCommitsAsync(cardId) {
@@ -184,6 +193,8 @@ export const BoardApi = {
     addBoardCommentAsync,
     addCardAttachmentAsync,
     deleteCardAttachmentAsync,
+    getCardAttachmentContentAsync,
+    getCardDescriptionHistoryAsync,
     getCardCommitsAsync,
     addCardCommitAsync,
     removeCardCommitAsync,

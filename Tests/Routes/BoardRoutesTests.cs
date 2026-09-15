@@ -99,6 +99,52 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, both.StatusCode);
     }
 
+    [Theory]
+    [InlineData("GET", "/api/v1/board/cards/VB-1/history")]
+    [InlineData("GET", "/api/v1/board/cards/VB-1/attachments/missing/content")]
+    [InlineData("POST", "/api/v1/board/cards/VB-1/attachments")]
+    public async Task NewBoardSurfaces_RequireSessionAndTab(string method, string path)
+    {
+        using var none = await SendAsync(new HttpMethod(method), path);
+        Assert.Equal(HttpStatusCode.Unauthorized, none.StatusCode);
+        using var sessionOnly = await SendAsync(new HttpMethod(method), path, session: "test-session");
+        Assert.Equal(HttpStatusCode.Unauthorized, sessionOnly.StatusCode);
+        using var tabOnly = await SendAsync(new HttpMethod(method), path, tab: "test-tab");
+        Assert.Equal(HttpStatusCode.Unauthorized, tabOnly.StatusCode);
+    }
+
+    [Fact]
+    public async Task FileContent_IsAuthenticatedDownload_AndDescriptionHistoryRoundTrips()
+    {
+        using var created = await PostJsonAsync("/api/v1/board/cards", new { title = "Files", description = "Original scope" });
+        created.EnsureSuccessStatusCode();
+        using var upload = await PostJsonAsync("/api/v1/board/cards/VB-1/attachments", new
+        {
+            name = "CLI_OPTIONS.MD", mimeType = "text/html", bytes = 1,
+            dataUrl = "data:text/html;base64," + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("# Options\n<script>alert(1)</script>"))
+        });
+        upload.EnsureSuccessStatusCode();
+        using var attachmentDocument = await ReadJsonAsync(upload);
+        var attachment = attachmentDocument.RootElement;
+        Assert.Equal("text/markdown", attachment.GetProperty("mimeType").GetString());
+        var id = attachment.GetProperty("id").GetString();
+        using var download = await SendAsync(HttpMethod.Get, $"/api/v1/board/cards/VB-1/attachments/{id}/content", "test-session", "test-tab");
+        download.EnsureSuccessStatusCode();
+        Assert.Equal("application/octet-stream", download.Content.Headers.ContentType?.MediaType);
+        Assert.Equal("attachment", download.Content.Headers.ContentDisposition?.DispositionType);
+        Assert.Equal("nosniff", download.Headers.GetValues("X-Content-Type-Options").Single());
+        Assert.Contains("sandbox", download.Headers.GetValues("Content-Security-Policy").Single());
+        Assert.Contains("<script>", await download.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        using var history = await GetJsonAsync("/api/v1/board/cards/VB-1/history");
+        var revision = history.RootElement.GetProperty("currentRevision").GetInt32();
+        using var updated = await SendJsonAsync(HttpMethod.Put, "/api/v1/board/cards/VB-1", new { description = "Updated scope", expectedDescriptionRevision = revision });
+        updated.EnsureSuccessStatusCode();
+        using var stale = await SendJsonAsync(HttpMethod.Put, "/api/v1/board/cards/VB-1", new { description = "Stale scope", expectedDescriptionRevision = revision });
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        using var finalHistory = await GetJsonAsync("/api/v1/board/cards/VB-1/history");
+        Assert.Equal("Updated scope", finalHistory.RootElement.GetProperty("revisions")[0].GetProperty("description").GetString());
+    }
+
     [Fact]
     public async Task Columns_Cards_Comments_Commits_RoundTrip_ThroughTheJsonContext()
     {
@@ -215,6 +261,7 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         Assert.Equal("my-env", started.EnvironmentName);
         Assert.Equal(_project, started.WorkingDirectory);
         Assert.Equal("VB-1 · Ship the board", started.Title);
+        Assert.True(started.AuthorizeBoardTools);
         Assert.StartsWith("You are working on kanban card VB-1", started.InitialPrompt);
         Assert.Contains("Title: Ship the board\nAll of it.", started.InitialPrompt);
         // The environment's template is appended unresolved — resolution happens once, in the tab child.

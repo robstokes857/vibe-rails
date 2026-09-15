@@ -49,6 +49,18 @@ public class KeyTranslatorTests
         Assert.Equal("\r", result);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void TranslateKey_ShiftTab_PreservesBacktab(bool modifiedEnterAsLineFeed)
+    {
+        var shifted = new ConsoleKeyInfo('\t', ConsoleKey.Tab, shift: true, alt: false, control: false);
+        var plain = new ConsoleKeyInfo('\t', ConsoleKey.Tab, shift: false, alt: false, control: false);
+
+        Assert.Equal("\u001b[Z", KeyTranslator.TranslateKey(shifted, modifiedEnterAsLineFeed));
+        Assert.Equal("\t", KeyTranslator.TranslateKey(plain, modifiedEnterAsLineFeed));
+    }
+
     private static ConsoleKeyInfo EnterKey(bool shift, bool control = false) =>
         new(
             keyChar: '\r',

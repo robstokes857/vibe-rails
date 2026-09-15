@@ -103,18 +103,20 @@ public sealed class BoardServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Attachments_MustBeImages_AndAreCapped()
+    public async Task Attachments_AllowFiles_AndKeepSafeRasterPreviewCompatibility()
     {
         await _service.GetColumnsAsync(_project, Ct);
         var created = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "A"), Ct);
-        await Assert.ThrowsAsync<BoardValidationException>(() =>
-            _service.AddAttachmentAsync(_project, created.Id, new AddBoardAttachmentRequest("x", "data:text/html;base64,AAAA"), Ct));
-        var ok = await _service.AddAttachmentAsync(_project, created.Id, new AddBoardAttachmentRequest("shot.png", "data:image/png;base64,AAAA", 4, "image/png"), Ct);
-        Assert.Equal("data:image/png;base64,AAAA", ok!.Url);
+        var html = await _service.AddAttachmentAsync(_project, created.Id, new AddBoardAttachmentRequest("x.html", "data:text/html;base64,AAAA"), Ct);
+        Assert.Equal("application/octet-stream", html!.MimeType);
+        Assert.Empty(html.Url);
+        const string image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=";
+        var ok = await _service.AddAttachmentAsync(_project, created.Id, new AddBoardAttachmentRequest("shot.png", image, 4, "image/png"), Ct);
+        Assert.Equal(image, ok!.Url);
         Assert.Equal("image/png", ok.MimeType);
 
         var detail = await _service.GetCardAsync(_project, created.Id, Ct);
-        Assert.Single(detail!.Attachments);
+        Assert.Equal(2, detail!.Attachments.Count);
         Assert.True(await _service.DeleteAttachmentAsync(_project, created.Id, ok.Id, Ct));
     }
 

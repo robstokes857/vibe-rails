@@ -16,7 +16,7 @@ public interface ITerminalSessionService
     /// runs a shell command — and two concurrent start requests must not both run them when only
     /// one of them can go on to own a terminal. Null when there is no Initial Message.
     /// </param>
-    Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false, Func<Task<string?>>? resolveInitialPrompt = null, string summary = "");
+    Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false, Func<Task<string?>>? resolveInitialPrompt = null, string summary = "", bool authorizeBoardTools = false);
     Task HandleWebSocketAsync(WebSocket webSocket, CancellationToken cancellationToken, int? cols = null, int? rows = null);
     Task<TerminalInputResponse> SendInputAsync(TerminalInputRequest request, CancellationToken cancellationToken = default);
     Task StopSessionAsync();

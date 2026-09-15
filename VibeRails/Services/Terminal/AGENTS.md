@@ -26,6 +26,69 @@ Remote relay server (other repo):
 
 ## Core Architecture
 
+### Board launch options and input sequences (2026-09-14)
+
+`StartTerminalRequest.BaseLlmOptions` carries typed model/effort/start-mode choices only for
+base CLIs. `BaseLlmOptionsBuilder` validates these at both board save/launch and the terminal
+child, producing discrete argv without changing physical CLI config. Saved environments
+keep their own arguments. Every startup mode the UI offers is a native CLI flag
+(`--permission-mode`, `--mode`, `--agent`), applied when the process is spawned. **Codex has no
+startup mode**: `/plan` is a TUI command with no launch flag, and the handshake that used to type
+it — wait for the composer, send `/plan`, paste the task, press Enter — was removed 2026-09-15.
+Session options are set at spawn time or not at all; nothing types into a running TUI. A mode
+stored on an older Codex card is dropped by `BaseLlmOptionsBuilder`, not rejected, so those cards
+still launch.
+
+Start work also sets `StartTerminalRequest.AuthorizeBoardTools` for base and saved-environment
+launches. It defaults to false everywhere else and travels through TerminalRoutes,
+TerminalSessionService, TerminalRunner and CommandService. The launch prompt explicitly
+authorizes the Board workflow for every provider. `Commands/BoardMcpAuthorization.cs` fixes the
+grant list to nine Board tools, with no wildcard grant to the entire MCP server:
+`list_board_columns`, `list_board_cards`, `get_board_card`, `read_board_attachment`,
+`create_board_card`, `update_board_card`, `move_board_card`, `add_board_comment`, `link_board_commit`.
+
+| Provider | Session-only Board grants and evidence |
+|---|---|
+| Codex | `--config mcp_servers.viberails-mcp.tools.<tool>.approval_mode="approve"` per tool; [official MCP reference](https://developers.openai.com/codex/mcp/). |
+| Claude | One comma-separated `--allowedTools=mcp__viberails-mcp__<tool>,…`, then `--` before the positional prompt so it is not parsed as another grant; 2.1.271 help. |
+| Copilot | Repeated `--allow-tool=viberails-mcp(<tool>)`; 1.0.71 permissions help. |
+| Grok | Repeated `--allow=MCPTool(viberails-mcp__<tool>)`; 1.0.30 guide. |
+| OpenCode and GLM/DeepSeek/Kimi variants | `OPENCODE_PERMISSION` entries mapping exact `viberails-mcp_<tool>` names to `allow`; OpenCode 1.18.30. |
+| Antigravity | Prompt authorization only; no verified narrow native switch. |
+
+The OpenCode helper preserves unrelated inherited rules and proxy configuration, and
+conservatively skips grants covered by inherited `OPENCODE_PERMISSION` deny rules. Native
+configuration precedence still applies. Selected modes and managed provider
+policies can still restrict calls. This requested Board-specific launch exception leaves the
+Environments editor's YOLO-only policy intact: no new permission editor, global policy change,
+or physical CLI configuration write. Validation used help, documentation and regression tests;
+no live provider session or deployment was performed.
+
+**Nothing writes into the terminal screen except the server's own bytes.** This cuts both ways and
+both halves are hard rules: never *strip or rewrite* the PTY byte stream (fix rendering at the
+source), and never *inject* anything into it either — not a status line, not a disconnect notice,
+not a colour. A TUI owns the whole screen and draws with absolute cursor positioning, so a
+client-side write scrolls the viewport, clobbers the SGR state the app was part-way through
+setting, and creates an artifact the server's emulator does not have — which the next snapshot
+replay then paints over, leaving client and server disagreeing. `terminal-tab.js` used to print
+`[reason] (reconnecting in 2s)` on socket close; that was removed 2026-09-15 along with its
+`writeData()` helper, so the only client→screen write left is the server stream itself
+(`flushPendingChunks`) plus `vibe-terminal.js`'s documented shrink-resize `ED2`+`CUP`. Session and
+retry state belong in the tab chrome (`state.status`, `statusController`).
+
+`TerminalInputRequest` supports bounded `EscapeCount` (0–2), `Paste`, and `ExpectedSessionId`.
+Semantic Escape goes through `TerminalIoRouter.RouteEscapeKeyAsync`, preserving Windows Codex
+physical-key encoding. **`EscapeCount` has no caller today, and no reachable one**: the board's
+description notification was its only caller and was removed 2026-09-15 — two Escapes on an *idle*
+Claude Code prompt open the rewind menu instead of clearing a draft, so the pasted text and Enter
+landed in that menu and could restore a checkpoint. Note that removing the caller was not by itself
+enough: `POST /api/v1/agent-tools/terminal/{tabId}/input` bound `TerminalInputRequest` straight from
+JSON, so any authenticated caller could still send `escapeCount: 2` and reproduce the sequence. That
+route now pins `EscapeCount: 0`, the way its sibling `/api/v1/agent-tools/terminal/input` already
+narrowed its body. The knob, its validation and its tests stay for a future caller that has verified
+the sequence against a live CLI of each provider; the Escape routing itself is still used by the
+interactive key path.
+
 ```
 Terminal (PTY owner, single read loop)
   - TerminalEmulator (20k-line scrollback, drives grid replay/snapshot attach)
@@ -253,6 +316,12 @@ Notes:
 
 ### `TerminalIoRouter.cs`
 Single I/O funnel and hook point.
+
+Native `Console.ReadKey` input is translated by `Pty/KeyTranslator.cs`. As of
+2026-09-14, Shift-only Tab emits `ESC[Z` (backtab), matching xterm's physical
+Shift+Tab. Plain Tab remains `\t`; previously the native path discarded Shift.
+`KeyTranslatorTests` and real `ConPtyEscapeKeyTests` cover this before and after
+modified Enter/Escape.
 
 Responsibilities:
 - `RouteEscapeKeyAsync(...)` (2026-09-14): records logical ESC, then uses the

@@ -23,17 +23,20 @@
 
 import { escapeHtml } from './utils.js';
 
-// Sentinels park extracted code blocks while inline transforms run over the
-// rest, so nothing rewrites the inside of a code block. U+0000 cannot collide:
-// control characters are stripped from the input first.
+// Sentinels park every generated fragment until parsing is complete, so no
+// transform can rewrite generated attributes or code. U+0000 cannot collide:
+// control characters are stripped from the input first and tokens cannot cross it.
 const BLOCK_OPEN = '\u0000B';
 const BLOCK_CLOSE = '\u0000';
 
 const FENCE_RE = /```([a-zA-Z0-9_+#.-]*)[ \t]*\r?\n?([\s\S]*?)```/g;
 const INLINE_CODE_RE = /`([^`\n]+)`/g;
 const IMAGE_RE = /!\[([^\]\n]*)\]\(attachment:([A-Za-z0-9_-]+)\)/g;
-// Trailing punctuation is excluded so "see https://x.com/a." does not swallow the period.
-const URL_RE = /\bhttps?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)\]}]/g;
+// Parse inline constructs together: a URL/backtick inside an image caption is
+// caption text, and image syntax/URLs inside inline code are code. Trailing URL
+// punctuation is excluded so "see https://x.com/a." does not swallow the period.
+const INLINE_TOKEN_RE = /`([^`\n\u0000]+)`|!\[([^\]\n\u0000]*)\]\(attachment:([A-Za-z0-9_-]+)\)|\bhttps?:\/\/[^\s<>"'`\u0000]+[^\s<>"'`.,;:!?)\]}\u0000]/g;
+const RASTER_DATA_URL_RE = /^data:image\/(?:png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=\s]+$/i;
 
 /** Strips control characters that would corrupt the sentinels or the display. */
 function stripControlChars(value) {
@@ -69,30 +72,32 @@ export function renderCommentHtml(text, { attachments = [] } = {}) {
     // 1. Escape everything. Nothing below reintroduces markup from user input.
     let work = escapeHtml(source);
 
-    // 2. Park fenced code blocks so inline transforms cannot reach inside them.
-    const blocks = [];
-    work = work.replace(FENCE_RE, (_match, lang, body) => {
-        const index = blocks.push({ lang, body }) - 1;
+    // 2. Park generated markup. No returned fragment is parsed a second time.
+    const fragments = [];
+    const park = html => {
+        const index = fragments.push(html) - 1;
         return `${BLOCK_OPEN}${index}${BLOCK_CLOSE}`;
+    };
+    work = work.replace(FENCE_RE, (_match, lang, body) => park(renderCodeBlock({ lang, body })));
+
+    // 3. Only source text is tokenized; generated attributes never enter a regex.
+    work = work.replace(INLINE_TOKEN_RE, (match, code, alt, id) => {
+        if (code !== undefined) return park(`<code class="board-inline-code">${code}</code>`);
+        if (id !== undefined) {
+            const attachment = attachments.find(item => item.id === id);
+            // The backend supplies raster data URLs only. Files with authenticated
+            // content URLs (and large rasters) open through the separate file viewer.
+            if (typeof attachment?.url !== 'string' || !RASTER_DATA_URL_RE.test(attachment.url)) return match;
+            // alt was already escaped with the source; escaping again corrupts names.
+            return park(`<img class="board-image" src="${escapeHtml(attachment.url)}" alt="${alt}"`
+                + ` data-board-image="${escapeHtml(id)}" loading="lazy">`);
+        }
+        // Only a literal http(s) source token reaches this branch, already escaped.
+        return park(`<a href="${match}" target="_blank" rel="noopener noreferrer">${match}</a>`);
     });
 
-    // 3. Images, resolved against the attachment records (never against the text).
-    work = work.replace(IMAGE_RE, (match, alt, id) => {
-        const attachment = attachments.find(item => item.id === id);
-        if (!attachment?.url) return match; // Unknown id stays literal text.
-        return `<img class="board-image" src="${escapeHtml(attachment.url)}" alt="${escapeHtml(alt)}"`
-            + ` data-board-image="${escapeHtml(id)}" loading="lazy">`;
-    });
-
-    // 4. Inline code.
-    work = work.replace(INLINE_CODE_RE, (_match, code) => `<code class="board-inline-code">${code}</code>`);
-
-    // 5. Autolink http(s) only. The URL is already escaped; the scheme is fixed
-    //    by the pattern, so javascript: and data: cannot appear here.
-    work = work.replace(URL_RE, url => `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
-
-    // 6. Put the code blocks back.
-    work = work.replace(/\u0000B(\d+)\u0000/g, (_match, index) => renderCodeBlock(blocks[Number(index)]));
+    // 4. Reinsert once, after all transforms. Fragments never contain sentinels.
+    work = work.replace(/\u0000B(\d+)\u0000/g, (_match, index) => fragments[Number(index)]);
 
     return work;
 }

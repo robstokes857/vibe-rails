@@ -26,10 +26,11 @@ namespace Tests.Services.Terminal;
 // the shared collection serializes the two classes so one can't clear/restore the flag while the
 // other is mid-test (which would flake PrepareSession into the echo+sleep fake).
 [Collection("ProcessEnvIsolation")]
-public class CommandServiceTests : IDisposable
+public partial class CommandServiceTests : IDisposable
 {
     private readonly string? _originalFakeCliFlag;
     private readonly string? _originalOpenCodeConfig;
+    private readonly string? _originalOpenCodePermission;
     private readonly string? _originalGrokProxyUrl;
     private readonly string _originalEnvPath;
 
@@ -40,10 +41,12 @@ public class CommandServiceTests : IDisposable
         _originalFakeCliFlag = Environment.GetEnvironmentVariable("VIBERAILS_TEST_FAKE_CLI");
         _originalOpenCodeConfig = Environment.GetEnvironmentVariable(
             LlmProxyZaiConfig.ConfigContentVariable);
+        _originalOpenCodePermission = Environment.GetEnvironmentVariable(BoardMcpOpenCodeAuthorization.PermissionVariable);
         _originalGrokProxyUrl = Environment.GetEnvironmentVariable(
             LlmProxyGrokConfig.ChatProxyBaseUrlVariable);
         Environment.SetEnvironmentVariable("VIBERAILS_TEST_FAKE_CLI", null);
         Environment.SetEnvironmentVariable(LlmProxyZaiConfig.ConfigContentVariable, null);
+        Environment.SetEnvironmentVariable(BoardMcpOpenCodeAuthorization.PermissionVariable, null);
         Environment.SetEnvironmentVariable(LlmProxyGrokConfig.ChatProxyBaseUrlVariable, null);
 
         // The env-name launch tests resolve GetEnvironmentVariables -> ParserConfigs.GetEnvPath(),
@@ -61,6 +64,7 @@ public class CommandServiceTests : IDisposable
         Environment.SetEnvironmentVariable(
             LlmProxyZaiConfig.ConfigContentVariable,
             _originalOpenCodeConfig);
+        Environment.SetEnvironmentVariable(BoardMcpOpenCodeAuthorization.PermissionVariable, _originalOpenCodePermission);
         Environment.SetEnvironmentVariable(
             LlmProxyGrokConfig.ChatProxyBaseUrlVariable,
             _originalGrokProxyUrl);

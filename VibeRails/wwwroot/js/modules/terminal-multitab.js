@@ -9,6 +9,13 @@ import { TabStatusController } from './terminal-tab-status.js';
 import { TerminalSettings, renderTerminalSettingsPanelHtml } from './terminal-settings.js';
 import { TerminalMenu } from './terminal-menu.js';
 import { TerminalTab } from './terminal-tab.js';
+import {
+    isAutoReconnectEnabled,
+    resolveHiddenConnectGeometry,
+    BACKGROUND_RECONNECT_REPLAY_WAIT_MS,
+    BACKGROUND_RECONNECT_SETTLE_MS,
+    BACKGROUND_RECONNECT_GAP_MS
+} from './terminal-reconnect.js';
 import { TerminalMultiRun } from './terminal-multirun.js';
 import { TerminalEditorModal } from './terminal-editor-modal.js';
 import { TerminalToast } from './terminal-toast.js';
@@ -54,6 +61,10 @@ export function shouldCreateFreshTab(options, activeTab, tabCount, maxTabs) {
     if (options?.forceNewTab !== true) return false;
     const activeTabIsBlank = Boolean(activeTab && !activeTab.state?.hasActiveSession);
     return !(tabCount >= maxTabs && activeTabIsBlank);
+}
+
+function waitMs(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function shorten(text, max = 26) {
@@ -128,6 +139,10 @@ class TerminalManager {
         this._themeSwatches = [];
 
         this.settings = null;
+
+        // In-flight background reconnect pass (scheduleBackgroundReconnect); null
+        // when idle. Purely informational — the pass polices itself via _destroyed.
+        this._backgroundReconnectRun = null;
 
         // Session-scoped draft for the "Open in text editor" scratchpad. Lives on
         // the manager (not a tab) because it's a composing surface independent of
@@ -236,6 +251,10 @@ class TerminalManager {
                     this.applySelection(active, this.options.preferredSelection);
                 }
             }
+
+            // Navigation destroyed every socket; the line above reconnected only the
+            // active tab. Bring the rest back without a Connect click each.
+            this.scheduleBackgroundReconnect();
         }
 
         this.setupFocusLayoutHandling();
@@ -781,7 +800,14 @@ class TerminalManager {
         target.state.ui.panel.style.display = 'block';
         target.instance.setActive(true);
 
-        if (options.connectIfNeeded && target.state.hasActiveSession && !target.instance.hasOpenSocket()) {
+        // Explicit callers (initial restore, focus/launch reuse, the Connect button)
+        // pass connectIfNeeded. Plain tab selection does not — but a tab that
+        // auto-reconnect still owes a connection (the background pass skipped it,
+        // or a retry is counting down) connects now that it is visible and
+        // measurable. See TerminalTab.wantsConnectOnActivate.
+        const shouldConnect = target.state.hasActiveSession && !target.instance.hasOpenSocket()
+            && (options.connectIfNeeded === true || target.instance.wantsConnectOnActivate());
+        if (shouldConnect) {
             // Make the terminal container visible before connecting so fit() can
             // compute real pixel dimensions. Those dimensions are forwarded to the
             // backend via the WebSocket URL, which lets the server resize the PTY
@@ -1410,6 +1436,8 @@ class TerminalManager {
         tab.state.status = 'connecting';
         this.updateUi();
 
+        // An explicit Connect click restarts the auto-retry budget.
+        tab.instance.autoReconnect?.reset();
         const connected = await tab.instance.connect();
         if (!connected) {
             this.app.showError('Failed to reconnect terminal session.');
@@ -1417,6 +1445,108 @@ class TerminalManager {
         }
 
         this.updateUi();
+    }
+
+    // After navigation the restored manager reconnects only the active tab (in
+    // initialize → activateTab). Every other restored tab with a live session is
+    // reconnected here: behind the active tab's snapshot, one at a time, each
+    // xterm pinned to the visible tab's PTY geometry so the replay paints at the
+    // width the PTY really has (see terminal-reconnect.js). A tab the pass cannot
+    // pin stays marked deferred and connects on activation instead. Kill switch:
+    // localStorage viberails_terminal_autoReconnect = 'off'.
+    scheduleBackgroundReconnect() {
+        if (this._destroyed || !isAutoReconnectEnabled()) {
+            return;
+        }
+
+        const candidates = this._collectBackgroundReconnectCandidates();
+        if (candidates.length === 0) {
+            return;
+        }
+        candidates.forEach((tab) => tab.instance.markAutoConnectDeferred());
+
+        const active = this.getActiveTab();
+        const activeSettled = active && active.state.hasActiveSession
+            && (active.instance.hasOpenSocket() || active.state.status === 'connecting')
+            ? active.instance.whenFirstReplay(BACKGROUND_RECONNECT_REPLAY_WAIT_MS)
+            : Promise.resolve();
+
+        this._backgroundReconnectRun = activeSettled
+            .then(() => waitMs(BACKGROUND_RECONNECT_SETTLE_MS))
+            .then(() => this._reconnectBackgroundTabs(candidates))
+            .catch(() => { /* best effort — anything left deferred connects on activation */ })
+            .finally(() => { this._backgroundReconnectRun = null; });
+    }
+
+    _collectBackgroundReconnectCandidates() {
+        return this.tabOrder
+            .filter((id) => id !== this.activeTabId)
+            .map((id) => this.tabs.get(id))
+            .filter((tab) => tab?.state?.hasActiveSession === true
+                && !tab.instance.hasOpenSocket()
+                && tab.state.status !== 'connecting');
+    }
+
+    async _reconnectBackgroundTabs(candidates) {
+        for (const tab of candidates) {
+            if (this._destroyed) {
+                return;
+            }
+            if (this.tabs.get(tab.state.id) !== tab) {
+                continue;
+            }
+            if (!tab.state.hasActiveSession || tab.instance.hasOpenSocket() || tab.state.status === 'connecting') {
+                tab.instance.clearAutoConnectDeferred();
+                continue;
+            }
+            if (this.activeTabId === tab.state.id) {
+                // Became the active tab meanwhile; activateTab owns its connect.
+                continue;
+            }
+
+            const geometry = resolveHiddenConnectGeometry(this.getActiveTab()?.instance);
+            if (!geometry) {
+                // Nothing visible to copy a trustworthy grid from — leave it deferred.
+                continue;
+            }
+
+            const opened = await tab.instance.connect({ pinnedGeometry: geometry });
+            if (this._destroyed) {
+                return;
+            }
+            if (opened) {
+                await tab.instance.whenFirstReplay(BACKGROUND_RECONNECT_REPLAY_WAIT_MS);
+            }
+            await waitMs(BACKGROUND_RECONNECT_GAP_MS);
+        }
+    }
+
+    // Retry callback for TerminalAutoReconnect (terminal-tab.js). The active tab
+    // reconnects through the normal visible path; a background tab is pinned to
+    // the visible geometry exactly like the post-navigation pass.
+    async autoReconnectTab(instance) {
+        if (this._destroyed || !instance) {
+            return false;
+        }
+        const tab = this.tabs.get(instance.state?.id);
+        if (!tab || tab.instance !== instance) {
+            return false;
+        }
+        if (!tab.state.hasActiveSession || tab.instance.hasOpenSocket()) {
+            return false;
+        }
+
+        if (this.activeTabId === tab.state.id) {
+            this.showTerminal();
+            return await tab.instance.connect();
+        }
+
+        const geometry = resolveHiddenConnectGeometry(this.getActiveTab()?.instance);
+        if (!geometry) {
+            tab.instance.markAutoConnectDeferred();
+            return false;
+        }
+        return await tab.instance.connect({ pinnedGeometry: geometry });
     }
 
     getSelectionMeta(selection) {

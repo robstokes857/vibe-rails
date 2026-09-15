@@ -51,6 +51,7 @@ public static class KeyTranslator
             ConsoleKey.F10 => "\x1B[21~",
             ConsoleKey.F11 => "\x1B[23~",
             ConsoleKey.F12 => "\x1B[24~",
+            ConsoleKey.Tab when key.Modifiers == ConsoleModifiers.Shift => "\x1B[Z",
             ConsoleKey.Tab => "\t",
             ConsoleKey.Enter => "\r",
             ConsoleKey.Backspace => "\x7F",
