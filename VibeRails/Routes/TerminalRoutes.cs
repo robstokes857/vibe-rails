@@ -51,6 +51,18 @@ public static class TerminalRoutes
                 return Results.BadRequest(new ErrorResponse($"Unknown CLI type: {request.Cli}"));
             }
 
+            BaseLlmOptions? baseOptions;
+            try
+            {
+                if (!string.IsNullOrEmpty(request.EnvironmentName) && request.BaseLlmOptions is not null)
+                    return Results.BadRequest(new ErrorResponse("Base LLM options cannot override a saved environment."));
+                baseOptions = BaseLlmOptionsBuilder.Normalize(llm, request.BaseLlmOptions);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new ErrorResponse(ex.Message));
+            }
+
             // Prefer an explicit working directory from the request (e.g. sandbox path);
             // otherwise fall back to the git root (project PK), then the launch directory.
             var workDir = request.WorkingDirectory;
@@ -60,7 +72,7 @@ public static class TerminalRoutes
                 workDir = launchDirectory;
 
             // Get custom args if environment specified
-            string[]? extraArgs = null;
+            string[]? extraArgs = BaseLlmOptionsBuilder.BuildArguments(llm, baseOptions);
             string? environmentPrompt = null;
             int? environmentId = null;
             if (!string.IsNullOrEmpty(request.EnvironmentName))
@@ -112,7 +124,8 @@ public static class TerminalRoutes
             // Start the terminal session with the LLM CLI
             try
             {
-                var success = await terminalService.StartSessionAsync(llm, workDir, request.EnvironmentName, extraArgs, request.Title, request.MakeRemote, resolveInitialPrompt, summary);
+                var success = await terminalService.StartSessionAsync(llm, workDir, request.EnvironmentName, extraArgs, request.Title, request.MakeRemote, resolveInitialPrompt, summary,
+                    authorizeBoardTools: request.AuthorizeBoardTools);
 
                 if (!success)
                 {

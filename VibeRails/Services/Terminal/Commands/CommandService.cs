@@ -40,7 +40,7 @@ public class CommandService : ICommandService
     private readonly ILlmProxySettingsService _llmProxySettings;
     private readonly ILlmProxySessionState _llmProxySessionState;
     private readonly IFileService _fileService;
-    private const string VibeRailsMcpServerName = "viberails-mcp";
+    private const string VibeRailsMcpServerName = BoardMcpAuthorization.ServerName;
 
     /// <summary>
     /// Ceiling on the assembled launch command on Windows. CreateProcess rejects a command line
@@ -85,7 +85,7 @@ public class CommandService : ICommandService
 
     public async Task<PreparedTerminalSession> PrepareSessionAsync(
         LLM llm, string? envName, string[]? extraArgs, string? initialPrompt = null, string summary = "",
-        string? sessionId = null)
+        string? sessionId = null, bool authorizeBoardTools = false)
     {
         if (Environment.GetEnvironmentVariable("VIBERAILS_TEST_FAKE_CLI") == "1")
         {
@@ -148,9 +148,17 @@ public class CommandService : ICommandService
             // Codex filters its stdio server environment. Forward identity by NAME
             // at launch time so parallel sessions never persist each other's ids in
             // a shared config.toml. The same argv serves shell and direct launches.
-            launchArgs = [.. launchArgs, "--config",
-                $"mcp_servers.{VibeRailsMcpServerName}.env_vars=[\"{LocalToolApiContext.CurrentSessionIdVariable}\",\"{LocalToolApiContext.CurrentTabIdVariable}\"]"];
+            var identityArgs = new List<string>(launchArgs);
+            var delimiter = identityArgs.IndexOf("--");
+            identityArgs.InsertRange(delimiter < 0 ? identityArgs.Count : delimiter,
+                ["--config", $"mcp_servers.{VibeRailsMcpServerName}.env_vars=[\"{LocalToolApiContext.CurrentSessionIdVariable}\",\"{LocalToolApiContext.CurrentTabIdVariable}\"]"]);
+            launchArgs = identityArgs.ToArray();
         }
+        // The Board sets this explicitly on Start work. Never infer permission from
+        // the prompt, title, environment name, or the mere presence of an MCP server.
+        if (authorizeBoardTools)
+            launchArgs = BoardMcpAuthorization.AppendArguments(llm, launchArgs);
+
         var cliCommand = launchArgs.Length > 0
             ? $"{cli} {BuildSafeArgString(launchArgs)}"
             : cli;
@@ -295,6 +303,9 @@ public class CommandService : ICommandService
             AddProxyContactDetails(environment, LlmProxyProvider.Grok, sessionId);
             await EnsureGrokProxyHeadersAsync();
         }
+
+        if (authorizeBoardTools)
+            BoardMcpOpenCodeAuthorization.Apply(llm, environment);
 
         LogMcpSetup(llm, envName, setupCommands);
 

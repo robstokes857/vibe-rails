@@ -29,7 +29,8 @@ public static class BoardPromptComposer
         var builder = new StringBuilder();
         var key = card.Key;
         builder.Append("You are working on kanban card ").Append(key)
-            .Append(" in the VibeRails board for this project.\n");
+            .Append(" in the VibeRails board for this project (description revision ")
+            .Append(card.DescriptionRevision).Append(").\n");
         builder.Append("Lane: ").Append(Sanitize(columnName, 80))
             .Append(" · Priority: ").Append(Sanitize(card.Priority, 20));
         if (!string.IsNullOrWhiteSpace(assigneeLabel))
@@ -48,6 +49,9 @@ public static class BoardPromptComposer
         }
         builder.Append("--- end card ---\n\n");
 
+        builder.Append("The user has authorized the viberails-mcp Board tools for this card session. ")
+            .Append("Use them without asking for another approval when carrying out this board workflow. ")
+            .Append("This authorization does not cover unrelated tools or actions.\n\n");
         builder.Append("Use the viberails-mcp board tools: get_board_card ").Append(key)
             .Append(" for the full card (comments, linked commits, earlier sessions); add_board_comment to record progress and decisions; ")
             .Append("move_board_card when the card changes state; link_board_commit after you commit. ")

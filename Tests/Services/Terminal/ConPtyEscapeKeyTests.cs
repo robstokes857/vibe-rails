@@ -22,6 +22,12 @@ public sealed class ConPtyEscapeKeyTests
     [InlineData(true, "")]
     [InlineData(true, "arrow")]
     [InlineData(true, "paste")]
+    [InlineData(false, "backtab")]
+    [InlineData(true, "backtab")]
+    [InlineData(false, "escape-backtab")]
+    [InlineData(true, "escape-backtab")]
+    [InlineData(false, "native-backtab")]
+    [InlineData(true, "native-backtab")]
     public async Task SemanticEscape_ArrivesWithoutAnotherKey_AndDoesNotModifyFollowingKey(bool afterModifiedEnter, string between)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
@@ -65,6 +71,25 @@ public sealed class ConPtyEscapeKeyTests
             Assert.Equal(new KeyRecord(65, 97, 0), await ReadKeyDownAsync(reader, ct));
             Assert.Equal(new KeyRecord(13, 10, 8), await ReadKeyDownAsync(reader, ct));
             Assert.Equal(new KeyRecord(66, 98, 0), await ReadKeyDownAsync(reader, ct));
+        }
+        if (between == "escape-backtab")
+        {
+            await terminal.WriteEscapeKeyAsync(ct);
+            Assert.Equal(new KeyRecord(27, 27, 0), await ReadKeyDownAsync(reader, ct));
+        }
+        if (between is "backtab" or "escape-backtab")
+        {
+            // xterm emits CSI Z for physical Shift+Tab. It must remain Shift+Tab
+            // before and after the Win32 modified-Enter/Escape input path.
+            await terminal.WriteInputBytesAsync("\u001b[Z"u8.ToArray(), ct);
+            Assert.Equal(new KeyRecord(9, 9, 16), await ReadKeyDownAsync(reader, ct));
+        }
+        if (between == "native-backtab")
+        {
+            var key = new ConsoleKeyInfo('\t', ConsoleKey.Tab, shift: true, alt: false, control: false);
+            var input = KeyTranslator.TranslateKey(key, modifiedEnterAsLineFeed: true);
+            await terminal.WriteInputBytesAsync(Encoding.UTF8.GetBytes(input), ct);
+            Assert.Equal(new KeyRecord(9, 9, 16), await ReadKeyDownAsync(reader, ct));
         }
 
         var state = new Mock<ITerminalStateService>();

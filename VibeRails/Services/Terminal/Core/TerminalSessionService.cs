@@ -88,7 +88,7 @@ public class TerminalSessionService : ITerminalSessionService
         _localClientTracker = localClientTracker;
     }
 
-    public async Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false, Func<Task<string?>>? resolveInitialPrompt = null, string summary = "")
+    public async Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false, Func<Task<string?>>? resolveInitialPrompt = null, string summary = "", bool authorizeBoardTools = false)
     {
         await s_lifecycleGate.WaitAsync();
 
@@ -116,6 +116,7 @@ public class TerminalSessionService : ITerminalSessionService
                 makeRemote,
                 initialPrompt,
                 summary: summary,
+                authorizeBoardTools: authorizeBoardTools,
                 onRemoteTakeoverAuthorized: trigger =>
                 {
                     Log.Information(
@@ -138,6 +139,15 @@ public class TerminalSessionService : ITerminalSessionService
                 s_sessionOwnerId = BuildSessionOwnerId(sessionId);
             }
             _localClientTracker.AcquireOwner(BuildSessionOwnerId(sessionId));
+            // A CLI can exit during the startup handshake, before its slot was published.
+            // Cleanup is identity-guarded, so covering that gap is safe even if Exited also fired.
+            if (terminal.HasExited)
+            {
+                // Pipe EOF can precede the process exit-code publication.
+                var exitCode = -1;
+                try { exitCode = terminal.ExitCode; } catch (InvalidOperationException) { }
+                ScheduleExitCleanup(terminal, sessionId, exitCode);
+            }
 
             return true;
         }
@@ -241,40 +251,40 @@ public class TerminalSessionService : ITerminalSessionService
 
     public async Task<TerminalInputResponse> SendInputAsync(TerminalInputRequest request, CancellationToken cancellationToken = default)
     {
-        if (request == null || string.IsNullOrEmpty(request.Text))
+        string input;
+        try
         {
-            return new TerminalInputResponse(false, "Input text is required.");
+            if (request is null) return new TerminalInputResponse(false, "Input text is required.");
+            input = TerminalInputSequence.Prepare(request);
         }
-
-        var input = request.Submit ? request.Text + "\r" : request.Text;
-        var byteCount = System.Text.Encoding.UTF8.GetByteCount(input);
-        if (byteCount > TerminalControlProtocol.MaxMessageBytes)
+        catch (ArgumentException ex)
         {
-            return new TerminalInputResponse(false, $"Input exceeds {TerminalControlProtocol.MaxMessageBytes} bytes.");
+            return new TerminalInputResponse(false, ex.Message);
         }
-
-        Terminal? terminal;
-        string? sessionId;
-        lock (s_lock)
+        // Reserve the current session for the whole escape/paste/submit sequence. Other API
+        // sends serialize here, and a concurrent stop/start cannot redirect it to another CLI.
+        await s_lifecycleGate.WaitAsync(cancellationToken);
+        try
         {
-            terminal = s_terminal;
-            sessionId = s_sessionId;
+            Terminal? terminal;
+            string? sessionId;
+            lock (s_lock)
+            {
+                terminal = s_terminal;
+                sessionId = s_sessionId;
+            }
+
+            if (terminal == null || terminal.HasExited || string.IsNullOrWhiteSpace(sessionId))
+                return new TerminalInputResponse(false, "No active terminal session.");
+            if (request.ExpectedSessionId is not null && !string.Equals(request.ExpectedSessionId, sessionId, StringComparison.Ordinal))
+                return new TerminalInputResponse(false, "The terminal session has changed; input was not sent.");
+
+            await TerminalIoRouter.RouteInputBatchAsync(_stateService, terminal, sessionId, TerminalIoSource.AgentTool,
+                (send, escape, ct) => TerminalInputSequence.SendAsync(request, input, escape, send, ct), cancellationToken);
+
+            return new TerminalInputResponse(true, "Input sent.", SessionId: sessionId);
         }
-
-        if (terminal == null || string.IsNullOrWhiteSpace(sessionId))
-        {
-            return new TerminalInputResponse(false, "No active terminal session.");
-        }
-
-        await TerminalIoRouter.RouteInputAsync(
-            _stateService,
-            terminal,
-            sessionId,
-            input,
-            TerminalIoSource.AgentTool,
-            cancellationToken);
-
-        return new TerminalInputResponse(true, "Input sent.", SessionId: sessionId);
+        finally { s_lifecycleGate.Release(); }
     }
 
     public void RegisterExternalTerminal(Terminal terminal, string sessionId, string workingDirectory)

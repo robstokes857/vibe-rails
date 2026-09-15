@@ -86,7 +86,9 @@ public class TerminalRunner
         Func<string, Task>? onRemoteTakeoverAuthorized = null,
         bool isNativeCli = false,
         string? initialUserInput = null,
-        string? jobRunId = null)
+        string? jobRunId = null,
+        bool requireDirectCli = false,
+        bool authorizeBoardTools = false)
     {
         // Plain shell sessions are shared remotely like any other session when remote is
         // enabled. A remote viewer of an agent session can already Ctrl+C out of the prompt
@@ -128,7 +130,7 @@ public class TerminalRunner
 
             var sessionTitle = ResolveSessionTitle(workDir, title);
             var preparedSession = await _commandService.PrepareSessionAsync(
-                llm, envName, extraArgs, initialPrompt, summary, sessionId);
+                llm, envName, extraArgs, initialPrompt, summary, sessionId, authorizeBoardTools: authorizeBoardTools);
             foreach (var kvp in _toolApiContext.BuildEnvironment(sessionId))
             {
                 preparedSession.Environment[kvp.Key] = kvp.Value;
@@ -171,7 +173,9 @@ public class TerminalRunner
             // the PTY, and therefore the run, alive with nothing left to end it. Falls back to the
             // shell path when there is no program to spawn (a plain Shell session, or the fake-CLI
             // test harness, both of which are shell programs rather than program + argv).
-            var spawnCliDirectly = jobRunId is not null && preparedSession.Executable is not null;
+            if (requireDirectCli && preparedSession.Executable is null)
+                throw new InvalidOperationException("This CLI cannot accept a startup mode safely.");
+            var spawnCliDirectly = (jobRunId is not null || requireDirectCli) && preparedSession.Executable is not null;
             if (spawnCliDirectly)
             {
                 var (app, argv) = CliSpawnCommandBuilder.Build(

@@ -107,8 +107,11 @@ public static class TerminalIoRouter
         TerminalIoSource source,
         CancellationToken ct = default)
     {
-        stateService.RecordInput(sessionId, "\u001b", source);
-        await terminal.WriteEscapeKeyAsync(ct);
+        await terminal.RunInputBatchAsync(async (writer, token) =>
+        {
+            stateService.RecordInput(sessionId, "\u001b", source);
+            await writer.WriteEscapeKeyAsync(token);
+        }, ct);
     }
 
     public static async Task RouteInputAsync(
@@ -141,12 +144,33 @@ public static class TerminalIoRouter
         if (input.Length == 0)
             return;
 
-        stateService.RecordInput(sessionId, input, source);
         // History/observer analysis above uses decoded text, but the PTY path must
         // retain the caller's original bytes. Terminal owns both the stateful Codex
         // rewrite and write serialization across local, remote, and tool sources.
-        await terminal.WriteInputBytesAsync(inputBytes, ct);
+        await terminal.RunInputBatchAsync(async (writer, token) =>
+        {
+            stateService.RecordInput(sessionId, input, source);
+            await writer.WriteInputBytesAsync(inputBytes, token);
+        }, ct);
     }
+
+    /// <summary>Routes/logs a sequence under the same stdin gate every input source uses.</summary>
+    internal static Task RouteInputBatchAsync(ITerminalStateService stateService, Terminal terminal,
+        string sessionId, TerminalIoSource source,
+        Func<Func<string, CancellationToken, Task>, Func<CancellationToken, Task>, CancellationToken, Task> action,
+        CancellationToken ct = default) =>
+        terminal.RunInputBatchAsync((writer, token) => action(
+            async (text, writeToken) =>
+            {
+                if (string.IsNullOrEmpty(text)) return;
+                stateService.RecordInput(sessionId, text, source);
+                await writer.WriteInputBytesAsync(Encoding.UTF8.GetBytes(text), writeToken);
+            },
+            async writeToken =>
+            {
+                stateService.RecordInput(sessionId, "\u001b", source);
+                await writer.WriteEscapeKeyAsync(writeToken);
+            }, token), ct);
 
     public static void RouteOutput(
         ITerminalStateService stateService,

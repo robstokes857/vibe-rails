@@ -10,5 +10,5 @@ public interface ICommandService
     /// </summary>
     Task<PreparedTerminalSession> PrepareSessionAsync(
         LLM llm, string? envName, string[]? extraArgs, string? initialPrompt = null, string summary = "",
-        string? sessionId = null);
+        string? sessionId = null, bool authorizeBoardTools = false);
 }

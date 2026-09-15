@@ -1587,6 +1587,7 @@ export class VibeControlApp {
                 }
                 throw new Error(message);
             }
+            if (requestOptions?.responseType === 'blob') return await response.blob();
             return await response.json();
         } catch (error) {
             if (error?.name === 'AbortError') throw error;

@@ -3,7 +3,7 @@ process.env.VIBERAILS_BOARD_STATIC = '1';
 
 module.exports = defineConfig({
     testDir: './tests',
-    testMatch: 'board-ux.spec.js',
+    testMatch: ['board-ux.spec.js', 'board-attachment-security.spec.js'],
     workers: 1,
     reporter: 'list',
     use: {

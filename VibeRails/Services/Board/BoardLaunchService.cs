@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Serilog;
 using VibeRails.DB;
 using VibeRails.DTOs;
@@ -27,7 +28,26 @@ public sealed class BoardLaunchService(
     IRepository repository,
     ITerminalTabHostService tabHost) : IBoardLaunchService
 {
+    // Only in-flight launches are retained. TryAdd is an immediate reservation, not a
+    // queued semaphore, so removal cannot strand waiters or create two gates for one card.
+    private static readonly ConcurrentDictionary<string, byte> LaunchingCards = new(StringComparer.Ordinal);
+
     public async Task<LaunchBoardCardResponse?> LaunchAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken = default)
+    {
+        var card = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
+        if (card is null) return null;
+        // Card ids are globally unique in the shared database; VB numbers are project-local.
+        if (!LaunchingCards.TryAdd(card.Id, 0))
+            throw new BoardConflictException("An agent is already starting on this card. Wait for it to finish starting.");
+        try
+        {
+            // Re-read after the reservation: fields may have changed while resolving the key.
+            return await LaunchCoreAsync(projectPath, card.Id, selectionOverride, cancellationToken);
+        }
+        finally { LaunchingCards.TryRemove(card.Id, out _); }
+    }
+
+    private async Task<LaunchBoardCardResponse?> LaunchCoreAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken)
     {
         var card = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
         if (card is null)
@@ -78,19 +98,41 @@ public sealed class BoardLaunchService(
                     Cli: parsed.Cli,
                     EnvironmentName: environment?.CustomName,
                     Title: title,
-                    InitialPrompt: prompt),
+                    InitialPrompt: prompt,
+                    BaseLlmOptions: !parsed.IsEnvironment && string.Equals(parsed.Key, card.Assignee, StringComparison.Ordinal)
+                        ? card.BaseLlmOptions : null,
+                    AuthorizeBoardTools: true),
                 cancellationToken);
 
             if (!string.IsNullOrWhiteSpace(session.SessionId))
             {
                 try
                 {
-                    await store.LinkSessionAsync(projectPath, card.Id, session.SessionId!, tab.TabId, parsed.Key, parsed.Cli,
-                        $"{assigneeLabel} · {card.Key}", BoardSessionRecord.LaunchOrigin, cancellationToken);
+                    var linked = await store.LinkSessionAsync(projectPath, card.Id, session.SessionId!, tab.TabId, parsed.Key, parsed.Cli,
+                        title, BoardSessionRecord.LaunchOrigin, cancellationToken);
+                    if (linked is null)
+                        throw new BoardValidationException("The card was deleted while its agent was starting. The terminal has been closed.");
                 }
                 catch (BoardConflictException ex)
                 {
                     Log.Warning("[Board] Session {SessionId} was already linked: {Message}", session.SessionId, ex.Message);
+                }
+                // The prompt was composed from this exact card snapshot before the asynchronous
+                // launch. Never associate whichever description happens to be current afterward.
+                //
+                // Bookkeeping, and deliberately kept off the failure path: the agent is already
+                // running and already linked to the card by this point, so a locked state.db or an
+                // aborted HTTP request must not reach the catch below, which deletes the tab and
+                // would terminate a perfectly healthy agent over a history row. CancellationToken
+                // .None for the same reason — a browser that navigated away must not skip it.
+                try
+                {
+                    await store.RecordDescriptionSessionAsync(projectPath, card.Id, card.DescriptionRevision,
+                        session.SessionId!, "launch", CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning(ex, "[Board] Started {Card} but could not record its launch revision", card.Key);
                 }
             }
             else

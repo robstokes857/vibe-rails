@@ -26,6 +26,68 @@ public sealed class TerminalRoutesPromptDeferralTests
 {
     private const string Prompt = "Deploy notes: {{step:2a1f0c4e-0000-4000-8000-000000000001}}";
 
+    [Theory]
+    [InlineData(false, null)]
+    [InlineData(true, null)]
+    [InlineData(true, "saved-environment")]
+    public async Task BoardToolAuthorization_IsExplicitAndReachesTheSession(bool authorizeBoardTools, string? environmentName)
+    {
+        var (app, terminal, _) = await StartAppAsync();
+        try
+        {
+            terminal.Setup(item => item.StartSessionAsync(
+                    LLM.Claude, It.IsAny<string>(), environmentName, It.IsAny<string[]>(),
+                    It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<string?>>>(), It.IsAny<string>(), authorizeBoardTools))
+                .ReturnsAsync(true);
+            using var client = new HttpClient();
+            using var response = await client.PostAsJsonAsync(new Uri(new Uri(app.Urls.First()), "/api/v1/terminal/start"),
+                new StartTerminalRequest(WorkingDirectory: Path.GetTempPath(), Cli: "Claude", EnvironmentName: environmentName,
+                    AuthorizeBoardTools: authorizeBoardTools), TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            terminal.VerifyAll();
+        }
+        finally { await StopAsync(app); }
+    }
+
+    [Fact]
+    public async Task BaseOptionsBecomeDiscreteArguments_AndACodexModeIsDroppedNotTyped()
+    {
+        var (app, terminal, _) = await StartAppAsync();
+        try
+        {
+            // "plan" survives no further than BaseLlmOptionsBuilder: it becomes no argument, and
+            // there is no longer any path that would type /plan into the running TUI instead.
+            terminal.Setup(item => item.StartSessionAsync(
+                    LLM.Codex, It.IsAny<string>(), null,
+                    It.Is<string[]>(args => args.SequenceEqual(new[] { "--model", "gpt-5.5", "-c", "model_reasoning_effort=xhigh" })),
+                    It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<string?>>>(), It.IsAny<string>(), false))
+                .ReturnsAsync(true);
+            using var client = new HttpClient();
+            using var response = await client.PostAsJsonAsync(new Uri(new Uri(app.Urls.First()), "/api/v1/terminal/start"),
+                new StartTerminalRequest(WorkingDirectory: Path.GetTempPath(), Cli: "Codex", InitialPrompt: "card",
+                    BaseLlmOptions: new("gpt-5.5", "max", "plan")), TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            terminal.VerifyAll();
+        }
+        finally { await StopAsync(app); }
+    }
+
+    [Fact]
+    public async Task SavedEnvironmentRejectsBaseOverridesBeforeLaunching()
+    {
+        var (app, terminal, _) = await StartAppAsync();
+        try
+        {
+            using var client = new HttpClient();
+            using var response = await client.PostAsJsonAsync(new Uri(new Uri(app.Urls.First()), "/api/v1/terminal/start"),
+                new StartTerminalRequest(WorkingDirectory: Path.GetTempPath(), Cli: "Codex", EnvironmentName: "saved",
+                    BaseLlmOptions: new("gpt-5.5")), TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.DoesNotContain(terminal.Invocations, invocation => invocation.Method.Name == nameof(ITerminalSessionService.StartSessionAsync));
+        }
+        finally { await StopAsync(app); }
+    }
+
     [Fact]
     public async Task ThePromptIsNotResolvedBeforeTheSessionServiceIsCalled()
     {
@@ -37,8 +99,8 @@ public sealed class TerminalRoutesPromptDeferralTests
             terminal
                 .Setup(item => item.StartSessionAsync(
                     It.IsAny<LLM>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string[]>(),
-                    It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<string?>>>(), It.IsAny<string>()))
-                .Callback((LLM _, string _, string? _, string[]? _, string? _, bool _, Func<Task<string?>>? resolve, string _) =>
+                    It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<string?>>>(), It.IsAny<string>(), It.IsAny<bool>()))
+                .Callback((LLM _, string _, string? _, string[]? _, string? _, bool _, Func<Task<string?>>? resolve, string _, bool _) =>
                 {
                     // Sampled at the moment the slot is claimed, not after the response: this is
                     // the window a losing concurrent request would have had to run the command in.
@@ -76,7 +138,7 @@ public sealed class TerminalRoutesPromptDeferralTests
             terminal
                 .Setup(item => item.StartSessionAsync(
                     It.IsAny<LLM>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string[]>(),
-                    It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<string?>>>(), It.IsAny<string>()))
+                    It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<string?>>>(), It.IsAny<string>(), It.IsAny<bool>()))
                 .ReturnsAsync(false);
 
             using var response = await PostStartAsync(app);
@@ -127,8 +189,8 @@ public sealed class TerminalRoutesPromptDeferralTests
             terminal
                 .Setup(item => item.StartSessionAsync(
                     It.IsAny<LLM>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string[]>(),
-                    It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<string?>>>(), It.IsAny<string>()))
-                .Callback((LLM _, string _, string? _, string[]? _, string? _, bool _, Func<Task<string?>>? resolve, string _) =>
+                    It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<string?>>>(), It.IsAny<string>(), It.IsAny<bool>()))
+                .Callback((LLM _, string _, string? _, string[]? _, string? _, bool _, Func<Task<string?>>? resolve, string _, bool _) =>
                     captured = resolve)
                 .ReturnsAsync(true);
 
@@ -163,8 +225,8 @@ public sealed class TerminalRoutesPromptDeferralTests
             terminal
                 .Setup(item => item.StartSessionAsync(
                     It.IsAny<LLM>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string[]>(),
-                    It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<string?>>>(), It.IsAny<string>()))
-                .Returns(async (LLM _, string _, string? _, string[]? _, string? _, bool _, Func<Task<string?>>? resolve, string _) =>
+                    It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<string?>>>(), It.IsAny<string>(), It.IsAny<bool>()))
+                .Returns(async (LLM _, string _, string? _, string[]? _, string? _, bool _, Func<Task<string?>>? resolve, string _, bool _) =>
                 {
                     // Awaited, not observed: the real service lets the throw escape the gate so
                     // the route can answer with the message instead of starting a session.

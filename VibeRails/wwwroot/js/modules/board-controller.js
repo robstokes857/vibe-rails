@@ -30,6 +30,8 @@ import { BoardApi } from './board-api.js';
 import { renderCommentHtml, wrapSelectionAsCode, toPlainPreview } from './board-text.js';
 import { openDiffModal } from './diff-modal.js';
 import * as SessionDebug from './session-viewer.js';
+import { renderBoardLaunchOptions, readBoardLaunchOptions, bindBoardLaunchOptions } from './board-launch-options.js';
+import { openBoardAttachment, disposeBoardAttachmentPreview, fileToAttachmentPayload, getAttachmentPreviewKind } from './board-attachments.js';
 
 const PRIORITIES = ['critical', 'high', 'medium', 'low'];
 const POINTS = [1, 2, 3, 5, 8, 13];
@@ -39,6 +41,12 @@ const FILTERS_STORAGE_KEY = 'viberails.board.filters.v1';
 const emptyFilters = () => ({ q: '', assignee: '', priority: '', tag: '' });
 // Task-key namespace for the terminal tab that works a card (see wwwroot/AGENTS.md).
 const CARD_TASK_KEY = cardId => `board-card:${cardId}`;
+
+function formatFileSize(bytes) {
+    const size = Math.max(0, Number(bytes) || 0);
+    return size >= 1024 * 1024 ? `${(size / (1024 * 1024)).toFixed(1)} MB`
+        : size >= 1024 ? `${Math.ceil(size / 1024)} KB` : `${size} bytes`;
+}
 
 export class BoardController {
     constructor(app) {
@@ -51,6 +59,7 @@ export class BoardController {
         this.sessionLayer = null;
         // Disposer for the LLM picker mounted in the card editor's Assignee field.
         this.assigneePickerDispose = null;
+        this.launchOptionsDispose = null;
         this._openCardGeneration = 0;
         this._openCardAbort = null;
         BoardApi.attach(app);
@@ -115,10 +124,13 @@ export class BoardController {
         this.closeDiffModal();
         this.closeSessionModal();
         this.disposeAssigneePicker();
+        disposeBoardAttachmentPreview();
         this.root = null;
     }
 
     disposeAssigneePicker() {
+        try { this.launchOptionsDispose?.(); } catch { /* already torn down */ }
+        this.launchOptionsDispose = null;
         try { this.assigneePickerDispose?.(); } catch { /* already torn down */ }
         this.assigneePickerDispose = null;
     }
@@ -700,8 +712,9 @@ export class BoardController {
 
         const columnId = card?.columnId || this.state.columns[0]?.id || '';
 
-        this.app.showModal(card ? `${card.key} · Card` : 'New card', `
-            <div class="board-card-editor" data-board-card-editor data-card-id="${escapeHtml(card?.id || '')}">
+        this.app.showModal(card ? `${card.key} · ${card.title}` : 'New card', `
+            <div class="board-card-editor" data-board-card-editor data-card-id="${escapeHtml(card?.id || '')}"
+                data-description-revision="${Number(card?.descriptionRevision) || 0}">
                 <div class="board-editor-scroll">
                 <div class="board-editor-main">
                     <input type="text" class="form-control board-editor-title" id="board-card-title"
@@ -716,6 +729,16 @@ export class BoardController {
                             preview: true,
                             placeholder: 'Context, repro steps, links. Use Code for a snippet.'
                         })}
+                    </section>
+
+                    <section class="board-block">
+                        <h3 class="board-block-label">Attachments <span class="board-count" data-board-count="attachments">${card?.attachments?.length || 0}</span></h3>
+                        <div class="board-attachment-list" data-board-attachments></div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-board-add-files>
+                            <i class="fa-solid fa-paperclip" aria-hidden="true"></i> Upload files
+                        </button>
+                        <input type="file" hidden multiple data-board-files>
+                        <p class="board-editor-muted mt-2">Up to 12 files, any size. Preview images, text and PDFs.</p>
                     </section>
 
                     <section class="board-block board-activity">
@@ -753,6 +776,7 @@ export class BoardController {
                                 </button>
                             </div>
                         </div>
+                        <div data-board-launch-options></div>
                         <div class="row g-2">
                             <div class="col-6">
                                 <label class="board-editor-label" for="board-card-priority">Priority</label>
@@ -817,6 +841,12 @@ export class BoardController {
                         </form>` : ''}
                     </section>
 
+                    ${card ? `<section class="board-side-section">
+                        <details data-board-history-details>
+                            <summary class="board-side-label"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Description history</summary>
+                            <div data-board-history class="board-history-list"></div>
+                        </details>
+                    </section>` : ''}
                     </div>
                 </aside>
                 </div>
@@ -826,15 +856,15 @@ export class BoardController {
                             <i class="fa-solid fa-trash" aria-hidden="true"></i> Delete
                         </button>` : '<span></span>'}
                         <span class="board-editor-actions-main">
-                            ${card ? `<button type="button" class="btn btn-sm btn-success" data-board-start-work
-                                title="Open a terminal for the assigned LLM with this card as its first message">
+                            ${card ? `<button type="button" class="btn btn-sm btn-outline-success" data-board-start-work
+                                title="Start the assigned LLM in the background with this card as its first message">
                                 <i class="fa-solid fa-play" aria-hidden="true"></i> <span data-board-start-work-label>Start work</span>
                             </button>` : ''}
                             <button type="button" class="btn btn-sm btn-outline-primary" data-board-save-card>Save</button>
                         </span>
                     </div>
             </div>
-        `, { onClose: () => { this.disposeAssigneePicker(); } });
+        `, { onClose: () => { this.disposeAssigneePicker(); disposeBoardAttachmentPreview(); } });
 
         if (generation !== this._openCardGeneration) return;
 
@@ -859,9 +889,22 @@ export class BoardController {
     }
 
     bindCardEditor(editor, card) {
+        card = card || { id: null, attachments: [], pendingAttachments: [] };
+        editor._boardCard = card;
         this.renderCommentsPanel(editor, card);
         this.renderCommitsPanel(editor, card);
         this.renderSessionsPanel(editor, card);
+        this.renderAttachmentsPanel(editor, card);
+        editor.querySelector('[data-board-add-files]')?.addEventListener('click', () => editor.querySelector('[data-board-files]')?.click());
+        editor.querySelector('[data-board-files]')?.addEventListener('change', event => {
+            const files = Array.from(event.target.files || []);
+            event.target.value = '';
+            this.attachImages(editor.querySelector('[data-board-composer="description"]'),
+                editor.querySelector('[data-board-composer="description"] [data-board-composer-input]'), card, files, { inline: false });
+        });
+        editor.querySelector('[data-board-history-details]')?.addEventListener('toggle', event => {
+            if (event.target.open) void this.renderDescriptionHistory(editor, card);
+        });
 
         this.bindComposer(editor.querySelector('[data-board-composer="description"]'), { card });
         this.bindComposer(editor.querySelector('[data-board-composer="comment"]'), {
@@ -883,8 +926,18 @@ export class BoardController {
                 placeholder: 'Unassigned',
                 selectedValue: card?.assignee || ''
             });
+            const renderOptions = (options = {}, selection = assigneeSelect.value) => {
+                this.launchOptionsDispose?.();
+                const host = editor.querySelector('[data-board-launch-options]');
+                if (!host) return;
+                host.innerHTML = renderBoardLaunchOptions(selection, options);
+                this.launchOptionsDispose = bindBoardLaunchOptions(host, selection);
+            };
+            renderOptions(card.baseLlmOptions || {}, card.assignee || '');
+            assigneeSelect.addEventListener('change', () => renderOptions());
             editor.querySelector('[data-board-clear-assignee]')?.addEventListener('click', () => {
                 setLlmPickerValue(this.app, assigneeSelect, '');
+                renderOptions({}, '');
             });
         }
 
@@ -923,18 +976,18 @@ export class BoardController {
                         <i class="fa-solid fa-code" aria-hidden="true"></i><span>Code</span>
                     </button>
                     <button type="button" class="board-composer-btn" data-board-composer-action="image"
-                        title="Add an image (or just paste one)"${off}>
-                        <i class="fa-regular fa-image" aria-hidden="true"></i><span>Image</span>
+                        title="Attach a file (or paste an image)"${off}>
+                        <i class="fa-solid fa-paperclip" aria-hidden="true"></i><span>Attach</span>
                     </button>
-                    <span class="board-composer-hint">Paste or drop an image</span>
+                    <span class="board-composer-hint">Drop files or paste an image</span>
                     ${preview ? `<button type="button" class="board-composer-btn ms-auto"
                         data-board-composer-toggle aria-label="Preview description"${off}>Preview</button>` : ''}
                 </div>
                 <textarea class="form-control board-composer-input" data-board-composer-input
                     placeholder="${escapeHtml(placeholder)}" rows="3"${off}>${escapeHtml(value)}</textarea>
                 ${preview ? '<div class="board-comment-body board-description-preview" data-board-composer-preview hidden></div>' : ''}
-                <input type="file" accept="image/*" hidden data-board-composer-file multiple>
-                <div class="board-composer-busy" data-board-composer-busy hidden>Adding image…</div>
+                <input type="file" hidden data-board-composer-file multiple>
+                <div class="board-composer-busy" data-board-composer-busy hidden>Adding files…</div>
                 ${submitLabel ? `<div class="board-composer-footer">
                     <button type="button" class="btn btn-sm btn-outline-primary board-composer-submit"
                         data-board-composer-action="submit"${off}>${escapeHtml(submitLabel)}</button>
@@ -1039,8 +1092,7 @@ export class BoardController {
         });
         input.addEventListener('dragleave', () => composer.classList.remove('is-drop-target'));
         input.addEventListener('drop', event => {
-            const images = Array.from(event.dataTransfer?.files || [])
-                .filter(item => item.type.startsWith('image/'));
+            const images = Array.from(event.dataTransfer?.files || []);
             composer.classList.remove('is-drop-target');
             if (images.length === 0) return;
             event.preventDefault();
@@ -1048,33 +1100,147 @@ export class BoardController {
         });
     }
 
-    async attachImages(composer, input, card, files) {
+    async attachImages(composer, input, card, files, { inline = true } = {}) {
         if (!files.length) return;
-        if (!card?.id) {
-            this.app.showToast('Board', 'Save the card before adding images.', 'warning');
-            return;
-        }
+        const editor = composer?.closest('[data-board-card-editor]');
+        if (editor?._boardUploading || editor?._boardSaving || editor?._boardStarting) return;
+        if (editor) editor._boardUploading = true;
         const busy = composer.querySelector('[data-board-composer-busy]');
         if (busy) busy.hidden = false;
         try {
             for (const file of files) {
-                const shrunk = await downscaleImage(file);
-                const attachment = await BoardApi.addCardAttachmentAsync(card.id, {
-                    name: file.name || 'pasted image',
-                    dataUrl: shrunk.dataUrl,
-                    bytes: shrunk.bytes,
-                    mimeType: shrunk.mimeType
-                });
+                if ((card.attachments?.length || 0) + (card.pendingAttachments?.length || 0) >= 12)
+                    throw new Error('A card can hold at most 12 attachments.');
+                const payload = await fileToAttachmentPayload(file);
+                if (!card.id) {
+                    card.pendingAttachments ||= [];
+                    card.pendingAttachments.push(payload);
+                    if (editor) this.renderAttachmentsPanel(editor, card);
+                    continue;
+                }
+                const attachment = await BoardApi.addCardAttachmentAsync(card.id, payload);
                 card.attachments = card.attachments || [];
                 card.attachments.push(attachment);
-                insertAtCursor(input, `![${attachment.name}](attachment:${attachment.id})`);
+                if (inline && attachment.url && getAttachmentPreviewKind(attachment) === 'image')
+                    insertAtCursor(input, `![${attachment.name.replace(/[\[\]\r\n]/g, '')}](attachment:${attachment.id})`);
+                if (editor) this.renderAttachmentsPanel(editor, card);
             }
             input.dispatchEvent(new Event('input', { bubbles: true }));
         } catch (error) {
-            this.app.showToast('Board', error?.message || 'Failed to add the image.', 'error');
+            this.app.showToast('Board', error?.message || 'Failed to add the file.', 'error');
         } finally {
+            if (card.id && editor) await this.syncAttachmentRevision(editor, card);
             if (busy) busy.hidden = true;
+            if (editor) editor._boardUploading = false;
         }
+    }
+
+    async syncAttachmentRevision(editor, card) {
+        try {
+            const fresh = await BoardApi.getBoardCardAsync(card.id);
+            if (fresh.description === card.description && fresh.descriptionRevision) {
+                card.descriptionRevision = fresh.descriptionRevision;
+                editor.dataset.descriptionRevision = String(fresh.descriptionRevision);
+            }
+            card.attachments = fresh.attachments || card.attachments;
+            this.renderAttachmentsPanel(editor, card);
+        } catch (error) {
+            this.app.showToast('Board', 'Files were updated, but the card could not be refreshed. Reopen it before saving.', 'warning');
+        }
+    }
+
+    // Every attachment upload appends a description revision server-side (the revision owns the
+    // attachment manifest), so the token the editor would send on its next save goes stale as soon
+    // as one file lands. Re-read it rather than guessing, and never let this failure mask the
+    // caller's own error — a stale token only costs a conflict the user can retry past.
+    async restampDescriptionRevision(editor, cardId) {
+        try {
+            const fresh = await BoardApi.getBoardCardAsync(cardId);
+            if (!fresh?.descriptionRevision) return;
+            editor.dataset.descriptionRevision = String(fresh.descriptionRevision);
+            if (editor._boardCard) editor._boardCard.descriptionRevision = fresh.descriptionRevision;
+        } catch {
+            // Leave the old token: the retry surfaces a readable conflict instead of a silent loss.
+        }
+    }
+
+    renderAttachmentsPanel(editor, card) {
+        const host = editor?.querySelector('[data-board-attachments]');
+        if (!host) return;
+        const attachments = card?.attachments || [];
+        const pending = card?.pendingAttachments || [];
+        this.updateSectionCount(editor, 'attachments', attachments.length + pending.length);
+        host.innerHTML = attachments.map(attachment => `
+            <div class="board-attachment-row">
+                <button type="button" class="board-side-main" data-board-view-attachment="${escapeHtml(attachment.id)}">
+                    <i class="fa-solid fa-file" aria-hidden="true"></i>
+                    <span class="board-side-copy"><span class="board-side-title">${escapeHtml(attachment.name)}</span>
+                    <span class="board-side-sub">${formatFileSize(attachment.bytes)} · ${getAttachmentPreviewKind(attachment) === 'download' ? 'Download' : 'Preview'}</span></span>
+                </button>
+                <button type="button" class="board-side-remove" data-board-remove-attachment="${escapeHtml(attachment.id)}" aria-label="Remove ${escapeHtml(attachment.name)}"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+            </div>`).join('') + pending.map((attachment, index) => `
+            <div class="board-attachment-row"><span class="board-side-copy"><span class="board-side-title">${escapeHtml(attachment.name)}</span>
+                <span class="board-side-sub">${formatFileSize(attachment.bytes)} · Uploads when you save</span></span>
+                <button type="button" class="board-side-remove" data-board-remove-pending="${index}" aria-label="Remove ${escapeHtml(attachment.name)}"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+            </div>`).join('') || '<p class="board-editor-muted">No files attached.</p>';
+        host.querySelectorAll('[data-board-view-attachment]').forEach(button => button.addEventListener('click', async () => {
+            const attachment = attachments.find(item => item.id === button.dataset.boardViewAttachment);
+            if (!attachment) return;
+            try { await openBoardAttachment(this.app, card.id, attachment); }
+            catch (error) { this.app.showToast('Board', error?.message || 'Could not open the file.', 'error'); }
+        }));
+        host.querySelectorAll('[data-board-remove-pending]').forEach(button => button.addEventListener('click', () => {
+            pending.splice(Number(button.dataset.boardRemovePending), 1);
+            this.renderAttachmentsPanel(editor, card);
+        }));
+        host.querySelectorAll('[data-board-remove-attachment]').forEach(button => button.addEventListener('click', async () => {
+            if (editor._boardUploading || editor._boardSaving || editor._boardStarting) return;
+            const attachment = attachments.find(item => item.id === button.dataset.boardRemoveAttachment);
+            // "Remove" takes the file off the current card; earlier description revisions keep
+            // their own manifest, so the bytes stay reachable from history. Say so rather than
+            // implying the file is gone.
+            if (!attachment || !await confirmDialog({ title: 'Remove attachment', message: `Remove ${attachment.name} from this card? Earlier description revisions can still open it.`, confirmLabel: 'Remove', danger: true })) return;
+            try {
+                await BoardApi.deleteCardAttachmentAsync(card.id, attachment.id);
+                card.attachments = attachments.filter(item => item.id !== attachment.id);
+                this.renderAttachmentsPanel(editor, card);
+                await this.syncAttachmentRevision(editor, card);
+            } catch (error) { this.app.showToast('Board', error?.message || 'Could not remove the file.', 'error'); }
+        }));
+    }
+
+    async renderDescriptionHistory(editor, card) {
+        const host = editor.querySelector('[data-board-history]');
+        if (!host || !card?.id) return;
+        host.textContent = 'Loading history…';
+        try {
+            const history = await BoardApi.getCardDescriptionHistoryAsync(card.id);
+            if (!host.isConnected) return;
+            host.innerHTML = (history?.revisions || []).map(revision => `
+                <details class="board-history-revision">
+                    <summary>Revision ${Number(revision.revision)} · ${escapeHtml(this.formatDateTime(revision.createdAt))}</summary>
+                    <p class="board-editor-muted">${escapeHtml(revision.author?.label || revision.source || '')}</p>
+                    <div class="board-comment-body">${renderCommentHtml(revision.description || '(Empty description)', { attachments: revision.attachments || [] })}</div>
+                    ${(revision.attachments || []).map(attachment => `<button type="button" class="btn btn-sm btn-outline-secondary my-1" data-board-history-file="${escapeHtml(attachment.id)}">${escapeHtml(attachment.name)}</button>`).join('')}
+                    <ul class="board-history-events">${(revision.sessions || []).map(event => {
+                        const session = card.sessions?.find(item => item.id === event.sessionId);
+                        // A read can come from a session this card does not own — reads never link
+                        // — so there is no display name for it. Show the short id; the event's
+                        // message says which card that agent is actually working.
+                        const who = session?.displayName || `Agent session ${String(event.sessionId || '').slice(0, 8)}`;
+                        // `status` is not rendered: it tracked notification delivery, and with that
+                        // feature gone every event is "recorded", so printing it says nothing.
+                        return `<li>${escapeHtml(who)} · ${escapeHtml(event.kind)}
+                            <span class="board-side-sub">${escapeHtml(this.formatDateTime(event.createdAt))}${event.message ? ` · ${escapeHtml(event.message)}` : ''}</span></li>`;
+                    }).join('')}</ul>
+                </details>`).join('') || '<p class="board-editor-muted">No history yet.</p>';
+            host.querySelectorAll('[data-board-history-file]').forEach(button => button.addEventListener('click', async () => {
+                const attachment = history.revisions.flatMap(revision => revision.attachments || []).find(item => item.id === button.dataset.boardHistoryFile);
+                if (!attachment) return;
+                try { await openBoardAttachment(this.app, card.id, attachment); }
+                catch (error) { this.app.showToast('Board', error?.message || 'Could not open the historical file.', 'error'); }
+            }));
+        } catch (error) { host.textContent = error?.message || 'Could not load history.'; }
     }
 
     // ============================================
@@ -1340,7 +1506,7 @@ export class BoardController {
         if (!terminal || !tabId) return;
         terminal.rememberTabLaunch?.(tabId, {
             selection: session.selection || null,
-            label: card?.key || session.displayName,
+            label: card?.key ? `${card.key} · ${card.title || session.displayName}` : session.displayName,
             title: `${card?.key || ''} · ${card?.title || session.displayName}`.replace(/^ · /, ''),
             taskKey: CARD_TASK_KEY(card?.id || session.id),
             workingDirectory: null
@@ -1442,6 +1608,9 @@ export class BoardController {
             description: value('[data-board-composer="description"] [data-board-composer-input]'),
             columnId: value('#board-card-lane'),
             assignee: value('#board-card-assignee'),
+            baseLlmOptions: readBoardLaunchOptions(editor, value('#board-card-assignee')),
+            ...(Number(editor.dataset?.descriptionRevision) > 0
+                ? { expectedDescriptionRevision: Number(editor.dataset.descriptionRevision) } : {}),
             priority: value('#board-card-priority'),
             points: value('#board-card-points'),
             tags: value('#board-card-tags').split(',').map(tag => tag.trim()).filter(Boolean),
@@ -1459,22 +1628,46 @@ export class BoardController {
     }
 
     async saveCard(editor) {
+        if (editor._boardSaving || editor._boardUploading || editor._boardStarting) return;
         const payload = this.readCardForm(editor);
         if (!this.validateCardTitle(editor, payload)) return;
-
+        editor._boardSaving = true;
+        let saved = null;
         try {
             const cardId = this.cardIdFromEditor(editor);
             if (cardId) {
-                await BoardApi.updateBoardCardAsync(cardId, payload);
+                saved = await BoardApi.updateBoardCardAsync(cardId, payload);
                 this.app.showToast('Board', 'Card saved.', 'success');
             } else {
-                const created = await BoardApi.createBoardCardAsync(payload);
-                this.app.showToast('Board', `Created ${created.key}.`, 'success');
+                saved = await BoardApi.createBoardCardAsync(payload);
+                editor.dataset.cardId = saved.id;
+                if (editor._boardCard) Object.assign(editor._boardCard, saved);
+                this.app.showToast('Board', `Created ${saved.key}.`, 'success');
             }
-            this.app.closeModal();
+            if (saved?.descriptionRevision) editor.dataset.descriptionRevision = String(saved.descriptionRevision);
+            const pending = editor._boardCard?.pendingAttachments || [];
+            while (pending.length) {
+                const attachment = await BoardApi.addCardAttachmentAsync(saved.id, pending[0]);
+                pending.shift();
+                editor._boardCard.attachments ||= [];
+                editor._boardCard.attachments.push(attachment);
+                this.renderAttachmentsPanel(editor, editor._boardCard);
+            }
+            if (editor.isConnected !== false) this.app.closeModal();
             await this.refresh();
         } catch (error) {
-            this.app.showToast('Board', error?.message || 'Failed to save the card.', 'error');
+            // The card itself may already be saved and only a queued upload failed — saying the
+            // card failed to save sends the user looking for a card that exists. The editor keeps
+            // the new id, so retrying Save uploads the rest. That retry only works if the revision
+            // token is refreshed first: each upload that DID land advanced it, so leaving the
+            // pre-upload value here would fail the retry with a spurious "changed while you were
+            // editing" conflict and strand the remaining files behind an error the user cannot clear.
+            if (saved) await this.restampDescriptionRevision(editor, saved.id);
+            this.app.showToast('Board', saved
+                ? `${saved.key} was saved, but a file did not upload. ${error?.message || ''}`.trim()
+                : error?.message || 'Failed to save the card.', saved ? 'warning' : 'error');
+        } finally {
+            editor._boardSaving = false;
         }
     }
 
@@ -1493,13 +1686,14 @@ export class BoardController {
         button.disabled = running;
         button.title = running
             ? 'An agent is already running on this card. Open it from Sessions.'
-            : 'Open a terminal for the assigned LLM with this card as its first message';
+            : 'Start the assigned LLM in the background with this card as its first message';
         const label = button.querySelector?.('[data-board-start-work-label]');
         if (label) label.textContent = running ? 'Agent running' : 'Start work';
     }
 
     async startWork(editor, card) {
         if (!card?.id) return;
+        if (editor._boardSaving || editor._boardUploading || editor._boardStarting) return;
         if (this.hasRunningSession(card)) {
             this.updateStartWorkButton(editor, card);
             return;
@@ -1514,8 +1708,10 @@ export class BoardController {
             return;
         }
         if (button) button.disabled = true;
+        editor._boardStarting = true;
         try {
             const saved = await BoardApi.updateBoardCardAsync(card.id, payload);
+            if (saved?.descriptionRevision) editor.dataset.descriptionRevision = String(saved.descriptionRevision);
             if (this.hasRunningSession(saved)) {
                 this.updateStartWorkButton(editor, saved);
                 this.app.showToast('Board', 'An agent is already running on this card. Open it from Sessions.', 'info');
@@ -1528,23 +1724,20 @@ export class BoardController {
             const info = this.assigneeInfo(result.selection || payload.assignee);
             this.app.terminalController?.rememberTabLaunch?.(tabId, {
                 selection: result.selection || payload.assignee,
-                label: result.cardKey || card.key,
+                label: `${result.cardKey || card.key} · ${payload.title || card.title}`,
                 title: `${result.cardKey || card.key} · ${payload.title || card.title}`,
                 taskKey: CARD_TASK_KEY(card.id),
                 accentColor: info?.color || null,
                 workingDirectory: result.workingDirectory || null
             });
-            this.app.closeModal();
-            this.app.showToast('Board', `${result.cardKey || card.key} handed to ${info?.label || 'the LLM'}.`, 'success');
-            if (!(await this.app.terminalController?.adoptLaunchedTab?.(tabId))) {
-                this.app.navigate?.('terminal-focus', {
-                    preferredTabId: tabId,
-                    preferredSelection: result.selection || payload.assignee
-                });
-            }
+            if (editor.isConnected !== false) this.app.closeModal();
+            this.app.showToast('Board', `${result.cardKey || card.key} started with ${info?.label || 'the LLM'}. Open it from Sessions when ready.`, 'success');
+            await this.refresh();
         } catch (error) {
             this.app.showToast('Board', error?.message || 'Failed to start work on the card.', 'error');
             if (button) button.disabled = false;
+        } finally {
+            editor._boardStarting = false;
         }
     }
 
@@ -1689,79 +1882,6 @@ export class BoardController {
         } catch (error) {
             this.app.showToast('Board', error?.message || 'Failed to delete the lane.', 'error');
         }
-    }
-}
-
-// ============================================
-// Image helpers
-// ============================================
-
-const MAX_IMAGE_DIMENSION = 1200;
-// Above this, re-encode as JPEG: a full-size PNG screenshot will exhaust the
-// placeholder's localStorage budget after only a handful of images.
-const PNG_BUDGET_BYTES = 300 * 1024;
-
-/** Decodes a File into something drawImage accepts, with a release callback. */
-async function loadImageSource(file) {
-    if (typeof createImageBitmap === 'function') {
-        try {
-            const bitmap = await createImageBitmap(file);
-            return { source: bitmap, width: bitmap.width, height: bitmap.height, release: () => bitmap.close?.() };
-        } catch {
-            // Some webviews reject createImageBitmap; fall through to an <img>.
-        }
-    }
-    const url = URL.createObjectURL(file);
-    try {
-        const image = new Image();
-        await new Promise((resolve, reject) => {
-            image.onload = resolve;
-            image.onerror = () => reject(new Error('That image could not be read.'));
-            image.src = url;
-        });
-        // The object URL has to outlive drawImage, so it is revoked in release().
-        return {
-            source: image,
-            width: image.naturalWidth,
-            height: image.naturalHeight,
-            release: () => URL.revokeObjectURL(url)
-        };
-    } catch (error) {
-        URL.revokeObjectURL(url);
-        throw error;
-    }
-}
-
-/**
- * Shrinks an image to a sane size for a comment and returns a data URL.
- * The placeholder data layer stores that URL directly; the real backend will
- * store bytes and hand back its own URL instead.
- */
-async function downscaleImage(file, maxDimension = MAX_IMAGE_DIMENSION) {
-    const { source, width, height, release } = await loadImageSource(file);
-    try {
-        const scale = Math.min(1, maxDimension / Math.max(width, height));
-        const targetWidth = Math.max(1, Math.round(width * scale));
-        const targetHeight = Math.max(1, Math.round(height * scale));
-
-        const canvas = document.createElement('canvas');
-        canvas.width = targetWidth;
-        canvas.height = targetHeight;
-        const context = canvas.getContext('2d');
-        if (!context) throw new Error('This browser would not give us a canvas to resize the image.');
-        context.drawImage(source, 0, 0, targetWidth, targetHeight);
-
-        // PNG first — screenshots of text stay crisp. Fall back to JPEG when that
-        // is too heavy to be worth it.
-        let mimeType = 'image/png';
-        let dataUrl = canvas.toDataURL(mimeType);
-        if (dataUrl.length * 0.75 > PNG_BUDGET_BYTES) {
-            mimeType = 'image/jpeg';
-            dataUrl = canvas.toDataURL(mimeType, 0.85);
-        }
-        return { dataUrl, mimeType, bytes: Math.round(dataUrl.length * 0.75) };
-    } finally {
-        release();
     }
 }
 

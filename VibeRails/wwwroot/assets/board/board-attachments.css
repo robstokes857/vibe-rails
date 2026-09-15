@@ -1,0 +1,8 @@
+.vb-board-attachment-modal .modal-dialog { max-width: min(1100px, 94vw); }
+.vb-board-attachment-modal .modal-title { overflow-wrap: anywhere; padding-right: 1rem; }
+.vb-board-attachment-modal .vb-board-attachment-body { display: block; overflow: auto; padding: 1.25rem; }
+.vb-board-attachment-toolbar { display: flex; gap: 1rem; align-items: center; padding: .75rem 1.25rem; border-bottom: 1px solid var(--color-border); }
+.vb-board-attachment-toolbar[hidden] { display: none; }
+.vb-board-attachment-image { display: block; max-width: 100%; max-height: 100%; object-fit: contain; margin: auto; }
+.vb-board-attachment-text { white-space: pre-wrap; overflow-wrap: anywhere; color: inherit; }
+.vb-board-pdf-canvas { display: block; max-width: 100%; height: auto; margin: 0 auto; background: white; }

@@ -5,14 +5,14 @@ const { test, expect } = process.env.VIBERAILS_BOARD_STATIC === '1'
 const IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=';
 const DESCRIPTION = 'Repro screenshot\n![Screenshot.png](attachment:att_image)\n<img src=x onerror="window.__injected=true">';
 
-async function openBoard(page, { active = false } = {}) {
+async function openBoard(page, { active = false, assignee = null } = {}) {
     if (process.env.VIBERAILS_BOARD_STATIC === '1') {
         await page.addInitScript(() => sessionStorage.setItem('viberails_tab', 'board-fixture'));
     }
     let card = {
         id: 'card_test', key: 'VB-1', columnId: 'col_ready', position: 0,
         title: 'Description images', description: DESCRIPTION, priority: 'high',
-        assignee: null, points: null, tags: [], blocked: false, commentCount: 1,
+        assignee, points: null, tags: [], blocked: false, commentCount: 1, descriptionRevision: 1,
         activeSessionId: active ? 'session_test' : null,
         createdAt: '2026-09-11T06:00:00Z', updatedAt: '2026-09-11T06:00:00Z',
         attachments: [{ id: 'att_image', name: 'Screenshot.png', url: IMAGE }],
@@ -21,24 +21,42 @@ async function openBoard(page, { active = false } = {}) {
         commits: [], sessions: [{ id: 'session_test', displayName: 'Codex session', cli: 'codex',
             active, createdAt: '2026-09-11T06:00:00Z' }]
     };
+    const requests = [];
+    const contents = new Map();
     await page.routeWebSocket('**/api/v1/events/ws*', () => {});
     await page.route('**/api/v1/**', async route => {
         const path = new URL(route.request().url()).pathname;
-        if (path === '/api/v1/board/cards/card_test') {
-            if (route.request().method() === 'PUT') card = { ...card, ...route.request().postDataJSON() };
+        requests.push({ path, method: route.request().method(), body: route.request().postDataJSON() });
+        if (path === '/api/v1/board/cards' && route.request().method() === 'POST') {
+            card = { ...card, ...route.request().postDataJSON(), id: 'card_created', key: 'VB-2', attachments: [], comments: [], sessions: [], descriptionRevision: 1 };
             return route.fulfill({ json: card });
         }
-        if (path === '/api/v1/board/cards/card_test/attachments') {
+        if (path === `/api/v1/board/cards/${card.id}`) {
+            if (route.request().method() === 'PUT') {
+                const patch = route.request().postDataJSON();
+                const changed = patch.description !== undefined && patch.description !== card.description;
+                card = { ...card, ...patch, descriptionChanged: changed, descriptionRevision: card.descriptionRevision + (changed ? 1 : 0) };
+            }
+            return route.fulfill({ json: card });
+        }
+        if (path === `/api/v1/board/cards/${card.id}/attachments`) {
             const upload = route.request().postDataJSON();
-            const attachment = { id: 'att_uploaded', name: upload.name, url: upload.dataUrl };
+            const attachment = { id: 'att_uploaded', name: upload.name, url: upload.mimeType?.startsWith('image/') ? upload.dataUrl : '', mimeType: upload.mimeType, bytes: upload.bytes };
+            contents.set(attachment.id, Buffer.from(upload.dataUrl.split(',')[1], 'base64'));
             card.attachments.push(attachment);
             return route.fulfill({ json: attachment });
         }
+        if (path.endsWith('/attachments/att_uploaded/content')) return route.fulfill({ contentType: 'application/octet-stream', body: contents.get('att_uploaded') });
+        if (path.endsWith('/launch')) return route.fulfill({ json: { tabId: 'board_background', cardKey: card.key, selection: card.assignee } });
+        if (path.endsWith('/history')) return route.fulfill({ json: { currentRevision: card.descriptionRevision, revisions: [{ revision: 1, description: DESCRIPTION, createdAt: card.createdAt, author: { label: 'You' }, sessions: [{ sessionId: 'session_test', kind: 'launch', status: 'recorded', createdAt: card.createdAt }] }] } });
         const payloads = {
             '/api/v1/context': { isInGit: true, rootPath: 'C:/board-fixture', launchDirectory: 'C:/board-fixture' },
             '/api/v1/settings': {},
             '/api/v1/environments': { environments: [] },
-            '/api/v1/llm-picker/preferences': { items: [] },
+            '/api/v1/llm-picker/preferences': { items: [
+                { key: 'base:codex', kind: 'base', group: 'Base CLIs', label: 'Codex', cli: 'codex', enabled: true, order: 0 },
+                { key: 'base:claude', kind: 'base', group: 'Base CLIs', label: 'Claude', cli: 'claude', enabled: true, order: 1 }
+            ] },
             '/api/v1/board/columns': { columns: [{ id: 'col_ready', name: 'Ready', position: 0, color: '#3b82f6' }] },
             '/api/v1/board/cards': { cards: [card] }
         };
@@ -46,6 +64,7 @@ async function openBoard(page, { active = false } = {}) {
     });
     await page.goto('/?view=board', { waitUntil: 'domcontentloaded' });
     await expect(page.locator('#app-content [data-view="board"]')).toBeVisible();
+    return requests;
 }
 
 test('board heading matches Settings and description images survive editing and save', async ({ page }) => {
@@ -116,6 +135,113 @@ test('a running agent disables Start work while keeping Save and the session ava
     await expect(page.getByRole('button', { name: 'Agent running', exact: true })).toBeDisabled();
     await expect(page.locator('[data-board-save-card]')).toBeEnabled();
     await expect(page.locator('[data-board-open-session="session_test"]')).toBeEnabled();
+});
+
+test('Start work preserves the board and stores model and effort', async ({ page }) => {
+    const requests = await openBoard(page, { assignee: 'base:codex' });
+    await page.getByText('Description images', { exact: true }).click();
+    await expect(page.locator('.board-card-modal-dialog .modal-title')).toHaveText('VB-1 · Description images');
+    await page.locator('[data-board-launch-model]').selectOption('gpt-6-astra');
+    await page.locator('[data-board-launch-effort]').selectOption('high');
+    // Codex exposes no Start mode: its /plan is a TUI command, and nothing types into a TUI.
+    await expect(page.locator('[data-board-launch-mode]')).toHaveCount(0);
+    await page.locator('[data-board-start-work]').click();
+    await expect(page.locator('[data-board-card-editor]')).toHaveCount(0);
+    await expect(page.locator('#app-content [data-view="board"]')).toBeVisible();
+    expect(requests.find(request => request.method === 'PUT' && request.path.endsWith('/card_test')).body.baseLlmOptions)
+        .toEqual({ model: 'gpt-6-astra', effort: 'high', mode: '' });
+    expect(requests.filter(request => request.path.endsWith('/launch'))).toHaveLength(1);
+    await page.getByText('Description images', { exact: true }).click();
+    await expect(page.locator('[data-board-launch-effort]')).toHaveValue('high');
+});
+
+test('a description edit saves without touching the running agent, and history identifies the session', async ({ page }) => {
+    const requests = await openBoard(page, { active: true });
+    await page.getByText('Description images', { exact: true }).click();
+    await page.getByRole('button', { name: 'Edit description' }).click();
+    await page.locator('[data-board-composer="description"] textarea').fill('New scope');
+    await page.locator('[data-board-save-card]').click();
+    // Saving closes the editor and asks nothing: with a live session on the card there is still
+    // no prompt and no terminal input, because the board has no way to type into an agent.
+    await expect(page.locator('[data-board-card-editor]')).toHaveCount(0);
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
+    expect(requests.filter(request => request.path.endsWith('/notify'))).toHaveLength(0);
+
+    await page.getByText('Description images', { exact: true }).click();
+    await page.locator('[data-board-history-details] > summary').click();
+    await page.locator('.board-history-revision > summary').click();
+    await expect(page.locator('[data-board-history]')).toContainText('Codex session · launch');
+    await expect(page.locator('[data-board-history]')).toContainText('Repro screenshot');
+});
+
+test('new cards queue files until Save and do not launch', async ({ page }) => {
+    const requests = await openBoard(page);
+    await page.getByRole('button', { name: 'New card', exact: true }).click();
+    await page.locator('#board-card-title').fill('File first');
+    await page.locator('[data-board-files]').setInputFiles({ name: 'notes.zip', mimeType: 'application/zip', buffer: Buffer.from('archive') });
+    await expect(page.locator('[data-board-attachments]')).toContainText('Uploads when you save');
+    expect(requests.filter(request => request.path.endsWith('/attachments'))).toHaveLength(0);
+    await page.locator('[data-board-save-card]').click();
+    await expect(page.locator('[data-board-card-editor]')).toHaveCount(0);
+    expect(requests.filter(request => request.path.endsWith('/attachments'))).toHaveLength(1);
+    expect(requests.filter(request => request.path.endsWith('/launch'))).toHaveLength(0);
+    await expect(page.locator('#app-content [data-view="board"]')).toBeVisible();
+});
+
+test('Markdown previews as literal source without HTML execution or external images', async ({ page }) => {
+    await openBoard(page);
+    const external = [];
+    await page.route('https://attacker.invalid/**', route => { external.push(route.request().url()); return route.abort(); });
+    const source = '# CLI Options\n\n**Model settings**\n\n<img src=x onerror="window.__boardXss=1">\n\n'
+        + '![remote](https://attacker.invalid/track)\n\n[bad](javascript:alert(1))';
+    await page.getByText('Description images', { exact: true }).click();
+    await page.locator('[data-board-files]').setInputFiles({ name: 'CLI_OPTIONS.MD', mimeType: 'text/markdown', buffer: Buffer.from(source) });
+    await page.locator('[data-board-view-attachment="att_uploaded"]').click();
+    const viewer = page.getByRole('dialog', { name: 'Attachment preview' });
+    // Markdown shows its own source, so the syntax survives instead of becoming elements.
+    // Nothing parses it, which is why the embedded HTML is inert rather than sanitized.
+    await expect(viewer.locator('.vb-board-attachment-text')).toContainText('# CLI Options');
+    await expect(viewer.locator('.vb-board-attachment-text')).toContainText('**Model settings**');
+    await expect(viewer.locator('.vb-board-attachment-text')).toContainText('<img src=x onerror=');
+    await expect(viewer.locator('[data-attachment-body]')
+        .locator('h1,strong,img,iframe,script,a[href^="javascript:"]')).toHaveCount(0);
+    expect(await page.evaluate(() => window.__boardXss)).toBeUndefined();
+    expect(external).toEqual([]);
+    await viewer.getByRole('button', { name: 'Close attachment' }).click();
+    await expect(page.locator('[data-board-card-editor]')).toBeVisible();
+});
+
+function pdfFixture() {
+    const stream = 'BT /F1 18 Tf 20 100 Td (Board attachment) Tj ET';
+    const objects = [
+        '<< /Type /Catalog /Pages 2 0 R /OpenAction << /S /JavaScript /JS (app.alert("unsafe")) >> >>',
+        '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+        '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 180] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+        '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+        `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`
+    ];
+    let output = '%PDF-1.4\n';
+    const offsets = [0];
+    objects.forEach((object, index) => { offsets.push(Buffer.byteLength(output)); output += `${index + 1} 0 obj\n${object}\nendobj\n`; });
+    const xref = Buffer.byteLength(output);
+    output += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+    offsets.slice(1).forEach(offset => { output += `${String(offset).padStart(10, '0')} 00000 n \n`; });
+    output += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+    return Buffer.from(output);
+}
+
+test('PDF previews render onto a canvas and do not execute document actions', async ({ page }) => {
+    await openBoard(page);
+    let dialogs = 0;
+    page.on('dialog', dialog => { dialogs++; void dialog.dismiss(); });
+    await page.getByText('Description images', { exact: true }).click();
+    await page.locator('[data-board-files]').setInputFiles({ name: 'scope.PDF', mimeType: 'application/pdf', buffer: pdfFixture() });
+    await page.locator('[data-board-view-attachment="att_uploaded"]').click();
+    const viewer = page.getByRole('dialog', { name: 'Attachment preview' });
+    await expect(viewer.locator('canvas')).toBeVisible();
+    await expect(viewer.locator('[data-pdf-position]')).toHaveText('Page 1 of 1');
+    await expect(viewer.locator('iframe,object,embed')).toHaveCount(0);
+    expect(dialogs).toBe(0);
 });
 
 for (const width of [1440, 520]) {

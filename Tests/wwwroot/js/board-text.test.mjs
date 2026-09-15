@@ -122,6 +122,31 @@ test('images resolve through the attachment record, never through the text', () 
     assert.doesNotMatch(renderCommentHtml('![x](attachment:img_1)'), /<img/);
 });
 
+test('image captions cannot be reparsed into tags or corrupt generated attributes', () => {
+    const attachments = [{ id: 'img_1', url: 'data:image/png;base64,AAAA' }];
+    const html = renderCommentHtml('![https://example.com `caption` " onerror="alert(1)](attachment:img_1)', { attachments });
+    assert.equal(html, '<img class="board-image" src="data:image/png;base64,AAAA"'
+        + ' alt="https://example.com `caption` &quot; onerror=&quot;alert(1)" data-board-image="img_1" loading="lazy">');
+    assert.doesNotMatch(html, /<a|<code/);
+});
+
+test('inline code and adjacent parked fragments are never autolinked or interpreted as images', () => {
+    const attachments = [{ id: 'img_1', url: 'data:image/png;base64,AAAA' }];
+    const html = renderCommentHtml('`https://example.com ![x](attachment:img_1)` https://outside.example`code`', { attachments });
+    assert.match(html, /<code class="board-inline-code">https:\/\/example.com !\[x\]\(attachment:img_1\)<\/code>/);
+    assert.equal((html.match(/<a /g) || []).length, 1);
+    assert.match(html, /<\/a><code class="board-inline-code">code<\/code>/);
+    assert.doesNotMatch(html, /<img/);
+    assert.doesNotMatch(html, /\u0000/);
+});
+
+test('inline attachment images accept raster data URLs only', () => {
+    for (const url of ['javascript:alert(1)', 'data:image/svg+xml;base64,PHN2Zz4=',
+        'data:text/html;base64,PHNjcmlwdD4=', 'https://example.com/pixel', '/api/v1/private', 'blob:https://example.com/id']) {
+        assert.doesNotMatch(renderCommentHtml('![x](attachment:img_1)', { attachments: [{ id: 'img_1', url }] }), /<img/, url);
+    }
+});
+
 test('empty and nullish bodies render as nothing', () => {
     assert.equal(renderCommentHtml(''), '');
     assert.equal(renderCommentHtml('   \n  '), '');

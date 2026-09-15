@@ -63,6 +63,19 @@ test('physical Escape reaches the WebSocket peer from xterm', async ({ page }) =
     await expectEscapeDelivered(page, received);
 });
 
+for (const cli of ['codex', 'claude']) {
+    test(`${cli} physical Shift+Tab sends backtab and retains terminal focus`, async ({ page }) => {
+        const received = await openTerminal(page, cli);
+        received.length = 0;
+        await page.keyboard.press('Shift+Tab');
+        await page.keyboard.press('Shift+Tab');
+        await page.keyboard.type('x');
+        await expect.poll(() => received.filter(message => !message.startsWith('__resize__:')))
+            .toEqual(['\x1b[Z', '\x1b[Z', 'x']);
+        await expect(page.locator('.xterm-helper-textarea')).toBeFocused();
+    });
+}
+
 test('Codex Shift+Enter then Escape then typing keeps ordered, distinct input messages', async ({ page }) => {
     const received = await openTerminal(page);
     received.length = 0;

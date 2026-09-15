@@ -1,3 +1,5 @@
+using VibeRails.DTOs;
+
 namespace VibeRails.Services.Board;
 
 /// <summary>A user-facing board rule violation (empty title, last column, bad sha). Maps to 400.</summary>
@@ -34,7 +36,10 @@ public sealed record BoardCardRecord(
     bool Blocked,
     int CommentCount,
     DateTime CreatedUtc,
-    DateTime UpdatedUtc)
+    DateTime UpdatedUtc,
+    int DescriptionRevision = 1,
+    BaseLlmOptions? BaseLlmOptions = null,
+    bool DescriptionChanged = false)
 {
     public string Key => BoardKeys.Format(Number);
 }
@@ -113,7 +118,9 @@ public sealed record NewBoardCard(
     string Priority,
     int? Points,
     IReadOnlyList<string> Tags,
-    bool Blocked);
+    bool Blocked,
+    BaseLlmOptions? BaseLlmOptions = null,
+    BoardAuthor? Author = null);
 
 /// <summary>Partial update. Null = leave untouched. <see cref="ClearAssignee"/> / <see cref="ClearPoints"/> express "set to null".</summary>
 public sealed record BoardCardPatch(
@@ -126,7 +133,12 @@ public sealed record BoardCardPatch(
     bool ClearPoints = false,
     IReadOnlyList<string>? Tags = null,
     bool? Blocked = null,
-    string? ColumnId = null);
+    string? ColumnId = null,
+    int? ExpectedDescriptionRevision = null,
+    BaseLlmOptions? BaseLlmOptions = null,
+    bool ClearBaseLlmOptions = false,
+    BoardAuthor? Author = null,
+    IReadOnlyList<string>? ActiveSessionIds = null);
 
 public static class BoardKeys
 {

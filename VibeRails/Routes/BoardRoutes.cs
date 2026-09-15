@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http.Features;
 using VibeRails.DTOs;
 using VibeRails.Services.Board;
 using VibeRails.Utils;
@@ -14,6 +15,23 @@ public static class BoardRoutes
 {
     public static void Map(WebApplication app)
     {
+        // Attachment uploads are not size-limited. This has to run as middleware, before model
+        // binding reads the body: a RequestSizeLimitAttribute on the endpoint does nothing here,
+        // because only the MVC filter pipeline honours it and a MapPost lambda never runs those —
+        // Kestrel's 30 MB default applied instead. The board is a single local user's own files;
+        // what they can fill is their own disk.
+        app.Use(async (context, next) =>
+        {
+            if (HttpMethods.IsPost(context.Request.Method)
+                && context.Request.Path.StartsWithSegments("/api/v1/board/cards")
+                && context.Request.Path.Value?.EndsWith("/attachments", StringComparison.Ordinal) == true)
+            {
+                var feature = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
+                if (feature is { IsReadOnly: false }) feature.MaxRequestBodySize = null;
+            }
+            await next(context);
+        });
+
         // ---------------------------------------------------------------- columns
 
         app.MapGet("/api/v1/board/columns", (IBoardService board, CancellationToken cancellationToken) =>
@@ -55,6 +73,10 @@ public static class BoardRoutes
             RunAsync(async () => OkOrNotFound(await board.UpdateCardAsync(Project(), card, request, cancellationToken), "Card")))
             .WithName("UpdateBoardCard");
 
+        app.MapGet("/api/v1/board/cards/{card}/history", (IBoardService board, string card, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(await board.GetDescriptionHistoryAsync(Project(), card, cancellationToken), "Card")))
+            .WithName("GetBoardCardDescriptionHistory");
+
         app.MapDelete("/api/v1/board/cards/{card}", (IBoardService board, string card, CancellationToken cancellationToken) =>
             RunAsync(async () => await board.DeleteCardAsync(Project(), card, cancellationToken)
                 ? Results.Ok(new OK("Card deleted"))
@@ -78,6 +100,18 @@ public static class BoardRoutes
         app.MapPost("/api/v1/board/cards/{card}/attachments", (IBoardService board, string card, AddBoardAttachmentRequest request, CancellationToken cancellationToken) =>
             RunAsync(async () => OkOrNotFound(await board.AddAttachmentAsync(Project(), card, request, cancellationToken), "Card")))
             .WithName("AddBoardAttachment");
+
+        app.MapGet("/api/v1/board/cards/{card}/attachments/{attachmentId}/content", (IBoardService board, HttpContext context, string card, string attachmentId, CancellationToken cancellationToken) =>
+            RunAsync(async () =>
+            {
+                var content = await board.GetAttachmentContentAsync(Project(), card, attachmentId, cancellationToken);
+                if (content is null) return NotFound("Attachment", attachmentId);
+                context.Response.Headers.ContentSecurityPolicy = "default-src 'none'; sandbox";
+                context.Response.Headers.XContentTypeOptions = "nosniff";
+                context.Response.Headers.CacheControl = "no-store";
+                return Results.File(content.Content, "application/octet-stream", content.Attachment.Name);
+            }))
+            .WithName("GetBoardAttachmentContent");
 
         app.MapDelete("/api/v1/board/cards/{card}/attachments/{attachmentId}", (IBoardService board, string card, string attachmentId, CancellationToken cancellationToken) =>
             RunAsync(async () => await board.DeleteAttachmentAsync(Project(), card, attachmentId, cancellationToken)

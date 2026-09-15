@@ -67,7 +67,7 @@ public sealed class BoardToolTests : IDisposable
 
         var card = await _tool.GetBoardCard("vb-1", Ct);
         Assert.StartsWith("VB-1: Fix the race\nLane: Backlog · Priority: medium · Assignee: unassigned", card);
-        Assert.Contains("Description:\nTwo 401s overlap.", card);
+        Assert.Contains("Description (revision 1):\nTwo 401s overlap.", card);
         Assert.Contains("Comments (0):\n(none)", card);
 
         Assert.Equal("Updated VB-1: Fix the race (critical, blocked)", await _tool.UpdateBoardCard("VB-1", priority: "critical", points: 5, blocked: true, cancellationToken: Ct));
@@ -165,6 +165,50 @@ public sealed class BoardToolTests : IDisposable
         Assert.Contains("] You: User note", result);
         var stored = (await _store.GetCardDetailAsync(_project, "VB-1", Ct))!;
         Assert.Equal("Agent", stored.Comments.Single(comment => comment.Body == "Old agent note").Author.Label);
+    }
+
+    [Fact]
+    public async Task ReadingAndEditingCard_RecordsExactRevisionAndAgentSession()
+    {
+        await _tool.CreateBoardCard("A", "first scope", cancellationToken: Ct);
+        _resolver.CurrentSessionId = "sess-reader";
+        Assert.Contains("Description (revision 1):\nfirst scope", await _tool.GetBoardCard("VB-1", Ct));
+        var history = (await _store.GetDescriptionHistoryAsync(_project, "VB-1", Ct))!;
+        var read = Assert.Single(history.Revisions[0].Sessions);
+        Assert.Equal("read", read.Kind);
+        Assert.Equal("sess-reader", read.SessionId);
+        // Reading records the read but never links. Linking on read bound a browsing session to
+        // whatever card it happened to open first, which then reported "Agent running" and
+        // refused Start work on that card for as long as the terminal lived.
+        Assert.Null(await _store.FindSessionLinkAsync("sess-reader", Ct));
+        await _tool.UpdateBoardCard("VB-1", description: "second scope", cancellationToken: Ct);
+        Assert.NotNull(await _store.FindSessionLinkAsync("sess-reader", Ct));
+        history = (await _store.GetDescriptionHistoryAsync(_project, "VB-1", Ct))!;
+        Assert.Equal("agent", history.Revisions[0].Source);
+        Assert.Equal("sess-reader", history.Revisions[0].Author.SessionId);
+        Assert.DoesNotContain(history.Revisions[0].Sessions, s => s.Kind == "notification" || s.Kind == "read");
+        await _tool.GetBoardCard("VB-1", Ct);
+        history = (await _store.GetDescriptionHistoryAsync(_project, "VB-1", Ct))!;
+        Assert.Contains(history.Revisions[0].Sessions, s => s.Kind == "read" && s.SessionId == "sess-reader");
+        Assert.Equal("first scope", history.Revisions[1].Description);
+    }
+
+    [Fact]
+    public async Task ReadingAnotherCard_NotesTheReadersOwnCard_WithoutClaimingTheOneItRead()
+    {
+        await _tool.CreateBoardCard("A", cancellationToken: Ct);
+        await _tool.CreateBoardCard("B", cancellationToken: Ct);
+        _resolver.CurrentSessionId = "sess-working-vb1";
+        await _store.LinkSessionAsync(_project, "VB-1", "sess-working-vb1", "tab-1", "base:claude", "claude", "Claude · VB-1", BoardSessionRecord.LaunchOrigin, Ct);
+
+        Assert.StartsWith("VB-2: B", await _tool.GetBoardCard("VB-2", Ct));
+
+        var read = Assert.Single((await _store.GetDescriptionHistoryAsync(_project, "VB-2", Ct))!.Revisions[0].Sessions);
+        Assert.Equal("read", read.Kind);
+        Assert.Equal("working VB-1", read.Message);
+        Assert.Empty((await _store.GetCardDetailAsync(_project, "VB-2", Ct))!.Sessions);
+        Assert.Equal((await _store.FindCardAsync(_project, "VB-1", Ct))!.Id,
+            (await _store.FindSessionLinkAsync("sess-working-vb1", Ct))!.CardId);
     }
 
     private sealed class FakeResolver(string project) : IBoardProjectResolver

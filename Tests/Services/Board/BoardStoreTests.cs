@@ -177,7 +177,7 @@ public sealed class BoardStoreTests : IDisposable
         await _store.AddCommentAsync(_project, a.Id, BoardAuthor.User(), "note", Ct);
         await _store.LinkSessionAsync(_project, a.Id, "session-1", "tab-1", "base:claude", "claude", "Claude · VB-1", BoardSessionRecord.LaunchOrigin, Ct);
         await _store.AddCommitAsync(_project, a.Id, "0123456789abcdef", "Rob", "msg", DateTime.UtcNow, Snapshot(), Ct);
-        await _store.AddAttachmentAsync(_project, a.Id, "shot.png", "image/png", 10, "data:image/png;base64,AAAA", Ct);
+        await _store.AddAttachmentContentAsync(_project, a.Id, "shot.png", "image/png", [137, 80, 78, 71, 13, 10, 26, 10], Ct);
 
         Assert.True(await _store.DeleteCardAsync(_project, a.Id, Ct));
         Assert.False(await _store.DeleteCardAsync(_project, a.Id, Ct));

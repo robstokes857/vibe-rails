@@ -1,3 +1,4 @@
+import { renderLlmModelOptions } from './llm-model-catalog.js';
 import { getEnabledLlmItems, mountLlmPicker } from './pickers/llm-picker.js';
 import { isConfirmDialogOpen } from './utils.js';
 import {
@@ -1007,32 +1008,7 @@ export class EnvironmentController {
     }
 
     renderAntigravityModelOptions(selectedModel) {
-        const selected = (selectedModel || '').trim();
-        // Hand-maintained pinned list.
-        // Values are the exact display strings `agy models` prints and that `--model` accepts,
-        // spaces + parens included (e.g. "Gemini 3.5 Flash (Low)"). `agy models` is an
-        // interactive picker with no scriptable/JSON output, so this list is updated by hand.
-        const options = [
-            ['', 'Default (Antigravity recommended)'],
-            ['Gemini 3.5 Flash (Medium)', 'Gemini 3.5 Flash (Medium)'],
-            ['Gemini 3.5 Flash (High)', 'Gemini 3.5 Flash (High)'],
-            ['Gemini 3.5 Flash (Low)', 'Gemini 3.5 Flash (Low)'],
-            ['Gemini 3.1 Pro (Low)', 'Gemini 3.1 Pro (Low)'],
-            ['Gemini 3.1 Pro (High)', 'Gemini 3.1 Pro (High)'],
-            ['Claude Sonnet 4.6 (Thinking)', 'Claude Sonnet 4.6 (Thinking)'],
-            ['Claude Opus 4.6 (Thinking)', 'Claude Opus 4.6 (Thinking)'],
-            ['GPT-OSS 120B (Medium)', 'GPT-OSS 120B (Medium)']
-        ];
-        const known = new Set(options.map(([value]) => value));
-        const rendered = options.map(([value, label]) =>
-            `<option value="${this.app.escapeHtml(value)}" ${selected === value ? 'selected' : ''}>${this.app.escapeHtml(label)}</option>`
-        );
-
-        if (selected && !known.has(selected)) {
-            rendered.push(`<option value="${this.app.escapeHtml(selected)}" selected>${this.app.escapeHtml(selected)} (custom)</option>`);
-        }
-
-        return rendered.join('');
+        return renderLlmModelOptions('antigravity', selectedModel);
     }
 
     buildAntigravityCustomArgs(settings) {
@@ -1257,26 +1233,7 @@ export class EnvironmentController {
     }
 
     renderCodexModelOptions(selectedModel) {
-        const selected = this.normalizeCodexModel(selectedModel);
-        // Hand-maintained pinned list. Add a newly released model or drop a retired one here.
-        const options = [
-            ['', 'Default (Codex recommended)'],
-            ['gpt-6-astra', 'gpt-6-astra'],
-            ['gpt-5.6-sol', 'gpt-5.6-sol'],
-            ['gpt-5.6-terra', 'gpt-5.6-terra'],
-            ['gpt-5.6-luna', 'gpt-5.6-luna'],
-            ['gpt-5.5', 'gpt-5.5']
-        ];
-        const known = new Set(options.map(([value]) => value));
-        const rendered = options.map(([value, label]) =>
-            `<option value="${this.app.escapeHtml(value)}" ${selected === value ? 'selected' : ''}>${this.app.escapeHtml(label)}</option>`
-        );
-
-        if (selected && !known.has(selected)) {
-            rendered.push(`<option value="${this.app.escapeHtml(selected)}" selected>${this.app.escapeHtml(selected)} (custom)</option>`);
-        }
-
-        return rendered.join('');
+        return renderLlmModelOptions('codex', selectedModel);
     }
 
     normalizeClaudeModel(model) {
@@ -1284,80 +1241,11 @@ export class EnvironmentController {
     }
 
     renderClaudeModelOptions(selectedModel) {
-        const selected = this.normalizeClaudeModel(selectedModel);
-        // Hand-maintained pinned list. Add a newly released model or drop a retired one here.
-        const options = [
-            ['', 'Default (Claude recommended)'],
-            ['claude-fable-5-1', 'claude-fable-5-1'],
-            ['claude-fable-5', 'claude-fable-5'],
-            ['claude-opus-5', 'claude-opus-5'],
-            ['claude-opus-4-8', 'claude-opus-4-8'],
-            ['claude-opus-4-7', 'claude-opus-4-7'],
-            ['claude-sonnet-5', 'claude-sonnet-5'],
-            ['claude-sonnet-4-6', 'claude-sonnet-4-6'],
-            ['claude-haiku-4-5', 'claude-haiku-4-5']
-        ];
-        const known = new Set(options.map(([value]) => value));
-        const rendered = options.map(([value, label]) =>
-            `<option value="${this.app.escapeHtml(value)}" ${selected === value ? 'selected' : ''}>${this.app.escapeHtml(label)}</option>`
-        );
-
-        if (selected && !known.has(selected)) {
-            rendered.push(`<option value="${this.app.escapeHtml(selected)}" selected>${this.app.escapeHtml(selected)} (custom)</option>`);
-        }
-
-        return rendered.join('');
+        return renderLlmModelOptions('claude', selectedModel);
     }
 
     renderCopilotModelOptions(selectedModel) {
-        const selected = (selectedModel || '').trim();
-        // Hand-maintained pinned list. Availability varies by Copilot plan/policy, so these are suggestions;
-        // an unavailable model errors at launch ("is not available"), and unknown saved
-        // values survive via the `(custom)` fallback below.
-        const options = [
-            ['', 'Default (auto)'],
-            ['claude-fable-5', 'claude-fable-5'],
-            ['claude-opus-5', 'claude-opus-5'],
-            ['claude-sonnet-5', 'claude-sonnet-5'],
-            ['claude-sonnet-4.6', 'claude-sonnet-4.6'],
-            ['claude-sonnet-4.5', 'claude-sonnet-4.5'],
-            ['claude-haiku-4.5', 'claude-haiku-4.5'],
-            ['claude-opus-4.8', 'claude-opus-4.8'],
-            ['claude-opus-4.8-fast', 'claude-opus-4.8-fast'],
-            ['claude-opus-4.7', 'claude-opus-4.7'],
-            ['claude-opus-4.6', 'claude-opus-4.6'],
-            ['claude-opus-4.5', 'claude-opus-4.5'],
-            ['gpt-5.6-sol', 'gpt-5.6-sol'],
-            ['gpt-5.6-terra', 'gpt-5.6-terra'],
-            ['gpt-5.6-luna', 'gpt-5.6-luna'],
-            ['gpt-5.5', 'gpt-5.5'],
-            ['gpt-5.4', 'gpt-5.4'],
-            ['gpt-5.4-mini', 'gpt-5.4-mini'],
-            ['gpt-5.4-nano', 'gpt-5.4-nano'],
-            ['gpt-5.3-codex', 'gpt-5.3-codex'],
-            ['gpt-5-mini', 'gpt-5-mini'],
-            ['gemini-3.7-flash', 'gemini-3.7-flash'],
-            ['gemini-3.6-flash', 'gemini-3.6-flash'],
-            ['gemini-3.5-flash', 'gemini-3.5-flash'],
-            ['gemini-3.1-pro', 'gemini-3.1-pro'],
-            ['mai-code-1.1-flash', 'mai-code-1.1-flash'],
-            ['mai-code-1-flash', 'mai-code-1-flash'],
-            ['raptor-mini', 'raptor-mini'],
-            ['kimi-k2.7-code', 'kimi-k2.7-code'],
-            ['kimi-k3', 'kimi-k3'],
-            ['grok-4.6', 'grok-4.6'],
-            ['grok-4.5', 'grok-4.5'],
-        ];
-        const known = new Set(options.map(([value]) => value));
-        const rendered = options.map(([value, label]) =>
-            `<option value="${this.app.escapeHtml(value)}" ${selected === value ? 'selected' : ''}>${this.app.escapeHtml(label)}</option>`
-        );
-
-        if (selected && !known.has(selected)) {
-            rendered.push(`<option value="${this.app.escapeHtml(selected)}" selected>${this.app.escapeHtml(selected)} (custom)</option>`);
-        }
-
-        return rendered.join('');
+        return renderLlmModelOptions('copilot', selectedModel);
     }
 
     buildCopilotCustomArgs(settings) {
@@ -1478,39 +1366,7 @@ export class EnvironmentController {
     }
 
     renderOpencodeModelOptions(selectedModel) {
-        const selected = (selectedModel || '').trim();
-        // Hand-maintained pinned list.
-        // OpenCode model IDs are `provider/model` (e.g. anthropic/claude-sonnet-4-5). Verify the
-        // current catalog with `opencode models` and refresh when providers ship/retire models;
-        // unknown saved values survive via the `(custom)` fallback below.
-        const options = [
-            ['', 'Default (OpenCode recommended)'],
-            ['anthropic/claude-opus-5', 'anthropic/claude-opus-5'],
-            ['anthropic/claude-sonnet-5', 'anthropic/claude-sonnet-5'],
-            ['anthropic/claude-opus-4-5', 'anthropic/claude-opus-4-5'],
-            ['anthropic/claude-sonnet-4-5', 'anthropic/claude-sonnet-4-5'],
-            ['openai/gpt-5.6', 'openai/gpt-5.6'],
-            ['openai/gpt-5.5', 'openai/gpt-5.5'],
-            ['openai/gpt-5.2', 'openai/gpt-5.2'],
-            ['openai/gpt-5.1-codex', 'openai/gpt-5.1-codex'],
-            ['google/gemini-3-pro', 'google/gemini-3-pro'],
-            ['zai/glm-5.2', 'zai/glm-5.2'],
-            ['zai-coding-plan/glm-5.3', 'zai-coding-plan/glm-5.3'],
-            ['deepseek/deepseek-v4-pro', 'deepseek/deepseek-v4-pro'],
-            ['moonshotai/kimi-k3', 'moonshotai/kimi-k3'],
-            ['xai/grok-4.6', 'xai/grok-4.6'],
-            ['opencode/gpt-5.1-codex', 'opencode/gpt-5.1-codex (Zen)'],
-        ];
-        const known = new Set(options.map(([value]) => value));
-        const rendered = options.map(([value, label]) =>
-            `<option value="${this.app.escapeHtml(value)}" ${selected === value ? 'selected' : ''}>${this.app.escapeHtml(label)}</option>`
-        );
-
-        if (selected && !known.has(selected)) {
-            rendered.push(`<option value="${this.app.escapeHtml(selected)}" selected>${this.app.escapeHtml(selected)} (custom)</option>`);
-        }
-
-        return rendered.join('');
+        return renderLlmModelOptions('opencode', selectedModel);
     }
 
     buildOpencodeCustomArgs(settings) {

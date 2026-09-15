@@ -228,7 +228,9 @@ namespace VibeRails.DTOs
         string? ActiveSessionId,
         string? ActiveTabId,
         DateTime CreatedAt,
-        DateTime UpdatedAt);
+        DateTime UpdatedAt,
+        int DescriptionRevision = 1,
+        BaseLlmOptions? BaseLlmOptions = null);
     public record BoardCardListResponse(List<BoardCardSummaryResponse> Cards);
     public record BoardCardResponse(
         string Id,
@@ -250,7 +252,10 @@ namespace VibeRails.DTOs
         List<BoardCommentDto> Comments,
         List<BoardCommitDto> Commits,
         List<BoardSessionDto> Sessions,
-        List<BoardAttachmentDto> Attachments);
+        List<BoardAttachmentDto> Attachments,
+        int DescriptionRevision = 1,
+        BaseLlmOptions? BaseLlmOptions = null,
+        bool DescriptionChanged = false);
     public record CreateBoardCardRequest(
         string? Title = null,
         string? ColumnId = null,
@@ -259,7 +264,8 @@ namespace VibeRails.DTOs
         string? Priority = null,
         JsonElement Points = default,
         List<string>? Tags = null,
-        bool? Blocked = null);
+        bool? Blocked = null,
+        BaseLlmOptions? BaseLlmOptions = null);
     public record UpdateBoardCardRequest(
         string? Title = null,
         string? ColumnId = null,
@@ -268,7 +274,17 @@ namespace VibeRails.DTOs
         string? Priority = null,
         JsonElement Points = default,
         List<string>? Tags = null,
-        bool? Blocked = null);
+        bool? Blocked = null,
+        int? ExpectedDescriptionRevision = null,
+        BaseLlmOptions? BaseLlmOptions = null,
+        bool ClearBaseLlmOptions = false);
+    public record BoardDescriptionSessionDto(string SessionId, string Kind, string Status,
+        DateTime CreatedAt, DateTime UpdatedAt, string? Message = null);
+    public record BoardDescriptionRevisionDto(int Revision, string Description, DateTime CreatedAt,
+        string Source, BoardAuthorDto Author, List<BoardDescriptionSessionDto> Sessions,
+        List<BoardAttachmentDto> Attachments);
+    public record BoardDescriptionHistoryResponse(string CardId, int CurrentRevision,
+        List<BoardDescriptionRevisionDto> Revisions);
     public record MoveBoardCardRequest(string? ColumnId = null, int? Position = null);
     public record AddBoardCommentRequest(string? Body = null);
     public record AddBoardAttachmentRequest(string? Name = null, string? DataUrl = null, long? Bytes = null, string? MimeType = null);
@@ -928,12 +944,17 @@ namespace VibeRails.DTOs
         bool MakeRemote = false,
         string? InitialPrompt = null,
         string? ResumeSessionId = null,
-        string? ResumeSummary = null
+        string? ResumeSummary = null,
+        BaseLlmOptions? BaseLlmOptions = null,
+        bool AuthorizeBoardTools = false
     );
 
     public record TerminalInputRequest(
         string Text,
-        bool Submit = false
+        bool Submit = false,
+        string? ExpectedSessionId = null,
+        int EscapeCount = 0,
+        bool Paste = false
     );
 
     public record TerminalInputResponse(
@@ -1737,6 +1758,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(List<TerminalTabStatusResponse>))]
     [JsonSerializable(typeof(TerminalTabListResponse))]
     [JsonSerializable(typeof(StartTerminalRequest))]
+    [JsonSerializable(typeof(BaseLlmOptions))]
     [JsonSerializable(typeof(TerminalInputRequest))]
     [JsonSerializable(typeof(TerminalInputResponse))]
     [JsonSerializable(typeof(TerminalSnapshotResponse))]
@@ -1826,6 +1848,11 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(BoardCardResponse))]
     [JsonSerializable(typeof(CreateBoardCardRequest))]
     [JsonSerializable(typeof(UpdateBoardCardRequest))]
+    [JsonSerializable(typeof(BoardDescriptionSessionDto))]
+    [JsonSerializable(typeof(List<BoardDescriptionSessionDto>))]
+    [JsonSerializable(typeof(BoardDescriptionRevisionDto))]
+    [JsonSerializable(typeof(List<BoardDescriptionRevisionDto>))]
+    [JsonSerializable(typeof(BoardDescriptionHistoryResponse))]
     [JsonSerializable(typeof(MoveBoardCardRequest))]
     [JsonSerializable(typeof(AddBoardCommentRequest))]
     [JsonSerializable(typeof(AddBoardAttachmentRequest))]
@@ -1858,5 +1885,3 @@ namespace VibeRails.DTOs
     {
     }
 }
-
-

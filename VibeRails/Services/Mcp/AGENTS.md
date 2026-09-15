@@ -59,7 +59,8 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 | `python_script_signing_help` | `PythonScriptTool.PythonScriptSigningHelp` | Explains signing and lists scripts plus explicit MCP exposure. |
 | `list_board_columns` | `BoardTool.ListBoardColumns` | Lanes of this project's kanban board with WIP limits and card counts. |
 | `list_board_cards` | `BoardTool.ListBoardCards` | Cards on the board (key, lane, priority, title, assignee, comment count, session open); optional lane/assignee filters. |
-| `get_board_card` | `BoardTool.GetBoardCard` | One card in full: fields, description, comments, linked commits, sessions, attachment names. `card` omitted = the card this terminal was launched for. |
+| `get_board_card` | `BoardTool.GetBoardCard` | One card in full: fields, description, comments, linked commits, sessions, attachment ids/names/types/sizes. `card` omitted = the card this terminal was launched for. Reading never links the session to the card. |
+| `read_board_attachment` | `BoardTool.ReadBoardAttachment` | Bounded UTF-8 Markdown/TXT attachment content; accepts attachment id, optional card, character offset and maximum length (20,000 default; 100,000 limit). Card/project scoped, including retained history files. |
 | `create_board_card` | `BoardTool.CreateBoardCard` | New card (title, description, lane, priority, tags). |
 | `update_board_card` | `BoardTool.UpdateBoardCard` | Partial field update (title, description, priority, points, tags, blocked). |
 | `move_board_card` | `BoardTool.MoveBoardCard` | Move a card to a lane (by name or id), optionally at a position. |
@@ -97,7 +98,8 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
   via the per-launch `mcp_servers.viberails-mcp.env_vars` override, because stdio inheritance is
   filtered. Values are not persisted in shared config. See the [official MCP reference](https://developers.openai.com/codex/mcp/).
 - **Capability boundary**: read / append / move / link only — there is deliberately no delete
-  tool, no attachment tool, and the only process spawned is `git` with a regex-validated hex sha
+  tool or attachment-upload tool. Attachment reads return untrusted task data, never execute it;
+  PDF, images and other binary files are opened in the board viewer. The only process spawned is `git` with a regex-validated hex sha
   via an argument list (`Services/Git/GitCli.cs`). Failures return `FAIL: …` sentences; detail
   goes to the file log. Worst case from an injected prompt is board vandalism, visible and
   reversible in the UI.
@@ -107,6 +109,26 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
   registered there: its constructor runs the full migration pass on every spawn.
 - The "Start work" launch prompt (`BoardPromptComposer`) tells the LLM to begin with
   `get_board_card`, record progress with `add_board_comment`, move the card, and link commits.
+  It includes the description revision used at launch. `get_board_card` records that session's
+  read of the exact returned revision and includes the revision in its output, but **never links
+  the session to the card it read** (2026-09-15). A session links to exactly one card, so linking
+  on read bound a general session to whatever it happened to browse first: that card then showed
+  "Agent running", refused Start work for as long as the terminal lived, and the card the session
+  actually worked never got the link. Writes — create, update, move, comment, link — still
+  auto-link. A read from a session working another card is recorded with that card's key, so the
+  card that was read still shows who read it. `read_board_attachment` does not link either. Agent
+  description edits are attributed to the current session and never interrupt the TUI.
+- **Board launch authorization (2026-09-14)**: Start work sets the typed, false-by-default
+  `AuthorizeBoardTools` marker for that session and explicitly authorizes the Board workflow in
+  the prompt for every provider. `Terminal/Commands/BoardMcpAuthorization.cs` grants only the nine
+  Board tools listed above; adding another MCP tool never automatically authorizes it. Supported
+  CLIs receive exact per-tool launch arguments or environment entries; Antigravity receives only
+  the prompt because no narrow native grant was verified. See
+  [Terminal launch authorization](../Terminal/AGENTS.md#board-launch-options-and-input-sequences-2026-09-14).
+  This is the requested Board-specific exception to the Environments editor's YOLO-only policy,
+  not a granular permission editor or a global policy change. No physical CLI config is rewritten;
+  selected provider modes and managed policies can still restrict calls. Validation used CLI help,
+  documentation and regression tests; no live provider session or deployment was performed.
 
 Dynamic Python tools are stored in `~/.vibe_rails/python_script_mcp.json`. They are appended to the
 static tool collection through `WithPythonScriptTools()` in both transports. List and call handlers

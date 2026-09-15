@@ -324,10 +324,7 @@ public sealed class Terminal : IAsyncDisposable
         await _stdinWriteGate.WaitAsync(ct);
         try
         {
-            var ptyBytes = EncodeBareLineFeedAsWin32ShiftEnter
-                ? _codexWindowsInputRewriter.Rewrite(buffer)
-                : buffer;
-            await WriteBytesCoreAsync(ptyBytes, ct);
+            await WriteInputBytesCoreAsync(buffer, ct);
         }
         finally
         {
@@ -345,19 +342,60 @@ public sealed class Terminal : IAsyncDisposable
         await _stdinWriteGate.WaitAsync(ct);
         try
         {
-            // Sending a Win32 Escape before the first rewritten LF would itself
-            // switch ConPTY into its persistent Win32-input parsing behavior.
-            // Read the state under the same gate that advances and writes it.
-            var bytes = EncodeBareLineFeedAsWin32ShiftEnter && _codexWindowsInputRewriter.HasRewrittenLineFeed
-                ? s_win32EscapeKeyBytes
-                : s_escapeKeyBytes;
-            _codexWindowsInputRewriter.BreakInputSequence();
-            await WriteBytesCoreAsync(bytes, ct);
+            await WriteEscapeKeyCoreAsync(ct);
         }
         finally
         {
             _stdinWriteGate.Release();
         }
+    }
+
+    /// <summary>
+    /// Reserves stdin for a whole automated sequence, including its waits. The scoped writer
+    /// bypasses gate acquisition; ordinary raw, routed and physical-key writes all wait here.
+    /// </summary>
+    internal async Task RunInputBatchAsync(Func<InputBatch, CancellationToken, Task> action, CancellationToken ct = default)
+    {
+        await _stdinWriteGate.WaitAsync(ct);
+        var writer = new InputBatch(this);
+        try { await action(writer, ct); }
+        finally
+        {
+            writer.Close();
+            _stdinWriteGate.Release();
+        }
+    }
+
+    internal sealed class InputBatch(Terminal terminal)
+    {
+        private bool _closed;
+        internal void Close() => _closed = true;
+        internal Task WriteInputBytesAsync(ReadOnlyMemory<byte> bytes, CancellationToken ct)
+        {
+            ObjectDisposedException.ThrowIf(_closed, this);
+            return terminal.WriteInputBytesCoreAsync(bytes, ct);
+        }
+        internal Task WriteEscapeKeyAsync(CancellationToken ct)
+        {
+            ObjectDisposedException.ThrowIf(_closed, this);
+            return terminal.WriteEscapeKeyCoreAsync(ct);
+        }
+    }
+
+    private Task WriteInputBytesCoreAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct)
+    {
+        var ptyBytes = EncodeBareLineFeedAsWin32ShiftEnter ? _codexWindowsInputRewriter.Rewrite(buffer) : buffer;
+        return WriteBytesCoreAsync(ptyBytes, ct);
+    }
+
+    private Task WriteEscapeKeyCoreAsync(CancellationToken ct)
+    {
+        // Sending Win32 Escape before the first rewritten LF would switch ConPTY's parser.
+        // Both the state check and physical write run under the caller's stdin reservation.
+        var bytes = EncodeBareLineFeedAsWin32ShiftEnter && _codexWindowsInputRewriter.HasRewrittenLineFeed
+            ? s_win32EscapeKeyBytes : s_escapeKeyBytes;
+        _codexWindowsInputRewriter.BreakInputSequence();
+        return WriteBytesCoreAsync(bytes, ct);
     }
 
     private async Task WriteBytesCoreAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct)
