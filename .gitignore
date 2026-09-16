@@ -427,6 +427,8 @@ bin_check/
 *.db-shm
 *.db-journal
 *.sqlite
+# This source-project directory is not a database file (Windows ignores case).
+!/VibeRails.Data.Sqlite/
 *.sqlite3
 *.sqlite-wal
 *.sqlite-shm

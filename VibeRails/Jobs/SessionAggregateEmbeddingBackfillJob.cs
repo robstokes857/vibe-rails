@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using Microsoft.Data.Sqlite;
+using VibeRails.Data.Abstractions;
 using VibeRails.DB;
 using VibeRails.Services;
 using VibeRails.Services.BertV2;
@@ -13,10 +13,6 @@ public sealed class SessionAggregateEmbeddingBackfillJob(
 {
     private const int BatchSize = 5;
 
-    // SQLITE_BUSY / SQLITE_LOCKED are environmental and will pass on retry.
-    // Don't burn through BertEmbedFailureSkipThreshold counting them.
-    private static bool IsTransientSqliteError(SqliteException ex)
-        => ex.SqliteErrorCode is 5 or 6;
 
     protected override TimeSpan Interval => TimeSpan.FromMinutes(5);
     protected override JobPriority Priority => JobPriority.Med;
@@ -24,7 +20,7 @@ public sealed class SessionAggregateEmbeddingBackfillJob(
     protected override async Task ExecuteJob(CancellationToken cancellationToken)
     {
         using var scope = scopeFactory.CreateScope();
-        var repository = scope.ServiceProvider.GetRequiredService<IRepository>();
+        var repository = scope.ServiceProvider.GetRequiredService<IEmbeddingProgressStore>();
 
         var sessionIds = await repository.GetUnaggregatedEndedSessionIdsAsync(BatchSize, cancellationToken);
         if (sessionIds.Count == 0)
@@ -76,13 +72,17 @@ public sealed class SessionAggregateEmbeddingBackfillJob(
                 {
                     throw;
                 }
-                catch (SqliteException ex) when (IsTransientSqliteError(ex))
+                // The raw SqliteException arm is deliberate belt-and-braces: the repository does not
+                // yet translate every method, and misclassifying a lock as permanent costs the
+                // session its aggregate embedding forever. Remove it once the boundary is complete.
+                catch (Exception ex) when (ex is StorageException { IsTransient: true }
+                    or Microsoft.Data.Sqlite.SqliteException { SqliteErrorCode: 5 or 6 })
                 {
                     // Transient contention — leave the session unmarked so the next
                     // tick retries it without consuming a failure attempt.
                     Serilog.Log.Warning(
                         ex,
-                        "[Job:SessionAggregateEmbeddingBackfillJob] Session deferred due to transient SQLite contention. sessionId={SessionId} durationMs={DurationMs}",
+                        "[Job:SessionAggregateEmbeddingBackfillJob] Session deferred due to transient storage contention. sessionId={SessionId} durationMs={DurationMs}",
                         sessionId, sessionSw.ElapsedMilliseconds);
                 }
                 catch (Exception ex)

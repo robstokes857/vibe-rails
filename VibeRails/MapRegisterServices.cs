@@ -1,4 +1,5 @@
 using VibeRails.Auth;
+using VibeRails.Data.Sqlite;
 using VibeRails.Jobs;
 using VibeRails.Routes;
 using VibeRails.Services;
@@ -100,20 +101,12 @@ namespace VibeRails
                 var settings = sp.GetRequiredService<IBertSettings>();
                 return new BertV2BgeEmbedder(settings.ModelPath, settings.VocabPath);
             });
-            serviceCollection.AddSingleton<IBertV2VectorStore>(sp =>
-            {
-                var settings = sp.GetRequiredService<IBertSettings>();
-                return new BertV2VectorStore(Path.Combine(settings.DataDirectory, BertSearchSchema.DatabaseFileName));
-            });
-            serviceCollection.AddSingleton<IBertV2SessionVectorStore>(sp =>
-            {
-                var settings = sp.GetRequiredService<IBertSettings>();
-                return new BertV2SessionVectorStore(Path.Combine(settings.DataDirectory, BertSearchSchema.DatabaseFileName));
-            });
+            serviceCollection.AddSqliteStorage(sp => new SqliteStoragePaths(
+                ParserConfigs.GetStatePath(),
+                Path.Combine(sp.GetRequiredService<IBertSettings>().DataDirectory, BertSearchSchema.DatabaseFileName)));
             serviceCollection.AddSingleton<IBertV2InputService, BertV2InputService>();
             serviceCollection.AddSingleton<IBertV2SessionEmbeddingService, BertV2SessionEmbeddingService>();
             serviceCollection.AddScoped<IBertV2InputDBService, BertV2InputDBService>();
-            serviceCollection.AddSingleton<IBertSearchDbService, BertSearchDbService>();
             serviceCollection.AddSingleton<IBertDocumentResponseMapper, BertDocumentResponseMapper>();
             serviceCollection.AddSingleton<IBertCaptureQueryService, BertCaptureQueryService>();
             serviceCollection.AddSingleton<IBertSearchStrategy, SemanticBertSearchStrategy>();
@@ -149,22 +142,7 @@ namespace VibeRails
             serviceCollection.AddSingleton<ICompressionCaptureSink, CompressionCaptureSinkAdapter>();
             // Required by every proxy route: exchange logging has no settings/UI gate.
             serviceCollection.AddSingleton<ILlmProxyExchangeSink, LlmProxyExchangeSinkAdapter>();
-            // Its own database file, never state.db: one exchange is the whole conversation plus
-            // the response, and the CLI resends that history every turn. See LlmExchangeLogStore.
-            serviceCollection.AddSingleton<ILlmExchangeLogStore>(_ => new LlmExchangeLogStore(
-                $"Data Source={Path.Combine(Path.GetDirectoryName(ParserConfigs.GetStatePath()) ?? ".", "proxy_exchanges.db")};Mode=ReadWriteCreate"));
-            serviceCollection.AddSingleton<ITokenSavingsStore>(_ => new TokenSavingsStore(
-                $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared"));
-            // Files the user excluded from Code quality scans (Rules page). Singleton for the
-            // same reason as the other state.db stores: one writer, connection-per-operation.
-            serviceCollection.AddSingleton<ICodeAnalyzerIgnoreStore>(_ => new CodeAnalyzerIgnoreStore(
-                $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared"));
-            // Kanban board (Services/Board). Own store on state.db like the others above — it owns its
-            // schema so the stdio MCP host can construct the same store without Repository's migration
-            // pass. The launch service is root-only because it drives the in-process tab host; the live
-            // session probe is what turns "linked session" into "open tab" on the board.
-            serviceCollection.AddSingleton<Services.Board.IBoardStore>(_ => new Services.Board.BoardStore(
-                $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared"));
+            // SQLite stores are registered together above; board orchestration stays in the host.
             serviceCollection.AddSingleton<Services.Board.IBoardProjectResolver, Services.Board.BoardProjectResolver>();
             serviceCollection.AddSingleton<Services.Board.IBoardCommitService, Services.Board.BoardCommitService>();
             serviceCollection.AddScoped<Services.Board.IBoardService, Services.Board.BoardService>();
@@ -195,10 +173,6 @@ namespace VibeRails
                     "[Jobs] Automation scheduler NOT registered: VIBERAILS_TEST_FAKE_CLI=1 marks this as a UI-test host");
             }
             serviceCollection.AddScoped<IJobService, JobService>();
-            // Singleton for the same reason as the savings tally: one ordered writer, so concurrent
-            // relays serialize capture inserts, re-sight counts, and clears before reaching SQLite.
-            serviceCollection.AddSingleton<ICompressionCaptureStore>(_ => new CompressionCaptureStore(
-                $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared"));
             serviceCollection.AddScoped<IAgentTerminalToolService, AgentTerminalToolService>();
             serviceCollection.AddScoped<ILlmPickerPreferenceService, LlmPickerPreferenceService>();
             serviceCollection.AddScoped<IAutomationNavPreferenceService, AutomationNavPreferenceService>();
@@ -364,6 +338,8 @@ namespace VibeRails
                         .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
                     serviceCollection.AddHostedService<TokenSavingsPublishJob>();
                     serviceCollection.AddHostedService<SessionDataDrainJob>();
+                    serviceCollection.AddHostedService<DataRetentionJob>();
+                    serviceCollection.AddHostedService<SearchIndexMaintenanceJob>();
                 }
             }
 

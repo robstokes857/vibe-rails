@@ -29,8 +29,8 @@ public class BertSearchServiceV2Tests : IDisposable
         // Pin state.db to a fresh, empty file so FTS5 lookups in SearchByText
         // don't accidentally resolve against the developer's real state.db.
         _searchDb = new BertSearchDbService(
-            new TestBertSettings(_runtimeDir, _tempDir),
-            stateDatabasePathOverride: Path.Combine(_tempDir, "state.db"));
+            Path.Combine(_tempDir, "bert_user_text_vectors.db"),
+            Path.Combine(_tempDir, "state.db"));
         _searchService = new BertSearchServiceV2(
             new IBertSearchStrategy[]
             {
@@ -146,20 +146,4 @@ public class BertSearchServiceV2Tests : IDisposable
         try { Directory.Delete(_tempDir, recursive: true); } catch { }
     }
 
-    private sealed class TestBertSettings : VibeRails.Services.BertBaseClasses.IBertSettings
-    {
-        public TestBertSettings(string modelDirectory, string dataDirectory)
-        {
-            ModelPath = Path.Combine(modelDirectory, "model.onnx");
-            VocabPath = Path.Combine(modelDirectory, "vocab.txt");
-            DataDirectory = dataDirectory;
-        }
-
-        public string ModelPath { get; }
-        public string VocabPath { get; }
-        public string DataDirectory { get; }
-        public string ModelName => "test";
-        public int EmbeddingDimension => 384;
-        public int MaxSequenceLength => 512;
-    }
 }

@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using VibeRails.Data.Sqlite;
 using VibeRails.DB;
 using Xunit;
 
@@ -108,6 +109,8 @@ public sealed class LlmPickerRepositoryTests : IDisposable
         // ClearAllPools() here can dispose handles out from under DB test classes running in
         // parallel (seen as an intermittent ObjectDisposedException in JobStoreOverlapTests).
         SqliteConnection.ClearPool(new SqliteConnection(_connectionString));
+        using var normalizedConnection = SqliteConnectionFactory.Create(_connectionString);
+        SqliteConnection.ClearPool(normalizedConnection);
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
     }
 

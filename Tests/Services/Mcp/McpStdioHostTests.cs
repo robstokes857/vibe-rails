@@ -73,4 +73,23 @@ public class McpStdioHostTests
         // No dashboard repository in this short-lived child: its constructor runs the full migration pass.
         Assert.DoesNotContain(services, d => d.ServiceType == typeof(VibeRails.DB.IRepository));
     }
+
+    [Fact]
+    public void ConfigureServices_ResolvesSearchDbService_NotJustRegistersIt()
+    {
+        // Descriptor assertions alone let a real outage through: BertSearchDbService moved to a
+        // (vectorDatabasePath, stateDatabasePath) ctor while this host still registered it by type
+        // activation, so the descriptor existed but every resolution threw "Unable to resolve
+        // service for type 'System.String'" -- i.e. search_history was dead over stdio.
+        // Resolving IBertSearchDbService touches no ONNX model and opens no database: the ctor
+        // only validates its two path strings.
+        var services = new ServiceCollection();
+        McpStdioHost.ConfigureServices(services);
+        using var provider = services.BuildServiceProvider(validateScopes: true);
+
+        var search = provider.GetRequiredService<IBertSearchDbService>();
+
+        Assert.EndsWith("bert_user_text_vectors.db", search.VectorDatabasePath);
+        Assert.EndsWith("state.db", search.StateDatabasePath);
+    }
 }

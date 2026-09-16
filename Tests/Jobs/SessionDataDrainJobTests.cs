@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -135,7 +135,7 @@ public sealed class SessionDataDrainJobTests
         repository.VerifyAll();
         repository.Verify(
             repo => repo.MarkSessionExportedAsync(
-                It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()),
+                It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 

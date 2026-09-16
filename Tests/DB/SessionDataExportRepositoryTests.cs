@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using VibeRails.DB;
@@ -29,8 +29,7 @@ public sealed class SessionDataExportRepositoryTests : IDisposable
         await CreateLegacySessionsTableAsync(legacyConnectionString);
 
         var repository = new Repository(legacyConnectionString);
-        // A differently ordered equivalent connection string forces the idempotent migration pass
-        // to execute again against the same file rather than hitting Repository's per-string cache.
+        // A differently ordered equivalent connection string must see the same durable receipts.
         _ = new Repository(
             $"Mode=ReadWriteCreate;Cache=Shared;Data Source={legacyPath}");
 
@@ -87,10 +86,12 @@ public sealed class SessionDataExportRepositoryTests : IDisposable
         Assert.True(await repository.MarkSessionExportedAsync(
             firstEligible,
             markedUtc,
+            null,
             TestContext.Current.CancellationToken));
         Assert.False(await repository.MarkSessionExportedAsync(
             firstEligible,
             markedUtc.AddMinutes(1),
+            null,
             TestContext.Current.CancellationToken));
 
         Assert.Equal(
@@ -115,6 +116,7 @@ public sealed class SessionDataExportRepositoryTests : IDisposable
         Assert.True(await repository.MarkSessionExportedAsync(
             secondEligible,
             markedUtc,
+            null,
             TestContext.Current.CancellationToken));
         Assert.Null((await repository.GetOldestUnexportedSessionAsync(
             cutoff,
@@ -244,7 +246,7 @@ public sealed class SessionDataExportRepositoryTests : IDisposable
                 ("$id", blocked)));
 
         Assert.True(await repository.MarkSessionExportedAsync(
-            blocked, retryAt, TestContext.Current.CancellationToken));
+            blocked, retryAt, null, TestContext.Current.CancellationToken));
         Assert.False(await repository.DeferSessionExportAsync(
             blocked, retryAt.AddMinutes(5), TestContext.Current.CancellationToken));
     }
@@ -261,7 +263,7 @@ public sealed class SessionDataExportRepositoryTests : IDisposable
             pending, TestContext.Current.CancellationToken));
 
         Assert.True(await repository.MarkSessionExportedAsync(
-            pending, cutoff, TestContext.Current.CancellationToken));
+            pending, cutoff, null, TestContext.Current.CancellationToken));
         // Exported: the spool for it is now reclaimable.
         Assert.False(await repository.SessionAwaitsExportAsync(
             pending, TestContext.Current.CancellationToken));
@@ -302,7 +304,7 @@ public sealed class SessionDataExportRepositoryTests : IDisposable
             TestContext.Current.CancellationToken);
 
         Assert.NotNull(descriptor);
-        Assert.Equal(1, descriptor!.SchemaVersion);
+        Assert.Equal(2, descriptor!.SchemaVersion);
         Assert.Equal("session", descriptor.Kind);
         Assert.Equal(Guid.Parse(sessionId), descriptor.SourceId);
 
@@ -310,7 +312,7 @@ public sealed class SessionDataExportRepositoryTests : IDisposable
         using (var document = JsonDocument.Parse(firstJson))
         {
             var root = document.RootElement;
-            Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
+            Assert.Equal(2, root.GetProperty("schemaVersion").GetInt32());
             Assert.Equal("session", root.GetProperty("kind").GetString());
             Assert.Equal(Guid.Parse(sessionId), root.GetProperty("sourceId").GetGuid());
 
@@ -402,10 +404,12 @@ public sealed class SessionDataExportRepositoryTests : IDisposable
         Assert.True(await repository.MarkSessionExportedAsync(
             sessionId,
             markedUtc,
+            null,
             TestContext.Current.CancellationToken));
         Assert.False(await repository.MarkSessionExportedAsync(
             sessionId,
             markedUtc.AddSeconds(1),
+            null,
             TestContext.Current.CancellationToken));
 
         await using var afterMark = new MemoryStream();

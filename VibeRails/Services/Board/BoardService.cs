@@ -54,7 +54,7 @@ public sealed partial class BoardService(
     public const int MaxCommentLength = 10_000;
     public const int MaxTags = 20;
     public const int MaxTagLength = 40;
-    public const int MaxAttachmentsPerCard = 12;
+    public const int MaxAttachmentsPerCard = BoardAttachmentData.MaxAttachmentsPerCard;
     public const int MaxColumnNameLength = 60;
     public const int MaxSessionIdLength = 36;
     public static readonly IReadOnlyList<int> AllowedPoints = [1, 2, 3, 5, 8, 13];

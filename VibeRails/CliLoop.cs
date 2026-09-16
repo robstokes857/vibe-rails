@@ -12,6 +12,9 @@ namespace VibeRails;
 
 public static class CliLoop
 {
+    internal static bool TryHandleStandaloneInformation(string[] args)
+        => args.Length == 1 && TryPrintInformation(ArgumentParser.Parse(args));
+
     /// <summary>
     /// Parses argv and handles the only two argv-handled exits — --help and --version.
     /// Every other invocation falls through to web/LMBootstrap mode in Program.cs.
@@ -19,20 +22,24 @@ public static class CliLoop
     public static Task<(bool exit, ParsedArgs parsedArgs)> RunAsync(string[] args, IServiceProvider services)
     {
         ParsedArgs parsedArgs = ParserConfigs.ParseArgs(args);
+        return Task.FromResult((TryPrintInformation(parsedArgs), parsedArgs));
+    }
 
+    private static bool TryPrintInformation(ParsedArgs parsedArgs)
+    {
         if (parsedArgs.Help)
         {
             ShowHelp();
-            return Task.FromResult((true, parsedArgs));
+            return true;
         }
 
         if (parsedArgs.Version)
         {
             ShowVersion();
-            return Task.FromResult((true, parsedArgs));
+            return true;
         }
 
-        return Task.FromResult((false, parsedArgs));
+        return false;
     }
 
     /// <summary>

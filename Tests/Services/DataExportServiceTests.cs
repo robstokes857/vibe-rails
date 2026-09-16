@@ -495,6 +495,7 @@ public sealed class DataExportServiceTests : IDisposable
         return new DataExportService(
             httpClient,
             configuration,
+            new VibeRails.Data.Sqlite.SqliteDatabaseSnapshotStore(),
             CreateTemporaryDirectoryPath,
             static () => "test-computer",
             featureLog: _featureLog);

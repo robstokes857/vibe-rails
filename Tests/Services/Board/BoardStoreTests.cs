@@ -129,8 +129,8 @@ public sealed class BoardStoreTests : IDisposable
         {
             await connection.OpenAsync(Ct);
             await using var legacy = connection.CreateCommand();
-            // Reproduce the old schema with a surviving card numbered above one.
-            legacy.CommandText = "UPDATE BoardCards SET Number = 42 WHERE Id = $id; DROP TABLE BoardCardSequences;";
+            // Reproduce the old schema, which predates the migration receipt as well.
+            legacy.CommandText = "UPDATE BoardCards SET Number = 42 WHERE Id = $id; DROP TABLE BoardCardSequences; DELETE FROM SchemaMigrations WHERE Component='board';";
             legacy.Parameters.AddWithValue("$id", existing.Id);
             await legacy.ExecuteNonQueryAsync(Ct);
         }

@@ -401,6 +401,15 @@ public sealed class JobStoreOverlapTests : IDisposable
         Assert.Equal(JobRunActionStatus.Succeeded, runAction.Status);
         Assert.Equal("legacy-session", runAction.SessionId);
         Assert.Equal(0, runAction.ExitCode);
+        await using var migrated = new SqliteConnection(_connectionString);
+        await migrated.OpenAsync(cancellationToken);
+        await using var schemaVersion = migrated.CreateCommand();
+        schemaVersion.CommandText = "PRAGMA schema_version;";
+        var version = await schemaVersion.ExecuteScalarAsync(cancellationToken);
+        var reopened = new JobStore(_connectionString);
+        Assert.Equal(version, await schemaVersion.ExecuteScalarAsync(cancellationToken));
+        Assert.Equal(jobAction.Id, Assert.Single((await reopened.GetJobAsync(7, cancellationToken))!.Actions!).Id);
+        Assert.Equal(runAction.Id, Assert.Single((await reopened.GetRunAsync("legacy-run", cancellationToken))!.Actions!).Id);
     }
 
     [Fact]

@@ -4,9 +4,9 @@ namespace VibeRails.Services.UserInOut;
 
 public class GetUserText : IGetUserText
 {
-    private readonly IRepository _repository;
+    private readonly IUserInputStore _repository;
 
-    public GetUserText(IRepository repository)
+    public GetUserText(IUserInputStore repository)
     {
         _repository = repository;
     }

@@ -14,10 +14,10 @@ namespace VibeRails.Services.Environments.Steps;
 /// </summary>
 public sealed class EnvironmentStepRunner : IEnvironmentStepRunner
 {
-    private readonly IRepository _repository;
+    private readonly IEnvironmentStore _repository;
     private readonly ICliWrapper _cli;
 
-    public EnvironmentStepRunner(IRepository repository, ICliWrapper cli)
+    public EnvironmentStepRunner(IEnvironmentStore repository, ICliWrapper cli)
     {
         _repository = repository;
         _cli = cli;

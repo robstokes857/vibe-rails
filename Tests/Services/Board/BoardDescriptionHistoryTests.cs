@@ -78,7 +78,7 @@ public sealed class BoardDescriptionHistoryTests : IDisposable
     {
         var card = await CreateAsync();
         await LinkAsync(card.Id, Guid.NewGuid().ToString(), "old-tab");
-        await ExecuteAsync("DROP TABLE BoardDescriptionRevisionAttachments; DROP TABLE BoardDescriptionSessionEvents; DROP TABLE BoardDescriptionRevisions;");
+        await ExecuteAsync("DROP TABLE BoardDescriptionRevisionAttachments; DROP TABLE BoardDescriptionSessionEvents; DROP TABLE BoardDescriptionRevisions; DELETE FROM SchemaMigrations WHERE Component='board';");
         var before = DateTime.UtcNow;
         var migrated = new BoardStore(_connectionString);
         var history = (await migrated.GetDescriptionHistoryAsync(_project, card.Id, Ct))!;

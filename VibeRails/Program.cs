@@ -15,6 +15,9 @@ using VibeRails.Services.PythonScripts;
 
 using VibeRails.Utils;
 
+// Informational invocations must not initialize or migrate the user's databases.
+if (CliLoop.TryHandleStandaloneInformation(args))
+    return;
 
 // Capture launch directory FIRST (where the user ran the command from)
 string launchDirectory = Directory.GetCurrentDirectory();

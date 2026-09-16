@@ -13,7 +13,7 @@ public class BertV2SessionEmbeddingService : IBertV2SessionEmbeddingService
 
     private readonly IBertV2BgeEmbedder _embedder;
     private readonly IBertV2SessionVectorStore _store;
-    private readonly Lock _writeLock = new();
+    private readonly Lock _captureLock = new();
 
     public BertV2SessionEmbeddingService(IBertV2BgeEmbedder embedder, IBertV2SessionVectorStore store)
     {
@@ -47,22 +47,20 @@ public class BertV2SessionEmbeddingService : IBertV2SessionEmbeddingService
         if (chunks.Count == 0)
             return 0;
 
-        // Embed every chunk BEFORE writing any: if the embedder throws on chunk 3
-        // of 5 we want the session to be left untouched, not half-replaced and
-        // still searchable. The atomic ReplaceSession below either commits all
-        // chunks or leaves the pre-existing chunks in place.
-        var prepared = new List<BertSessionChunkWrite>(chunks.Count);
-        for (int i = 0; i < chunks.Count; i++)
+        lock (_captureLock)
         {
-            var embedding = _embedder.GenerateEmbedding(chunks[i]);
-            prepared.Add(new BertSessionChunkWrite(i, chunks[i], embedding));
-        }
+            // Recover from state-marker contention without repeating inference.
+            // Matching includes chunk order, exact text and every vector's presence.
+            if (_store.ContainsCurrentSession(sessionId, chunks))
+                return chunks.Count;
 
-        lock (_writeLock)
-        {
+            // Prepare every vector first; ReplaceSession commits all chunks atomically.
+            var prepared = new List<BertSessionChunkWrite>(chunks.Count);
+            for (int i = 0; i < chunks.Count; i++)
+                prepared.Add(new BertSessionChunkWrite(i, chunks[i], _embedder.GenerateEmbedding(chunks[i])));
             _store.ReplaceSession(sessionId, prepared);
         }
-        return prepared.Count;
+        return chunks.Count;
     }
 
     internal static List<string> ComputeChunks(string text)

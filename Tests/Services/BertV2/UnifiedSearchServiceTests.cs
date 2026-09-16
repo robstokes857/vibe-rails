@@ -1,7 +1,7 @@
 using Microsoft.Data.Sqlite;
+using VibeRails.Data.Sqlite;
 using VibeRails.DB;
 using VibeRails.DTOs;
-using VibeRails.Services.BertBaseClasses;
 using VibeRails.Services.BertV2;
 using Xunit;
 
@@ -47,8 +47,8 @@ public class UnifiedSearchServiceTests : IDisposable
         _inputService = new BertV2InputService(_embedder, _store);
         _sessionService = new BertV2SessionEmbeddingService(_embedder, _sessionStore);
         _searchDb = new BertSearchDbService(
-            new TestBertSettings(_runtimeDir, _tempDir),
-            stateDatabasePathOverride: _stateDbPath);
+            vectorDbPath,
+            _stateDbPath);
         _unifiedSearch = new UnifiedSearchService(_embedder, _searchDb, new BertDocumentResponseMapper());
     }
 
@@ -235,35 +235,13 @@ public class UnifiedSearchServiceTests : IDisposable
 
     private static void InitializeStateDb(string path)
     {
-        using var connection = new SqliteConnection($"Data Source={path};Mode=ReadWriteCreate");
-        connection.Open();
-
-        using (var pragmaCmd = connection.CreateCommand())
-        {
-            pragmaCmd.CommandText = SqlStrings.PragmaForeignKeys;
-            pragmaCmd.ExecuteNonQuery();
-        }
-
-        foreach (var sql in SqlStrings.InitStatements)
-        {
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = sql;
-            cmd.ExecuteNonQuery();
-        }
-
-        foreach (var migration in SqlStrings.MigrationStatements)
-        {
-            try
-            {
-                using var cmd = connection.CreateCommand();
-                cmd.CommandText = migration;
-                cmd.ExecuteNonQuery();
-            }
-            catch (SqliteException)
-            {
-                // Migrations are safe to re-run; ignore already-applied errors.
-            }
-        }
+        // Use the real schema path rather than replaying SqlStrings.InitStatements /
+        // MigrationStatements by hand. The hand-rolled version only ever built what state/1
+        // installs, so it silently lacked everything state migration 2 owns (the search document
+        // and pending tables and the rebuilt UserInputs_fts), and it swallowed SqliteExceptions,
+        // which is how a schema this test depends on could go missing without the test saying so.
+        StateDatabaseSchema.Ensure(
+            new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString());
     }
 
     private void SeedSession(string sessionId, string cli, int endedSecondsAgo)
@@ -314,13 +292,20 @@ public class UnifiedSearchServiceTests : IDisposable
             userInputId = (long)cmd.ExecuteScalar()!;
         }
 
-        // Mirror Repository.InsertUserInputAsync: write the FTS row through the same
-        // InputEtlFilter the app uses, so lexical search has something to match.
+        // Mirror the production path (SearchIndexWriter.Synchronize): filtered text goes into
+        // UserInputSearchDocuments and the AFTER INSERT trigger mirrors it into UserInputs_fts.
+        // Writing UserInputs_fts directly -- the pre-state/2 external-content shape over
+        // UserInputs -- would leave index entries with no backing content row, which is precisely
+        // the desync state/2 exists to remove.
         var safe = VibeRails.Services.UserInOut.InputEtlFilter.Process(text);
         if (!string.IsNullOrWhiteSpace(safe))
         {
             using var ftsCmd = connection.CreateCommand();
-            ftsCmd.CommandText = SqlStrings.InsertUserInputsFtsRow;
+            ftsCmd.CommandText = """
+                INSERT INTO UserInputSearchDocuments(UserInputId, InputText) VALUES ($rowid, $inputText)
+                    ON CONFLICT(UserInputId) DO UPDATE SET InputText = excluded.InputText;
+                DELETE FROM UserInputSearchPending WHERE UserInputId = $rowid;
+                """;
             ftsCmd.Parameters.AddWithValue("$rowid", userInputId);
             ftsCmd.Parameters.AddWithValue("$inputText", safe);
             ftsCmd.ExecuteNonQuery();
@@ -374,20 +359,4 @@ public class UnifiedSearchServiceTests : IDisposable
         CorpusSize: hits.Count,
         Hits: hits.ToList());
 
-    private sealed class TestBertSettings : IBertSettings
-    {
-        public TestBertSettings(string modelDirectory, string dataDirectory)
-        {
-            ModelPath = Path.Combine(modelDirectory, "model.onnx");
-            VocabPath = Path.Combine(modelDirectory, "vocab.txt");
-            DataDirectory = dataDirectory;
-        }
-
-        public string ModelPath { get; }
-        public string VocabPath { get; }
-        public string DataDirectory { get; }
-        public string ModelName => "test";
-        public int EmbeddingDimension => 384;
-        public int MaxSequenceLength => 512;
-    }
 }

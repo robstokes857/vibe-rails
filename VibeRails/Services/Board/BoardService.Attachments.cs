@@ -3,7 +3,6 @@ using System.Text;
 namespace VibeRails.Services.Board;
 
 /// <summary>Immutable bytes and their card-scoped, untrusted display metadata.</summary>
-public sealed record BoardAttachmentContent(BoardAttachmentRecord Attachment, byte[] Content);
 
 public partial interface IBoardService
 {
@@ -20,22 +19,7 @@ public sealed partial class BoardService
     public Task<BoardAttachmentContent?> GetAttachmentContentAsync(string projectPath, string idOrKey, string attachmentId, CancellationToken cancellationToken = default) =>
         store.GetAttachmentContentAsync(projectPath, idOrKey, attachmentId, cancellationToken);
 
-    internal static byte[] DecodeAttachmentDataUrl(string? dataUrl)
-    {
-        if (dataUrl is null)
-            throw new BoardValidationException("The attachment must contain base64 file content.");
-        var separator = dataUrl.IndexOf(',');
-        if (separator is < 12 or > 255 || !dataUrl.StartsWith("data:", StringComparison.OrdinalIgnoreCase)
-            || !dataUrl.AsSpan(0, separator).EndsWith(";base64", StringComparison.OrdinalIgnoreCase))
-            throw new BoardValidationException("The attachment must contain base64 file content.");
-        var encoded = dataUrl.AsSpan(separator + 1);
-        // Reject whitespace and alternate alphabets before allocating decoded bytes.
-        foreach (var character in encoded)
-            if (!(character is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= '0' and <= '9' or '+' or '/' or '='))
-                throw new BoardValidationException("The attachment has invalid base64 content.");
-        try { return Convert.FromBase64String(dataUrl[(separator + 1)..]); }
-        catch (FormatException) { throw new BoardValidationException("The attachment has invalid base64 content."); }
-    }
+    internal static byte[] DecodeAttachmentDataUrl(string? dataUrl) => BoardAttachmentData.DecodeDataUrl(dataUrl);
 
     internal static string NormalizeAttachmentName(string? value)
     {

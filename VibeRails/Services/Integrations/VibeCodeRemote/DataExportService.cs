@@ -5,7 +5,7 @@ using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Microsoft.Data.Sqlite;
+using VibeRails.Data.Abstractions;
 using Serilog;
 using VibeRails.Services.Diagnostics;
 using VibeRails.Utils;
@@ -74,15 +74,18 @@ public sealed class DataExportService : IDataExportService
     private readonly Func<string> _computerNameFactory;
     private readonly IDataExportProgress _progress;
     private readonly IFeatureLog _featureLog;
+    private readonly IDatabaseSnapshotStore _snapshotStore;
 
     public DataExportService(
         HttpClient httpClient,
         IConfiguration configuration,
+        IDatabaseSnapshotStore snapshotStore,
         IDataExportProgress progress,
         IFeatureLog? featureLog = null)
         : this(
             httpClient,
             configuration,
+            snapshotStore,
             static () => Path.Combine(
                 Path.GetTempPath(),
                 $"viberails-data-export-{Guid.NewGuid():N}"),
@@ -95,6 +98,7 @@ public sealed class DataExportService : IDataExportService
     internal DataExportService(
         HttpClient httpClient,
         IConfiguration configuration,
+        IDatabaseSnapshotStore snapshotStore,
         Func<string> temporaryDirectoryFactory,
         Func<string> computerNameFactory,
         IDataExportProgress? progress = null,
@@ -102,6 +106,7 @@ public sealed class DataExportService : IDataExportService
     {
         _httpClient = httpClient;
         _configuration = configuration;
+        _snapshotStore = snapshotStore;
         _temporaryDirectoryFactory = temporaryDirectoryFactory;
         _computerNameFactory = computerNameFactory;
         _progress = progress ?? NullDataExportProgress.Instance;
@@ -276,17 +281,17 @@ public sealed class DataExportService : IDataExportService
         {
             throw;
         }
-        catch (SqliteException exception)
+        catch (StorageException exception)
         {
             // Overwhelmingly the "something else has the database open" case, which has its own
             // obvious fix. Reporting it as a generic preparation failure sends people diffing code.
             Log.Error(
                 exception,
-                "[DataExport] SQLite refused to snapshot the state database (code {ErrorCode}).",
-                exception.SqliteErrorCode);
+                "[DataExport] Storage refused to snapshot the state database. Transient={Transient}",
+                exception.IsTransient);
             return new DataExportResult(
                 DataExportStatus.Failed,
-                Detail: exception.SqliteErrorCode == 5
+                Detail: exception.IsTransient
                     ? "The state database is locked by another program. Close any SQLite browser "
                       + "or leftover vb process and try again."
                     : "SQLite could not read the state database.");
@@ -401,7 +406,7 @@ public sealed class DataExportService : IDataExportService
         }
     }
 
-    private static void CreateSnapshot(string statePath, string snapshotPath)
+    private void CreateSnapshot(string statePath, string snapshotPath)
     {
         // The only line in this file that opens a database for writing is the destination
         // connection below. If a refactor ever pointed it at the live path, File.Create would
@@ -422,24 +427,7 @@ public sealed class DataExportService : IDataExportService
         }
         PrivateFilePermissions.EnsureFile(snapshotPath);
 
-        var sourceConnectionString = new SqliteConnectionStringBuilder
-        {
-            DataSource = statePath,
-            Mode = SqliteOpenMode.ReadOnly,
-            Pooling = false
-        }.ToString();
-        var destinationConnectionString = new SqliteConnectionStringBuilder
-        {
-            DataSource = snapshotPath,
-            Mode = SqliteOpenMode.ReadWriteCreate,
-            Pooling = false
-        }.ToString();
-
-        using var sourceConnection = new SqliteConnection(sourceConnectionString);
-        using var destinationConnection = new SqliteConnection(destinationConnectionString);
-        sourceConnection.Open();
-        destinationConnection.Open();
-        sourceConnection.BackupDatabase(destinationConnection);
+        _snapshotStore.CreateSnapshot(statePath, snapshotPath);
     }
 
     private async Task CompressSnapshotAsync(
