@@ -2,7 +2,6 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using VibeRails.Services;
 
-
 namespace VibeRails.DTOs
 {
     // Response records for API
@@ -26,59 +25,6 @@ namespace VibeRails.DTOs
         string Message,
         string StandardOutput,
         string StandardError
-    );
-
-    // Session DTOs
-    public record SessionResponse(
-        string Id,
-        string Cli,
-        string? EnvironmentName,
-        string WorkingDirectory,
-        DateTime StartedUTC,
-        DateTime? EndedUTC,
-        int? ExitCode
-    );
-
-    public record OpenSessionCleanupCandidate(
-        string SessionId,
-        int? OwnerPid
-    );
-
-    public record SessionLogResponse(
-        long Id,
-        string SessionId,
-        DateTime Timestamp,
-        string Content,
-        bool IsError
-    );
-
-    public record SessionWithLogsResponse(
-        SessionResponse Session,
-        List<SessionLogResponse> Logs
-    );
-
-    // User Input tracking DTOs
-    public record UserInputRecord(
-        long Id,
-        string SessionId,
-        int Sequence,
-        string InputText,
-        string? GitCommitHash,
-        DateTime TimestampUTC
-    );
-
-    public record UnembeddedUserInputRow(
-        long Id,
-        string SessionId,
-        string InputText
-    );
-
-    public record FileChangeInfo(
-        string FilePath,
-        string ChangeType,
-        int? LinesAdded,
-        int? LinesDeleted,
-        string? DiffContent
     );
 
     //
@@ -199,7 +145,7 @@ namespace VibeRails.DTOs
     public record UpdateBoardColumnRequest(string? Name = null, JsonElement WipLimit = default, string? Color = null);
     public record ReorderBoardColumnsRequest(List<string>? OrderedIds = null);
     public record DeleteBoardColumnResponse(bool Ok, string MovedToColumnId, int MovedCards);
-    public record BoardAuthorDto(string Kind, string Label, string? Cli, string? SessionId = null);
+
     public record BoardCommentDto(string Id, BoardAuthorDto Author, string Body, DateTime CreatedAt);
     public record BoardSessionDto(
         string Id,
@@ -210,7 +156,7 @@ namespace VibeRails.DTOs
         string Origin,
         DateTime CreatedAt,
         bool Active);
-    public record BoardAttachmentDto(string Id, string Name, string Url, string MimeType, long Bytes, DateTime CreatedAt);
+
     public record BoardCommitDto(string Sha, string ShortSha, string Author, string Message, DateTime CommittedAt);
     public record BoardCardSummaryResponse(
         string Id,
@@ -278,13 +224,7 @@ namespace VibeRails.DTOs
         int? ExpectedDescriptionRevision = null,
         BaseLlmOptions? BaseLlmOptions = null,
         bool ClearBaseLlmOptions = false);
-    public record BoardDescriptionSessionDto(string SessionId, string Kind, string Status,
-        DateTime CreatedAt, DateTime UpdatedAt, string? Message = null);
-    public record BoardDescriptionRevisionDto(int Revision, string Description, DateTime CreatedAt,
-        string Source, BoardAuthorDto Author, List<BoardDescriptionSessionDto> Sessions,
-        List<BoardAttachmentDto> Attachments);
-    public record BoardDescriptionHistoryResponse(string CardId, int CurrentRevision,
-        List<BoardDescriptionRevisionDto> Revisions);
+
     public record MoveBoardCardRequest(string? ColumnId = null, int? Position = null);
     public record AddBoardCommentRequest(string? Body = null);
     public record AddBoardAttachmentRequest(string? Name = null, string? DataUrl = null, long? Bytes = null, string? MimeType = null);
@@ -300,18 +240,6 @@ namespace VibeRails.DTOs
         string CardId,
         string CardKey,
         string Selection);
-
-    public record SandboxDiffFileResponse(
-        string FileName,
-        string Language,
-        string OriginalContent,
-        string ModifiedContent
-    );
-
-    public record SandboxDiffResponse(
-        List<SandboxDiffFileResponse> Files,
-        int TotalChanges
-    );
 
     public record MergeBackResponse(
         bool Success,
@@ -1324,13 +1252,6 @@ namespace VibeRails.DTOs
         int SessionVectorCount
     );
 
-    public record BertFileChangeResponse(
-        string FilePath,
-        string ChangeType,
-        int? LinesAdded,
-        int? LinesDeleted
-    );
-
     public record BertCaptureSummaryResponse(
         string DocumentId,
         string SessionId,
@@ -1476,24 +1397,6 @@ namespace VibeRails.DTOs
         DateTime? StartedUtc = null
     );
 
-    public record ChatHistoryItem(
-        string Id,
-        string Cli,
-        string? EnvironmentName,
-        string WorkingDirectory,
-        string? ProjectDisplayName,
-        DateTime StartedUTC,
-        DateTime? EndedUTC,
-        int? ExitCode,
-        string? ParentSessionId,
-        string? ParentCli,
-        string? SessionDisplayName,
-        int? Sequence,
-        string? InputText,
-        int UserInputCount,
-        long? DurationSeconds
-    );
-
     public record ChatHistoryResponse(
         List<ChatHistoryItem> Items,
         int Page,
@@ -1586,7 +1489,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(List<ChatHistoryItem>))]
     [JsonSerializable(typeof(ChatHistoryResponse))]
     [JsonSerializable(typeof(UpdateChatHistorySessionRequest))]
-    // User Input tracking DTOs
+
     [JsonSerializable(typeof(UserInputRecord))]
     [JsonSerializable(typeof(List<UserInputRecord>))]
     [JsonSerializable(typeof(FileChangeInfo))]

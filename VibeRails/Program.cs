@@ -12,9 +12,13 @@ using VibeRails.Services.Terminal;
 using VibeRails.Services.VCA.Hooks;
 using VibeRails.Services.Jobs;
 using VibeRails.Services.PythonScripts;
+using VibeRails.Services.Storage;
 
 using VibeRails.Utils;
 
+// Informational invocations must not initialize or migrate the user's databases.
+if (CliLoop.TryHandleStandaloneInformation(args))
+    return;
 
 // Capture launch directory FIRST (where the user ran the command from)
 string launchDirectory = Directory.GetCurrentDirectory();
@@ -42,11 +46,16 @@ Log.Logger = new LoggerConfiguration()
         outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
     .CreateLogger();
 
+// dataDirectory and dataPolicy answer "which database did this process open, and why" -- the
+// first thing to check when two builds are running at once.
 Log.Information(
-    "[Startup] Booting processId={ProcessId} launchDirectory={LaunchDirectory} exeDirectory={ExeDirectory} argCount={ArgCount}",
+    "[Startup] Booting processId={ProcessId} launchDirectory={LaunchDirectory} exeDirectory={ExeDirectory} dataDirectory={DataDirectory} dataPolicy={DataPolicy} build={Build} argCount={ArgCount}",
     Environment.ProcessId,
     launchDirectory,
     exeDirectory,
+    installDir,
+    PathConstants.DescribeDataDirectoryPolicy(),
+    PathConstants.IsDebugBuild ? "Debug" : "Release",
     args.Length);
 
 AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
@@ -122,6 +131,15 @@ AppDomain.CurrentDomain.ProcessExit += (_, _) =>
         ShutdownDiagnostics.FormatSnapshot(snapshot));
     Log.CloseAndFlush();
 };
+
+// Explicit schema upgrade: `vb --migrate`. The only launch path allowed to apply a breaking
+// migration to an existing database, and only with no other vb process alive and a backup taken.
+// Applies everything pending, prints the ledger, exits. No web server, no browser.
+if (SchemaMigrateProcessHost.IsRequested(args))
+{
+    Environment.ExitCode = await SchemaMigrateProcessHost.RunAsync();
+    return;
+}
 
 // MCP stdio server mode: `vb mcp`. Speaks MCP over stdin/stdout for CLIs that spawn it
 // (claude/codex `mcp add`). No web server, no port, no auth — stdio is inherently scoped to the

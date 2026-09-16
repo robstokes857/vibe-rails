@@ -14,6 +14,15 @@
         "ASPNETCORE_ENVIRONMENT": "Development"
       },
       "dotnetRunMessages": false
+    },
+    "LaunchBrowser (PRODUCTION data in ~/.vibe_rails)": {
+      "commandName": "Project",
+      "commandLineArgs": "--web",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "VIBE_RAILS_ALLOW_PROD_DATA": "1"
+      },
+      "dotnetRunMessages": false
     }
   },
   "$schema": "https://json.schemastore.org/launchsettings.json"

@@ -1,3 +1,4 @@
+using VibeRails.Data.Sqlite;
 using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
@@ -343,12 +344,12 @@ public static class VcaHookProcessHost
         services.AddSingleton<ICommitMessageCoAuthorCleaner, CommitMessageCoAuthorCleaner>();
         services.AddSingleton<IVcaHookRunner, VcaHookRunner>();
         services.AddSingleton<IVcaHookValidationAnalyzer, VcaHookValidationAnalyzer>();
-        services.AddSingleton<IJobStore>(_ =>
+        services.AddSqliteJobStorage(_ =>
         {
             var installDirectory = PathConstants.GetInstallDirPath();
             Directory.CreateDirectory(installDirectory);
             var statePath = Path.Combine(installDirectory, PathConstants.STATE_FILENAME);
-            return new JobStore($"Data Source={statePath};Mode=ReadWriteCreate;Cache=Shared");
+            return statePath;
         });
         services.AddGitPreflight();
         services.AddSingleton<IVcaHookPresenter>(_ =>

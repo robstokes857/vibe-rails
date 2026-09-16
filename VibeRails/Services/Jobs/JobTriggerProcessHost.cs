@@ -1,3 +1,4 @@
+using VibeRails.Data.Sqlite;
 using Serilog;
 using VibeRails.DB;
 using VibeRails.DTOs;
@@ -66,7 +67,7 @@ public static class JobTriggerProcessHost
                 var installDirectory = PathConstants.GetInstallDirPath();
                 Directory.CreateDirectory(installDirectory);
                 var statePath = Path.Combine(installDirectory, PathConstants.STATE_FILENAME);
-                jobStore = new JobStore($"Data Source={statePath};Mode=ReadWriteCreate;Cache=Shared");
+                jobStore = SqliteStorage.CreateJobStore(statePath);
             }
 
             // Enqueue only — deliberately. Spawning terminals from here used to be unbounded: this

@@ -10,6 +10,7 @@ public class TerminalStateService : ITerminalStateService, IDisposable
 {
     private readonly IRepository _repository;
     private readonly IGitService _gitService;
+    private readonly UserInputRecordingService _inputRecordingService;
     private readonly IRemoteStateService _remoteStateService;
     private readonly ITerminalIoObserverService _ioObserverService;
 
@@ -27,9 +28,11 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         IRepository repository,
         IGitService gitService,
         IRemoteStateService remoteStateService,
-        ITerminalIoObserverService ioObserverService)
+        ITerminalIoObserverService ioObserverService,
+        UserInputRecordingService? inputRecordingService = null)
     {
         _repository = repository;
+        _inputRecordingService = inputRecordingService ?? new UserInputRecordingService(repository);
         _gitService = gitService;
         _remoteStateService = remoteStateService;
         _ioObserverService = ioObserverService;
@@ -55,7 +58,7 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         // Must run before InputAccumulator is wired so the sequence number is unambiguous.
         if (!string.IsNullOrWhiteSpace(initialUserInput))
         {
-            await _repository.RecordUserInputAsync(sessionId, initialUserInput, _gitService, ct);
+            await _inputRecordingService.RecordAsync(sessionId, initialUserInput, _gitService, ct);
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -66,7 +69,7 @@ public class TerminalStateService : ITerminalStateService, IDisposable
             s_inputAccumulators[sessionId] = new InputAccumulator(
                 async inputText =>
                 {
-                    await _repository.RecordUserInputAsync(sessionId, inputText, _gitService, ct);
+                    await _inputRecordingService.RecordAsync(sessionId, inputText, _gitService, ct);
                 },
                 // VibeRails records Codex modified-Enter as LF and plain Enter as CR.
                 // Keep LF buffered until CR so a multiline prompt is one history row.

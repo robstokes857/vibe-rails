@@ -35,7 +35,7 @@ public sealed class BoardProjectResolver(IBoardStore store) : IBoardProjectResol
         {
             var rootPath = ParserConfigs.GetRootPath();
             var cwd = Directory.GetCurrentDirectory();
-            return BoardStore.NormalizeProjectPath(!string.IsNullOrWhiteSpace(rootPath)
+            return BoardPaths.NormalizeProjectPath(!string.IsNullOrWhiteSpace(rootPath)
                 ? rootPath : GitCli.FindRoot(cwd) ?? cwd);
         }
     }
@@ -44,7 +44,7 @@ public sealed class BoardProjectResolver(IBoardStore store) : IBoardProjectResol
     {
         var rootPath = ParserConfigs.GetRootPath();
         if (!string.IsNullOrWhiteSpace(rootPath))
-            return BoardStore.NormalizeProjectPath(rootPath);
+            return BoardPaths.NormalizeProjectPath(rootPath);
 
         if (CurrentSessionId is { } sessionId)
         {
@@ -54,7 +54,7 @@ public sealed class BoardProjectResolver(IBoardStore store) : IBoardProjectResol
         }
 
         var cwd = Directory.GetCurrentDirectory();
-        return BoardStore.NormalizeProjectPath(GitCli.FindRoot(cwd) ?? cwd);
+        return BoardPaths.NormalizeProjectPath(GitCli.FindRoot(cwd) ?? cwd);
     }
 
     private static string? EmptyToNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

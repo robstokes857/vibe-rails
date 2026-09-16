@@ -1,7 +1,6 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using VibeRails.DB;
+using VibeRails.Data.Sqlite;
 using VibeRails.Interfaces;
-using VibeRails.Services.BertBaseClasses;
 using VibeRails.Services.Cli;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.LlmClis.Launchers;
@@ -11,9 +10,8 @@ using VibeRails.Utils;
 namespace VibeRails.Services.Jobs;
 
 /// <summary>
-/// The shared Automation scheduling and native-terminal launch graph. Both the dashboard and the
-/// lean VBD process host use this exact registration so Environment/workspace behavior cannot
-/// drift between process roles.
+/// The shared Automation scheduling and native-terminal launch graph. The dashboard and terminal
+/// process hosts use this registration so Environment/workspace behavior stays consistent.
 /// </summary>
 public static class AutomationRuntimeServiceCollectionExtensions
 {
@@ -21,24 +19,15 @@ public static class AutomationRuntimeServiceCollectionExtensions
         this IServiceCollection services,
         bool hostScheduler)
     {
-        services.TryAddSingleton<IJobStore>(_ => new JobStore(
-            $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared"));
+        services.AddSqliteStateStorage(_ => new SqliteStoragePaths(ParserConfigs.GetStatePath()));
         services.TryAddSingleton<IJobExecutableResolver, JobExecutableResolver>();
         services.TryAddSingleton<IAutomationScriptService, AutomationScriptService>();
         services.TryAddSingleton<IJobProcessLauncher, JobProcessLauncher>();
         // Shared process runner for repository-script actions and Environment Steps. It is
-        // stateless, so the dashboard and lean Demon host both use one singleton.
+        // stateless, so each process host uses one singleton.
         services.TryAddSingleton<ICliWrapper, CliWrapper>();
 
-        services.TryAddScoped<IRepository>(serviceProvider =>
-        {
-            var connectionString =
-                $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared";
-            var gitDiff = serviceProvider.GetService<IGitDiffCaptureService>();
-            var logger = serviceProvider.GetService<ILogger<Repository>>();
-            return new Repository(connectionString, gitDiff, logger);
-        });
-
+        services.TryAddScoped<UserInputRecordingService>();
         services.TryAddScoped<ISandboxService, SandboxService>();
         services.TryAddScoped<IRunWorkspaceService, RunWorkspaceService>();
 

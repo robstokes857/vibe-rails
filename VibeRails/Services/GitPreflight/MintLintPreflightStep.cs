@@ -58,9 +58,9 @@ public sealed class MintLintPreflightStep(ICodeAnalyzerIgnoreStore? ignoreStore 
                 && MintLintAnalyzer.SupportsFile(file.RelativePath))
             .ToList();
         var ignoredCount = supportedFiles.Count(file =>
-            CodeAnalyzerIgnoreStore.IsIgnored(file.RelativePath, ignoreRules));
+            CodeAnalyzerIgnoreRules.IsIgnored(file.RelativePath, ignoreRules));
         var eligibleFiles = supportedFiles
-            .Where(file => !CodeAnalyzerIgnoreStore.IsIgnored(file.RelativePath, ignoreRules))
+            .Where(file => !CodeAnalyzerIgnoreRules.IsIgnored(file.RelativePath, ignoreRules))
             .ToList();
         // Production snapshots carry a zero-context Git patch. Null remains a deliberate
         // fallback for preview/test snapshots created before AddedContent was introduced.

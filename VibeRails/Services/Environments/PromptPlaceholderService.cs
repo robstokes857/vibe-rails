@@ -101,12 +101,12 @@ public sealed partial class PromptPlaceholderService : IPromptPlaceholderService
     public static string DisabledStepText(string displayName) =>
         $"(step \"{displayName}\" is disabled and was not run)";
 
-    private readonly IRepository _repository;
+    private readonly IEnvironmentStore _repository;
     private readonly ICliWrapper _cli;
     private readonly TimeProvider _timeProvider;
 
     public PromptPlaceholderService(
-        IRepository repository,
+        IEnvironmentStore repository,
         ICliWrapper cli,
         TimeProvider? timeProvider = null)
     {

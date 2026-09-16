@@ -71,6 +71,9 @@ public sealed class MapRegisterServicesProcessRoleTests
             descriptor.ServiceType == typeof(IHostedService)
             && descriptor.ImplementationType == typeof(SessionDataDrainJob));
         Assert.Equal(expectedActiveRoot ? 1 : 0, registrations);
+        foreach (var job in new[] { typeof(DataRetentionJob), typeof(SearchIndexMaintenanceJob) })
+            Assert.Equal(expectedActiveRoot ? 1 : 0, services.Count(descriptor =>
+                descriptor.ServiceType == typeof(IHostedService) && descriptor.ImplementationType == job));
     }
 
     [Fact]

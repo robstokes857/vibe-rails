@@ -6,7 +6,7 @@ public class BertV2InputService : IBertV2InputService
 {
     private readonly IBertV2BgeEmbedder _embedder;
     private readonly IBertV2VectorStore _store;
-    private readonly Lock _writeLock = new();
+    private readonly Lock _captureLock = new();
 
     public BertV2InputService(IBertV2BgeEmbedder embedder, IBertV2VectorStore store)
     {
@@ -23,11 +23,16 @@ public class BertV2InputService : IBertV2InputService
         if (string.IsNullOrWhiteSpace(captureText))
             return;
 
-        var embedding = _embedder.GenerateEmbedding(captureText);
-
-        lock (_writeLock)
+        lock (_captureLock)
         {
-            _store.AddOrUpdate(BertDocumentId.Create(sessionId, userInputId), captureText, embedding);
+            var documentId = BertDocumentId.Create(sessionId, userInputId);
+            // A previous attempt may have committed the vector but failed to mark
+            // state.db. Verify its content before repeating expensive inference.
+            if (_store.ContainsCurrent(documentId, captureText))
+                return;
+
+            var embedding = _embedder.GenerateEmbedding(captureText);
+            _store.AddOrUpdate(documentId, captureText, embedding);
         }
     }
 }

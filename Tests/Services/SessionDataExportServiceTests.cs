@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -48,7 +48,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
         var sessionId = sourceId.ToString("D");
         var envelope = Encoding.UTF8.GetBytes(
             "{\"kind\":\"session\",\"value\":\"small\"}");
-        var repository = new Mock<IRepository>(MockBehavior.Strict);
+        var repository = new Mock<ISessionArchiveReader>(MockBehavior.Strict);
         SetupEnvelopeWrite(
             repository,
             sessionId,
@@ -58,6 +58,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
             .Setup(repo => repo.MarkSessionExportedAsync(
                 sessionId,
                 It.Is<DateTime>(value => value.Kind == DateTimeKind.Utc),
+                It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         using var services = BuildServices(repository.Object);
@@ -79,7 +80,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
         Assert.Equal($"/v1/data/sessions/{sessionId}", request.Uri.AbsolutePath);
         Assert.Equal(ApiKey, request.ApiKey);
         Assert.Equal(Uri.EscapeDataString(ComputerName), request.ComputerName);
-        Assert.Equal("1", request.SchemaVersion);
+        Assert.Equal("2", request.SchemaVersion);
         Assert.Equal("application/octet-stream", request.ContentType);
         Assert.Equal(request.Body.LongLength, request.ContentLength);
         var expectedSha = Convert.ToHexStringLower(SHA256.HashData(request.Body));
@@ -90,7 +91,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
         repository.Verify(repo => repo.WriteSessionExportAsync(
             sessionId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once);
         repository.Verify(repo => repo.MarkSessionExportedAsync(
-            sessionId, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Once);
+            sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
         repository.VerifyNoOtherCalls();
     }
 
@@ -99,7 +100,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
     {
         var sourceId = Guid.NewGuid();
         var sessionId = sourceId.ToString("D");
-        var repository = new Mock<IRepository>(MockBehavior.Strict);
+        var repository = new Mock<ISessionArchiveReader>(MockBehavior.Strict);
         SetupEnvelopeWrite(
             repository,
             sessionId,
@@ -109,6 +110,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
             .Setup(repo => repo.MarkSessionExportedAsync(
                 sessionId,
                 It.Is<DateTime>(value => value.Kind == DateTimeKind.Utc),
+                It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
         using var services = BuildServices(repository.Object);
@@ -132,7 +134,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
         repository.Verify(repo => repo.WriteSessionExportAsync(
             sessionId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once);
         repository.Verify(repo => repo.MarkSessionExportedAsync(
-            sessionId, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Once);
+            sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
         repository.VerifyNoOtherCalls();
     }
 
@@ -141,7 +143,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
     {
         var sourceId = Guid.NewGuid();
         var sessionId = sourceId.ToString("D");
-        var repository = new Mock<IRepository>(MockBehavior.Strict);
+        var repository = new Mock<ISessionArchiveReader>(MockBehavior.Strict);
         SetupEnvelopeWrite(
             repository,
             sessionId,
@@ -167,7 +169,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
         repository.Verify(repo => repo.WriteSessionExportAsync(
             sessionId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once);
         repository.Verify(repo => repo.MarkSessionExportedAsync(
-            It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
         repository.VerifyNoOtherCalls();
     }
 
@@ -178,15 +180,15 @@ public sealed class SessionDataExportServiceTests : IDisposable
     {
         var sourceId = Guid.NewGuid();
         var sessionId = sourceId.ToString("D").ToUpperInvariant();
-        var repository = new Mock<IRepository>(MockBehavior.Strict);
+        var repository = new Mock<ISessionArchiveReader>(MockBehavior.Strict);
         SetupEnvelopeWrite(repository, sessionId, sourceId,
             () => Encoding.UTF8.GetBytes("private transcript content"));
         using var cancellationSource = CancellationTokenSource.CreateLinkedTokenSource(
             TestContext.Current.CancellationToken);
         repository
             .Setup(repo => repo.MarkSessionExportedAsync(
-                sessionId, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .Returns((string _, DateTime _, CancellationToken token) =>
+                sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Returns((string _, DateTime _, string? _, CancellationToken token) =>
             {
                 if (cancelled)
                 {
@@ -233,7 +235,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
         SessionDataExportStatus expectedStatus)
     {
         var sessionId = reason == "invalid-id" ? ApiKey + " invalid id" : Guid.NewGuid().ToString("D");
-        var repository = new Mock<IRepository>(MockBehavior.Strict);
+        var repository = new Mock<ISessionArchiveReader>(MockBehavior.Strict);
         if (reason == "not-found")
         {
             repository.Setup(repo => repo.WriteSessionExportAsync(
@@ -263,7 +265,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
     public async Task ExportSessionAsync_AlreadyCancelled_RecordsCancellationAndPropagates()
     {
         var sessionId = Guid.NewGuid().ToString("D");
-        using var services = BuildServices(new Mock<IRepository>(MockBehavior.Strict).Object);
+        using var services = BuildServices(new Mock<ISessionArchiveReader>(MockBehavior.Strict).Object);
         using var client = new HttpClient(new UnreachableHandler());
         var service = CreateService(client, services);
         using var cancellationSource = new CancellationTokenSource();
@@ -280,7 +282,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
     {
         var sourceId = Guid.NewGuid();
         var sessionId = sourceId.ToString("D");
-        var repository = new Mock<IRepository>(MockBehavior.Strict);
+        var repository = new Mock<ISessionArchiveReader>(MockBehavior.Strict);
         SetupEnvelopeWrite(
             repository,
             sessionId,
@@ -305,7 +307,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
         repository.Verify(repo => repo.WriteSessionExportAsync(
             sessionId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once);
         repository.Verify(repo => repo.MarkSessionExportedAsync(
-            It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
         repository.VerifyNoOtherCalls();
     }
 
@@ -317,7 +319,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
         var currentEnvelope = Encoding.UTF8.GetBytes(
             "{\"kind\":\"session\",\"transcript\":\"before mutation\"}");
         var writeCount = 0;
-        var repository = new Mock<IRepository>(MockBehavior.Strict);
+        var repository = new Mock<ISessionArchiveReader>(MockBehavior.Strict);
         SetupEnvelopeWrite(
             repository,
             sessionId,
@@ -328,6 +330,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
             .Setup(repo => repo.MarkSessionExportedAsync(
                 sessionId,
                 It.IsAny<DateTime>(),
+                It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         using var services = BuildServices(repository.Object);
@@ -376,7 +379,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
         repository.Verify(repo => repo.WriteSessionExportAsync(
             sessionId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once);
         repository.Verify(repo => repo.MarkSessionExportedAsync(
-            sessionId, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Once);
+            sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
         repository.VerifyNoOtherCalls();
     }
 
@@ -387,12 +390,13 @@ public sealed class SessionDataExportServiceTests : IDisposable
         var sessionId = sourceId.ToString("D");
         var envelope = new byte[5 * 1024 * 1024];
         new Random(0x51A7).NextBytes(envelope);
-        var repository = new Mock<IRepository>(MockBehavior.Strict);
+        var repository = new Mock<ISessionArchiveReader>(MockBehavior.Strict);
         SetupEnvelopeWrite(repository, sessionId, sourceId, () => envelope);
         repository
             .Setup(repo => repo.MarkSessionExportedAsync(
                 sessionId,
                 It.IsAny<DateTime>(),
+                It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         using var services = BuildServices(repository.Object);
@@ -466,7 +470,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
         repository.Verify(repo => repo.WriteSessionExportAsync(
             sessionId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once);
         repository.Verify(repo => repo.MarkSessionExportedAsync(
-            sessionId, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Once);
+            sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
         repository.VerifyNoOtherCalls();
     }
 
@@ -485,7 +489,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
         var exported = Guid.NewGuid();
         var deleted = Guid.NewGuid();
 
-        var repository = new Mock<IRepository>(MockBehavior.Strict);
+        var repository = new Mock<ISessionArchiveReader>(MockBehavior.Strict);
         repository
             .Setup(repo => repo.SessionAwaitsExportAsync(
                 retained.ToString("D"), It.IsAny<CancellationToken>()))
@@ -527,7 +531,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
         var path = WriteSpool(sourceId, ".json.br");
         var tempPath = WriteSpool(sourceId, ".json.br.tmp");
 
-        var repository = new Mock<IRepository>(MockBehavior.Strict);
+        var repository = new Mock<ISessionArchiveReader>(MockBehavior.Strict);
         using var services = BuildServices(repository.Object);
         using var client = new HttpClient(new UnreachableHandler());
         var service = CreateService(client, services);
@@ -539,6 +543,161 @@ public sealed class SessionDataExportServiceTests : IDisposable
         // A deletion for a session that never spooled anything must be silent, not an exception.
         service.DeleteSpool(Guid.NewGuid().ToString("D"));
         service.DeleteSpool("not-a-guid");
+    }
+
+    [Theory]
+    [InlineData(1, false)]
+    [InlineData(1, true)]
+    [InlineData(2, false)]
+    [InlineData(2, true)]
+    public async Task ExportSessionAsync_FrozenSpool_UsesItsVersionAndBytes(int schemaVersion, bool chunked)
+    {
+        var sourceId = Guid.NewGuid();
+        var sessionId = sourceId.ToString("D");
+        var frozen = await WriteFrozenSpoolAsync(sourceId, schemaVersion, chunked);
+        var repository = new Mock<ISessionArchiveReader>(MockBehavior.Strict);
+        repository.Setup(repo => repo.MarkSessionExportedAsync(sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        using var services = BuildServices(repository.Object);
+        using var handler = new ChunkUploadHandler(sourceId);
+        using var client = new HttpClient(handler);
+        var result = await CreateService(client, services).ExportSessionAsync(sessionId, TestContext.Current.CancellationToken);
+
+        Assert.Equal(SessionDataExportStatus.Success, result.Status);
+        Assert.All(handler.Requests, request => Assert.Equal(schemaVersion.ToString(), request.SchemaVersion));
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(frozen)), result.Sha256);
+        if (!chunked) Assert.Equal(frozen, Assert.Single(handler.Requests).Body);
+        Assert.False(File.Exists(SpoolPath(sourceId, schemaVersion)));
+        repository.Verify(repo => repo.WriteSessionExportAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Never);
+        repository.Verify(repo => repo.MarkSessionExportedAsync(sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+        repository.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExportSessionAsync_TwoFrozenSpools_PrefersV1AndPreservesUnused(bool immutableConflict)
+    {
+        var sourceId = Guid.NewGuid();
+        var sessionId = sourceId.ToString("D");
+        var v1 = await WriteFrozenSpoolAsync(sourceId, 1, false);
+        var v2 = await WriteFrozenSpoolAsync(sourceId, 2, false);
+        var requests = new List<RequestSnapshot>();
+        using var handler = new CallbackHandler(request =>
+        {
+            requests.Add(request);
+            if (immutableConflict && request.SchemaVersion == "1")
+                return new HttpResponseMessage(HttpStatusCode.Conflict)
+                {
+                    Content = new StringContent("{\"code\":\"immutable_content_conflict\"}")
+                };
+            return Ack(HttpStatusCode.OK, sourceId, request.ContentSha256!, request.Body.LongLength,
+                "already_exists", int.Parse(request.SchemaVersion!));
+        });
+        var repository = new Mock<ISessionArchiveReader>(MockBehavior.Strict);
+        repository.Setup(repo => repo.MarkSessionExportedAsync(sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        using var services = BuildServices(repository.Object);
+        using var client = new HttpClient(handler);
+        var service = CreateService(client, services);
+
+        var result = await service.ExportSessionAsync(sessionId, TestContext.Current.CancellationToken);
+
+        Assert.Equal(SessionDataExportStatus.Success, result.Status);
+        Assert.Equal("1", requests[0].SchemaVersion);
+        Assert.Equal(v1, requests[0].Body);
+        Assert.Equal(immutableConflict ? 2 : 1, requests.Count);
+        if (immutableConflict) Assert.Equal(v2, requests[1].Body);
+        var reconciliation = Assert.Single(Directory.EnumerateFiles(_testRoot,
+            "*" + SessionDataExportService.ReconciliationSuffix, SearchOption.AllDirectories));
+        Assert.Equal(immutableConflict ? v1 : v2,
+            await File.ReadAllBytesAsync(reconciliation, TestContext.Current.CancellationToken));
+        Assert.Equal(0, await service.SweepOrphanedSpoolAsync(TestContext.Current.CancellationToken));
+        Assert.True(File.Exists(reconciliation));
+        repository.Verify(repo => repo.MarkSessionExportedAsync(sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+        repository.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData("probe")]
+    [InlineData("stage")]
+    [InlineData("commit")]
+    public async Task ExportSessionAsync_ChunkImmutableConflict_TriesOtherFrozenCandidate(string conflictAt)
+    {
+        var sourceId = Guid.NewGuid();
+        var sessionId = sourceId.ToString("D");
+        await WriteFrozenSpoolAsync(sourceId, 1, true);
+        var v2 = await WriteFrozenSpoolAsync(sourceId, 2, false);
+        var repository = new Mock<ISessionArchiveReader>(MockBehavior.Strict);
+        repository.Setup(repo => repo.MarkSessionExportedAsync(sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        using var services = BuildServices(repository.Object);
+        using var handler = new ChunkUploadHandler(sourceId, conflictAt);
+        using var client = new HttpClient(handler);
+
+        var result = await CreateService(client, services).ExportSessionAsync(sessionId, TestContext.Current.CancellationToken);
+
+        Assert.Equal(SessionDataExportStatus.Success, result.Status);
+        Assert.Equal("1", handler.Requests[0].SchemaVersion);
+        Assert.Equal("2", handler.Requests[^1].SchemaVersion);
+        Assert.Equal(v2, handler.Requests[^1].Body);
+        Assert.False(File.Exists(SpoolPath(sourceId, 2)));
+        Assert.Single(Directory.EnumerateFiles(_testRoot, "*.reconcile", SearchOption.AllDirectories));
+        repository.Verify(repo => repo.MarkSessionExportedAsync(sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+        repository.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task ExportSessionAsync_FrozenV1_RejectsV2Acknowledgement()
+    {
+        var sourceId = Guid.NewGuid();
+        await WriteFrozenSpoolAsync(sourceId, 1, false);
+        var repository = new Mock<ISessionArchiveReader>(MockBehavior.Strict);
+        using var services = BuildServices(repository.Object);
+        using var handler = new CallbackHandler(request => Ack(HttpStatusCode.OK, sourceId,
+            request.ContentSha256!, request.Body.LongLength, "already_exists", 2));
+        using var client = new HttpClient(handler);
+        var result = await CreateService(client, services).ExportSessionAsync(sourceId.ToString("D"), TestContext.Current.CancellationToken);
+
+        Assert.Equal(SessionDataExportStatus.UploadFailed, result.Status);
+        Assert.True(File.Exists(SpoolPath(sourceId, 1)));
+        repository.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task SweepOrphanedSpoolAsync_AmbiguousCompletedVersions_AreRetained()
+    {
+        var sourceId = Guid.NewGuid();
+        await WriteFrozenSpoolAsync(sourceId, 1, false);
+        await WriteFrozenSpoolAsync(sourceId, 2, false);
+        var repository = new Mock<ISessionArchiveReader>(MockBehavior.Strict);
+        using var services = BuildServices(repository.Object);
+        using var client = new HttpClient(new UnreachableHandler());
+        var service = CreateService(client, services);
+
+        Assert.Equal(0, await service.SweepOrphanedSpoolAsync(TestContext.Current.CancellationToken));
+        Assert.True(File.Exists(SpoolPath(sourceId, 1)));
+        Assert.True(File.Exists(SpoolPath(sourceId, 2)));
+        repository.VerifyNoOtherCalls();
+    }
+
+    private async Task<byte[]> WriteFrozenSpoolAsync(Guid sourceId, int version, bool chunked)
+    {
+        var payload = chunked ? RandomNumberGenerator.GetBytes(5 * 1024 * 1024) : Encoding.UTF8.GetBytes($"frozen version {version}");
+        using var output = new MemoryStream();
+        await using (var brotli = new BrotliStream(output, CompressionLevel.Fastest, leaveOpen: true))
+            await brotli.WriteAsync(payload, TestContext.Current.CancellationToken);
+        var compressed = output.ToArray();
+        var path = SpoolPath(sourceId, version);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.WriteAllBytesAsync(path, compressed, TestContext.Current.CancellationToken);
+        return compressed;
+    }
+
+    private sealed class CallbackHandler(Func<RequestSnapshot, HttpResponseMessage> callback) : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            callback(await RequestSnapshot.CaptureAsync(request, cancellationToken));
     }
 
     private string WriteSpool(Guid sourceId, string suffix)
@@ -581,13 +740,13 @@ public sealed class SessionDataExportServiceTests : IDisposable
             _featureLog);
     }
 
-    private static ServiceProvider BuildServices(IRepository repository) =>
+    private static ServiceProvider BuildServices(ISessionArchiveReader repository) =>
         new ServiceCollection()
             .AddSingleton(repository)
             .BuildServiceProvider();
 
     private static void SetupEnvelopeWrite(
-        Mock<IRepository> repository,
+        Mock<ISessionArchiveReader> repository,
         string sessionId,
         Guid sourceId,
         Func<byte[]> envelopeFactory,
@@ -616,7 +775,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
     {
         onWrite?.Invoke();
         await destination.WriteAsync(envelope, cancellationToken);
-        return new SessionDataExportDescriptor(1, "session", sourceId);
+        return new SessionDataExportDescriptor(2, "session", sourceId);
     }
 
     private static async Task<byte[]> DecompressAsync(byte[] compressed)
@@ -628,17 +787,17 @@ public sealed class SessionDataExportServiceTests : IDisposable
         return output.ToArray();
     }
 
-    private string SpoolPath(Guid sourceId) => Path.Combine(
+    private string SpoolPath(Guid sourceId, int schemaVersion = SessionDataExportService.EnvelopeSchemaVersion) => Path.Combine(
         _testRoot,
         SessionDataExportService.SpoolDirectoryName,
-        $"v{SessionDataExportService.EnvelopeSchemaVersion}",
+        $"v{schemaVersion}",
         $"{sourceId:D}.json.br");
 
     private static void AssertCommonHeaders(RequestSnapshot request)
     {
         Assert.Equal(ApiKey, request.ApiKey);
         Assert.Equal(Uri.EscapeDataString(ComputerName), request.ComputerName);
-        Assert.Equal("1", request.SchemaVersion);
+        Assert.Equal("2", request.SchemaVersion);
     }
 
     private static HttpResponseMessage Ack(
@@ -646,14 +805,15 @@ public sealed class SessionDataExportServiceTests : IDisposable
         Guid sourceId,
         string sha256,
         long compressedLength,
-        string serverStatus)
+        string serverStatus,
+        int schemaVersion = SessionDataExportService.EnvelopeSchemaVersion)
     {
         var json = JsonSerializer.Serialize(new
         {
             status = serverStatus,
             kind = "session",
             sourceId = sourceId.ToString("D"),
-            schemaVersion = 1,
+            schemaVersion,
             sha256,
             compressedBytes = compressedLength
         });
@@ -726,11 +886,12 @@ public sealed class SessionDataExportServiceTests : IDisposable
                 sha,
                 Request.Body.LongLength,
                 acknowledgementStatus
-                    ?? throw new InvalidOperationException("Acknowledgement status was absent."));
+                    ?? throw new InvalidOperationException("Acknowledgement status was absent."),
+                int.Parse(Request.SchemaVersion!));
         }
     }
 
-    private sealed class ChunkUploadHandler(Guid sourceId) : HttpMessageHandler
+    private sealed class ChunkUploadHandler(Guid sourceId, string? immutableConflictAt = null) : HttpMessageHandler
     {
         public const int BlockSizeBytes = 1024 * 1024;
 
@@ -747,6 +908,12 @@ public sealed class SessionDataExportServiceTests : IDisposable
         {
             var snapshot = await RequestSnapshot.CaptureAsync(request, cancellationToken);
             Requests.Add(snapshot);
+
+            if (snapshot.SchemaVersion == "1" &&
+                ((immutableConflictAt == "probe" && request.Method == HttpMethod.Get) ||
+                 (immutableConflictAt == "stage" && request.Method == HttpMethod.Put) ||
+                 (immutableConflictAt == "commit" && snapshot.Uri.AbsolutePath.EndsWith("/commit", StringComparison.Ordinal))))
+                return JsonResponse(HttpStatusCode.Conflict, new { code = "immutable_content_conflict" });
 
             if (request.Method == HttpMethod.Get)
             {
@@ -785,8 +952,13 @@ public sealed class SessionDataExportServiceTests : IDisposable
                     sourceId,
                     Sha256,
                     CompressedLength,
-                    "stored");
+                    "stored",
+                    int.Parse(snapshot.SchemaVersion!));
             }
+
+            if (request.Method == HttpMethod.Post)
+                return Ack(HttpStatusCode.Created, sourceId, snapshot.ContentSha256!, snapshot.Body.LongLength,
+                    "stored", int.Parse(snapshot.SchemaVersion!));
 
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         }

@@ -6,6 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Data.Sqlite;
+using VibeRails.Data.Sqlite;
 using Moq;
 using VibeRails.DB;
 using VibeRails.DTOs;
@@ -141,6 +142,8 @@ public sealed class EnvironmentRoutesDeletionTests
             // Scoped to this test's connection string: a process-wide ClearAllPools() disposes
             // handles out from under DB test classes running in parallel.
             SqliteConnection.ClearPool(new SqliteConnection(connectionString));
+            using var normalizedConnection = SqliteConnectionFactory.Create(connectionString);
+            SqliteConnection.ClearPool(normalizedConnection);
             Directory.Delete(testRoot, recursive: true);
         }
     }

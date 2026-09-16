@@ -88,13 +88,6 @@ vibe-rails/
 │   │       ├── AntigravityLlmCliEnvironment.cs
 │   │       └── Launchers/         # CLI-type-specific launchers (Claude, Codex, Antigravity, Copilot, OpenCode)
 │   │
-│   ├── DB/                         # Data access layer
-│   │   ├── Repository.cs           # SQLite data access implementation
-│   │   ├── IRepository.cs          # Repository interface
-│   │   ├── SqlStrings.cs           # SQL statement definitions
-│   │   └── DBModels/
-│   │       └── Project.cs          # Project entity model
-│   │
 │   ├── DTOs/                       # Data transfer objects
 │   │   ├── ResponseRecords.cs      # API response types
 │   │   ├── Sandbox.cs              # Sandbox entity model
@@ -127,6 +120,8 @@ vibe-rails/
 │       │   └── dashboard-controller.js  # Dashboard with state passing for preselection
 │       └── assets/                 # Images, fonts, icons
 │
+├── VibeRails.Data.Abstractions/    # Storage contracts and shared records (no SQLite dependency)
+├── VibeRails.Data.Sqlite/          # SQLite stores, connections, migrations, and registration
 ├── Pty.Net/                        # Cross-platform PTY library (inlined fork, ConPTY only)
 ├── PyBridge/                       # AOT-friendly Python runner library (in-tree)
 │
@@ -393,9 +388,9 @@ example of a rule is never itself a rule.
 - `COMMIT` - Require explanation in commit/PR message
 - `STOP` - Block the commit/PR
 
-#### Repository ([DB/Repository.cs](VibeRails/DB/Repository.cs))
+#### Repository ([Repository.cs](VibeRails.Data.Sqlite/DB/Repository.cs))
 **Purpose**: SQLite data access implementation (implements `IRepository`). See
-[VibeRails/DB/AGENTS.md](VibeRails/DB/AGENTS.md) for the full schema and operation reference.
+[database reference](VibeRails.Data.Sqlite/DB/AGENTS.md) for the full schema and operation reference.
 
 **Key Methods** (selected):
 - `GetOrCreateEnvironmentAsync(name, llm)` - Get/create environment record
@@ -518,10 +513,10 @@ tools (security review 2026-07-02).
 
 ### Data Layer
 
-#### Repository ([DB/Repository.cs](VibeRails/DB/Repository.cs))
+#### Repository ([Repository.cs](VibeRails.Data.Sqlite/DB/Repository.cs))
 **Purpose**: SQLite data access implementation
 
-**Database Tables** (see [VibeRails/DB/AGENTS.md](VibeRails/DB/AGENTS.md) for the full reference):
+**Database Tables** (see [database reference](VibeRails.Data.Sqlite/DB/AGENTS.md) for the full reference):
 - `Environments` - Environment configurations (global, not project-scoped)
   - `Id`, `CustomName`, `LLM`, `Path`, `CustomArgs`, `CustomPrompt`, `CreatedUTC`, `LastUsedUTC`, `Hidden`
   - `UNIQUE(CustomName, LLM)`
@@ -669,7 +664,25 @@ All services registered in [MapRegisterServices.cs](VibeRails/MapRegisterService
 - **Singleton**: Long-lived services (GitService, RulesService, MCP settings)
 
 ### Repository Pattern
-`IRepository` interface abstracts SQLite data access, allowing easy testing and potential database swaps.
+Storage contracts and their records live in `VibeRails.Data.Abstractions`; SQLite implementations
+live in `VibeRails.Data.Sqlite`. New consumers request the focused `ISessionStore`,
+`ISessionArchiveReader`, `IUserInputStore`, `IEnvironmentStore`, `ISandboxStore`, `IMetadataStore`,
+`IChatSummaryStore`, or `IEmbeddingProgressStore` interface. `IRepository` remains a compatibility
+aggregate, and its scoped aliases resolve to the same instance. Board, Automations, telemetry,
+proxy archives, snapshots, retention, vector storage, and search use their own contracts.
+
+`SqliteStorage` is the provider's composition entry point. Hosts supply file paths; the provider
+owns connection strings, construction, and registration. `SqliteConnectionFactory` applies private
+cache to file databases, foreign keys, and busy timeouts. `SchemaMigrations(Component, Version,
+AppliedUTC)` records completed changes transactionally with each migration. Existing files receive
+a one-time adoption pass; ordinary starts skip completed changes. The SQLite write lock serializes
+migration ownership between processes, and failed changes remain pending.
+
+Git input recording is application orchestration in `UserInputRecordingService`; storage never
+invokes Git. BERT inference stays in the application while SQL and vector writes live in the
+provider. Small provider JSON contexts retain Native AOT support. Root-only maintenance retries
+pending lexical-index writes and applies one-month state / seven-day proxy retention to completed,
+export-acknowledged sessions.
 
 ### Service Layer Pattern
 Business logic isolated from HTTP concerns. Services are reusable across CLI and web modes.
@@ -1094,7 +1107,7 @@ vb --web  # Explicit web-dashboard launch
 - **MCP SDK** - Model Context Protocol development kit
 
 ### Key Dependencies
-- **Microsoft.Data.Sqlite** (v10.0.10) - SQLite database access
+- **Microsoft.Data.Sqlite** (v10.0.11) - SQLite database access
 - **ModelContextProtocol** (v2.0.0) - MCP foundation
 - **ModelContextProtocol.AspNetCore** (v2.0.0) - ASP.NET Core integration for the in-process MCP server
 - **Pty.Net** (inlined fork) - Pseudo-terminal support

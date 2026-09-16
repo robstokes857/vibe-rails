@@ -198,6 +198,7 @@ public sealed class BoardServiceTests : IDisposable
         await using var command = connection.CreateCommand();
         command.CommandText = """
             DROP TABLE BoardCommitSnapshots;
+            DELETE FROM SchemaMigrations WHERE Component='board';
             INSERT INTO BoardCommits (CardId, Sha, Author, Message, CommittedUTC, LinkedUTC)
             VALUES ($card, 'abc1234abc1234abc1234abc1234abc1234abc12', 'Rob', 'Old link', $date, $date);
             """;

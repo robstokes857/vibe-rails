@@ -11,21 +11,25 @@ namespace VibeRails.Services
     public class FileService : IFileService
     {
         private static readonly TimeSpan GitRootTimeout = TimeSpan.FromSeconds(5);
+        // The configured name is passed through as-is (possibly null) so the global directory
+        // follows the data-directory policy; _hiddenDir keeps the per-project folder name.
+        private readonly string? _configuredInstallDirName;
         private readonly string _hiddenDir;
 
         public FileService(IConfiguration configuration)
         {
-            _hiddenDir = configuration["VibeRails:InstallDirName"] ?? PathConstants.DEFAULT_INSTALL_DIR_NAME;
+            _configuredInstallDirName = configuration["VibeRails:InstallDirName"];
+            _hiddenDir = _configuredInstallDirName ?? PathConstants.DEFAULT_INSTALL_DIR_NAME;
         }
 
         public string GetGlobalSavePath() =>
             // Same normalization as InitGlobalSave: a padded or oddly-cased override must not
             // make reads target a different directory than Initialize created.
-            GlobalRuntimePaths.ResolveGlobalDirectory(_hiddenDir);
+            GlobalRuntimePaths.ResolveGlobalDirectory(_configuredInstallDirName);
 
         public void InitGlobalSave()
         {
-            GlobalRuntimePaths.Initialize(_hiddenDir);
+            GlobalRuntimePaths.Initialize(_configuredInstallDirName);
         }
 
         public void InitLocal(string rootPath)

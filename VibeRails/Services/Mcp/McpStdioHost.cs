@@ -1,3 +1,4 @@
+using VibeRails.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -81,10 +82,9 @@ public static class McpStdioHost
     {
         if (!string.IsNullOrWhiteSpace(VibeRails.Utils.ParserConfigs.GetStatePath()))
             return;
-        VibeRails.Utils.GlobalRuntimePaths.Initialize(
-            string.IsNullOrWhiteSpace(installDirectoryName)
-                ? VibeRails.Utils.PathConstants.DEFAULT_INSTALL_DIR_NAME
-                : installDirectoryName);
+        // A blank name means the default location, which GlobalRuntimePaths resolves through the
+        // data-directory policy (VIBE_RAILS_HOME, Debug builds' dev directory).
+        VibeRails.Utils.GlobalRuntimePaths.Initialize(installDirectoryName);
     }
 
     /// <summary>State.db for this process: the configured path, else the default install directory.</summary>
@@ -112,7 +112,15 @@ public static class McpStdioHost
             var settings = sp.GetRequiredService<IBertSettings>();
             return new BertV2BgeEmbedder(settings.ModelPath, settings.VocabPath);
         });
-        services.AddSingleton<IBertSearchDbService, BertSearchDbService>();
+        // Explicit factory, NOT type activation. BertSearchDbService's ctor takes
+        // (vectorDatabasePath, stateDatabasePath) since the storage move, and this host
+        // deliberately never calls AddSqliteStorage -- that would register the scoped IRepository,
+        // and running state migrations from a short-lived MCP child is exactly what must not
+        // happen. Type activation therefore found no string factory and every search_history call
+        // threw "Unable to resolve service for type 'System.String'".
+        services.AddSingleton<IBertSearchDbService>(sp => new BertSearchDbService(
+            Path.Combine(sp.GetRequiredService<IBertSettings>().DataDirectory, BertSearchSchema.DatabaseFileName),
+            ResolveStatePath()));
         services.AddSingleton<IBertDocumentResponseMapper, BertDocumentResponseMapper>();
         services.AddSingleton<IUnifiedSearchService, UnifiedSearchService>();
         services.AddScoped<SessionSearchTool>();
@@ -143,8 +151,7 @@ public static class McpStdioHost
         // the CLI's inherited cwd / the launching session — see BoardProjectResolver. This is what
         // lets an LLM pick up a card from ANY terminal, not only a VibeRails tab. No live tab host
         // here, so linked sessions never report as open from this transport.
-        services.AddSingleton<VibeRails.Services.Board.IBoardStore>(_ => new VibeRails.Services.Board.BoardStore(
-            $"Data Source={ResolveStatePath()};Mode=ReadWriteCreate;Cache=Shared"));
+        services.AddSqliteBoardStorage(_ => ResolveStatePath());
         services.AddSingleton<VibeRails.Services.Board.IBoardProjectResolver, VibeRails.Services.Board.BoardProjectResolver>();
         services.AddSingleton<VibeRails.Services.Board.IBoardCommitService, VibeRails.Services.Board.BoardCommitService>();
         services.AddSingleton<VibeRails.Services.Board.IBoardLiveSessionProbe, VibeRails.Services.Board.NullBoardLiveSessionProbe>();

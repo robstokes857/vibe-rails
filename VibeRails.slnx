@@ -8,4 +8,6 @@
   <Project Path="Tests/Tests.csproj" />
   <Project Path="TokenSaver/TokenSaver.csproj" />
   <Project Path="VibeRails/VibeRails.csproj" />
+  <Project Path="VibeRails.Data.Abstractions/VibeRails.Data.Abstractions.csproj" />
+  <Project Path="VibeRails.Data.Sqlite/VibeRails.Data.Sqlite.csproj" />
 </Solution>

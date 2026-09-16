@@ -515,7 +515,7 @@ public static class HookRoutes
                 return Results.BadRequest(new ErrorResponse("Not in a git repository."));
             }
 
-            var path = CodeAnalyzerIgnoreStore.NormalizePath(request.Path ?? string.Empty);
+            var path = CodeAnalyzerIgnoreRules.NormalizePath(request.Path ?? string.Empty);
             if (path.Length == 0 || System.IO.Path.IsPathRooted(path) || HasParentTraversal(path))
             {
                 return Results.BadRequest(new ErrorResponse("A repository-relative path is required."));
@@ -551,7 +551,7 @@ public static class HookRoutes
             const int MaxBulkPaths = 500;
             var requestedCount = request.Paths?.Count ?? 0;
             var paths = (request.Paths ?? [])
-                .Select(p => CodeAnalyzerIgnoreStore.NormalizePath(p ?? string.Empty))
+                .Select(p => CodeAnalyzerIgnoreRules.NormalizePath(p ?? string.Empty))
                 .Where(p => p.Length > 0 && !System.IO.Path.IsPathRooted(p) && !HasParentTraversal(p))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
@@ -595,7 +595,7 @@ public static class HookRoutes
                 return Results.BadRequest(new ErrorResponse("Not in a git repository."));
             }
 
-            var normalized = CodeAnalyzerIgnoreStore.NormalizePath(path ?? string.Empty);
+            var normalized = CodeAnalyzerIgnoreRules.NormalizePath(path ?? string.Empty);
             if (normalized.Length == 0)
             {
                 return Results.BadRequest(new ErrorResponse("A repository-relative path is required."));

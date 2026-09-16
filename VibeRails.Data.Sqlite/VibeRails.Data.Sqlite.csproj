@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsAotCompatible>true</IsAotCompatible>
+    <!-- sqlite-vec ships our arm64 RIDs although its build target rejects them. -->
+    <EnableUnsupportedPlatformTargetCheck>false</EnableUnsupportedPlatformTargetCheck>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../VibeRails.Data.Abstractions/VibeRails.Data.Abstractions.csproj" />
+    <ProjectReference Include="../TokenSaver/TokenSaver.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
+    <PackageReference Include="Serilog" Version="4.4.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.1" />
+    <PackageReference Include="sqlite-vec" Version="0.1.7-alpha.2.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Microsoft.Extensions.Logging" />
+    <InternalsVisibleTo Include="Tests" />
+  </ItemGroup>
+</Project>

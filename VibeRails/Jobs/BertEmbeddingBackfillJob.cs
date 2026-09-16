@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using Microsoft.Data.Sqlite;
+using VibeRails.Data.Abstractions;
 using VibeRails.DB;
 using VibeRails.Services;
 using VibeRails.Services.BertV2;
@@ -13,13 +13,6 @@ public sealed class BertEmbeddingBackfillJob(
 {
     private const int BatchSize = 25;
 
-    // Transient SQLite errors should not eat into a row's failure quota — those
-    // are environmental and disappear on retry, so counting them risks burning
-    // through BertEmbedFailureSkipThreshold on a healthy row that just happened
-    // to overlap with a writer holding the file lock.
-    //   5 = SQLITE_BUSY, 6 = SQLITE_LOCKED.
-    private static bool IsTransientSqliteError(SqliteException ex)
-        => ex.SqliteErrorCode is 5 or 6;
 
     protected override TimeSpan Interval => TimeSpan.FromMinutes(3);
     protected override JobPriority Priority => JobPriority.Med;
@@ -27,7 +20,7 @@ public sealed class BertEmbeddingBackfillJob(
     protected override async Task ExecuteJob(CancellationToken cancellationToken)
     {
         using var scope = scopeFactory.CreateScope();
-        var repository = scope.ServiceProvider.GetRequiredService<IRepository>();
+        var repository = scope.ServiceProvider.GetRequiredService<IEmbeddingProgressStore>();
 
         var batch = await repository.GetUnembeddedUserInputsAsync(BatchSize, cancellationToken);
         if (batch.Count == 0)
@@ -79,13 +72,13 @@ public sealed class BertEmbeddingBackfillJob(
                 {
                     throw;
                 }
-                catch (SqliteException ex) when (IsTransientSqliteError(ex))
+                catch (StorageException ex) when (ex.IsTransient)
                 {
                     // Don't bump the failure count — this is contention, not corruption.
                     // The row stays unembedded and the next tick picks it up.
                     Serilog.Log.Warning(
                         ex,
-                        "[Job:BertEmbeddingBackfillJob] Row deferred due to transient SQLite contention. sessionId={SessionId} userInputId={UserInputId} durationMs={DurationMs}",
+                        "[Job:BertEmbeddingBackfillJob] Row deferred due to transient storage contention. sessionId={SessionId} userInputId={UserInputId} durationMs={DurationMs}",
                         row.SessionId, row.Id, rowSw.ElapsedMilliseconds);
                 }
                 catch (Exception ex)
