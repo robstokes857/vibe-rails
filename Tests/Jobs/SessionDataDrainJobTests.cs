@@ -135,7 +135,7 @@ public sealed class SessionDataDrainJobTests
         repository.VerifyAll();
         repository.Verify(
             repo => repo.MarkSessionExportedAsync(
-                It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+                It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 

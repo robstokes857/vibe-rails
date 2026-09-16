@@ -147,9 +147,11 @@ public sealed class DataRetentionStoreTests : IDisposable
     }
 
     [Theory]
-    // Only these two are proof the exchanges were actually uploaded.
+    // Only an "included" snapshot is proof a row was uploaded, and only for rows up to its largest
+    // rowid (the helper models a snapshot taken after this row was written).
     [InlineData("included", 0)]
-    [InlineData("empty", 0)]
+    // An "empty" snapshot contained nothing, so a row present now arrived after it.
+    [InlineData("empty", 1)]
     // A v2 envelope whose proxy read failed is still acknowledged and still sets ExportedUTC.
     [InlineData("unavailable", 1)]
     // A historical or frozen schema-v1 acknowledgement carries no proxy data at all.
@@ -183,23 +185,78 @@ public sealed class DataRetentionStoreTests : IDisposable
         Assert.Equal((long)expectedSurvivors, count.ExecuteScalar());
     }
 
+    [Fact]
+    public async Task IncludedSnapshotOnlyCoversRowsUpToItsHighWaterMark()
+    {
+        Directory.CreateDirectory(_directory);
+        var repository = new Repository(State);
+        var session = Guid.NewGuid().ToString("D");
+        await repository.CreateSessionAsync(session, "test", "late-write", _directory, Environment.ProcessId);
+        await repository.CompleteSessionAsync(session, 0);
+        using (var state = SqliteConnectionFactory.Open(State))
+        {
+            using var age = state.CreateCommand();
+            age.CommandText = "UPDATE Sessions SET EndedUTC=$ended WHERE Id=$id;";
+            age.Parameters.AddWithValue("$ended", _now.AddMonths(-2).ToString("O"));
+            age.Parameters.AddWithValue("$id", session);
+            age.ExecuteNonQuery();
+        }
+        using (var proxy = SqliteConnectionFactory.Open(new SqliteConnectionStringBuilder { DataSource = Proxy, Pooling = false }.ToString()))
+        {
+            using var create = proxy.CreateCommand();
+            create.CommandText = "CREATE TABLE ProxyExchanges(Id TEXT PRIMARY KEY,SessionId TEXT,CreatedUTC TEXT);";
+            create.ExecuteNonQuery();
+            create.CommandText = "INSERT INTO ProxyExchanges VALUES ('uploaded',$session,$utc);";
+            create.Parameters.AddWithValue("$session", session);
+            create.Parameters.AddWithValue("$utc", _now.AddDays(-10).ToString("O"));
+            create.ExecuteNonQuery();
+        }
+        // The acknowledged envelope's snapshot ended at rowid 1. The proxy then writes a queued
+        // exchange it had stamped before the snapshot, so by CreatedUTC alone it looks uploaded.
+        Assert.True(await repository.MarkSessionExportedAsync(
+            session, _now.AddMonths(-2), "included", 1, TestContext.Current.CancellationToken));
+        using (var proxy = SqliteConnectionFactory.Open(new SqliteConnectionStringBuilder { DataSource = Proxy, Pooling = false }.ToString()))
+        {
+            using var late = proxy.CreateCommand();
+            late.CommandText = "INSERT INTO ProxyExchanges VALUES ('written-after-snapshot',$session,$utc);";
+            late.Parameters.AddWithValue("$session", session);
+            late.Parameters.AddWithValue("$utc", _now.AddDays(-10).ToString("O"));
+            late.ExecuteNonQuery();
+        }
+
+        var result = await new SqliteDataRetentionStore(State, Proxy).PruneAsync(_now, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, result.ProxyExchangesDeleted);
+        using var check = SqliteConnectionFactory.Open(new SqliteConnectionStringBuilder { DataSource = Proxy, Pooling = false }.ToString());
+        using var remaining = check.CreateCommand();
+        remaining.CommandText = "SELECT Id FROM ProxyExchanges;";
+        Assert.Equal("written-after-snapshot", remaining.ExecuteScalar());
+        var again = await new SqliteDataRetentionStore(State, Proxy).PruneAsync(_now, TestContext.Current.CancellationToken);
+        Assert.Equal(0, again.ProxyExchangesDeleted);
+    }
+
     /// <param name="proxyCoverage">
     /// The acknowledged envelope's proxy coverage. "included" is the ordinary v2 result; null
     /// models a historical or v1 acknowledgement, which is NOT proof the proxy rows were backed up.
     /// </param>
+    /// <param name="proxyMaxRowId">
+    /// The largest proxy rowid the acknowledged "included" snapshot contained. The default models
+    /// a snapshot taken after every proxy row the test writes.
+    /// </param>
     private async Task<string> Session(Repository repository, string name, DateTime time, bool exported,
-        bool ended = true, string? proxyCoverage = "included")
+        bool ended = true, string? proxyCoverage = "included", long proxyMaxRowId = long.MaxValue)
     {
         var id = Guid.NewGuid().ToString("D");
         await repository.CreateSessionAsync(id, "test", name, _directory, Environment.ProcessId);
         using var connection = SqliteConnectionFactory.Open(State);
         using var update = connection.CreateCommand();
-        update.CommandText = "UPDATE Sessions SET StartedUTC=$start, EndedUTC=$end, ExportedUTC=$exported, ExportedProxyCoverage=$coverage WHERE Id=$id;";
+        update.CommandText = "UPDATE Sessions SET StartedUTC=$start, EndedUTC=$end, ExportedUTC=$exported, ExportedProxyCoverage=$coverage, ExportedProxyMaxRowId=$maxRowId WHERE Id=$id;";
         update.Parameters.AddWithValue("$id", id);
         update.Parameters.AddWithValue("$start", time.ToString("O"));
         update.Parameters.AddWithValue("$end", ended ? time.ToString("O") : DBNull.Value);
         update.Parameters.AddWithValue("$exported", exported ? time.ToString("O") : DBNull.Value);
         update.Parameters.AddWithValue("$coverage", exported && proxyCoverage is not null ? proxyCoverage : (object)DBNull.Value);
+        update.Parameters.AddWithValue("$maxRowId", exported && proxyCoverage == "included" ? proxyMaxRowId : (object)DBNull.Value);
         update.ExecuteNonQuery();
         return id;
     }

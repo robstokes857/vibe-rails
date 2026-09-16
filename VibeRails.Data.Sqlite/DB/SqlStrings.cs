@@ -1000,13 +1000,15 @@ namespace VibeRails.DB
             """;
         public const string MarkSessionExported = """
             UPDATE Sessions
-            SET ExportedUTC = $exportedUtc, ExportedProxyCoverage = $proxyCoverage
+            SET ExportedUTC = $exportedUtc, ExportedProxyCoverage = $proxyCoverage, ExportedProxyMaxRowId = $proxyMaxRowId
             WHERE Id = $sessionId
               AND EndedUTC IS NOT NULL
               AND ExportedUTC IS NULL;
             """;
         public const string MigrateSessionsAddExportedProxyCoverage =
             "ALTER TABLE Sessions ADD COLUMN ExportedProxyCoverage TEXT NULL";
+        public const string MigrateSessionsAddExportedProxyMaxRowId =
+            "ALTER TABLE Sessions ADD COLUMN ExportedProxyMaxRowId INTEGER NULL";
         public const string SelectSessionLogChunks = """
             SELECT Id, Timestamp, Content
             FROM SessionLogs

@@ -150,9 +150,10 @@ public sealed class SqliteDataRetentionStore(
             check.CommandText = "ATTACH DATABASE $path AS retention_state;";
             check.Parameters.AddWithValue("$path", new SqliteConnectionStringBuilder(stateConnectionString).DataSource);
             await check.ExecuteNonQueryAsync(cancellationToken);
-            // State migration 3 adds the coverage proof. A state database that predates it cannot
-            // prove anything was backed up, so prune nothing rather than fall back to ExportedUTC.
-            check.CommandText = "SELECT 1 FROM pragma_table_info('Sessions', 'retention_state') WHERE name='ExportedProxyCoverage';";
+            // State migrations 3 and 4 add the coverage proof and its rowid boundary. A state
+            // database that predates them cannot prove anything was backed up, so prune nothing
+            // rather than fall back to ExportedUTC.
+            check.CommandText = "SELECT 1 FROM pragma_table_info('Sessions', 'retention_state') WHERE name='ExportedProxyMaxRowId';";
             if (await check.ExecuteScalarAsync(cancellationToken) is null)
                 return 0;
         }
@@ -163,12 +164,17 @@ public sealed class SqliteDataRetentionStore(
             await using var transaction = proxy.BeginTransaction(deferred: false);
             using var delete = proxy.CreateCommand();
             delete.Transaction = transaction;
+            // Only rows the acknowledged envelope actually contained: coverage "included" up to the
+            // snapshot's largest rowid. An "empty" snapshot contained nothing, so every row present
+            // now arrived after it. CreatedUTC cannot decide this on its own -- the proxy queues an
+            // exchange stamped with it and may write the row after the snapshot was taken.
             delete.CommandText = """
                 DELETE FROM ProxyExchanges WHERE rowid IN (
                     SELECT p.rowid FROM ProxyExchanges p
                     JOIN retention_state.Sessions s ON s.Id=p.SessionId
                     WHERE p.CreatedUTC < $cutoff AND s.EndedUTC IS NOT NULL AND s.ExportedUTC IS NOT NULL
-                      AND s.ExportedProxyCoverage IN ('included','empty')
+                      AND s.ExportedProxyCoverage='included'
+                      AND s.ExportedProxyMaxRowId IS NOT NULL AND p.rowid <= s.ExportedProxyMaxRowId
                     ORDER BY p.CreatedUTC, p.rowid LIMIT $limit
                 );
                 """;

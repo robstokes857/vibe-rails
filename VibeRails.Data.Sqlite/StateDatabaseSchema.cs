@@ -119,6 +119,15 @@ internal static class StateDatabaseSchema
             // which is the safe direction -- disk is recoverable, deleted exchanges are not.
             SqliteSchema.AdoptStatement(db, transaction, SqlStrings.MigrateSessionsAddExportedProxyCoverage);
         });
+        SqliteMigrationRunner.Apply(connection, "state", 4, MigrationKind.Additive, (db, transaction) =>
+        {
+            // The boundary of that proof. The proxy queues an exchange stamped with its CreatedUTC
+            // and writes it later, so a row can land after the export snapshot was taken while
+            // carrying a timestamp from before it. The snapshot's largest rowid is what separates
+            // rows the acknowledged envelope contains from rows it does not. Sessions acknowledged
+            // before this column existed stay NULL and are therefore never pruned.
+            SqliteSchema.AdoptStatement(db, transaction, SqlStrings.MigrateSessionsAddExportedProxyMaxRowId);
+        });
         JobStore.EnsureSessionLinkSchema(connection);
         // Every breaking step above has now been applied (or was already), so the file is at this
         // build's generation. Stamping after the fact also covers databases migrated before the

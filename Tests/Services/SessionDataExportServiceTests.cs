@@ -59,6 +59,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
                 sessionId,
                 It.Is<DateTime>(value => value.Kind == DateTimeKind.Utc),
                 It.IsAny<string?>(),
+                It.IsAny<long?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         using var services = BuildServices(repository.Object);
@@ -91,7 +92,45 @@ public sealed class SessionDataExportServiceTests : IDisposable
         repository.Verify(repo => repo.WriteSessionExportAsync(
             sessionId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once);
         repository.Verify(repo => repo.MarkSessionExportedAsync(
-            sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+            sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Once);
+        repository.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task ExportSessionAsync_ExactAcknowledgement_RecordsTheEnvelopesProxyProof()
+    {
+        var sourceId = Guid.NewGuid();
+        var sessionId = sourceId.ToString("D");
+        var envelope = Encoding.UTF8.GetBytes(
+            "{\"kind\":\"session\",\"value\":\"small\"}");
+        var repository = new Mock<ISessionArchiveReader>(MockBehavior.Strict);
+        SetupEnvelopeWrite(
+            repository,
+            sessionId,
+            sourceId,
+            () => envelope,
+            proxyCoverage: "included",
+            proxyMaxRowId: 7);
+        repository
+            .Setup(repo => repo.MarkSessionExportedAsync(
+                sessionId, It.IsAny<DateTime>(), "included", 7L, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        using var services = BuildServices(repository.Object);
+        var handler = new SingleUploadHandler(HttpStatusCode.Created, sourceId, "stored");
+        using var client = new HttpClient(handler);
+        var service = CreateService(client, services);
+
+        var result = await service.ExportSessionAsync(
+            sessionId,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(SessionDataExportStatus.Success, result.Status);
+        repository.Verify(repo => repo.WriteSessionExportAsync(
+            sessionId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once);
+        // Retention may prune exactly what this envelope carried: its coverage and the snapshot's
+        // largest rowid, as reported by the repository that streamed it.
+        repository.Verify(repo => repo.MarkSessionExportedAsync(
+            sessionId, It.IsAny<DateTime>(), "included", 7L, It.IsAny<CancellationToken>()), Times.Once);
         repository.VerifyNoOtherCalls();
     }
 
@@ -111,6 +150,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
                 sessionId,
                 It.Is<DateTime>(value => value.Kind == DateTimeKind.Utc),
                 It.IsAny<string?>(),
+                It.IsAny<long?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
         using var services = BuildServices(repository.Object);
@@ -134,7 +174,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
         repository.Verify(repo => repo.WriteSessionExportAsync(
             sessionId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once);
         repository.Verify(repo => repo.MarkSessionExportedAsync(
-            sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+            sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Once);
         repository.VerifyNoOtherCalls();
     }
 
@@ -169,7 +209,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
         repository.Verify(repo => repo.WriteSessionExportAsync(
             sessionId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once);
         repository.Verify(repo => repo.MarkSessionExportedAsync(
-            It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Never);
         repository.VerifyNoOtherCalls();
     }
 
@@ -187,8 +227,8 @@ public sealed class SessionDataExportServiceTests : IDisposable
             TestContext.Current.CancellationToken);
         repository
             .Setup(repo => repo.MarkSessionExportedAsync(
-                sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .Returns((string _, DateTime _, string? _, CancellationToken token) =>
+                sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
+            .Returns((string _, DateTime _, string? _, long? _, CancellationToken token) =>
             {
                 if (cancelled)
                 {
@@ -307,7 +347,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
         repository.Verify(repo => repo.WriteSessionExportAsync(
             sessionId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once);
         repository.Verify(repo => repo.MarkSessionExportedAsync(
-            It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Never);
         repository.VerifyNoOtherCalls();
     }
 
@@ -331,6 +371,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
                 sessionId,
                 It.IsAny<DateTime>(),
                 It.IsAny<string?>(),
+                It.IsAny<long?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         using var services = BuildServices(repository.Object);
@@ -379,7 +420,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
         repository.Verify(repo => repo.WriteSessionExportAsync(
             sessionId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once);
         repository.Verify(repo => repo.MarkSessionExportedAsync(
-            sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+            sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Once);
         repository.VerifyNoOtherCalls();
     }
 
@@ -397,6 +438,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
                 sessionId,
                 It.IsAny<DateTime>(),
                 It.IsAny<string?>(),
+                It.IsAny<long?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         using var services = BuildServices(repository.Object);
@@ -470,7 +512,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
         repository.Verify(repo => repo.WriteSessionExportAsync(
             sessionId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once);
         repository.Verify(repo => repo.MarkSessionExportedAsync(
-            sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+            sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Once);
         repository.VerifyNoOtherCalls();
     }
 
@@ -556,7 +598,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
         var sessionId = sourceId.ToString("D");
         var frozen = await WriteFrozenSpoolAsync(sourceId, schemaVersion, chunked);
         var repository = new Mock<ISessionArchiveReader>(MockBehavior.Strict);
-        repository.Setup(repo => repo.MarkSessionExportedAsync(sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+        repository.Setup(repo => repo.MarkSessionExportedAsync(sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         using var services = BuildServices(repository.Object);
         using var handler = new ChunkUploadHandler(sourceId);
@@ -569,7 +611,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
         if (!chunked) Assert.Equal(frozen, Assert.Single(handler.Requests).Body);
         Assert.False(File.Exists(SpoolPath(sourceId, schemaVersion)));
         repository.Verify(repo => repo.WriteSessionExportAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Never);
-        repository.Verify(repo => repo.MarkSessionExportedAsync(sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+        repository.Verify(repo => repo.MarkSessionExportedAsync(sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Once);
         repository.VerifyNoOtherCalls();
     }
 
@@ -595,7 +637,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
                 "already_exists", int.Parse(request.SchemaVersion!));
         });
         var repository = new Mock<ISessionArchiveReader>(MockBehavior.Strict);
-        repository.Setup(repo => repo.MarkSessionExportedAsync(sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+        repository.Setup(repo => repo.MarkSessionExportedAsync(sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         using var services = BuildServices(repository.Object);
         using var client = new HttpClient(handler);
@@ -614,7 +656,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
             await File.ReadAllBytesAsync(reconciliation, TestContext.Current.CancellationToken));
         Assert.Equal(0, await service.SweepOrphanedSpoolAsync(TestContext.Current.CancellationToken));
         Assert.True(File.Exists(reconciliation));
-        repository.Verify(repo => repo.MarkSessionExportedAsync(sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+        repository.Verify(repo => repo.MarkSessionExportedAsync(sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Once);
         repository.VerifyNoOtherCalls();
     }
 
@@ -629,7 +671,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
         await WriteFrozenSpoolAsync(sourceId, 1, true);
         var v2 = await WriteFrozenSpoolAsync(sourceId, 2, false);
         var repository = new Mock<ISessionArchiveReader>(MockBehavior.Strict);
-        repository.Setup(repo => repo.MarkSessionExportedAsync(sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+        repository.Setup(repo => repo.MarkSessionExportedAsync(sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         using var services = BuildServices(repository.Object);
         using var handler = new ChunkUploadHandler(sourceId, conflictAt);
@@ -643,7 +685,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
         Assert.Equal(v2, handler.Requests[^1].Body);
         Assert.False(File.Exists(SpoolPath(sourceId, 2)));
         Assert.Single(Directory.EnumerateFiles(_testRoot, "*.reconcile", SearchOption.AllDirectories));
-        repository.Verify(repo => repo.MarkSessionExportedAsync(sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+        repository.Verify(repo => repo.MarkSessionExportedAsync(sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Once);
         repository.VerifyNoOtherCalls();
     }
 
@@ -750,7 +792,9 @@ public sealed class SessionDataExportServiceTests : IDisposable
         string sessionId,
         Guid sourceId,
         Func<byte[]> envelopeFactory,
-        Action? onWrite = null)
+        Action? onWrite = null,
+        string? proxyCoverage = null,
+        long? proxyMaxRowId = null)
     {
         repository
             .Setup(repo => repo.WriteSessionExportAsync(
@@ -763,7 +807,9 @@ public sealed class SessionDataExportServiceTests : IDisposable
                     envelopeFactory(),
                     sourceId,
                     onWrite,
-                    cancellationToken));
+                    cancellationToken,
+                    proxyCoverage,
+                    proxyMaxRowId));
     }
 
     private static async Task<SessionDataExportDescriptor?> WriteEnvelopeAsync(
@@ -771,11 +817,13 @@ public sealed class SessionDataExportServiceTests : IDisposable
         byte[] envelope,
         Guid sourceId,
         Action? onWrite,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? proxyCoverage = null,
+        long? proxyMaxRowId = null)
     {
         onWrite?.Invoke();
         await destination.WriteAsync(envelope, cancellationToken);
-        return new SessionDataExportDescriptor(2, "session", sourceId);
+        return new SessionDataExportDescriptor(2, "session", sourceId, proxyCoverage, proxyMaxRowId);
     }
 
     private static async Task<byte[]> DecompressAsync(byte[] compressed)

@@ -61,7 +61,7 @@ public sealed class DbRefactorReviewReproTests : IDisposable
         Execute(proxy, "CREATE TABLE ProxyExchanges(Id TEXT PRIMARY KEY,SessionId TEXT,CreatedUTC TEXT);");
         // The acknowledged envelope saw an empty proxy snapshot. A queued write from
         // another process then arrives, with the time recorded when it was queued.
-        await repository.MarkSessionExportedAsync("late", now.AddDays(-14), "empty", CancellationToken.None);
+        await repository.MarkSessionExportedAsync("late", now.AddDays(-14), "empty", null, CancellationToken.None);
         Execute(proxy, "INSERT INTO ProxyExchanges VALUES('never-uploaded','late','2026-09-01T00:00:00.0000000Z');");
         var result = await new SqliteDataRetentionStore(State, proxyPath).PruneAsync(now, CancellationToken.None);
         Assert.Equal(0, result.ProxyExchangesDeleted);

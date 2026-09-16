@@ -25,11 +25,13 @@ public interface ISessionArchiveReader
 
     /// <summary>
     /// Sets ExportedUTC once; does not touch the transcript Processed flag. <paramref name="proxyCoverage"/>
-    /// is the acknowledged envelope's proxyCoverage.status, recorded as the ONLY evidence retention
-    /// will accept that this session's proxy exchanges were actually backed up. ExportedUTC alone
-    /// never was: a v1 envelope carries no proxy data at all, and a v2 envelope whose proxy read
-    /// failed is still acknowledged with status "unavailable". Pass null when unknown.
+    /// is the acknowledged envelope's proxyCoverage.status and <paramref name="proxyMaxRowId"/> the
+    /// largest proxy rowid that envelope contained; together they are the ONLY evidence retention
+    /// will accept that a given proxy exchange was actually backed up. ExportedUTC alone never was:
+    /// a v1 envelope carries no proxy data at all, a v2 envelope whose proxy read failed is still
+    /// acknowledged with status "unavailable", and an exchange the proxy's write queue lands after
+    /// the snapshot keeps the earlier CreatedUTC it was queued with. Pass null when unknown.
     /// </summary>
     Task<bool> MarkSessionExportedAsync(string sessionId, DateTime exportedUtc, string? proxyCoverage,
-        CancellationToken cancellationToken);
+        long? proxyMaxRowId, CancellationToken cancellationToken);
 }

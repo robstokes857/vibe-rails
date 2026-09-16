@@ -1581,7 +1581,7 @@ namespace VibeRails.DB
                 await destination.WriteAsync("}"u8.ToArray(), cancellationToken);
             }
             await transaction.CommitAsync(cancellationToken);
-            return new SessionDataExportDescriptor(2, "session", sourceId, proxy.Status);
+            return new SessionDataExportDescriptor(2, "session", sourceId, proxy.Status, proxy.MaxRowId);
         }
 
         public async Task<bool> SessionAwaitsExportAsync(
@@ -1599,6 +1599,7 @@ namespace VibeRails.DB
             string sessionId,
             DateTime exportedUtc,
             string? proxyCoverage,
+            long? proxyMaxRowId,
             CancellationToken cancellationToken)
         {
             await using var connection = await OpenConnectionAsync(cancellationToken);
@@ -1608,6 +1609,7 @@ namespace VibeRails.DB
             cmd.Parameters.AddWithValue("$exportedUtc", exportedUtc.ToUniversalTime().ToString("O"));
             // Null is the safe value: retention requires positive proof and prunes nothing without it.
             cmd.Parameters.AddWithValue("$proxyCoverage", (object?)proxyCoverage ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$proxyMaxRowId", (object?)proxyMaxRowId ?? DBNull.Value);
             return await cmd.ExecuteNonQueryAsync(cancellationToken) == 1;
         }
 

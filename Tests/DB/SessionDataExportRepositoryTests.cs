@@ -87,10 +87,12 @@ public sealed class SessionDataExportRepositoryTests : IDisposable
             firstEligible,
             markedUtc,
             null,
+            null,
             TestContext.Current.CancellationToken));
         Assert.False(await repository.MarkSessionExportedAsync(
             firstEligible,
             markedUtc.AddMinutes(1),
+            null,
             null,
             TestContext.Current.CancellationToken));
 
@@ -116,6 +118,7 @@ public sealed class SessionDataExportRepositoryTests : IDisposable
         Assert.True(await repository.MarkSessionExportedAsync(
             secondEligible,
             markedUtc,
+            null,
             null,
             TestContext.Current.CancellationToken));
         Assert.Null((await repository.GetOldestUnexportedSessionAsync(
@@ -246,7 +249,7 @@ public sealed class SessionDataExportRepositoryTests : IDisposable
                 ("$id", blocked)));
 
         Assert.True(await repository.MarkSessionExportedAsync(
-            blocked, retryAt, null, TestContext.Current.CancellationToken));
+            blocked, retryAt, null, null, TestContext.Current.CancellationToken));
         Assert.False(await repository.DeferSessionExportAsync(
             blocked, retryAt.AddMinutes(5), TestContext.Current.CancellationToken));
     }
@@ -263,7 +266,7 @@ public sealed class SessionDataExportRepositoryTests : IDisposable
             pending, TestContext.Current.CancellationToken));
 
         Assert.True(await repository.MarkSessionExportedAsync(
-            pending, cutoff, null, TestContext.Current.CancellationToken));
+            pending, cutoff, null, null, TestContext.Current.CancellationToken));
         // Exported: the spool for it is now reclaimable.
         Assert.False(await repository.SessionAwaitsExportAsync(
             pending, TestContext.Current.CancellationToken));
@@ -405,10 +408,12 @@ public sealed class SessionDataExportRepositoryTests : IDisposable
             sessionId,
             markedUtc,
             null,
+            null,
             TestContext.Current.CancellationToken));
         Assert.False(await repository.MarkSessionExportedAsync(
             sessionId,
             markedUtc.AddSeconds(1),
+            null,
             null,
             TestContext.Current.CancellationToken));
 

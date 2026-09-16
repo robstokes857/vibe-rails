@@ -43,7 +43,7 @@ public sealed class StateSchemaLegacyAdoptionTests
             command.ExecuteNonQuery();
             _ = new Repository(connectionString);
             command.CommandText = "SELECT COUNT(*) FROM SchemaMigrations WHERE Component='state';";
-            Assert.Equal(3L, command.ExecuteScalar());
+            Assert.Equal(4L, command.ExecuteScalar());
             command.CommandText = "SELECT COUNT(*) FROM Environments;";
             Assert.Equal(2L, command.ExecuteScalar());
         }

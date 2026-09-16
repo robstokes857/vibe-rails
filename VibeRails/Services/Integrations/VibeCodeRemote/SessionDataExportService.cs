@@ -223,7 +223,7 @@ public sealed class SessionDataExportService : ISessionDataExportService
                 File.Move(inProgressPath, newPath, overwrite: false);
                 inProgressPath = null;
                 PrivateFilePermissions.EnsureFile(newPath);
-                candidates.Add(new(EnvelopeSchemaVersion, newPath, descriptor.ProxyCoverage));
+                candidates.Add(new(EnvelopeSchemaVersion, newPath, descriptor.ProxyCoverage, descriptor.ProxyMaxRowId));
             }
 
             var computerName = ComputerNameFormatter.Normalize(_computerNameFactory());
@@ -279,10 +279,14 @@ public sealed class SessionDataExportService : ISessionDataExportService
                 var acknowledgedCoverage = acknowledged.SchemaVersion >= EnvelopeSchemaVersion
                     ? acknowledged.ProxyCoverage
                     : null;
+                var acknowledgedProxyMaxRowId = acknowledgedCoverage is not null
+                    ? acknowledged.ProxyMaxRowId
+                    : null;
                 if (!await repository.MarkSessionExportedAsync(
                         sessionId,
                         DateTime.UtcNow,
                         acknowledgedCoverage,
+                        acknowledgedProxyMaxRowId,
                         cancellationToken))
                 {
                     // The row may have been deleted or concurrently acknowledged and therefore
@@ -833,7 +837,11 @@ public sealed class SessionDataExportService : ISessionDataExportService
     /// from a previous process -- its coverage is inside the compressed body and is not re-read.
     /// Null is recorded as "no proof", so retention keeps that session's proxy exchanges.
     /// </param>
-    private sealed record PreparedSpool(int SchemaVersion, string Path, string? ProxyCoverage = null);
+    /// <param name="ProxyMaxRowId">
+    /// The largest proxy rowid inside this envelope's snapshot, known only when the envelope was
+    /// prepared by this process. Retention prunes nothing above it.
+    /// </param>
+    private sealed record PreparedSpool(int SchemaVersion, string Path, string? ProxyCoverage = null, long? ProxyMaxRowId = null);
 
     private static List<PreparedSpool> FindPreparedSpools(string statePath, Guid sourceId)
     {

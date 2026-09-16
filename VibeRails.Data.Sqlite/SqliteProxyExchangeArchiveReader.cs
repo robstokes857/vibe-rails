@@ -53,11 +53,16 @@ public sealed class SqliteProxyExchangeArchiveReader(string databasePath, ILogge
                 options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
             staged = new FileStream(Path.Combine(Path.GetTempPath(), $"viberails-proxy-{Guid.NewGuid():N}.json"), options);
             long count = 0;
+            long maxRowId = 0;
             await using (var writer = new Utf8JsonWriter(staged))
             {
                 writer.WriteStartArray();
                 do
                 {
+                    // Rows are read in rowid order inside one read transaction, so the last rowid
+                    // seen is the snapshot's high-water mark: anything the proxy's write queue
+                    // lands afterwards gets a larger rowid and is not in this envelope.
+                    maxRowId = Math.Max(maxRowId, reader.GetInt64(0));
                     writer.WriteStartObject();
                     writer.WriteString("id", reader.GetString(1));
                     writer.WriteString("sessionId", reader.GetString(2));
@@ -82,7 +87,7 @@ public sealed class SqliteProxyExchangeArchiveReader(string databasePath, ILogge
                 await writer.FlushAsync(cancellationToken);
             }
             staged.Position = 0;
-            var result = new PreparedProxyArchive("included", count, snapshotUtc, staged);
+            var result = new PreparedProxyArchive("included", count, snapshotUtc, staged, maxRowId);
             staged = null; // The returned result owns and deletes the private staging file.
             return result;
         }
