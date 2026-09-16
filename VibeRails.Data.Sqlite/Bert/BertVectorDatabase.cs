@@ -32,7 +32,8 @@ internal static class BertVectorDatabase
             Directory.CreateDirectory(directory);
 
         using var connection = Open(databasePath);
-        SqliteMigrationRunner.Apply(connection, "bert-vectors", 1, (db, transaction) =>
+        SqliteMigrationRunner.RequireGenerationAtMost(connection, Generation, "vector");
+        SqliteMigrationRunner.Apply(connection, "bert-vectors", 1, MigrationKind.Additive, (db, transaction) =>
         {
             using var command = db.CreateCommand();
             command.Transaction = transaction;
@@ -61,7 +62,15 @@ internal static class BertVectorDatabase
             command.ExecuteNonQuery();
             PurgeLegacySecretDocuments(db, transaction);
         });
+        SqliteMigrationRunner.StampGeneration(connection, Generation);
     }
+
+    /// <summary>
+    /// Vector database generation (PRAGMA user_version). Generation 1 doubles as the legacy
+    /// "secret documents purged" marker that <see cref="PurgeLegacySecretDocuments"/> checks, so it
+    /// must never be lowered below 1.
+    /// </summary>
+    internal const int Generation = 1;
 
     private static void PurgeLegacySecretDocuments(SqliteConnection connection, SqliteTransaction transaction)
     {

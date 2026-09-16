@@ -171,16 +171,22 @@ public sealed class CodeAnalyzerIgnoreStore(string connectionString) : ICodeAnal
             : CodeAnalyzerIgnoreMatchKind.File;
     }
 
+    internal static void EnsureSchema(SqliteConnection connection)
+    {
+        SqliteMigrationRunner.RequireGenerationAtMost(connection, StateDatabaseSchema.Generation, "state.db");
+        SqliteMigrationRunner.Apply(connection, "code-analyzer-ignores", 1, MigrationKind.Additive, (db, transaction) =>
+        {
+            SqliteSchema.Execute(db, transaction, SqlStrings.CreateCodeAnalyzerIgnoresTable);
+            SqliteSchema.AdoptStatement(db, transaction, SqlStrings.MigrateCodeAnalyzerIgnoresAddMatchKind);
+        });
+    }
+
     private async Task<SqliteConnection> OpenAsync(CancellationToken cancellationToken)
     {
         var connection = await SqliteConnectionFactory.OpenAsync(connectionString, cancellationToken);
         try
         {
-            SqliteMigrationRunner.Apply(connection, "code-analyzer-ignores", 1, (db, transaction) =>
-            {
-                SqliteSchema.Execute(db, transaction, SqlStrings.CreateCodeAnalyzerIgnoresTable);
-                SqliteSchema.AdoptStatement(db, transaction, SqlStrings.MigrateCodeAnalyzerIgnoresAddMatchKind);
-            });
+            EnsureSchema(connection);
             return connection;
         }
         catch

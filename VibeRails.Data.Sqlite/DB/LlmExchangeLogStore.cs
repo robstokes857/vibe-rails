@@ -207,6 +207,22 @@ public sealed class LlmExchangeLogStore : ILlmExchangeLogStore, IDisposable
         await insert.ExecuteNonQueryAsync();
     }
 
+    /// <summary>proxy_exchanges.db schema generation (PRAGMA user_version); bumped only by breaking changes.</summary>
+    internal const int Generation = 1;
+
+    internal static void EnsureSchema(SqliteConnection connection)
+    {
+        SqliteMigrationRunner.RequireGenerationAtMost(connection, Generation, "proxy_exchanges.db");
+        SqliteMigrationRunner.Apply(connection, "proxy-exchanges", 1, MigrationKind.Additive, (db, transaction) =>
+        {
+            SqliteSchema.Execute(db, transaction, CreateTable);
+            SqliteSchema.AdoptStatement(db, transaction, AddSessionIdColumn);
+            SqliteSchema.Execute(db, transaction, CreateCreatedIndex);
+            SqliteSchema.Execute(db, transaction, CreateSessionIdIndex);
+        });
+        SqliteMigrationRunner.StampGeneration(connection, Generation);
+    }
+
     private async Task<SqliteConnection> OpenAsync()
     {
         var connection = await SqliteConnectionFactory.OpenAsync(_connectionString);
@@ -214,13 +230,7 @@ public sealed class LlmExchangeLogStore : ILlmExchangeLogStore, IDisposable
         {
             if (!_schemaReady)
             {
-                SqliteMigrationRunner.Apply(connection, "proxy-exchanges", 1, (db, transaction) =>
-                {
-                    SqliteSchema.Execute(db, transaction, CreateTable);
-                    SqliteSchema.AdoptStatement(db, transaction, AddSessionIdColumn);
-                    SqliteSchema.Execute(db, transaction, CreateCreatedIndex);
-                    SqliteSchema.Execute(db, transaction, CreateSessionIdIndex);
-                });
+                EnsureSchema(connection);
                 _schemaReady = true;
             }
             return connection;

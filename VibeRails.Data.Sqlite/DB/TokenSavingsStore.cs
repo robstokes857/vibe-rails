@@ -194,6 +194,13 @@ public sealed class TokenSavingsStore : ITokenSavingsStore
         }
     }
 
+    internal static void EnsureSchema(SqliteConnection connection)
+    {
+        SqliteMigrationRunner.RequireGenerationAtMost(connection, StateDatabaseSchema.Generation, "state.db");
+        SqliteMigrationRunner.Apply(connection, "token-savings", 1, MigrationKind.Additive,
+            (db, transaction) => SqliteSchema.Execute(db, transaction, SqlStrings.CreateTokenSavingsTable));
+    }
+
     /// <summary>
     /// Writes one record (when <paramref name="provider"/> is set) and re-reads the totals. Both
     /// halves share a connection because every write wants the fresh numbers anyway.
@@ -221,8 +228,7 @@ public sealed class TokenSavingsStore : ITokenSavingsStore
             using var connection = SqliteConnectionFactory.Open(_connectionString);
             if (!_schemaReady)
             {
-                SqliteMigrationRunner.Apply(connection, "token-savings", 1,
-                    (db, transaction) => SqliteSchema.Execute(db, transaction, SqlStrings.CreateTokenSavingsTable));
+                EnsureSchema(connection);
                 _schemaReady = true;
             }
 

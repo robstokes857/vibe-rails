@@ -6,7 +6,11 @@ using VibeRails.Utils;
 
 namespace VibeRails.Jobs;
 
-/// <summary>Schedules small retention batches only while automatic backup is opted in.</summary>
+/// <summary>
+/// Schedules small retention batches only while automatic backup is opted in AND retention itself
+/// is switched on. Two flags on purpose: "back my data up" must never by itself mean "and then
+/// delete it locally" -- deletion is the one storage action with no undo.
+/// </summary>
 public sealed class DataRetentionJob(
     ILogger<DataRetentionJob> logger,
     ISystemResourceService resources,
@@ -18,7 +22,8 @@ public sealed class DataRetentionJob(
 
     protected override async Task ExecuteJob(CancellationToken cancellationToken)
     {
-        if (!Config.LoadFresh().DataExportOptIn)
+        var settings = Config.LoadFresh();
+        if (!settings.DataExportOptIn || !settings.DataRetentionEnabled)
             return;
         // Reuse the archive drain's machine-wide lock. Retention cannot race preparation or
         // acknowledgment, and multiple root backends cannot prune the same data simultaneously.

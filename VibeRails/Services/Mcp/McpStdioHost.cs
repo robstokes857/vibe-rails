@@ -82,10 +82,9 @@ public static class McpStdioHost
     {
         if (!string.IsNullOrWhiteSpace(VibeRails.Utils.ParserConfigs.GetStatePath()))
             return;
-        VibeRails.Utils.GlobalRuntimePaths.Initialize(
-            string.IsNullOrWhiteSpace(installDirectoryName)
-                ? VibeRails.Utils.PathConstants.DEFAULT_INSTALL_DIR_NAME
-                : installDirectoryName);
+        // A blank name means the default location, which GlobalRuntimePaths resolves through the
+        // data-directory policy (VIBE_RAILS_HOME, Debug builds' dev directory).
+        VibeRails.Utils.GlobalRuntimePaths.Initialize(installDirectoryName);
     }
 
     /// <summary>State.db for this process: the configured path, else the default install directory.</summary>

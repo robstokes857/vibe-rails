@@ -1027,7 +1027,8 @@ public sealed partial class BoardStore : IBoardStore
     private void EnsureSchema()
     {
         using var connection = SqliteConnectionFactory.Open(_connectionString);
-        SqliteMigrationRunner.Apply(connection, "board", 1, (db, transaction) =>
+        SqliteMigrationRunner.RequireGenerationAtMost(connection, StateDatabaseSchema.Generation, "state.db");
+        SqliteMigrationRunner.Apply(connection, "board", 1, MigrationKind.Additive, (db, transaction) =>
         {
             SqliteSchema.Execute(db, transaction, SchemaSql);
             EnsureAttachmentSchema(db, transaction);

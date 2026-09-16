@@ -8,11 +8,20 @@ namespace VibeRails.Data.Sqlite;
 /// <summary>Adopts existing state.db files once, then applies only new numbered migrations.</summary>
 internal static class StateDatabaseSchema
 {
+    /// <summary>
+    /// The state.db schema generation this build writes, stored in PRAGMA user_version. Bumped only
+    /// by breaking migrations (state/2 re-pointed the search index: generation 2). A build refuses a
+    /// database above its own generation; additive changes never move it. Values stay at or above 1
+    /// because the shipped 1.10.10 binary reads user_version &lt; 1 as "rebuild the FTS table".
+    /// </summary>
+    internal const int Generation = 2;
+
     internal static void Ensure(string connectionString, ILogger? logger = null)
     {
         using var connection = SqliteConnectionFactory.Open(connectionString);
         SqliteConnectionFactory.EnsureWalMode(connection);
-        SqliteMigrationRunner.Apply(connection, "state", 1, (db, transaction) =>
+        SqliteMigrationRunner.RequireGenerationAtMost(connection, Generation, "state.db");
+        SqliteMigrationRunner.Apply(connection, "state", 1, MigrationKind.Additive, (db, transaction) =>
         {
             using (var steps = db.CreateCommand())
             {
@@ -31,7 +40,10 @@ internal static class StateDatabaseSchema
 
         });
         var queued = 0;
-        SqliteMigrationRunner.Apply(connection, "state", 2, (db, transaction) =>
+        // Breaking: 1.10.10 writes UserInputs_fts directly over UserInputs; after this the index is
+        // fed from UserInputSearchDocuments. Already applied on the owner's database (2026-09-16);
+        // any other existing database takes it only through `vb --migrate`.
+        SqliteMigrationRunner.Apply(connection, "state", 2, MigrationKind.Breaking, (db, transaction) =>
         {
             if (SqliteSchema.HasColumn(db, transaction, "UserInputs", "CleanedId"))
                 SqliteSchema.Execute(db, transaction,
@@ -98,7 +110,7 @@ internal static class StateDatabaseSchema
             logger?.LogInformation("Adopted state database search schema; queued {Count} prompts for indexing.", queued);
         });
         DrainSearchIndexBacklog(connection, logger);
-        SqliteMigrationRunner.Apply(connection, "state", 3, (db, transaction) =>
+        SqliteMigrationRunner.Apply(connection, "state", 3, MigrationKind.Additive, (db, transaction) =>
         {
             // Retention's proof that a session's proxy exchanges were actually backed up.
             // ExportedUTC alone is not that proof: schema-v1 envelopes carry no proxy data, frozen
@@ -108,6 +120,10 @@ internal static class StateDatabaseSchema
             SqliteSchema.AdoptStatement(db, transaction, SqlStrings.MigrateSessionsAddExportedProxyCoverage);
         });
         JobStore.EnsureSessionLinkSchema(connection);
+        // Every breaking step above has now been applied (or was already), so the file is at this
+        // build's generation. Stamping after the fact also covers databases migrated before the
+        // generation existed.
+        SqliteMigrationRunner.StampGeneration(connection, Generation);
     }
 
     /// <summary>
@@ -130,6 +146,7 @@ internal static class StateDatabaseSchema
                 return;
         }
         var indexed = 0;
+        var legacyIndexed = 0;
         while (true)
         {
             var batch = new List<(long Id, string? Text)>(BatchSize);
@@ -137,11 +154,15 @@ internal static class StateDatabaseSchema
             using (var read = connection.CreateCommand())
             {
                 read.Transaction = transaction;
-                read.CommandText = SelectPendingBatchSql;
+                read.CommandText = SqliteSearchIndexMaintenanceStore.SelectPendingBatchSql;
                 read.Parameters.AddWithValue("$limit", BatchSize);
                 using var reader = read.ExecuteReader();
                 while (reader.Read())
+                {
                     batch.Add((reader.GetInt64(0), reader.IsDBNull(1) ? null : reader.GetString(1)));
+                    if (reader.GetInt64(2) != 0)
+                        legacyIndexed++;
+                }
             }
             if (batch.Count == 0)
             {
@@ -153,13 +174,15 @@ internal static class StateDatabaseSchema
             transaction.Commit();
             indexed += batch.Count;
         }
+        if (legacyIndexed > 0)
+        {
+            // Rows an older binary wrote straight into the FTS table now exist twice in it. The
+            // index is derived, so one rebuild from the content table is the whole repair.
+            using var transaction = connection.BeginTransaction(deferred: false);
+            SqliteSchema.Execute(connection, transaction, "INSERT INTO UserInputs_fts(UserInputs_fts) VALUES('rebuild');");
+            transaction.Commit();
+        }
         if (indexed > 0)
-            logger?.LogInformation("Rebuilt the prompt search index for {Count} prompts.", indexed);
+            logger?.LogInformation("Rebuilt the prompt search index for {Count} prompts ({Legacy} had been indexed directly by an older build).", indexed, legacyIndexed);
     }
-
-    private const string SelectPendingBatchSql =
-        "SELECT pending.UserInputId, input.InputText " +
-        "FROM UserInputSearchPending AS pending " +
-        "LEFT JOIN UserInputs AS input ON input.Id = pending.UserInputId " +
-        "ORDER BY pending.UserInputId LIMIT $limit;";
 }

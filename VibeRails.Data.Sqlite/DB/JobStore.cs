@@ -1633,7 +1633,8 @@ public sealed class JobStore : IJobStore
     private void EnsureSchema()
     {
         using var connection = SqliteConnectionFactory.Open(_connectionString);
-        SqliteMigrationRunner.Apply(connection, "jobs", 1, AdoptSchema);
+        SqliteMigrationRunner.RequireGenerationAtMost(connection, StateDatabaseSchema.Generation, "state.db");
+        SqliteMigrationRunner.Apply(connection, "jobs", 1, MigrationKind.Additive, AdoptSchema);
         EnsureDependentSchema(connection);
     }
 
@@ -1720,7 +1721,7 @@ public sealed class JobStore : IJobStore
         // cross-component adoption pending until its parent schema becomes available.
         var environmentsReady = SqliteSchema.HasColumn(connection, null, "Environments", "Id");
         if (environmentsReady)
-            SqliteMigrationRunner.Apply(connection, "jobs-worker-actions", 1, AdoptWorkerActions);
+            SqliteMigrationRunner.Apply(connection, "jobs-worker-actions", 1, MigrationKind.Additive, AdoptWorkerActions);
         var sessionsReady = EnsureSessionLinkSchema(connection);
         if (environmentsReady && sessionsReady)
             Volatile.Write(ref _dependenciesReady, 1);
@@ -1731,7 +1732,7 @@ public sealed class JobStore : IJobStore
         if (!SqliteSchema.HasColumn(connection, null, "Sessions", "JobRunId")
             || !SqliteSchema.HasColumn(connection, null, "JobRuns", "DeletedUTC"))
             return false;
-        SqliteMigrationRunner.Apply(connection, "jobs-session-link", 1, (db, transaction) =>
+        SqliteMigrationRunner.Apply(connection, "jobs-session-link", 1, MigrationKind.Additive, (db, transaction) =>
         {
             if (!IsLinkTriggerCurrent(db, transaction))
                 SqliteSchema.Execute(db, transaction, "DROP TRIGGER IF EXISTS Sessions_LinkJobRunSession;\n"

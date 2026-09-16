@@ -406,6 +406,20 @@ public sealed class CompressionCaptureStore : ICompressionCaptureStore, IDisposa
         }
     }
 
+    internal static void EnsureSchema(SqliteConnection connection)
+    {
+        SqliteMigrationRunner.RequireGenerationAtMost(connection, StateDatabaseSchema.Generation, "state.db");
+        SqliteMigrationRunner.Apply(connection, "compression-captures", 1, MigrationKind.Additive, (db, transaction) =>
+        {
+            SqliteSchema.Execute(db, transaction, SqlStrings.CreateCompressionCapturesTable);
+            SqliteSchema.AdoptStatement(db, transaction, SqlStrings.AddCompressionCaptureContentHashColumn);
+            SqliteSchema.AdoptStatement(db, transaction, SqlStrings.AddCompressionCaptureSeenCountColumn);
+            SqliteSchema.AdoptStatement(db, transaction, SqlStrings.AddCompressionCaptureRewriteAcceptedColumn);
+            SqliteSchema.Execute(db, transaction, SqlStrings.CreateCompressionCapturesCreatedIndex);
+            SqliteSchema.Execute(db, transaction, SqlStrings.CreateCompressionCapturesHashIndex);
+        });
+    }
+
     private async Task<SqliteConnection> OpenAsync(CancellationToken cancellationToken)
     {
         var connection = await SqliteConnectionFactory.OpenAsync(_connectionString, cancellationToken);
@@ -418,15 +432,7 @@ public sealed class CompressionCaptureStore : ICompressionCaptureStore, IDisposa
                 {
                     if (!_schemaReady)
                     {
-                        SqliteMigrationRunner.Apply(connection, "compression-captures", 1, (db, transaction) =>
-                        {
-                            SqliteSchema.Execute(db, transaction, SqlStrings.CreateCompressionCapturesTable);
-                            SqliteSchema.AdoptStatement(db, transaction, SqlStrings.AddCompressionCaptureContentHashColumn);
-                            SqliteSchema.AdoptStatement(db, transaction, SqlStrings.AddCompressionCaptureSeenCountColumn);
-                            SqliteSchema.AdoptStatement(db, transaction, SqlStrings.AddCompressionCaptureRewriteAcceptedColumn);
-                            SqliteSchema.Execute(db, transaction, SqlStrings.CreateCompressionCapturesCreatedIndex);
-                            SqliteSchema.Execute(db, transaction, SqlStrings.CreateCompressionCapturesHashIndex);
-                        });
+                        EnsureSchema(connection);
                         Volatile.Write(ref _schemaReady, true);
                     }
                 }

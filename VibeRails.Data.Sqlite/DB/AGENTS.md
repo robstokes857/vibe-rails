@@ -21,6 +21,35 @@ A lock timeout reports which migration is pending and asks the operator to close
 and retry; it never records completion. The connection returns to its previous timeout afterward
 (ordinary store operations retain the five-second policy).
 
+### Migration kinds, generations, and `vb --migrate` (added 2026-09-16)
+
+Every `SqliteMigrationRunner.Apply` call declares a `MigrationKind`:
+
+- **Additive** — older binaries keep working unchanged (new table, nullable column, index, trigger
+  that writes only to new tables, virtual table over a *new* content table). Runs at startup.
+- **Breaking** — anything an older binary could misuse afterwards (drop, rename, re-pointed
+  virtual-table content, changed trigger or constraint, row deletion). Never runs automatically
+  against a database that existed before the process started. It runs only from `vb --migrate`,
+  only when no other `vb` process is alive, and only after a copy is written to `backups/` beside
+  the file. Files this process created are never guarded. See `SchemaUpgradePolicy`.
+
+Each database file carries a **generation** in `PRAGMA user_version`, bumped only by breaking
+changes (`StateDatabaseSchema.Generation`, `LlmExchangeLogStore.Generation`,
+`BertVectorDatabase.Generation`). Every schema entry point first calls
+`RequireGenerationAtMost`: a build refuses a file newer than it understands instead of writing to
+it. The shipped 1.10.10 binary predates the gate and reads `user_version < 1` as "rebuild the FTS
+table", so generations stay at or above 1.
+
+`SchemaMigrations.AppliedBy` records which binary (name, version, configuration, pid, host)
+applied each step. `SqliteStorage.EnsureAllSchemas` brings every store current in one call; the
+`--migrate` host and `Tests/DB/SchemaSnapshotTests.cs` both use it. That test pins the schema of
+every table to `docs/schema/*.sql`; a table change is a diff there and needs the owner's sign-off.
+`Tests/DB/PreviousReleaseCompatibilityTests.cs` replays the shipped binary's FTS writes against this
+schema and must be updated with any change to what that binary can do.
+
+Prefer expand/contract for anything breaking: ship the new structure additively first, drop the old
+one in a later release once every install has moved, and bump the generation then.
+
 Input recording and Git capture are orchestrated by `VibeRails/Services/UserInputRecordingService.cs`.
 Session export schema v2 includes a nested proxy-exchange archive. Retention uses the existing
 export acknowledgement, preserving open/unexported sessions and unattributed proxy records.
