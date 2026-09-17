@@ -9,7 +9,7 @@
 //
 // Shapes (see VibeRails/DTOs/ResponseRecords.cs, "Kanban board"):
 //   column     { id, name, wipLimit, position, color }
-//   card       { id, key 'VB-n', columnId, position, title, description, assignee, priority,
+//   card       { id, key 'VB-n', columnId, position, title, description, assignee, type, priority,
 //                points, tags[], blocked, commentCount, activeSessionId, activeTabId,
 //                createdAt, updatedAt }                      (board list = these summaries)
 //   card+rails { ...card, comments[], commits[], sessions[], attachments[], notes[] }  (getBoardCardAsync)

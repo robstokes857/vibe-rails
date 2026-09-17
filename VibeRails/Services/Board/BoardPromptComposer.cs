@@ -54,10 +54,11 @@ public static class BoardPromptComposer
         builder.Append("You are working on kanban card ").Append(key)
             .Append(" in the VibeRails board for this project (description revision ")
             .Append(card.DescriptionRevision).Append(").\n");
-        // Lane, priority and assignee are one line of board data; everything else the board
+        // Lane, type, priority and assignee are one line of board data; everything else the board
         // supplies goes inside the fence below. Single-line fields are flattened so nothing typed
         // into a lane name or environment name can start a new "instruction" line up here.
         builder.Append("Lane: ").Append(SanitizeLine(columnName, 80))
+            .Append(" · Type: ").Append(SanitizeLine(BoardCardTypes.Label(card.Type), 40))
             .Append(" · Priority: ").Append(SanitizeLine(card.Priority, 20));
         if (!string.IsNullOrWhiteSpace(assigneeLabel))
             builder.Append(" · Assignee: ").Append(SanitizeLine(assigneeLabel, 80));

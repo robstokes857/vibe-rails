@@ -41,6 +41,8 @@ public sealed class BoardServiceTests : IDisposable
         await Assert.ThrowsAsync<BoardValidationException>(() =>
             _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "x", Priority: "urgent"), Ct));
         await Assert.ThrowsAsync<BoardValidationException>(() =>
+            _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "x", Type: "incident"), Ct));
+        await Assert.ThrowsAsync<BoardValidationException>(() =>
             _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "x", Points: Element("4")), Ct));
         await Assert.ThrowsAsync<BoardValidationException>(() =>
             _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "x", Assignee: "maya"), Ct));
@@ -50,10 +52,12 @@ public sealed class BoardServiceTests : IDisposable
             Assignee: "env:7:Codex",
             Priority: "High",
             Points: Element("\"5\""),
-            Tags: ["auth", " auth ", "", "bug"]), Ct);
+            Tags: ["auth", " auth ", "", "bug"],
+            Type: "research spike"), Ct);
         Assert.Equal("Ship it", created.Title);
         Assert.Equal("env:7:codex", created.Assignee);
         Assert.Equal("high", created.Priority);
+        Assert.Equal(BoardCardTypes.ResearchSpike, created.Type);
         Assert.Equal(5, created.Points);
         Assert.Equal(["auth", "bug"], created.Tags);
         Assert.Equal("VB-1", created.Key);
@@ -73,6 +77,7 @@ public sealed class BoardServiceTests : IDisposable
         Assert.Equal("base:claude", untouched!.Assignee);
         Assert.Equal(3, untouched.Points);
         Assert.Equal(["x"], untouched.Tags);
+        Assert.Equal(BoardCardTypes.Task, untouched.Type);
 
         // "" clears points and the assignee; [] clears tags; null points also clears.
         var cleared = await _service.UpdateCardAsync(_project, created.Id, new UpdateBoardCardRequest(
@@ -89,6 +94,11 @@ public sealed class BoardServiceTests : IDisposable
         await Assert.ThrowsAsync<BoardValidationException>(() =>
             _service.UpdateCardAsync(_project, created.Id, new UpdateBoardCardRequest(Title: ""), Ct));
         Assert.Null(await _service.UpdateCardAsync(_project, "VB-999", new UpdateBoardCardRequest(Title: "x"), Ct));
+
+        var typed = await _service.UpdateCardAsync(_project, created.Id, new UpdateBoardCardRequest(Type: "chore/tech debt"), Ct);
+        Assert.Equal(BoardCardTypes.Chore, typed!.Type);
+        await Assert.ThrowsAsync<BoardValidationException>(() =>
+            _service.UpdateCardAsync(_project, created.Id, new UpdateBoardCardRequest(Type: ""), Ct));
     }
 
     [Fact]

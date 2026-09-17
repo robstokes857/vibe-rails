@@ -3962,7 +3962,27 @@
                     display: inline-flex;
                     align-items: center;
                     gap: 0.3rem;
+                    min-width: 0;
                 }
+
+                .board-view .board-type-chip {
+                    display: inline-block;
+                    max-width: 5.5rem;
+                    padding: 1px 6px;
+                    border: 1px solid color-mix(in srgb, #94a3b8 45%, transparent);
+                    border-radius: 999px;
+                    color: #94a3b8;
+                    font-size: 0.62rem;
+                    font-weight: 600;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                }
+
+                .board-view .board-type-chip[data-type="bug"] { color: #fb7185; border-color: color-mix(in srgb, #fb7185 45%, transparent); }
+                .board-view .board-type-chip[data-type="feature"] { color: #38bdf8; border-color: color-mix(in srgb, #38bdf8 45%, transparent); }
+                .board-view .board-type-chip[data-type="research-spike"] { color: #c084fc; border-color: color-mix(in srgb, #c084fc 45%, transparent); }
+                .board-view .board-type-chip[data-type="chore"] { color: #fbbf24; border-color: color-mix(in srgb, #fbbf24 45%, transparent); }
 
                 .board-view .board-priority-chip {
                     padding: 1px 6px;
@@ -4639,28 +4659,11 @@
 
                 /* The description gets a roomier box than a comment reply.
                    No max-height: it grows with the text and the editor
-                   scroller takes over, so this box never grows a second bar.
-                   On a new card the leftover column height goes to this box
-                   so the taller dialog is writing space, not empty gray. */
+                   scroller takes over, so this box never grows a second bar. */
                 .board-block:first-of-type .board-composer-input {
                     min-height: 240px;
                     max-height: none;
                     overflow-y: hidden;
-                }
-
-                .board-card-editor[data-card-id=""] .board-block:first-of-type {
-                    flex: 1 1 auto;
-                    min-height: 0;
-                }
-
-                .board-card-editor[data-card-id=""] .board-block:first-of-type .board-composer,
-                .board-card-editor[data-card-id=""] .board-block:first-of-type .board-composer-input {
-                    flex: 1 1 auto;
-                    min-height: 0;
-                }
-
-                .board-card-editor[data-card-id=""] .board-block:first-of-type .board-composer-input {
-                    min-height: 240px;
                 }
 
                 .board-comment-content {
@@ -5028,6 +5031,14 @@
                     <input type="search" class="board-control board-search-input" data-board-search
                         placeholder="Search cards" autocomplete="off" aria-label="Search cards">
                 </div>
+                <select class="board-control" data-board-filter-type aria-label="Filter by type">
+                    <option value="">Any type</option>
+                    <option value="task">Task</option>
+                    <option value="bug">Bug</option>
+                    <option value="feature">Feature</option>
+                    <option value="research-spike">Research spike</option>
+                    <option value="chore">Chore / tech debt</option>
+                </select>
                 <select class="board-control" data-board-filter-assignee aria-label="Filter by assignee"></select>
                 <select class="board-control" data-board-filter-priority aria-label="Filter by priority">
                     <option value="">Any priority</option>

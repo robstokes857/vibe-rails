@@ -34,11 +34,18 @@ import { renderBoardLaunchOptions, readBoardLaunchOptions, bindBoardLaunchOption
 import { openBoardAttachment, disposeBoardAttachmentPreview, fileToAttachmentPayload, getAttachmentPreviewKind } from './board-attachments.js';
 
 const PRIORITIES = ['critical', 'high', 'medium', 'low'];
+const CARD_TYPES = [
+    { value: 'task', label: 'Task' },
+    { value: 'bug', label: 'Bug' },
+    { value: 'feature', label: 'Feature' },
+    { value: 'research-spike', label: 'Research spike' },
+    { value: 'chore', label: 'Chore / tech debt' }
+];
 const POINTS = [1, 2, 3, 5, 8, 13];
 const LANE_COLORS = ['#64748b', '#3b82f6', '#06b6d4', '#f59e0b', '#10b981', '#a855f7', '#ec4899'];
 const FILTERS_STORAGE_KEY = 'viberails.board.filters.v1';
 
-const emptyFilters = () => ({ q: '', assignee: '', priority: '', tag: '' });
+const emptyFilters = () => ({ q: '', assignee: '', type: '', priority: '', tag: '' });
 // Task-key namespace for the terminal tab that works a card (see wwwroot/AGENTS.md).
 const CARD_TASK_KEY = cardId => `board-card:${cardId}`;
 
@@ -46,6 +53,10 @@ function formatFileSize(bytes) {
     const size = Math.max(0, Number(bytes) || 0);
     return size >= 1024 * 1024 ? `${(size / (1024 * 1024)).toFixed(1)} MB`
         : size >= 1024 ? `${Math.ceil(size / 1024)} KB` : `${size} bytes`;
+}
+
+function cardType(value) {
+    return CARD_TYPES.find(item => item.value === value) || CARD_TYPES[0];
 }
 
 export class BoardController {
@@ -210,10 +221,12 @@ export class BoardController {
         const filters = this.state.filters;
         const query = filters.q.trim().toLowerCase();
         if (query) {
-            const haystack = [card.key, card.title, card.description, ...(card.tags || [])].join(' ').toLowerCase();
+            const type = cardType(card.type);
+            const haystack = [card.key, card.title, card.description, type.value, type.label, ...(card.tags || [])].join(' ').toLowerCase();
             if (!haystack.includes(query)) return false;
         }
         if (filters.assignee && card.assignee !== filters.assignee) return false;
+        if (filters.type && cardType(card.type).value !== filters.type) return false;
         if (filters.priority && card.priority !== filters.priority) return false;
         if (filters.tag && !(card.tags || []).includes(filters.tag)) return false;
         return true;
@@ -242,8 +255,8 @@ export class BoardController {
     }
 
     hasActiveFilters() {
-        const { q, assignee, priority, tag } = this.state.filters;
-        return Boolean(q.trim() || assignee || priority || tag);
+        const { q, assignee, type, priority, tag } = this.state.filters;
+        return Boolean(q.trim() || assignee || type || priority || tag);
     }
 
     stats() {
@@ -305,6 +318,7 @@ export class BoardController {
             });
         };
         bindSelect('[data-board-filter-assignee]', 'assignee');
+        bindSelect('[data-board-filter-type]', 'type');
         bindSelect('[data-board-filter-priority]', 'priority');
         bindSelect('[data-board-filter-tag]', 'tag');
     }
@@ -339,6 +353,9 @@ export class BoardController {
 
         const priority = this.query('[data-board-filter-priority]');
         if (priority) priority.value = this.state.filters.priority;
+
+        const type = this.query('[data-board-filter-type]');
+        if (type) type.value = this.state.filters.type;
 
         const tag = this.query('[data-board-filter-tag]');
         if (tag) {
@@ -384,6 +401,7 @@ export class BoardController {
 
     renderCard(card) {
         const member = this.assigneeInfo(card.assignee);
+        const type = cardType(card.type);
         const live = card.activeTabId
             ? `<span class="board-live-dot" title="A terminal session is working this card" aria-label="Session open"></span>`
             : '';
@@ -415,6 +433,8 @@ export class BoardController {
                     <div class="board-card-top">
                         <span class="board-key">${escapeHtml(card.key)}</span>
                         <span class="board-card-top-right">
+                            <span class="board-type-chip" data-type="${escapeHtml(type.value)}"
+                                title="${escapeHtml(type.label)}">${escapeHtml(type.label)}</span>
                             <span class="board-priority-chip" data-priority="${escapeHtml(card.priority)}">${escapeHtml(card.priority)}</span>
                             ${card.points != null ? `<span class="board-points" title="Story points">${escapeHtml(card.points)}</span>` : ''}
                         </span>
@@ -758,6 +778,14 @@ export class BoardController {
                 <aside class="board-editor-side">
                     <div class="board-side-scroll">
                     <div class="board-side-fields">
+                        <div>
+                            <label class="board-editor-label" for="board-card-type">Type</label>
+                            <select class="form-select form-select-sm" id="board-card-type">
+                                ${CARD_TYPES.map(type => `
+                                    <option value="${type.value}"${type.value === (card?.type || 'task') ? ' selected' : ''}>${escapeHtml(type.label)}</option>
+                                `).join('')}
+                            </select>
+                        </div>
                         <div>
                             <label class="board-editor-label" for="board-card-lane">Lane</label>
                             <select class="form-select form-select-sm" id="board-card-lane">
@@ -1646,6 +1674,7 @@ export class BoardController {
             title: value('#board-card-title').trim(),
             description: value('[data-board-composer="description"] [data-board-composer-input]'),
             columnId: value('#board-card-lane'),
+            type: value('#board-card-type'),
             assignee: value('#board-card-assignee'),
             baseLlmOptions: readBoardLaunchOptions(editor, value('#board-card-assignee')),
             ...(Number(editor.dataset?.descriptionRevision) > 0
@@ -1806,7 +1835,7 @@ export class BoardController {
         const text = String(title || '').trim();
         if (!text) return;
         try {
-            const card = await BoardApi.createBoardCardAsync({ columnId, title: text, priority: 'medium' });
+            const card = await BoardApi.createBoardCardAsync({ columnId, title: text, type: 'task', priority: 'medium' });
             this.app.showToast('Board', `Created ${card.key}.`, 'success');
             await this.refresh();
         } catch (error) {

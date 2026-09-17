@@ -47,7 +47,7 @@ public sealed class BoardStoreTests : IDisposable
         await _store.EnsureDefaultColumnsAsync(_project, Ct);
         await _store.EnsureDefaultColumnsAsync(_otherProject, Ct);
         var first = await _store.CreateCardAsync(_project, NewCard("First"), Ct);
-        var second = await _store.CreateCardAsync(_project, NewCard("Second"), Ct);
+        var second = await _store.CreateCardAsync(_project, NewCard("Second") with { Type = BoardCardTypes.Bug }, Ct);
         var elsewhere = await _store.CreateCardAsync(_otherProject, NewCard("Elsewhere"), Ct);
 
         Assert.Equal("VB-1", first.Key);
@@ -55,13 +55,36 @@ public sealed class BoardStoreTests : IDisposable
         Assert.Equal("VB-1", elsewhere.Key);
         Assert.Equal(0, first.Position);
         Assert.Equal(1, second.Position);
+        Assert.Equal(BoardCardTypes.Task, first.Type);
+        Assert.Equal(BoardCardTypes.Bug, second.Type);
 
         Assert.Equal(second.Id, (await _store.FindCardAsync(_project, "vb-2", Ct))!.Id);
+        Assert.Equal(BoardCardTypes.Bug, (await _store.FindCardAsync(_project, "vb-2", Ct))!.Type);
         Assert.Equal(second.Id, (await _store.FindCardAsync(_project, second.Id, Ct))!.Id);
         // Keys never cross projects.
         Assert.Equal(elsewhere.Id, (await _store.FindCardAsync(_otherProject, "VB-1", Ct))!.Id);
         Assert.Null(await _store.FindCardAsync(_otherProject, "VB-2", Ct));
         Assert.Null(await _store.FindCardAsync(_project, first.Id + "x", Ct));
+
+        var retyped = await _store.UpdateCardAsync(_project, first.Id, new BoardCardPatch(Type: BoardCardTypes.Feature), Ct);
+        Assert.Equal(BoardCardTypes.Feature, retyped!.Type);
+    }
+
+    [Fact]
+    public async Task CardTypeMigration_BackfillsLegacyCardsAsTask()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var existing = await _store.CreateCardAsync(_project, NewCard("Legacy"), Ct);
+        await using (var connection = new SqliteConnection(_connectionString))
+        {
+            await connection.OpenAsync(Ct);
+            await using var legacy = connection.CreateCommand();
+            legacy.CommandText = "ALTER TABLE BoardCards DROP COLUMN Type; DELETE FROM SchemaMigrations WHERE Component='board' AND Version=3;";
+            await legacy.ExecuteNonQueryAsync(Ct);
+        }
+
+        var migrated = new BoardStore(_connectionString);
+        Assert.Equal(BoardCardTypes.Task, (await migrated.FindCardAsync(_project, existing.Id, Ct))!.Type);
     }
 
     [Fact]

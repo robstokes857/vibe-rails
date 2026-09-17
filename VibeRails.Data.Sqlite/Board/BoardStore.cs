@@ -260,9 +260,9 @@ public sealed partial class BoardStore : IBoardStore
             insert.Transaction = transaction;
             insert.CommandText = """
                 INSERT INTO BoardCards
-                    (Id, ProjectPath, Number, ColumnId, Position, Title, Description, Assignee, Priority, Points, Tags, Blocked, CreatedUTC, UpdatedUTC)
+                    (Id, ProjectPath, Number, ColumnId, Position, Title, Description, Assignee, Priority, Type, Points, Tags, Blocked, CreatedUTC, UpdatedUTC)
                 VALUES
-                    ($id, $project, $number, $column, $position, $title, $description, $assignee, $priority, $points, $tags, $blocked, $created, $updated);
+                    ($id, $project, $number, $column, $position, $title, $description, $assignee, $priority, $type, $points, $tags, $blocked, $created, $updated);
                 """;
             insert.Parameters.AddWithValue("$id", id);
             insert.Parameters.AddWithValue("$project", project);
@@ -273,6 +273,7 @@ public sealed partial class BoardStore : IBoardStore
             insert.Parameters.AddWithValue("$description", card.Description);
             insert.Parameters.AddWithValue("$assignee", (object?)card.Assignee ?? DBNull.Value);
             insert.Parameters.AddWithValue("$priority", card.Priority);
+            insert.Parameters.AddWithValue("$type", card.Type);
             insert.Parameters.AddWithValue("$points", card.Points is int p ? p : DBNull.Value);
             insert.Parameters.AddWithValue("$tags", SerializeTags(card.Tags));
             insert.Parameters.AddWithValue("$blocked", card.Blocked ? 1 : 0);
@@ -283,12 +284,12 @@ public sealed partial class BoardStore : IBoardStore
         await WriteBaseLlmOptionsAsync(connection, transaction, id, card.BaseLlmOptions, cancellationToken);
         var revision = await AppendDescriptionRevisionAsync(connection, transaction,
             new BoardCardRecord(id, project, number, column.Id, position, card.Title, card.Description,
-                card.Assignee, card.Priority, card.Points, card.Tags, card.Blocked, 0, now, now, 0),
+                card.Assignee, card.Priority, card.Points, card.Tags, card.Blocked, 0, now, now, 0, Type: card.Type),
             card.Description, "created", card.Author ?? BoardAuthor.User(), null, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         return new BoardCardRecord(id, project, number, column.Id, position, card.Title, card.Description,
-            card.Assignee, card.Priority, card.Points, card.Tags, card.Blocked, 0, now, now, revision, card.BaseLlmOptions);
+            card.Assignee, card.Priority, card.Points, card.Tags, card.Blocked, 0, now, now, revision, card.BaseLlmOptions, Type: card.Type);
     }
 
     public async Task<BoardCardRecord?> UpdateCardAsync(string projectPath, string cardId, BoardCardPatch patch, CancellationToken cancellationToken = default)
@@ -326,6 +327,7 @@ public sealed partial class BoardStore : IBoardStore
             Description = patch.Description ?? existing.Description,
             Assignee = patch.ClearAssignee ? null : (patch.Assignee ?? existing.Assignee),
             Priority = patch.Priority ?? existing.Priority,
+            Type = patch.Type ?? existing.Type,
             Points = patch.ClearPoints ? null : (patch.Points ?? existing.Points),
             Tags = patch.Tags ?? existing.Tags,
             Blocked = patch.Blocked ?? existing.Blocked,
@@ -339,7 +341,7 @@ public sealed partial class BoardStore : IBoardStore
             command.Transaction = transaction;
             command.CommandText = """
                 UPDATE BoardCards SET ColumnId = $column, Position = $position, Title = $title, Description = $description,
-                    Assignee = $assignee, Priority = $priority, Points = $points, Tags = $tags, Blocked = $blocked, UpdatedUTC = $updated
+                    Assignee = $assignee, Priority = $priority, Type = $type, Points = $points, Tags = $tags, Blocked = $blocked, UpdatedUTC = $updated
                 WHERE Id = $id;
                 """;
             command.Parameters.AddWithValue("$column", updated.ColumnId);
@@ -348,6 +350,7 @@ public sealed partial class BoardStore : IBoardStore
             command.Parameters.AddWithValue("$description", updated.Description);
             command.Parameters.AddWithValue("$assignee", (object?)updated.Assignee ?? DBNull.Value);
             command.Parameters.AddWithValue("$priority", updated.Priority);
+            command.Parameters.AddWithValue("$type", updated.Type);
             command.Parameters.AddWithValue("$points", updated.Points is int p ? p : DBNull.Value);
             command.Parameters.AddWithValue("$tags", SerializeTags(updated.Tags));
             command.Parameters.AddWithValue("$blocked", updated.Blocked ? 1 : 0);
@@ -827,7 +830,8 @@ public sealed partial class BoardStore : IBoardStore
                c.Points, c.Tags, c.Blocked, c.CreatedUTC, c.UpdatedUTC,
                (SELECT COUNT(*) FROM BoardComments m WHERE m.CardId = c.Id AND m.Kind = 'comment') AS CommentCount,
                COALESCE((SELECT MAX(r.Revision) FROM BoardDescriptionRevisions r WHERE r.CardId = c.Id), 0),
-               (SELECT o.OptionsJson FROM BoardCardOptions o WHERE o.CardId = c.Id)
+               (SELECT o.OptionsJson FROM BoardCardOptions o WHERE o.CardId = c.Id),
+               c.Type
         FROM BoardCards c
         """;
 
@@ -904,7 +908,8 @@ public sealed partial class BoardStore : IBoardStore
         ParseDb(reader.GetString(12)),
         ParseDb(reader.GetString(13)),
         reader.GetInt32(15),
-        reader.IsDBNull(16) ? null : JsonSerializer.Deserialize(reader.GetString(16), StorageJsonSerializerContext.Default.BaseLlmOptions));
+        reader.IsDBNull(16) ? null : JsonSerializer.Deserialize(reader.GetString(16), StorageJsonSerializerContext.Default.BaseLlmOptions),
+        Type: reader.GetString(17));
 
     private static async Task<IReadOnlyList<BoardCommentRecord>> ReadCommentsAsync(SqliteConnection connection, string cardId, string kind, CancellationToken cancellationToken)
     {
@@ -1105,11 +1110,17 @@ public sealed partial class BoardStore : IBoardStore
         // A fresh file already has the column from SchemaSql; adoption is guarded either way.
         SqliteMigrationRunner.Apply(connection, "board", 2, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.AdoptStatement(db, transaction, CommentKindColumnSql));
+        // board/3: classify cards. Existing rows are deliberately neutral rather than guessed.
+        SqliteMigrationRunner.Apply(connection, "board", 3, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.AdoptStatement(db, transaction, CardTypeColumnSql));
         ReconcileDerivedRows(connection);
     }
 
     internal const string CommentKindColumnSql =
         "ALTER TABLE BoardComments ADD COLUMN Kind TEXT NOT NULL DEFAULT 'comment'";
+
+    internal const string CardTypeColumnSql =
+        "ALTER TABLE BoardCards ADD COLUMN Type TEXT NOT NULL DEFAULT 'task'";
 
     /// <summary>
     /// Re-derives the rows that are a function of BoardCards rather than schema: the
@@ -1222,6 +1233,7 @@ public sealed partial class BoardStore : IBoardStore
             Description TEXT NOT NULL DEFAULT '',
             Assignee TEXT NULL,
             Priority TEXT NOT NULL DEFAULT 'medium',
+            Type TEXT NOT NULL DEFAULT 'task',
             Points INTEGER NULL,
             Tags TEXT NOT NULL DEFAULT '[]',
             Blocked INTEGER NOT NULL DEFAULT 0,

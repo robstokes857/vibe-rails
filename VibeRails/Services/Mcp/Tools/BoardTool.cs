@@ -57,10 +57,11 @@ public sealed class BoardTool(
         }
     }
 
-    [McpServerTool, Description("List the cards on this project's VibeRails kanban board: key, lane, priority, title, assignee, comment count and whether a terminal session is open on it. Optional filters by lane name and assignee key.")]
+    [McpServerTool, Description("List the cards on this project's VibeRails kanban board: key, lane, type, priority, title, assignee, comment count and whether a terminal session is open on it. Optional filters by lane name, assignee key and card type.")]
     public async Task<string> ListBoardCards(
         [Description("Only cards in this lane (name or id). Optional.")] string? column = null,
         [Description("Only cards assigned to this LLM picker key, e.g. base:claude or env:7:codex. Optional.")] string? assignee = null,
+        [Description("Only cards of this type: task | bug | feature | research-spike | chore. Optional.")] string? type = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -78,6 +79,11 @@ public sealed class BoardTool(
             }
             if (!string.IsNullOrWhiteSpace(assignee))
                 cards = cards.Where(c => string.Equals(c.Assignee, assignee.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(type))
+            {
+                var normalizedType = BoardService.NormalizeCardType(type);
+                cards = cards.Where(c => string.Equals(c.Type, normalizedType, StringComparison.Ordinal));
+            }
 
             var rows = cards.OrderBy(c => columns.TryGetValue(c.ColumnId, out var lane) ? lane.Position : int.MaxValue).ThenBy(c => c.Position).ToList();
             if (rows.Count == 0)
@@ -86,7 +92,8 @@ public sealed class BoardTool(
             var builder = new StringBuilder();
             foreach (var card in rows)
             {
-                builder.Append(card.Key).Append(" [").Append(columns.TryGetValue(card.ColumnId, out var lane) ? lane.Name : card.ColumnId).Append("] (")
+                builder.Append(card.Key).Append(" [").Append(columns.TryGetValue(card.ColumnId, out var lane) ? lane.Name : card.ColumnId)
+                    .Append("] [").Append(BoardCardTypes.Label(card.Type)).Append("] (")
                     .Append(card.Priority).Append(") ").Append(card.Title);
                 if (!string.IsNullOrWhiteSpace(card.Assignee)) builder.Append(" — assignee ").Append(card.Assignee);
                 if (card.Blocked) builder.Append(" — BLOCKED");
@@ -96,6 +103,7 @@ public sealed class BoardTool(
             }
             return builder.ToString().TrimEnd();
         }
+        catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return Fail("list the board cards", ex);
@@ -208,6 +216,7 @@ public sealed class BoardTool(
         [Description("Lane name or id to create the card in. Defaults to the left-most lane.")] string? column = null,
         [Description("critical | high | medium | low. Defaults to medium.")] string? priority = null,
         [Description("Comma-separated tags. Optional.")] string? tags = null,
+        [Description("task | bug | feature | research-spike | chore. Defaults to task.")] string? type = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -226,7 +235,8 @@ public sealed class BoardTool(
                 ColumnId: columnId,
                 Description: description,
                 Priority: priority,
-                Tags: SplitTags(tags)), cancellationToken, await ResolveAuthorAsync(cancellationToken));
+                Tags: SplitTags(tags),
+                Type: type), cancellationToken, await ResolveAuthorAsync(cancellationToken));
             await AutoLinkSessionAsync(project, created.Id, cancellationToken);
             await TryRecordRevisionAsync(project, created.Id, created.DescriptionRevision, "updated", cancellationToken);
             return $"Created {created.Key}: {created.Title}";
@@ -249,6 +259,7 @@ public sealed class BoardTool(
         [Description("Story points: 1, 2, 3, 5, 8 or 13. Pass 0 to clear.")] int? points = null,
         [Description("Comma-separated tags (replaces all tags). Pass an empty string to clear.")] string? tags = null,
         [Description("Mark the card blocked (true) or unblocked (false).")] bool? blocked = null,
+        [Description("New type: task | bug | feature | research-spike | chore.")] string? type = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -265,7 +276,8 @@ public sealed class BoardTool(
                 Priority: priority,
                 Points: points is null ? default : PointsElement(points.Value),
                 Tags: tags is null ? null : SplitTags(tags) ?? [],
-                Blocked: blocked);
+                Blocked: blocked,
+                Type: type);
             var updated = await board.UpdateCardAsync(target.Project, target.CardId!, request, cancellationToken,
                 await ResolveAuthorAsync(cancellationToken));
             if (updated is null)
@@ -273,7 +285,7 @@ public sealed class BoardTool(
             await AutoLinkSessionAsync(target.Project, updated.Id, cancellationToken);
             if (updated.DescriptionChanged)
                 await TryRecordRevisionAsync(target.Project, updated.Id, updated.DescriptionRevision, "updated", cancellationToken);
-            if (descriptionAppend is not null && title is null && priority is null && points is null && tags is null && blocked is null)
+            if (descriptionAppend is not null && title is null && priority is null && points is null && tags is null && blocked is null && type is null)
                 return $"Appended to the description of {updated.Key} (now revision {updated.DescriptionRevision}).";
             return $"Updated {updated.Key}: {updated.Title} ({updated.Priority}{(updated.Blocked ? ", blocked" : "")})";
         }
@@ -555,6 +567,7 @@ public sealed class BoardTool(
         var builder = new StringBuilder();
         builder.Append(card.Key).Append(": ").Append(card.Title).Append('\n');
         builder.Append("Lane: ").Append(laneName)
+            .Append(" · Type: ").Append(BoardCardTypes.Label(card.Type))
             .Append(" · Priority: ").Append(card.Priority)
             .Append(" · Assignee: ").Append(string.IsNullOrWhiteSpace(card.Assignee) ? "unassigned" : card.Assignee);
         if (card.Points is int points) builder.Append(" · Points: ").Append(points);

@@ -75,6 +75,28 @@ test('the card editor fills the viewport and only .board-editor-scroll overflows
     assert.doesNotMatch(rule(css, '.board-comments'), /overflow-y:\s*auto/);
 });
 
+test('the new-card description stays in document flow while auto-growing', () => {
+    const css = boardCss();
+    const description = rule(css, '.board-block:first-of-type .board-composer-input');
+    assert.match(description, /min-height:\s*240px/);
+    assert.match(description, /max-height:\s*none/);
+    assert.match(description, /overflow-y:\s*hidden/);
+    assert.doesNotMatch(css, /\.board-card-editor\[data-card-id=""\][^{]*\{[^}]*flex:\s*1 1 auto/,
+        'the create-card composer must grow with its text, not be constrained to the leftover viewport height');
+});
+
+test('card type is present in the editor, filters, tiles and save payload', () => {
+    const source = readFileSync(controllerPath, 'utf8');
+    const html = readFileSync(indexPath, 'utf8');
+    assert.match(source, /const CARD_TYPES = \[[\s\S]*research-spike[\s\S]*Chore \/ tech debt/);
+    assert.match(source, /id="board-card-type"/);
+    assert.match(source, /type: value\('#board-card-type'\)/);
+    assert.match(source, /class="board-type-chip" data-type=/);
+    assert.match(source, /bindSelect\('\[data-board-filter-type\]', 'type'\)/);
+    assert.match(html, /data-board-filter-type/);
+    assert.match(html, /\.board-type-chip\[data-type="bug"\]/);
+});
+
 test('the card editor has a collapsed Agent notes rail that renders card.notes with the comment renderer', () => {
     const source = readFileSync(controllerPath, 'utf8');
     const open = source.slice(

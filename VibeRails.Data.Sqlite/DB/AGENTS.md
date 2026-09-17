@@ -765,7 +765,7 @@ it (dashboard root path → the launching terminal session's card → git root o
 ```sql
 BoardColumns      (Id TEXT PK, ProjectPath, Name, WipLimit NULL, Position, Color, CreatedUTC, UpdatedUTC)
 BoardCards        (Id TEXT PK, ProjectPath, Number, ColumnId → BoardColumns, Position, Title, Description,
-                   Assignee NULL, Priority, Points NULL, Tags JSON, Blocked, CreatedUTC, UpdatedUTC,
+                   Assignee NULL, Priority, Type, Points NULL, Tags JSON, Blocked, CreatedUTC, UpdatedUTC,
                    UNIQUE(ProjectPath, Number))
 BoardCardSequences (ProjectPath TEXT PK, LastNumber)
 BoardCardOptions   (CardId → BoardCards CASCADE PK, OptionsJson)
@@ -790,6 +790,9 @@ BoardCommitSnapshots (CardId, Sha → BoardCommits CASCADE, SnapshotJson, PK(Car
   and restarting; schema initialization seeds it from existing cards without decreasing it.
   Lookups accept the id or the key. Positions are dense `0..n-1` per lane after every
   create/move/delete (`WriteCardPositionsAsync`).
+- `BoardCards.Type` is one of `task`, `bug`, `feature`, `research-spike`, or `chore`. Migration
+  `board/3` adds it with the neutral `task` default so existing cards are not guessed from tags or
+  title text.
 - `Assignee` is an LLM picker key (`base:claude` / `env:7:codex`), validated by `BoardSelection`.
   Optional base-provider model, effort and startup-mode overrides are stored in `BoardCardOptions`;
   changing the assignee clears the old overrides unless the request supplies a new valid set.
@@ -1112,4 +1115,4 @@ ChatSummary               TokenSavings / CompressionCaptures
 
 ---
 
-*Last checked: 2026-09-09 by Claude (added the Board* tables)*
+*Last checked: 2026-09-17 by Codex (added BoardCards.Type and board/3 backfill)*

@@ -55,15 +55,18 @@ public sealed class BoardToolTests : IDisposable
         Assert.Contains("WIP limit 8", lanes);
 
         Assert.Equal("No cards match.", await _tool.ListBoardCards(cancellationToken: Ct));
-        var created = await _tool.CreateBoardCard("Fix the race", "Two 401s overlap.", "build", "HIGH", "auth, bug", Ct);
+        var created = await _tool.CreateBoardCard("Fix the race", "Two 401s overlap.", "build", "HIGH", "auth, bug", "bug", Ct);
         Assert.Equal("Created VB-1: Fix the race", created);
 
         var list = await _tool.ListBoardCards(cancellationToken: Ct);
-        Assert.Equal("VB-1 [Build] (high) Fix the race", list);
+        Assert.Equal("VB-1 [Build] [Bug] (high) Fix the race", list);
+        Assert.Equal(list, await _tool.ListBoardCards(type: "bug", cancellationToken: Ct));
+        Assert.Equal("No cards match.", await _tool.ListBoardCards(type: "feature", cancellationToken: Ct));
         Assert.Equal("No cards match.", await _tool.ListBoardCards(column: "Review", cancellationToken: Ct));
         Assert.StartsWith("FAIL: lane not found: Nowhere", await _tool.ListBoardCards(column: "Nowhere", cancellationToken: Ct));
         Assert.StartsWith("FAIL: lane not found: Nowhere", await _tool.CreateBoardCard("x", column: "Nowhere", cancellationToken: Ct));
         Assert.StartsWith("FAIL: Priority must be one of", await _tool.CreateBoardCard("x", priority: "urgent", cancellationToken: Ct));
+        Assert.StartsWith("FAIL: Type must be one of", await _tool.CreateBoardCard("x", type: "incident", cancellationToken: Ct));
     }
 
     [Fact]
@@ -72,7 +75,7 @@ public sealed class BoardToolTests : IDisposable
         await _tool.CreateBoardCard("Fix the race", "Two 401s overlap.", cancellationToken: Ct);
 
         var card = await _tool.GetBoardCard("vb-1", cancellationToken: Ct);
-        Assert.StartsWith("VB-1: Fix the race\nLane: Backlog · Priority: medium · Assignee: unassigned", card);
+        Assert.StartsWith("VB-1: Fix the race\nLane: Backlog · Type: Task · Priority: medium · Assignee: unassigned", card);
         Assert.Contains("Description (revision 1):\nTwo 401s overlap.", card);
         Assert.Contains("Comments (0):\n(none)", card);
 
@@ -91,7 +94,7 @@ public sealed class BoardToolTests : IDisposable
         Assert.StartsWith("FAIL: That does not look like a commit sha.", await _tool.LinkBoardCommit("nope", "VB-1", Ct));
 
         card = await _tool.GetBoardCard("VB-1", cancellationToken: Ct);
-        Assert.Contains("Lane: Review · Priority: critical", card);
+        Assert.Contains("Lane: Review · Type: Task · Priority: critical", card);
         Assert.Contains("- [", card);
         Assert.Matches(@"\] Agent \(cm_[0-9a-f]{12}\): Reproduced on two parallel saves\.", card);
         Assert.Contains("Linked commits (1):\n- abc1234 Fix the race (Rob)", card);
@@ -246,7 +249,7 @@ public sealed class BoardToolTests : IDisposable
         Assert.Contains("Agent notes (1):\n", card);
         Assert.Matches(@"\] Agent \(note_[0-9a-f]{12}\): checkpoint: found 3 candidates", card);
         Assert.Equal(1, (await _store.FindCardAsync(_project, "VB-1", Ct))!.CommentCount);
-        Assert.Equal("VB-1 [Backlog] (medium) A — 1 comment", await _tool.ListBoardCards(cancellationToken: Ct));
+        Assert.Equal("VB-1 [Backlog] [Task] (medium) A — 1 comment", await _tool.ListBoardCards(cancellationToken: Ct));
 
         var notes = await _tool.GetBoardNotes("VB-1", cancellationToken: Ct);
         Assert.StartsWith("Agent notes on VB-1 (1):\n", notes);

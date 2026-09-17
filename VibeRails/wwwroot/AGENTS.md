@@ -64,8 +64,8 @@ Application Settings. New card lives in the board toolbar.
 **The board is per project and server-backed.** `board-api.js` is a thin client over
 `/api/v1/board/*` (`VibeRails/Routes/BoardRoutes.cs`, root backend only); the server scopes every
 call to the open workspace, so the client never sends a project path. The list endpoint returns
-card **summaries** (no comments/commits/sessions/attachments, plus `commentCount`,
-`activeSessionId`, `activeTabId`); `getBoardCardAsync` returns the full card, which is why
+card **summaries** (including the canonical `type`, but no comments/commits/sessions/attachments,
+plus `commentCount`, `activeSessionId`, `activeTabId`); `getBoardCardAsync` returns the full card, which is why
 `openCardEditor` always re-fetches — an LLM may have commented on or moved the card since the
 board loaded. There is no "Reset sample" any more; a new project starts with five empty lanes.
 
@@ -81,6 +81,11 @@ card never launches an agent. Sessions is the explicit way to open its terminal.
 server composes the LLM's first message from the card and prepends it to the environment's
 Initial Message (`Services/Board/BoardPromptComposer.cs`), then links the session to the card.
 Task-key namespace: `board-card:<cardId>` (keep it distinct from `python-script*:`).
+
+Every card also has one canonical work type: `task` (the neutral default and legacy backfill),
+`bug`, `feature`, `research-spike`, or `chore` (shown as **Chore / tech debt**). The fixed taxonomy
+lives in `BoardCardTypes`; the editor, tile chip, toolbar filter, REST responses, MCP tools, and
+launch prompt all use those same storage values rather than deriving type from tags.
 
 Card headings, launch session names, and remembered terminal labels use `VB-n · Card title`.
 Base assignees show `board-launch-options.js` controls for model, effort, and start mode;
@@ -126,6 +131,11 @@ in a footer **below** the textarea, not in its toolbar.
 Descriptions open as rendered text (including attached images), with an Edit/Preview toggle
 in the composer toolbar. Empty descriptions start in edit mode. The textarea remains the source
 for Save and Start work in either mode; preview uses the same attachment-aware renderer as comments.
+
+The description textarea grows in normal document flow. Do not make the new-card description
+block, composer, or textarea a `flex: 1` chain constrained to leftover viewport height: the
+auto-grow routine can then make the textarea taller than its composer and its text paints over the
+Attachments section. `.board-editor-scroll` is the one viewport overflow owner.
 
 **Comment and description text is not Markdown.** `board-text.js` supports a deliberately tiny
 syntax: fenced code, inline code, `http(s)` autolinks and images. It escapes the entire input
@@ -235,7 +245,7 @@ inside `.monaco-editor` belongs to Monaco's own widgets and must be left alone. 
 `monaco.editor.getDiffEditors()` accumulates and is never pruned on dispose — use
 `getModels().length` as the leak signal, which is what the e2e test asserts.
 
-Filters (search, assignee, priority, tag) persist per browser in
+Filters (search, assignee, type, priority, tag) persist per browser in
 `localStorage['viberails.board.filters.v1']`. Clicking a card's tag or avatar toggles that filter,
 which is why those two controls stop propagation before the card's own open handler runs.
 

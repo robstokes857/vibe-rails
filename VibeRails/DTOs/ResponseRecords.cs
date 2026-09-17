@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using VibeRails.Services;
+using VibeRails.Services.Board;
 
 namespace VibeRails.DTOs
 {
@@ -178,7 +179,8 @@ namespace VibeRails.DTOs
         DateTime CreatedAt,
         DateTime UpdatedAt,
         int DescriptionRevision = 1,
-        BaseLlmOptions? BaseLlmOptions = null);
+        BaseLlmOptions? BaseLlmOptions = null,
+        string Type = BoardCardTypes.Default);
     public record BoardCardListResponse(List<BoardCardSummaryResponse> Cards);
     public record BoardCardResponse(
         string Id,
@@ -204,7 +206,8 @@ namespace VibeRails.DTOs
         int DescriptionRevision = 1,
         BaseLlmOptions? BaseLlmOptions = null,
         bool DescriptionChanged = false,
-        List<BoardCommentDto>? Notes = null);
+        List<BoardCommentDto>? Notes = null,
+        string Type = BoardCardTypes.Default);
     public record CreateBoardCardRequest(
         string? Title = null,
         string? ColumnId = null,
@@ -214,7 +217,8 @@ namespace VibeRails.DTOs
         JsonElement Points = default,
         List<string>? Tags = null,
         bool? Blocked = null,
-        BaseLlmOptions? BaseLlmOptions = null);
+        BaseLlmOptions? BaseLlmOptions = null,
+        string? Type = null);
     public record UpdateBoardCardRequest(
         string? Title = null,
         string? ColumnId = null,
@@ -229,7 +233,8 @@ namespace VibeRails.DTOs
         bool ClearBaseLlmOptions = false,
         // Appended to the current description as a new revision, in the same write as every other
         // field of this request. Mutually exclusive with Description.
-        string? DescriptionAppend = null);
+        string? DescriptionAppend = null,
+        string? Type = null);
 
     public record MoveBoardCardRequest(string? ColumnId = null, int? Position = null);
     public record AddBoardCommentRequest(string? Body = null);

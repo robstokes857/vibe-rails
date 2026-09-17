@@ -11,7 +11,7 @@ async function openBoard(page, { active = false, assignee = null } = {}) {
     }
     let card = {
         id: 'card_test', key: 'VB-1', columnId: 'col_ready', position: 0,
-        title: 'Description images', description: DESCRIPTION, priority: 'high',
+        title: 'Description images', description: DESCRIPTION, type: 'feature', priority: 'high',
         assignee, points: null, tags: [], blocked: false, commentCount: 1, descriptionRevision: 1,
         activeSessionId: active ? 'session_test' : null,
         createdAt: '2026-09-11T06:00:00Z', updatedAt: '2026-09-11T06:00:00Z',
@@ -127,6 +127,47 @@ test('description previews newly uploaded images and new cards start in edit mod
     await expect(description.locator('textarea')).toBeVisible();
     await expect(description.locator('textarea')).toHaveValue('');
     await expect(description.locator('[data-board-composer-preview]')).toBeHidden();
+});
+
+test('card type renders, filters, edits and is sent on save', async ({ page }) => {
+    const requests = await openBoard(page);
+    await expect(page.locator('.board-card .board-type-chip')).toHaveText('Feature');
+
+    await page.locator('[data-board-filter-type]').selectOption('bug');
+    await expect(page.getByText('Description images', { exact: true })).toHaveCount(0);
+    await page.locator('[data-board-filter-type]').selectOption('feature');
+    await page.getByText('Description images', { exact: true }).click();
+    await expect(page.locator('#board-card-type')).toHaveValue('feature');
+    await page.locator('#board-card-type').selectOption('bug');
+    await page.locator('[data-board-save-card]').click();
+
+    const update = requests.find(request => request.method === 'PUT' && request.path.endsWith('/card_test'));
+    expect(update.body.type).toBe('bug');
+    await page.locator('[data-board-filter-type]').selectOption('');
+    await expect(page.locator('.board-card .board-type-chip')).toHaveText('Bug');
+});
+
+test('long new-card descriptions grow inside the composer instead of painting over attachments', async ({ page }) => {
+    await page.setViewportSize({ width: 960, height: 640 });
+    await openBoard(page);
+    await page.getByRole('button', { name: 'New card', exact: true }).click();
+    const input = page.locator('[data-board-composer="description"] textarea');
+    await input.fill(Array.from({ length: 24 }, (_, index) => `description line ${index + 1}`).join('\n'));
+
+    const layout = await input.evaluate(element => {
+        const composer = element.closest('[data-board-composer]');
+        const attachments = element.closest('.board-editor-main').querySelectorAll('.board-block')[1];
+        return {
+            clientHeight: element.clientHeight,
+            scrollHeight: element.scrollHeight,
+            inputBottom: element.getBoundingClientRect().bottom,
+            composerBottom: composer.getBoundingClientRect().bottom,
+            attachmentsTop: attachments.getBoundingClientRect().top
+        };
+    });
+    expect(layout.clientHeight).toBeGreaterThanOrEqual(layout.scrollHeight - 1);
+    expect(layout.composerBottom).toBeGreaterThanOrEqual(layout.inputBottom);
+    expect(layout.attachmentsTop).toBeGreaterThanOrEqual(layout.composerBottom);
 });
 
 test('a running agent disables Start work while keeping Save and the session available', async ({ page }) => {

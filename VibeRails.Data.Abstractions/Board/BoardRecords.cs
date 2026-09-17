@@ -39,7 +39,8 @@ public sealed record BoardCardRecord(
     DateTime UpdatedUtc,
     int DescriptionRevision = 1,
     BaseLlmOptions? BaseLlmOptions = null,
-    bool DescriptionChanged = false)
+    bool DescriptionChanged = false,
+    string Type = BoardCardTypes.Default)
 {
     public string Key => BoardKeys.Format(Number);
 }
@@ -141,7 +142,8 @@ public sealed record NewBoardCard(
     IReadOnlyList<string> Tags,
     bool Blocked,
     BaseLlmOptions? BaseLlmOptions = null,
-    BoardAuthor? Author = null);
+    BoardAuthor? Author = null,
+    string Type = BoardCardTypes.Default);
 
 /// <summary>Partial update. Null = leave untouched. <see cref="ClearAssignee"/> / <see cref="ClearPoints"/> express "set to null".</summary>
 public sealed record BoardCardPatch(
@@ -159,7 +161,8 @@ public sealed record BoardCardPatch(
     BaseLlmOptions? BaseLlmOptions = null,
     bool ClearBaseLlmOptions = false,
     BoardAuthor? Author = null,
-    IReadOnlyList<string>? ActiveSessionIds = null);
+    IReadOnlyList<string>? ActiveSessionIds = null,
+    string? Type = null);
 
 public static class BoardKeys
 {
@@ -188,4 +191,29 @@ public static class BoardPriorities
 
     public static bool IsValid(string? value) =>
         value is not null && All.Contains(value, StringComparer.Ordinal);
+}
+
+/// <summary>Stable wire/storage values for the kind of work a board card represents.</summary>
+public static class BoardCardTypes
+{
+    public const string Task = "task";
+    public const string Bug = "bug";
+    public const string Feature = "feature";
+    public const string ResearchSpike = "research-spike";
+    public const string Chore = "chore";
+    public const string Default = Task;
+
+    public static readonly IReadOnlyList<string> All = [Task, Bug, Feature, ResearchSpike, Chore];
+
+    public static bool IsValid(string? value) =>
+        value is not null && All.Contains(value, StringComparer.Ordinal);
+
+    public static string Label(string? value) => value switch
+    {
+        Bug => "Bug",
+        Feature => "Feature",
+        ResearchSpike => "Research spike",
+        Chore => "Chore / tech debt",
+        _ => "Task"
+    };
 }

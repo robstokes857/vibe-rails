@@ -162,7 +162,7 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         using var created = await PostJsonAsync("/api/v1/board/cards", new
         {
             columnId = backlogId, title = " Fix it ", description = "Body", assignee = "base:claude",
-            priority = "high", points = "5", tags = new[] { "auth" }, blocked = false
+            type = "bug", priority = "high", points = "5", tags = new[] { "auth" }, blocked = false
         });
         Assert.Equal(HttpStatusCode.OK, created.StatusCode);
         using var createdDocument = await ReadJsonAsync(created);
@@ -171,6 +171,7 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         Assert.Equal("VB-1", card.GetProperty("key").GetString());
         Assert.Equal("Fix it", card.GetProperty("title").GetString());
         Assert.Equal("base:claude", card.GetProperty("assignee").GetString());
+        Assert.Equal("bug", card.GetProperty("type").GetString());
         Assert.Equal(5, card.GetProperty("points").GetInt32());
         Assert.Equal(0, card.GetProperty("commentCount").GetInt32());
         Assert.Equal(0, card.GetProperty("comments").GetArrayLength());
@@ -183,12 +184,17 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
         using var badDocument = await ReadJsonAsync(bad);
         Assert.Contains("Priority must be one of", badDocument.RootElement.GetProperty("error").GetString());
+        using var badType = await PostJsonAsync("/api/v1/board/cards", new { title = "x", type = "incident" });
+        Assert.Equal(HttpStatusCode.BadRequest, badType.StatusCode);
+        using var badTypeDocument = await ReadJsonAsync(badType);
+        Assert.Contains("Type must be one of", badTypeDocument.RootElement.GetProperty("error").GetString());
 
         // Update by key with points "" → cleared; move by id; comment as the user.
-        using var updated = await SendJsonAsync(HttpMethod.Put, "/api/v1/board/cards/VB-1", new { points = "", tags = Array.Empty<string>() });
+        using var updated = await SendJsonAsync(HttpMethod.Put, "/api/v1/board/cards/VB-1", new { type = "research spike", points = "", tags = Array.Empty<string>() });
         using var updatedDocument = await ReadJsonAsync(updated);
         Assert.Equal(JsonValueKind.Null, updatedDocument.RootElement.GetProperty("points").ValueKind);
         Assert.Equal(0, updatedDocument.RootElement.GetProperty("tags").GetArrayLength());
+        Assert.Equal("research-spike", updatedDocument.RootElement.GetProperty("type").GetString());
 
         using var moved = await PostJsonAsync($"/api/v1/board/cards/{cardId}/move", new { columnId = reviewId, position = 0 });
         using var movedDocument = await ReadJsonAsync(moved);

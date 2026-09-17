@@ -168,7 +168,8 @@ public sealed partial class BoardService(
             NormalizeTags(request.Tags) ?? [],
             request.Blocked ?? false,
             NormalizeBaseOptions(NormalizeAssignee(request.Assignee), request.BaseLlmOptions),
-            author), cancellationToken);
+            Author: author,
+            Type: NormalizeCardType(request.Type) ?? BoardCardTypes.Default), cancellationToken);
         return (await GetCardAsync(projectPath, card.Id, cancellationToken))!;
     }
 
@@ -218,6 +219,9 @@ public sealed partial class BoardService(
         string? priority = null;
         if (request.Priority is not null)
             priority = NormalizePriority(request.Priority) ?? throw new BoardValidationException($"Priority must be one of: {string.Join(", ", BoardPriorities.All)}.");
+        string? type = null;
+        if (request.Type is not null)
+            type = NormalizeCardType(request.Type) ?? throw new BoardValidationException($"Type must be one of: {string.Join(", ", BoardCardTypes.All)}.");
 
         // Points: "" or null clears; omitted stays Undefined and leaves the value alone.
         // Assignee: "" clears; null or omitted leaves it alone. The patch carries clear flags.
@@ -252,7 +256,8 @@ public sealed partial class BoardService(
             BaseLlmOptions: options,
             ClearBaseLlmOptions: clearOptions,
             Author: author,
-            ActiveSessionIds: activeSessionIds);
+            ActiveSessionIds: activeSessionIds,
+            Type: type);
         var updated = await store.UpdateCardAsync(projectPath, existing.Id, patch, cancellationToken);
         if (updated is null) return null;
         var detail = await store.GetCardDetailAsync(projectPath, updated.Id, cancellationToken);
@@ -476,7 +481,7 @@ public sealed partial class BoardService(
             detail.Sessions.Select(s => ToDto(s, live)).ToList(),
             detail.Attachments.Select(ToDto).ToList(),
             detail.Card.DescriptionRevision, detail.Card.BaseLlmOptions, detail.Card.DescriptionChanged,
-            notes);
+            notes, summary.Type);
     }
 
     private async Task<List<BoardCommentDto>> ResolveAuthorsAsync(IReadOnlyList<BoardCommentRecord> rows, Dictionary<string, BoardAuthor?> authors, CancellationToken cancellationToken)
@@ -503,7 +508,7 @@ public sealed partial class BoardService(
     internal static BoardCardSummaryResponse ToSummary(BoardCardRecord card, string? activeSessionId, string? activeTabId) => new(
         card.Id, card.Key, card.ColumnId, card.Position, card.Title, card.Description, card.Assignee, card.Priority,
         card.Points, card.Tags.ToList(), card.Blocked, card.CommentCount, activeSessionId, activeTabId, card.CreatedUtc, card.UpdatedUtc,
-        card.DescriptionRevision, card.BaseLlmOptions);
+        card.DescriptionRevision, card.BaseLlmOptions, card.Type);
 
     internal static BoardColumnResponse ToDto(BoardColumnRecord column) =>
         new(column.Id, column.Name, column.WipLimit, column.Position, column.Color);
@@ -583,6 +588,22 @@ public sealed partial class BoardService(
         return string.IsNullOrEmpty(priority) ? null
             : BoardPriorities.IsValid(priority) ? priority
             : throw new BoardValidationException($"Priority must be one of: {string.Join(", ", BoardPriorities.All)}.");
+    }
+
+    internal static string? NormalizeCardType(string? value)
+    {
+        var type = value?.Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(type))
+            return null;
+        type = type switch
+        {
+            "research" or "research spike" or "spike" => BoardCardTypes.ResearchSpike,
+            "chore/tech debt" or "chore / tech debt" or "tech debt" => BoardCardTypes.Chore,
+            _ => type
+        };
+        return BoardCardTypes.IsValid(type)
+            ? type
+            : throw new BoardValidationException($"Type must be one of: {string.Join(", ", BoardCardTypes.All)}.");
     }
 
     internal static bool IsClearValue(System.Text.Json.JsonElement element) =>
