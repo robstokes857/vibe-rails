@@ -165,15 +165,11 @@ public sealed class LlmProxySettingsServiceTests
     }
 
     [Fact]
-    public void Resolve_UsesOnePlanAndSnapshotsCaptureEnablement()
+    public void Resolve_UsesOnePlan()
     {
-        var settings = ProxyOn();
-        settings.TokenSaverCaptureEnabled = true;
-
-        var resolved = LlmProxySettingsService.Resolve(settings);
+        var resolved = LlmProxySettingsService.Resolve(ProxyOn());
 
         Assert.Same(resolved.TokenSaverPlan, resolved.ResolvedPlan);
-        Assert.True(resolved.TokenSaverCaptureEnabled);
     }
 
     [Fact]

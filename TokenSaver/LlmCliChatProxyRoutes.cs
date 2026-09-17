@@ -38,14 +38,11 @@ public static class LlmCliChatProxyRoutes
 
             var plan = settings.ResolvedPlan;
             var saverHasWork = !plan.IsNoOp && plan.GrokAllowlist.Count > 0;
-            var captureSink = settings.TokenSaverCaptureEnabled
-                ? context.RequestServices.GetService<ICompressionCaptureSink>()
-                : null;
             // Grok 1.0.5 speaks two body shapes on this base (grok-4.6 → /responses,
             // grok-build / API mode → /chat/completions); the composite handles both with
             // Grok's own tool allowlist.
             var transform = settings.GrokTokenSaverEnabled && saverHasWork
-                ? new CliChatBodyTransform(plan, captureSink)
+                ? new CliChatBodyTransform(plan)
                 : (ILlmProxyBodyTransform?)null;
             var exchangeSink = context.RequestServices.GetRequiredService<ILlmProxyExchangeSink>();
 

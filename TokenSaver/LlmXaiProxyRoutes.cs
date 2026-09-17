@@ -37,11 +37,8 @@ public static class LlmXaiProxyRoutes
 
             var plan = settings.ResolvedPlan;
             var saverHasWork = !plan.IsNoOp && plan.ZaiAllowlist.Count > 0;
-            var captureSink = settings.TokenSaverCaptureEnabled
-                ? context.RequestServices.GetService<ICompressionCaptureSink>()
-                : null;
             var transform = settings.OpenCodeTokenSaverEnabled && saverHasWork
-                ? new ZaiBodyTransform(plan, captureSink, provider: "xai")
+                ? new ZaiBodyTransform(plan, provider: "xai")
                 : null;
             var exchangeSink = context.RequestServices.GetRequiredService<ILlmProxyExchangeSink>();
 

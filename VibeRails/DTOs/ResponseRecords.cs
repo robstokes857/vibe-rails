@@ -1041,7 +1041,6 @@ namespace VibeRails.DTOs
         bool? ClaudeTokenSaverEnabled,
         bool? CodexTokenSaverEnabled,
         bool? OpenCodeTokenSaverEnabled,
-        bool? TokenSaverCaptureEnabled,
         // Read-only: the live machine name, used by the client as the placeholder
         // and as the push-notification fallback when ComputerName is blank. Never
         // persisted (see AppSettingsRoutes), so renaming the machine reflects live.
@@ -1139,49 +1138,16 @@ namespace VibeRails.DTOs
         long TotalTokensSaved
     );
 
-    // Compression capture DTOs — served by /api/v1/compression/*.
+    // Compression DTOs — served by /api/v1/compression/*.
     //
-    // Outcome and Kind cross the wire as strings, not enum ordinals: the capture view renders
-    // these directly, and an ordinal would silently change meaning if a value is ever inserted
-    // into StageOutcome/StageKind. Same wire-format discipline CompressionCatalog applies to
-    // stage ids.
+    // Outcome and Kind cross the wire as strings, not enum ordinals: the preview renders these
+    // directly, and an ordinal would silently change meaning if a value is ever inserted into
+    // StageOutcome/StageKind. Same wire-format discipline CompressionCatalog applies to stage ids.
     public record CompressionStageTraceResponse(
         string StageId,
         string Outcome,
         int CharsRemoved
     );
-
-    // The list projection. No RawText: the capture table is uncapped and one row can hold
-    // megabytes, so the big strings only ever ship from the by-id endpoint.
-    public record CompressionCaptureSummaryResponse(
-        Guid Id,
-        DateTime CreatedUtc,
-        string Provider,
-        string ToolName,
-        string? Command,
-        int CharsBefore,
-        int CharsAfter,
-        bool Changed,
-        bool RewriteAccepted
-    );
-
-    public record CompressionCaptureDetailResponse(
-        Guid Id,
-        DateTime CreatedUtc,
-        string Provider,
-        string ToolName,
-        string? Command,
-        string RawText,
-        string CompressedText,
-        int CharsBefore,
-        int CharsAfter,
-        bool Changed,
-        bool RewriteAccepted,
-        List<CompressionStageTraceResponse> Trace,
-        List<string> EnabledIds
-    );
-
-    public record CompressionClearResponse(int Deleted);
 
     public record CompressionStageResponse(
         string Id,
@@ -1209,17 +1175,16 @@ namespace VibeRails.DTOs
         List<string> DefaultSelection
     );
 
-    // Two mutually exclusive forms (plan_1A A3): {captureId} replays a stored capture, and
-    // {text, toolName, provider[, command]} runs the same pipeline over caller-supplied text --
-    // the bridge that lets exchange-mined candidate strings hit the real pipeline without first
-    // being reproduced as live traffic. Provider is the stored wire key ("anthropic" | "openai"
-    // | "zai" | "xai"), matched exactly the way the proxy matches tool names.
+    // {text, toolName, provider[, command]} runs the real pipeline over caller-supplied text
+    // (plan_1A A3) -- the bridge that lets exchange-mined candidate strings hit the real pipeline
+    // without first being reproduced as live traffic. Provider is the wire key ("anthropic" |
+    // "openai" | "zai" | "xai"), matched exactly the way the proxy matches tool names. The former
+    // {captureId} replay form went with the capture table (2026-09-17).
     //
     // EnabledIds is nullable because null and empty are different answers: null means "not
     // specified" and resolves to the catalog defaults, empty means "every stage off". See
     // CompressionCatalog.Resolve, which draws that line.
     public record CompressionPreviewRequest(
-        Guid? CaptureId,
         string? Text,
         string? ToolName,
         string? Command,
@@ -1712,13 +1677,9 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(TokenSavingsDto))]
     [JsonSerializable(typeof(TokenSaverPausePayload))]
     [JsonSerializable(typeof(TokenSavingsPostDto))]
-    // Compression capture DTOs
+    // Compression DTOs
     [JsonSerializable(typeof(CompressionStageTraceResponse))]
     [JsonSerializable(typeof(List<CompressionStageTraceResponse>))]
-    [JsonSerializable(typeof(CompressionCaptureSummaryResponse))]
-    [JsonSerializable(typeof(List<CompressionCaptureSummaryResponse>))]
-    [JsonSerializable(typeof(CompressionCaptureDetailResponse))]
-    [JsonSerializable(typeof(CompressionClearResponse))]
     [JsonSerializable(typeof(CompressionStageResponse))]
     [JsonSerializable(typeof(List<CompressionStageResponse>))]
     [JsonSerializable(typeof(CompressionScopeResponse))]

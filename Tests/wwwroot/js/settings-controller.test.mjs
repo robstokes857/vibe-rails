@@ -79,7 +79,6 @@ test('saving settings sends the co-author removal choice', async () => {
         /* codexTokenSaverEnabled */ true,
         /* openCodeTokenSaverEnabled */ true,
         /* grokTokenSaverEnabled */ true,
-        /* tokenSaverCaptureEnabled */ false,
         /* removeCoAuthorTrailers */ false,
         /* routeThroughVibeRailsAi */ false,
         /* showVibeAiUi */ false,

@@ -90,7 +90,7 @@ seams. If you are debugging *compression*, it is one of the eight files above.
                           rewritten string + StageTrace[]
                                         |
                                         v
-                          ICompressionCaptureSink  ->  state.db
+                          ILlmProxyExchangeSink  ->  proxy_exchanges.db
 ```
 
 ## The stage catalog
@@ -261,7 +261,8 @@ to diagnose from the symptom (a slow, expensive session).
    before, because the forwarded `HttpContent` reads straight out of those pooled
    buffers.
 7. `ILlmProxyEventSink.SavingsMeasured` reports byte counts (never content) for the
-   tally. `ICompressionCaptureSink.Capture` reports the full before/after (see below).
+   tally. `ILlmProxyExchangeSink.Record` keeps the whole before/after request and the
+   response (see [Captures](#captures) for why that is the only body log now).
 
 ## Debugging: how to watch a request compress
 
@@ -311,44 +312,26 @@ individually **schedulable**. Same story for stages 11–12 in `OutputCondenser`
 
 ## Captures
 
-When diagnostic capture is explicitly enabled, textual output from every recognized Codex tool
-and every allowlisted tool result for the other providers is written to the `CompressionCaptures`
-table in `state.db` with a **GUID**, the raw text, the compressed candidate, whether that candidate
-was actually forwarded, and the exact enabled-id set active for the request. Array-form outputs
-produce one row per textual block. The legacy trace column is retained but new persisted rows leave
-it empty; live in-memory captures still carry a trace while an allowlisted pipeline run executes.
-Codex tools outside its compression allowlist are diagnostic-only: raw and compressed text are
-identical, `RewriteAccepted` is false, the trace is empty, and the original request bytes are
-forwarded unchanged. Images and other non-text blocks are never captured. Capture is off by
-default because these values can contain source code, paths, secrets printed by commands, and
-other sensitive local content.
+**The per-tool_result capture table is gone (2026-09-17).** `CompressionCaptures` in `state.db`,
+its opt-in `TokenSaverCaptureEnabled` setting, the `/api/v1/compression/captures` routes, the
+Vibe AI capture browser and the `{captureId}` preview form were all removed. The table itself is
+kept, schema-only, so existing databases need no migration (`CompressionCapturesSchema`).
 
-This is the deliberate exception to the "proxy never logs bodies" rule, and the
-exception is the point: the savings tally tells you *that* 40% came off; only a raw
-capture tells you whether what came off **mattered**. Captures answer "was this
-compression correct", which is not a question byte counts can answer.
+Why: every request re-sends the whole conversation, so the store saw every tool_result again on
+every turn and bumped a re-sight counter with `UPDATE ... WHERE ContentHash = ?`. The only index
+on that column is partial (`WHERE ContentHash != ''`), which SQLite cannot use for a bound
+parameter, so each bump was a full scan of the table — taken under `state.db`'s single writer
+lock, hundreds of times per Codex request. That starved every other writer in every vb process
+(board, job scheduler, the tab's own terminal writer) for 30-60 s at a stretch.
 
-- **The GUID is the handle.** Paste it at an LLM reviewer, look it up in Vibe AI, cite
-  it in a bug report.
-- **Grain is per textual output string, not per request.** "This Bash output compressed wrong" is
-  the real grain of every bug; one request carries many tool results, and an array result can carry
-  multiple text blocks that are captured separately.
-- **`RawText` is re-runnable.** It is the unescaped string the rewriter observed, so feeding
-  it back through a different `CompressionPlan` gives an honest what-if — which is
-  exactly what `POST /api/v1/compression/preview` and the Vibe AI preview do. They call
-  the real pipeline; they do not simulate it.
-- **`RewriteAccepted` is the wire truth.** A changed candidate can still be rejected when JSON
-  re-serialization would make its token larger. It remains captured to explain the missed saving,
-  but the original text is what went upstream.
-- **Uncapped, by explicit decision (2026-07-15).** No pruning, no size cap, no
-  truncation. Capping would preferentially destroy the pathological inputs that are the
-  only reason to look. It grows without bound;
-  `DELETE /api/v1/compression/captures` is the reset.
-- **The in-memory writer is bounded.** Persistence remains uncapped, but a slow/locked database
-  cannot make the relay retain captures without limit; overload drops diagnostics rather than
-  blocking or exhausting the proxy process.
-- **Captures contain verbatim file and command output from the user's machine.** Treat
-  them exactly like `SessionLogs`: never checked in, never shipped off-box.
+What replaces it: nothing new. The always-on exchange log (`ILlmProxyExchangeSink` →
+`proxy_exchanges.db`, own file, insert-only) already holds every raw and rewritten tool_result
+inside `RequestBefore`/`RequestAfter`, plus the response. Per-output questions ("was this
+compression correct?") are answered by mining that log — see `runbooks/token_saver/` — or by
+pasting the text at `POST /api/v1/compression/preview`, which still runs the real pipeline.
+
+The library seam (`ICompressionCaptureSink`, the rewriters' optional `captures` parameter) is
+still there for unit tests; no host registers an implementation.
 
 ## Settings
 
@@ -372,7 +355,6 @@ that provider's proxy is on), the pipeline runs `CompressionCatalog.DefaultSelec
   frozen early adopters on their old selection, silently exempting them from the
   curated set. The old key and the pre-2026-07 tier/bool knobs are ignored on read
   and dropped on the next save.
-- `TokenSaverCaptureEnabled` independently opts into raw diagnostic captures; it defaults off.
   For Codex requests processed by the saver, this also observes recognized textual tool output
   when the tool is outside the compression allowlist; observation alone never makes that output
   eligible for rewriting.
@@ -465,7 +447,7 @@ TokenSaver/
 ├─ ILlmProxySettingsService.cs   ← Settings seam (impl lives in VibeRails).
 ├─ ILlmProxyEventSink.cs         ← Telemetry seam. Counts only, never content.
 ├─ ILlmProxyExchangeSink.cs      ← Whole-request/response exchange log seam.
-├─ ICompressionCaptureSink.cs    ← Capture seam. Content, deliberately.
+├─ ICompressionCaptureSink.cs    ← Capture seam (test-only since 2026-09-17; no host wiring).
 ├─ ILlmProxyAuthGate.cs
 ├─ ILlmProxyBodyTransform.cs
 └─ LlmProxyBaseUrl.cs / LlmProxyClaudeConfig.cs / LlmProxyCodexConfig.cs / LlmProxyZaiConfig.cs / LlmProxyXaiConfig.cs / LlmProxyGrokConfig.cs
@@ -473,8 +455,7 @@ TokenSaver/
 
 Host-side implementations live in `VibeRails/`:
 
-- `VibeRails/Services/LlmProxy/` — the settings, event-sink, capture-sink and exchange-sink adapters, and the in-memory pause state (`TokenSaverPauseState.cs`).
-- `VibeRails/DB/CompressionCaptureStore.cs` — the per-tool_result capture writer.
+- `VibeRails/Services/LlmProxy/` — the settings, event-sink and exchange-sink adapters, and the in-memory pause state (`TokenSaverPauseState.cs`).
 - `VibeRails/DB/LlmExchangeLogStore.cs` — the whole-request/response log. Its own database file
   (`~/.vibe_rails/proxy_exchanges.db`), never state.db. Every authenticated exchange handled by
   any proxy route is logged; there is no settings flag or UI toggle. This is the artifact to reach
@@ -484,7 +465,7 @@ Host-side implementations live in `VibeRails/`:
   and for session-less launches — old rows are never backfilled. The column is added to existing
   files by an idempotent `ALTER TABLE` on first write after the upgrade.
 - `VibeRails/DB/TokenSavingsStore.cs` — the byte tally.
-- `VibeRails/Routes/CompressionCaptureRoutes.cs` — captures, catalog, preview.
+- `VibeRails/Routes/CompressionRoutes.cs` — catalog, preview.
 - `VibeRails/Routes/TokenSaverPauseRoutes.cs` — the pause/resume/status control surface (see [Pausing](#pausing--the-agents-escape-hatch)).
 
 ## Tests
@@ -531,10 +512,12 @@ smudge byte-exact fixtures on a fresh Windows checkout and you'll get failures w
   by splitting CRLF→LF out of `cr-collapse` into the on-by-default `crlf-normalize` stage. The
   fail-open itself is unchanged and still correct: it now fires only on a genuine bare CR (a
   redraw frame), which is what it was written for. `cr-collapse` remains off.
-- **The relay must never wait on SQLite.** `TokenSavingsStore` persists in the background and
-  `CompressionCaptureStore` enqueues work to its single ordered consumer; both set `busy_timeout`
-  and swallow write failures. `state.db` has known lock contention; a lost capture is a bad
-  afternoon, a blocked relay is a broken product.
+- **The relay must never wait on SQLite.** `TokenSavingsStore` and `LlmExchangeLogStore` persist
+  in the background through a single ordered consumer each; both set `busy_timeout` and swallow
+  write failures. A lost record is a bad afternoon, a blocked relay is a broken product. And
+  never hold `state.db`'s writer lock for anything proportional to a table's size: the retired
+  capture writer's re-sight UPDATE scanned its table under that lock and starved every other
+  writer in every vb process (2026-09-17).
 - **No single process knows what the app has saved.** The proxy runs wherever the CLI runs, and
   that is the terminal tab's own child `vb.exe` — never the root backend that serves the
   dashboard. So a savings number held in one process's memory describes one tab: the root's would

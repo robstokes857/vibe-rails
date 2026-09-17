@@ -139,7 +139,10 @@ namespace VibeRails
             // event sink → app event bus + Serilog + the state.db savings tally.
             serviceCollection.AddSingleton<ILlmProxyAuthGate, LlmProxyAuthGateAdapter>();
             serviceCollection.AddSingleton<ILlmProxyEventSink, LlmProxyEventSinkAdapter>();
-            serviceCollection.AddSingleton<ICompressionCaptureSink, CompressionCaptureSinkAdapter>();
+            // ICompressionCaptureSink is deliberately NOT registered: the per-tool_result capture
+            // table was retired on 2026-09-17 (its re-sight UPDATE scanned CompressionCaptures under
+            // state.db's writer lock, hundreds of times per request). The exchange log below holds
+            // the same bytes.
             // Required by every proxy route: exchange logging has no settings/UI gate.
             serviceCollection.AddSingleton<ILlmProxyExchangeSink, LlmProxyExchangeSinkAdapter>();
             // SQLite stores are registered together above; board orchestration stays in the host.

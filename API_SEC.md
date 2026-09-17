@@ -516,11 +516,8 @@ No local endpoint is anonymous and no production listener was added.
 - `PUT /api/v1/llm-picker/preferences`
 - `DELETE /api/v1/llm-picker/preferences`
 
-### Compression and token savings (6)
+### Compression and token savings (3)
 
-- `GET /api/v1/compression/captures`
-- `GET /api/v1/compression/captures/{id:guid}`
-- `DELETE /api/v1/compression/captures`
 - `GET /api/v1/compression/catalog`
 - `POST /api/v1/compression/preview`
 - `GET /api/v1/token-savings`
@@ -745,6 +742,13 @@ requirement and the launch composition; `Tests/Services/Mcp/BoardToolTests.cs` p
 
 ## Audit observations
 
+- Inventory amendment on 2026-09-17: the three compression-capture routes
+  (`GET /api/v1/compression/captures`, `GET /api/v1/compression/captures/{id:guid}`,
+  `DELETE /api/v1/compression/captures`) were removed with the retired `CompressionCaptures`
+  writer (`CompressionCaptureRoutes` → `CompressionRoutes`; the `{captureId}` form of
+  `POST /api/v1/compression/preview` went with them, the text form stays). Section 3 count
+  for that group 6 → 3; `/api/v1` mappings 193 → 190, total surfaces 205 → 202. No listener,
+  middleware, or bypass change. Not a full re-validation.
 - Full validation on 2026-09-15: reconciled **205 mapped route surfaces**, including
   **193 `/api/v1` mappings**, against the working tree, including uncommitted and untracked
   source. No missing or removed method/path pairs. Resolved the signing-key route group,

@@ -744,7 +744,7 @@ http://localhost:<auto-detected-port>/api/v1/
 | POST | `/search` · `/bert/search` | Unified / BERT semantic search |
 | GET | `/version` · `/update/check` · `/update/version` | Version + update checks |
 | GET | `/token-savings` | Token savings metrics |
-| GET/POST/DELETE | `/compression/captures` · `/compression/catalog` | Compression capture records |
+| GET/POST | `/compression/catalog` · `/compression/preview` | Token saver stage catalog + what-if preview |
 | POST | `/shutdown` · `/lifecycle/ping` · `/lifecycle/disconnect` | Lifecycle control |
 
 ### Example Requests
