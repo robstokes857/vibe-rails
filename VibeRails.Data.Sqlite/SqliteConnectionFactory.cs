@@ -74,10 +74,19 @@ internal static class SqliteConnectionFactory
         command.ExecuteScalar();
     }
 
+    /// <summary>
+    /// synchronous=NORMAL: in WAL mode a commit no longer fsyncs the WAL (the checkpoint still
+    /// does), so the single per-file writer lock is held for microseconds instead of a Windows
+    /// FlushFileBuffers. Commits stay durable across application crashes; only an OS crash or
+    /// power loss can lose the last few. On 2026-09-16/17 three tab children streaming
+    /// agent output at 100-200 fsync'd autocommit INSERTs/s saturated that lock for minutes
+    /// and starved every other writer (board MCP tools, the job scheduler, other tabs).
+    /// This is terminal history, not a ledger: fast and 99% beats slow and ACID.
+    /// </summary>
     internal static void Configure(SqliteConnection connection)
     {
         using var command = connection.CreateCommand();
-        command.CommandText = "PRAGMA busy_timeout=5000; PRAGMA journal_size_limit=67108864;";
+        command.CommandText = "PRAGMA busy_timeout=5000; PRAGMA journal_size_limit=67108864; PRAGMA synchronous=NORMAL;";
         command.ExecuteNonQuery();
     }
 }

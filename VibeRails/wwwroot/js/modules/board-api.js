@@ -12,11 +12,12 @@
 //   card       { id, key 'VB-n', columnId, position, title, description, assignee, priority,
 //                points, tags[], blocked, commentCount, activeSessionId, activeTabId,
 //                createdAt, updatedAt }                      (board list = these summaries)
-//   card+rails { ...card, comments[], commits[], sessions[], attachments[] }  (getBoardCardAsync)
+//   card+rails { ...card, comments[], commits[], sessions[], attachments[], notes[] }  (getBoardCardAsync)
 //   comment    { id, author: { kind: 'user'|'agent', label, cli }, body, createdAt }
+//   note       same shape as a comment (id 'note_…'); the agent scratchpad, never in comments[]
 //   session    { id, tabId, displayName, cli, selection, origin, createdAt, active }
 //   attachment { id, name, url (data: URL), mimeType, bytes, createdAt }
-//   commit     { sha, shortSha, author, message, committedAt }
+//   commit     { sha, shortSha, author, message, committedAt, linkedAt }
 //
 // `assignee` is an LLM picker key ('base:claude' / 'env:7:codex'), never a person.
 // The board is per project: the server scopes every call to the open workspace.
@@ -98,6 +99,19 @@ async function launchBoardCardAsync(cardId, { selection } = {}) {
 
 async function addBoardCommentAsync(cardId, { body }) {
     return call(`/cards/${enc(cardId)}/comments`, 'POST', { body });
+}
+
+// ---------------------------------------------- agent notes
+//
+// The scratchpad agents write over MCP (append_board_note). The card response already carries
+// `notes`; these exist for a refresh and for a user-written note.
+
+async function getCardNotesAsync(cardId) {
+    return call(`/cards/${enc(cardId)}/notes`);
+}
+
+async function addCardNoteAsync(cardId, body) {
+    return call(`/cards/${enc(cardId)}/notes`, 'POST', { body });
 }
 
 // ---------------------------------------------- attachments
@@ -191,6 +205,8 @@ export const BoardApi = {
     moveBoardCardAsync,
     launchBoardCardAsync,
     addBoardCommentAsync,
+    getCardNotesAsync,
+    addCardNoteAsync,
     addCardAttachmentAsync,
     deleteCardAttachmentAsync,
     getCardAttachmentContentAsync,

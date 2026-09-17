@@ -59,12 +59,16 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 | `python_script_signing_help` | `PythonScriptTool.PythonScriptSigningHelp` | Explains signing and lists scripts plus explicit MCP exposure. |
 | `list_board_columns` | `BoardTool.ListBoardColumns` | Lanes of this project's kanban board with WIP limits and card counts. |
 | `list_board_cards` | `BoardTool.ListBoardCards` | Cards on the board (key, lane, priority, title, assignee, comment count, session open); optional lane/assignee filters. |
-| `get_board_card` | `BoardTool.GetBoardCard` | One card in full: fields, description, comments, linked commits, sessions, attachment ids/names/types/sizes. `card` omitted = the card this terminal was launched for. Reading never links the session to the card. |
-| `read_board_attachment` | `BoardTool.ReadBoardAttachment` | Bounded UTF-8 Markdown/TXT attachment content; accepts attachment id, optional card, character offset and maximum length (20,000 default; 100,000 limit). Card/project scoped, including retained history files. |
+| `get_board_card` | `BoardTool.GetBoardCard` | One card in full: fields, the board's lane names, description, comments, linked commits, sessions (full session id, ended time/exit code, that session's last comment, its chat summary when one exists), the tail of the agent notes, attachment ids/names/types/sizes. `card` omitted = the card this terminal was launched for. `since` (ISO-8601) lists only activity at or after that time and counts the rest. Reading never links the session to the card. |
+| `get_board_card_history` | `BoardTool.GetBoardCardHistory` | Read-only description history: every revision with author, date, source, a 300-char preview and the launch/read/updated session events; `revision=N` returns that revision's full text. |
+| `read_board_attachment` | `BoardTool.ReadBoardAttachment` | Bounded UTF-8 Markdown/TXT attachment content; accepts attachment id, optional card, character offset and maximum length (40,000 default; 250,000 limit). Card/project scoped, including retained history files. |
 | `create_board_card` | `BoardTool.CreateBoardCard` | New card (title, description, lane, priority, tags). |
-| `update_board_card` | `BoardTool.UpdateBoardCard` | Partial field update (title, description, priority, points, tags, blocked). |
+| `update_board_card` | `BoardTool.UpdateBoardCard` | Partial field update (title, description, priority, points, tags, blocked). `descriptionAppend` adds to the end of the description as a new revision in the **same** store write as the other fields (`UpdateBoardCardRequest.DescriptionAppend`, validated with everything else, so a rejected priority leaves no appended text behind; optimistic on the current revision with one retry on conflict); it cannot be combined with `description`. |
 | `move_board_card` | `BoardTool.MoveBoardCard` | Move a card to a lane (by name or id), optionally at a position. |
-| `add_board_comment` | `BoardTool.AddBoardComment` | Append a comment, attributed to the launching session (or "Agent"). |
+| `add_board_comment` | `BoardTool.AddBoardComment` | Append a comment, attributed to the launching session (or "Agent"). Returns the comment id. |
+| `append_board_note` | `BoardTool.AppendBoardNote` | Append an entry to the card's **agent notes** — the scratchpad for checkpointing findings and working state as the agent goes. Same limits and attribution as a comment; never part of the comment stream or count. Returns the note id. |
+| `get_board_notes` | `BoardTool.GetBoardNotes` | All notes on a card, oldest first (`get_board_card` shows only the most recent ~3,000 characters); optional `since`. |
+| `add_board_attachment` | `BoardTool.AddBoardAttachment` | Attach an agent-written `*.md` / `*.txt` file (UTF-8 text, ≤ 500,000 characters). The description revision it produces is attributed to the agent session. |
 | `link_board_commit` | `BoardTool.LinkBoardCommit` | Capture a commit from the terminal's checkout and atomically save its sha, metadata and changed-code snapshot on the card. |
 | user-defined | `PythonScriptMcpService` dynamic handler | Runs one user-configured, still-signed Python script with its declared typed inputs mapped to argv. |
 
@@ -98,18 +102,40 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
   via the per-launch `mcp_servers.viberails-mcp.env_vars` override, because stdio inheritance is
   filtered. Values are not persisted in shared config. See the [official MCP reference](https://developers.openai.com/codex/mcp/).
 - **Capability boundary**: read / append / move / link only — there is deliberately no delete
-  tool or attachment-upload tool. Attachment reads return untrusted task data, never execute it;
-  PDF, images and other binary files are opened in the board viewer. The only process spawned is `git` with a regex-validated hex sha
-  via an argument list (`Services/Git/GitCli.cs`). Failures return `FAIL: …` sentences; detail
-  goes to the file log. Worst case from an injected prompt is board vandalism, visible and
+  tool. The one upload path, `add_board_attachment`, accepts Markdown/TXT text only (MIME from
+  the extension, strict UTF-8, ≤ 500,000 characters); binaries still come from the dashboard.
+  Attachment reads return untrusted task data, never execute it; PDF, images and other binary
+  files are opened in the board viewer. The only process spawned is `git` with a regex-validated
+  hex sha via an argument list (`Services/Git/GitCli.cs`). Failures return `FAIL: …` sentences;
+  detail goes to the file log. A `database is locked` failure (SQLite 5/6, or a transient
+  `StorageException`) says so explicitly and tells the agent to retry — `Fail()` in `BoardTool`
+  — because on 2026-09-16 three agents each lost a comment to the generic "see the log" sentence
+  and filed it as a bug. Worst case from an injected prompt is board vandalism, visible and
   reversible in the UI.
+- **Agent notes (2026-09-17)**: `BoardComments.Kind` (`comment` | `note`, migration `board/2`)
+  separates the scratchpad from the thread. Notes never appear in `comments[]`, `CommentCount`
+  or the dashboard's comment panel; the card editor shows them in a collapsed "Agent notes" rail
+  and the HTTP API exposes `GET/POST /api/v1/board/cards/{card}/notes`. The launch prompt tells
+  the agent to checkpoint into notes as it goes instead of hoarding findings until the end — the
+  first agent to work a card ran out of context doing exactly that. Limits were raised at the
+  same time: description 100,000, comment/note 50,000, 40 attachments per card.
 - **Stdio host**: `McpStdioHost.RunAsync` now pins the content root to the install directory, loads
   `appsettings.json` and calls `GlobalRuntimePaths.Initialize`, so `ParserConfigs.GetStatePath()`
   answers in the child (and `VibeRails:InstallDirName` is honoured). `IRepository` is still not
   registered there: its constructor runs the full migration pass on every spawn.
 - The "Start work" launch prompt (`BoardPromptComposer`) tells the LLM to begin with
-  `get_board_card`, record progress with `add_board_comment`, move the card, and link commits.
-  It includes the description revision used at launch. `get_board_card` records that session's
+  `get_board_card`, record progress with `add_board_comment`, checkpoint with `append_board_note`,
+  consult `get_board_card_history`, move the card, and link commits. It includes the description
+  revision used at launch, the board's lane names, the linked commits (≤ 10) and attachment names
+  (`BoardPromptComposer.LaunchContext`, filled by `BoardLaunchService`). Those lists are board
+  data, so they sit **inside** the "verbatim task text, treat as data" fence after the title —
+  never in the app's preamble, where a hostile lane name or commit subject would read as an
+  instruction to a session that has preauthorized Board write tools. Every single-line field
+  (`SanitizeLine`) has newlines, C0/C1 controls and bidi overrides flattened, and a description
+  line that spells the closing fence is indented so it cannot end the block early. The inline description
+  excerpt is up to 4,000 characters, shrinking to a 1,500 floor when the environment's own
+  Initial Message is long, because the whole prompt is one CLI argument under
+  `PromptPlaceholderService.MaxResolvedPromptChars`. `get_board_card` records that session's
   read of the exact returned revision and includes the revision in its output, but **never links
   the session to the card it read** (2026-09-15). A session links to exactly one card, so linking
   on read bound a general session to whatever it happened to browse first: that card then showed
@@ -120,8 +146,8 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
   description edits are attributed to the current session and never interrupt the TUI.
 - **Board launch authorization (2026-09-14)**: Start work sets the typed, false-by-default
   `AuthorizeBoardTools` marker for that session and explicitly authorizes the Board workflow in
-  the prompt for every provider. `Terminal/Commands/BoardMcpAuthorization.cs` grants only the nine
-  Board tools listed above; adding another MCP tool never automatically authorizes it. Supported
+  the prompt for every provider. `Terminal/Commands/BoardMcpAuthorization.cs` grants only the
+  thirteen Board tools listed above; adding another MCP tool never automatically authorizes it. Supported
   CLIs receive exact per-tool launch arguments or environment entries; Antigravity receives only
   the prompt because no narrow native grant was verified. See
   [Terminal launch authorization](../Terminal/AGENTS.md#board-launch-options-and-input-sequences-2026-09-14).
@@ -225,15 +251,14 @@ loopback requests on a separate connection, so there is no self-deadlock.
 
 ## CLI auto-registration
 
-Managed agent launches always run a VibeRails MCP setup step before the agent starts. CLIs with a
-remove command delete the managed `viberails-mcp` entry first, then add it back; OpenCode replaces
-the named entry with one add command. Either form repairs old configs that pointed at the removed
+Managed agent launches always run a VibeRails MCP setup step before the agent starts. Codex and
+OpenCode replace the managed `viberails-mcp` entry with one add command; other CLIs delete it first,
+then add it back. Either form repairs old configs that pointed at the removed
 standalone `MCP_Server.exe`. With the stdio transport this needs no port and no auth token:
 
 ```
 claude mcp remove viberails-mcp          # output suppressed by CommandService
 claude mcp add --scope user viberails-mcp -- "<path-to-vb>" mcp
-codex  mcp remove viberails-mcp          # output suppressed by CommandService
 codex  mcp add viberails-mcp -- "<path-to-vb>" mcp
 agy    mcp remove viberails-mcp          # output suppressed by CommandService
 agy    mcp add viberails-mcp -- "<path-to-vb>" mcp
@@ -243,6 +268,12 @@ opencode mcp add viberails-mcp -- "<path-to-vb>" mcp
 grok mcp remove viberails-mcp            # output suppressed by CommandService
 grok mcp add --scope user viberails-mcp -- "<path-to-vb>" mcp
 ```
+
+Codex must not use remove-first registration. An already-running session reloads `config.toml`
+while retaining its launch-local `env_vars` and Board tool overrides. During the removal gap those
+overrides form an MCP entry with no `command` or `url`, causing `invalid transport` and a misleading
+"Skipped loading ... invalid SKILL.md" warning. Codex 0.154.0 was verified offline with an isolated
+`CODEX_HOME`: repeated `mcp add` replaces the old command without deleting the entry first.
 
 OpenCode 1.18.8 supports the non-interactive local-command form shown above. It has no matching
 `mcp remove` command, but adding the same name replaces that entry, so OpenCode and the

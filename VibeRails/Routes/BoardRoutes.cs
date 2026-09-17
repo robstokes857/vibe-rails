@@ -97,6 +97,20 @@ public static class BoardRoutes
             RunAsync(async () => OkOrNotFound(await board.AddCommentAsync(Project(), card, BoardAuthor.User(), request.Body ?? string.Empty, cancellationToken), "Card")))
             .WithName("AddBoardComment");
 
+        // Agent notes: the scratchpad agents append over MCP. The dashboard reads it and may add
+        // a user note; it is never part of the comment stream.
+        app.MapGet("/api/v1/board/cards/{card}/notes", (IBoardService board, string card, CancellationToken cancellationToken) =>
+            RunAsync(async () =>
+            {
+                var notes = await board.GetNotesAsync(Project(), card, cancellationToken);
+                return notes is null ? NotFound("Card", card) : Results.Ok(new BoardNoteListResponse(notes));
+            }))
+            .WithName("GetBoardCardNotes");
+
+        app.MapPost("/api/v1/board/cards/{card}/notes", (IBoardService board, string card, AddBoardNoteRequest request, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(await board.AddNoteAsync(Project(), card, BoardAuthor.User(), request.Body ?? string.Empty, cancellationToken), "Card")))
+            .WithName("AddBoardCardNote");
+
         app.MapPost("/api/v1/board/cards/{card}/attachments", (IBoardService board, string card, AddBoardAttachmentRequest request, CancellationToken cancellationToken) =>
             RunAsync(async () => OkOrNotFound(await board.AddAttachmentAsync(Project(), card, request, cancellationToken), "Card")))
             .WithName("AddBoardAttachment");

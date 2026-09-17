@@ -842,6 +842,13 @@ export class BoardController {
                     </section>
 
                     ${card ? `<section class="board-side-section">
+                        <details data-board-notes-details>
+                            <summary class="board-side-label"><i class="fa-solid fa-pen-ruler" aria-hidden="true"></i> Agent notes <span class="board-count" data-board-count="notes">${card?.notes?.length || 0}</span></summary>
+                            <p class="board-editor-muted">The scratchpad agents checkpoint findings in while they work. Not part of the comment thread.</p>
+                            <div data-board-notes class="board-history-list"></div>
+                        </details>
+                    </section>
+                    <section class="board-side-section">
                         <details data-board-history-details>
                             <summary class="board-side-label"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Description history</summary>
                             <div data-board-history class="board-history-list"></div>
@@ -904,6 +911,9 @@ export class BoardController {
         });
         editor.querySelector('[data-board-history-details]')?.addEventListener('toggle', event => {
             if (event.target.open) void this.renderDescriptionHistory(editor, card);
+        });
+        editor.querySelector('[data-board-notes-details]')?.addEventListener('toggle', event => {
+            if (event.target.open) this.renderNotesPanel(editor, card);
         });
 
         this.bindComposer(editor.querySelector('[data-board-composer="description"]'), { card });
@@ -1241,6 +1251,35 @@ export class BoardController {
                 catch (error) { this.app.showToast('Board', error?.message || 'Could not open the historical file.', 'error'); }
             }));
         } catch (error) { host.textContent = error?.message || 'Could not load history.'; }
+    }
+
+    // Agent notes ride on the card response (card.notes), so no fetch: the section is collapsed by
+    // default and rendered when opened. Same escape-first body renderer as comments.
+    renderNotesPanel(editor, card) {
+        const host = editor.querySelector('[data-board-notes]');
+        if (!host) return;
+        const notes = card?.notes || [];
+        const count = editor.querySelector('[data-board-count="notes"]');
+        if (count) count.textContent = String(notes.length);
+        if (!notes.length) {
+            host.innerHTML = '<p class="board-editor-muted">No notes yet. Agents add them with append_board_note.</p>';
+            return;
+        }
+        const attachments = card?.attachments || [];
+        host.innerHTML = notes.map(note => {
+            const author = this.authorInfo(note.author);
+            return `
+                <article class="board-comment board-note${note.author?.kind === 'agent' ? ' is-agent' : ''}">
+                    ${this.avatarHtml(author, 24, { filterable: false })}
+                    <div class="board-comment-content">
+                        <div class="board-comment-meta">
+                            <span class="board-comment-author">${escapeHtml(author?.label || 'Someone')}</span>
+                            <span class="board-comment-when">${escapeHtml(this.formatDateTime(note.createdAt))}</span>
+                        </div>
+                        <div class="board-comment-body">${renderCommentHtml(note.body, { attachments })}</div>
+                    </div>
+                </article>`;
+        }).join('');
     }
 
     // ============================================

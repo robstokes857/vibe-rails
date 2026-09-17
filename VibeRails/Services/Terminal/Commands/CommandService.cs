@@ -525,8 +525,7 @@ public class CommandService : ICommandService
 
     /// <summary>
     /// Returns the MCP setup commands for this launch. Registration is always on for supported
-    /// CLIs. CLIs with a remove command use remove-first repair; OpenCode's idempotent add replaces
-    /// the named entry directly.
+    /// CLIs. Codex and OpenCode replace the named entry directly; other CLIs use remove-first repair.
     /// </summary>
     private static IReadOnlyList<string> BuildMcpSetupCommands(LLM llm)
     {
@@ -554,7 +553,11 @@ public class CommandService : ICommandService
                 SuppressCommandOutput($"claude mcp remove {VibeRailsMcpServerName}"),
                 $"claude mcp add --scope user {VibeRailsMcpServerName} -- {serverCommand}"),
             LLM.Codex => (
-                SuppressCommandOutput($"codex mcp remove {VibeRailsMcpServerName}"),
+                // Codex watches config.toml in already-running sessions. Removing the server
+                // leaves their session-only env_vars/Board grants without a command, so reload
+                // fails with "invalid transport" (also surfaced as a skill-loading warning).
+                // `mcp add` replaces an existing registration, including stale command paths.
+                null,
                 $"codex mcp add {VibeRailsMcpServerName} -- {serverCommand}"),
             LLM.Antigravity => (
                 SuppressCommandOutput($"agy mcp remove {VibeRailsMcpServerName}"),

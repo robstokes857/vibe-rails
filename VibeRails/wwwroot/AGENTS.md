@@ -184,6 +184,15 @@ and the per-file buttons fetch content through the same authenticated route as t
 event can come from a session this card does not own (reads never link), so it renders with the
 short session id plus the note naming the card that agent is actually working.
 
+**Agent notes** (2026-09-17) are a second collapsed rail section above Description history. They
+are the scratchpad agents write over MCP (`append_board_note`) to checkpoint findings while they
+work; the server keeps them out of `comments[]` and the comment count (`BoardComments.Kind`).
+The card response carries `notes[]`, so the section renders from the loaded card with the same
+escape-first `renderCommentHtml` as comments and no extra fetch (`renderNotesPanel`);
+`board-api.js` has `getCardNotesAsync` / `addCardNoteAsync` for a refresh or a user note. Do not
+merge notes into the comment thread: the thread is what the human reads, the notes are working
+state.
+
 **Saving a description never sends terminal input.** There is no notify endpoint: it was removed
 2026-09-15 because the sequence it sent — two Escapes, the text, Enter — opens Claude Code's rewind
 menu on an idle prompt rather than clearing it, so the message and its Enter landed in that menu and

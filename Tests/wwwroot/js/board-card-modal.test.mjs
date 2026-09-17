@@ -74,3 +74,32 @@ test('the card editor fills the viewport and only .board-editor-scroll overflows
     assert.match(rule(css, '.board-side-scroll'), /overflow:\s*visible/);
     assert.doesNotMatch(rule(css, '.board-comments'), /overflow-y:\s*auto/);
 });
+
+test('the card editor has a collapsed Agent notes rail that renders card.notes with the comment renderer', () => {
+    const source = readFileSync(controllerPath, 'utf8');
+    const open = source.slice(
+        source.indexOf('async openCardEditor'),
+        source.indexOf('bindCardEditor(editor, card)')
+    );
+    // Collapsed by default, sitting beside Description history, with a count badge.
+    assert.match(open, /<details data-board-notes-details>/);
+    assert.match(open, /data-board-count="notes"/);
+    assert.ok(open.indexOf('data-board-notes-details') < open.indexOf('data-board-history-details'));
+    // Rendered on toggle, from the card response — no extra fetch — and escape-first.
+    assert.match(source, /\[data-board-notes-details\]'\)\?\.addEventListener\('toggle'/);
+    const render = source.slice(source.indexOf('renderNotesPanel(editor, card) {'), source.indexOf('renderCommentsPanel(editor, card) {'));
+    assert.match(render, /const notes = card\?\.notes \|\| \[\];/);
+    assert.match(render, /renderCommentHtml\(note\.body, \{ attachments \}\)/);
+    assert.match(render, /class="board-comment board-note/);
+    assert.doesNotMatch(render, /BoardApi\./);
+    // The rail style narrows the avatar column for the side rail.
+    const css = boardCss();
+    assert.match(rule(css, '.board-comment.board-note'), /grid-template-columns: 24px minmax\(0, 1fr\)/);
+});
+
+test('board-api exposes the agent-notes routes', () => {
+    const api = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/board-api.js'), 'utf8');
+    assert.match(api, /async function getCardNotesAsync\(cardId\)[\s\S]*?\/notes`\)/);
+    assert.match(api, /async function addCardNoteAsync\(cardId, body\)[\s\S]*?\/notes`, 'POST', \{ body \}\)/);
+    assert.match(api, /getCardNotesAsync,\s*addCardNoteAsync,/);
+});

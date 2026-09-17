@@ -43,9 +43,11 @@ Start work also sets `StartTerminalRequest.AuthorizeBoardTools` for base and sav
 launches. It defaults to false everywhere else and travels through TerminalRoutes,
 TerminalSessionService, TerminalRunner and CommandService. The launch prompt explicitly
 authorizes the Board workflow for every provider. `Commands/BoardMcpAuthorization.cs` fixes the
-grant list to nine Board tools, with no wildcard grant to the entire MCP server:
-`list_board_columns`, `list_board_cards`, `get_board_card`, `read_board_attachment`,
-`create_board_card`, `update_board_card`, `move_board_card`, `add_board_comment`, `link_board_commit`.
+grant list to thirteen Board tools, with no wildcard grant to the entire MCP server:
+`list_board_columns`, `list_board_cards`, `get_board_card`, `get_board_card_history`,
+`get_board_notes`, `read_board_attachment`, `create_board_card`, `update_board_card`,
+`move_board_card`, `add_board_comment`, `append_board_note`, `add_board_attachment`,
+`link_board_commit` (the last four additions are the 2026-09-17 agent-workflow tools).
 
 | Provider | Session-only Board grants and evidence |
 |---|---|

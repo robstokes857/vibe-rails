@@ -145,7 +145,7 @@ public sealed class BoardAttachmentTests : IDisposable
         var resolver = new Mock<IBoardProjectResolver>();
         resolver.Setup(x => x.ResolveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(_project);
         var tool = new BoardTool(_service, resolver.Object, _store);
-        var detail = await tool.GetBoardCard(card.Key, Ct);
+        var detail = await tool.GetBoardCard(card.Key, cancellationToken: Ct);
         Assert.Contains($"{file.Id}: scope.md (text/markdown, 6 bytes)", detail);
         Assert.Contains("read_board_attachment", detail);
         var chunk = await tool.ReadBoardAttachment(file.Id, card.Key, 2, 3, Ct);

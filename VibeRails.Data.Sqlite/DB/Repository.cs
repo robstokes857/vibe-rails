@@ -1128,6 +1128,60 @@ namespace VibeRails.DB
             await cmd.ExecuteNonQueryAsync();
         }
 
+        public async Task PersistTerminalOutputAsync(string sessionId, IReadOnlyList<TerminalOutputWrite> rows, CancellationToken cancellationToken = default)
+        {
+            if (rows.Count == 0)
+                return;
+
+            await using var connection = await OpenConnectionAsync(cancellationToken);
+            // BEGIN IMMEDIATE: take the writer lock once, up front, for the whole batch. Two prepared
+            // statements are reused across the rows; only parameter values change.
+            await using var transaction = connection.BeginTransaction(deferred: false);
+
+            await using var legacy = connection.CreateCommand();
+            legacy.Transaction = transaction;
+            legacy.CommandText = SqlStrings.InsertSessionLog;
+            legacy.Parameters.AddWithValue("$sessionId", sessionId);
+            var legacyTimestamp = legacy.Parameters.Add("$timestamp", SqliteType.Text);
+            var legacyContent = legacy.Parameters.Add("$content", SqliteType.Blob);
+            var legacyIsError = legacy.Parameters.Add("$isError", SqliteType.Integer);
+
+            await using var enriched = connection.CreateCommand();
+            enriched.Transaction = transaction;
+            enriched.CommandText = SqlStrings.InsertTerminalSessionLog;
+            enriched.Parameters.AddWithValue("$sessionId", sessionId);
+            var enrichedSequence = enriched.Parameters.Add("$sequence", SqliteType.Integer);
+            var enrichedAlt = enriched.Parameters.Add("$isAlternateScreen", SqliteType.Integer);
+            var enrichedData = enriched.Parameters.Add("$data", SqliteType.Blob);
+            var enrichedCols = enriched.Parameters.Add("$cols", SqliteType.Integer);
+            var enrichedRows = enriched.Parameters.Add("$rows", SqliteType.Integer);
+            var enrichedTimestamp = enriched.Parameters.Add("$timestamp", SqliteType.Text);
+
+            foreach (var row in rows)
+            {
+                var timestamp = row.TimestampUtc.ToString("O");
+                if (row.Kind == TerminalOutputKind.Legacy)
+                {
+                    legacyTimestamp.Value = timestamp;
+                    legacyContent.Value = row.Data;
+                    legacyIsError.Value = row.IsError ? 1 : 0;
+                    await legacy.ExecuteNonQueryAsync(cancellationToken);
+                }
+                else
+                {
+                    enrichedSequence.Value = row.Sequence;
+                    enrichedAlt.Value = row.IsAlternateScreen ? 1 : 0;
+                    enrichedData.Value = row.Data;
+                    enrichedCols.Value = row.Cols;
+                    enrichedRows.Value = row.Rows;
+                    enrichedTimestamp.Value = timestamp;
+                    await enriched.ExecuteNonQueryAsync(cancellationToken);
+                }
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+
         public async Task<List<TerminalSessionLogRecord>> GetTerminalSessionLogsAsync(string sessionId, CancellationToken cancellationToken)
         {
             var logs = new List<TerminalSessionLogRecord>();

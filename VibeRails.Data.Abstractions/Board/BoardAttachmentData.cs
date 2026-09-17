@@ -3,7 +3,7 @@ namespace VibeRails.Services.Board;
 public sealed record BoardAttachmentContent(BoardAttachmentRecord Attachment, byte[] Content);
 internal static class BoardAttachmentData
 {
-    internal const int MaxAttachmentsPerCard = 12;
+    internal const int MaxAttachmentsPerCard = 40;
     internal static byte[] DecodeDataUrl(string? dataUrl)
     {
         if (dataUrl is null)

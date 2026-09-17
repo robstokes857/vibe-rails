@@ -328,6 +328,89 @@ public sealed class BoardStoreTests : IDisposable
         Assert.Single(await _store.GetCardsAsync(withTrailingSeparator, Ct));
     }
 
+    [Fact]
+    public async Task Notes_ShareTheCommentsTable_ButNeverTheCommentStream()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var card = await _store.CreateCardAsync(_project, NewCard("A"), Ct);
+        var note = await _store.AddNoteAsync(_project, card.Id, BoardAuthor.Agent("Codex", "codex", "sess-1"), "scratch", Ct);
+        var comment = await _store.AddCommentAsync(_project, card.Id, BoardAuthor.User(), "visible", Ct);
+
+        Assert.StartsWith("note_", note!.Id);
+        Assert.Equal(BoardCommentKinds.Note, note.Kind);
+        Assert.StartsWith("cm_", comment!.Id);
+        Assert.Equal(BoardCommentKinds.Comment, comment.Kind);
+
+        var detail = (await _store.GetCardDetailAsync(_project, card.Id, Ct))!;
+        Assert.Equal("visible", Assert.Single(detail.Comments).Body);
+        Assert.Equal("scratch", Assert.Single(detail.Notes).Body);
+        Assert.Equal(1, detail.Card.CommentCount);
+        Assert.Equal("scratch", Assert.Single(await _store.GetNotesAsync(_project, card.Key, Ct)).Body);
+        Assert.Empty(await _store.GetNotesAsync(_project, "VB-99", Ct));
+
+        // Cascade covers both kinds.
+        Assert.True(await _store.DeleteCardAsync(_project, card.Id, Ct));
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(Ct);
+        await using var count = connection.CreateCommand();
+        count.CommandText = "SELECT COUNT(*) FROM BoardComments WHERE CardId = $card";
+        count.Parameters.AddWithValue("$card", card.Id);
+        Assert.Equal(0L, (long)(await count.ExecuteScalarAsync(Ct))!);
+    }
+
+    [Fact]
+    public async Task ABoardVersion1Database_GainsTheKindColumn_AndKeepsOldCommentsAsComments()
+    {
+        // A file the previous build left behind: board/1 applied, BoardComments without Kind.
+        var legacyRoot = Path.Combine(_root, "legacy");
+        Directory.CreateDirectory(legacyRoot);
+        var connectionString = $"Data Source={Path.Combine(legacyRoot, "state.db")};Mode=ReadWriteCreate;Cache=Shared";
+        await using (var connection = new SqliteConnection(connectionString))
+        {
+            await connection.OpenAsync(Ct);
+            await using var setup = connection.CreateCommand();
+            setup.CommandText = """
+                CREATE TABLE SchemaMigrations (Component TEXT NOT NULL, Version INTEGER NOT NULL CHECK (Version > 0), AppliedUTC TEXT NOT NULL, AppliedBy TEXT, PRIMARY KEY (Component, Version));
+                INSERT INTO SchemaMigrations VALUES ('board', 1, '2026-09-16T13:38:52Z', NULL);
+                CREATE TABLE BoardColumns (Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Name TEXT NOT NULL, WipLimit INTEGER NULL, Position INTEGER NOT NULL, Color TEXT NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL);
+                CREATE TABLE BoardCards (Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Number INTEGER NOT NULL, ColumnId TEXT NOT NULL REFERENCES BoardColumns(Id), Position INTEGER NOT NULL, Title TEXT NOT NULL, Description TEXT NOT NULL DEFAULT '', Assignee TEXT NULL, Priority TEXT NOT NULL DEFAULT 'medium', Points INTEGER NULL, Tags TEXT NOT NULL DEFAULT '[]', Blocked INTEGER NOT NULL DEFAULT 0, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, UNIQUE(ProjectPath, Number));
+                CREATE TABLE BoardCardSequences (ProjectPath TEXT PRIMARY KEY COLLATE NOCASE, LastNumber INTEGER NOT NULL);
+                CREATE TABLE BoardComments (Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, AuthorKind TEXT NOT NULL, AuthorLabel TEXT NOT NULL, AuthorCli TEXT NULL, SessionId TEXT NULL, Body TEXT NOT NULL, CreatedUTC TEXT NOT NULL);
+                CREATE TABLE BoardCardSessions (SessionId TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, TabId TEXT NULL, Selection TEXT NOT NULL, Cli TEXT NOT NULL, DisplayName TEXT NOT NULL, Origin TEXT NOT NULL, CreatedUTC TEXT NOT NULL);
+                CREATE TABLE BoardAttachments (Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, Name TEXT NOT NULL, MimeType TEXT NOT NULL, Bytes INTEGER NOT NULL, DataUrl TEXT NOT NULL, CreatedUTC TEXT NOT NULL, DeletedUTC TEXT);
+                CREATE TABLE BoardAttachmentContents (AttachmentId TEXT PRIMARY KEY REFERENCES BoardAttachments(Id) ON DELETE CASCADE, Content BLOB NOT NULL);
+                CREATE TABLE BoardCommits (CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, Sha TEXT NOT NULL, Author TEXT NOT NULL, Message TEXT NOT NULL, CommittedUTC TEXT NOT NULL, LinkedUTC TEXT NOT NULL, PRIMARY KEY (CardId, Sha));
+                CREATE TABLE BoardCommitSnapshots (CardId TEXT NOT NULL, Sha TEXT NOT NULL, SnapshotJson TEXT NOT NULL, PRIMARY KEY (CardId, Sha), FOREIGN KEY (CardId, Sha) REFERENCES BoardCommits(CardId, Sha) ON DELETE CASCADE);
+                CREATE TABLE BoardCardOptions (CardId TEXT PRIMARY KEY REFERENCES BoardCards(Id) ON DELETE CASCADE, OptionsJson TEXT NOT NULL);
+                CREATE TABLE BoardDescriptionRevisions (CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, Revision INTEGER NOT NULL, Description TEXT NOT NULL, CreatedUTC TEXT NOT NULL, Source TEXT NOT NULL, AuthorKind TEXT NOT NULL, AuthorLabel TEXT NOT NULL, AuthorCli TEXT NULL, AuthorSessionId TEXT NULL, PRIMARY KEY (CardId, Revision));
+                CREATE TABLE BoardDescriptionSessionEvents (CardId TEXT NOT NULL, Revision INTEGER NOT NULL, SessionId TEXT NOT NULL, Kind TEXT NOT NULL, Status TEXT NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, Message TEXT NULL, PRIMARY KEY (CardId, Revision, SessionId, Kind), FOREIGN KEY (CardId, Revision) REFERENCES BoardDescriptionRevisions(CardId, Revision) ON DELETE CASCADE);
+                CREATE TABLE BoardDescriptionRevisionAttachments (CardId TEXT NOT NULL, Revision INTEGER NOT NULL, AttachmentId TEXT NOT NULL REFERENCES BoardAttachments(Id) ON DELETE CASCADE, PRIMARY KEY (CardId, Revision, AttachmentId), FOREIGN KEY (CardId, Revision) REFERENCES BoardDescriptionRevisions(CardId, Revision) ON DELETE CASCADE);
+                INSERT INTO BoardColumns VALUES ('col_1', $project, 'Backlog', NULL, 0, '#64748b', '2026-09-16T00:00:00Z', '2026-09-16T00:00:00Z');
+                INSERT INTO BoardCards (Id, ProjectPath, Number, ColumnId, Position, Title, CreatedUTC, UpdatedUTC) VALUES ('card_1', $project, 1, 'col_1', 0, 'Old', '2026-09-16T00:00:00Z', '2026-09-16T00:00:00Z');
+                INSERT INTO BoardComments VALUES ('cm_1', 'card_1', 'user', 'You', NULL, NULL, 'written before Kind existed', '2026-09-16T00:00:00Z');
+                """;
+            setup.Parameters.AddWithValue("$project", BoardStore.NormalizeProjectPath(_project));
+            await setup.ExecuteNonQueryAsync(Ct);
+        }
+
+        var store = new BoardStore(connectionString);
+        var detail = (await store.GetCardDetailAsync(_project, "VB-1", Ct))!;
+        Assert.Equal("written before Kind existed", Assert.Single(detail.Comments).Body);
+        Assert.Equal(BoardCommentKinds.Comment, detail.Comments[0].Kind);
+        Assert.Empty(detail.Notes);
+        Assert.Equal(1, detail.Card.CommentCount);
+        Assert.NotNull(await store.AddNoteAsync(_project, "card_1", BoardAuthor.User(), "new note", Ct));
+
+        await using (var connection = new SqliteConnection(connectionString))
+        {
+            await connection.OpenAsync(Ct);
+            await using var ledger = connection.CreateCommand();
+            ledger.CommandText = "SELECT COUNT(*) FROM SchemaMigrations WHERE Component = 'board' AND Version = 2;";
+            Assert.Equal(1L, (long)(await ledger.ExecuteScalarAsync(Ct))!);
+        }
+        SqliteConnection.ClearPool(new SqliteConnection(connectionString));
+    }
+
     private static NewBoardCard NewCard(string title) =>
         new(null, title, "", null, "medium", null, [], false);
 

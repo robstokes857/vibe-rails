@@ -14,7 +14,16 @@ public sealed partial class BoardService
     // Attachments have no size limit, per-file or per-card. Only the count is bounded, because
     // that is a list people have to scan, not a number of bytes. The board holds one local user's
     // own files on their own disk; a file too big to be practical is their problem, not a rule.
-    public const int MaxAttachmentTextCharacters = 100_000;
+    public const int MaxAttachmentTextCharacters = 250_000;
+
+    /// <summary>
+    /// The one agent-written path that does have a byte budget: an MCP call carries the whole
+    /// text in one argument, and half a megabyte is already far past what a tool result needs.
+    /// </summary>
+    public const int MaxAgentAttachmentTextCharacters = 500_000;
+
+    /// <summary>Default chunk for <c>read_board_attachment</c>; the hard cap is <see cref="MaxAttachmentTextCharacters"/>.</summary>
+    public const int DefaultAttachmentReadCharacters = 40_000;
 
     public Task<BoardAttachmentContent?> GetAttachmentContentAsync(string projectPath, string idOrKey, string attachmentId, CancellationToken cancellationToken = default) =>
         store.GetAttachmentContentAsync(projectPath, idOrKey, attachmentId, cancellationToken);
@@ -47,7 +56,7 @@ public sealed partial class BoardService
         return "application/octet-stream";
     }
 
-    public static string ReadAttachmentText(BoardAttachmentContent attachment, int offset = 0, int maxCharacters = 20_000)
+    public static string ReadAttachmentText(BoardAttachmentContent attachment, int offset = 0, int maxCharacters = DefaultAttachmentReadCharacters)
     {
         if (attachment.Attachment.MimeType is not ("text/plain" or "text/markdown"))
             throw new BoardValidationException("Only Markdown and TXT attachments can be read as text. Download other file types from the card.");

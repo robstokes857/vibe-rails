@@ -37,7 +37,7 @@ public sealed partial class BoardStore
             throw new BoardValidationException($"A card can hold at most {BoardAttachmentData.MaxAttachmentsPerCard} current attachments.");
     }
 
-    public async Task<BoardAttachmentRecord?> AddAttachmentContentAsync(string projectPath, string cardId, string name, string mimeType, byte[] content, CancellationToken cancellationToken = default)
+    public async Task<BoardAttachmentRecord?> AddAttachmentContentAsync(string projectPath, string cardId, string name, string mimeType, byte[] content, CancellationToken cancellationToken = default, BoardAuthor? author = null)
     {
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
@@ -68,7 +68,9 @@ public sealed partial class BoardStore
             insert.Parameters.Add("$content", SqliteType.Blob).Value = content;
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
-        await AppendDescriptionRevisionAsync(connection, transaction, card, card.Description, "attachments", BoardAuthor.User(), null, cancellationToken);
+        // The revision names who added the file: the user from the dashboard, or the agent session
+        // that wrote it over MCP. The attachment row itself carries no author.
+        await AppendDescriptionRevisionAsync(connection, transaction, card, card.Description, "attachments", author ?? BoardAuthor.User(), null, cancellationToken);
         await TouchCardAsync(connection, transaction, card.Id, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return record;

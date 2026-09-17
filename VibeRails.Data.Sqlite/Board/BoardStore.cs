@@ -212,10 +212,11 @@ public sealed partial class BoardStore : IBoardStore
 
         return new BoardCardDetailRecord(
             card,
-            await ReadCommentsAsync(connection, card.Id, cancellationToken),
+            await ReadCommentsAsync(connection, card.Id, BoardCommentKinds.Comment, cancellationToken),
             await ReadSessionsAsync(connection, card.Id, cancellationToken),
             await ReadAttachmentsAsync(connection, card.Id, cancellationToken),
-            await ReadCommitsAsync(connection, card.Id, cancellationToken));
+            await ReadCommitsAsync(connection, card.Id, cancellationToken),
+            await ReadCommentsAsync(connection, card.Id, BoardCommentKinds.Note, cancellationToken));
     }
 
     public async Task<BoardCardRecord> CreateCardAsync(string projectPath, NewBoardCard card, CancellationToken cancellationToken = default)
@@ -477,7 +478,13 @@ public sealed partial class BoardStore : IBoardStore
         return null;
     }
 
-    public async Task<BoardCommentRecord?> AddCommentAsync(string projectPath, string cardId, BoardAuthor author, string body, CancellationToken cancellationToken = default)
+    public Task<BoardCommentRecord?> AddCommentAsync(string projectPath, string cardId, BoardAuthor author, string body, CancellationToken cancellationToken = default)
+        => InsertCommentRowAsync(projectPath, cardId, author, body, BoardCommentKinds.Comment, cancellationToken);
+
+    public Task<BoardCommentRecord?> AddNoteAsync(string projectPath, string cardId, BoardAuthor author, string body, CancellationToken cancellationToken = default)
+        => InsertCommentRowAsync(projectPath, cardId, author, body, BoardCommentKinds.Note, cancellationToken);
+
+    private async Task<BoardCommentRecord?> InsertCommentRowAsync(string projectPath, string cardId, BoardAuthor author, string body, string kind, CancellationToken cancellationToken)
     {
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
@@ -486,13 +493,14 @@ public sealed partial class BoardStore : IBoardStore
         if (card is null)
             return null;
 
-        var comment = new BoardCommentRecord(NewId("cm"), card.Id, author, body, DateTime.UtcNow);
+        // Notes use their own id prefix so an agent can tell the two apart in tool output.
+        var comment = new BoardCommentRecord(NewId(kind == BoardCommentKinds.Note ? "note" : "cm"), card.Id, author, body, DateTime.UtcNow, kind);
         await using (var insert = connection.CreateCommand())
         {
             insert.Transaction = transaction;
             insert.CommandText = """
-                INSERT INTO BoardComments (Id, CardId, AuthorKind, AuthorLabel, AuthorCli, SessionId, Body, CreatedUTC)
-                VALUES ($id, $card, $kind, $label, $cli, $session, $body, $created);
+                INSERT INTO BoardComments (Id, CardId, AuthorKind, AuthorLabel, AuthorCli, SessionId, Body, CreatedUTC, Kind)
+                VALUES ($id, $card, $kind, $label, $cli, $session, $body, $created, $rowKind);
                 """;
             insert.Parameters.AddWithValue("$id", comment.Id);
             insert.Parameters.AddWithValue("$card", card.Id);
@@ -502,11 +510,68 @@ public sealed partial class BoardStore : IBoardStore
             insert.Parameters.AddWithValue("$session", (object?)author.SessionId ?? DBNull.Value);
             insert.Parameters.AddWithValue("$body", body);
             insert.Parameters.AddWithValue("$created", ToDb(comment.CreatedUtc));
+            insert.Parameters.AddWithValue("$rowKind", kind);
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
         await TouchCardAsync(connection, transaction, card.Id, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return comment;
+    }
+
+    public async Task<IReadOnlyList<BoardCommentRecord>> GetNotesAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default)
+    {
+        var project = NormalizeProjectPath(projectPath);
+        await using var connection = await OpenAsync(cancellationToken);
+        var card = await ReadCardAsync(connection, null, project, idOrKey, cancellationToken);
+        return card is null ? [] : await ReadCommentsAsync(connection, card.Id, BoardCommentKinds.Note, cancellationToken);
+    }
+
+    /// <summary>
+    /// Same "the table may not exist in this host" discipline as <see cref="FindSessionAuthorAsync"/>:
+    /// a board-only database (fresh stdio host) has neither Sessions nor ChatSummary.
+    /// </summary>
+    public async Task<BoardSessionOutcomeRecord?> FindSessionOutcomeAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        var tables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using (var probe = connection.CreateCommand())
+        {
+            probe.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('Sessions', 'ChatSummary');";
+            await using var reader = await probe.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+                tables.Add(reader.GetString(0));
+        }
+        // Fixtures (and very old files) carry a Sessions table without these columns.
+        if (!tables.Contains("Sessions")
+            || !SqliteSchema.HasColumn(connection, null, "Sessions", "EndedUTC")
+            || !SqliteSchema.HasColumn(connection, null, "Sessions", "ExitCode"))
+            return null;
+
+        DateTime? ended = null;
+        int? exitCode = null;
+        await using (var session = connection.CreateCommand())
+        {
+            session.CommandText = "SELECT EndedUTC, ExitCode FROM Sessions WHERE Id = $session LIMIT 1;";
+            session.Parameters.AddWithValue("$session", sessionId);
+            await using var reader = await session.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+                return null;
+            if (!reader.IsDBNull(0) && DateTime.TryParse(reader.GetString(0), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var endedAt))
+                ended = endedAt.ToUniversalTime();
+            if (!reader.IsDBNull(1))
+                exitCode = reader.GetInt32(1);
+        }
+
+        string? summary = null;
+        if (tables.Contains("ChatSummary"))
+        {
+            await using var chat = connection.CreateCommand();
+            chat.CommandText = "SELECT SummaryText FROM ChatSummary WHERE SessionId = $session LIMIT 1;";
+            chat.Parameters.AddWithValue("$session", sessionId);
+            summary = await chat.ExecuteScalarAsync(cancellationToken) as string;
+            if (string.IsNullOrWhiteSpace(summary)) summary = null;
+        }
+        return new BoardSessionOutcomeRecord(sessionId, ended, exitCode, summary);
     }
 
     // ------------------------------------------------------------------ sessions
@@ -760,7 +825,7 @@ public sealed partial class BoardStore : IBoardStore
     private const string CardSelectSql = """
         SELECT c.Id, c.ProjectPath, c.Number, c.ColumnId, c.Position, c.Title, c.Description, c.Assignee, c.Priority,
                c.Points, c.Tags, c.Blocked, c.CreatedUTC, c.UpdatedUTC,
-               (SELECT COUNT(*) FROM BoardComments m WHERE m.CardId = c.Id) AS CommentCount,
+               (SELECT COUNT(*) FROM BoardComments m WHERE m.CardId = c.Id AND m.Kind = 'comment') AS CommentCount,
                COALESCE((SELECT MAX(r.Revision) FROM BoardDescriptionRevisions r WHERE r.CardId = c.Id), 0),
                (SELECT o.OptionsJson FROM BoardCardOptions o WHERE o.CardId = c.Id)
         FROM BoardCards c
@@ -841,14 +906,15 @@ public sealed partial class BoardStore : IBoardStore
         reader.GetInt32(15),
         reader.IsDBNull(16) ? null : JsonSerializer.Deserialize(reader.GetString(16), StorageJsonSerializerContext.Default.BaseLlmOptions));
 
-    private static async Task<IReadOnlyList<BoardCommentRecord>> ReadCommentsAsync(SqliteConnection connection, string cardId, CancellationToken cancellationToken)
+    private static async Task<IReadOnlyList<BoardCommentRecord>> ReadCommentsAsync(SqliteConnection connection, string cardId, string kind, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT Id, CardId, AuthorKind, AuthorLabel, AuthorCli, SessionId, Body, CreatedUTC
-            FROM BoardComments WHERE CardId = $card ORDER BY CreatedUTC, Id;
+            SELECT Id, CardId, AuthorKind, AuthorLabel, AuthorCli, SessionId, Body, CreatedUTC, Kind
+            FROM BoardComments WHERE CardId = $card AND Kind = $kind ORDER BY CreatedUTC, Id;
             """;
         command.Parameters.AddWithValue("$card", cardId);
+        command.Parameters.AddWithValue("$kind", kind);
         var comments = new List<BoardCommentRecord>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
@@ -862,7 +928,8 @@ public sealed partial class BoardStore : IBoardStore
                     reader.IsDBNull(4) ? null : reader.GetString(4),
                     reader.IsDBNull(5) ? null : reader.GetString(5)),
                 reader.GetString(6),
-                ParseDb(reader.GetString(7))));
+                ParseDb(reader.GetString(7)),
+                reader.GetString(8)));
         }
         return comments;
     }
@@ -1034,8 +1101,15 @@ public sealed partial class BoardStore : IBoardStore
             EnsureAttachmentSchema(db, transaction);
             EnsureDescriptionSchema(db, transaction);
         });
+        // board/2: BoardComments.Kind separates agent scratchpad notes from the comment stream.
+        // A fresh file already has the column from SchemaSql; adoption is guarded either way.
+        SqliteMigrationRunner.Apply(connection, "board", 2, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.AdoptStatement(db, transaction, CommentKindColumnSql));
         ReconcileDerivedRows(connection);
     }
+
+    internal const string CommentKindColumnSql =
+        "ALTER TABLE BoardComments ADD COLUMN Kind TEXT NOT NULL DEFAULT 'comment'";
 
     /// <summary>
     /// Re-derives the rows that are a function of BoardCards rather than schema: the
@@ -1170,7 +1244,8 @@ public sealed partial class BoardStore : IBoardStore
             AuthorCli TEXT NULL,
             SessionId TEXT NULL,
             Body TEXT NOT NULL,
-            CreatedUTC TEXT NOT NULL
+            CreatedUTC TEXT NOT NULL,
+            Kind TEXT NOT NULL DEFAULT 'comment'
         );
         CREATE INDEX IF NOT EXISTS IX_BoardComments_Card ON BoardComments(CardId, CreatedUTC);
 

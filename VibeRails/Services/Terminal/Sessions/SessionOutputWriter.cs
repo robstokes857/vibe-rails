@@ -1,12 +1,40 @@
 using System.Threading.Channels;
+using Microsoft.Data.Sqlite;
 using Serilog;
+using VibeRails.Data.Abstractions;
 using VibeRails.DB;
+using VibeRails.DTOs;
 
 namespace VibeRails.Services.Terminal;
 
+/// <summary>
+/// Persists a session's PTY output. Chunks arrive on an unbounded channel and a single drain
+/// loop turns them into rows: one raw <c>SessionLogs</c> row per chunk plus <c>TerminalSessionLogs</c>
+/// replay frames split at alt-screen / sync-output boundaries.
+///
+/// Everything a drain produces is written in ONE transaction. The old shape -- two autocommit
+/// INSERTs per chunk, each holding SQLite's single writer lock through an fsync -- let a few
+/// streaming agents (100-200 chunks/s between them) starve every other writer on the shared
+/// state.db for minutes at a time (2026-09-16). A transient lock is retried a few times and the
+/// batch is then dropped: this is terminal history, and losing a burst beats blocking the PTY
+/// read loop or the rest of the application.
+/// </summary>
 public sealed class SessionOutputWriter : ISessionOutputWriter
 {
     private const int FlushThreshold = 5 * 1024 * 1024; // 5MB
+
+    // How long a drain waits after the first queued chunk before writing, so a burst of PTY reads
+    // shares one transaction. Persistence latency, not display latency: the browser is fed
+    // directly from the PTY read loop, never from this table.
+    internal static readonly TimeSpan CoalesceWindow = TimeSpan.FromMilliseconds(25);
+
+    // Retry delays for a batch that lost the writer lock (busy_timeout already waited 5s each).
+    internal static readonly TimeSpan[] RetryDelays =
+    [
+        TimeSpan.FromMilliseconds(100),
+        TimeSpan.FromMilliseconds(250),
+        TimeSpan.FromMilliseconds(500),
+    ];
 
     // Max bytes a partial CSI private-mode sequence can span (e.g. ESC[?1049;2004;25
     // without the trailing h/l). Multi-mode sequences can be longer than standalone ones.
@@ -85,24 +113,34 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
 
     private async Task DrainAsync()
     {
-        await foreach (var msg in _channel.Reader.ReadAllAsync().ConfigureAwait(false))
+        var reader = _channel.Reader;
+        var batch = new List<TerminalOutputWrite>();
+        while (await reader.WaitToReadAsync().ConfigureAwait(false))
         {
-            try
+            // Let the rest of the burst land, then take everything that is queued.
+            await Task.Delay(CoalesceWindow).ConfigureAwait(false);
+            while (reader.TryRead(out var msg))
             {
-                switch (msg.Kind)
+                try
                 {
-                    case WriterMessageKind.Data:
-                        await HandleDataAsync(msg.Payload!).ConfigureAwait(false);
-                        break;
-                    case WriterMessageKind.Resize:
-                        await HandleResizeAsync(msg.NewCols, msg.NewRows).ConfigureAwait(false);
-                        break;
+                    switch (msg.Kind)
+                    {
+                        case WriterMessageKind.Data:
+                            HandleData(msg.Payload!, batch);
+                            break;
+                        case WriterMessageKind.Resize:
+                            HandleResize(msg.NewCols, msg.NewRows, batch);
+                            break;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Error(ex, "[SessionOutputWriter] Drain error for session {SessionId}", _sessionId);
                 }
             }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "[SessionOutputWriter] Drain error for session {SessionId}", _sessionId);
-            }
+
+            await PersistBatchAsync(batch).ConfigureAwait(false);
+            batch.Clear();
         }
 
         // Session ended — flush residual into active buffer, then flush both buffers
@@ -111,21 +149,55 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
             ActiveBuffer.Write(_residual, 0, _residual.Length);
             _residual = null;
         }
-        await FlushBufferAsync(_mainBuffer, false).ConfigureAwait(false);
-        await FlushBufferAsync(_altBuffer, true).ConfigureAwait(false);
+        FlushBuffer(_mainBuffer, false, batch);
+        FlushBuffer(_altBuffer, true, batch);
+        await PersistBatchAsync(batch).ConfigureAwait(false);
     }
 
-    private async Task HandleDataAsync(byte[] payload)
+    /// <summary>
+    /// One transaction for the whole batch. A lost writer lock is retried a few times, then the
+    /// batch is dropped with one log line -- never re-queued, so a lock storm cannot pile up
+    /// unbounded memory behind a PTY that keeps producing.
+    /// </summary>
+    private async Task PersistBatchAsync(List<TerminalOutputWrite> batch)
     {
-        // Write to legacy SessionLogs (unchanged, per-chunk — always the original payload)
-        try
+        if (batch.Count == 0)
+            return;
+
+        for (var attempt = 1; ; attempt++)
         {
-            await _repository.LogSessionOutputAsync(_sessionId!, payload, false).ConfigureAwait(false);
+            try
+            {
+                await _repository.PersistTerminalOutputAsync(_sessionId!, batch).ConfigureAwait(false);
+                return;
+            }
+            catch (Exception ex) when (attempt <= RetryDelays.Length && IsTransientLock(ex))
+            {
+                await Task.Delay(RetryDelays[attempt - 1]).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                long bytes = 0;
+                foreach (var row in batch) bytes += row.Data.Length;
+                Log.Error(ex,
+                    "[SessionOutputWriter] Dropped {Rows} output rows ({Bytes} bytes) for session {SessionId} after {Attempts} attempt(s)",
+                    batch.Count, bytes, _sessionId, attempt);
+                return;
+            }
         }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "[SessionOutputWriter] Failed to persist legacy output for session {SessionId}", _sessionId);
-        }
+    }
+
+    private static bool IsTransientLock(Exception ex) => ex switch
+    {
+        SqliteException sqlite => sqlite.SqliteErrorCode is 5 or 6,
+        StorageException storage => storage.IsTransient,
+        _ => false,
+    };
+
+    private void HandleData(byte[] payload, List<TerminalOutputWrite> batch)
+    {
+        // Legacy SessionLogs row: always the original, unsplit payload.
+        batch.Add(TerminalOutputWrite.Legacy(payload, false, DateTime.UtcNow));
 
         // Build working data: prepend any residual from the previous call so that
         // alt-screen sequences split across PTY reads are detected correctly.
@@ -176,7 +248,7 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
                         _mainBuffer.Write(workData, offset, transitionOffset - offset);
 
                     // Flush main buffer so it gets a sequence number BEFORE the alt content
-                    await FlushBufferAsync(_mainBuffer, false).ConfigureAwait(false);
+                    FlushBuffer(_mainBuffer, false, batch);
 
                     // The enter sequence goes to the alt buffer so replay
                     // properly enters alt-screen from the alt chunk
@@ -190,7 +262,7 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
                         _altBuffer.Write(workData, offset, endOfChunk - offset);
 
                     // Flush alt buffer — it now contains enter seq + alt content + exit seq
-                    await FlushBufferAsync(_altBuffer, true).ConfigureAwait(false);
+                    FlushBuffer(_altBuffer, true, batch);
                     _inAltScreen = false;
                 }
                 else
@@ -203,7 +275,7 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
                     // states instead of one giant undifferentiated alt-screen chunk.
                     if (_inAltScreen && !enabled)
                     {
-                        await FlushBufferAsync(_altBuffer, true).ConfigureAwait(false);
+                        FlushBuffer(_altBuffer, true, batch);
                     }
                 }
 
@@ -214,11 +286,11 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
         // Check if active buffer exceeded threshold
         if (ActiveBuffer.Length >= FlushThreshold)
         {
-            await FlushBufferAsync(ActiveBuffer, _inAltScreen).ConfigureAwait(false);
+            FlushBuffer(ActiveBuffer, _inAltScreen, batch);
         }
     }
 
-    private async Task HandleResizeAsync(int newCols, int newRows)
+    private void HandleResize(int newCols, int newRows, List<TerminalOutputWrite> batch)
     {
         // No-op resize: dimensions unchanged. Skip flush + marker — neither helps
         // replay when geometry didn't actually change, and natural flush triggers
@@ -231,8 +303,8 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
         // Flush both buffers at the OLD dimensions before swapping geometry — any
         // in-progress data was produced under the old (cols,rows) and must be
         // persisted with that geometry for replay fidelity.
-        await FlushBufferAsync(_mainBuffer, false).ConfigureAwait(false);
-        await FlushBufferAsync(_altBuffer, true).ConfigureAwait(false);
+        FlushBuffer(_mainBuffer, false, batch);
+        FlushBuffer(_altBuffer, true, batch);
 
         _cols = newCols;
         _rows = newRows;
@@ -241,36 +313,23 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
         // if no further data triggers a flush before the session ends. Without this,
         // a resize that updates only in-memory state is lost when the buffer never
         // reaches FlushThreshold and shutdown skips DisposeAsync.
-        try
-        {
-            await _repository.InsertTerminalSessionLogAsync(
-                _sessionId!, _sequence++, Array.Empty<byte>(), _inAltScreen, _cols, _rows
-            ).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "[SessionOutputWriter] Failed to persist resize marker for session {SessionId}", _sessionId);
-        }
+        batch.Add(TerminalOutputWrite.Enriched(_sequence++, Array.Empty<byte>(), _inAltScreen, _cols, _rows, DateTime.UtcNow));
     }
 
-    private async Task FlushBufferAsync(MemoryStream buffer, bool isAlternateScreen)
+    /// <summary>
+    /// Moves the buffer into the batch as one replay frame. The sequence number is taken here,
+    /// when the row is created: a retried batch keeps its rows and numbers, and only a dropped
+    /// batch loses its numbers together with its data (the old per-row write incremented inside
+    /// the failing call, so a transient failure burned the number AND lost the buffer).
+    /// </summary>
+    private void FlushBuffer(MemoryStream buffer, bool isAlternateScreen, List<TerminalOutputWrite> batch)
     {
         if (buffer.Length == 0)
             return;
 
         var data = buffer.ToArray();
         buffer.SetLength(0);
-
-        try
-        {
-            await _repository.InsertTerminalSessionLogAsync(
-                _sessionId!, _sequence++, data, isAlternateScreen, _cols, _rows
-            ).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "[SessionOutputWriter] Failed to persist enriched output for session {SessionId}", _sessionId);
-        }
+        batch.Add(TerminalOutputWrite.Enriched(_sequence++, data, isAlternateScreen, _cols, _rows, DateTime.UtcNow));
     }
 
     private MemoryStream ActiveBuffer => _inAltScreen ? _altBuffer : _mainBuffer;

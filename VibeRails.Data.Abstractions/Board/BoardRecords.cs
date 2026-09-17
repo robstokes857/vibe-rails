@@ -49,7 +49,27 @@ public sealed record BoardCardDetailRecord(
     IReadOnlyList<BoardCommentRecord> Comments,
     IReadOnlyList<BoardSessionRecord> Sessions,
     IReadOnlyList<BoardAttachmentRecord> Attachments,
-    IReadOnlyList<BoardCommitRecord> Commits);
+    IReadOnlyList<BoardCommitRecord> Commits,
+    IReadOnlyList<BoardCommentRecord> Notes);
+
+/// <summary>
+/// The two kinds of BoardComments row. A <em>note</em> is the agent scratchpad: same shape and
+/// attribution as a comment, but kept out of the comment stream and the comment count so an agent
+/// can checkpoint findings as it goes without spamming the human-facing thread.
+/// </summary>
+public static class BoardCommentKinds
+{
+    public const string Comment = "comment";
+    public const string Note = "note";
+
+    public static bool IsValid(string? value) => value is Comment or Note;
+}
+
+/// <summary>
+/// What became of a linked terminal session, read from the Sessions / ChatSummary tables when the
+/// host has them. Null fields mean "unknown here", never "did not happen".
+/// </summary>
+public sealed record BoardSessionOutcomeRecord(string SessionId, DateTime? EndedUtc, int? ExitCode, string? Summary);
 
 public sealed record BoardAuthor(string Kind, string Label, string? Cli, string? SessionId)
 {
@@ -70,7 +90,8 @@ public sealed record BoardCommentRecord(
     string CardId,
     BoardAuthor Author,
     string Body,
-    DateTime CreatedUtc);
+    DateTime CreatedUtc,
+    string Kind = BoardCommentKinds.Comment);
 
 public sealed record BoardSessionRecord(
     string SessionId,

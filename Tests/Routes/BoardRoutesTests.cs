@@ -103,6 +103,8 @@ public sealed class BoardRoutesTests : IAsyncLifetime
     [InlineData("GET", "/api/v1/board/cards/VB-1/history")]
     [InlineData("GET", "/api/v1/board/cards/VB-1/attachments/missing/content")]
     [InlineData("POST", "/api/v1/board/cards/VB-1/attachments")]
+    [InlineData("GET", "/api/v1/board/cards/VB-1/notes")]
+    [InlineData("POST", "/api/v1/board/cards/VB-1/notes")]
     public async Task NewBoardSurfaces_RequireSessionAndTab(string method, string path)
     {
         using var none = await SendAsync(new HttpMethod(method), path);
@@ -205,6 +207,18 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         Assert.Equal("old", changedFile.GetProperty("originalContent").GetString());
         Assert.Equal("new", changedFile.GetProperty("modifiedContent").GetString());
 
+        // Notes are the agent scratchpad: their own rail and routes, never counted as comments.
+        using var noted = await PostJsonAsync($"/api/v1/board/cards/{cardId}/notes", new { body = "scratch" });
+        using var noteDocument = await ReadJsonAsync(noted);
+        Assert.StartsWith("note_", noteDocument.RootElement.GetProperty("id").GetString());
+        using var notes = await GetJsonAsync($"/api/v1/board/cards/{cardId}/notes");
+        Assert.Equal("scratch", Assert.Single(notes.RootElement.GetProperty("notes").EnumerateArray()).GetProperty("body").GetString());
+        using var withNotes = await GetJsonAsync($"/api/v1/board/cards/{cardId}");
+        Assert.Equal(1, withNotes.RootElement.GetProperty("comments").GetArrayLength());
+        Assert.Equal(1, withNotes.RootElement.GetProperty("notes").GetArrayLength());
+        using var emptyNote = await PostJsonAsync($"/api/v1/board/cards/{cardId}/notes", new { body = "  " });
+        Assert.Equal(HttpStatusCode.BadRequest, emptyNote.StatusCode);
+
         using var list = await GetJsonAsync("/api/v1/board/cards");
         var summary = Assert.Single(list.RootElement.GetProperty("cards").EnumerateArray());
         Assert.Equal(1, summary.GetProperty("commentCount").GetInt32());
@@ -263,7 +277,8 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         Assert.Equal("VB-1 · Ship the board", started.Title);
         Assert.True(started.AuthorizeBoardTools);
         Assert.StartsWith("You are working on kanban card VB-1", started.InitialPrompt);
-        Assert.Contains("Title: Ship the board\nAll of it.", started.InitialPrompt);
+        // Lane names ride inside the fenced card block, between the title and the description.
+        Assert.Contains("Title: Ship the board\nLanes: Backlog → Ready → Build → Review → Done\nAll of it.", started.InitialPrompt);
         // The environment's template is appended unresolved — resolution happens once, in the tab child.
         Assert.EndsWith("\n\nRead AGENTS.md. {{datetime}}", started.InitialPrompt);
 
