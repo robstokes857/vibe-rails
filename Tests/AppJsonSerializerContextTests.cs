@@ -137,7 +137,6 @@ public sealed class AppJsonSerializerContextTests
                 ClaudeTokenSaverEnabled: true,
                 CodexTokenSaverEnabled: true,
                 OpenCodeTokenSaverEnabled: true,
-                TokenSaverCaptureEnabled: false,
                 MachineName: "build-box",
                 ClearApiKey: null,
                 DataExportConfigured: true,

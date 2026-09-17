@@ -102,7 +102,6 @@ public sealed class LlmProxySettingsService(
             CodexTokenSaverEnabled: !tokenSaverPaused && settings.CodexLlmProxyEnabled && codexSaver,
             OpenCodeTokenSaverEnabled: !tokenSaverPaused && openCodeProxyEnabled && openCodeSaver,
             TokenSaverPlan: plan,
-            TokenSaverCaptureEnabled: settings.TokenSaverCaptureEnabled,
             GrokLlmProxyEnabled: grokProxyEnabled,
             GrokLlmProxyMode: LlmProxyCliChatConfig.NormalizeMode(settings.GrokLlmProxyMode),
             GrokTokenSaverEnabled: !tokenSaverPaused && grokProxyEnabled && grokSaver)

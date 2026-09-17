@@ -74,12 +74,9 @@ public class Settings
     // the next save.
     public List<string>? TokenSaverStageOverride { get; set; }
 
-    // Raw before/after captures to state.db (see ICompressionCaptureSink). UNCAPPED by explicit
-    // product decision (2026-07-15): captures are the only evidence that a stage is correct rather
-    // than merely small, and capping or truncating them would preferentially destroy the
-    // pathological inputs that are the entire reason to look. This table grows without bound;
-    // DELETE /api/v1/compression/captures is the reset.
-    public bool TokenSaverCaptureEnabled { get; set; } = false;
+    // TokenSaverCaptureEnabled (2026-07-15 → 2026-09-17) is gone: the per-tool_result capture
+    // table was retired, and the always-on exchange log (proxy_exchanges.db) holds the same
+    // bytes. A settings.json that still carries the key is read fine; it is dropped on next save.
     public string PinHash { get; set; } = string.Empty;
     public string PinSalt { get; set; } = string.Empty;
 }

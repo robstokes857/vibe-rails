@@ -63,7 +63,6 @@ public static class SqliteStorage
         services.TryAddSingleton<IBoardStore>(sp => new BoardStore(StateConnectionString(sp)));
         services.TryAddSingleton<ITokenSavingsStore>(sp => new TokenSavingsStore(StateConnectionString(sp)));
         services.TryAddSingleton<ICodeAnalyzerIgnoreStore>(sp => new CodeAnalyzerIgnoreStore(StateConnectionString(sp)));
-        services.TryAddSingleton<ICompressionCaptureStore>(sp => new CompressionCaptureStore(StateConnectionString(sp)));
         services.TryAddSingleton<ILlmExchangeLogStore>(sp => new LlmExchangeLogStore(ConnectionString(
             sp.GetRequiredService<SqliteStoragePaths>().ProxyDatabasePath)));
         services.TryAddSingleton<IDatabaseSnapshotStore, SqliteDatabaseSnapshotStore>();
@@ -111,7 +110,7 @@ public static class SqliteStorage
         {
             TokenSavingsStore.EnsureSchema(connection);
             CodeAnalyzerIgnoreStore.EnsureSchema(connection);
-            CompressionCaptureStore.EnsureSchema(connection);
+            CompressionCapturesSchema.EnsureSchema(connection);
         }
         using (var connection = SqliteConnectionFactory.Open(ConnectionString(paths.ProxyDatabasePath)))
             LlmExchangeLogStore.EnsureSchema(connection);

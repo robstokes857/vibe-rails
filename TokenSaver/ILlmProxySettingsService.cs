@@ -30,7 +30,6 @@ public sealed record LlmProxySettings(
     bool CodexTokenSaverEnabled = false,
     bool OpenCodeTokenSaverEnabled = false,
     CompressionPlan? TokenSaverPlan = null,
-    bool TokenSaverCaptureEnabled = false,
     bool GrokLlmProxyEnabled = false,
     string GrokLlmProxyMode = CodexLlmProxySettings.ModeSubscription,
     bool GrokTokenSaverEnabled = false)
