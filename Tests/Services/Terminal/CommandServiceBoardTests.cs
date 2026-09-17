@@ -20,7 +20,7 @@ public partial class CommandServiceTests
             initialPrompt: "Read VB-7", sessionId: "board-session", authorizeBoardTools: true);
 
         var grants = prepared.Argv!.Where(argument => argument.Contains(".approval_mode=")).ToArray();
-        Assert.Equal(9, grants.Length);
+        Assert.Equal(13, grants.Length);
         Assert.Contains("mcp_servers.viberails-mcp.tools.get_board_card.approval_mode=\"approve\"", grants);
         Assert.Contains("mcp_servers.viberails-mcp.tools.update_board_card.approval_mode=\"approve\"", grants);
         Assert.All(grants, grant => Assert.StartsWith("mcp_servers.viberails-mcp.tools.", grant));
@@ -97,7 +97,7 @@ public partial class CommandServiceTests
             initialPrompt: "Read VB-7", authorizeBoardTools: true);
         Assert.Contains(expectedReadGrant, prepared.Argv!);
         Assert.Contains(deny, prepared.Argv!);
-        Assert.Equal(9, prepared.Argv!.Count(arg => arg.StartsWith(llm == LLM.Copilot ? "--allow-tool=" : "--allow=")));
+        Assert.Equal(13, prepared.Argv!.Count(arg => arg.StartsWith(llm == LLM.Copilot ? "--allow-tool=" : "--allow=")));
         Assert.DoesNotContain(prepared.Argv!, arg => arg is "--yolo" or "--allow-all" or "--dangerously-skip-permissions");
     }
 

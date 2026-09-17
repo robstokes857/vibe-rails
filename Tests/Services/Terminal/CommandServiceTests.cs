@@ -19,8 +19,8 @@ namespace Tests.Services.Terminal;
 /// resize-reprint flash disappears. See anthropics/claude-code#49584, #55613.
 ///
 /// Also pins the MCP behavior: VibeRails registers its stdio MCP server for every
-/// managed agent CLI launch. Remove-first repairs stale registrations and add
-/// restores the current server command.
+/// managed agent CLI launch. Codex/OpenCode replace the entry without a removal gap;
+/// other CLIs use remove-first repair to restore the current server command.
 /// </summary>
 // Shares the process-global VIBERAILS_TEST_FAKE_CLI env var with LlmProxyClaudeConfigTests;
 // the shared collection serializes the two classes so one can't clear/restore the flag while the
@@ -86,7 +86,6 @@ public partial class CommandServiceTests : IDisposable
 
     [Theory]
     [InlineData(LLM.Claude, "claude mcp remove viberails-mcp", "claude mcp add --scope user viberails-mcp -- ")]
-    [InlineData(LLM.Codex, "codex mcp remove viberails-mcp", "codex mcp add viberails-mcp -- ")]
     [InlineData(LLM.Antigravity, "agy mcp remove viberails-mcp", "agy mcp add viberails-mcp -- ")]
     [InlineData(LLM.Copilot, "copilot mcp remove viberails-mcp", "copilot mcp add viberails-mcp -- ")]
     public async Task PrepareSession_SupportedClis_AddsVibeRailsMcpSetupCommand(
@@ -110,6 +109,28 @@ public partial class CommandServiceTests : IDisposable
         Assert.StartsWith(prepared.SetupCommands[0] + "; ", prepared.Command);
         Assert.Contains(expectedAddPrefix, prepared.Command);
         Assert.EndsWith(prepared.LaunchCommand, prepared.Command);
+    }
+
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData(null, true)]
+    [InlineData("my-codex", false)]
+    [InlineData("my-codex", true)]
+    public async Task PrepareSession_Codex_ReplacesMcpWithoutBreakingRunningSessions(string? envName, bool authorizeBoardTools)
+    {
+        var prepared = await CreateService().PrepareSessionAsync(LLM.Codex, envName, null,
+            sessionId: "codex-session", authorizeBoardTools: authorizeBoardTools);
+
+        // A running Codex retains these overrides across config reloads. Removing the server
+        // first leaves them without a transport; a single add replaces the old command in place.
+        var setup = Assert.Single(prepared.SetupCommands);
+        Assert.StartsWith("codex mcp add viberails-mcp -- ", setup);
+        Assert.DoesNotContain("codex mcp remove", prepared.Command);
+        Assert.Contains("mcp_servers.viberails-mcp.env_vars", prepared.LaunchCommand);
+        Assert.StartsWith(setup + "; ", prepared.Command);
+        Assert.EndsWith(prepared.LaunchCommand, prepared.Command);
+        Assert.Equal(authorizeBoardTools, prepared.Argv!.Any(arg =>
+            arg.StartsWith("mcp_servers.viberails-mcp.tools.", StringComparison.Ordinal)));
     }
 
     [Fact]

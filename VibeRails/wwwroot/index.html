@@ -4529,6 +4529,15 @@
                     background: color-mix(in srgb, var(--color-primary, #3b82f6) 6%, var(--color-bg-surface, #1e1e1e));
                 }
 
+                /* Agent notes: the scratchpad in the right rail. Same card as a comment, sized
+                   for the narrow column, dashed to read as working notes rather than the thread. */
+                .board-comment.board-note {
+                    grid-template-columns: 24px minmax(0, 1fr);
+                    margin: 0.5rem 0;
+                    font-size: 0.75rem;
+                    border-left-style: dashed;
+                }
+
                 /* Composer ------------------------------------------------ */
                 .board-composer {
                     display: flex;

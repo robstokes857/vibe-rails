@@ -67,7 +67,8 @@ This document describes the database layer: Environments, Sandboxes, AgentMetada
 | Property | Value |
 |---|---|
 | **Engine** | SQLite with WAL mode and foreign keys enabled |
-| **Connection** | Paths passed to `SqliteStorage`; file connections use private cache |
+| **Connection** | Paths passed to `SqliteStorage`; file connections use private cache. `SqliteConnectionFactory.Configure` sets `busy_timeout=5000`, `journal_size_limit=64MB` and `synchronous=NORMAL` on every open. NORMAL is deliberate: it removes the per-commit fsync so the single writer lock is held for microseconds; a crash of the process loses nothing, an OS crash can lose the last few commits. Several `vb.exe` processes (roots, tab children, `vb mcp` hosts) write the same file, and on 2026-09-16 per-chunk fsync'd terminal-output INSERTs saturated that lock and starved every other writer. |
+| **Terminal output** | `SessionOutputWriter` batches queued PTY chunks into one `IRepository.PersistTerminalOutputAsync` transaction per drain (both `SessionLogs` and `TerminalSessionLogs` rows), retrying a transient lock a few times and then dropping the batch. Never reintroduce one autocommit INSERT per chunk. |
 | **Initialization** | `StateDatabaseSchema` and store-specific components run pending migrations through `SqliteMigrationRunner`; completed `(Component, Version)` entries persist in `SchemaMigrations` |
 | **Timestamps** | All `DateTime` values stored as ISO 8601 round-trip strings (`"O"` format), parsed with `DateTimeStyles.RoundtripKind` |
 

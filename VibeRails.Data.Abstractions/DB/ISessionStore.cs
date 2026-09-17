@@ -30,6 +30,13 @@ public interface ISessionStore
 
     Task InsertTerminalSessionLogAsync(string sessionId, int sequence, byte[] data, bool isAlternateScreen, int cols, int rows);
 
+    /// <summary>
+    /// Writes a drain's worth of legacy and enriched output rows in one write transaction, in the
+    /// order given. This is the hot path for live terminals: one lock acquisition per batch instead
+    /// of one per row keeps streaming agents from starving every other writer on the shared file.
+    /// </summary>
+    Task PersistTerminalOutputAsync(string sessionId, IReadOnlyList<TerminalOutputWrite> rows, CancellationToken cancellationToken = default);
+
     Task<List<TerminalSessionLogRecord>> GetTerminalSessionLogsAsync(string sessionId, CancellationToken cancellationToken);
 
     Task SaveSessionOutputAndMarkProcessedAsync(string sessionId, string text, CancellationToken cancellationToken);

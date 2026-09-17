@@ -17,10 +17,15 @@ const MCP_ARG_EXAMPLES = {
     list_board_columns: {},
     list_board_cards: {},
     get_board_card: { card: 'VB-1' },
+    get_board_card_history: { card: 'VB-1' },
+    get_board_notes: { card: 'VB-1' },
+    read_board_attachment: { card: 'VB-1', attachmentId: 'att_...' },
     create_board_card: { title: 'Try the board from MCP', column: 'Backlog', priority: 'medium' },
     update_board_card: { card: 'VB-1', priority: 'high' },
     move_board_card: { card: 'VB-1', column: 'Review' },
     add_board_comment: { card: 'VB-1', body: 'Progress note from the MCP Explorer.' },
+    append_board_note: { card: 'VB-1', body: 'Checkpoint from the MCP Explorer.' },
+    add_board_attachment: { card: 'VB-1', name: 'findings.md', text: '# Findings\n' },
     link_board_commit: { card: 'VB-1', sha: 'abc1234' }
 };
 

@@ -1,6 +1,8 @@
 # API authentication coverage
 
-Audit date: 2026-09-15
+Audit date: 2026-09-15 (route inventory amended 2026-09-17: +2 board note routes, both under
+`/api/v1` and therefore behind both credentials by construction — **207 mapped surfaces**,
+**195 under `/api/v1`**; the rest of the reconciliation below is unchanged).
 
 Full route/authentication reconciliation (2026-09-15): **205 mapped surfaces**, including
 **193 under `/api/v1`**, nine protected non-`/api` API surfaces, and three bootstrap/page/probe
@@ -662,10 +664,14 @@ before the process starts; session options are set at spawn time or not at all. 
 the agent" surface is a fresh capability decision and must be validated against each provider's
 real TUI before it ships.
 - `POST /api/v1/board/cards/{card}/comments`,
+  `GET /api/v1/board/cards/{card}/notes`, `POST /api/v1/board/cards/{card}/notes`,
   `POST /api/v1/board/cards/{card}/attachments`,
-  `DELETE /api/v1/board/cards/{card}/attachments/{attachmentId}` — comments and file attachments.
+  `DELETE /api/v1/board/cards/{card}/attachments/{attachmentId}` — comments, agent notes and file
+  attachments. Notes (added 2026-09-17) are the same row shape as comments with
+  `BoardComments.Kind = 'note'`; same 50,000-character cap, same `textContent`-only rendering,
+  same both-credentials requirement, and never merged into the comment stream.
   Upload bytes are base64-decoded and counted by the server; supplied MIME/byte counts are
-  untrusted. There is deliberately **no upload size limit** — only 12 current files per card.
+  untrusted. There is deliberately **no upload size limit** — only 40 current files per card.
   Kestrel's body limit is lifted for this one path in middleware, which is the only place it can
   be lifted: a `RequestSizeLimitAttribute` on a minimal-API endpoint is inert (only the MVC filter
   pipeline reads it), so the previously documented 29 MB cap never applied and Kestrel's 30 MB

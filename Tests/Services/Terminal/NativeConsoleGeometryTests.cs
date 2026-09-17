@@ -1,5 +1,6 @@
 using Moq;
 using VibeRails.DB;
+using VibeRails.DTOs;
 using VibeRails.Services;
 using VibeRails.Services.Integrations.VibeCodeRemote;
 using VibeRails.Services.Terminal;
@@ -62,20 +63,20 @@ public sealed class NativeConsoleGeometryTests
                 It.IsAny<int>(),
                 "run-123"))
             .Returns(Task.CompletedTask);
+        var persisted = new List<(string SessionId, TerminalOutputWrite Row)>();
         repository
-            .Setup(x => x.LogSessionOutputAsync(
+            .Setup(x => x.PersistTerminalOutputAsync(
                 It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                false))
-            .Returns(Task.CompletedTask);
-        repository
-            .Setup(x => x.InsertTerminalSessionLogAsync(
-                It.IsAny<string>(),
-                It.IsAny<int>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<bool>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
+                It.IsAny<IReadOnlyList<TerminalOutputWrite>>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, IReadOnlyList<TerminalOutputWrite>, CancellationToken>((id, rows, _) =>
+            {
+                lock (persisted)
+                {
+                    foreach (var row in rows)
+                        persisted.Add((id, row));
+                }
+            })
             .Returns(Task.CompletedTask);
         repository
             .Setup(x => x.CompleteSessionAsync(It.IsAny<string>(), 0))
@@ -103,26 +104,17 @@ public sealed class NativeConsoleGeometryTests
         service.LogOutput(sessionId, resizedPayload);
         await service.CompleteSessionAsync(sessionId, 0);
 
-        repository.Verify(x => x.InsertTerminalSessionLogAsync(
-            sessionId,
-            It.IsAny<int>(),
-            It.Is<byte[]>(data => data.SequenceEqual(initialPayload)),
-            false,
-            211,
-            47), Times.Once);
-        repository.Verify(x => x.InsertTerminalSessionLogAsync(
-            sessionId,
-            It.IsAny<int>(),
-            It.Is<byte[]>(data => data.Length == 0),
-            false,
-            222,
-            55), Times.Once);
-        repository.Verify(x => x.InsertTerminalSessionLogAsync(
-            sessionId,
-            It.IsAny<int>(),
-            It.Is<byte[]>(data => data.SequenceEqual(resizedPayload)),
-            false,
-            222,
-            55), Times.Once);
+        List<TerminalOutputWrite> enriched;
+        lock (persisted)
+        {
+            Assert.All(persisted, entry => Assert.Equal(sessionId, entry.SessionId));
+            enriched = persisted.Select(entry => entry.Row)
+                .Where(row => row.Kind == TerminalOutputKind.Enriched)
+                .ToList();
+        }
+
+        Assert.Single(enriched, row => row.Data.SequenceEqual(initialPayload) && !row.IsAlternateScreen && row.Cols == 211 && row.Rows == 47);
+        Assert.Single(enriched, row => row.Data.Length == 0 && !row.IsAlternateScreen && row.Cols == 222 && row.Rows == 55);
+        Assert.Single(enriched, row => row.Data.SequenceEqual(resizedPayload) && !row.IsAlternateScreen && row.Cols == 222 && row.Rows == 55);
     }
 }

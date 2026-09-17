@@ -72,15 +72,22 @@ public sealed class BoardLaunchService(
                 throw new BoardValidationException("The assigned environment belongs to another project.");
         }
 
-        var column = await store.GetColumnAsync(projectPath, card.ColumnId, cancellationToken);
+        var columns = await store.GetColumnsAsync(projectPath, cancellationToken);
+        var column = columns.FirstOrDefault(c => c.Id == card.ColumnId);
         var assigneeLabel = environment is not null
             ? $"{environment.CustomName} ({parsed.Cli})"
             : parsed.Cli;
-        var prompt = BoardPromptComposer.Compose(card, column?.Name ?? "(no lane)", assigneeLabel, environment?.CustomPrompt);
+        var detail = await store.GetCardDetailAsync(projectPath, card.Id, cancellationToken);
+        // Lanes, linked commits and attachment names ride along so the agent does not spend its
+        // first minutes discovering which lane names exist or which change "the big refactor" was.
+        var context = new BoardPromptComposer.LaunchContext(
+            columns.OrderBy(c => c.Position).Select(c => c.Name).ToList(),
+            detail?.Commits ?? [],
+            detail?.Attachments ?? []);
+        var prompt = BoardPromptComposer.Compose(card, column?.Name ?? "(no lane)", assigneeLabel, environment?.CustomPrompt, context);
         var title = $"{card.Key} · {Truncate(card.Title, 60)}";
 
         var tabs = await tabHost.ListTabsAsync(cancellationToken);
-        var detail = await store.GetCardDetailAsync(projectPath, card.Id, cancellationToken);
         var linkedSessionIds = detail?.Sessions.Select(session => session.SessionId).ToHashSet(StringComparer.Ordinal) ?? [];
         if (tabs.Any(tab => tab.HasActiveSession && tab.SessionId is not null && linkedSessionIds.Contains(tab.SessionId)))
             throw new BoardConflictException("An agent is already running on this card. Open it from Sessions.");

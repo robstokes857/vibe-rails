@@ -26,7 +26,13 @@ public partial interface IBoardService
     Task<BoardDescriptionHistoryResponse?> GetDescriptionHistoryAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
 
     Task<BoardCommentDto?> AddCommentAsync(string projectPath, string idOrKey, BoardAuthor author, string body, CancellationToken cancellationToken = default);
+    /// <summary>Agent scratchpad entry: same validation as a comment, never shown in the comment stream.</summary>
+    Task<BoardCommentDto?> AddNoteAsync(string projectPath, string idOrKey, BoardAuthor author, string body, CancellationToken cancellationToken = default);
+    Task<List<BoardCommentDto>?> GetNotesAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
     Task<BoardAttachmentDto?> AddAttachmentAsync(string projectPath, string idOrKey, AddBoardAttachmentRequest request, CancellationToken cancellationToken = default);
+    /// <summary>Agent-written Markdown/TXT attachment. Only these two types; the text is stored as UTF-8 bytes.</summary>
+    Task<BoardAttachmentDto?> AddTextAttachmentAsync(string projectPath, string idOrKey, string name, string text, BoardAuthor author, CancellationToken cancellationToken = default);
+    Task<BoardSessionOutcomeRecord?> FindSessionOutcomeAsync(string sessionId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAttachmentAsync(string projectPath, string idOrKey, string attachmentId, CancellationToken cancellationToken = default);
 
     Task<List<BoardCommitDto>?> GetCommitsAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
@@ -49,9 +55,11 @@ public sealed partial class BoardService(
     IBoardCommitService commits,
     IBoardLiveSessionProbe liveSessions) : IBoardService
 {
+    // Raised 2026-09-17 (description 20k→100k, comment 10k→50k, attachments 12→40 per card): the
+    // first agents to work cards split multi-part reports across comments and hit the old caps.
     public const int MaxTitleLength = 300;
-    public const int MaxDescriptionLength = 20_000;
-    public const int MaxCommentLength = 10_000;
+    public const int MaxDescriptionLength = 100_000;
+    public const int MaxCommentLength = 50_000;
     public const int MaxTags = 20;
     public const int MaxTagLength = 40;
     public const int MaxAttachmentsPerCard = BoardAttachmentData.MaxAttachmentsPerCard;
@@ -166,9 +174,43 @@ public sealed partial class BoardService(
 
     public async Task<BoardCardResponse?> UpdateCardAsync(string projectPath, string idOrKey, UpdateBoardCardRequest request, CancellationToken cancellationToken = default, BoardAuthor? author = null)
     {
+        // Append mode is optimistic on the revision this call reads. Without a caller-supplied
+        // expected revision, a concurrent edit is retried once against the fresh text; with one,
+        // the caller asked to be told. Every field, including the append, is validated before the
+        // store write and lands in that single write -- an invalid priority must not leave the
+        // appended text behind for a retry to duplicate.
+        var retryOnConflict = request.DescriptionAppend is not null && request.ExpectedDescriptionRevision is null;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await UpdateCardOnceAsync(projectPath, idOrKey, request, cancellationToken, author);
+            }
+            catch (BoardConflictException) when (retryOnConflict && attempt == 1)
+            {
+                // Re-read and append to the revision that won.
+            }
+        }
+    }
+
+    private async Task<BoardCardResponse?> UpdateCardOnceAsync(string projectPath, string idOrKey, UpdateBoardCardRequest request, CancellationToken cancellationToken, BoardAuthor? author)
+    {
         var existing = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
         if (existing is null)
             return null;
+
+        var description = request.Description;
+        var expectedRevision = request.ExpectedDescriptionRevision;
+        if (request.DescriptionAppend is not null)
+        {
+            if (description is not null)
+                throw new BoardValidationException("Pass either description (replace) or descriptionAppend (append), not both.");
+            var addition = request.DescriptionAppend.Replace("\r\n", "\n").Trim();
+            if (addition.Length == 0)
+                throw new BoardValidationException("Nothing to append.");
+            description = existing.Description.Length == 0 ? addition : existing.Description + "\n\n" + addition;
+            expectedRevision ??= existing.DescriptionRevision;
+        }
 
         string? title = null;
         if (request.Title is not null)
@@ -189,14 +231,15 @@ public sealed partial class BoardService(
         var clearOptions = request.ClearBaseLlmOptions || assigneeChanged
             || (request.BaseLlmOptions is not null && options is null);
         if (options is not null) clearOptions = false;
-        if (request.ExpectedDescriptionRevision is < 1)
+        if (expectedRevision is < 1)
             throw new BoardValidationException("Description revision must be a positive number.");
-        var activeSessionIds = request.Description is null ? null
+        var normalizedDescription = description is null ? null : NormalizeDescription(description);
+        var activeSessionIds = description is null ? null
             : (await liveSessions.GetLiveSessionsAsync(cancellationToken)).Keys.ToList();
 
         var patch = new BoardCardPatch(
             Title: title,
-            Description: request.Description is null ? null : NormalizeDescription(request.Description),
+            Description: normalizedDescription,
             Assignee: assignee,
             ClearAssignee: clearAssignee,
             Priority: priority,
@@ -205,7 +248,7 @@ public sealed partial class BoardService(
             Tags: NormalizeTags(request.Tags),
             Blocked: request.Blocked,
             ColumnId: request.ColumnId,
-            ExpectedDescriptionRevision: request.ExpectedDescriptionRevision,
+            ExpectedDescriptionRevision: expectedRevision,
             BaseLlmOptions: options,
             ClearBaseLlmOptions: clearOptions,
             Author: author,
@@ -242,16 +285,31 @@ public sealed partial class BoardService(
 
     public async Task<BoardCommentDto?> AddCommentAsync(string projectPath, string idOrKey, BoardAuthor author, string body, CancellationToken cancellationToken = default)
     {
-        var text = body?.Trim() ?? string.Empty;
-        if (text.Length == 0)
-            throw new BoardValidationException("Comment cannot be empty.");
-        if (text.Length > MaxCommentLength)
-            throw new BoardValidationException($"Comment is too long (max {MaxCommentLength} characters).");
+        var text = NormalizeCommentBody(body, "Comment");
         var existing = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
         if (existing is null)
             return null;
         var comment = await store.AddCommentAsync(projectPath, existing.Id, author, text, cancellationToken);
         return comment is null ? null : ToDto(comment);
+    }
+
+    public async Task<BoardCommentDto?> AddNoteAsync(string projectPath, string idOrKey, BoardAuthor author, string body, CancellationToken cancellationToken = default)
+    {
+        var text = NormalizeCommentBody(body, "Note");
+        var existing = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
+        if (existing is null)
+            return null;
+        var note = await store.AddNoteAsync(projectPath, existing.Id, author, text, cancellationToken);
+        return note is null ? null : ToDto(note);
+    }
+
+    public async Task<List<BoardCommentDto>?> GetNotesAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default)
+    {
+        var existing = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
+        if (existing is null)
+            return null;
+        var notes = await store.GetNotesAsync(projectPath, existing.Id, cancellationToken);
+        return notes.Select(ToDto).ToList();
     }
 
     public async Task<BoardAttachmentDto?> AddAttachmentAsync(string projectPath, string idOrKey, AddBoardAttachmentRequest request, CancellationToken cancellationToken = default)
@@ -265,6 +323,39 @@ public sealed partial class BoardService(
         // The browser's declared byte count and MIME type are never authoritative.
         var attachment = await store.AddAttachmentContentAsync(projectPath, card.Id, name, mimeType, content, cancellationToken);
         return attachment is null ? null : ToDto(attachment);
+    }
+
+    public async Task<BoardAttachmentDto?> AddTextAttachmentAsync(string projectPath, string idOrKey, string name, string text, BoardAuthor author, CancellationToken cancellationToken = default)
+    {
+        var label = NormalizeAttachmentName(name);
+        var extension = Path.GetExtension(label).ToLowerInvariant();
+        if (extension is not (".md" or ".markdown" or ".txt"))
+            throw new BoardValidationException("Agent attachments must be Markdown or TXT: name the file *.md or *.txt.");
+        var body = (text ?? string.Empty).Replace("\r\n", "\n");
+        if (body.Trim().Length == 0)
+            throw new BoardValidationException("The attachment text cannot be empty.");
+        if (body.Length > MaxAgentAttachmentTextCharacters)
+            throw new BoardValidationException($"The attachment text is too long (max {MaxAgentAttachmentTextCharacters} characters).");
+        var card = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
+        if (card is null)
+            return null;
+        var content = new System.Text.UTF8Encoding(false).GetBytes(body);
+        var mimeType = DetectAttachmentMimeType(label, content);
+        var attachment = await store.AddAttachmentContentAsync(projectPath, card.Id, label, mimeType, content, cancellationToken, author);
+        return attachment is null ? null : ToDto(attachment);
+    }
+
+    public Task<BoardSessionOutcomeRecord?> FindSessionOutcomeAsync(string sessionId, CancellationToken cancellationToken = default) =>
+        store.FindSessionOutcomeAsync(sessionId, cancellationToken);
+
+    private static string NormalizeCommentBody(string? body, string what)
+    {
+        var text = body?.Trim() ?? string.Empty;
+        if (text.Length == 0)
+            throw new BoardValidationException($"{what} cannot be empty.");
+        if (text.Length > MaxCommentLength)
+            throw new BoardValidationException($"{what} is too long (max {MaxCommentLength} characters).");
+        return text;
     }
 
     public async Task<bool> DeleteAttachmentAsync(string projectPath, string idOrKey, string attachmentId, CancellationToken cancellationToken = default)
@@ -374,10 +465,26 @@ public sealed partial class BoardService(
         // Older comments may have been written before their session was linked.
         // Resolve those labels on read without rewriting historical comment rows.
         var authors = new Dictionary<string, BoardAuthor?>();
-        var comments = new List<BoardCommentDto>();
-        foreach (var comment in detail.Comments)
+        var comments = await ResolveAuthorsAsync(detail.Comments, authors, cancellationToken);
+        var notes = await ResolveAuthorsAsync(detail.Notes, authors, cancellationToken);
+        return new BoardCardResponse(
+            summary.Id, summary.Key, summary.ColumnId, summary.Position, summary.Title, summary.Description,
+            summary.Assignee, summary.Priority, summary.Points, summary.Tags, summary.Blocked, summary.CommentCount,
+            summary.ActiveSessionId, summary.ActiveTabId, summary.CreatedAt, summary.UpdatedAt,
+            comments,
+            detail.Commits.Select(ToDto).ToList(),
+            detail.Sessions.Select(s => ToDto(s, live)).ToList(),
+            detail.Attachments.Select(ToDto).ToList(),
+            detail.Card.DescriptionRevision, detail.Card.BaseLlmOptions, detail.Card.DescriptionChanged,
+            notes);
+    }
+
+    private async Task<List<BoardCommentDto>> ResolveAuthorsAsync(IReadOnlyList<BoardCommentRecord> rows, Dictionary<string, BoardAuthor?> authors, CancellationToken cancellationToken)
+    {
+        var result = new List<BoardCommentDto>(rows.Count);
+        foreach (var row in rows)
         {
-            var author = comment.Author;
+            var author = row.Author;
             if (author.Kind == BoardAuthor.AgentKind && BoardAuthor.IsGenericAgentLabel(author.Label)
                 && !string.IsNullOrWhiteSpace(author.SessionId))
             {
@@ -388,17 +495,9 @@ public sealed partial class BoardService(
                 }
                 author = resolved ?? author;
             }
-            comments.Add(ToDto(comment with { Author = author }));
+            result.Add(ToDto(row with { Author = author }));
         }
-        return new BoardCardResponse(
-            summary.Id, summary.Key, summary.ColumnId, summary.Position, summary.Title, summary.Description,
-            summary.Assignee, summary.Priority, summary.Points, summary.Tags, summary.Blocked, summary.CommentCount,
-            summary.ActiveSessionId, summary.ActiveTabId, summary.CreatedAt, summary.UpdatedAt,
-            comments,
-            detail.Commits.Select(ToDto).ToList(),
-            detail.Sessions.Select(s => ToDto(s, live)).ToList(),
-            detail.Attachments.Select(ToDto).ToList(),
-            detail.Card.DescriptionRevision, detail.Card.BaseLlmOptions, detail.Card.DescriptionChanged);
+        return result;
     }
 
     internal static BoardCardSummaryResponse ToSummary(BoardCardRecord card, string? activeSessionId, string? activeTabId) => new(
@@ -416,7 +515,7 @@ public sealed partial class BoardService(
         new(attachment.Id, attachment.Name, attachment.DataUrl, attachment.MimeType, attachment.Bytes, attachment.CreatedUtc);
 
     internal static BoardCommitDto ToDto(BoardCommitRecord commit) =>
-        new(commit.Sha, commit.ShortSha, commit.Author, commit.Message, commit.CommittedUtc);
+        new(commit.Sha, commit.ShortSha, commit.Author, commit.Message, commit.CommittedUtc, commit.LinkedUtc);
 
     internal static BoardSessionDto ToDto(BoardSessionRecord session, IReadOnlyDictionary<string, string> live)
     {

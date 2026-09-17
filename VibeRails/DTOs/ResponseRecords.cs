@@ -157,7 +157,9 @@ namespace VibeRails.DTOs
         DateTime CreatedAt,
         bool Active);
 
-    public record BoardCommitDto(string Sha, string ShortSha, string Author, string Message, DateTime CommittedAt);
+    // LinkedAt is when the commit was put on the card; CommittedAt is the commit's own date. "Since"
+    // views filter on LinkedAt: linking an old commit during a session is that session's activity.
+    public record BoardCommitDto(string Sha, string ShortSha, string Author, string Message, DateTime CommittedAt, DateTime LinkedAt);
     public record BoardCardSummaryResponse(
         string Id,
         string Key,
@@ -201,7 +203,8 @@ namespace VibeRails.DTOs
         List<BoardAttachmentDto> Attachments,
         int DescriptionRevision = 1,
         BaseLlmOptions? BaseLlmOptions = null,
-        bool DescriptionChanged = false);
+        bool DescriptionChanged = false,
+        List<BoardCommentDto>? Notes = null);
     public record CreateBoardCardRequest(
         string? Title = null,
         string? ColumnId = null,
@@ -223,10 +226,15 @@ namespace VibeRails.DTOs
         bool? Blocked = null,
         int? ExpectedDescriptionRevision = null,
         BaseLlmOptions? BaseLlmOptions = null,
-        bool ClearBaseLlmOptions = false);
+        bool ClearBaseLlmOptions = false,
+        // Appended to the current description as a new revision, in the same write as every other
+        // field of this request. Mutually exclusive with Description.
+        string? DescriptionAppend = null);
 
     public record MoveBoardCardRequest(string? ColumnId = null, int? Position = null);
     public record AddBoardCommentRequest(string? Body = null);
+    public record AddBoardNoteRequest(string? Body = null);
+    public record BoardNoteListResponse(List<BoardCommentDto> Notes);
     public record AddBoardAttachmentRequest(string? Name = null, string? DataUrl = null, long? Bytes = null, string? MimeType = null);
     public record LinkBoardCommitRequest(string? Sha = null);
     public record AddBoardSessionRequest(string? Id = null, string? DisplayName = null);
@@ -1758,6 +1766,8 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(BoardDescriptionHistoryResponse))]
     [JsonSerializable(typeof(MoveBoardCardRequest))]
     [JsonSerializable(typeof(AddBoardCommentRequest))]
+    [JsonSerializable(typeof(AddBoardNoteRequest))]
+    [JsonSerializable(typeof(BoardNoteListResponse))]
     [JsonSerializable(typeof(AddBoardAttachmentRequest))]
     [JsonSerializable(typeof(LinkBoardCommitRequest))]
     [JsonSerializable(typeof(AddBoardSessionRequest))]
