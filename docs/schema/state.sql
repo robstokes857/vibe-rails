@@ -11,11 +11,17 @@ CREATE INDEX IX_BoardCardSessions_Card ON BoardCardSessions(CardId);
 -- index IX_BoardCards_Column
 CREATE INDEX IX_BoardCards_Column ON BoardCards(ColumnId, Position);
 
+-- index IX_BoardColumns_Board
+CREATE INDEX IX_BoardColumns_Board ON BoardColumns(BoardId, Position);
+
 -- index IX_BoardColumns_Project
 CREATE INDEX IX_BoardColumns_Project ON BoardColumns(ProjectPath, Position);
 
 -- index IX_BoardComments_Card
 CREATE INDEX IX_BoardComments_Card ON BoardComments(CardId, CreatedUTC);
+
+-- index IX_Boards_Project
+CREATE INDEX IX_Boards_Project ON Boards(ProjectPath, Position);
 
 -- index idx_agent_metadata_path
 CREATE INDEX idx_agent_metadata_path ON AgentMetadata(Path);
@@ -126,7 +132,7 @@ CREATE TABLE BoardCardSessions ( SessionId TEXT PRIMARY KEY, CardId TEXT NOT NUL
 CREATE TABLE BoardCards ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Number INTEGER NOT NULL, ColumnId TEXT NOT NULL REFERENCES BoardColumns(Id), Position INTEGER NOT NULL, Title TEXT NOT NULL, Description TEXT NOT NULL DEFAULT '', Assignee TEXT NULL, Priority TEXT NOT NULL DEFAULT 'medium', Type TEXT NOT NULL DEFAULT 'task', Points INTEGER NULL, Tags TEXT NOT NULL DEFAULT '[]', Blocked INTEGER NOT NULL DEFAULT 0, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, UNIQUE(ProjectPath, Number) );
 
 -- table BoardColumns
-CREATE TABLE BoardColumns ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Name TEXT NOT NULL, WipLimit INTEGER NULL, Position INTEGER NOT NULL, Color TEXT NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL );
+CREATE TABLE BoardColumns ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Name TEXT NOT NULL, WipLimit INTEGER NULL, Position INTEGER NOT NULL, Color TEXT NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, BoardId TEXT NULL );
 
 -- table BoardComments
 CREATE TABLE BoardComments ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, AuthorKind TEXT NOT NULL, AuthorLabel TEXT NOT NULL, AuthorCli TEXT NULL, SessionId TEXT NULL, Body TEXT NOT NULL, CreatedUTC TEXT NOT NULL, Kind TEXT NOT NULL DEFAULT 'comment' );
@@ -145,6 +151,9 @@ CREATE TABLE BoardDescriptionRevisions ( CardId TEXT NOT NULL REFERENCES BoardCa
 
 -- table BoardDescriptionSessionEvents
 CREATE TABLE BoardDescriptionSessionEvents ( CardId TEXT NOT NULL, Revision INTEGER NOT NULL, SessionId TEXT NOT NULL, Kind TEXT NOT NULL, Status TEXT NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, Message TEXT NULL, PRIMARY KEY (CardId, Revision, SessionId, Kind), FOREIGN KEY (CardId, Revision) REFERENCES BoardDescriptionRevisions(CardId, Revision) ON DELETE CASCADE );
+
+-- table Boards
+CREATE TABLE Boards ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Name TEXT NOT NULL, Position INTEGER NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL );
 
 -- table ChatSummary
 CREATE TABLE ChatSummary ( Id INTEGER PRIMARY KEY AUTOINCREMENT, SessionId TEXT NOT NULL UNIQUE, SummaryText TEXT NOT NULL DEFAULT '', Date TEXT NOT NULL );

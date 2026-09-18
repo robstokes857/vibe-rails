@@ -8,6 +8,19 @@ public sealed class BoardValidationException(string message) : Exception(message
 /// <summary>A conflicting board operation (deleting the last lane, duplicate link). Maps to 409.</summary>
 public sealed class BoardConflictException(string message) : Exception(message);
 
+/// <summary>
+/// One board of a project: a named set of lanes (a sprint, a sub-project, a release). Every
+/// project has at least one; card keys (<c>VB-n</c>) stay unique per project, never per board, so
+/// a key names the same card whichever board it sits on.
+/// </summary>
+public sealed record BoardRecord(
+    string Id,
+    string ProjectPath,
+    string Name,
+    int Position,
+    DateTime CreatedUtc,
+    DateTime UpdatedUtc);
+
 public sealed record BoardColumnRecord(
     string Id,
     string ProjectPath,
@@ -16,9 +29,12 @@ public sealed record BoardColumnRecord(
     int Position,
     string Color,
     DateTime CreatedUtc,
-    DateTime UpdatedUtc);
+    DateTime UpdatedUtc,
+    string BoardId = "");
 
 public sealed record BoardColumnDeleteResult(string DeletedColumnId, string MovedToColumnId, int MovedCards);
+
+public sealed record BoardDeleteResult(string DeletedBoardId, int DeletedColumns, int DeletedCards);
 
 /// <summary>Everything a lane card shows. Rails (comments, sessions…) live on <see cref="BoardCardDetailRecord"/>.</summary>
 public sealed record BoardCardRecord(
@@ -40,7 +56,8 @@ public sealed record BoardCardRecord(
     int DescriptionRevision = 1,
     BaseLlmOptions? BaseLlmOptions = null,
     bool DescriptionChanged = false,
-    string Type = BoardCardTypes.Default)
+    string Type = BoardCardTypes.Default,
+    string BoardId = "")
 {
     public string Key => BoardKeys.Format(Number);
 }
@@ -132,6 +149,10 @@ public sealed record BoardCommitRecord(
     public string ShortSha => Sha.Length > 7 ? Sha[..7] : Sha;
 }
 
+/// <summary>
+/// <see cref="BoardId"/> picks the board whose left-most lane takes the card when
+/// <see cref="ColumnId"/> is omitted; null means the project's default (first) board.
+/// </summary>
 public sealed record NewBoardCard(
     string? ColumnId,
     string Title,
@@ -143,7 +164,8 @@ public sealed record NewBoardCard(
     bool Blocked,
     BaseLlmOptions? BaseLlmOptions = null,
     BoardAuthor? Author = null,
-    string Type = BoardCardTypes.Default);
+    string Type = BoardCardTypes.Default,
+    string? BoardId = null);
 
 /// <summary>Partial update. Null = leave untouched. <see cref="ClearAssignee"/> / <see cref="ClearPoints"/> express "set to null".</summary>
 public sealed record BoardCardPatch(

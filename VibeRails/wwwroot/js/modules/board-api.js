@@ -19,8 +19,12 @@
 //   attachment { id, name, url (data: URL), mimeType, bytes, createdAt }
 //   commit     { sha, shortSha, author, message, committedAt, linkedAt }
 //
+//   board      { id, name, position, createdAt, cardCount, columns[] }
+//
 // `assignee` is an LLM picker key ('base:claude' / 'env:7:codex'), never a person.
-// The board is per project: the server scopes every call to the open workspace.
+// Boards are per project: the server scopes every call to the open workspace, and a project can
+// hold several boards (sprints, sub-projects). Lane and card lists take the board id; omitted,
+// the server answers for the project's first board. Card keys are unique across the project.
 
 const BASE = '/api/v1/board';
 
@@ -37,14 +41,36 @@ function call(path, method = 'GET', body = null, extra = {}) {
 }
 
 const enc = value => encodeURIComponent(String(value));
+const withBoard = (path, boardId) => boardId ? `${path}?boardId=${enc(boardId)}` : path;
+
+// ---------------------------------------------- boards
+
+async function getBoardsAsync() {
+    const response = await call('/boards');
+    return (response?.boards || []).sort((a, b) => a.position - b.position);
+}
+
+async function createBoardAsync(payload) {
+    return call('/boards', 'POST', payload);
+}
+
+async function updateBoardAsync(boardId, patch) {
+    return call(`/boards/${enc(boardId)}`, 'PUT', patch);
+}
+
+/** Deletes the board with its lanes and cards; the server refuses the project's last board. */
+async function deleteBoardAsync(boardId) {
+    return call(`/boards/${enc(boardId)}`, 'DELETE');
+}
 
 // ---------------------------------------------- columns
 
-async function getBoardColumnsAsync() {
-    const response = await call('/columns');
+async function getBoardColumnsAsync(boardId = null) {
+    const response = await call(withBoard('/columns', boardId));
     return (response?.columns || []).sort((a, b) => a.position - b.position);
 }
 
+/** payload.boardId picks the board; omitted, the lane lands on the project's first board. */
 async function createBoardColumnAsync(payload) {
     return call('/columns', 'POST', payload);
 }
@@ -57,15 +83,15 @@ async function deleteBoardColumnAsync(columnId) {
     return call(`/columns/${enc(columnId)}`, 'DELETE');
 }
 
-async function reorderBoardColumnsAsync(orderedIds) {
-    const response = await call('/columns/order', 'PUT', { orderedIds });
+async function reorderBoardColumnsAsync(orderedIds, boardId = null) {
+    const response = await call('/columns/order', 'PUT', { orderedIds, boardId: boardId || null });
     return (response?.columns || []).sort((a, b) => a.position - b.position);
 }
 
 // ---------------------------------------------- cards
 
-async function getBoardCardsAsync() {
-    const response = await call('/cards');
+async function getBoardCardsAsync(boardId = null) {
+    const response = await call(withBoard('/cards', boardId));
     return (response?.cards || []).sort((a, b) => a.position - b.position || a.key.localeCompare(b.key));
 }
 
@@ -192,6 +218,10 @@ async function removeCardSessionAsync(cardId, sessionId) {
 
 export const BoardApi = {
     attach,
+    getBoardsAsync,
+    createBoardAsync,
+    updateBoardAsync,
+    deleteBoardAsync,
     getBoardColumnsAsync,
     createBoardColumnAsync,
     updateBoardColumnAsync,

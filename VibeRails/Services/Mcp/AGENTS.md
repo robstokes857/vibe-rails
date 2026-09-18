@@ -57,12 +57,13 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 | `resume_token_saver` | `TokenSaverTool.ResumeTokenSaver` | Restores token compression immediately, ending an active pause early. |
 | `get_token_saver_status` | `TokenSaverTool.GetTokenSaverStatus` | Reports whether compression is active and whether a pause window is open. |
 | `python_script_signing_help` | `PythonScriptTool.PythonScriptSigningHelp` | Explains signing and lists scripts plus explicit MCP exposure. |
-| `list_board_columns` | `BoardTool.ListBoardColumns` | Lanes of this project's kanban board with WIP limits and card counts. |
-| `list_board_cards` | `BoardTool.ListBoardCards` | Cards on the board (key, lane, type, priority, title, assignee, comment count, session open); optional lane/assignee/type filters. |
+| `list_boards` | `BoardTool.ListBoards` | The project's boards (a project can hold several: sprints, sub-projects) with ids, lanes and card counts, and which one is current for this terminal. |
+| `list_board_columns` | `BoardTool.ListBoardColumns` | Lanes of one board with WIP limits and card counts. `board` (name or id) optional: defaults to the board of the card this terminal was launched for, else the first board. |
+| `list_board_cards` | `BoardTool.ListBoardCards` | Cards on one board (key, lane, type, priority, title, assignee, comment count, session open); optional lane/assignee/type filters and the same optional `board`. Card keys are project-unique, so `get_board_card VB-n` never needs a board. |
 | `get_board_card` | `BoardTool.GetBoardCard` | One card in full: fields, the board's lane names, description, comments, linked commits, sessions (full session id, ended time/exit code, that session's last comment, its chat summary when one exists), the tail of the agent notes, attachment ids/names/types/sizes. `card` omitted = the card this terminal was launched for. `since` (ISO-8601) lists only activity at or after that time and counts the rest. Reading never links the session to the card. |
 | `get_board_card_history` | `BoardTool.GetBoardCardHistory` | Read-only description history: every revision with author, date, source, a 300-char preview and the launch/read/updated session events; `revision=N` returns that revision's full text. |
 | `read_board_attachment` | `BoardTool.ReadBoardAttachment` | Bounded UTF-8 Markdown/TXT attachment content; accepts attachment id, optional card, character offset and maximum length (40,000 default; 250,000 limit). Card/project scoped, including retained history files. |
-| `create_board_card` | `BoardTool.CreateBoardCard` | New card (title, description, lane, type, priority, tags). |
+| `create_board_card` | `BoardTool.CreateBoardCard` | New card (title, description, lane, type, priority, tags); optional `board` as above. |
 | `update_board_card` | `BoardTool.UpdateBoardCard` | Partial field update (title, description, type, priority, points, tags, blocked). `descriptionAppend` adds to the end of the description as a new revision in the **same** store write as the other fields (`UpdateBoardCardRequest.DescriptionAppend`, validated with everything else, so a rejected priority leaves no appended text behind; optimistic on the current revision with one retry on conflict); it cannot be combined with `description`. |
 | `move_board_card` | `BoardTool.MoveBoardCard` | Move a card to a lane (by name or id), optionally at a position. |
 | `add_board_comment` | `BoardTool.AddBoardComment` | Append a comment, attributed to the launching session (or "Agent"). Returns the comment id. |
@@ -146,10 +147,11 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
   description edits are attributed to the current session and never interrupt the TUI.
 - **Board launch authorization (2026-09-14)**: Start work sets the typed, false-by-default
   `AuthorizeBoardTools` marker for that session and explicitly authorizes the Board workflow in
-  the prompt for every provider. `Terminal/Commands/BoardMcpAuthorization.cs` grants only the
-  thirteen Board tools listed above; adding another MCP tool never automatically authorizes it. Supported
-  CLIs receive exact per-tool launch arguments or environment entries; Antigravity receives only
-  the prompt because no narrow native grant was verified. See
+  the prompt for every provider. `Terminal/Commands/BoardMcpAuthorization.cs` grants every tool
+  of the `viberails-mcp` server for that session (VB-11, 2026-09-18): the compile-time list above
+  (`ToolNames`, which a test keeps in step) plus a server-wide rule where the CLI has one, so
+  user-exposed Python script tools are covered too. Nothing outside this one server is granted.
+  Antigravity receives only the prompt because its only native switch is a global bypass. See
   [Terminal launch authorization](../Terminal/AGENTS.md#board-launch-options-and-input-sequences-2026-09-14).
   This is the requested Board-specific exception to the Environments editor's YOLO-only policy,
   not a granular permission editor or a global policy change. No physical CLI config is rewritten;

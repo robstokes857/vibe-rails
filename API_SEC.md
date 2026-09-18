@@ -23,6 +23,10 @@ added: description history and attachment content downloads. A third, explicit a
 was added and then **removed** on 2026-09-15 — see the Kanban board section for why. The inventory
 is **205 mapped surfaces**, **193 under `/api/v1`**, including **25 board routes**. Both surviving
 additions require both credentials and server-derived project scope.
+Multi-board amendment (2026-09-18, VB-11): four board-management routes (`/api/v1/board/boards`
+list/create, rename, delete) bring the inventory to **209 mapped surfaces**, **197 under
+`/api/v1`**, **29 board routes**. Same middleware, same server-derived project scope; a board id
+in a query string or body is resolved inside that project only.
 The combined board/terminal/CLI-authorization/authentication regression suite passed **437 tests**. Route
 enumeration and both mandatory listener searches were repeated: only the existing main
 Kestrel listener, non-serving port probe, and test-only hosts matched; the cross-runtime
@@ -623,13 +627,21 @@ transcript text out of messages and exception text; do not rely on the Logs view
 hidden. `Tests/Routes/InternalToolsRoutesTests.cs` pins the two-credential requirement, the
 whitelist rejection of path-like sources, and the absence of mutating verbs.
 
-### Kanban board (25; active root backend only)
+### Kanban board (29; active root backend only)
 
 All mapped by `BoardRoutes.Map` under `if (isActiveRootBackend)`; every path contains `/api/`,
 so both credentials are enforced by the middleware with no route-level registration. The
 project is always `ParserConfigs.GetRootPath()` — never a value from the request — so a caller
 cannot read or write another project's board through this surface.
 
+- `GET /api/v1/board/boards`, `POST /api/v1/board/boards`, `PUT /api/v1/board/boards/{boardId}`,
+  `DELETE /api/v1/board/boards/{boardId}` — boards (2026-09-18). A project holds one or more
+  boards (sprints, sub-projects); every lane belongs to one and a card belongs to a board through
+  its lane. Card keys stay per project. Deleting a board deletes its lanes and cards; the last
+  board is refused (409). `GET …/columns` and `GET …/cards` take `?boardId=`, and the create-lane,
+  reorder and create-card bodies take `boardId`; omitted, the project's first board is meant, so
+  every pre-board client reads exactly what it did before. A board id is looked up within the
+  current project only — an id from another project is a 400, never a cross-project read.
 - `GET /api/v1/board/columns`, `POST /api/v1/board/columns`, `PUT /api/v1/board/columns/order`,
   `PUT /api/v1/board/columns/{columnId}`, `DELETE /api/v1/board/columns/{columnId}` — lanes.
 - `GET /api/v1/board/cards`, `POST /api/v1/board/cards`, `GET /api/v1/board/cards/{card}`,

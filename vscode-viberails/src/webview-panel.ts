@@ -143,7 +143,9 @@ export class WebviewPanelManager {
             // which in turn pulls woff2 files from fonts.gstatic.com. Removing either entry
             // breaks the dashboard's body font. Self-hosting Lato would let both go away.
             `style-src ${webview.cspSource} 'unsafe-inline' https://fonts.googleapis.com`,
-            `img-src ${webview.cspSource} https: data:`,
+            // blob: joins data: so an object URL painted by the page (attachment previews, canvases)
+            // is not silently blocked the way the board's image viewer once was.
+            `img-src ${webview.cspSource} https: data: blob:`,
             `font-src ${webview.cspSource} https://fonts.gstatic.com`,
             `connect-src ${loopbackHttpOrigin} ${loopbackWsOrigin} http://localhost:${port} ws://localhost:${port} ${webview.cspSource}`,
             `form-action 'none'`,

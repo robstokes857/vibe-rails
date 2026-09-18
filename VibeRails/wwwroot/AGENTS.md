@@ -59,7 +59,12 @@ fill the viewport height and the board scrolls sideways while the page itself do
 cannot all fit.
 
 The page heading is **Vibe Board**, using the same centered, uppercase gradient heading as
-Application Settings. New card lives in the board toolbar.
+Application Settings. New card lives in the board toolbar. Top-left of the heading sits the
+**board picker** (a project can hold several boards — sprints, sub-projects): a select, a `+`
+that creates one (default lanes; the new board opens at once), and a settings button for
+rename/delete. The selection persists in `localStorage` (`viberails.board.selected.v1`), every
+list call carries the board id, and the card editor's Lane field groups every board's lanes so a
+card moves between boards by saving it into another board's lane. Card keys stay per project.
 
 **The board is per project and server-backed.** `board-api.js` is a thin client over
 `/api/v1/board/*` (`VibeRails/Routes/BoardRoutes.cs`, root backend only); the server scopes every

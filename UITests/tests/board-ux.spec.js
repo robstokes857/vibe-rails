@@ -57,7 +57,9 @@ async function openBoard(page, { active = false, assignee = null } = {}) {
                 { key: 'base:codex', kind: 'base', group: 'Base CLIs', label: 'Codex', cli: 'codex', enabled: true, order: 0 },
                 { key: 'base:claude', kind: 'base', group: 'Base CLIs', label: 'Claude', cli: 'claude', enabled: true, order: 1 }
             ] },
-            '/api/v1/board/columns': { columns: [{ id: 'col_ready', name: 'Ready', position: 0, color: '#3b82f6' }] },
+            '/api/v1/board/boards': { boards: [{ id: 'brd_main', name: 'Main', position: 0, cardCount: 1,
+                columns: [{ id: 'col_ready', name: 'Ready', position: 0, color: '#3b82f6', boardId: 'brd_main' }] }] },
+            '/api/v1/board/columns': { columns: [{ id: 'col_ready', name: 'Ready', position: 0, color: '#3b82f6', boardId: 'brd_main' }] },
             '/api/v1/board/cards': { cards: [card] }
         };
         return route.fulfill({ json: payloads[path] || {} });

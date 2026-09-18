@@ -6,8 +6,11 @@
 // reorder, filter the whole board down to a slice, and open a card for the full
 // editor with comments.
 //
-// Data comes from board-api.js, a thin client over /api/v1/board/* (the board is
-// per project; the server scopes every call). Cards are work items for LLMs: the
+// Data comes from board-api.js, a thin client over /api/v1/board/* (boards are
+// per project; the server scopes every call). A project can hold several boards
+// (sprints, sub-projects): the picker top-left switches between them, and the
+// card editor's Lane field lists every board's lanes so a card can move across.
+// Card keys (VB-n) are unique across the project. Cards are work items for LLMs: the
 // assignee is an LLM picker key (base:claude / env:7:codex), "Start work" opens a
 // terminal tab with the card prepended to that LLM's initial message, and the
 // LLM reads/updates the card over the viberails-mcp board tools. A card's
@@ -44,6 +47,10 @@ const CARD_TYPES = [
 const POINTS = [1, 2, 3, 5, 8, 13];
 const LANE_COLORS = ['#64748b', '#3b82f6', '#06b6d4', '#f59e0b', '#10b981', '#a855f7', '#ec4899'];
 const FILTERS_STORAGE_KEY = 'viberails.board.filters.v1';
+// The last board the user looked at. Board ids are unique across projects, so a stale id from
+// another workspace simply fails to match and the first board is shown.
+const BOARD_STORAGE_KEY = 'viberails.board.selected.v1';
+const RASTER_DATA_URL_RE = /^data:image\/(?:png|jpeg|gif|webp);base64,/i;
 
 const emptyFilters = () => ({ q: '', assignee: '', type: '', priority: '', tag: '' });
 // Task-key namespace for the terminal tab that works a card (see wwwroot/AGENTS.md).
@@ -75,6 +82,8 @@ export class BoardController {
         this._openCardAbort = null;
         BoardApi.attach(app);
         this.state = {
+            boards: [],
+            boardId: null,
             columns: [],
             cards: [],
             filters: emptyFilters(),
@@ -102,12 +111,17 @@ export class BoardController {
         this.bindShell();
 
         this.setBusy(true);
+        let boards;
         let columns;
         let cards;
         try {
+            boards = await BoardApi.getBoardsAsync();
+            if (this.app.currentView !== 'board' || !this.root?.isConnected) return;
+            this.state.boards = boards;
+            this.state.boardId = this.pickBoardId(boards);
             [columns, cards] = await Promise.all([
-                BoardApi.getBoardColumnsAsync(),
-                BoardApi.getBoardCardsAsync()
+                BoardApi.getBoardColumnsAsync(this.state.boardId),
+                BoardApi.getBoardCardsAsync(this.state.boardId)
             ]);
         } catch (error) {
             // The view stayed mounted, so the failure belongs on screen, not in the console only.
@@ -170,6 +184,50 @@ export class BoardController {
         } catch {
             // Storage blocked: filters simply do not survive a reload.
         }
+    }
+
+    // ============================================
+    // Board selection
+    // ============================================
+
+    readStoredBoardId() {
+        try {
+            return localStorage.getItem(BOARD_STORAGE_KEY) || null;
+        } catch {
+            return null;
+        }
+    }
+
+    persistBoardSelection() {
+        try {
+            if (this.state.boardId) localStorage.setItem(BOARD_STORAGE_KEY, this.state.boardId);
+        } catch {
+            // Storage blocked: the first board opens next time.
+        }
+    }
+
+    // The remembered board when it still exists, else the project's first board.
+    pickBoardId(boards) {
+        const stored = this.readStoredBoardId();
+        const sorted = boards.slice().sort((a, b) => a.position - b.position);
+        return (stored && sorted.find(board => board.id === stored)?.id) || sorted[0]?.id || null;
+    }
+
+    boardById(id) {
+        return this.state.boards.find(board => board.id === id) || null;
+    }
+
+    currentBoard() {
+        return this.boardById(this.state.boardId);
+    }
+
+    async switchBoard(boardId) {
+        if (!boardId || boardId === this.state.boardId) return;
+        this.state.boardId = boardId;
+        this.persistBoardSelection();
+        this.setBusy(true);
+        await this.refresh();
+        this.setBusy(false);
     }
 
     // ============================================
@@ -321,6 +379,9 @@ export class BoardController {
         bindSelect('[data-board-filter-type]', 'type');
         bindSelect('[data-board-filter-priority]', 'priority');
         bindSelect('[data-board-filter-tag]', 'tag');
+
+        const picker = this.query('[data-board-select]');
+        picker?.addEventListener('change', () => this.switchBoard(picker.value));
     }
 
     // ============================================
@@ -328,8 +389,25 @@ export class BoardController {
     // ============================================
 
     renderAll() {
+        this.renderBoardPicker();
         this.renderToolbar();
         this.renderLanes();
+    }
+
+    // The select top-left: one option per board, the current one selected. Card counts come from
+    // the boards list, which every refresh re-reads.
+    renderBoardPicker() {
+        const select = this.query('[data-board-select]');
+        if (!select) return;
+        select.innerHTML = this.state.boards
+            .slice()
+            .sort((a, b) => a.position - b.position)
+            .map(board => `<option value="${escapeHtml(board.id)}">${escapeHtml(board.name)}${board.cardCount ? ` (${Number(board.cardCount)})` : ''}</option>`)
+            .join('');
+        select.value = this.state.boardId || '';
+        select.title = select.selectedOptions[0]?.textContent || 'Switch board';
+        const settings = this.query('[data-board-action="edit-board"]');
+        if (settings) settings.title = `Settings for ${this.currentBoard()?.name || 'this board'}`;
     }
 
     renderToolbar() {
@@ -424,8 +502,9 @@ export class BoardController {
                 >${this.avatarHtml(member, 18, { filterable: false })}<span class="board-assignee-name">${escapeHtml(member.label)}</span></span>`
             : `<span class="board-assignee-chip is-empty" title="Unassigned">${this.avatarHtml(null, 18)}<span class="board-assignee-name">Unassigned</span></span>`;
 
+        // is-live paints the marching "an agent is on this" border (see the template CSS).
         return `
-            <article class="board-card${card.blocked ? ' is-blocked' : ''}" data-card-id="${escapeHtml(card.id)}"
+            <article class="board-card${card.blocked ? ' is-blocked' : ''}${card.activeTabId ? ' is-live' : ''}" data-card-id="${escapeHtml(card.id)}"
                 tabindex="0" role="button" aria-label="${escapeHtml(card.key)}: ${escapeHtml(card.title)}">
                 <span class="board-card-rail" data-priority="${escapeHtml(card.priority)}"
                     title="${escapeHtml(card.priority)} priority"></span>
@@ -607,7 +686,7 @@ export class BoardController {
     async onLanesReordered() {
         const orderedIds = this.queryAll('.board-lane').map(lane => lane.dataset.columnId);
         try {
-            await BoardApi.reorderBoardColumnsAsync(orderedIds);
+            await BoardApi.reorderBoardColumnsAsync(orderedIds, this.state.boardId);
         } catch (error) {
             this.app.showToast('Board', error?.message || 'Failed to reorder lanes.', 'error');
         }
@@ -616,9 +695,14 @@ export class BoardController {
 
     async refresh() {
         try {
+            const boards = await BoardApi.getBoardsAsync();
+            if (this.app.currentView !== 'board' || !this.root?.isConnected) return;
+            this.state.boards = boards;
+            // The selected board may have been deleted (here or from another tab).
+            if (!boards.some(board => board.id === this.state.boardId)) this.state.boardId = this.pickBoardId(boards);
             const [columns, cards] = await Promise.all([
-                BoardApi.getBoardColumnsAsync(),
-                BoardApi.getBoardCardsAsync()
+                BoardApi.getBoardColumnsAsync(this.state.boardId),
+                BoardApi.getBoardCardsAsync(this.state.boardId)
             ]);
             if (this.app.currentView !== 'board' || !this.root?.isConnected) return;
             this.state.columns = columns;
@@ -672,6 +756,12 @@ export class BoardController {
                 break;
             case 'edit-lane':
                 this.openLaneEditor(trigger.dataset.columnId);
+                break;
+            case 'new-board':
+                this.openBoardEditor(null);
+                break;
+            case 'edit-board':
+                this.openBoardEditor(this.state.boardId);
                 break;
             case 'clear-filters':
                 this.state.filters = emptyFilters();
@@ -789,9 +879,7 @@ export class BoardController {
                         <div>
                             <label class="board-editor-label" for="board-card-lane">Lane</label>
                             <select class="form-select form-select-sm" id="board-card-lane">
-                                ${this.state.columns.map(column => `
-                                    <option value="${escapeHtml(column.id)}"${column.id === columnId ? ' selected' : ''}>${escapeHtml(column.name)}</option>
-                                `).join('')}
+                                ${this.laneOptionsHtml(columnId)}
                             </select>
                         </div>
                         <div>
@@ -916,6 +1004,20 @@ export class BoardController {
         this.bindCardEditor(editor, card);
     }
 
+    // One <option> per lane. With several boards the lanes are grouped by board, so saving a
+    // card into another board's lane is how a card moves between sprints.
+    laneOptionsHtml(selectedId) {
+        const option = column => `<option value="${escapeHtml(column.id)}"${column.id === selectedId ? ' selected' : ''}>${escapeHtml(column.name)}</option>`;
+        const boards = this.state.boards
+            .filter(board => (board.columns || []).length > 0)
+            .sort((a, b) => a.position - b.position);
+        if (boards.length <= 1) {
+            return this.state.columns.slice().sort((a, b) => a.position - b.position).map(option).join('');
+        }
+        return boards.map(board => `<optgroup label="${escapeHtml(board.name)}">${board.columns
+            .slice().sort((a, b) => a.position - b.position).map(option).join('')}</optgroup>`).join('');
+    }
+
     // The card id lives on the editor (data-card-id), not on controller state.
     // showModal replacement runs the previous editor's onClose, which used to
     // clear a shared editingCardId and turn the next Save into a create.
@@ -1023,7 +1125,7 @@ export class BoardController {
                 </div>
                 <textarea class="form-control board-composer-input" data-board-composer-input
                     placeholder="${escapeHtml(placeholder)}" rows="3"${off}>${escapeHtml(value)}</textarea>
-                ${preview ? '<div class="board-comment-body board-description-preview" data-board-composer-preview hidden></div>' : ''}
+                ${preview ? '<div class="board-comment-body board-description-preview" data-board-composer-preview title="Click to edit" hidden></div>' : ''}
                 <input type="file" hidden data-board-composer-file multiple>
                 <div class="board-composer-busy" data-board-composer-busy hidden>Adding files…</div>
                 ${submitLabel ? `<div class="board-composer-footer">
@@ -1069,6 +1171,15 @@ export class BoardController {
         toggle?.addEventListener('click', () => {
             setPreview(preview.hidden);
             if (preview.hidden) input.focus();
+        });
+        // Clicking into the rendered description opens it for editing (the Edit button stays as
+        // the discoverable way). Links and images keep their own click behaviour.
+        preview?.addEventListener('click', event => {
+            if (event.target.closest('a, img, button')) return;
+            setPreview(false);
+            input.focus();
+            const end = input.value.length;
+            try { input.setSelectionRange(end, end); } catch { /* not a text control */ }
         });
         input.addEventListener('input', autoGrow);
         // Sized now rather than on the next frame: an occluded page never gets one,
@@ -1208,10 +1319,15 @@ export class BoardController {
         const attachments = card?.attachments || [];
         const pending = card?.pendingAttachments || [];
         this.updateSectionCount(editor, 'attachments', attachments.length + pending.length);
+        // Small rasters come with a data: URL (the same one inline images use), so the row can
+        // show the picture itself; everything else gets the file icon.
+        const lead = attachment => RASTER_DATA_URL_RE.test(String(attachment.url || ''))
+            ? `<img class="board-attachment-thumb" src="${escapeHtml(attachment.url)}" alt="" loading="lazy">`
+            : '<i class="fa-solid fa-file" aria-hidden="true"></i>';
         host.innerHTML = attachments.map(attachment => `
             <div class="board-attachment-row">
                 <button type="button" class="board-side-main" data-board-view-attachment="${escapeHtml(attachment.id)}">
-                    <i class="fa-solid fa-file" aria-hidden="true"></i>
+                    ${lead(attachment)}
                     <span class="board-side-copy"><span class="board-side-title">${escapeHtml(attachment.name)}</span>
                     <span class="board-side-sub">${formatFileSize(attachment.bytes)} · ${getAttachmentPreviewKind(attachment) === 'download' ? 'Download' : 'Preview'}</span></span>
                 </button>
@@ -1844,6 +1960,93 @@ export class BoardController {
     }
 
     // ============================================
+    // Board editor (new / rename / delete)
+    // ============================================
+
+    openBoardEditor(boardId) {
+        const board = boardId ? this.boardById(boardId) : null;
+        this.app.showModal(board ? `Board · ${board.name}` : 'New board', `
+            <div class="board-lane-editor" data-board-board-editor>
+                <label class="board-editor-label" for="board-board-name">Name</label>
+                <input type="text" class="form-control form-control-sm mb-3" id="board-board-name" maxlength="60"
+                    placeholder="Sprint 12, Website, Q4 bugs…" value="${escapeHtml(board?.name || '')}">
+                <p class="board-editor-muted mb-3">${board
+                    ? 'Cards keep their keys when they move between boards.'
+                    : 'A new board starts with the default lanes. Card keys stay unique across the whole project.'}</p>
+                <div class="board-editor-actions mt-4">
+                    ${board ? `<button type="button" class="btn btn-sm btn-outline-danger" data-board-delete-board>
+                        <i class="fa-solid fa-trash" aria-hidden="true"></i> Delete board
+                    </button>` : '<span></span>'}
+                    <button type="button" class="btn btn-sm btn-outline-primary" data-board-save-board>${board ? 'Save' : 'Create'}</button>
+                </div>
+            </div>
+        `);
+
+        const container = document.getElementById('modal-container');
+        const editor = container?.querySelector('[data-board-board-editor]');
+        if (!editor) return;
+        editor.querySelector('[data-board-save-board]')?.addEventListener('click', () => this.saveBoard(editor, board));
+        editor.querySelector('[data-board-delete-board]')?.addEventListener('click', () => this.deleteBoard(board));
+        editor.addEventListener('keydown', event => {
+            if (event.key !== 'Enter' || event.target.id !== 'board-board-name') return;
+            event.preventDefault();
+            this.saveBoard(editor, board);
+        });
+        editor.querySelector('#board-board-name')?.focus();
+    }
+
+    async saveBoard(editor, board) {
+        const name = editor.querySelector('#board-board-name')?.value.trim();
+        if (!name) {
+            this.app.showToast('Board', 'A board needs a name.', 'warning');
+            editor.querySelector('#board-board-name')?.focus();
+            return;
+        }
+        try {
+            if (board) {
+                await BoardApi.updateBoardAsync(board.id, { name });
+                this.app.showToast('Board', 'Board renamed.', 'success');
+            } else {
+                const created = await BoardApi.createBoardAsync({ name });
+                // Open the new board straight away: that is what "add" was for.
+                this.state.boardId = created.id;
+                this.persistBoardSelection();
+                this.app.showToast('Board', `Created board ${created.name}.`, 'success');
+            }
+            this.app.closeModal();
+            await this.refresh();
+        } catch (error) {
+            this.app.showToast('Board', error?.message || 'Failed to save the board.', 'error');
+        }
+    }
+
+    async deleteBoard(board) {
+        if (!board) return;
+        if (this.state.boards.length <= 1) {
+            this.app.showToast('Board', 'The project needs at least one board.', 'warning');
+            return;
+        }
+        const count = Number(board.cardCount) || 0;
+        const confirmed = await confirmDialog({
+            title: 'Delete board',
+            message: `Delete the ${board.name} board?${count ? ` Its ${count} ${count === 1 ? 'card goes' : 'cards go'} with it.` : ''} This cannot be undone.`,
+            confirmLabel: 'Delete',
+            danger: true
+        });
+        if (!confirmed) return;
+
+        try {
+            await BoardApi.deleteBoardAsync(board.id);
+            if (this.state.boardId === board.id) this.state.boardId = null;
+            this.app.closeModal();
+            this.app.showToast('Board', 'Board deleted.', 'success');
+            await this.refresh();
+        } catch (error) {
+            this.app.showToast('Board', error?.message || 'Failed to delete the board.', 'error');
+        }
+    }
+
+    // ============================================
     // Lane editor
     // ============================================
 
@@ -1917,7 +2120,7 @@ export class BoardController {
                 await BoardApi.updateBoardColumnAsync(this.state.editingColumnId, { name, wipLimit, color });
                 this.app.showToast('Board', 'Lane saved.', 'success');
             } else {
-                await BoardApi.createBoardColumnAsync({ name, wipLimit, color });
+                await BoardApi.createBoardColumnAsync({ name, wipLimit, color, boardId: this.state.boardId });
                 this.app.showToast('Board', 'Lane added.', 'success');
             }
             this.app.closeModal();

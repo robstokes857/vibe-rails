@@ -3178,6 +3178,43 @@
                     pointer-events: none;
                 }
 
+                /* Header: board picker left, title centred ---------------- */
+                .board-view .board-head {
+                    display: grid;
+                    grid-template-columns: 1fr auto 1fr;
+                    align-items: center;
+                    gap: 0.75rem;
+                    margin-bottom: 0.15rem;
+                }
+
+                .board-view .board-head-title {
+                    grid-column: 2;
+                    text-align: center;
+                    white-space: nowrap;
+                }
+
+                .board-view .board-picker {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.4rem;
+                    min-width: 0;
+                }
+
+                .board-view .board-picker-select {
+                    min-width: 150px;
+                    max-width: 260px;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                    cursor: pointer;
+                }
+
+                .board-view .board-picker-add {
+                    min-height: 34px;
+                    padding-inline: 0.6rem;
+                    white-space: nowrap;
+                }
+
                 /* Toolbar ------------------------------------------------ */
                 .board-view .board-toolbar {
                     display: flex;
@@ -3515,6 +3552,37 @@
                             color-mix(in srgb, var(--color-warning, #f59e0b) 9%, transparent) 16px);
                 }
 
+                /* An agent is working this card: the border marches like a print queue. Two
+                   background layers — the card's own surface on the padding box, a repeating
+                   diagonal gradient on the border box showing through a transparent 2px border.
+                   A 28px tile is one dash+gap (20px) along a -45° axis, so the loop is seamless. */
+                .board-view .board-card.is-live {
+                    border: 2px solid transparent;
+                    background:
+                        linear-gradient(var(--color-bg-elevated, #232323), var(--color-bg-elevated, #232323)) padding-box,
+                        repeating-linear-gradient(-45deg, #06b6d4 0 10px, var(--color-bg-surface, #1e1e1e) 10px 20px) border-box;
+                    background-size: auto, 28px 28px;
+                    animation: board-march 1s linear infinite;
+                }
+
+                .board-view .board-card.is-live:hover,
+                .board-view .board-card.is-live:focus-visible {
+                    border-color: transparent;
+                    background:
+                        linear-gradient(var(--color-bg-surface-hover, #2c2c2c), var(--color-bg-surface-hover, #2c2c2c)) padding-box,
+                        repeating-linear-gradient(-45deg, #06b6d4 0 10px, var(--color-bg-surface, #1e1e1e) 10px 20px) border-box;
+                    background-size: auto, 28px 28px;
+                }
+
+                @keyframes board-march {
+                    from { background-position: 0 0, 0 0; }
+                    to { background-position: 0 0, 28px 0; }
+                }
+
+                @media (prefers-reduced-motion: reduce) {
+                    .board-view .board-card.is-live { animation: none; }
+                }
+
                 .board-view .board-card-rail {
                     background: var(--color-primary, #3b82f6);
                 }
@@ -3744,8 +3812,8 @@
                 .board-live-dot {
                     display: inline-block;
                     flex: none;
-                    width: 8px;
-                    height: 8px;
+                    width: 12px;
+                    height: 12px;
                     margin-right: 0.3rem;
                     border-radius: 50%;
                     background: #22c55e;
@@ -3759,7 +3827,7 @@
 
                 @keyframes board-live-pulse {
                     0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.55); }
-                    70% { box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }
+                    70% { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0); }
                     100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
                 }
 
@@ -3877,6 +3945,15 @@
                     padding: 0.4rem 0;
                 }
                 .board-attachment-row > .board-side-copy { flex: 1; min-width: 0; }
+                .board-attachment-thumb {
+                    flex: none;
+                    width: 34px;
+                    height: 34px;
+                    border: 1px solid var(--color-border, #334155);
+                    border-radius: 4px;
+                    object-fit: cover;
+                    background: var(--color-bg-base, #121212);
+                }
                 .board-history-revision {
                     margin: 0.6rem 0;
                     font-size: 0.75rem;
@@ -4251,9 +4328,15 @@
                     display: none !important;
                 }
 
+                /* Click anywhere in the rendered description to edit it. */
                 .board-description-preview {
                     min-width: 0;
                     padding: 0.55rem 0.65rem;
+                    cursor: text;
+                }
+
+                .board-description-preview:hover {
+                    background: color-mix(in srgb, var(--color-primary, #3b82f6) 5%, transparent);
                 }
 
                 .board-composer-busy {
@@ -4617,13 +4700,36 @@
                         margin-left: 0;
                         padding-left: 0;
                     }
+
+                    .board-view .board-head {
+                        grid-template-columns: 1fr;
+                    }
+
+                    .board-view .board-head-title {
+                        grid-column: 1;
+                        text-align: left;
+                    }
+
+                    .board-view .board-head-side {
+                        display: none;
+                    }
                 }
             </style>
 
-            <header class="row justify-content-center text-center">
-                <div class="col-md-8 col-lg-6 mb-3">
-                    <h4 class="text-uppercase fw-bold mb-0" style="letter-spacing: 0.05em;"><span class="text-gradient">Vibe Board</span></h4>
+            <header class="board-head">
+                <!-- Which board: a project can hold several (sprints, sub-projects). -->
+                <div class="board-picker" data-board-picker>
+                    <select class="board-control board-picker-select" data-board-select aria-label="Board" title="Switch board"></select>
+                    <button type="button" class="btn btn-sm btn-outline-primary board-picker-add" data-board-action="new-board"
+                        title="New board" aria-label="New board">
+                        <i class="fa-solid fa-plus" aria-hidden="true"></i>
+                    </button>
+                    <button type="button" class="board-icon-btn" data-board-action="edit-board" title="Board settings" aria-label="Board settings">
+                        <i class="fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>
+                    </button>
                 </div>
+                <h4 class="text-uppercase fw-bold mb-0 board-head-title" style="letter-spacing: 0.05em;"><span class="text-gradient">Vibe Board</span></h4>
+                <div class="board-head-side" aria-hidden="true"></div>
             </header>
 
             <div class="board-toolbar">

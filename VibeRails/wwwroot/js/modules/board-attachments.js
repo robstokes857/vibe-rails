@@ -37,6 +37,22 @@ export function disposeBoardAttachmentPreview() {
     activePreview = null;
 }
 
+/**
+ * Image previews paint from a data: URL rather than a blob: object URL. The VS Code webview's
+ * CSP allows `img-src data:` but not `blob:`, so a blob: src there fails to load and the viewer
+ * fell through to "cannot be previewed" — the only way to see a card's screenshot was to download
+ * it (VB-11). A data: URL renders under both the extension CSP and Kestrel's.
+ */
+export function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error('The image could not be read.'));
+        reader.onabort = () => reject(new Error('Reading the image was cancelled.'));
+        reader.readAsDataURL(blob);
+    });
+}
+
 /** Opens an independent nested layer, keeping the card editor and unsaved edits alive. */
 export async function openBoardAttachment(app, cardId, attachment) {
     disposeBoardAttachmentPreview();
@@ -135,10 +151,14 @@ export async function openBoardAttachment(app, cardId, attachment) {
         const kind = getAttachmentPreviewKind(attachment);
         body.replaceChildren();
         if (kind === 'image') {
+            // kind === 'image' means the server-detected MIME type is one of the four raster
+            // types, so the data: URL below can only ever be a raster image (never SVG/HTML).
+            const src = await blobToDataUrl(new Blob([blob], { type: attachment.mimeType }));
+            if (disposed) return close;
             const img = document.createElement('img');
             img.className = 'vb-board-attachment-image';
             img.alt = attachment.name || 'Attached image';
-            img.src = objectUrl(new Blob([blob], { type: attachment.mimeType }));
+            img.src = src;
             img.onerror = () => { body.textContent = 'This image cannot be previewed. You can still download the original file.'; };
             body.append(img);
         } else if (kind === 'text') {

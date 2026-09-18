@@ -140,11 +140,20 @@ namespace VibeRails.DTOs
     // ---------------------------------------------------------------- Kanban board (Services/Board)
     // Wire names are what wwwroot/js/modules/board-api.js already consumes. Points and WipLimit are
     // JsonElement so a PUT can say "leave alone" (omitted), "clear" (null / ""), or "set" (number).
-    public record BoardColumnResponse(string Id, string Name, int? WipLimit, int Position, string Color);
+    // A project has one or more boards (sprints, sub-projects); every lane belongs to one. Card
+    // keys stay per project. Lane and card list calls take an optional board id and default to
+    // the project's first board, so a single-board client keeps working unchanged.
+    public record BoardSummaryResponse(string Id, string Name, int Position, DateTime CreatedAt, int CardCount, List<BoardColumnResponse> Columns);
+    public record BoardListResponse(List<BoardSummaryResponse> Boards);
+    public record CreateBoardRequest(string? Name = null);
+    public record UpdateBoardRequest(string? Name = null);
+    public record DeleteBoardResponse(bool Ok, int DeletedColumns, int DeletedCards);
+
+    public record BoardColumnResponse(string Id, string Name, int? WipLimit, int Position, string Color, string BoardId = "");
     public record BoardColumnListResponse(List<BoardColumnResponse> Columns);
-    public record CreateBoardColumnRequest(string? Name = null, JsonElement WipLimit = default, string? Color = null);
+    public record CreateBoardColumnRequest(string? Name = null, JsonElement WipLimit = default, string? Color = null, string? BoardId = null);
     public record UpdateBoardColumnRequest(string? Name = null, JsonElement WipLimit = default, string? Color = null);
-    public record ReorderBoardColumnsRequest(List<string>? OrderedIds = null);
+    public record ReorderBoardColumnsRequest(List<string>? OrderedIds = null, string? BoardId = null);
     public record DeleteBoardColumnResponse(bool Ok, string MovedToColumnId, int MovedCards);
 
     public record BoardCommentDto(string Id, BoardAuthorDto Author, string Body, DateTime CreatedAt);
@@ -180,7 +189,8 @@ namespace VibeRails.DTOs
         DateTime UpdatedAt,
         int DescriptionRevision = 1,
         BaseLlmOptions? BaseLlmOptions = null,
-        string Type = BoardCardTypes.Default);
+        string Type = BoardCardTypes.Default,
+        string BoardId = "");
     public record BoardCardListResponse(List<BoardCardSummaryResponse> Cards);
     public record BoardCardResponse(
         string Id,
@@ -207,7 +217,8 @@ namespace VibeRails.DTOs
         BaseLlmOptions? BaseLlmOptions = null,
         bool DescriptionChanged = false,
         List<BoardCommentDto>? Notes = null,
-        string Type = BoardCardTypes.Default);
+        string Type = BoardCardTypes.Default,
+        string BoardId = "");
     public record CreateBoardCardRequest(
         string? Title = null,
         string? ColumnId = null,
@@ -218,7 +229,9 @@ namespace VibeRails.DTOs
         List<string>? Tags = null,
         bool? Blocked = null,
         BaseLlmOptions? BaseLlmOptions = null,
-        string? Type = null);
+        string? Type = null,
+        // Which board's left-most lane takes the card when ColumnId is omitted; null = the first board.
+        string? BoardId = null);
     public record UpdateBoardCardRequest(
         string? Title = null,
         string? ColumnId = null,
@@ -1703,6 +1716,12 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(SetPinRequest))]
     [JsonSerializable(typeof(PinStatusResponse))]
     // Kanban board DTOs
+    [JsonSerializable(typeof(BoardSummaryResponse))]
+    [JsonSerializable(typeof(List<BoardSummaryResponse>))]
+    [JsonSerializable(typeof(BoardListResponse))]
+    [JsonSerializable(typeof(CreateBoardRequest))]
+    [JsonSerializable(typeof(UpdateBoardRequest))]
+    [JsonSerializable(typeof(DeleteBoardResponse))]
     [JsonSerializable(typeof(BoardColumnResponse))]
     [JsonSerializable(typeof(List<BoardColumnResponse>))]
     [JsonSerializable(typeof(BoardColumnListResponse))]

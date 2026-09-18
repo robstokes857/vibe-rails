@@ -20,7 +20,7 @@ test('board-api.js is a thin client over /api/v1/board with no local placeholder
 
     // Every export the controller consumes exists and is server-backed.
     for (const name of [
-        'attach', 'getBoardColumnsAsync', 'createBoardColumnAsync', 'updateBoardColumnAsync', 'deleteBoardColumnAsync',
+        'attach', 'getBoardsAsync', 'createBoardAsync', 'updateBoardAsync', 'deleteBoardAsync', 'getBoardColumnsAsync', 'createBoardColumnAsync', 'updateBoardColumnAsync', 'deleteBoardColumnAsync',
         'reorderBoardColumnsAsync', 'getBoardCardsAsync', 'getBoardCardAsync', 'createBoardCardAsync', 'updateBoardCardAsync',
         'deleteBoardCardAsync', 'moveBoardCardAsync', 'launchBoardCardAsync', 'addBoardCommentAsync', 'addCardAttachmentAsync',
         'deleteCardAttachmentAsync', 'getCardCommitsAsync', 'addCardCommitAsync', 'removeCardCommitAsync', 'getCommitDiffAsync',
@@ -31,8 +31,9 @@ test('board-api.js is a thin client over /api/v1/board with no local placeholder
 
     // The routes the server maps (BoardRoutes.cs), by the paths the client builds.
     for (const route of [
-        "call('/columns')", "call('/columns', 'POST', payload)", "call('/columns/order', 'PUT', { orderedIds })",
-        "call('/cards')", "call('/cards', 'POST', payload)", "/move`, 'POST'", "/launch`, 'POST'",
+        "call('/boards')", "call('/boards', 'POST', payload)",
+        "call(withBoard('/columns', boardId))", "call('/columns', 'POST', payload)", "call('/columns/order', 'PUT', { orderedIds, boardId: boardId || null })",
+        "call(withBoard('/cards', boardId))", "call('/cards', 'POST', payload)", "/move`, 'POST'", "/launch`, 'POST'",
         "/comments`, 'POST', { body })", "/attachments`, 'POST'", "/commits`, 'POST', { sha })", "/diff`)",
         "/sessions`, 'POST'"
     ]) {

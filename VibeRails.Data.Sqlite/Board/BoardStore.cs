@@ -17,6 +17,11 @@ namespace VibeRails.Services.Board;
 ///
 /// Every row is scoped by <c>ProjectPath</c> (the git root the board belongs to). Callers never
 /// pass a project path they got from a request — see <see cref="IBoardProjectResolver"/>.
+///
+/// A project holds one or more <em>boards</em> (board/4): each lane belongs to exactly one board
+/// and a card belongs to a board through its lane. Card numbers stay per project, so a key names
+/// the same card on every board. An optional <c>boardId</c> of null means the project's default
+/// board (the first by position), which is what every pre-board caller was talking to.
 /// </summary>
 public sealed partial class BoardStore : IBoardStore
 {
@@ -28,6 +33,101 @@ public sealed partial class BoardStore : IBoardStore
         EnsureSchema();
     }
 
+    // ------------------------------------------------------------------ boards
+
+    /// <summary>What the one board every project starts with is called.</summary>
+    public const string DefaultBoardName = "Main";
+
+    public async Task<IReadOnlyList<BoardRecord>> GetBoardsAsync(string projectPath, CancellationToken cancellationToken = default)
+    {
+        var project = NormalizeProjectPath(projectPath);
+        await using var connection = await OpenAsync(cancellationToken);
+        return await ReadBoardsAsync(connection, null, project, cancellationToken);
+    }
+
+    public async Task<BoardRecord?> GetBoardAsync(string projectPath, string boardId, CancellationToken cancellationToken = default)
+    {
+        var project = NormalizeProjectPath(projectPath);
+        await using var connection = await OpenAsync(cancellationToken);
+        return await ReadBoardAsync(connection, null, project, boardId, cancellationToken);
+    }
+
+    public async Task<BoardRecord> CreateBoardAsync(string projectPath, string name, CancellationToken cancellationToken = default)
+    {
+        var project = NormalizeProjectPath(projectPath);
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
+        var position = (int)await ScalarLongAsync(connection, transaction,
+            $"SELECT COUNT(*) FROM Boards WHERE ProjectPath = $project{ProjectPathCollation}",
+            ("$project", project), cancellationToken);
+        var board = await InsertBoardWithDefaultLanesAsync(connection, transaction, project, name, position, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return board;
+    }
+
+    public async Task<BoardRecord?> RenameBoardAsync(string projectPath, string boardId, string name, CancellationToken cancellationToken = default)
+    {
+        var project = NormalizeProjectPath(projectPath);
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
+        var existing = await ReadBoardAsync(connection, transaction, project, boardId, cancellationToken);
+        if (existing is null)
+            return null;
+        var updated = existing with { Name = name, UpdatedUtc = DateTime.UtcNow };
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "UPDATE Boards SET Name = $name, UpdatedUTC = $updated WHERE Id = $id;";
+            command.Parameters.AddWithValue("$name", updated.Name);
+            command.Parameters.AddWithValue("$updated", ToDb(updated.UpdatedUtc));
+            command.Parameters.AddWithValue("$id", updated.Id);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await transaction.CommitAsync(cancellationToken);
+        return updated;
+    }
+
+    public async Task<BoardDeleteResult?> DeleteBoardAsync(string projectPath, string boardId, CancellationToken cancellationToken = default)
+    {
+        var project = NormalizeProjectPath(projectPath);
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
+        var boards = await ReadBoardsAsync(connection, transaction, project, cancellationToken);
+        var target = boards.FirstOrDefault(b => string.Equals(b.Id, boardId.Trim(), StringComparison.Ordinal));
+        if (target is null)
+            return null;
+        if (boards.Count <= 1)
+            throw new BoardConflictException("The project needs at least one board.");
+
+        // Cards go with their lanes; the rails cascade off BoardCards like a single delete does.
+        int cards, columns;
+        await using (var deleteCards = connection.CreateCommand())
+        {
+            deleteCards.Transaction = transaction;
+            deleteCards.CommandText = "DELETE FROM BoardCards WHERE ColumnId IN (SELECT Id FROM BoardColumns WHERE BoardId = $board);";
+            deleteCards.Parameters.AddWithValue("$board", target.Id);
+            cards = await deleteCards.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await using (var deleteColumns = connection.CreateCommand())
+        {
+            deleteColumns.Transaction = transaction;
+            deleteColumns.CommandText = "DELETE FROM BoardColumns WHERE BoardId = $board;";
+            deleteColumns.Parameters.AddWithValue("$board", target.Id);
+            columns = await deleteColumns.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await using (var deleteBoard = connection.CreateCommand())
+        {
+            deleteBoard.Transaction = transaction;
+            deleteBoard.CommandText = "DELETE FROM Boards WHERE Id = $board;";
+            deleteBoard.Parameters.AddWithValue("$board", target.Id);
+            await deleteBoard.ExecuteNonQueryAsync(cancellationToken);
+        }
+        var remaining = boards.Where(b => b.Id != target.Id).OrderBy(b => b.Position).ThenBy(b => b.CreatedUtc).Select(b => b.Id).ToList();
+        await WriteBoardPositionsAsync(connection, transaction, remaining, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return new BoardDeleteResult(target.Id, columns, cards);
+    }
+
     // ------------------------------------------------------------------ columns
 
     public async Task<bool> EnsureDefaultColumnsAsync(string projectPath, CancellationToken cancellationToken = default)
@@ -36,26 +136,57 @@ public sealed partial class BoardStore : IBoardStore
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
         var count = await ScalarLongAsync(connection, transaction,
-            $"SELECT COUNT(*) FROM BoardColumns WHERE ProjectPath = $project{ProjectPathCollation}",
+            $"SELECT COUNT(*) FROM Boards WHERE ProjectPath = $project{ProjectPathCollation}",
             ("$project", project), cancellationToken);
         if (count > 0)
             return false;
 
-        var now = DateTime.UtcNow;
-        var position = 0;
-        foreach (var (name, wip, color) in DefaultLanes)
-        {
-            await InsertColumnAsync(connection, transaction, NewId("col"), project, name, wip, position++, color, now, cancellationToken);
-        }
+        await InsertBoardWithDefaultLanesAsync(connection, transaction, project, DefaultBoardName, 0, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return true;
     }
 
-    public async Task<IReadOnlyList<BoardColumnRecord>> GetColumnsAsync(string projectPath, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<BoardColumnRecord>> GetColumnsAsync(string projectPath, CancellationToken cancellationToken = default, string? boardId = null)
     {
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
-        return await ReadColumnsAsync(connection, null, project, cancellationToken);
+        var board = await ResolveBoardIdAsync(connection, null, project, boardId, cancellationToken);
+        return board is null ? [] : await ReadColumnsAsync(connection, null, project, board, cancellationToken);
+    }
+
+    public async Task<IReadOnlyDictionary<string, int>> CountCardsByBoardAsync(string projectPath, CancellationToken cancellationToken = default)
+    {
+        var project = NormalizeProjectPath(projectPath);
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT k.BoardId, COUNT(*) FROM BoardCards c JOIN BoardColumns k ON k.Id = c.ColumnId
+            WHERE c.ProjectPath = $project{ProjectPathCollation} AND k.BoardId IS NOT NULL
+            GROUP BY k.BoardId;
+            """;
+        command.Parameters.AddWithValue("$project", project);
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            counts[reader.GetString(0)] = reader.GetInt32(1);
+        return counts;
+    }
+
+    public async Task<IReadOnlyList<BoardColumnRecord>> GetAllColumnsAsync(string projectPath, CancellationToken cancellationToken = default)
+    {
+        var project = NormalizeProjectPath(projectPath);
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = ColumnSelectSql + $"""
+             WHERE c.ProjectPath = $project{ProjectPathCollation}
+             ORDER BY (SELECT b.Position FROM Boards b WHERE b.Id = c.BoardId), c.BoardId, c.Position, c.CreatedUTC;
+            """;
+        command.Parameters.AddWithValue("$project", project);
+        var columns = new List<BoardColumnRecord>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            columns.Add(ReadColumn(reader));
+        return columns;
     }
 
     public async Task<BoardColumnRecord?> GetColumnAsync(string projectPath, string columnId, CancellationToken cancellationToken = default)
@@ -65,19 +196,21 @@ public sealed partial class BoardStore : IBoardStore
         return await ReadColumnAsync(connection, null, project, columnId, cancellationToken);
     }
 
-    public async Task<BoardColumnRecord> CreateColumnAsync(string projectPath, string name, int? wipLimit, string color, CancellationToken cancellationToken = default)
+    public async Task<BoardColumnRecord> CreateColumnAsync(string projectPath, string name, int? wipLimit, string color, CancellationToken cancellationToken = default, string? boardId = null)
     {
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
+        var board = await ResolveBoardIdAsync(connection, transaction, project, boardId, cancellationToken)
+            ?? throw new BoardValidationException("No board available. Create a board first.");
         var position = (int)await ScalarLongAsync(connection, transaction,
-            $"SELECT COUNT(*) FROM BoardColumns WHERE ProjectPath = $project{ProjectPathCollation}",
-            ("$project", project), cancellationToken);
+            "SELECT COUNT(*) FROM BoardColumns WHERE BoardId = $board",
+            ("$board", board), cancellationToken);
         var id = NewId("col");
         var now = DateTime.UtcNow;
-        await InsertColumnAsync(connection, transaction, id, project, name, wipLimit, position, color, now, cancellationToken);
+        await InsertColumnAsync(connection, transaction, id, project, board, name, wipLimit, position, color, now, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        return new BoardColumnRecord(id, project, name, wipLimit, position, color, now, now);
+        return new BoardColumnRecord(id, project, name, wipLimit, position, color, now, now, board);
     }
 
     public async Task<BoardColumnRecord?> UpdateColumnAsync(string projectPath, string columnId, string? name, int? wipLimit, bool clearWipLimit, string? color, CancellationToken cancellationToken = default)
@@ -120,10 +253,10 @@ public sealed partial class BoardStore : IBoardStore
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
-        var columns = await ReadColumnsAsync(connection, transaction, project, cancellationToken);
-        var target = columns.FirstOrDefault(c => string.Equals(c.Id, columnId.Trim(), StringComparison.Ordinal));
+        var target = await ReadColumnAsync(connection, transaction, project, columnId, cancellationToken);
         if (target is null)
             return null;
+        var columns = await ReadColumnsAsync(connection, transaction, project, target.BoardId, cancellationToken);
         if (columns.Count <= 1)
             throw new BoardConflictException("The board needs at least one lane.");
 
@@ -159,14 +292,20 @@ public sealed partial class BoardStore : IBoardStore
         return new BoardColumnDeleteResult(target.Id, destination.Id, movingCards.Count);
     }
 
-    public async Task<IReadOnlyList<BoardColumnRecord>> ReorderColumnsAsync(string projectPath, IReadOnlyList<string> orderedIds, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<BoardColumnRecord>> ReorderColumnsAsync(string projectPath, IReadOnlyList<string> orderedIds, CancellationToken cancellationToken = default, string? boardId = null)
     {
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
-        var columns = await ReadColumnsAsync(connection, transaction, project, cancellationToken);
-        var known = columns.Select(c => c.Id).ToHashSet(StringComparer.Ordinal);
         var requested = orderedIds.Select(id => id?.Trim() ?? string.Empty).ToList();
+        // Without an explicit board, the order describes the board its first lane sits on.
+        string? board = null;
+        if (boardId is null && requested.Count > 0)
+            board = (await ReadColumnAsync(connection, transaction, project, requested[0], cancellationToken))?.BoardId;
+        board ??= await ResolveBoardIdAsync(connection, transaction, project, boardId, cancellationToken)
+            ?? throw new BoardValidationException("No board available. Create a board first.");
+        var columns = await ReadColumnsAsync(connection, transaction, project, board, cancellationToken);
+        var known = columns.Select(c => c.Id).ToHashSet(StringComparer.Ordinal);
         if (requested.Count != known.Count
             || requested.Distinct(StringComparer.Ordinal).Count() != requested.Count
             || requested.Any(id => !known.Contains(id)))
@@ -176,18 +315,26 @@ public sealed partial class BoardStore : IBoardStore
 
         await WriteColumnPositionsAsync(connection, transaction, requested, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        return await ReadColumnsAsync(connection, null, project, cancellationToken);
+        return await ReadColumnsAsync(connection, null, project, board, cancellationToken);
     }
 
     // ------------------------------------------------------------------ cards
 
-    public async Task<IReadOnlyList<BoardCardRecord>> GetCardsAsync(string projectPath, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<BoardCardRecord>> GetCardsAsync(string projectPath, CancellationToken cancellationToken = default, string? boardId = null)
     {
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
+        var board = await ResolveBoardIdAsync(connection, null, project, boardId, cancellationToken);
+        if (board is null)
+            return [];
         await using var command = connection.CreateCommand();
-        command.CommandText = CardSelectSql + $" WHERE c.ProjectPath = $project{ProjectPathCollation} ORDER BY c.ColumnId, c.Position, c.Number;";
+        command.CommandText = CardSelectSql + $"""
+             WHERE c.ProjectPath = $project{ProjectPathCollation}
+               AND c.ColumnId IN (SELECT k.Id FROM BoardColumns k WHERE k.BoardId = $board)
+             ORDER BY c.ColumnId, c.Position, c.Number;
+            """;
         command.Parameters.AddWithValue("$project", project);
+        command.Parameters.AddWithValue("$board", board);
         var cards = new List<BoardCardRecord>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
@@ -225,17 +372,19 @@ public sealed partial class BoardStore : IBoardStore
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
 
-        var columns = await ReadColumnsAsync(connection, transaction, project, cancellationToken);
-        if (columns.Count == 0)
-            throw new BoardValidationException("No lane available. Create a lane first.");
         BoardColumnRecord column;
         if (string.IsNullOrWhiteSpace(card.ColumnId))
         {
+            var board = await ResolveBoardIdAsync(connection, transaction, project, card.BoardId, cancellationToken);
+            var columns = board is null ? [] : await ReadColumnsAsync(connection, transaction, project, board, cancellationToken);
+            if (columns.Count == 0)
+                throw new BoardValidationException("No lane available. Create a lane first.");
             column = columns.OrderBy(c => c.Position).First();
         }
         else
         {
-            column = columns.FirstOrDefault(c => string.Equals(c.Id, card.ColumnId.Trim(), StringComparison.Ordinal))
+            // A lane id is unique across the project's boards, so the lane alone places the card.
+            column = await ReadColumnAsync(connection, transaction, project, card.ColumnId, cancellationToken)
                 ?? throw new BoardValidationException($"Lane not found: {card.ColumnId}");
         }
 
@@ -284,12 +433,12 @@ public sealed partial class BoardStore : IBoardStore
         await WriteBaseLlmOptionsAsync(connection, transaction, id, card.BaseLlmOptions, cancellationToken);
         var revision = await AppendDescriptionRevisionAsync(connection, transaction,
             new BoardCardRecord(id, project, number, column.Id, position, card.Title, card.Description,
-                card.Assignee, card.Priority, card.Points, card.Tags, card.Blocked, 0, now, now, 0, Type: card.Type),
+                card.Assignee, card.Priority, card.Points, card.Tags, card.Blocked, 0, now, now, 0, Type: card.Type, BoardId: column.BoardId),
             card.Description, "created", card.Author ?? BoardAuthor.User(), null, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         return new BoardCardRecord(id, project, number, column.Id, position, card.Title, card.Description,
-            card.Assignee, card.Priority, card.Points, card.Tags, card.Blocked, 0, now, now, revision, card.BaseLlmOptions, Type: card.Type);
+            card.Assignee, card.Priority, card.Points, card.Tags, card.Blocked, 0, now, now, revision, card.BaseLlmOptions, Type: card.Type, BoardId: column.BoardId);
     }
 
     public async Task<BoardCardRecord?> UpdateCardAsync(string projectPath, string cardId, BoardCardPatch patch, CancellationToken cancellationToken = default)
@@ -308,12 +457,14 @@ public sealed partial class BoardStore : IBoardStore
         var moving = !string.IsNullOrWhiteSpace(patch.ColumnId)
             && !string.Equals(patch.ColumnId.Trim(), existing.ColumnId, StringComparison.Ordinal);
         var columnId = existing.ColumnId;
+        var boardId = existing.BoardId;
         var position = existing.Position;
         if (moving)
         {
             var column = await ReadColumnAsync(connection, transaction, project, patch.ColumnId!.Trim(), cancellationToken)
                 ?? throw new BoardValidationException($"Lane not found: {patch.ColumnId}");
             columnId = column.Id;
+            boardId = column.BoardId;
             position = (int)await ScalarLongAsync(connection, transaction,
                 "SELECT COUNT(*) FROM BoardCards WHERE ColumnId = $column AND Id <> $id",
                 ("$column", columnId), cancellationToken, ("$id", (object)existing.Id));
@@ -322,6 +473,7 @@ public sealed partial class BoardStore : IBoardStore
         var updated = existing with
         {
             ColumnId = columnId,
+            BoardId = boardId,
             Position = position,
             Title = patch.Title ?? existing.Title,
             Description = patch.Description ?? existing.Description,
@@ -823,7 +975,10 @@ public sealed partial class BoardStore : IBoardStore
     // ------------------------------------------------------------------ readers
 
     private const string ColumnSelectSql =
-        "SELECT Id, ProjectPath, Name, WipLimit, Position, Color, CreatedUTC, UpdatedUTC FROM BoardColumns";
+        "SELECT c.Id, c.ProjectPath, c.Name, c.WipLimit, c.Position, c.Color, c.CreatedUTC, c.UpdatedUTC, c.BoardId FROM BoardColumns c";
+
+    private const string BoardSelectSql =
+        "SELECT Id, ProjectPath, Name, Position, CreatedUTC, UpdatedUTC FROM Boards";
 
     private const string CardSelectSql = """
         SELECT c.Id, c.ProjectPath, c.Number, c.ColumnId, c.Position, c.Title, c.Description, c.Assignee, c.Priority,
@@ -831,19 +986,21 @@ public sealed partial class BoardStore : IBoardStore
                (SELECT COUNT(*) FROM BoardComments m WHERE m.CardId = c.Id AND m.Kind = 'comment') AS CommentCount,
                COALESCE((SELECT MAX(r.Revision) FROM BoardDescriptionRevisions r WHERE r.CardId = c.Id), 0),
                (SELECT o.OptionsJson FROM BoardCardOptions o WHERE o.CardId = c.Id),
-               c.Type
+               c.Type,
+               (SELECT k.BoardId FROM BoardColumns k WHERE k.Id = c.ColumnId)
         FROM BoardCards c
         """;
 
     private const string SessionSelectSql =
         "SELECT s.SessionId, s.CardId, s.TabId, s.Selection, s.Cli, s.DisplayName, s.Origin, s.CreatedUTC FROM BoardCardSessions s";
 
-    private static async Task<IReadOnlyList<BoardColumnRecord>> ReadColumnsAsync(SqliteConnection connection, SqliteTransaction? transaction, string project, CancellationToken cancellationToken)
+    private static async Task<IReadOnlyList<BoardColumnRecord>> ReadColumnsAsync(SqliteConnection connection, SqliteTransaction? transaction, string project, string boardId, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = ColumnSelectSql + $" WHERE ProjectPath = $project{ProjectPathCollation} ORDER BY Position, CreatedUTC;";
+        command.CommandText = ColumnSelectSql + $" WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.BoardId = $board ORDER BY c.Position, c.CreatedUTC;";
         command.Parameters.AddWithValue("$project", project);
+        command.Parameters.AddWithValue("$board", boardId);
         var columns = new List<BoardColumnRecord>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
@@ -855,7 +1012,7 @@ public sealed partial class BoardStore : IBoardStore
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = ColumnSelectSql + $" WHERE ProjectPath = $project{ProjectPathCollation} AND Id = $id LIMIT 1;";
+        command.CommandText = ColumnSelectSql + $" WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.Id = $id LIMIT 1;";
         command.Parameters.AddWithValue("$project", project);
         command.Parameters.AddWithValue("$id", columnId.Trim());
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -870,7 +1027,57 @@ public sealed partial class BoardStore : IBoardStore
         reader.GetInt32(4),
         reader.GetString(5),
         ParseDb(reader.GetString(6)),
-        ParseDb(reader.GetString(7)));
+        ParseDb(reader.GetString(7)),
+        reader.IsDBNull(8) ? string.Empty : reader.GetString(8));
+
+    private static async Task<IReadOnlyList<BoardRecord>> ReadBoardsAsync(SqliteConnection connection, SqliteTransaction? transaction, string project, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = BoardSelectSql + $" WHERE ProjectPath = $project{ProjectPathCollation} ORDER BY Position, CreatedUTC;";
+        command.Parameters.AddWithValue("$project", project);
+        var boards = new List<BoardRecord>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            boards.Add(ReadBoard(reader));
+        return boards;
+    }
+
+    private static async Task<BoardRecord?> ReadBoardAsync(SqliteConnection connection, SqliteTransaction? transaction, string project, string boardId, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = BoardSelectSql + $" WHERE ProjectPath = $project{ProjectPathCollation} AND Id = $id LIMIT 1;";
+        command.Parameters.AddWithValue("$project", project);
+        command.Parameters.AddWithValue("$id", boardId.Trim());
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? ReadBoard(reader) : null;
+    }
+
+    private static BoardRecord ReadBoard(SqliteDataReader reader) => new(
+        reader.GetString(0),
+        reader.GetString(1),
+        reader.GetString(2),
+        reader.GetInt32(3),
+        ParseDb(reader.GetString(4)),
+        ParseDb(reader.GetString(5)));
+
+    /// <summary>
+    /// The board a caller means: the named one (which must belong to the project), else the
+    /// project's default — first by position. Null only when the project has no board yet.
+    /// </summary>
+    private static async Task<string?> ResolveBoardIdAsync(SqliteConnection connection, SqliteTransaction? transaction, string project, string? boardId, CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(boardId))
+        {
+            var board = await ReadBoardAsync(connection, transaction, project, boardId, cancellationToken)
+                ?? throw new BoardValidationException($"Board not found: {boardId.Trim()}");
+            return board.Id;
+        }
+        return await ScalarStringAsync(connection, transaction,
+            $"SELECT Id FROM Boards WHERE ProjectPath = $project{ProjectPathCollation} ORDER BY Position, CreatedUTC LIMIT 1",
+            ("$project", project), cancellationToken);
+    }
 
     private static async Task<BoardCardRecord?> ReadCardAsync(SqliteConnection connection, SqliteTransaction? transaction, string project, string idOrKey, CancellationToken cancellationToken)
     {
@@ -909,7 +1116,8 @@ public sealed partial class BoardStore : IBoardStore
         ParseDb(reader.GetString(13)),
         reader.GetInt32(15),
         reader.IsDBNull(16) ? null : JsonSerializer.Deserialize(reader.GetString(16), StorageJsonSerializerContext.Default.BaseLlmOptions),
-        Type: reader.GetString(17));
+        Type: reader.GetString(17),
+        BoardId: reader.IsDBNull(18) ? string.Empty : reader.GetString(18));
 
     private static async Task<IReadOnlyList<BoardCommentRecord>> ReadCommentsAsync(SqliteConnection connection, string cardId, string kind, CancellationToken cancellationToken)
     {
@@ -995,16 +1203,57 @@ public sealed partial class BoardStore : IBoardStore
 
     // ------------------------------------------------------------------ writers / helpers
 
-    private static async Task InsertColumnAsync(SqliteConnection connection, SqliteTransaction transaction, string id, string project, string name, int? wipLimit, int position, string color, DateTime now, CancellationToken cancellationToken)
+    private static async Task<BoardRecord> InsertBoardWithDefaultLanesAsync(SqliteConnection connection, SqliteTransaction transaction, string project, string name, int position, CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        var board = new BoardRecord(NewId("brd"), project, name, position, now, now);
+        await using (var insert = connection.CreateCommand())
+        {
+            insert.Transaction = transaction;
+            insert.CommandText = """
+                INSERT INTO Boards (Id, ProjectPath, Name, Position, CreatedUTC, UpdatedUTC)
+                VALUES ($id, $project, $name, $position, $created, $updated);
+                """;
+            insert.Parameters.AddWithValue("$id", board.Id);
+            insert.Parameters.AddWithValue("$project", project);
+            insert.Parameters.AddWithValue("$name", name);
+            insert.Parameters.AddWithValue("$position", position);
+            insert.Parameters.AddWithValue("$created", ToDb(now));
+            insert.Parameters.AddWithValue("$updated", ToDb(now));
+            await insert.ExecuteNonQueryAsync(cancellationToken);
+        }
+        var lanePosition = 0;
+        foreach (var (laneName, wip, color) in DefaultLanes)
+            await InsertColumnAsync(connection, transaction, NewId("col"), project, board.Id, laneName, wip, lanePosition++, color, now, cancellationToken);
+        return board;
+    }
+
+    private static async Task WriteBoardPositionsAsync(SqliteConnection connection, SqliteTransaction transaction, IReadOnlyList<string> orderedIds, CancellationToken cancellationToken)
+    {
+        var now = ToDb(DateTime.UtcNow);
+        for (var index = 0; index < orderedIds.Count; index++)
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "UPDATE Boards SET Position = $position, UpdatedUTC = $updated WHERE Id = $id AND Position <> $position;";
+            command.Parameters.AddWithValue("$position", index);
+            command.Parameters.AddWithValue("$updated", now);
+            command.Parameters.AddWithValue("$id", orderedIds[index]);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
+
+    private static async Task InsertColumnAsync(SqliteConnection connection, SqliteTransaction transaction, string id, string project, string boardId, string name, int? wipLimit, int position, string color, DateTime now, CancellationToken cancellationToken)
     {
         await using var insert = connection.CreateCommand();
         insert.Transaction = transaction;
         insert.CommandText = """
-            INSERT INTO BoardColumns (Id, ProjectPath, Name, WipLimit, Position, Color, CreatedUTC, UpdatedUTC)
-            VALUES ($id, $project, $name, $wip, $position, $color, $created, $updated);
+            INSERT INTO BoardColumns (Id, ProjectPath, BoardId, Name, WipLimit, Position, Color, CreatedUTC, UpdatedUTC)
+            VALUES ($id, $project, $board, $name, $wip, $position, $color, $created, $updated);
             """;
         insert.Parameters.AddWithValue("$id", id);
         insert.Parameters.AddWithValue("$project", project);
+        insert.Parameters.AddWithValue("$board", boardId);
         insert.Parameters.AddWithValue("$name", name);
         insert.Parameters.AddWithValue("$wip", wipLimit is int w ? w : DBNull.Value);
         insert.Parameters.AddWithValue("$position", position);
@@ -1113,8 +1362,23 @@ public sealed partial class BoardStore : IBoardStore
         // board/3: classify cards. Existing rows are deliberately neutral rather than guessed.
         SqliteMigrationRunner.Apply(connection, "board", 3, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.AdoptStatement(db, transaction, CardTypeColumnSql));
+        // board/4: several boards per project. Lanes gain a nullable BoardId; the rows are adopted
+        // into a default board by ReconcileDerivedRows, which also catches lanes an older binary
+        // inserts later without one.
+        SqliteMigrationRunner.Apply(connection, "board", 4, MigrationKind.Additive, (db, transaction) =>
+        {
+            SqliteSchema.Execute(db, transaction, BoardsTableSql);
+            SqliteSchema.AdoptStatement(db, transaction, ColumnBoardIdSql);
+            SqliteSchema.Execute(db, transaction, ColumnBoardIndexSql);
+        });
         ReconcileDerivedRows(connection);
     }
+
+    internal const string ColumnBoardIdSql =
+        "ALTER TABLE BoardColumns ADD COLUMN BoardId TEXT NULL";
+
+    internal const string ColumnBoardIndexSql =
+        "CREATE INDEX IF NOT EXISTS IX_BoardColumns_Board ON BoardColumns(BoardId, Position)";
 
     internal const string CommentKindColumnSql =
         "ALTER TABLE BoardComments ADD COLUMN Kind TEXT NOT NULL DEFAULT 'comment'";
@@ -1144,6 +1408,8 @@ public sealed partial class BoardStore : IBoardStore
                 ) OR EXISTS (
                     SELECT 1 FROM BoardCards c
                     WHERE NOT EXISTS (SELECT 1 FROM BoardDescriptionRevisions r WHERE r.CardId = c.Id)
+                ) OR EXISTS (
+                    SELECT 1 FROM BoardColumns k WHERE k.BoardId IS NULL
                 );
                 """;
             if (probe.ExecuteScalar() is null)
@@ -1154,7 +1420,7 @@ public sealed partial class BoardStore : IBoardStore
         using (var repair = connection.CreateCommand())
         {
             repair.Transaction = transaction;
-            repair.CommandText = CardSequenceReseedSql + DescriptionBaselineSql;
+            repair.CommandText = CardSequenceReseedSql + DescriptionBaselineSql + OrphanLaneAdoptionSql;
             repair.Parameters.AddWithValue("$now", ToDb(DateTime.UtcNow));
             repair.ExecuteNonQuery();
         }
@@ -1162,11 +1428,31 @@ public sealed partial class BoardStore : IBoardStore
     }
 
     /// <summary>Idempotent: raises each project's high-water mark to its highest live card number.</summary>
-    internal static readonly string CardSequenceReseedSql = $"""
+    // Properties, not static readonly fields: both interpolate ProjectPathCollation, which is
+    // declared further down and would still be null while an earlier field initialised.
+    internal static string CardSequenceReseedSql => $"""
         INSERT INTO BoardCardSequences (ProjectPath, LastNumber)
             SELECT ProjectPath, MAX(Number) FROM BoardCards
             GROUP BY ProjectPath{ProjectPathCollation}
         ON CONFLICT(ProjectPath) DO UPDATE SET LastNumber = MAX(LastNumber, excluded.LastNumber);
+        """;
+
+    /// <summary>
+    /// Idempotent: lanes without a board (pre-board/4 rows, or rows an older binary added) join
+    /// their project's default board, which is created — named <see cref="DefaultBoardName"/> —
+    /// when the project has none. Board ids follow the same <c>brd_</c> + 12 hex shape as NewId.
+    /// </summary>
+    internal static string OrphanLaneAdoptionSql => $"""
+        INSERT INTO Boards (Id, ProjectPath, Name, Position, CreatedUTC, UpdatedUTC)
+            SELECT 'brd_' || lower(hex(randomblob(6))), MIN(k.ProjectPath), '{DefaultBoardName}', 0, $now, $now
+            FROM BoardColumns k
+            WHERE k.BoardId IS NULL
+              AND NOT EXISTS (SELECT 1 FROM Boards b WHERE b.ProjectPath = k.ProjectPath{ProjectPathCollation})
+            GROUP BY k.ProjectPath{ProjectPathCollation};
+        UPDATE BoardColumns SET BoardId = (
+            SELECT b.Id FROM Boards b WHERE b.ProjectPath = BoardColumns.ProjectPath{ProjectPathCollation}
+            ORDER BY b.Position, b.CreatedUTC LIMIT 1)
+        WHERE BoardId IS NULL;
         """;
 
     static partial void EnsureAttachmentSchema(SqliteConnection connection, SqliteTransaction transaction);
@@ -1210,7 +1496,21 @@ public sealed partial class BoardStore : IBoardStore
         ("Done", null, "#10b981")
     ];
 
+    internal const string BoardsTableSql = """
+        CREATE TABLE IF NOT EXISTS Boards (
+            Id TEXT PRIMARY KEY,
+            ProjectPath TEXT NOT NULL,
+            Name TEXT NOT NULL,
+            Position INTEGER NOT NULL,
+            CreatedUTC TEXT NOT NULL,
+            UpdatedUTC TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS IX_Boards_Project ON Boards(ProjectPath, Position);
+        """;
+
     private static readonly string SchemaSql = $"""
+        {BoardsTableSql}
+
         CREATE TABLE IF NOT EXISTS BoardColumns (
             Id TEXT PRIMARY KEY,
             ProjectPath TEXT NOT NULL,
@@ -1219,7 +1519,8 @@ public sealed partial class BoardStore : IBoardStore
             Position INTEGER NOT NULL,
             Color TEXT NOT NULL,
             CreatedUTC TEXT NOT NULL,
-            UpdatedUTC TEXT NOT NULL
+            UpdatedUTC TEXT NOT NULL,
+            BoardId TEXT NULL
         );
         CREATE INDEX IF NOT EXISTS IX_BoardColumns_Project ON BoardColumns(ProjectPath, Position);
 
