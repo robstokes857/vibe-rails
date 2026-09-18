@@ -49,13 +49,13 @@ public sealed class BoardToolTests : IDisposable
     [Fact]
     public async Task ListAndCreate_SeedLanes_AndReturnReadableText()
     {
-        var lanes = await _tool.ListBoardColumns(Ct);
+        var lanes = await _tool.ListBoardColumns(cancellationToken: Ct);
         Assert.Contains("- Backlog (id col_", lanes);
         Assert.Contains("- Ready (id col_", lanes);
         Assert.Contains("WIP limit 8", lanes);
 
         Assert.Equal("No cards match.", await _tool.ListBoardCards(cancellationToken: Ct));
-        var created = await _tool.CreateBoardCard("Fix the race", "Two 401s overlap.", "build", "HIGH", "auth, bug", "bug", Ct);
+        var created = await _tool.CreateBoardCard("Fix the race", "Two 401s overlap.", "build", "HIGH", "auth, bug", "bug", cancellationToken: Ct);
         Assert.Equal("Created VB-1: Fix the race", created);
 
         var list = await _tool.ListBoardCards(cancellationToken: Ct);
@@ -444,6 +444,63 @@ public sealed class BoardToolTests : IDisposable
         Assert.StartsWith("FAIL: could not add the comment: the VibeRails database is busy", reply);
         Assert.Contains("Nothing was saved. Retry the same call in a few seconds.", reply);
         Assert.DoesNotContain("See the VibeRails log", reply);
+    }
+
+    [Fact]
+    public async Task ListBoards_AndTheBoardArgument_ScopeTheListing()
+    {
+        Assert.Equal("Created VB-1: On main", await _tool.CreateBoardCard("On main", cancellationToken: Ct));
+        var sprint = await _service.CreateBoardAsync(_project, new CreateBoardRequest("Sprint 2"), Ct);
+
+        var boards = await _tool.ListBoards(Ct);
+        Assert.Contains("- Main (id brd_", boards);
+        Assert.Contains("1 card; lanes: Backlog → Ready → Build → Review → Done; current)", boards);
+        Assert.Contains($"- Sprint 2 (id {sprint.Id}, 0 cards; lanes:", boards);
+
+        // By name, case-insensitively, or by id; unknown boards fail readably.
+        Assert.Equal("Created VB-2: On sprint", await _tool.CreateBoardCard("On sprint", column: "build", board: "sprint 2", cancellationToken: Ct));
+        Assert.Equal("VB-2 [Build] [Task] (medium) On sprint", await _tool.ListBoardCards(board: sprint.Id, cancellationToken: Ct));
+        Assert.Equal("VB-1 [Backlog] [Task] (medium) On main", await _tool.ListBoardCards(cancellationToken: Ct));
+        Assert.StartsWith("FAIL: board not found: Nowhere", await _tool.ListBoardCards(board: "Nowhere", cancellationToken: Ct));
+        Assert.Contains("(board Sprint 2):", await _tool.ListBoardColumns("Sprint 2", Ct));
+
+        // A card's own board is reported, and lane names resolve on that board.
+        var card = await _tool.GetBoardCard("VB-2", cancellationToken: Ct);
+        Assert.Contains("\nBoard: Sprint 2\nLanes: Backlog → Ready → Build → Review → Done\n", card);
+        Assert.StartsWith("Moved VB-2 to Review", await _tool.MoveBoardCard("VB-2", "review", cancellationToken: Ct));
+        Assert.Equal(sprint.Id, (await _service.FindCardAsync(_project, "VB-2", Ct))!.BoardId);
+
+        // A terminal launched for a card on the sprint board defaults to that board.
+        _resolver.CurrentSessionId = "11111111-2222-3333-4444-555555555555";
+        await _store.LinkSessionAsync(_project, (await _service.FindCardAsync(_project, "VB-2", Ct))!.Id, _resolver.CurrentSessionId!, null, "base:codex", "codex", "Codex", BoardSessionRecord.LaunchOrigin, Ct);
+        Assert.Equal("VB-2 [Review] [Task] (medium) On sprint", await _tool.ListBoardCards(cancellationToken: Ct));
+        Assert.Equal("Created VB-3: Sibling", await _tool.CreateBoardCard("Sibling", cancellationToken: Ct));
+        Assert.Equal(sprint.Id, (await _service.FindCardAsync(_project, "VB-3", Ct))!.BoardId);
+        Assert.Contains("; current)", (await _tool.ListBoards(Ct)).Split('\n').Single(line => line.Contains("Sprint 2")));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DuplicateBoardNames_RequireAnIdWithoutWritingToEitherBoard(bool duplicateByRename)
+    {
+        var first = await _service.CreateBoardAsync(_project, new CreateBoardRequest("Sprint"), Ct);
+        var second = await _service.CreateBoardAsync(_project, new CreateBoardRequest(duplicateByRename ? "Other" : "sPRINT"), Ct);
+        if (duplicateByRename)
+            await _service.UpdateBoardAsync(_project, second.Id, new UpdateBoardRequest("sPRINT"), Ct);
+
+        var listing = await _tool.ListBoardCards(board: "sprint", cancellationToken: Ct);
+        Assert.Contains("ambiguous", listing);
+        Assert.Contains("Use a board ID from list_boards", listing);
+        var creation = await _tool.CreateBoardCard("Wrong target", board: "SPRINT", cancellationToken: Ct);
+        Assert.Contains("ambiguous", creation);
+        Assert.Empty((await _service.GetCardsAsync(_project, Ct, first.Id)).Cards);
+        Assert.Empty((await _service.GetCardsAsync(_project, Ct, second.Id)).Cards);
+
+        Assert.Equal("Created VB-1: First", await _tool.CreateBoardCard("First", board: first.Id, cancellationToken: Ct));
+        Assert.Equal("Created VB-2: Second", await _tool.CreateBoardCard("Second", board: second.Id, cancellationToken: Ct));
+        Assert.Equal("First", Assert.Single((await _service.GetCardsAsync(_project, Ct, first.Id)).Cards).Title);
+        Assert.Equal("Second", Assert.Single((await _service.GetCardsAsync(_project, Ct, second.Id)).Cards).Title);
     }
 
     private sealed class FakeResolver(string project) : IBoardProjectResolver

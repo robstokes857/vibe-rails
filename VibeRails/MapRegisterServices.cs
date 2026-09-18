@@ -182,18 +182,12 @@ namespace VibeRails
             // Python script signing: file-based state + a lazily-probed interpreter. Singleton so
             // the run-history and the signing-file lock live in one place. Factory form on
             // purpose: Discover() probes the filesystem/PATH for an interpreter, and that must
-            // happen on the first actual run (not list/sign/MCP discovery), nor during startup of
+            // happen on the first actual run (not list/sign), nor during startup of
             // every vb process (terminal tab children register services too).
             serviceCollection.AddSingleton<Services.PythonScripts.IPythonScriptService>(sp =>
                 new Services.PythonScripts.PythonScriptService(
-                    mcpConfigurationStore: sp.GetRequiredService<
-                        Services.PythonScripts.IPythonScriptMcpConfigurationStore>(),
                     pythonRunnerProvider: () => new PyBridge.PythonRunner(
                         PyBridge.PythonRunnerOptions.Discover())));
-            serviceCollection.AddSingleton<Services.PythonScripts.IPythonScriptMcpConfigurationStore,
-                Services.PythonScripts.PythonScriptMcpConfigurationStore>();
-            serviceCollection.AddSingleton<Services.PythonScripts.IPythonScriptMcpService,
-                Services.PythonScripts.PythonScriptMcpService>();
             serviceCollection.AddScoped<IGetUserText, GetUserText>();
             serviceCollection.AddScoped<IProjectCache, ProjectCache>();
             serviceCollection.AddScoped<IGlobalCache, GlobalCache>();
@@ -256,7 +250,6 @@ namespace VibeRails
                     client.Timeout = TimeSpan.FromSeconds(10);
                 });
                 serviceCollection.AddScoped<TokenSaverTool>();
-                serviceCollection.AddScoped<PythonScriptTool>();
                 // Kanban board tools (ctor-injected board services). Registered here AND in
                 // McpStdioHost.ConfigureServices — the two transports must expose the same tools.
                 serviceCollection.AddScoped<BoardTool>();
@@ -274,9 +267,7 @@ namespace VibeRails
                     .WithTools<RulesTool>()
                     .WithTools<SessionSearchTool>()
                     .WithTools<TokenSaverTool>()
-                    .WithTools<PythonScriptTool>()
-                    .WithTools<BoardTool>()
-                    .WithPythonScriptTools();
+                    .WithTools<BoardTool>();
             }
 
             // Claude Agent Sync Service (syncs CLAUDE.md to AGENTS.md on session lifecycle)

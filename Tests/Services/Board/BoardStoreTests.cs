@@ -434,6 +434,89 @@ public sealed class BoardStoreTests : IDisposable
         SqliteConnection.ClearPool(new SqliteConnection(connectionString));
     }
 
+    [Fact]
+    public async Task Boards_ScopeLanesAndCards_AndKeysStayPerProject()
+    {
+        Assert.True(await _store.EnsureDefaultColumnsAsync(_project, Ct));
+        var main = Assert.Single(await _store.GetBoardsAsync(_project, Ct));
+        Assert.Equal(BoardStore.DefaultBoardName, main.Name);
+        Assert.All(await _store.GetColumnsAsync(_project, Ct), column => Assert.Equal(main.Id, column.BoardId));
+
+        var sprint = await _store.CreateBoardAsync(_project, "Sprint 2", Ct);
+        Assert.Equal(1, sprint.Position);
+        Assert.Equal(BoardStore.DefaultLanes.Select(l => l.Name), (await _store.GetColumnsAsync(_project, Ct, sprint.Id)).Select(c => c.Name));
+        // Null still means the first board; the second board's lanes are separate rows.
+        Assert.Equal(await _store.GetColumnsAsync(_project, Ct), await _store.GetColumnsAsync(_project, Ct, main.Id));
+        Assert.Equal(10, (await _store.GetAllColumnsAsync(_project, Ct)).Count);
+        await Assert.ThrowsAsync<BoardValidationException>(() => _store.GetColumnsAsync(_project, Ct, "brd_missing"));
+
+        var onMain = await _store.CreateCardAsync(_project, NewCard("Main card"), Ct);
+        var onSprint = await _store.CreateCardAsync(_project, NewCard("Sprint card") with { BoardId = sprint.Id }, Ct);
+        Assert.Equal("VB-1", onMain.Key);
+        Assert.Equal("VB-2", onSprint.Key);
+        Assert.Equal(main.Id, onMain.BoardId);
+        Assert.Equal(sprint.Id, onSprint.BoardId);
+        Assert.Equal([onMain.Id], (await _store.GetCardsAsync(_project, Ct)).Select(c => c.Id));
+        Assert.Equal([onSprint.Id], (await _store.GetCardsAsync(_project, Ct, sprint.Id)).Select(c => c.Id));
+        Assert.Equal(sprint.Id, (await _store.FindCardAsync(_project, "VB-2", Ct))!.BoardId);
+        var counts = await _store.CountCardsByBoardAsync(_project, Ct);
+        Assert.Equal(2, counts.Count);
+        Assert.Equal(1, counts[main.Id]);
+        Assert.Equal(1, counts[sprint.Id]);
+
+        // Moving into another board's lane moves the card across boards.
+        var sprintDone = (await _store.GetColumnsAsync(_project, Ct, sprint.Id)).Last();
+        var moved = await _store.UpdateCardAsync(_project, onMain.Id, new BoardCardPatch(ColumnId: sprintDone.Id), Ct);
+        Assert.Equal(sprint.Id, moved!.BoardId);
+        Assert.Empty(await _store.GetCardsAsync(_project, Ct, main.Id));
+
+        // Lane operations stay on their board: a new lane appends to its board, a reorder names its board's lanes.
+        var extra = await _store.CreateColumnAsync(_project, "QA", null, "#ffffff", Ct, sprint.Id);
+        Assert.Equal(sprint.Id, extra.BoardId);
+        Assert.Equal(5, extra.Position);
+        var sprintIds = (await _store.GetColumnsAsync(_project, Ct, sprint.Id)).Select(c => c.Id).ToList();
+        sprintIds.Reverse();
+        Assert.Equal(sprintIds, (await _store.ReorderColumnsAsync(_project, sprintIds, Ct)).Select(c => c.Id));
+        await Assert.ThrowsAsync<BoardValidationException>(() => _store.ReorderColumnsAsync(_project, sprintIds, Ct, main.Id));
+
+        Assert.Equal("Sprint 2 (closed)", (await _store.RenameBoardAsync(_project, sprint.Id, "Sprint 2 (closed)", Ct))!.Name);
+        Assert.Null(await _store.RenameBoardAsync(_project, "brd_missing", "x", Ct));
+
+        var deleted = await _store.DeleteBoardAsync(_project, sprint.Id, Ct);
+        Assert.Equal(2, deleted!.DeletedCards);
+        Assert.Equal(6, deleted.DeletedColumns);
+        Assert.Null(await _store.FindCardAsync(_project, "VB-2", Ct));
+        Assert.Equal(main.Id, Assert.Single(await _store.GetBoardsAsync(_project, Ct)).Id);
+        await Assert.ThrowsAsync<BoardConflictException>(() => _store.DeleteBoardAsync(_project, main.Id, Ct));
+        Assert.Null(await _store.DeleteBoardAsync(_project, "brd_missing", Ct));
+        // Numbers were consumed by the deleted board's cards and never come back.
+        Assert.Equal("VB-3", (await _store.CreateCardAsync(_project, NewCard("Next"), Ct)).Key);
+    }
+
+    [Fact]
+    public async Task LanesWithoutABoard_AreAdoptedIntoADefaultBoard_OnReopen()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var card = await _store.CreateCardAsync(_project, NewCard("Old"), Ct);
+        await using (var connection = new SqliteConnection(_connectionString))
+        {
+            await connection.OpenAsync(Ct);
+            await using var legacy = connection.CreateCommand();
+            // What a pre-board/4 file (or an older binary writing lanes today) leaves behind.
+            legacy.CommandText = "UPDATE BoardColumns SET BoardId = NULL; DELETE FROM Boards;";
+            await legacy.ExecuteNonQueryAsync(Ct);
+        }
+
+        var reopened = new BoardStore(_connectionString);
+        var board = Assert.Single(await reopened.GetBoardsAsync(_project, Ct));
+        Assert.Equal(BoardStore.DefaultBoardName, board.Name);
+        Assert.StartsWith("brd_", board.Id);
+        Assert.All(await reopened.GetColumnsAsync(_project, Ct), column => Assert.Equal(board.Id, column.BoardId));
+        Assert.Equal(board.Id, (await reopened.FindCardAsync(_project, card.Key, Ct))!.BoardId);
+        Assert.Equal([card.Id], (await reopened.GetCardsAsync(_project, Ct)).Select(c => c.Id));
+        Assert.False(await reopened.EnsureDefaultColumnsAsync(_project, Ct));
+    }
+
     private static NewBoardCard NewCard(string title) =>
         new(null, title, "", null, "medium", null, [], false);
 

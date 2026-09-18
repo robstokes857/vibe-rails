@@ -1,8 +1,9 @@
 namespace VibeRails.Services.Terminal;
 
 /// <summary>
-/// Launch-local grants for the Board workflow. Keep this an explicit list: registering
-/// another VibeRails MCP tool must never silently preauthorize it for board sessions.
+/// Launch-local grants for the explicit Board tool allowlist. Unrelated tools on the same
+/// server retain their normal approval policy.
+/// CommandService applies these grants only when <c>AuthorizeBoardTools</c> is set.
 /// </summary>
 public static class BoardMcpAuthorization
 {
@@ -10,6 +11,8 @@ public static class BoardMcpAuthorization
 
     public static IReadOnlyList<string> ToolNames { get; } = Array.AsReadOnly<string>(
     [
+        // BoardTool
+        "list_boards",
         "list_board_columns",
         "list_board_cards",
         "get_board_card",
@@ -30,8 +33,6 @@ public static class BoardMcpAuthorization
         var grants = new List<string>();
         if (llm == LLM.Codex)
         {
-            // Explicit per-tool approval overrides the server's default prompt policy.
-            // https://developers.openai.com/codex/mcp/#other-configuration-options
             foreach (var tool in ToolNames)
             {
                 grants.Add("--config");
@@ -40,9 +41,10 @@ public static class BoardMcpAuthorization
         }
         else if (llm == LLM.Claude)
         {
-            // --allowedTools is variadic; the delimiter below keeps the positional
-            // task prompt from being swallowed as another permission rule.
-            grants.Add("--allowedTools=" + string.Join(',', ToolNames.Select(tool => $"mcp__{ServerName}__{tool}")));
+            // --allowedTools is variadic; the delimiter below keeps the positional task
+            // prompt from being swallowed as a rule. Always name each tool explicitly.
+            grants.Add("--allowedTools=" + string.Join(',',
+                ToolNames.Select(tool => $"mcp__{ServerName}__{tool}")));
         }
         else if (llm == LLM.Copilot)
         {
@@ -55,6 +57,8 @@ public static class BoardMcpAuthorization
             foreach (var tool in ToolNames)
                 grants.Add($"--allow=MCPTool({ServerName}__{tool})");
         }
+        // Antigravity (agy) has no per-server or per-tool grant — only a global
+        // --dangerously-skip-permissions — so a board launch adds nothing for it on purpose.
 
         var result = new List<string>(arguments);
         var delimiter = result.IndexOf("--");

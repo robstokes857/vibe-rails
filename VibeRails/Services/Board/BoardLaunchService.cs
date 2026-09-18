@@ -72,8 +72,10 @@ public sealed class BoardLaunchService(
                 throw new BoardValidationException("The assigned environment belongs to another project.");
         }
 
-        var columns = await store.GetColumnsAsync(projectPath, cancellationToken);
+        var boardId = string.IsNullOrEmpty(card.BoardId) ? null : card.BoardId;
+        var columns = await store.GetColumnsAsync(projectPath, cancellationToken, boardId);
         var column = columns.FirstOrDefault(c => c.Id == card.ColumnId);
+        var boardName = boardId is null ? null : (await store.GetBoardAsync(projectPath, boardId, cancellationToken))?.Name;
         var assigneeLabel = environment is not null
             ? $"{environment.CustomName} ({parsed.Cli})"
             : parsed.Cli;
@@ -83,7 +85,8 @@ public sealed class BoardLaunchService(
         var context = new BoardPromptComposer.LaunchContext(
             columns.OrderBy(c => c.Position).Select(c => c.Name).ToList(),
             detail?.Commits ?? [],
-            detail?.Attachments ?? []);
+            detail?.Attachments ?? [],
+            boardName);
         var prompt = BoardPromptComposer.Compose(card, column?.Name ?? "(no lane)", assigneeLabel, environment?.CustomPrompt, context);
         var title = $"{card.Key} · {Truncate(card.Title, 60)}";
 

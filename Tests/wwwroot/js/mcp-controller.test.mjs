@@ -33,21 +33,16 @@ test('Advertised behavior hints become badges, and unspecified ones stay silent'
         /Writes/);
 });
 
-test('Local MCP tools render Python scripts in their own section', () => {
+test('Local MCP tools render the available tools and selected item', () => {
     const controller = new McpController({});
     let html = '';
     controller.state = {
         localConnected: true,
-        localSelected: 'python_report',
+        localSelected: 'get_board_card',
         localFilter: '',
         localTools: [
-            { name: 'search_history', description: 'Search history.', category: 'built-in' },
-            {
-                name: 'python_report',
-                description: 'Create a report.',
-                category: 'python-script',
-                sourceName: 'report.py'
-            }
+            { name: 'search_history', description: 'Search history.' },
+            { name: 'get_board_card', description: 'Read a board card.' }
         ]
     };
     controller.nodes = {
@@ -56,7 +51,8 @@ test('Local MCP tools render Python scripts in their own section', () => {
 
     controller.renderLocalToolList();
 
-    assert.match(html, /Built-in tools[\s\S]*search_history/);
-    assert.match(html, /Python script tools[\s\S]*python_report[\s\S]*report\.py/);
-    assert.ok(html.indexOf('Built-in tools') < html.indexOf('Python script tools'));
+    assert.match(html, /search_history/);
+    assert.match(html, /mcp-tool-item selected" data-tool="get_board_card"/);
+    assert.match(html, /Read a board card/);
+    assert.doesNotMatch(html, /Python script tools/);
 });

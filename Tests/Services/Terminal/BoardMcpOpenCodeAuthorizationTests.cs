@@ -13,7 +13,7 @@ public sealed class BoardMcpOpenCodeAuthorizationTests
     [InlineData(LLM.Glm53)]
     [InlineData(LLM.DeepSeekV4Pro)]
     [InlineData(LLM.KimiK3)]
-    public void AppliesOnlyTheThirteenExactBoardToolsWithoutChangingProxyConfig(LLM llm)
+    public void AppliesOnlyBoardToolsWithoutChangingProxyConfig(LLM llm)
     {
         var environment = new Dictionary<string, string>
         {
@@ -24,9 +24,12 @@ public sealed class BoardMcpOpenCodeAuthorizationTests
         BoardMcpOpenCodeAuthorization.Apply(llm, environment);
 
         var permissions = JsonNode.Parse(environment[BoardMcpOpenCodeAuthorization.PermissionVariable])!.AsObject();
-        Assert.Equal(13, permissions.Count);
+        Assert.Equal(BoardMcpAuthorization.ToolNames.Count, permissions.Count);
         foreach (var tool in BoardMcpAuthorization.ToolNames)
             Assert.Equal("allow", permissions["viberails-mcp_" + tool]!.GetValue<string>());
+        Assert.False(permissions.ContainsKey("viberails-mcp_*"));
+        Assert.False(permissions.ContainsKey("viberails-mcp_python_script_signing_help"));
+        Assert.False(permissions.ContainsKey("viberails-mcp_search_history"));
         Assert.Equal("{\"provider\":{\"existing\":{}}}", environment["OPENCODE_CONFIG_CONTENT"]);
     }
 

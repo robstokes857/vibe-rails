@@ -11,8 +11,6 @@ public record McpToolInfo(
     string? Title = null,
     JsonElement? InputSchema = null,
     JsonElement? ReturnSchema = null,
-    string? Category = null,
-    string? SourceName = null,
     McpToolAnnotationsInfo? Annotations = null);
 
 /// <summary>

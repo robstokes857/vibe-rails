@@ -1,5 +1,20 @@
 # API authentication coverage
 
+Python MCP removal amendment (2026-09-18): custom Python tools and
+`python_script_signing_help` are no longer registered in either MCP transport. Removed
+`GET|PUT|DELETE /api/v1/python-scripts/mcp`; ordinary signed-script authoring and execution
+remain. This is an owner-requested feature removal. Board launches use exact per-tool
+grants for the 14 Board tools, with no server-wide approval rule.
+
+Route enumeration now finds **205 mapped surfaces**, **193 under `/api/v1`**, including
+**31 board routes** and **13 Python-script routes**. These totals supersede the earlier
+amendment totals below. Both mandatory listener searches were repeated: the main Kestrel
+host, non-serving port probe, and test-only Kestrel hosts were the only matches; the
+cross-runtime search had no matches. No listener, middleware, or credential rule changed.
+This amendment is a capability-removal check, not a new full authentication audit.
+Validation: 415 targeted backend tests passed (one skipped), covering Board, Python scripts,
+MCP, launch grants, and authentication middleware; 163 affected frontend tests passed.
+
 Audit date: 2026-09-15 (route inventory amended 2026-09-17: +2 board note routes, both under
 `/api/v1` and therefore behind both credentials by construction — **207 mapped surfaces**,
 **195 under `/api/v1`**; the rest of the reconciliation below is unchanged).
@@ -23,6 +38,10 @@ added: description history and attachment content downloads. A third, explicit a
 was added and then **removed** on 2026-09-15 — see the Kanban board section for why. The inventory
 is **205 mapped surfaces**, **193 under `/api/v1`**, including **25 board routes**. Both surviving
 additions require both credentials and server-derived project scope.
+Multi-board amendment (2026-09-18, VB-11): four board-management routes (`/api/v1/board/boards`
+list/create, rename, delete) bring the inventory to **209 mapped surfaces**, **197 under
+`/api/v1`**, **29 board routes**. Same middleware, same server-derived project scope; a board id
+in a query string or body is resolved inside that project only.
 The combined board/terminal/CLI-authorization/authentication regression suite passed **437 tests**. Route
 enumeration and both mandatory listener searches were repeated: only the existing main
 Kestrel listener, non-serving port probe, and test-only hosts matched; the cross-runtime
@@ -33,7 +52,7 @@ Board MCP authorization amendment (2026-09-14): Board **Start work** explicitly 
 default-false `AuthorizeBoardTools` launch field, including when a saved environment is
 selected. The authenticated terminal-start API forwards this explicit choice; card text,
 titles and environment names cannot enable it. `BoardMcpAuthorization` enumerates exactly
-nine Board tools, with no server wildcard, unrelated MCP tools, dynamic Python tools, global
+fourteen Board tools (as of 2026-09-18), with no server wildcard, unrelated MCP tools, dynamic Python tools, global
 approval-policy change or sandbox bypass. Codex, Claude, Copilot and Grok receive per-tool
 argv grants; OpenCode and its variants receive per-tool `OPENCODE_PERMISSION` entries.
 The latter retains unrelated inherited rules and conservatively skips matching inherited
@@ -582,16 +601,13 @@ inventory changed — the removal deleted routes, it did not alter any authentic
 - `GET /api/v1/projects/name`
 - `PUT /api/v1/projects/name`
 
-### Python scripts (16)
+### Python scripts (13)
 
 - `GET /api/v1/python-scripts`
 - `POST /api/v1/python-scripts/pin`
 - `POST /api/v1/python-scripts/approve`
 - `POST /api/v1/python-scripts/revoke`
 - `POST /api/v1/python-scripts/run`
-- `GET /api/v1/python-scripts/mcp`
-- `PUT /api/v1/python-scripts/mcp`
-- `DELETE /api/v1/python-scripts/mcp`
 - `POST /api/v1/python-scripts/run/interactive` — mapped only by an active root-backend process.
 - `GET /api/v1/python-scripts/runs`
 - `GET /api/v1/python-scripts/content`
@@ -623,13 +639,21 @@ transcript text out of messages and exception text; do not rely on the Logs view
 hidden. `Tests/Routes/InternalToolsRoutesTests.cs` pins the two-credential requirement, the
 whitelist rejection of path-like sources, and the absence of mutating verbs.
 
-### Kanban board (25; active root backend only)
+### Kanban board (31; active root backend only)
 
 All mapped by `BoardRoutes.Map` under `if (isActiveRootBackend)`; every path contains `/api/`,
 so both credentials are enforced by the middleware with no route-level registration. The
 project is always `ParserConfigs.GetRootPath()` — never a value from the request — so a caller
 cannot read or write another project's board through this surface.
 
+- `GET /api/v1/board/boards`, `POST /api/v1/board/boards`, `PUT /api/v1/board/boards/{boardId}`,
+  `DELETE /api/v1/board/boards/{boardId}` — boards (2026-09-18). A project holds one or more
+  boards (sprints, sub-projects); every lane belongs to one and a card belongs to a board through
+  its lane. Card keys stay per project. Deleting a board deletes its lanes and cards; the last
+  board is refused (409). `GET …/columns` and `GET …/cards` take `?boardId=`, and the create-lane,
+  reorder and create-card bodies take `boardId`; omitted, the project's first board is meant, so
+  every pre-board client reads exactly what it did before. A board id is looked up within the
+  current project only — an id from another project is a 400, never a cross-project read.
 - `GET /api/v1/board/columns`, `POST /api/v1/board/columns`, `PUT /api/v1/board/columns/order`,
   `PUT /api/v1/board/columns/{columnId}`, `DELETE /api/v1/board/columns/{columnId}` — lanes.
 - `GET /api/v1/board/cards`, `POST /api/v1/board/cards`, `GET /api/v1/board/cards/{card}`,

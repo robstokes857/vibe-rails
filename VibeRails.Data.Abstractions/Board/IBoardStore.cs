@@ -2,15 +2,31 @@ using VibeRails.DTOs;
 namespace VibeRails.Services.Board;
 public partial interface IBoardStore
 {
+    // Boards. A project always has at least one; every column belongs to exactly one. Methods
+    // that take an optional boardId (after the token, house style) treat null as the project's
+    // default board — the first by position — so single-board callers and tests read unchanged.
+    Task<IReadOnlyList<BoardRecord>> GetBoardsAsync(string projectPath, CancellationToken cancellationToken = default);
+    Task<BoardRecord?> GetBoardAsync(string projectPath, string boardId, CancellationToken cancellationToken = default);
+    /// <summary>Creates a board with the default lanes. Position is appended.</summary>
+    Task<BoardRecord> CreateBoardAsync(string projectPath, string name, CancellationToken cancellationToken = default);
+    Task<BoardRecord?> RenameBoardAsync(string projectPath, string boardId, string name, CancellationToken cancellationToken = default);
+    /// <summary>Deletes the board with its lanes and cards. Refuses the project's last board.</summary>
+    Task<BoardDeleteResult?> DeleteBoardAsync(string projectPath, string boardId, CancellationToken cancellationToken = default);
+
+    /// <summary>Seeds the default board and its lanes when the project has none. True when it did.</summary>
     Task<bool> EnsureDefaultColumnsAsync(string projectPath, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<BoardColumnRecord>> GetColumnsAsync(string projectPath, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<BoardColumnRecord>> GetColumnsAsync(string projectPath, CancellationToken cancellationToken = default, string? boardId = null);
+    /// <summary>Every lane of every board in the project, ordered by board then lane position.</summary>
+    Task<IReadOnlyList<BoardColumnRecord>> GetAllColumnsAsync(string projectPath, CancellationToken cancellationToken = default);
+    /// <summary>Card count per board id; boards without cards are absent.</summary>
+    Task<IReadOnlyDictionary<string, int>> CountCardsByBoardAsync(string projectPath, CancellationToken cancellationToken = default);
     Task<BoardColumnRecord?> GetColumnAsync(string projectPath, string columnId, CancellationToken cancellationToken = default);
-    Task<BoardColumnRecord> CreateColumnAsync(string projectPath, string name, int? wipLimit, string color, CancellationToken cancellationToken = default);
+    Task<BoardColumnRecord> CreateColumnAsync(string projectPath, string name, int? wipLimit, string color, CancellationToken cancellationToken = default, string? boardId = null);
     Task<BoardColumnRecord?> UpdateColumnAsync(string projectPath, string columnId, string? name, int? wipLimit, bool clearWipLimit, string? color, CancellationToken cancellationToken = default);
     Task<BoardColumnDeleteResult?> DeleteColumnAsync(string projectPath, string columnId, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<BoardColumnRecord>> ReorderColumnsAsync(string projectPath, IReadOnlyList<string> orderedIds, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<BoardColumnRecord>> ReorderColumnsAsync(string projectPath, IReadOnlyList<string> orderedIds, CancellationToken cancellationToken = default, string? boardId = null);
 
-    Task<IReadOnlyList<BoardCardRecord>> GetCardsAsync(string projectPath, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<BoardCardRecord>> GetCardsAsync(string projectPath, CancellationToken cancellationToken = default, string? boardId = null);
     Task<BoardCardRecord?> FindCardAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
     Task<BoardCardDetailRecord?> GetCardDetailAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
     Task<BoardCardRecord> CreateCardAsync(string projectPath, NewBoardCard card, CancellationToken cancellationToken = default);

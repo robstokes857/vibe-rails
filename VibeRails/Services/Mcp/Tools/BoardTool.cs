@@ -23,23 +23,62 @@ namespace VibeRails.Services.Mcp.Tools;
 /// </summary>
 [McpServerToolType]
 public sealed class BoardTool(
-    IBoardService board,
+    IBoardService service,
     IBoardProjectResolver projects,
     IBoardStore store)
 {
     private const string NoCardHint =
         "FAIL: no card given and this terminal is not linked to one. Pass the card key, e.g. card=\"VB-12\" (see list_board_cards).";
 
-    [McpServerTool, Description("List the lanes (columns) of this project's VibeRails kanban board with their WIP limits and card counts.")]
-    public async Task<string> ListBoardColumns(CancellationToken cancellationToken = default)
+    private const string BoardArgumentHelp =
+        "Board name or id (see list_boards). Optional: defaults to the board of the card this terminal was launched for, else the project's first board.";
+
+    [McpServerTool, Description("List this project's kanban boards (a project can have several: sprints, sub-projects) with their ids, lanes and card counts. Card keys like VB-12 are unique across the whole project, so a key never needs a board.")]
+    public async Task<string> ListBoards(CancellationToken cancellationToken = default)
     {
         try
         {
             var project = await projects.ResolveAsync(cancellationToken);
-            var columns = await board.GetColumnsAsync(project, cancellationToken);
-            var cards = await board.GetCardsAsync(project, cancellationToken);
+            var boards = await service.GetBoardsAsync(project, cancellationToken);
+            var current = await ResolveBoardAsync(project, null, cancellationToken);
             var builder = new StringBuilder();
-            builder.Append("Board lanes for ").Append(project).Append(":\n");
+            builder.Append("Boards for ").Append(project).Append(":\n");
+            foreach (var board in boards.Boards.OrderBy(b => b.Position))
+            {
+                builder.Append("- ").Append(board.Name).Append(" (id ").Append(board.Id).Append(", ")
+                    .Append(board.CardCount).Append(" card").Append(board.CardCount == 1 ? "" : "s");
+                if (board.Columns.Count > 0)
+                    builder.Append("; lanes: ").Append(string.Join(" → ", board.Columns.OrderBy(c => c.Position).Select(c => c.Name)));
+                if (string.Equals(board.Id, current.BoardId, StringComparison.Ordinal)
+                    || (current.BoardId is null && board.Position == boards.Boards.Min(b => b.Position)))
+                    builder.Append("; current");
+                builder.Append(")\n");
+            }
+            return builder.ToString().TrimEnd();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return Fail("list the boards", ex);
+        }
+    }
+
+    [McpServerTool, Description("List the lanes (columns) of a VibeRails kanban board with their WIP limits and card counts. Omit board for the board of the card this terminal was launched for.")]
+    public async Task<string> ListBoardColumns(
+        [Description(BoardArgumentHelp)] string? board = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var project = await projects.ResolveAsync(cancellationToken);
+            var target = await ResolveBoardAsync(project, board, cancellationToken);
+            if (target.Error is not null)
+                return target.Error;
+            var columns = await service.GetColumnsAsync(project, cancellationToken, target.BoardId);
+            var cards = await service.GetCardsAsync(project, cancellationToken, target.BoardId);
+            var builder = new StringBuilder();
+            builder.Append("Board lanes for ").Append(project);
+            if (target.BoardName is not null) builder.Append(" (board ").Append(target.BoardName).Append(')');
+            builder.Append(":\n");
             foreach (var column in columns.Columns.OrderBy(c => c.Position))
             {
                 var count = cards.Cards.Count(c => c.ColumnId == column.Id);
@@ -62,17 +101,21 @@ public sealed class BoardTool(
         [Description("Only cards in this lane (name or id). Optional.")] string? column = null,
         [Description("Only cards assigned to this LLM picker key, e.g. base:claude or env:7:codex. Optional.")] string? assignee = null,
         [Description("Only cards of this type: task | bug | feature | research-spike | chore. Optional.")] string? type = null,
+        [Description(BoardArgumentHelp)] string? board = null,
         CancellationToken cancellationToken = default)
     {
         try
         {
             var project = await projects.ResolveAsync(cancellationToken);
-            var columns = (await board.GetColumnsAsync(project, cancellationToken)).Columns.ToDictionary(c => c.Id, c => c);
-            var cards = (await board.GetCardsAsync(project, cancellationToken)).Cards.AsEnumerable();
+            var target = await ResolveBoardAsync(project, board, cancellationToken);
+            if (target.Error is not null)
+                return target.Error;
+            var columns = (await service.GetColumnsAsync(project, cancellationToken, target.BoardId)).Columns.ToDictionary(c => c.Id, c => c);
+            var cards = (await service.GetCardsAsync(project, cancellationToken, target.BoardId)).Cards.AsEnumerable();
 
             if (!string.IsNullOrWhiteSpace(column))
             {
-                var lane = await board.FindColumnAsync(project, column, cancellationToken);
+                var lane = await service.FindColumnAsync(project, column, cancellationToken, target.BoardId);
                 if (lane is null)
                     return $"FAIL: lane not found: {column}. Use list_board_columns to see the lanes.";
                 cards = cards.Where(c => c.ColumnId == lane.Id);
@@ -123,7 +166,7 @@ public sealed class BoardTool(
             var target = await ResolveCardAsync(card, cancellationToken);
             if (target.Error is not null)
                 return target.Error;
-            var detail = await board.GetCardAsync(target.Project, target.CardId!, cancellationToken);
+            var detail = await service.GetCardAsync(target.Project, target.CardId!, cancellationToken);
             if (detail is null)
                 return $"FAIL: card not found: {card}";
             // Reading deliberately does not link. A session can read any card while browsing, and
@@ -133,16 +176,18 @@ public sealed class BoardTool(
             // carries the reader's own card, so this card shows who read it (see
             // BoardStore.RecordDescriptionSessionAsync). Writes below still link.
             await TryRecordRevisionAsync(target.Project, detail.Id, detail.DescriptionRevision, "read", cancellationToken);
-            var lanes = (await board.GetColumnsAsync(target.Project, cancellationToken)).Columns.OrderBy(c => c.Position).ToList();
+            var lanes = (await service.GetColumnsAsync(target.Project, cancellationToken, BoardService.NormalizeBoardId(detail.BoardId))).Columns.OrderBy(c => c.Position).ToList();
             var lane = lanes.FirstOrDefault(c => c.Id == detail.ColumnId);
+            var boardName = string.IsNullOrEmpty(detail.BoardId) ? null
+                : (await store.GetBoardAsync(target.Project, detail.BoardId, cancellationToken))?.Name;
             var outcomes = new Dictionary<string, (BoardSessionOutcomeRecord? Outcome, BoardCommentDto? LastComment)>(StringComparer.Ordinal);
             foreach (var session in detail.Sessions)
             {
-                var outcome = await board.FindSessionOutcomeAsync(session.Id, cancellationToken);
+                var outcome = await service.FindSessionOutcomeAsync(session.Id, cancellationToken);
                 var last = detail.Comments.LastOrDefault(c => string.Equals(c.Author.SessionId, session.Id, StringComparison.Ordinal));
                 outcomes[session.Id] = (outcome, last);
             }
-            return FormatCard(detail, lane?.Name ?? detail.ColumnId, lanes.Select(c => c.Name).ToList(), outcomes, sinceUtc);
+            return FormatCard(detail, lane?.Name ?? detail.ColumnId, lanes.Select(c => c.Name).ToList(), outcomes, sinceUtc, boardName);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -161,7 +206,7 @@ public sealed class BoardTool(
             var target = await ResolveCardAsync(card, cancellationToken);
             if (target.Error is not null)
                 return target.Error;
-            var history = await board.GetDescriptionHistoryAsync(target.Project, target.CardId!, cancellationToken);
+            var history = await service.GetDescriptionHistoryAsync(target.Project, target.CardId!, cancellationToken);
             if (history is null)
                 return $"FAIL: card not found: {card}";
             if (revision is int wanted)
@@ -199,7 +244,7 @@ public sealed class BoardTool(
         {
             var target = await ResolveCardAsync(card, cancellationToken);
             if (target.Error is not null) return target.Error;
-            var attachment = await board.GetAttachmentContentAsync(target.Project, target.CardId!, attachmentId, cancellationToken);
+            var attachment = await service.GetAttachmentContentAsync(target.Project, target.CardId!, attachmentId, cancellationToken);
             if (attachment is null) return "FAIL: attachment not found on this card.";
             var text = BoardService.ReadAttachmentText(attachment, offset, maxCharacters);
             return $"Attachment: {attachment.Attachment.Name} ({attachment.Attachment.Id}, {attachment.Attachment.Bytes} bytes)\n"
@@ -209,7 +254,7 @@ public sealed class BoardTool(
         catch (Exception ex) when (ex is not OperationCanceledException) { return Fail("read the card attachment", ex); }
     }
 
-    [McpServerTool, Description("Create a new kanban card on this project's board. Returns the new card's key.")]
+    [McpServerTool, Description("Create a new kanban card on this project's board. Returns the new card's key. Omit board to create it on the board of the card this terminal was launched for.")]
     public async Task<string> CreateBoardCard(
         [Description("Card title (required).")] string title,
         [Description("Longer description of the work. Optional.")] string? description = null,
@@ -217,26 +262,31 @@ public sealed class BoardTool(
         [Description("critical | high | medium | low. Defaults to medium.")] string? priority = null,
         [Description("Comma-separated tags. Optional.")] string? tags = null,
         [Description("task | bug | feature | research-spike | chore. Defaults to task.")] string? type = null,
+        [Description(BoardArgumentHelp)] string? board = null,
         CancellationToken cancellationToken = default)
     {
         try
         {
             var project = await projects.ResolveAsync(cancellationToken);
+            var target = await ResolveBoardAsync(project, board, cancellationToken);
+            if (target.Error is not null)
+                return target.Error;
             string? columnId = null;
             if (!string.IsNullOrWhiteSpace(column))
             {
-                var lane = await board.FindColumnAsync(project, column, cancellationToken);
+                var lane = await service.FindColumnAsync(project, column, cancellationToken, target.BoardId);
                 if (lane is null)
                     return $"FAIL: lane not found: {column}. Use list_board_columns to see the lanes.";
                 columnId = lane.Id;
             }
-            var created = await board.CreateCardAsync(project, new CreateBoardCardRequest(
+            var created = await service.CreateCardAsync(project, new CreateBoardCardRequest(
                 Title: title,
                 ColumnId: columnId,
                 Description: description,
                 Priority: priority,
                 Tags: SplitTags(tags),
-                Type: type), cancellationToken, await ResolveAuthorAsync(cancellationToken));
+                Type: type,
+                BoardId: target.BoardId), cancellationToken, await ResolveAuthorAsync(cancellationToken));
             await AutoLinkSessionAsync(project, created.Id, cancellationToken);
             await TryRecordRevisionAsync(project, created.Id, created.DescriptionRevision, "updated", cancellationToken);
             return $"Created {created.Key}: {created.Title}";
@@ -278,7 +328,7 @@ public sealed class BoardTool(
                 Tags: tags is null ? null : SplitTags(tags) ?? [],
                 Blocked: blocked,
                 Type: type);
-            var updated = await board.UpdateCardAsync(target.Project, target.CardId!, request, cancellationToken,
+            var updated = await service.UpdateCardAsync(target.Project, target.CardId!, request, cancellationToken,
                 await ResolveAuthorAsync(cancellationToken));
             if (updated is null)
                 return $"FAIL: card not found: {card}";
@@ -309,10 +359,10 @@ public sealed class BoardTool(
             var target = await ResolveCardAsync(card, cancellationToken);
             if (target.Error is not null)
                 return target.Error;
-            var moved = await board.MoveCardAsync(target.Project, target.CardId!, column, position, cancellationToken);
+            var moved = await service.MoveCardAsync(target.Project, target.CardId!, column, position, cancellationToken);
             if (moved is null)
                 return $"FAIL: card not found: {card}";
-            var lane = await board.FindColumnAsync(target.Project, moved.ColumnId, cancellationToken);
+            var lane = await service.FindColumnAsync(target.Project, moved.ColumnId, cancellationToken);
             await AutoLinkSessionAsync(target.Project, moved.Id, cancellationToken);
             return $"Moved {moved.Key} to {lane?.Name ?? moved.ColumnId} (position {moved.Position}).";
         }
@@ -336,7 +386,7 @@ public sealed class BoardTool(
             if (target.Error is not null)
                 return target.Error;
             var author = await ResolveAuthorAsync(cancellationToken);
-            var comment = await board.AddCommentAsync(target.Project, target.CardId!, author, body, cancellationToken);
+            var comment = await service.AddCommentAsync(target.Project, target.CardId!, author, body, cancellationToken);
             if (comment is null)
                 return $"FAIL: card not found: {card}";
             await AutoLinkSessionAsync(target.Project, target.CardId!, cancellationToken);
@@ -362,7 +412,7 @@ public sealed class BoardTool(
             if (target.Error is not null)
                 return target.Error;
             var author = await ResolveAuthorAsync(cancellationToken);
-            var note = await board.AddNoteAsync(target.Project, target.CardId!, author, body, cancellationToken);
+            var note = await service.AddNoteAsync(target.Project, target.CardId!, author, body, cancellationToken);
             if (note is null)
                 return $"FAIL: card not found: {card}";
             await AutoLinkSessionAsync(target.Project, target.CardId!, cancellationToken);
@@ -389,7 +439,7 @@ public sealed class BoardTool(
             var target = await ResolveCardAsync(card, cancellationToken);
             if (target.Error is not null)
                 return target.Error;
-            var notes = await board.GetNotesAsync(target.Project, target.CardId!, cancellationToken);
+            var notes = await service.GetNotesAsync(target.Project, target.CardId!, cancellationToken);
             if (notes is null)
                 return $"FAIL: card not found: {card}";
             var visible = sinceUtc is DateTime s ? notes.Where(n => n.CreatedAt >= s).ToList() : notes;
@@ -421,7 +471,7 @@ public sealed class BoardTool(
             if (target.Error is not null)
                 return target.Error;
             var author = await ResolveAuthorAsync(cancellationToken);
-            var attachment = await board.AddTextAttachmentAsync(target.Project, target.CardId!, name, text, author, cancellationToken);
+            var attachment = await service.AddTextAttachmentAsync(target.Project, target.CardId!, name, text, author, cancellationToken);
             if (attachment is null)
                 return $"FAIL: card not found: {card}";
             await AutoLinkSessionAsync(target.Project, target.CardId!, cancellationToken);
@@ -446,7 +496,7 @@ public sealed class BoardTool(
             var target = await ResolveCardAsync(card, cancellationToken);
             if (target.Error is not null)
                 return target.Error;
-            var commit = await board.LinkCommitAsync(target.Project, target.CardId!, sha, cancellationToken,
+            var commit = await service.LinkCommitAsync(target.Project, target.CardId!, sha, cancellationToken,
                 gitWorkingDirectory: projects.GitWorkingDirectory);
             if (commit is null)
                 return $"FAIL: card not found: {card}";
@@ -465,13 +515,44 @@ public sealed class BoardTool(
 
     private sealed record CardTarget(string Project, string? CardId, string? CardKey, string? Error);
 
+    /// <summary>Null BoardId = the project's default board (the store resolves it); Name is known only for an explicit or launched board.</summary>
+    private sealed record BoardTarget(string? BoardId, string? BoardName, string? Error);
+
+    /// <summary>Explicit board argument first (name or id); otherwise the board of the card this session was launched for.</summary>
+    private async Task<BoardTarget> ResolveBoardAsync(string project, string? boardArgument, CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(boardArgument))
+        {
+            var found = await service.FindBoardAsync(project, boardArgument, cancellationToken);
+            return found is null
+                ? new BoardTarget(null, null, $"FAIL: board not found: {boardArgument.Trim()}. Use list_boards to see the boards.")
+                : new BoardTarget(found.Id, found.Name, null);
+        }
+
+        if (projects.CurrentSessionId is { } sessionId)
+        {
+            var link = await store.FindSessionLinkAsync(sessionId, cancellationToken);
+            if (link is not null && string.Equals(link.ProjectPath, project, StringComparison.OrdinalIgnoreCase))
+            {
+                var linked = await service.FindCardAsync(link.ProjectPath, link.CardId, cancellationToken);
+                if (linked is not null && !string.IsNullOrEmpty(linked.BoardId))
+                {
+                    var boardRecord = await store.GetBoardAsync(project, linked.BoardId, cancellationToken);
+                    if (boardRecord is not null)
+                        return new BoardTarget(boardRecord.Id, boardRecord.Name, null);
+                }
+            }
+        }
+        return new BoardTarget(null, null, null);
+    }
+
     /// <summary>Explicit card argument first; otherwise the card this session was launched for.</summary>
     private async Task<CardTarget> ResolveCardAsync(string? card, CancellationToken cancellationToken)
     {
         var project = await projects.ResolveAsync(cancellationToken);
         if (!string.IsNullOrWhiteSpace(card))
         {
-            var found = await board.FindCardAsync(project, card, cancellationToken);
+            var found = await service.FindCardAsync(project, card, cancellationToken);
             return found is null
                 ? new CardTarget(project, null, null, $"FAIL: card not found on this project's board: {card}. Use list_board_cards to see the keys.")
                 : new CardTarget(project, found.Id, found.Key, null);
@@ -482,7 +563,7 @@ public sealed class BoardTool(
             var link = await store.FindSessionLinkAsync(sessionId, cancellationToken);
             if (link is not null)
             {
-                var linked = await board.FindCardAsync(link.ProjectPath, link.CardId, cancellationToken);
+                var linked = await service.FindCardAsync(link.ProjectPath, link.CardId, cancellationToken);
                 if (linked is not null)
                     return new CardTarget(link.ProjectPath, linked.Id, linked.Key, null);
             }
@@ -562,7 +643,8 @@ public sealed class BoardTool(
         string laneName,
         IReadOnlyList<string>? laneNames = null,
         IReadOnlyDictionary<string, (BoardSessionOutcomeRecord? Outcome, BoardCommentDto? LastComment)>? sessionOutcomes = null,
-        DateTime? since = null)
+        DateTime? since = null,
+        string? boardName = null)
     {
         var builder = new StringBuilder();
         builder.Append(card.Key).Append(": ").Append(card.Title).Append('\n');
@@ -574,6 +656,8 @@ public sealed class BoardTool(
         if (card.Blocked) builder.Append(" · BLOCKED");
         if (card.Tags.Count > 0) builder.Append(" · Tags: ").Append(string.Join(", ", card.Tags));
         builder.Append('\n');
+        if (!string.IsNullOrWhiteSpace(boardName))
+            builder.Append("Board: ").Append(boardName).Append('\n');
         if (laneNames is { Count: > 0 })
             builder.Append("Lanes: ").Append(string.Join(" → ", laneNames)).Append('\n');
         builder.Append("Created ").Append(card.CreatedAt.ToString("u", CultureInfo.InvariantCulture))

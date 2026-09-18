@@ -40,6 +40,7 @@ public class McpStdioHostTests
         Assert.Contains(services, d => d.ServiceType == typeof(IUnifiedSearchService));
         Assert.Contains(services, d => d.ServiceType == typeof(IBertV2BgeEmbedder));
         Assert.Contains(services, d => d.ServiceType == typeof(IBertSearchDbService));
+        Assert.DoesNotContain(services, d => d.ServiceType == typeof(VibeRails.Services.PythonScripts.IPythonScriptService));
     }
 
     [Fact]

@@ -283,8 +283,8 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         Assert.Equal("VB-1 · Ship the board", started.Title);
         Assert.True(started.AuthorizeBoardTools);
         Assert.StartsWith("You are working on kanban card VB-1", started.InitialPrompt);
-        // Lane names ride inside the fenced card block, between the title and the description.
-        Assert.Contains("Title: Ship the board\nLanes: Backlog → Ready → Build → Review → Done\nAll of it.", started.InitialPrompt);
+        // Board and lane names ride inside the fenced card block, between the title and the description.
+        Assert.Contains("Title: Ship the board\nBoard: Main\nLanes: Backlog → Ready → Build → Review → Done\nAll of it.", started.InitialPrompt);
         // The environment's template is appended unresolved — resolution happens once, in the tab child.
         Assert.EndsWith("\n\nRead AGENTS.md. {{datetime}}", started.InitialPrompt);
 
@@ -309,6 +309,81 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         using var duplicateBody = await ReadJsonAsync(duplicate);
         Assert.Contains("already running", duplicateBody.RootElement.GetProperty("error").GetString());
         _tabHost.Verify(t => t.CreateTabAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Boards_RoundTrip_AndScopeLanesAndCards()
+    {
+        using var initial = await GetJsonAsync("/api/v1/board/boards");
+        var main = Assert.Single(initial.RootElement.GetProperty("boards").EnumerateArray());
+        var mainId = main.GetProperty("id").GetString()!;
+        Assert.Equal("Main", main.GetProperty("name").GetString());
+        Assert.Equal(5, main.GetProperty("columns").GetArrayLength());
+        Assert.Equal(0, main.GetProperty("cardCount").GetInt32());
+
+        using var blank = await PostJsonAsync("/api/v1/board/boards", new { name = "  " });
+        Assert.Equal(HttpStatusCode.BadRequest, blank.StatusCode);
+        using var created = await PostJsonAsync("/api/v1/board/boards", new { name = " Sprint 2 " });
+        created.EnsureSuccessStatusCode();
+        using var createdDocument = await ReadJsonAsync(created);
+        var sprintId = createdDocument.RootElement.GetProperty("id").GetString()!;
+        Assert.Equal("Sprint 2", createdDocument.RootElement.GetProperty("name").GetString());
+        Assert.Equal(1, createdDocument.RootElement.GetProperty("position").GetInt32());
+        var sprintLanes = createdDocument.RootElement.GetProperty("columns");
+        Assert.Equal(5, sprintLanes.GetArrayLength());
+        Assert.Equal(sprintId, sprintLanes[0].GetProperty("boardId").GetString());
+
+        // Lanes and cards are read per board; omitting the board means the first one.
+        using var sprintColumns = await GetJsonAsync($"/api/v1/board/columns?boardId={sprintId}");
+        Assert.Equal(sprintLanes[0].GetProperty("id").GetString(), sprintColumns.RootElement.GetProperty("columns")[0].GetProperty("id").GetString());
+        using var defaultColumns = await GetJsonAsync("/api/v1/board/columns");
+        Assert.Equal(mainId, defaultColumns.RootElement.GetProperty("columns")[0].GetProperty("boardId").GetString());
+        using var unknownBoard = await SendAsync(HttpMethod.Get, "/api/v1/board/columns?boardId=brd_nope", "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.BadRequest, unknownBoard.StatusCode);
+
+        using var onSprint = await PostJsonAsync("/api/v1/board/cards", new { title = "Sprint work", boardId = sprintId });
+        using var onSprintDocument = await ReadJsonAsync(onSprint);
+        Assert.Equal("VB-1", onSprintDocument.RootElement.GetProperty("key").GetString());
+        Assert.Equal(sprintId, onSprintDocument.RootElement.GetProperty("boardId").GetString());
+        using var onMain = await PostJsonAsync("/api/v1/board/cards", new { title = "Main work" });
+        using var onMainDocument = await ReadJsonAsync(onMain);
+        Assert.Equal("VB-2", onMainDocument.RootElement.GetProperty("key").GetString());
+        Assert.Equal(mainId, onMainDocument.RootElement.GetProperty("boardId").GetString());
+
+        using var sprintCards = await GetJsonAsync($"/api/v1/board/cards?boardId={sprintId}");
+        Assert.Equal("VB-1", Assert.Single(sprintCards.RootElement.GetProperty("cards").EnumerateArray()).GetProperty("key").GetString());
+        using var mainCards = await GetJsonAsync("/api/v1/board/cards");
+        Assert.Equal("VB-2", Assert.Single(mainCards.RootElement.GetProperty("cards").EnumerateArray()).GetProperty("key").GetString());
+        // A key resolves without naming a board.
+        using var byKey = await GetJsonAsync("/api/v1/board/cards/VB-1");
+        Assert.Equal(sprintId, byKey.RootElement.GetProperty("boardId").GetString());
+
+        // A lane on the sprint board, and the sprint's lane order.
+        using var lane = await PostJsonAsync("/api/v1/board/columns", new { name = "QA", boardId = sprintId });
+        using var laneDocument = await ReadJsonAsync(lane);
+        Assert.Equal(sprintId, laneDocument.RootElement.GetProperty("boardId").GetString());
+        var order = sprintLanes.EnumerateArray().Select(c => c.GetProperty("id").GetString()!).Reverse().Append(laneDocument.RootElement.GetProperty("id").GetString()!).ToArray();
+        using var reordered = await SendJsonAsync(HttpMethod.Put, "/api/v1/board/columns/order", new { orderedIds = order, boardId = sprintId });
+        reordered.EnsureSuccessStatusCode();
+        using var reorderedDocument = await ReadJsonAsync(reordered);
+        Assert.Equal(order, reorderedDocument.RootElement.GetProperty("columns").EnumerateArray().Select(c => c.GetProperty("id").GetString()));
+
+        using var renamed = await SendJsonAsync(HttpMethod.Put, $"/api/v1/board/boards/{sprintId}", new { name = "Sprint 2 (done)" });
+        using var renamedDocument = await ReadJsonAsync(renamed);
+        Assert.Equal("Sprint 2 (done)", renamedDocument.RootElement.GetProperty("name").GetString());
+        Assert.Equal(1, renamedDocument.RootElement.GetProperty("cardCount").GetInt32());
+        using var renameMissing = await SendJsonAsync(HttpMethod.Put, "/api/v1/board/boards/brd_nope", new { name = "x" });
+        Assert.Equal(HttpStatusCode.NotFound, renameMissing.StatusCode);
+
+        using var deleted = await SendAsync(HttpMethod.Delete, $"/api/v1/board/boards/{sprintId}", "test-session", "test-tab");
+        deleted.EnsureSuccessStatusCode();
+        using var deletedDocument = await ReadJsonAsync(deleted);
+        Assert.Equal(1, deletedDocument.RootElement.GetProperty("deletedCards").GetInt32());
+        Assert.Equal(6, deletedDocument.RootElement.GetProperty("deletedColumns").GetInt32());
+        using var gone = await SendAsync(HttpMethod.Get, "/api/v1/board/cards/VB-1", "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.NotFound, gone.StatusCode);
+        using var last = await SendAsync(HttpMethod.Delete, $"/api/v1/board/boards/{mainId}", "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.Conflict, last.StatusCode);
     }
 
     private async Task<JsonDocument> GetJsonAsync(string path)

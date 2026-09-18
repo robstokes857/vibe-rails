@@ -12,21 +12,24 @@ public partial class CommandServiceTests
     [InlineData("saved-board-env", false)]
     [InlineData(null, true)]
     [InlineData("saved-board-env", true)]
-    public async Task BoardLaunch_CodexGrantsOnlyNamedBoardToolsInLaunchArguments(string? environmentName, bool proxyEnabled)
+    public async Task BoardLaunch_CodexGrantsOnlyBoardToolsInLaunchArguments(string? environmentName, bool proxyEnabled)
     {
         var service = CreateService(codexLlmProxyEnabled: proxyEnabled);
         var prepared = await service.PrepareSessionAsync(LLM.Codex, environmentName,
             ["--config", "approval_policy=\"on-request\"", "--config", "sandbox_mode=\"workspace-write\""],
             initialPrompt: "Read VB-7", sessionId: "board-session", authorizeBoardTools: true);
 
-        var grants = prepared.Argv!.Where(argument => argument.Contains(".approval_mode=")).ToArray();
-        Assert.Equal(13, grants.Length);
+        var grants = prepared.Argv!.Where(argument => argument.Contains("approval_mode=")).ToArray();
+        Assert.Equal(BoardMcpAuthorization.ToolNames.Select(tool =>
+            $"mcp_servers.viberails-mcp.tools.{tool}.approval_mode=\"approve\""), grants);
         Assert.Contains("mcp_servers.viberails-mcp.tools.get_board_card.approval_mode=\"approve\"", grants);
         Assert.Contains("mcp_servers.viberails-mcp.tools.update_board_card.approval_mode=\"approve\"", grants);
-        Assert.All(grants, grant => Assert.StartsWith("mcp_servers.viberails-mcp.tools.", grant));
+        Assert.Contains("mcp_servers.viberails-mcp.tools.list_boards.approval_mode=\"approve\"", grants);
+        Assert.DoesNotContain(prepared.Argv!, arg => arg.Contains("default_tools_approval_mode") || arg.Contains('*'));
+        // The launch keeps its existing approval policy and sandbox settings.
+        Assert.DoesNotContain(prepared.Argv!, arg => arg.StartsWith("approval_policy=\"never\"") || arg.Contains("mcp_servers.") && !arg.Contains("mcp_servers.viberails-mcp."));
         Assert.Contains("approval_policy=\"on-request\"", prepared.Argv!);
         Assert.Contains("sandbox_mode=\"workspace-write\"", prepared.Argv!);
-        Assert.DoesNotContain(prepared.Argv!, arg => arg.Contains("default_tools_approval_mode") || arg.Contains("search_history") || arg.Contains("python_"));
         Assert.DoesNotContain(prepared.SetupCommands, command => command.Contains("approval_mode"));
         Assert.Contains("tools.get_board_card.approval_mode", prepared.LaunchCommand);
         Assert.Equal("Read VB-7", prepared.Argv![^1]);
@@ -65,9 +68,13 @@ public partial class CommandServiceTests
         Assert.Contains("--disallowedTools", prepared.Argv!);
         Assert.Contains("Bash", prepared.Argv!);
         var grant = Assert.Single(prepared.Argv!, arg => arg.StartsWith("--allowedTools="));
+        Assert.Equal(BoardMcpAuthorization.ToolNames.Select(tool => $"mcp__viberails-mcp__{tool}"),
+            grant["--allowedTools=".Length..].Split(','));
         Assert.Contains("mcp__viberails-mcp__get_board_card", grant);
         Assert.Contains("mcp__viberails-mcp__add_board_comment", grant);
+        Assert.Contains("mcp__viberails-mcp__list_boards", grant);
         Assert.DoesNotContain('*', grant);
+        Assert.DoesNotContain("mcp__viberails-mcp", grant["--allowedTools=".Length..].Split(','));
         Assert.Equal("--", prepared.Argv![^2]);
         Assert.Equal("Read VB-7 before working", prepared.Argv[^1]);
         Assert.Contains(" -- ", prepared.LaunchCommand);
@@ -97,7 +104,11 @@ public partial class CommandServiceTests
             initialPrompt: "Read VB-7", authorizeBoardTools: true);
         Assert.Contains(expectedReadGrant, prepared.Argv!);
         Assert.Contains(deny, prepared.Argv!);
-        Assert.Equal(13, prepared.Argv!.Count(arg => arg.StartsWith(llm == LLM.Copilot ? "--allow-tool=" : "--allow=")));
+        var grants = prepared.Argv!.Where(arg => arg.StartsWith(llm == LLM.Copilot ? "--allow-tool=" : "--allow=")).ToList();
+        Assert.Equal(BoardMcpAuthorization.ToolNames.Select(tool => llm == LLM.Copilot
+            ? $"--allow-tool=viberails-mcp({tool})"
+            : $"--allow=MCPTool(viberails-mcp__{tool})"), grants);
+        Assert.DoesNotContain(grants, grant => grant.Contains('*'));
         Assert.DoesNotContain(prepared.Argv!, arg => arg is "--yolo" or "--allow-all" or "--dangerously-skip-permissions");
     }
 
@@ -129,5 +140,19 @@ public partial class CommandServiceTests
         var board = await service.PrepareSessionAsync(LLM.Antigravity, null, ["--mode", "plan"], initialPrompt: "Read VB-7", authorizeBoardTools: true);
         Assert.Equal(regular.Argv, board.Argv);
         Assert.Equal(regular.Environment, board.Environment);
+    }
+
+    [Fact]
+    public void BoardAuthorizationAllowlist_ContainsOnlyReviewedBoardCapabilities()
+    {
+        string[] expected =
+        [
+            "list_boards", "list_board_columns", "list_board_cards", "get_board_card",
+            "get_board_card_history", "get_board_notes", "read_board_attachment",
+            "create_board_card", "update_board_card", "move_board_card", "add_board_comment",
+            "append_board_note", "add_board_attachment", "link_board_commit"
+        ];
+
+        Assert.Equal(expected.Order(), BoardMcpAuthorization.ToolNames.Order());
     }
 }

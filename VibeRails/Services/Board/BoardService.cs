@@ -10,13 +10,21 @@ namespace VibeRails.Services.Board;
 /// </summary>
 public partial interface IBoardService
 {
-    Task<BoardColumnListResponse> GetColumnsAsync(string projectPath, CancellationToken cancellationToken = default);
+    // Boards. boardId null = the project's default (first) board everywhere it is optional.
+    Task<BoardListResponse> GetBoardsAsync(string projectPath, CancellationToken cancellationToken = default);
+    Task<BoardSummaryResponse> CreateBoardAsync(string projectPath, CreateBoardRequest request, CancellationToken cancellationToken = default);
+    Task<BoardSummaryResponse?> UpdateBoardAsync(string projectPath, string boardId, UpdateBoardRequest request, CancellationToken cancellationToken = default);
+    Task<DeleteBoardResponse?> DeleteBoardAsync(string projectPath, string boardId, CancellationToken cancellationToken = default);
+    /// <summary>Resolves an id or case-insensitive name within the project; ambiguous names require an id.</summary>
+    Task<BoardRecord?> FindBoardAsync(string projectPath, string idOrName, CancellationToken cancellationToken = default);
+
+    Task<BoardColumnListResponse> GetColumnsAsync(string projectPath, CancellationToken cancellationToken = default, string? boardId = null);
     Task<BoardColumnResponse> CreateColumnAsync(string projectPath, CreateBoardColumnRequest request, CancellationToken cancellationToken = default);
     Task<BoardColumnResponse?> UpdateColumnAsync(string projectPath, string columnId, UpdateBoardColumnRequest request, CancellationToken cancellationToken = default);
     Task<DeleteBoardColumnResponse?> DeleteColumnAsync(string projectPath, string columnId, CancellationToken cancellationToken = default);
-    Task<BoardColumnListResponse> ReorderColumnsAsync(string projectPath, IReadOnlyList<string> orderedIds, CancellationToken cancellationToken = default);
+    Task<BoardColumnListResponse> ReorderColumnsAsync(string projectPath, IReadOnlyList<string> orderedIds, CancellationToken cancellationToken = default, string? boardId = null);
 
-    Task<BoardCardListResponse> GetCardsAsync(string projectPath, CancellationToken cancellationToken = default);
+    Task<BoardCardListResponse> GetCardsAsync(string projectPath, CancellationToken cancellationToken = default, string? boardId = null);
     Task<BoardCardResponse?> GetCardAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
     Task<BoardCardResponse> CreateCardAsync(string projectPath, CreateBoardCardRequest request, CancellationToken cancellationToken = default, BoardAuthor? author = null);
     Task<BoardCardResponse?> UpdateCardAsync(string projectPath, string idOrKey, UpdateBoardCardRequest request, CancellationToken cancellationToken = default, BoardAuthor? author = null);
@@ -45,8 +53,11 @@ public partial interface IBoardService
     Task<BoardSessionDto?> RenameSessionAsync(string projectPath, string idOrKey, string sessionId, string displayName, CancellationToken cancellationToken = default);
     Task<bool> UnlinkSessionAsync(string projectPath, string idOrKey, string sessionId, CancellationToken cancellationToken = default);
 
-    /// <summary>Resolves a lane by id or (case-insensitive) name within the project.</summary>
-    Task<BoardColumnRecord?> FindColumnAsync(string projectPath, string idOrName, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Resolves a lane: by id anywhere in the project (lane ids are project-unique), else by
+    /// case-insensitive name on the given board (null = the default board).
+    /// </summary>
+    Task<BoardColumnRecord?> FindColumnAsync(string projectPath, string idOrName, CancellationToken cancellationToken = default, string? boardId = null);
     Task<BoardCardRecord?> FindCardAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
 }
 
@@ -64,15 +75,68 @@ public sealed partial class BoardService(
     public const int MaxTagLength = 40;
     public const int MaxAttachmentsPerCard = BoardAttachmentData.MaxAttachmentsPerCard;
     public const int MaxColumnNameLength = 60;
+    public const int MaxBoardNameLength = 60;
     public const int MaxSessionIdLength = 36;
     public static readonly IReadOnlyList<int> AllowedPoints = [1, 2, 3, 5, 8, 13];
 
-    // ------------------------------------------------------------------ columns
+    // ------------------------------------------------------------------ boards
 
-    public async Task<BoardColumnListResponse> GetColumnsAsync(string projectPath, CancellationToken cancellationToken = default)
+    public async Task<BoardListResponse> GetBoardsAsync(string projectPath, CancellationToken cancellationToken = default)
     {
         await store.EnsureDefaultColumnsAsync(projectPath, cancellationToken);
-        var columns = await store.GetColumnsAsync(projectPath, cancellationToken);
+        var boards = await store.GetBoardsAsync(projectPath, cancellationToken);
+        var columns = await store.GetAllColumnsAsync(projectPath, cancellationToken);
+        var counts = await store.CountCardsByBoardAsync(projectPath, cancellationToken);
+        return new BoardListResponse(boards.Select(board => ToDto(board, columns, counts)).ToList());
+    }
+
+    public async Task<BoardSummaryResponse> CreateBoardAsync(string projectPath, CreateBoardRequest request, CancellationToken cancellationToken = default)
+    {
+        var name = NormalizeBoardName(request.Name) ?? throw new BoardValidationException("A board needs a name.");
+        var board = await store.CreateBoardAsync(projectPath, name, cancellationToken);
+        var columns = await store.GetColumnsAsync(projectPath, cancellationToken, board.Id);
+        return ToDto(board, columns, new Dictionary<string, int>());
+    }
+
+    public async Task<BoardSummaryResponse?> UpdateBoardAsync(string projectPath, string boardId, UpdateBoardRequest request, CancellationToken cancellationToken = default)
+    {
+        var name = NormalizeBoardName(request.Name) ?? throw new BoardValidationException("A board needs a name.");
+        var board = await store.RenameBoardAsync(projectPath, boardId, name, cancellationToken);
+        if (board is null)
+            return null;
+        var columns = await store.GetColumnsAsync(projectPath, cancellationToken, board.Id);
+        var counts = await store.CountCardsByBoardAsync(projectPath, cancellationToken);
+        return ToDto(board, columns, counts);
+    }
+
+    public async Task<DeleteBoardResponse?> DeleteBoardAsync(string projectPath, string boardId, CancellationToken cancellationToken = default)
+    {
+        var result = await store.DeleteBoardAsync(projectPath, boardId, cancellationToken);
+        return result is null ? null : new DeleteBoardResponse(true, result.DeletedColumns, result.DeletedCards);
+    }
+
+    public async Task<BoardRecord?> FindBoardAsync(string projectPath, string idOrName, CancellationToken cancellationToken = default)
+    {
+        var wanted = idOrName?.Trim() ?? string.Empty;
+        if (wanted.Length == 0)
+            return null;
+        await store.EnsureDefaultColumnsAsync(projectPath, cancellationToken);
+        var boards = await store.GetBoardsAsync(projectPath, cancellationToken);
+        var byId = boards.FirstOrDefault(b => string.Equals(b.Id, wanted, StringComparison.Ordinal));
+        if (byId is not null)
+            return byId;
+        var matches = boards.Where(b => string.Equals(b.Name, wanted, StringComparison.OrdinalIgnoreCase)).Take(2).ToArray();
+        if (matches.Length > 1)
+            throw new BoardValidationException($"Board name '{wanted}' is ambiguous. Use a board ID from list_boards.");
+        return matches.FirstOrDefault();
+    }
+
+    // ------------------------------------------------------------------ columns
+
+    public async Task<BoardColumnListResponse> GetColumnsAsync(string projectPath, CancellationToken cancellationToken = default, string? boardId = null)
+    {
+        await store.EnsureDefaultColumnsAsync(projectPath, cancellationToken);
+        var columns = await store.GetColumnsAsync(projectPath, cancellationToken, boardId);
         return new BoardColumnListResponse(columns.Select(ToDto).ToList());
     }
 
@@ -81,7 +145,8 @@ public sealed partial class BoardService(
         var name = NormalizeColumnName(request.Name) ?? "New lane";
         var wip = IsNoLimit(request.WipLimit) ? null : NormalizeWip(request.WipLimit);
         var color = NormalizeColor(request.Color) ?? "#64748b";
-        var column = await store.CreateColumnAsync(projectPath, name, wip, color, cancellationToken);
+        await store.EnsureDefaultColumnsAsync(projectPath, cancellationToken);
+        var column = await store.CreateColumnAsync(projectPath, name, wip, color, cancellationToken, NormalizeBoardId(request.BoardId));
         return ToDto(column);
     }
 
@@ -104,28 +169,31 @@ public sealed partial class BoardService(
         return result is null ? null : new DeleteBoardColumnResponse(true, result.MovedToColumnId, result.MovedCards);
     }
 
-    public async Task<BoardColumnListResponse> ReorderColumnsAsync(string projectPath, IReadOnlyList<string> orderedIds, CancellationToken cancellationToken = default)
+    public async Task<BoardColumnListResponse> ReorderColumnsAsync(string projectPath, IReadOnlyList<string> orderedIds, CancellationToken cancellationToken = default, string? boardId = null)
     {
-        var columns = await store.ReorderColumnsAsync(projectPath, orderedIds, cancellationToken);
+        var columns = await store.ReorderColumnsAsync(projectPath, orderedIds, cancellationToken, NormalizeBoardId(boardId));
         return new BoardColumnListResponse(columns.Select(ToDto).ToList());
     }
 
-    public async Task<BoardColumnRecord?> FindColumnAsync(string projectPath, string idOrName, CancellationToken cancellationToken = default)
+    public async Task<BoardColumnRecord?> FindColumnAsync(string projectPath, string idOrName, CancellationToken cancellationToken = default, string? boardId = null)
     {
         var wanted = idOrName?.Trim() ?? string.Empty;
         if (wanted.Length == 0)
             return null;
         await store.EnsureDefaultColumnsAsync(projectPath, cancellationToken);
-        var columns = await store.GetColumnsAsync(projectPath, cancellationToken);
-        return columns.FirstOrDefault(c => string.Equals(c.Id, wanted, StringComparison.Ordinal))
-            ?? columns.FirstOrDefault(c => string.Equals(c.Name, wanted, StringComparison.OrdinalIgnoreCase));
+        var everywhere = await store.GetAllColumnsAsync(projectPath, cancellationToken);
+        var byId = everywhere.FirstOrDefault(c => string.Equals(c.Id, wanted, StringComparison.Ordinal));
+        if (byId is not null)
+            return byId;
+        var columns = await store.GetColumnsAsync(projectPath, cancellationToken, NormalizeBoardId(boardId));
+        return columns.FirstOrDefault(c => string.Equals(c.Name, wanted, StringComparison.OrdinalIgnoreCase));
     }
 
     // ------------------------------------------------------------------ cards
 
-    public async Task<BoardCardListResponse> GetCardsAsync(string projectPath, CancellationToken cancellationToken = default)
+    public async Task<BoardCardListResponse> GetCardsAsync(string projectPath, CancellationToken cancellationToken = default, string? boardId = null)
     {
-        var cards = await store.GetCardsAsync(projectPath, cancellationToken);
+        var cards = await store.GetCardsAsync(projectPath, cancellationToken, NormalizeBoardId(boardId));
         var live = await liveSessions.GetLiveSessionsAsync(cancellationToken);
         var activeByCard = new Dictionary<string, (string SessionId, string TabId)>(StringComparer.Ordinal);
         if (live.Count > 0)
@@ -169,7 +237,8 @@ public sealed partial class BoardService(
             request.Blocked ?? false,
             NormalizeBaseOptions(NormalizeAssignee(request.Assignee), request.BaseLlmOptions),
             Author: author,
-            Type: NormalizeCardType(request.Type) ?? BoardCardTypes.Default), cancellationToken);
+            Type: NormalizeCardType(request.Type) ?? BoardCardTypes.Default,
+            BoardId: NormalizeBoardId(request.BoardId)), cancellationToken);
         return (await GetCardAsync(projectPath, card.Id, cancellationToken))!;
     }
 
@@ -275,7 +344,8 @@ public sealed partial class BoardService(
         var existing = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
         if (existing is null)
             return null;
-        var column = await FindColumnAsync(projectPath, columnIdOrName, cancellationToken)
+        // A lane name means a lane on the card's own board; an id can move it to another board.
+        var column = await FindColumnAsync(projectPath, columnIdOrName, cancellationToken, NormalizeBoardId(existing.BoardId))
             ?? throw new BoardValidationException($"Lane not found: {columnIdOrName}");
         if (position is < 0)
             throw new BoardValidationException("Position cannot be negative.");
@@ -481,7 +551,7 @@ public sealed partial class BoardService(
             detail.Sessions.Select(s => ToDto(s, live)).ToList(),
             detail.Attachments.Select(ToDto).ToList(),
             detail.Card.DescriptionRevision, detail.Card.BaseLlmOptions, detail.Card.DescriptionChanged,
-            notes, summary.Type);
+            notes, summary.Type, summary.BoardId);
     }
 
     private async Task<List<BoardCommentDto>> ResolveAuthorsAsync(IReadOnlyList<BoardCommentRecord> rows, Dictionary<string, BoardAuthor?> authors, CancellationToken cancellationToken)
@@ -508,10 +578,15 @@ public sealed partial class BoardService(
     internal static BoardCardSummaryResponse ToSummary(BoardCardRecord card, string? activeSessionId, string? activeTabId) => new(
         card.Id, card.Key, card.ColumnId, card.Position, card.Title, card.Description, card.Assignee, card.Priority,
         card.Points, card.Tags.ToList(), card.Blocked, card.CommentCount, activeSessionId, activeTabId, card.CreatedUtc, card.UpdatedUtc,
-        card.DescriptionRevision, card.BaseLlmOptions, card.Type);
+        card.DescriptionRevision, card.BaseLlmOptions, card.Type, card.BoardId);
 
     internal static BoardColumnResponse ToDto(BoardColumnRecord column) =>
-        new(column.Id, column.Name, column.WipLimit, column.Position, column.Color);
+        new(column.Id, column.Name, column.WipLimit, column.Position, column.Color, column.BoardId);
+
+    internal static BoardSummaryResponse ToDto(BoardRecord board, IReadOnlyList<BoardColumnRecord> columns, IReadOnlyDictionary<string, int> counts) =>
+        new(board.Id, board.Name, board.Position, board.CreatedUtc,
+            counts.TryGetValue(board.Id, out var count) ? count : 0,
+            columns.Where(c => c.BoardId == board.Id).OrderBy(c => c.Position).Select(ToDto).ToList());
 
     internal static BoardCommentDto ToDto(BoardCommentRecord comment) =>
         new(comment.Id, new BoardAuthorDto(comment.Author.Kind, comment.Author.Label, comment.Author.Cli, comment.Author.SessionId), comment.Body, comment.CreatedUtc);
@@ -667,6 +742,20 @@ public sealed partial class BoardService(
             .Take(MaxTags)
             .ToList();
         return cleaned;
+    }
+
+    /// <summary>Empty and whitespace mean "the default board"; anything else is passed through trimmed.</summary>
+    internal static string? NormalizeBoardId(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string? NormalizeBoardName(string? value)
+    {
+        var name = value?.Trim();
+        if (string.IsNullOrEmpty(name))
+            return null;
+        if (name.Length > MaxBoardNameLength)
+            throw new BoardValidationException($"Board name is too long (max {MaxBoardNameLength} characters).");
+        return name;
     }
 
     private static string? NormalizeColumnName(string? value)

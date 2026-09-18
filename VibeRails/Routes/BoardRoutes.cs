@@ -32,10 +32,31 @@ public static class BoardRoutes
             await next(context);
         });
 
+        // ---------------------------------------------------------------- boards
+        //
+        // Lane and card lists take ?board=<id>; omitted means the project's first board, which is
+        // what every client before boards existed was reading.
+
+        app.MapGet("/api/v1/board/boards", (IBoardService board, CancellationToken cancellationToken) =>
+            RunAsync(async () => Results.Ok(await board.GetBoardsAsync(Project(), cancellationToken))))
+            .WithName("GetBoards");
+
+        app.MapPost("/api/v1/board/boards", (IBoardService board, CreateBoardRequest request, CancellationToken cancellationToken) =>
+            RunAsync(async () => Results.Ok(await board.CreateBoardAsync(Project(), request, cancellationToken))))
+            .WithName("CreateBoard");
+
+        app.MapPut("/api/v1/board/boards/{boardId}", (IBoardService board, string boardId, UpdateBoardRequest request, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(await board.UpdateBoardAsync(Project(), boardId, request, cancellationToken), "Board")))
+            .WithName("UpdateBoard");
+
+        app.MapDelete("/api/v1/board/boards/{boardId}", (IBoardService board, string boardId, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(await board.DeleteBoardAsync(Project(), boardId, cancellationToken), "Board")))
+            .WithName("DeleteBoard");
+
         // ---------------------------------------------------------------- columns
 
-        app.MapGet("/api/v1/board/columns", (IBoardService board, CancellationToken cancellationToken) =>
-            RunAsync(async () => Results.Ok(await board.GetColumnsAsync(Project(), cancellationToken))))
+        app.MapGet("/api/v1/board/columns", (IBoardService board, string? boardId, CancellationToken cancellationToken) =>
+            RunAsync(async () => Results.Ok(await board.GetColumnsAsync(Project(), cancellationToken, boardId))))
             .WithName("GetBoardColumns");
 
         app.MapPost("/api/v1/board/columns", (IBoardService board, CreateBoardColumnRequest request, CancellationToken cancellationToken) =>
@@ -44,7 +65,7 @@ public static class BoardRoutes
 
         // Mapped before /{id} so "order" is never taken for a lane id.
         app.MapPut("/api/v1/board/columns/order", (IBoardService board, ReorderBoardColumnsRequest request, CancellationToken cancellationToken) =>
-            RunAsync(async () => Results.Ok(await board.ReorderColumnsAsync(Project(), request.OrderedIds ?? [], cancellationToken))))
+            RunAsync(async () => Results.Ok(await board.ReorderColumnsAsync(Project(), request.OrderedIds ?? [], cancellationToken, request.BoardId))))
             .WithName("ReorderBoardColumns");
 
         app.MapPut("/api/v1/board/columns/{columnId}", (IBoardService board, string columnId, UpdateBoardColumnRequest request, CancellationToken cancellationToken) =>
@@ -57,8 +78,8 @@ public static class BoardRoutes
 
         // ---------------------------------------------------------------- cards
 
-        app.MapGet("/api/v1/board/cards", (IBoardService board, CancellationToken cancellationToken) =>
-            RunAsync(async () => Results.Ok(await board.GetCardsAsync(Project(), cancellationToken))))
+        app.MapGet("/api/v1/board/cards", (IBoardService board, string? boardId, CancellationToken cancellationToken) =>
+            RunAsync(async () => Results.Ok(await board.GetCardsAsync(Project(), cancellationToken, boardId))))
             .WithName("GetBoardCards");
 
         app.MapPost("/api/v1/board/cards", (IBoardService board, CreateBoardCardRequest request, CancellationToken cancellationToken) =>

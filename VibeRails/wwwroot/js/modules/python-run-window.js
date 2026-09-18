@@ -9,10 +9,7 @@ const MAX_EXTRAS = 24;
  * value come back, and nothing spawns a terminal. This is the small-space surface — the
  * PTY tab ("Run in terminal") stays one click away for scripts that need typing or Ctrl+C.
  *
- * Inputs come from two places. A script exposed to MCP has already declared its parameters
- * (name, type, required, default, positional-or-flag); those render as typed fields whose
- * shape is locked, because that declaration is the script's real interface. Anything else
- * — and any extra argument on a script that declares nothing — is a free argument row.
+ * Inputs are argument rows (optional flag plus value) and standard input.
  * Whatever you typed is remembered per script, so re-running is one click.
  *
  * The command line under the inputs is not a decoration: it is literally the payload. The
@@ -62,58 +59,8 @@ export function returnValueOf(run) {
     return prettyJson(stdout) || prettyJson(stdout.split(/\r?\n/).pop());
 }
 
-/** A declared parameter's value as one argv token, or null when it has nothing to say. */
-function parameterValue(parameter, values) {
-    const supplied = values?.[parameter.name];
-    const hasSupplied = supplied !== undefined && supplied !== null && String(supplied).trim() !== '';
-    if (hasSupplied) return String(supplied).trim();
-    if (parameter.defaultValue !== null && parameter.defaultValue !== undefined) {
-        return String(parameter.defaultValue);
-    }
-    return null;
-}
-
-function isTypeValid(type, value) {
-    if (type === 'integer') return /^-?\d+$/.test(value);
-    if (type === 'number') return Number.isFinite(Number(value));
-    if (type === 'boolean') return value === 'true' || value === 'false';
-    return true;
-}
-
-/**
- * The argv the run posts, built the way PythonScriptMcpService.BuildArguments builds it for
- * an agent: declared parameters first (positional values in order, then named options), then
- * the free argument rows. Returns { argv, error } — error is the first thing a human has to
- * fix, phrased for them.
- */
-export function resolveArgv({ parameters = [], values = {}, extras = [] } = {}) {
-    const positional = [];
-    const options = [];
-
-    for (const parameter of parameters) {
-        const value = parameterValue(parameter, values);
-        if (value === null) {
-            if (parameter.required) {
-                return { argv: [], error: `${parameter.name} needs a value.` };
-            }
-            continue;
-        }
-        if (!isTypeValid(parameter.type, value)) {
-            const expected = parameter.type === 'boolean' ? 'true or false' : `a ${parameter.type}`;
-            return { argv: [], error: `${parameter.name} must be ${expected}.` };
-        }
-
-        if (parameter.argumentMode === 'positional') {
-            positional.push(value);
-        } else if (parameter.type === 'boolean') {
-            // A false boolean option is the absence of its flag, exactly as the MCP path
-            // sends it — passing "--verbose false" would reach Python as a stray value.
-            if (value === 'true') options.push(parameter.flag);
-        } else {
-            options.push(parameter.flag, value);
-        }
-    }
-
+/** Builds the argv array from the run window's argument rows. */
+export function resolveArgv({ extras = [] } = {}) {
     const free = [];
     for (const extra of extras) {
         const flag = String(extra?.flag || '').trim();
@@ -122,7 +69,7 @@ export function resolveArgv({ parameters = [], values = {}, extras = [] } = {}) 
         if (value) free.push(value);
     }
 
-    return { argv: [...positional, ...options, ...free], error: null };
+    return { argv: free, error: null };
 }
 
 /** Shell-style quoting, for display only: it shows where one argument ends. */
@@ -137,7 +84,7 @@ export function readRemembered(storage, name) {
         const parsed = raw ? JSON.parse(raw) : null;
         if (!parsed || typeof parsed !== 'object') return null;
         return {
-            values: parsed.values && typeof parsed.values === 'object' ? parsed.values : {},
+            hadDeclaredInputs: Boolean(parsed.hadDeclaredInputs || Object.keys(parsed.values || {}).length),
             extras: Array.isArray(parsed.extras) ? parsed.extras.slice(0, MAX_EXTRAS) : [],
             stdin: typeof parsed.stdin === 'string' ? parsed.stdin : ''
         };
@@ -152,8 +99,7 @@ export class PythonRunWindow {
         this.scripts = scripts;
         this.layer = null;
         this.name = null;
-        this.parameters = [];
-        this.values = {};
+        this.hadDeclaredInputs = false;
         this.extras = [];
         this.stdin = '';
         this.lastRun = null;
@@ -179,11 +125,10 @@ export class PythonRunWindow {
         if (!name) return Promise.resolve(null);
         if (this.layer) this.close();
 
-        const configuration = this.scripts?.mcpConfigurationByScript?.(name) || null;
         this.name = name;
-        this.parameters = Array.isArray(configuration?.parameters) ? configuration.parameters : [];
         const remembered = readRemembered(globalThis.localStorage, name);
-        this.values = remembered?.values || {};
+        // Legacy typed inputs no longer have an MCP mapping. Let the user review argv.
+        this.hadDeclaredInputs = remembered?.hadDeclaredInputs || false;
         this.extras = remembered?.extras || [];
         this.stdin = remembered?.stdin || '';
         this.lastRun = null;
@@ -196,7 +141,7 @@ export class PythonRunWindow {
         this._paintRunState();
 
         const takesNothing = !this.running
-            && this.parameters.length === 0 && this.extras.length === 0 && !this.stdin;
+            && !this.hadDeclaredInputs && this.extras.length === 0 && !this.stdin;
         if (takesNothing) {
             void this.execute();
         } else {
@@ -393,44 +338,11 @@ export class PythonRunWindow {
     }
 
     _renderFields() {
-        const declared = this.parameters.map((parameter, index) =>
-            this._renderDeclaredField(parameter, index)).join('');
         const extras = this.extras.map((extra, index) => this._renderExtraRow(extra, index)).join('');
-        if (!declared && !extras) {
-            return `<p class="vb-run-empty">${escapeHtml(this.name || 'This script')} takes no arguments. Add one to pass a value through <code>sys.argv</code>.</p>`;
+        if (!extras) {
+            return `<p class="vb-run-empty">No arguments configured for ${escapeHtml(this.name || 'this script')}. Add one to pass a value through <code>sys.argv</code>.</p>`;
         }
-        return declared + extras;
-    }
-
-    _renderDeclaredField(parameter, index) {
-        const name = escapeHtml(parameter.name || '');
-        const value = this.values?.[parameter.name] ?? '';
-        const shape = parameter.argumentMode === 'positional'
-            ? `#${this.parameters.filter((other, position) =>
-                other.argumentMode === 'positional' && position <= index).length}`
-            : parameter.flag || '';
-        const control = parameter.type === 'boolean'
-            ? `<select class="form-select form-select-sm" data-run-input data-run-param="${name}">
-                    <option value="" ${value === '' ? 'selected' : ''}>—</option>
-                    <option value="true" ${String(value) === 'true' ? 'selected' : ''}>true</option>
-                    <option value="false" ${String(value) === 'false' ? 'selected' : ''}>false</option>
-               </select>`
-            // Always type=text: a number input would swallow the leading "-" of a negative
-            // value mid-typing and silently report "" for anything it dislikes.
-            : `<input class="form-control form-control-sm" type="text"
-                      inputmode="${parameter.type === 'integer' || parameter.type === 'number' ? 'numeric' : 'text'}"
-                      data-run-input data-run-param="${name}" value="${escapeHtml(String(value))}"
-                      placeholder="${escapeHtml(parameter.defaultValue ?? '')}" spellcheck="false">`;
-
-        return `
-            <div class="vb-run-field${parameter.required ? ' is-required' : ''}">
-                <div class="vb-run-field-label">
-                    <label>${name}${parameter.required ? '<span class="vb-run-required" title="Required">*</span>' : ''}</label>
-                    <span class="vb-run-shape" title="${parameter.argumentMode === 'positional' ? 'Positional argument' : 'Named option'}">${escapeHtml(shape)}</span>
-                </div>
-                ${control}
-                ${parameter.description ? `<p class="vb-run-field-hint">${escapeHtml(parameter.description)}</p>` : ''}
-            </div>`;
+        return extras;
     }
 
     _renderExtraRow(extra, index) {
@@ -602,10 +514,6 @@ export class PythonRunWindow {
 
     _onInput(event) {
         const target = event.target;
-        if (target?.dataset?.runParam !== undefined && target.dataset.runParam !== '') {
-            this.values[target.dataset.runParam] = target.value;
-            return void this._paintCommandLine();
-        }
         if (target?.dataset?.runExtraFlag !== undefined) {
             const extra = this.extras[Number(target.dataset.runExtraFlag)];
             if (extra) extra.flag = target.value;
@@ -637,7 +545,7 @@ export class PythonRunWindow {
         if (!this.name) return;
         try {
             globalThis.localStorage?.setItem(STORAGE_PREFIX + this.name, JSON.stringify({
-                values: this.values,
+                hadDeclaredInputs: this.hadDeclaredInputs,
                 extras: this.extras,
                 stdin: this.stdin
             }));

@@ -95,66 +95,81 @@ export function ensureMonaco() {
                 resolve(null);
             }, 15000);
 
-            amdRequire(['vs/editor/editor.main'], () => {
-                clearTimeout(timeout);
-                const monacoInstance = window.monaco;
-                if (!monacoInstance) {
-                    console.error('Monaco editor loaded but global monaco was not available');
-                    _monacoReady = null; // Allow retry
-                    resolve(null);
-                    return;
-                }
-
-                // Define custom theme once
-                monacoInstance.editor.defineTheme('viberails-dark', {
-                    base: 'vs-dark',
-                    inherit: true,
-                    rules: [
-                        { token: 'comment', foreground: '6A6A7D', fontStyle: 'italic' },
-                        { token: 'keyword', foreground: 'C586C0' },
-                        { token: 'string', foreground: '9AC6C5' },
-                        { token: 'number', foreground: 'B5CEA8' },
-                        { token: 'type', foreground: '4EC9B0' },
-                        { token: 'function', foreground: 'DCDCAA' },
-                        { token: 'variable', foreground: '9CDCFE' },
-                        { token: 'constant', foreground: '569CD6' },
-                    ],
-                    colors: {
-                        'editor.background': '#1a1a22',
-                        'editor.foreground': '#f0f0f5',
-                        'editor.lineHighlightBackground': '#2b2b3640',
-                        'editor.selectionBackground': '#5b2a8650',
-                        'editorCursor.foreground': '#9ac6c5',
-                        'editor.inactiveSelectionBackground': '#3e3e4a40',
-                        'editorLineNumber.foreground': '#6A6A7D',
-                        'editorLineNumber.activeForeground': '#9ac6c5',
-                        'editorGutter.background': '#1a1a22',
-                        'editorWidget.background': '#2b2b36',
-                        'editorWidget.border': '#3e3e4a',
-                        'input.background': '#1e1e24',
-                        'input.border': '#3e3e4a',
-                        'dropdown.background': '#2b2b36',
-                        'dropdown.border': '#3e3e4a',
-                        'list.hoverBackground': '#32323f',
-                        'list.activeSelectionBackground': '#5b2a86',
-                        'minimap.background': '#1a1a22',
-                        'scrollbar.shadow': '#00000033',
-                        'scrollbarSlider.background': '#3e3e4a80',
-                        'scrollbarSlider.hoverBackground': '#7785ac80',
-                        'scrollbarSlider.activeBackground': '#9ac6c580',
-                        'diffEditor.insertedTextBackground': '#4caf5020',
-                        'diffEditor.removedTextBackground': '#e5737320',
-                        'diffEditor.insertedLineBackground': '#4caf5015',
-                        'diffEditor.removedLineBackground': '#e5737315',
-                    }
-                });
-                resolve(monacoInstance);
-            }, (err) => {
+            const onLoadError = (err) => {
                 clearTimeout(timeout);
                 console.error('Monaco editor failed to load:', err);
                 _monacoReady = null; // Allow retry
                 resolve(null);
-            });
+            };
+
+            // 'vs/basic-languages/all' is the concatenated syntax-highlighting bundle
+            // built by deploy/build-monaco-language-bundle.ps1; packaged builds ship it
+            // in place of the 81 per-language files (see deploy/prepare-binaries.ps1) to
+            // stay under vsce's 100-JS-file warning. Loading it registers all 81 language
+            // modules up front, so Monaco's lazy per-language require resolves from memory
+            // instead of fetching a file that is not in the VSIX.
+            //
+            // It has to load *after* editor.main, not alongside it: this AMD loader runs a
+            // module factory as soon as its declared dependencies resolve, and 11 of the
+            // language modules synchronously require 'vs/editor/editor.api', which does not
+            // exist until editor.main has run.
+            amdRequire(['vs/editor/editor.main'], () => {
+                amdRequire(['vs/basic-languages/all'], () => {
+                    clearTimeout(timeout);
+                    const monacoInstance = window.monaco;
+                    if (!monacoInstance) {
+                        console.error('Monaco editor loaded but global monaco was not available');
+                        _monacoReady = null; // Allow retry
+                        resolve(null);
+                        return;
+                    }
+
+                    // Define custom theme once
+                    monacoInstance.editor.defineTheme('viberails-dark', {
+                        base: 'vs-dark',
+                        inherit: true,
+                        rules: [
+                            { token: 'comment', foreground: '6A6A7D', fontStyle: 'italic' },
+                            { token: 'keyword', foreground: 'C586C0' },
+                            { token: 'string', foreground: '9AC6C5' },
+                            { token: 'number', foreground: 'B5CEA8' },
+                            { token: 'type', foreground: '4EC9B0' },
+                            { token: 'function', foreground: 'DCDCAA' },
+                            { token: 'variable', foreground: '9CDCFE' },
+                            { token: 'constant', foreground: '569CD6' },
+                        ],
+                        colors: {
+                            'editor.background': '#1a1a22',
+                            'editor.foreground': '#f0f0f5',
+                            'editor.lineHighlightBackground': '#2b2b3640',
+                            'editor.selectionBackground': '#5b2a8650',
+                            'editorCursor.foreground': '#9ac6c5',
+                            'editor.inactiveSelectionBackground': '#3e3e4a40',
+                            'editorLineNumber.foreground': '#6A6A7D',
+                            'editorLineNumber.activeForeground': '#9ac6c5',
+                            'editorGutter.background': '#1a1a22',
+                            'editorWidget.background': '#2b2b36',
+                            'editorWidget.border': '#3e3e4a',
+                            'input.background': '#1e1e24',
+                            'input.border': '#3e3e4a',
+                            'dropdown.background': '#2b2b36',
+                            'dropdown.border': '#3e3e4a',
+                            'list.hoverBackground': '#32323f',
+                            'list.activeSelectionBackground': '#5b2a86',
+                            'minimap.background': '#1a1a22',
+                            'scrollbar.shadow': '#00000033',
+                            'scrollbarSlider.background': '#3e3e4a80',
+                            'scrollbarSlider.hoverBackground': '#7785ac80',
+                            'scrollbarSlider.activeBackground': '#9ac6c580',
+                            'diffEditor.insertedTextBackground': '#4caf5020',
+                            'diffEditor.removedTextBackground': '#e5737320',
+                            'diffEditor.insertedLineBackground': '#4caf5015',
+                            'diffEditor.removedLineBackground': '#e5737315',
+                        }
+                    });
+                    resolve(monacoInstance);
+                }, onLoadError);
+            }, onLoadError);
         });
     })();
 

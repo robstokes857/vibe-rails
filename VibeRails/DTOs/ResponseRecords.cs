@@ -140,11 +140,20 @@ namespace VibeRails.DTOs
     // ---------------------------------------------------------------- Kanban board (Services/Board)
     // Wire names are what wwwroot/js/modules/board-api.js already consumes. Points and WipLimit are
     // JsonElement so a PUT can say "leave alone" (omitted), "clear" (null / ""), or "set" (number).
-    public record BoardColumnResponse(string Id, string Name, int? WipLimit, int Position, string Color);
+    // A project has one or more boards (sprints, sub-projects); every lane belongs to one. Card
+    // keys stay per project. Lane and card list calls take an optional board id and default to
+    // the project's first board, so a single-board client keeps working unchanged.
+    public record BoardSummaryResponse(string Id, string Name, int Position, DateTime CreatedAt, int CardCount, List<BoardColumnResponse> Columns);
+    public record BoardListResponse(List<BoardSummaryResponse> Boards);
+    public record CreateBoardRequest(string? Name = null);
+    public record UpdateBoardRequest(string? Name = null);
+    public record DeleteBoardResponse(bool Ok, int DeletedColumns, int DeletedCards);
+
+    public record BoardColumnResponse(string Id, string Name, int? WipLimit, int Position, string Color, string BoardId = "");
     public record BoardColumnListResponse(List<BoardColumnResponse> Columns);
-    public record CreateBoardColumnRequest(string? Name = null, JsonElement WipLimit = default, string? Color = null);
+    public record CreateBoardColumnRequest(string? Name = null, JsonElement WipLimit = default, string? Color = null, string? BoardId = null);
     public record UpdateBoardColumnRequest(string? Name = null, JsonElement WipLimit = default, string? Color = null);
-    public record ReorderBoardColumnsRequest(List<string>? OrderedIds = null);
+    public record ReorderBoardColumnsRequest(List<string>? OrderedIds = null, string? BoardId = null);
     public record DeleteBoardColumnResponse(bool Ok, string MovedToColumnId, int MovedCards);
 
     public record BoardCommentDto(string Id, BoardAuthorDto Author, string Body, DateTime CreatedAt);
@@ -180,7 +189,8 @@ namespace VibeRails.DTOs
         DateTime UpdatedAt,
         int DescriptionRevision = 1,
         BaseLlmOptions? BaseLlmOptions = null,
-        string Type = BoardCardTypes.Default);
+        string Type = BoardCardTypes.Default,
+        string BoardId = "");
     public record BoardCardListResponse(List<BoardCardSummaryResponse> Cards);
     public record BoardCardResponse(
         string Id,
@@ -207,7 +217,8 @@ namespace VibeRails.DTOs
         BaseLlmOptions? BaseLlmOptions = null,
         bool DescriptionChanged = false,
         List<BoardCommentDto>? Notes = null,
-        string Type = BoardCardTypes.Default);
+        string Type = BoardCardTypes.Default,
+        string BoardId = "");
     public record CreateBoardCardRequest(
         string? Title = null,
         string? ColumnId = null,
@@ -218,7 +229,9 @@ namespace VibeRails.DTOs
         List<string>? Tags = null,
         bool? Blocked = null,
         BaseLlmOptions? BaseLlmOptions = null,
-        string? Type = null);
+        string? Type = null,
+        // Which board's left-most lane takes the card when ColumnId is omitted; null = the first board.
+        string? BoardId = null);
     public record UpdateBoardCardRequest(
         string? Title = null,
         string? ColumnId = null,
@@ -468,51 +481,6 @@ namespace VibeRails.DTOs
         string? StandardInput = null
     );
 
-    // User-approved MCP exposure for one signed script. Parameters describe both the
-    // MCP JSON schema and the argv mapping used when the tool is invoked.
-    public record PythonScriptMcpParameter(
-        string? Name,
-        string? Description,
-        string? Type,
-        bool Required,
-        string? DefaultValue,
-        string? ArgumentMode,
-        string? Flag
-    );
-
-    // Behavior is the script author's declaration of what running the tool does, in the
-    // product's own vocabulary: "read-only", "additive", or "destructive". The four MCP
-    // annotation hints are derived from it plus RepeatSafe and ReachesNetwork, so adding a
-    // protocol hint later is a mapping change rather than a stored-schema change.
-    public record PythonScriptMcpConfiguration(
-        string ScriptName,
-        string ToolName,
-        string Description,
-        List<PythonScriptMcpParameter> Parameters,
-        string Behavior,
-        bool RepeatSafe,
-        bool ReachesNetwork
-    );
-
-    public record PythonScriptMcpConfigurationRequest(
-        string? ScriptName,
-        string? ToolName,
-        string? Description,
-        List<PythonScriptMcpParameter>? Parameters,
-        string? Behavior,
-        bool RepeatSafe,
-        bool ReachesNetwork,
-        string? Pin
-    );
-
-    public record PythonScriptMcpListResponse(
-        List<PythonScriptMcpConfiguration> Configurations
-    );
-
-    public record PythonScriptMcpDocument(
-        int Version,
-        List<PythonScriptMcpConfiguration> Configurations
-    );
 
     // Script authoring (create / edit / import / rename / delete). None of these carry a
     // PIN or create an approval. Saves use the raw-byte Version as an optimistic concurrency
@@ -1582,13 +1550,6 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(SetPythonScriptPinRequest))]
     [JsonSerializable(typeof(PythonScriptApprovalRequest))]
     [JsonSerializable(typeof(PythonScriptRunRequest))]
-    [JsonSerializable(typeof(PythonScriptMcpParameter))]
-    [JsonSerializable(typeof(List<PythonScriptMcpParameter>))]
-    [JsonSerializable(typeof(PythonScriptMcpConfiguration))]
-    [JsonSerializable(typeof(List<PythonScriptMcpConfiguration>))]
-    [JsonSerializable(typeof(PythonScriptMcpConfigurationRequest))]
-    [JsonSerializable(typeof(PythonScriptMcpListResponse))]
-    [JsonSerializable(typeof(PythonScriptMcpDocument))]
     [JsonSerializable(typeof(PythonScriptContentResponse))]
     [JsonSerializable(typeof(PythonScriptSaveRequest))]
     [JsonSerializable(typeof(PythonScriptSaveResponse))]
@@ -1703,6 +1664,12 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(SetPinRequest))]
     [JsonSerializable(typeof(PinStatusResponse))]
     // Kanban board DTOs
+    [JsonSerializable(typeof(BoardSummaryResponse))]
+    [JsonSerializable(typeof(List<BoardSummaryResponse>))]
+    [JsonSerializable(typeof(BoardListResponse))]
+    [JsonSerializable(typeof(CreateBoardRequest))]
+    [JsonSerializable(typeof(UpdateBoardRequest))]
+    [JsonSerializable(typeof(DeleteBoardResponse))]
     [JsonSerializable(typeof(BoardColumnResponse))]
     [JsonSerializable(typeof(List<BoardColumnResponse>))]
     [JsonSerializable(typeof(BoardColumnListResponse))]

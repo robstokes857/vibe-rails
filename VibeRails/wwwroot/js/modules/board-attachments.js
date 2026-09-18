@@ -135,6 +135,8 @@ export async function openBoardAttachment(app, cardId, attachment) {
         const kind = getAttachmentPreviewKind(attachment);
         body.replaceChildren();
         if (kind === 'image') {
+            // kind === 'image' means the server-detected MIME type is one of the four raster
+            // types. Keep the bytes in a Blob; the tracked URL is revoked on close/unload.
             const img = document.createElement('img');
             img.className = 'vb-board-attachment-image';
             img.alt = attachment.name || 'Attached image';

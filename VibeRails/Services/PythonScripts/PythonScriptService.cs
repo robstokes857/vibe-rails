@@ -30,10 +30,6 @@ public interface IPythonScriptService
         string? standardInput,
         CancellationToken cancellationToken = default);
     Task<string> ValidateRunnableAsync(string? name, CancellationToken cancellationToken = default);
-    Task<string> AuthorizeMcpExposureAsync(
-        string? name,
-        string? pin,
-        CancellationToken cancellationToken = default);
     PythonScriptRunHistoryResponse GetRunHistory();
     string GetScriptsDirectory();
 
@@ -127,7 +123,6 @@ public sealed class PythonScriptService : IPythonScriptService
     private readonly string _installDirectory;
     private readonly Lazy<IPythonRunner?> _pythonRunner;
     private readonly Func<PythonRunnerOptions, IPythonRunner> _runnerFactory;
-    private readonly IPythonScriptMcpConfigurationStore? _mcpConfigurationStore;
     private readonly SemaphoreSlim _documentLock = new(1, 1);
     private readonly object _historyLock = new();
     private readonly List<PythonScriptRunRecord> _runHistory = [];
@@ -136,7 +131,6 @@ public sealed class PythonScriptService : IPythonScriptService
         IPythonRunner? pythonRunner = null,
         string? installDirectory = null,
         Func<PythonRunnerOptions, IPythonRunner>? runnerFactory = null,
-        IPythonScriptMcpConfigurationStore? mcpConfigurationStore = null,
         Func<IPythonRunner?>? pythonRunnerProvider = null)
     {
         _pythonRunner = new Lazy<IPythonRunner?>(
@@ -144,7 +138,6 @@ public sealed class PythonScriptService : IPythonScriptService
             LazyThreadSafetyMode.ExecutionAndPublication);
         _installDirectory = installDirectory ?? PathConstants.GetInstallDirPath();
         _runnerFactory = runnerFactory ?? (options => new PythonRunner(options));
-        _mcpConfigurationStore = mcpConfigurationStore;
     }
 
     public string GetScriptsDirectory() => Path.Combine(_installDirectory, ScriptsSubdirectory);
@@ -406,35 +399,6 @@ public sealed class PythonScriptService : IPythonScriptService
     {
         var verified = await ReadVerifiedScriptAsync(requestedName, cancellationToken);
         return verified.Name;
-    }
-
-    /// <summary>
-    /// Requires explicit user approval before a signed script is exposed as an MCP tool.
-    /// The script must still match its approved hash, and the PIN is checked for every
-    /// enable or configuration edit; it is never persisted in the MCP document.
-    /// </summary>
-    public async Task<string> AuthorizeMcpExposureAsync(
-        string? requestedName,
-        string? pin,
-        CancellationToken cancellationToken = default)
-    {
-        var verified = await ReadVerifiedScriptAsync(requestedName, cancellationToken);
-
-        await _documentLock.WaitAsync(cancellationToken);
-        try
-        {
-            if (VerifyPin(ReadDocument(), pin))
-            {
-                return verified.Name;
-            }
-        }
-        finally
-        {
-            _documentLock.Release();
-        }
-
-        await Task.Delay(TimeSpan.FromMilliseconds(PinFailureDelayMs), cancellationToken);
-        throw new PythonScriptValidationException("Incorrect PIN.");
     }
 
     /// <summary>
@@ -764,18 +728,6 @@ public sealed class PythonScriptService : IPythonScriptService
         }
 
         Log.Information("[PythonScripts] Renamed script {Name} to {NewName}", canonicalName, newName);
-        if (_mcpConfigurationStore is not null)
-        {
-            try
-            {
-                await _mcpConfigurationStore.RenameAsync(canonicalName, newName, CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                Log.Warning(ex, "[PythonScripts] Could not move MCP configuration from {Name} to {NewName}",
-                    canonicalName, newName);
-            }
-        }
         return await GetStatusAsync(CancellationToken.None);
     }
 
@@ -822,17 +774,6 @@ public sealed class PythonScriptService : IPythonScriptService
         }
 
         Log.Information("[PythonScripts] Deleted script {Name}", canonicalName);
-        if (_mcpConfigurationStore is not null)
-        {
-            try
-            {
-                await _mcpConfigurationStore.DeleteAsync(canonicalName, CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                Log.Warning(ex, "[PythonScripts] Could not remove MCP configuration for {Name}", canonicalName);
-            }
-        }
         return await GetStatusAsync(CancellationToken.None);
     }
 

@@ -133,19 +133,6 @@ public static class McpStdioHost
             client.Timeout = TimeSpan.FromSeconds(10);
         });
         services.AddScoped<TokenSaverTool>();
-        // Signed-Python-script guidance. File-based state only (no DB, no interpreter
-        // probe on construction), so it is safe in this stdio child process too.
-        services.AddSingleton<VibeRails.Services.PythonScripts.IPythonScriptService>(sp =>
-            new VibeRails.Services.PythonScripts.PythonScriptService(
-                mcpConfigurationStore: sp.GetRequiredService<
-                    VibeRails.Services.PythonScripts.IPythonScriptMcpConfigurationStore>(),
-                pythonRunnerProvider: () => new PyBridge.PythonRunner(
-                    PyBridge.PythonRunnerOptions.Discover())));
-        services.AddSingleton<VibeRails.Services.PythonScripts.IPythonScriptMcpConfigurationStore,
-            VibeRails.Services.PythonScripts.PythonScriptMcpConfigurationStore>();
-        services.AddSingleton<VibeRails.Services.PythonScripts.IPythonScriptMcpService,
-            VibeRails.Services.PythonScripts.PythonScriptMcpService>();
-        services.AddScoped<PythonScriptTool>();
         // Kanban board tools. Backed by the board's own SQLite store (it owns its schema, so no
         // Repository migration pass runs in this short-lived child) and scoped to the project by
         // the CLI's inherited cwd / the launching session — see BoardProjectResolver. This is what
@@ -170,8 +157,6 @@ public static class McpStdioHost
             .WithTools<RulesTool>()
             .WithTools<SessionSearchTool>()
             .WithTools<TokenSaverTool>()
-            .WithTools<PythonScriptTool>()
-            .WithTools<BoardTool>()
-            .WithPythonScriptTools();
+            .WithTools<BoardTool>();
     }
 }
