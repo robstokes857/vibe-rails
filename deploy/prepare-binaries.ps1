@@ -21,6 +21,10 @@ $WwwrootSource = Join-Path $RepoRoot "VibeRails" "wwwroot"
 $BinDir = Join-Path $ExtensionRoot "bin"
 $supportedTargets = @("win32-x64", "linux-x64", "darwin-arm64")
 
+# vsce emits the "you should bundle your extension" warning when a VSIX holds more
+# than this many .js files (@vscode/vsce/out/package.js: `jsFiles.length > 100`).
+$VsceJsFileLimit = 100
+
 Write-Host "VibeRails Extension - Binary Preparation" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
@@ -112,6 +116,72 @@ foreach ($platform in $platforms) {
     $fileCount = (Get-ChildItem -Path $destWwwroot -Recurse -File).Count
     Write-Host "    Copied wwwroot/ ($fileCount files)" -ForegroundColor Green
 
+    # Prune web assets the app never requests, so the VSIX stays under vsce's
+    # JavaScript-file warning ("This extension consists of N files, out of which M
+    # are JavaScript files" - it fires above 100 .js files). Pruning has to happen
+    # here rather than in .vscodeignore: package-platforms.ps1 appends a
+    # `!bin/<target>/**` negate pattern, and vsce's filter keeps a file when it is
+    # negated by ANY pattern regardless of order (@vscode/vsce/out/package.js),
+    # so no ignore rule can carve anything back out of the staged backend.
+    #
+    # These stay in VibeRails/wwwroot for source runs and Monaco upgrades; only the
+    # packaged copy is slimmed.
+    $prunePaths = @(
+        # Localisation bundles. editor.main.js fetches vs/nls.messages.<locale> only
+        # when require.config sets vs/nls.availableLanguages to a non-English locale,
+        # which monaco-loader.js never does.
+        "assets/monaco/vs/nls.messages.*.js"
+
+        # Bootstrap variants index.html does not reference; it loads only
+        # bootstrap.bundle.min.js (plus bootstrap.min.css, which is kept).
+        "assets/bootstrap.bundle.js"
+        "assets/bootstrap.bundle.js.map"
+        "assets/bootstrap.esm.js"
+        "assets/bootstrap.esm.js.map"
+        "assets/bootstrap.esm.min.js"
+        "assets/bootstrap.esm.min.js.map"
+        "assets/bootstrap.js"
+        "assets/bootstrap.js.map"
+        "assets/bootstrap.min.js"
+        "assets/bootstrap.min.js.map"
+
+        # xterm addons index.html never loads. addon-clipboard is deliberately left
+        # out (index.html: "PTY-controlled OSC 52 must not access the browser
+        # clipboard"), the rest were never wired up.
+        "assets/xterm/addon-clipboard.*"
+        "assets/xterm/addon-image.*"
+        "assets/xterm/addon-ligatures.*"
+        "assets/xterm/addon-web-fonts.js"
+    )
+
+    foreach ($prunePath in $prunePaths) {
+        $target = Join-Path $destWwwroot ($prunePath -replace '/', [System.IO.Path]::DirectorySeparatorChar)
+        $matched = @(Get-Item -Path $target -ErrorAction SilentlyContinue)
+        if ($matched.Count -eq 0) {
+            throw "Nothing matched prune path '$prunePath' under $destWwwroot. Did the asset move or get removed? Update the prune list in $($MyInvocation.MyCommand.Name)."
+        }
+        foreach ($item in $matched) {
+            Remove-Item -Path $item.FullName -Recurse -Force
+        }
+    }
+
+    # Replace Monaco's 81 per-language AMD modules with the single concatenated
+    # bundle. They are all *named* defines, so the bundle registers exactly the same
+    # module ids; factories still run lazily on first use. monaco-loader.js requires
+    # 'vs/basic-languages/all' before editor.main, so the bundle must exist.
+    $languageDir = Join-Path $destWwwroot "assets/monaco/vs/basic-languages"
+    $languageBundle = Join-Path $languageDir "all.js"
+    if (-not (Test-Path $languageBundle)) {
+        throw "Monaco language bundle not found at $languageBundle. Run: pwsh deploy/build-monaco-language-bundle.ps1"
+    }
+    $languageDirs = @(Get-ChildItem -Path $languageDir -Directory)
+    foreach ($dir in $languageDirs) {
+        Remove-Item -Path $dir.FullName -Recurse -Force
+    }
+
+    $prunedCount = $fileCount - (Get-ChildItem -Path $destWwwroot -Recurse -File).Count
+    Write-Host "    Pruned $prunedCount unused wwwroot files ($($languageDirs.Count) Monaco languages folded into all.js)" -ForegroundColor Green
+
     # Copy remaining AOT publish artifacts (native DLLs from NuGet runtime packages:
     # onnxruntime, e_sqlite3, vec0, winpty, plus winpty-agent.exe). NativeAOT emits
     # these next to vb.exe; without them vb.exe falls back to the system DLL search
@@ -179,6 +249,29 @@ foreach ($platform in $platforms) {
             throw "Hook script $hookScript missing from bin/$($platform.Name)/scripts/. Git Guard hook install/repair would fail at runtime. Did the AOT publish emit VibeRails/scripts/ into $sourceDir?"
         }
     }
+
+    # Keep the VSIX inside vsce's JavaScript-file limit, which is what produced the
+    # "This extension consists of N files, out of which M are JavaScript files"
+    # warning on every publish. Failing here is far cheaper than finding out at
+    # publish time.
+    #
+    # The VSIX's .js files are the staged backend plus the extension's own compiled
+    # output. out/ is compiled by vsce's `vscode:prepublish` *after* this script
+    # runs, so count the sources it will emit instead: src/*.ts maps 1:1 onto
+    # out/*.js, and .vscodeignore drops out/test/**.
+    $stagedJsCount = @(Get-ChildItem -Path $platformDir -Recurse -File -Filter *.js).Count
+    $srcDir = Join-Path $ExtensionRoot "src"
+    $testSrcDir = Join-Path $srcDir "test"
+    $extensionJsCount = @(
+        Get-ChildItem -Path $srcDir -Recurse -File -Filter *.ts |
+            Where-Object { $_.Name -notlike '*.d.ts' -and -not $_.FullName.StartsWith($testSrcDir, [System.StringComparison]::OrdinalIgnoreCase) }
+    ).Count
+    $totalJsCount = $stagedJsCount + $extensionJsCount
+
+    if ($totalJsCount -gt $VsceJsFileLimit) {
+        throw "bin/$($platform.Name)/ would ship $totalJsCount .js files ($stagedJsCount staged backend + $extensionJsCount compiled from src/), over vsce's limit of $VsceJsFileLimit. vsce warns above that and tells you to bundle. Add the new assets to the prune list above, or bundle them."
+    }
+    Write-Host "    $totalJsCount .js files will ship ($stagedJsCount backend + $extensionJsCount extension; vsce warns above $VsceJsFileLimit)" -ForegroundColor Gray
 }
 
 # Display summary
