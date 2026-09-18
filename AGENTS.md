@@ -336,6 +336,16 @@ See [VibeRails/Services/Mcp/AGENTS.md](VibeRails/Services/Mcp/AGENTS.md) for the
 
 ## Key Components
 
+### Vibe Board
+
+For Board UI, API, SQLite, launch and MCP work, start with the
+[Board contributor guide](VibeRails/Services/Board/AGENTS.md) and
+[architecture and VB-18 review](VibeRails/Services/Board/ARCHITECTURE.md).
+The Board uses the shared `state.db`; its contracts live in `VibeRails.Data.Abstractions/Board`
+and its store/migrations in `VibeRails.Data.Sqlite/Board`. REST and MCP share `BoardService`.
+The review records open concurrency and workflow findings; documentation is not evidence that
+those findings have been fixed.
+
 ### Services Layer
 
 #### AgentFileService ([Services/AgentFileService.cs](VibeRails/Services/AgentFileService.cs))

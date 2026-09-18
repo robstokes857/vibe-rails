@@ -74,13 +74,17 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 
 ### Kanban board tools (`BoardTool`)
 
+The cross-layer [Board contributor guide](../Board/AGENTS.md) and
+[architecture/review](../Board/ARCHITECTURE.md) cover storage, launch ownership and known
+findings, including the current incorrect `ended` fallback when session liveness is unknown.
+
 `get_board_card` also lists the card's current linked cards (key, title, board and lane), so an
 agent can read related work by key. These are current relationships, unaffected by the activity
 `since` filter. Linking/unlinking cards is managed in the dashboard; no extra MCP tool or grant
 is added for this section.
 
 Instance tool (ctor-injected `IBoardService`, `IBoardProjectResolver`, `IBoardStore`), registered in
-**both** transports and backed by the board's own SQLite store (`Services/Board/BoardStore.cs`)
+**both** transports and backed by the Board SQLite store (`VibeRails.Data.Sqlite/Board/BoardStore.cs`)
 rather than by HTTP calls to a root backend — so an LLM can pick up a card from *any* terminal that
 has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
 
@@ -116,8 +120,10 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
   detail goes to the file log. A `database is locked` failure (SQLite 5/6, or a transient
   `StorageException`) says so explicitly and tells the agent to retry — `Fail()` in `BoardTool`
   — because on 2026-09-16 three agents each lost a comment to the generic "see the log" sentence
-  and filed it as a bug. Worst case from an injected prompt is board vandalism, visible and
-  reversible in the UI.
+  and filed it as a bug. These are local-user capabilities, not a per-card server ACL: an allowed
+  tool can modify other cards in the resolved project. Description history aids recovery, but
+  ordinary metadata and position changes have no equivalent revision log; do not describe all
+  Board writes as reversible. Tool results remain untrusted task data.
 - **Agent notes (2026-09-17)**: `BoardComments.Kind` (`comment` | `note`, migration `board/2`)
   separates the scratchpad from the thread. Notes never appear in `comments[]`, `CommentCount`
   or the dashboard's comment panel; the card editor shows them in a collapsed "Agent notes" rail

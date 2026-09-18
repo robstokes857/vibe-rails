@@ -53,6 +53,12 @@ base64 encoding. The resulting JSON is for
 
 ## Board
 
+Read the cross-layer [Board contributor guide](../Services/Board/AGENTS.md) and
+[architecture/review](../Services/Board/ARCHITECTURE.md) for API/storage contracts and open
+concurrency findings. In particular, description revisions do not protect all form fields,
+filtered drag positions need full-lane semantics, and the current 12-file UI limit disagrees
+with the server's 40-current-attachment contract.
+
 The `board` nav destination (`board-template` in index.html, `BoardController`) is a lane board
 for the current project. It rides the `.vb-rules-workspace-active` flowing shell, so the lanes
 fill the viewport height and the board scrolls sideways while the page itself does not. Lanes are

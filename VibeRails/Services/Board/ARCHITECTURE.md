@@ -1,0 +1,474 @@
+# Vibe Board architecture and review
+
+Reviewed for **VB-18, description revision 1**, on **2026-09-18**, against commit
+`1f4fd71` (`Add linked-card relationships to board cards`). This is the component reference
+and the review of that implementation. Findings below remain open; this documentation change
+does not implement their fixes. Session checkpoints and investigation history are on VB-18.
+
+## Assessment
+
+The Board has a useful separation between presentation, application policy, and persistence.
+REST and MCP share the same services and SQLite transactions. Description history, attachment
+manifests, and saved commit snapshots provide considerably more durability than a simple lane UI.
+Keep this architecture and strengthen its concurrency and lifecycle contracts before adding
+automatic launches or more writers.
+
+The main correctness risks are **silent loss of concurrent edits** and **launch ownership that
+exists only in one root backend's memory**. Seven issues were reproduced with isolated probes;
+an additional draft-loss issue follows directly from the modal close path. Existing tests pass
+but do not cover these cases. No authentication bypass, executable attachment preview, SQL
+injection, or shell injection was confirmed in the Board paths reviewed. That is a scoped result,
+not a certification of the entire application or of every provider's native approval behavior.
+
+## Component map
+
+```mermaid
+flowchart TD
+    UI[BoardController and board modules] --> API[BoardApi / app.apiCall]
+    API --> Auth[CookieAuthMiddleware]
+    Auth --> Routes[BoardRoutes: active root backend]
+    Auth --> HTTP[HTTP MCP /mcp]
+    CLI[CLI child: vb mcp over stdio] --> Tool[BoardTool]
+    HTTP --> Tool
+    Routes --> Service[BoardService]
+    Tool --> Service
+    Tool --> Resolver[BoardProjectResolver]
+    Tool --> Store[IBoardStore / BoardStore]
+    Service --> Store
+    Service --> Git[BoardCommitService / GitCli]
+    Routes --> Launch[BoardLaunchService]
+    Launch --> Store
+    Launch --> Prompt[BoardPromptComposer]
+    Launch --> Tabs[TerminalTabHostService / PTY child]
+    Service --> Live[Root-local live session probe]
+    Store --> DB[(Shared state.db)]
+```
+
+| Responsibility | Source of truth |
+| --- | --- |
+| View lifecycle, lanes, filters, editor, launch UX | [board-controller.js](../../wwwroot/js/modules/board-controller.js), `board-template` in [index.html](../../wwwroot/index.html), Board styles in [style.css](../../wwwroot/style.css) |
+| Authenticated frontend calls | [board-api.js](../../wwwroot/js/modules/board-api.js), shared `app.apiCall` |
+| Inert text/files; related-card picker; provider options | [board-text.js](../../wwwroot/js/modules/board-text.js), [board-attachments.js](../../wwwroot/js/modules/board-attachments.js), [board-card-links.js](../../wwwroot/js/modules/board-card-links.js), [board-launch-options.js](../../wwwroot/js/modules/board-launch-options.js) |
+| HTTP adapter / request and response shapes | [BoardRoutes.cs](../../Routes/BoardRoutes.cs), Board section of [ResponseRecords.cs](../../DTOs/ResponseRecords.cs) |
+| Validation, application operations, mapping | [BoardService.cs](BoardService.cs), its `.Attachments.cs` and `.Links.cs` partials |
+| Storage contracts and records | [VibeRails.Data.Abstractions/Board](../../../VibeRails.Data.Abstractions/Board) |
+| SQL, migrations, ordering, history | [VibeRails.Data.Sqlite/Board](../../../VibeRails.Data.Sqlite/Board); implementation is **not** in this services directory |
+| Agent workflow adapter | [BoardTool.cs](../Mcp/Tools/BoardTool.cs), [MCP contributor reference](../Mcp/AGENTS.md) |
+| Project and checkout identity | [BoardProjectResolver.cs](BoardProjectResolver.cs), [BoardSelection.cs](BoardSelection.cs) |
+| Starting work and prompt composition | [BoardLaunchService.cs](BoardLaunchService.cs), [BoardPromptComposer.cs](BoardPromptComposer.cs) |
+| Narrow provider grants | [BoardMcpAuthorization.cs](../Terminal/Commands/BoardMcpAuthorization.cs), [BoardMcpOpenCodeAuthorization.cs](../Terminal/Commands/BoardMcpOpenCodeAuthorization.cs) |
+| Service lifetimes and transport parity | [MapRegisterServices.cs](../../MapRegisterServices.cs), [McpStdioHost.cs](../Mcp/McpStdioHost.cs), [SqliteStorage.cs](../../../VibeRails.Data.Sqlite/SqliteStorage.cs) |
+
+`BoardStore`, project resolver, commit service and live probe are singleton services;
+`BoardService`, `BoardTool`, and the root-only launch service are scoped. Store operations own
+their connections. The abstractions and SQLite projects retain the historical
+`VibeRails.Services.Board` namespace: follow physical project ownership when adding code.
+
+## Identity, ownership, and state
+
+A project has one or more boards. A board has ordered lanes; a card belongs to a board through
+its lane. Card numbers are unique **per project**, including across its boards. `VB-18` is a
+display key, not a globally unique identifier; generated `card_*` IDs identify rows globally.
+Board, lane, attachment, comment and note IDs use type prefixes and 12 hexadecimal characters.
+
+The default board is `Main`. New boards start with Backlog, Ready, Build, Review, Done; users
+can rename, remove or reorder lanes. The four lanes on VB-18's own board are configuration,
+not a hard-coded state machine. WIP limits are advisory UI feedback, not database or API gates.
+The UI's done statistic infers completion from lane names; there is no persisted completion flag.
+
+The server normalizes project paths with full-path resolution and trailing-separator removal.
+Queries use case-insensitive comparison on Windows/macOS and case-sensitive comparison on Linux.
+This is path identity, not repository-remote identity or symlink canonicalization. Moving a
+checkout changes its board lookup identity unless an existing linked session resolves it back.
+
+REST uses the dashboard root from `ParserConfigs`; it accepts no caller-selected project path.
+MCP resolves root configuration, then the launching session's card, then cwd's Git root, then cwd.
+This lets a sandbox agent address its source project's board. Commit capture separately resolves
+the actual checkout (`GitWorkingDirectory`), so a sandbox commit can be linked to the source card.
+The environment session ID is local process context, not a cryptographic identity credential.
+
+An assignee is `base:<cli>` or `env:<id>:<cli>`, not a person. Saved environments are resolved by
+ID and checked against provider and project visibility at launch. Base provider options are
+typed records; changing assignee clears incompatible options. Board-launched terminals are real
+PTY CLI sessions, not a separate chat service.
+
+## Main flows
+
+### Load, edit, move
+
+`loadView` fetches the board catalog, then the chosen board's lanes and cards. Generation checks
+discard obsolete responses after refresh, board switch, or unload. Local storage remembers
+selection and filters; authoritative cards remain server-side. There is no Board subscription,
+polling loop, or change feed. MCP writes become visible on refresh or reopening a card.
+
+The editor fetches full detail and uses the shared modal with a single scroll region and right
+rail. Comments, agent notes, linked cards, commits, sessions, and attachments are separate data.
+Links mutate immediately without saving the form. New-card uploads queue until the card exists.
+Save and Start work submit the form's fields, including `expectedDescriptionRevision`.
+Description conflict protection is narrower than whole-card concurrency protection (F1/F2).
+
+Moving posts a destination lane and a zero-based position. The store resolves source and
+destination inside one write transaction, reinserts into the full ordered destination list, and
+renumbers affected lanes densely. Deleting a lane appends its cards to the left-most remaining
+lane **on that board**. Deleting the last lane or last board is rejected. Deleting a board deletes
+its cards, lanes, and dependent records; it does not stop the linked CLI processes.
+
+### Start work
+
+1. UI saves current fields and rechecks the returned active-session state.
+2. Launch service resolves card/assignee, takes an in-process reservation keyed by card ID,
+   rereads the card, and checks that root's live tabs and tab capacity.
+3. Composer builds the prompt from the selected description revision, lanes, up to ten linked
+   commits and twenty attachment names, followed by the environment's initial-message template.
+4. Tab host creates a child and starts the CLI with `AuthorizeBoardTools: true`, typed options,
+   source project directory and composed prompt. Normal workspace resolution still applies.
+5. The returned session is linked to the card, then the exact launch revision is recorded.
+   Failure to record that history is logged without killing an already linked agent. Earlier
+   startup failures attempt to delete the new tab.
+6. UI remembers `board-card:<cardId>` and stays on the Board; Sessions opens the terminal.
+
+The reservation is released when startup finishes. Durable session links and live tab state are
+different concepts. There is no cross-process launch lease (F3). Another startup race worth a
+targeted integration test: the child can start before its source-card link is committed, so an
+early MCP call from a clone could initially resolve the clone's project. This race was not
+reproduced in this review and is not counted among confirmed findings.
+
+### Agent work and history
+
+MCP reads record the exact returned description revision without linking the reader to the card.
+Writes try to auto-link a VibeRails session only when it has no card link. A session has at most
+one card link; writing a second card does not transfer ownership. Comments and notes retain
+author/session attribution. Notes use the same table with a different `Kind` and do not inflate
+comment counts. `get_board_card` shows a roughly 3,000-character note tail; `get_board_notes`
+returns the full notes. `since` filters returned activity after it has been loaded.
+
+Description creation/change and attachment membership changes create immutable revisions in the
+same transaction as the mutation. Each revision owns an attachment manifest. `read`, `launch`,
+and `updated` session events refer to revisions; `updated` is not an acknowledgment that the
+agent consumed the text. Saving does not inject input into a running agent. MCP full reads use
+the shared service and separately look up linked session outcomes. Unknown liveness is currently
+misreported in their text output (F6).
+
+### Attachments and commit snapshots
+
+Uploads are JSON containing a base64 data URL. Service derives byte count and MIME category;
+client-declared values are not authoritative. Names are display labels, never filesystem paths.
+Original bytes live in SQLite; small safe raster previews also have a data URL. Removal sets
+`DeletedUTC` and creates a revision. Historical manifests can still retrieve the original bytes
+through the same project/card-scoped endpoint. This is removal from the current card, not erasure.
+
+Commit linking validates a 7–40 hex SHA, captures Git metadata and changed-file before/after blobs,
+then atomically inserts the commit link and JSON snapshot. Git runs with discrete argv values,
+not a shell-built command. Limits: 60 files, 400,000 characters per side/file with a truncation
+marker, and a bounded changed-file listing. Root commits, renames, merges and gitlinks have
+explicit handling. Viewing uses the saved snapshot and survives deletion of the checkout.
+Legacy links lacking snapshots return a recapture instruction. Linking an existing SHA returns
+a conflict without duplicating the snapshot; short prefixes must identify exactly one linked
+commit for diff/unlink.
+
+## REST and MCP contracts
+
+All **34 Board HTTP mappings** are under `/api/v1/board`, behind both session and tab credentials,
+and registered only for `ProcessRole.IsActiveRootBackend`. Relative paths below share that prefix.
+
+| Resource | Methods and paths |
+| --- | --- |
+| Boards | `GET/POST /boards`; `PUT/DELETE /boards/{boardId}` |
+| Lanes | `GET/POST /columns`; `PUT /columns/order`; `PUT/DELETE /columns/{columnId}` |
+| Cards | `GET/POST /cards`; `GET/PUT/DELETE /cards/{card}`; `GET /cards/{card}/history`; `POST /cards/{card}/move`; `POST /cards/{card}/launch` |
+| Related cards | `GET /cards/{card}/links/candidates?q=`; `POST /cards/{card}/links`; `DELETE /cards/{card}/links/{linkedCard}` |
+| Comments / notes | `POST /cards/{card}/comments`; `GET/POST /cards/{card}/notes` |
+| Files | `POST /cards/{card}/attachments`; `GET /cards/{card}/attachments/{attachmentId}/content`; `DELETE /cards/{card}/attachments/{attachmentId}` |
+| Commits | `GET/POST /cards/{card}/commits`; `DELETE /cards/{card}/commits/{sha}`; `GET /cards/{card}/commits/{sha}/diff` |
+| Sessions | `GET/POST /cards/{card}/sessions`; `PUT/DELETE /cards/{card}/sessions/{sessionId}` |
+
+Lane/card lists take `?boardId=<id>`; omission means the first board by position. Full card lookup
+accepts an ID or project-local key across boards. Candidate links search the entire project and
+cap results at 50. Summary responses omit the rails but **include the full description**.
+Lists use wrappers (`boards`, `columns`, `cards`, `notes`); single mutations return DTOs or an OK
+body. Validation returns 400, conflicts 409, missing resources 404; unexpected storage failures
+can propagate as 500. `RunAsync` also maps all `InvalidOperationException`s to 400, which can hide
+programming errors as client mistakes.
+
+REST updates are partial despite using PUT. Omitted/null ordinary fields leave existing values;
+an empty assignee clears it. Points distinguish omitted (`JsonElement.Undefined`) from null/empty
+(clear). Description replacement and append are mutually exclusive. Append without an explicit
+expected revision retries once against the winning text. A supplied revision is checked only
+when a description is supplied. Options have an explicit clear flag.
+
+| MCP tools (14, both HTTP and stdio) | Capability |
+| --- | --- |
+| `list_boards`, `list_board_columns`, `list_board_cards` | Discovery/filtering; board ID or unambiguous name |
+| `get_board_card`, `get_board_card_history`, `get_board_notes`, `read_board_attachment` | Detail, revision provenance, scratchpad, paged UTF-8 TXT/Markdown reads |
+| `create_board_card`, `update_board_card`, `move_board_card` | Create/patch/move; omitted card defaults to launching session where supported |
+| `add_board_comment`, `append_board_note`, `add_board_attachment`, `link_board_commit` | Append attributed work, bounded text attachment, durable Git capture |
+
+MCP update exposes a subset of the REST fields and has no expected-description-revision
+argument. Description replacement through that tool is unconditional; prefer append when
+adding context, and add a revision argument when implementing concurrent replacement safety.
+MCP cannot currently clear points or change assignee/base options through its update signature.
+
+There are no Board MCP delete, launch, board-management, or related-card mutation tools. MCP
+returns human-readable text and `FAIL: ...` strings, not REST status codes or structured error
+results. Cancellation propagates; busy database errors tell the caller to retry. Read-style
+calls are not universally side-effect-free: initial listing can seed a board and full card reads
+can append a revision-read event. Native grants enumerate these exact tool names and do not
+authorize unrelated tools on the same server.
+
+## Database model and transaction boundaries
+
+Board data shares the user's global `state.db` with terminal history and other features. It is
+not stored in the checkout or a separate Board database. `BoardStore` owns component migrations
+and can initialize from stdio without constructing the main `Repository`.
+
+| Table | Identity / relation / purpose |
+| --- | --- |
+| `Boards` | PK `Id`; project, name and display order |
+| `BoardColumns` | PK `Id`; project and nullable `BoardId`; lane/order/WIP/color |
+| `BoardCards` | PK `Id`; FK `ColumnId`; `UNIQUE(ProjectPath, Number)`; fields and position |
+| `BoardCardSequences` | PK project path; persistent high-water number, independent of deleted cards |
+| `BoardCardOptions` | PK/FK card; source-generated JSON for typed launch options |
+| `BoardComments` | PK `Id`; FK card; body, author, session; `Kind=comment|note` |
+| `BoardCardSessions` | PK session ID; FK card; tab/selection/provider/origin/display metadata |
+| `BoardAttachments` | PK `Id`; FK card; metadata, optional preview, soft-deletion timestamp |
+| `BoardAttachmentContents` | PK/FK attachment; original byte BLOB |
+| `BoardDescriptionRevisions` | PK `(CardId, Revision)`; immutable description and attribution |
+| `BoardDescriptionRevisionAttachments` | PK `(CardId, Revision, AttachmentId)`; immutable membership |
+| `BoardDescriptionSessionEvents` | PK `(CardId, Revision, SessionId, Kind)`; provenance, no live notification |
+| `BoardCommits` | PK `(CardId, Sha)`; Git metadata/link time |
+| `BoardCommitSnapshots` | PK/FK `(CardId, Sha)`; durable JSON before/after content |
+| `BoardCardLinks` | Ordered pair PK plus `CHECK(CardId < LinkedCardId)`; symmetric relationship, two cascading FKs |
+
+Card-dependent rows cascade on card deletion. There is deliberately no FK to terminal `Sessions`:
+manual links and retained Board provenance can outlive terminal history. `BoardColumns.BoardId`
+has **no FK** and remains nullable for compatibility; Board deletion explicitly deletes cards
+and lanes. Project agreement across board/lane/card and across linked cards is enforced by scoped
+store transactions, not composite foreign keys. Dense positions, allowed taxonomy, field lengths,
+last-board/lane protection and WIP policy are also not generic SQL constraints.
+
+Most mutations use `BeginTransaction(IsolationLevel.Serializable)` (an immediate writer
+transaction in this provider). Pair linking explicitly uses `deferred: false`. Allocation of
+card number + insert, moves + renumbering, description + revision, attachment + manifest, and
+commit + snapshot are atomic. Git capture occurs before its write transaction. Detail/catalog/
+history reads perform multiple SELECTs without a shared snapshot, so their composite responses
+can reflect adjacent moments during concurrent edits.
+
+Connections enforce foreign keys, a five-second busy timeout, private cache for file databases,
+and `synchronous=NORMAL`. The shared migration runner establishes WAL. NORMAL durability means
+an OS crash/power loss can lose recent commits even though application-crash recovery is supported;
+this shared policy affects Board work as well as terminal logs. There is one writer per database.
+
+Migrations: `board/1` core tables plus attachment/history schemas; `/2` comment kind; `/3` card
+type; `/4` multiple boards and lane `BoardId`; `/5` card links. Startup also read-probes and repairs
+missing/low number sequences, missing description baselines and lanes with null board IDs.
+It must not rewind high-water numbers. Follow the [migration policy](../../../VibeRails.Data.Sqlite/DB/AGENTS.md)
+and schema snapshot tests; altering already-applied migration SQL does not upgrade existing files.
+
+## Security review and explicit tradeoffs
+
+| Boundary | Observed protection / limitation |
+| --- | --- |
+| Browser to backend | Production auth middleware precedes endpoints and static serving. Session cookie or session header plus `viberails_tab` are required on Board and HTTP MCP. Root-only registration is separate from authentication. |
+| Project scope | No REST/MCP project-path argument; store lookups resolve keys/IDs inside server-derived project. Cross-board links/moves remain inside that project. This is local application scoping, not multi-user tenancy. |
+| SQL and Git | Values are SQL parameters. Variable SQL fragments are internal constants. SHA validation, argv-based Git and blob IDs avoid shell/path interpolation for snapshot capture. |
+| Browser content | Escape-first small text renderer; attachment images allow only raster data URLs. File response is an octet-stream attachment with `nosniff`, `no-store`, and restrictive CSP. Text uses `textContent`; PDF paints to canvas, not an active document iframe. |
+| Agent instructions | Launch composer bounds text, neutralizes template braces, flattens controls/bidi in metadata, and labels card content as data. Tool output is still untrusted text; fences are guidance, not an authorization boundary. |
+| MCP permissions | HTTP uses both credentials. Stdio is a process owned by the local user and has their database access; no new listener. `AuthorizeBoardTools` is explicit/default-false and produces a per-launch 14-tool allowlist, with provider-specific handling. It is a client approval choice, not a server-side card ACL. |
+| Destruction / retention | MCP has no delete tool, but allowed tools can alter other cards in the resolved project. Description history helps recovery; ordinary metadata/position has no equivalent revision log. Do not claim all agent writes are reversible. |
+| Availability | Authenticated file uploads intentionally have no byte limit, and attachment routes disable Kestrel's request limit. Base64 JSON, decoded bytes and SQLite BLOB handling buffer whole files. Current-file count is 40, but removed history bytes, comments, revisions and snapshots have no aggregate retention budget. |
+
+The unlimited-file behavior is explicit existing product policy, not an accidental missing check
+or newly discovered auth violation. Large uploads can exhaust browser/backend memory before
+disk capacity is reached; removing current files does not reclaim historical bytes. Preserve
+arbitrary file-size support by considering streaming, bounded concurrency, lazy reads and
+explicit retention/export controls rather than silently reintroducing the old byte quota.
+
+Two repository-wide listener searches found only the approved main Kestrel implementation,
+the non-serving `PortFinder` probe and test hosts; the cross-runtime search had no matches.
+Board route enumeration matched the 34-route Board inventory in [API_SEC.md](../../../API_SEC.md).
+No API security-contract violation was established, so no `SECURITY_ERROR.md` was created.
+This was not a new inventory reconciliation of every unrelated application endpoint.
+
+## Prioritized findings
+
+P1 = silent loss of user/agent work; P2 = observable workflow correctness; P3 = lower-impact
+contract drift. Source references below name the methods as well as their baseline line numbers.
+
+### F1 — P1: full form saves overwrite concurrent metadata
+
+**Evidence:** `board-controller.js:1825` (`readCardForm`), `BoardService.cs:266`
+(`UpdateCardOnceAsync`), `BoardStore.cs:447` (`UpdateCardAsync`). The UI submits title, lane,
+assignee, type, priority, points, tags and blocked along with description; only the description
+revision is checked, and metadata changes do not increment it.
+
+**Trigger/result:** open revision 1 in the browser; an agent changes title/priority or moves the
+card without changing description; save the old form. The save succeeds and restores stale
+fields. A real service/store probe reproduced title/priority loss with the expected revision
+still set to 1. Lane moves and assignment are exposed to the same full-payload behavior.
+
+**Recommendation/test:** add whole-card optimistic concurrency and a UI conflict/reload/merge
+path, or submit only changed fields with per-field conflict semantics. Test two clients editing
+different fields, conflicting fields, and moving a card while its editor is open. Preserve the
+separate immutable description revision for agent provenance.
+
+### F2 — P1: upload retry can bypass description conflict detection
+
+**Evidence:** `board-controller.js:1343` (`restampDescriptionRevision`) and `:1887` (save failure
+recovery). After a card save succeeds but a queued upload fails, recovery fetches the current
+revision and adopts it without comparing the returned description with the editor's base text.
+`syncAttachmentRevision` elsewhere already performs such a comparison.
+
+**Trigger/result:** save description A, upload one file, let another writer save description B,
+then fail the next upload. Recovery adopts B's revision while the editor retains A; retry Save
+can overwrite B with a matching token. The real restamp handler probe confirmed the mismatched
+text/token pair. Existing partial-upload coverage only tests attachment-only revision changes.
+
+**Recommendation/test:** restamp only if the fetched normalized description matches the last
+successfully saved description; otherwise keep the conflict and the remaining upload queue.
+Add an interleaved description edit to the partial-upload regression test.
+
+### F3 — P2: duplicate-start prevention does not span root backends
+
+**Evidence:** `BoardLaunchService.cs:33,93` uses a static in-flight dictionary and the injected
+tab host's list; `BoardCardSessions` is unique by session ID, not by active card claim. Multiple
+root backends may coexist (`Routes.cs:55`).
+
+**Trigger/result:** root A starts work on a card; root B opens the same project and starts it
+again. B cannot see A's live tabs. An isolated probe with two independent mocked tab hosts and
+one real store successfully created two linked sessions for the same card. This models the
+scope mismatch; it did not launch two real CLIs. Unlinking a running session also removes the
+association used by the same-root guard without stopping that process.
+
+**Recommendation/test:** introduce a database-backed launch claim/lease with owner and recovery
+semantics, held through startup and live ownership. Reserve before starting the child and do
+not make display-link removal release execution ownership. Test independent processes, crashed
+owners, cancellation and unlinking. This can use existing root processes; no daemon/listener is
+needed. If multiple agents per card are desired, make that an explicit policy instead.
+
+### F4 — P2: dragging with filters sends the wrong position
+
+**Evidence:** `board-controller.js:643` (`onCardDropped`) counts rendered `.board-card` elements;
+`BoardStore.cs:557` (`MoveCardAsync`) interprets that number against every card in the lane.
+
+**Trigger/result:** full lane `[hidden A, visible B]`; drop C after B while a filter hides A.
+The UI posts position 1, producing `[A, C, B]`. The handler probe reproduced the payload and
+resulting ordering. WIP feedback in this handler similarly counts visible rather than all cards.
+
+**Recommendation/test:** use visible neighbor IDs translated against the full authoritative
+order, or disable ordering while filtered with an explanation. Test same-lane and cross-lane
+drops with hidden cards before, between and after visible neighbors, plus full-lane WIP counts.
+
+### F5 — P2: duplicate lane names make MCP moves ambiguous
+
+**Evidence:** `BoardService.cs:143,178` allows duplicate lane names; `FindColumnAsync` returns
+the first case-insensitive name match. Board-name lookup already rejects ambiguous matches.
+
+**Trigger/result:** create two lanes named Build on one board; ask MCP to move a card to Build.
+It silently chooses the first lane, with no way for the caller's name to identify the second.
+A real store/service probe confirmed this behavior.
+
+**Recommendation/test:** mirror board-name resolution: exact scoped ID first, then exactly one
+name match, otherwise return an ambiguity error listing IDs. Test duplicate/case-equivalent names,
+different boards, and cross-board moves by lane ID.
+
+### F6 — P2: MCP says “ended” when session status is unknown
+
+**Evidence:** `McpStdioHost.cs:144` registers `NullBoardLiveSessionProbe`;
+`BoardTool.cs:710` (`FormatCard` session branch) falls back to `ended` even without `EndedUtc`.
+The outcome record itself documents null as unknown.
+
+**Trigger/result:** read a card from stdio while its linked session has no recorded end, or link
+a manual session without an outcome row. The tool says “ended.” A real tool/store probe verified
+the latter; the former follows from the same null-probe path. Agents may infer work has stopped
+when it has not.
+
+**Recommendation/test:** represent live/ended/unknown separately. Only report ended with evidence;
+do not treat a missing local tab as global inactivity. Cover missing, ongoing, ended and pruned
+session rows under both transport probe types.
+
+### F7 — P3: frontend still caps attachments at 12
+
+**Evidence:** `board-controller.js:848,1299` renders “Up to 12” and rejects the thirteenth file;
+`BoardAttachmentData.cs:6` and transactional count enforcement allow 40 current attachments.
+
+**Trigger/result:** add file 13 through the editor. It fails before upload even though API/MCP
+can add it. The actual upload-handler probe reproduced this. Removing current files frees slots;
+history-retained files are intentionally excluded from the server's count.
+
+**Recommendation/test:** align the UI limit/help with the server contract, preferably via shared
+capability metadata. Test 12→13, 39→40, 40→41, pending uploads, and removed historical attachments.
+
+### F8 — P2: ordinary modal close discards drafts without a guard
+
+**Evidence:** `board-controller.js:989,1120` supplies cleanup on close and guards only linked-card
+navigation. `app.js:1235,1240` binds the ordinary close button directly to `closeModal`, which
+clears the DOM without a veto or draft persistence.
+
+**Trigger/result:** edit a title/description or compose a comment, then click the modal X and
+reopen. Unsaved content is lost. This is a source-confirmed control-flow finding, not an
+additional browser reproduction in this review. Pending new-card attachments are also draft
+state; already-uploaded files and immediate link operations have separately persisted.
+
+**Recommendation/test:** use one discard/draft policy for close, replacement and navigation,
+including in-flight save/upload completion. Test X, Escape, linked navigation and page unload;
+ensure intentional Save and Delete close without a redundant prompt.
+
+## Maintainability and scaling follow-ups
+
+- **Large controller/store:** the controller is about 2,200 lines and the main store about
+  1,670. Extract editor state/save coordination and lane-order operations along behavior seams;
+  retain the shared modal and services. Avoid another UI framework or a second board backend.
+- **Heavy reads:** card summaries carry up to 100,000 description characters each; card detail
+  loads every comment/note; history returns every full revision; MCP `since` and note-tail
+  truncation happen after materialization. Add lightweight previews, cursors and lazy rails;
+  benchmark realistic long-lived cards before adding continuous refresh. Per-session outcome
+  lookups also perform repeated schema checks and separate connections.
+- **Atomic writes, composite reads:** use deferred read snapshots where a coherent response is
+  required, not immediate writer transactions. Keep response revisions tied to their actual text.
+  There are also post-commit rereads: a committed mutation can appear failed if rereading then
+  encounters a lock/cancellation. Define retry/idempotency behavior before adding automated retry.
+- **Schema guardrails:** nullable/unconstrained board ownership and application-only taxonomy are
+  compatibility choices. Add integrity diagnostics/tests before tightening constraints through
+  the migration policy. Do not rewrite applied migrations or silently rebuild user data.
+- **Contract drift:** UI counts, duplicated path normalization, lane-name ambiguity, broad
+  exception mapping, text-only MCP errors, and old prose demonstrate missing shared contracts.
+  Prefer targeted cross-layer behavior tests over source-string assertions for these boundaries.
+- **Freshness and capacity:** no live Board feed, no history pagination, no aggregate retention
+  policy and memory-buffered uploads are current limits. Their remedies should be explicit feature
+  work with measured budgets. No load test or large-file stress test was performed here.
+
+Suggested order: F1/F2 first; F3 before expanding launch automation; F4/F5/F6/F8 as focused UX
+and MCP fixes; F7 as a small contract alignment. Then address read size/retention and extract
+controller responsibilities using the new regression coverage.
+
+## Validation and remaining coverage
+
+Run from the repository root unless noted. All production code was unchanged for this review.
+
+Backend command:
+
+```powershell
+dotnet test Tests/Tests.csproj --no-restore --filter "FullyQualifiedName~Board|FullyQualifiedName~CookieAuthMiddlewareTests|FullyQualifiedName~McpServerHttpTests|FullyQualifiedName~McpStdioHostTests" -p:OutputPath=bin/VB18Review/ --verbosity quiet
+```
+
+| Check | Result and scope |
+| --- | --- |
+| Focused backend command above | **239 passed**; real temp SQLite, Board routes, services, Git capture, tools, grants, auth and MCP wiring |
+| `node --test Tests/wwwroot/js/board-*.test.mjs` | **63 passed**; real modules with unit doubles plus source-shape assertions |
+| `npx playwright test --config playwright.board.config.js` from `UITests` | **20 passed**; real browser/frontend, mocked APIs, desktop/narrow layouts, inert text/PDF/file previews |
+| Isolated review probes | Real JS handler probes for F2/F4/F7; real store/service/tool probes for F1/F5/F6; independent mocked root tab hosts for F3. Synthetic database only; no real CLI launch. Reproduction procedures and intended regression tests are above. |
+| Source security pass | 34 Board mappings; shared middleware/order, both MCP registrations, grant allowlist, SQL/Git inputs, attachment rendering/download, prompt composition and both listener searches |
+
+The test commands isolate output from running application binaries. Existing analyzer warnings
+were observed (`xUnit1051`, `xUnit2029`). A full solution suite, Native AOT publish, live provider
+approval checks, true multi-process launch reproduction, and load/resource-exhaustion tests were
+not run. Passing current tests does not close the eight findings.
+
+**Installed-runtime observation:** after committing this review, the live `link_board_commit`
+tool rejected both short and full SHA as “not found” after about ten seconds, while local Git
+resolved the commit immediately. VB-14 already records the same installed-stdio failure and a
+source fix pending deployment/live verification. The reviewed `GitCli` disables fsmonitor and
+closes stdin, and `BoardCommitService` distinguishes timeout from a missing commit. This session
+did not establish why the installed host still fails or replace that host. The actual commit
+SHA and unsuccessful link attempts are recorded on VB-18; a successful snapshot link is still
+pending. Do not confuse testing current source with testing the installed MCP binary.
