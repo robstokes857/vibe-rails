@@ -481,51 +481,6 @@ namespace VibeRails.DTOs
         string? StandardInput = null
     );
 
-    // User-approved MCP exposure for one signed script. Parameters describe both the
-    // MCP JSON schema and the argv mapping used when the tool is invoked.
-    public record PythonScriptMcpParameter(
-        string? Name,
-        string? Description,
-        string? Type,
-        bool Required,
-        string? DefaultValue,
-        string? ArgumentMode,
-        string? Flag
-    );
-
-    // Behavior is the script author's declaration of what running the tool does, in the
-    // product's own vocabulary: "read-only", "additive", or "destructive". The four MCP
-    // annotation hints are derived from it plus RepeatSafe and ReachesNetwork, so adding a
-    // protocol hint later is a mapping change rather than a stored-schema change.
-    public record PythonScriptMcpConfiguration(
-        string ScriptName,
-        string ToolName,
-        string Description,
-        List<PythonScriptMcpParameter> Parameters,
-        string Behavior,
-        bool RepeatSafe,
-        bool ReachesNetwork
-    );
-
-    public record PythonScriptMcpConfigurationRequest(
-        string? ScriptName,
-        string? ToolName,
-        string? Description,
-        List<PythonScriptMcpParameter>? Parameters,
-        string? Behavior,
-        bool RepeatSafe,
-        bool ReachesNetwork,
-        string? Pin
-    );
-
-    public record PythonScriptMcpListResponse(
-        List<PythonScriptMcpConfiguration> Configurations
-    );
-
-    public record PythonScriptMcpDocument(
-        int Version,
-        List<PythonScriptMcpConfiguration> Configurations
-    );
 
     // Script authoring (create / edit / import / rename / delete). None of these carry a
     // PIN or create an approval. Saves use the raw-byte Version as an optimistic concurrency
@@ -1595,13 +1550,6 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(SetPythonScriptPinRequest))]
     [JsonSerializable(typeof(PythonScriptApprovalRequest))]
     [JsonSerializable(typeof(PythonScriptRunRequest))]
-    [JsonSerializable(typeof(PythonScriptMcpParameter))]
-    [JsonSerializable(typeof(List<PythonScriptMcpParameter>))]
-    [JsonSerializable(typeof(PythonScriptMcpConfiguration))]
-    [JsonSerializable(typeof(List<PythonScriptMcpConfiguration>))]
-    [JsonSerializable(typeof(PythonScriptMcpConfigurationRequest))]
-    [JsonSerializable(typeof(PythonScriptMcpListResponse))]
-    [JsonSerializable(typeof(PythonScriptMcpDocument))]
     [JsonSerializable(typeof(PythonScriptContentResponse))]
     [JsonSerializable(typeof(PythonScriptSaveRequest))]
     [JsonSerializable(typeof(PythonScriptSaveResponse))]

@@ -6,7 +6,6 @@ import { pathToFileURL } from 'node:url';
 
 const modulePath = path.resolve('VibeRails/wwwroot/js/modules/python-run-window.js');
 const servicePath = path.resolve('VibeRails/Services/PythonScripts/PythonScriptService.cs');
-const mcpServicePath = path.resolve('VibeRails/Services/PythonScripts/PythonScriptMcpService.cs');
 const stylePath = path.resolve('VibeRails/wwwroot/style.css');
 
 const {
@@ -20,80 +19,15 @@ const {
     returnValueOf
 } = await import(pathToFileURL(modulePath).href);
 
-const positional = (name, extra = {}) => ({
-    name, type: 'string', required: false, defaultValue: null,
-    argumentMode: 'positional', flag: null, description: '', ...extra
-});
-const option = (name, flag, extra = {}) => ({
-    name, type: 'string', required: false, defaultValue: null,
-    argumentMode: 'option', flag, description: '', ...extra
-});
-
-// --- argv: the payload the command line prints ---
-
-test('argv puts positional values in order first, then named options — the MCP mapping', () => {
-    const parameters = [
-        option('since', '--since'),
-        positional('report'),
-        option('verbose', '--verbose', { type: 'boolean' }),
-        positional('limit', { type: 'integer' })
-    ];
-    const values = { since: '2026-08-01', report: 'weekly', verbose: 'true', limit: '50' };
-
-    assert.deepEqual(resolveArgv({ parameters, values }).argv,
-        ['weekly', '50', '--since', '2026-08-01', '--verbose']);
-});
-
-test('a false boolean option is the absence of its flag, never "--flag false"', () => {
-    const parameters = [option('verbose', '--verbose', { type: 'boolean' })];
-    assert.deepEqual(resolveArgv({ parameters, values: { verbose: 'false' } }).argv, []);
-    assert.deepEqual(resolveArgv({ parameters, values: { verbose: 'true' } }).argv, ['--verbose']);
-});
-
-test('an empty value falls back to the declared default, and only a required one blocks the run', () => {
-    const parameters = [
-        option('format', '--format', { defaultValue: 'json' }),
-        option('out', '--out', { required: true })
-    ];
-
-    // The default fills in silently…
-    assert.deepEqual(resolveArgv({ parameters, values: { out: 'x.csv' } }).argv,
-        ['--format', 'json', '--out', 'x.csv']);
-
-    // …but a required parameter with nothing behind it stops the run, named for the human.
-    const blocked = resolveArgv({ parameters, values: {} });
-    assert.deepEqual(blocked.argv, []);
-    assert.equal(blocked.error, 'out needs a value.');
-
-    // A non-required parameter with no value and no default is simply absent.
-    assert.deepEqual(resolveArgv({ parameters: [option('tag', '--tag')], values: {} }).argv, []);
-});
-
-test('typed parameters refuse values Python would choke on, in the type the author declared', () => {
-    const integer = [positional('limit', { type: 'integer' })];
-    assert.equal(resolveArgv({ parameters: integer, values: { limit: '12' } }).error, null);
-    assert.equal(resolveArgv({ parameters: integer, values: { limit: '1.5' } }).error,
-        'limit must be a integer.');
-
-    const number = [positional('ratio', { type: 'number' })];
-    assert.equal(resolveArgv({ parameters: number, values: { ratio: '0.25' } }).error, null);
-    assert.equal(resolveArgv({ parameters: number, values: { ratio: 'lots' } }).error,
-        'ratio must be a number.');
-
-    const flag = [option('dry', '--dry', { type: 'boolean' })];
-    assert.equal(resolveArgv({ parameters: flag, values: { dry: 'yes' } }).error,
-        'dry must be true or false.');
-});
-
-test('free argument rows append after the declared ones; blank halves drop out', () => {
+test('argument rows preserve their order and keep each value as one argv token', () => {
     const extras = [
         { flag: '--out', value: 'report.csv' },
         { flag: '', value: 'extra-positional' },
         { flag: '--quiet', value: '' },
         { flag: '', value: '' }
     ];
-    assert.deepEqual(resolveArgv({ parameters: [positional('mode')], values: { mode: 'fast' }, extras }).argv,
-        ['fast', '--out', 'report.csv', 'extra-positional', '--quiet']);
+    assert.deepEqual(resolveArgv({ extras }).argv,
+        ['--out', 'report.csv', 'extra-positional', '--quiet']);
 });
 
 test('a script with nothing declared still runs, with no arguments at all', () => {
@@ -155,13 +89,6 @@ test('argv and stdin are bounded on the server, since they arrive as request dat
     assert.match(service, /ValidateRunInputs\(arguments, standardInput\);/);
 });
 
-test('the positional-then-option order is the one the MCP tool path uses', () => {
-    // If BuildArguments ever stops appending options after positionals, this window's
-    // preview would quietly disagree with what an agent sends for the same script.
-    const mcp = readFileSync(mcpServicePath, 'utf8');
-    assert.match(mcp, /positional\.AddRange\(options\);/);
-});
-
 // --- run output shared with the row drawer ---
 
 test('formatPythonRunOutput labels stderr and never renders an empty box', () => {
@@ -184,7 +111,7 @@ test('a run only "worked" when it exited 0 without timing out', () => {
 test('remembered inputs survive a reopen and shrug off anything unreadable', () => {
     const stored = JSON.stringify({ values: { out: 'x.csv' }, extras: [{ flag: '--v', value: '' }], stdin: 'hi' });
     assert.deepEqual(readRemembered({ getItem: () => stored }, 'report.py'), {
-        values: { out: 'x.csv' }, extras: [{ flag: '--v', value: '' }], stdin: 'hi'
+        hadDeclaredInputs: true, extras: [{ flag: '--v', value: '' }], stdin: 'hi'
     });
     assert.equal(readRemembered({ getItem: () => null }, 'report.py'), null);
     assert.equal(readRemembered({ getItem: () => '{oops' }, 'report.py'), null);
@@ -193,12 +120,12 @@ test('remembered inputs survive a reopen and shrug off anything unreadable', () 
     assert.equal(readRemembered(undefined, 'x.py'), null);
     // Shapes are coerced, never trusted.
     assert.deepEqual(readRemembered({ getItem: () => '{"values":7,"extras":"no","stdin":9}' }, 'x.py'),
-        { values: {}, extras: [], stdin: '' });
+        { hadDeclaredInputs: false, extras: [], stdin: '' });
 });
 
 // --- posting a run ---
 
-function windowFor({ parameters = [], run = null, fail = null } = {}) {
+function windowFor({ run = null, fail = null } = {}) {
     const posted = [];
     const app = {
         calls: posted,
@@ -215,7 +142,6 @@ function windowFor({ parameters = [], run = null, fail = null } = {}) {
         runningNames: new Set(),
         recorded: [],
         runChanges: [],
-        mcpConfigurationByScript: () => (parameters.length ? { parameters } : null),
         recordRun(name, result) { this.recorded.push({ name, result }); },
         markRunning(name) { this.runningNames.add(name); this.runChanges.push(['start', name]); },
         clearRunning(name) { this.runningNames.delete(name); this.runChanges.push(['end', name]); },
@@ -226,16 +152,14 @@ function windowFor({ parameters = [], run = null, fail = null } = {}) {
     // Headless: the window paints into a layer it never has here.
     view.layer = null;
     view.name = 'report.py';
-    view.parameters = parameters;
     return { view, app, scripts, posted };
 }
 
 test('Run posts exactly the argv the command line shows, plus stdin when there is any', async () => {
     const { view, posted } = windowFor({
-        parameters: [option('out', '--out'), positional('mode')],
         run: { name: 'report.py', exitCode: 0, timedOut: false, durationMs: 8, standardOutput: '{"rows":1}', standardError: '' }
     });
-    view.values = { out: 'x.csv', mode: 'fast' };
+    view.extras = [{ value: 'fast' }, { flag: '--out', value: 'x.csv' }];
     view.stdin = 'piped text';
 
     const result = await view.execute();
@@ -254,13 +178,6 @@ test('an empty stdin box is sent as null, not an empty pipe', async () => {
     const { view, posted } = windowFor({ run: { exitCode: 0, timedOut: false, durationMs: 1, standardOutput: '', standardError: '' } });
     await view.execute();
     assert.equal(posted[0].body.standardInput, null);
-});
-
-test('a missing required value never reaches the server, and the run stays clickable', async () => {
-    const { view, posted } = windowFor({ parameters: [option('out', '--out', { required: true })] });
-    assert.equal(await view.execute(), null);
-    assert.deepEqual(posted, [], 'nothing is posted while the command is incomplete');
-    assert.equal(view.running, false);
 });
 
 test('a run marks the script busy for every surface, and releases it however the run ends', async () => {
@@ -310,6 +227,20 @@ test('reopening a window while the script is still running never starts a second
     assert.equal(scripts.runningNames.size, 0);
 });
 
+test('remembered legacy typed inputs require a manual run after argument review', t => {
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    globalThis.localStorage = { getItem: () => JSON.stringify({ values: { target: 'old-path' } }) };
+    t.after(() => {
+        if (original) Object.defineProperty(globalThis, 'localStorage', original);
+        else delete globalThis.localStorage;
+    });
+    const { view, posted } = windowFor();
+    view._mount = () => {};
+    view.open('report.py');
+    assert.equal(view.hadDeclaredInputs, true);
+    assert.deepEqual(posted, []);
+});
+
 test('a run that outlived its window records its result but does not repaint a newer one', async () => {
     const slow = { exitCode: 0, timedOut: false, durationMs: 9, standardOutput: 'slow', standardError: '' };
     const { view, scripts } = windowFor({ run: slow });
@@ -346,18 +277,10 @@ test('Run in terminal refuses while a captured run is going, instead of closing 
 
 // --- the design contract ---
 
-test('the MCP tool prints the return value, which survives a truncated stdout', () => {
+test('the return value survives truncated stdout', () => {
     const service = readFileSync(servicePath, 'utf8');
-    const mcp = readFileSync(mcpServicePath, 'utf8');
-
-    // ReturnJson is extracted from the FULL stdout while the captured copy is capped, so the
-    // return value can be the one thing truncation removes. The tool has to print it itself.
     assert.match(service, /ExtractReturnJson\(result\.StandardOutput\)\);/);
     assert.match(service, /Truncate\(result\.StandardOutput\),/);
-    assert.match(mcp, /if \(!string\.IsNullOrWhiteSpace\(run\.ReturnJson\)\)/);
-    const format = mcp.slice(mcp.indexOf('static string FormatRunResult'));
-    assert.ok(format.indexOf('run.ReturnJson') < format.indexOf('run.StandardOutput'),
-        'the return value is printed ahead of the transcript it may have been cut from');
 });
 
 test('the PTY escape hatch says it drops the inputs, because /run/interactive takes only a name', () => {
@@ -371,7 +294,7 @@ test('the PTY escape hatch says it drops the inputs, because /run/interactive ta
 test('the run window CSS keeps a fallback on every colour token and spends cyan only on the command line', () => {
     const css = readFileSync(stylePath, 'utf8');
     const block = css.slice(css.indexOf('The run window (python-run-window.js)'),
-        css.indexOf('.python-mcp-config-body'));
+        css.indexOf('/* --- Script authoring:'));
     assert.ok(block.length > 0, 'the run window has its own CSS block');
     // The slice starts inside the block's header comment; drop what is left of it so the
     // prose below (which names --color-accent) is not read as a rule.

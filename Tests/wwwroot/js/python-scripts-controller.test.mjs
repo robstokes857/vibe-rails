@@ -11,7 +11,7 @@ const webviewPanelPath = path.resolve('vscode-viberails/src/webview-panel.ts');
 const stylePath = path.resolve('VibeRails/wwwroot/style.css');
 const wwwrootPath = path.resolve('VibeRails/wwwroot');
 
-const { PythonScriptsController, defaultPythonMcpToolName, formatPythonRunOutput, PYTHON_SCRIPT_STATUS_META } =
+const { PythonScriptsController, formatPythonRunOutput, PYTHON_SCRIPT_STATUS_META } =
     await import(pathToFileURL(modulePath).href);
 
 function createApp() {
@@ -283,112 +283,15 @@ test('The shared flows fetch the list themselves when nothing is mounted', async
     assert.equal(app.calls[0].url, '/api/v1/python-scripts');
     // Cached afterwards: a second call is free.
     await controller.ensureState();
-    assert.equal(app.calls.length, 2);
-    assert.equal(app.calls[1].url, '/api/v1/python-scripts/mcp');
+    assert.equal(app.calls.length, 1);
     assert.equal(controller.scriptByName('nightly.py').path, '/scripts/nightly.py');
 });
 
-test('A signed script has an MCP switch and configured tools can be edited separately', () => {
-    const controller = controllerWith([SCRIPT]);
-    assert.equal(defaultPythonMcpToolName('Nightly Report.py'), 'python_nightly_report');
-
-    let html = controller._renderRow(SCRIPT);
-    assert.match(html, /role="switch"[\s\S]*?aria-checked="false"[\s\S]*?data-python-scripts-action="mcp-toggle"/);
-    assert.doesNotMatch(html, /data-python-scripts-action="mcp-configure"/);
-
-    controller.mcpConfigurations = [{
-        scriptName: 'nightly.py',
-        toolName: 'python_nightly',
-        description: 'Run nightly.',
-        parameters: []
-    }];
-    html = controller._renderRow(SCRIPT);
-    assert.match(html, /role="switch"[\s\S]*?aria-checked="true"/);
-    assert.match(html, /data-python-scripts-action="mcp-configure"[\s\S]*?Edit MCP tool/);
-});
-
-test('MCP parameter editor captures schema fields and argv mapping fields', () => {
-    const controller = controllerWith([SCRIPT]);
-    const html = controller._renderMcpParameterEditor({
-        name: 'output_path',
-        description: 'Where to write the report.',
-        type: 'string',
-        required: true,
-        defaultValue: null,
-        argumentMode: 'option',
-        flag: '--output'
-    });
-
-    assert.match(html, /data-python-mcp-param="name" value="output_path"/);
-    assert.match(html, /data-python-mcp-param="description" value="Where to write the report\."/);
-    assert.match(html, /value="option" selected/);
-    assert.match(html, /data-python-mcp-param="flag" value="--output"/);
-    assert.match(html, /data-python-mcp-param="required" checked/);
-});
-
-test('The behavior declaration starts blank, and read-only locks in the idempotent claim', () => {
-    const controller = controllerWith([SCRIPT]);
-
-    // Nothing is preselected: the author has to say what the script does.
-    const blank = controller._renderMcpBehaviorSection(null);
-    assert.equal((blank.match(/type="radio"/g) || []).length, 3);
-    assert.doesNotMatch(blank, /checked/);
-    assert.match(blank, /value="read-only"\s+required/);
-
-    const readOnly = controller._renderMcpBehaviorSection({ behavior: 'read-only' });
-    assert.match(readOnly, /value="read-only"\s+checked required/);
-    // A script that changes nothing cannot change more on a second run.
-    assert.match(readOnly, /data-python-mcp-field="repeatSafe"\s+checked disabled/);
-
-    const destructive = controller._renderMcpBehaviorSection(
-        { behavior: 'destructive', reachesNetwork: true });
-    assert.match(destructive, /value="destructive"\s+checked required/);
-    assert.doesNotMatch(destructive, /data-python-mcp-field="repeatSafe"[^>]*disabled/);
-    assert.match(destructive, /data-python-mcp-field="reachesNetwork"\s+checked/);
-});
-
-test('The MCP form collects a declaration and no PIN, which is asked for after it', () => {
-    const controller = controllerWith([SCRIPT]);
-    const layer = (behavior, boxes = {}) => {
-        const fields = {
-            toolName: { value: 'python_nightly' },
-            description: { value: 'Run the nightly report.' },
-            repeatSafe: { checked: Boolean(boxes.repeatSafe) },
-            reachesNetwork: { checked: Boolean(boxes.reachesNetwork) }
-        };
-        return {
-            querySelector(selector) {
-                if (selector.includes(':checked')) return behavior ? { value: behavior } : null;
-                const key = selector.match(/\[data-python-mcp-field="([^"]+)"\]/)?.[1];
-                return key ? fields[key] ?? null : null;
-            },
-            querySelectorAll() { return []; }
-        };
-    };
-
-    assert.match(
-        controller._collectMcpConfiguration(layer(null), 'nightly.py').error,
-        /what this script does/);
-
-    const readOnly = controller._collectMcpConfiguration(layer('read-only'), 'nightly.py').value;
-    assert.equal(readOnly.behavior, 'read-only');
-    assert.equal(readOnly.repeatSafe, true, 'read-only implies it even with the box unticked');
-    assert.equal(readOnly.reachesNetwork, false);
-    assert.equal('pin' in readOnly, false, 'the form must not collect a PIN');
-
-    const destructive = controller._collectMcpConfiguration(
-        layer('destructive', { reachesNetwork: true }), 'nightly.py').value;
-    assert.equal(destructive.repeatSafe, false);
-    assert.equal(destructive.reachesNetwork, true);
-
-    // The PIN moved out of the dialog and is prompted for once the form is complete.
-    const source = readFileSync(modulePath, 'utf8');
-    assert.doesNotMatch(source, /data-python-mcp-field="pin"/);
-    const configure = source.slice(
-        source.indexOf('async configureMcp('), source.indexOf('async disableMcp('));
-    assert.ok(
-        configure.indexOf('_openMcpConfigurationModal') < configure.indexOf('_promptPin'),
-        'the PIN must be asked for after the configuration form, not inside it');
+test('Signed scripts retain run and sign actions without MCP exposure controls', () => {
+    const html = controllerWith([SCRIPT])._renderRow(SCRIPT);
+    assert.match(html, /data-python-scripts-action="run"/);
+    assert.match(html, /data-python-scripts-action="approve"/);
+    assert.doesNotMatch(html, /MCP|mcp-toggle|mcp-configure/);
 });
 
 test('Suggested names are sanitised, extended to .py, and made unique', () => {

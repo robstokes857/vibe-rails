@@ -256,6 +256,21 @@ public sealed class PythonScriptRoutesTests : IDisposable
         Assert.Equal("piped text", forwardedStandardInput);
     }
 
+    [Theory]
+    [InlineData("GET")]
+    [InlineData("PUT")]
+    [InlineData("DELETE")]
+    public async Task RemovedMcpConfigurationRoutes_ReturnNotFound(string method)
+    {
+        await WithHostAsync(async baseUri =>
+        {
+            using var request = new HttpRequestMessage(new HttpMethod(method),
+                new Uri(baseUri, "/api/v1/python-scripts/mcp"));
+            using var response = await SharedClient.SendAsync(request, TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        });
+    }
+
     private static Task<HttpResponseMessage> PostAsync<TRequest>(
         Uri baseUri,
         string path,

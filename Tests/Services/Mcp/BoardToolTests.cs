@@ -479,6 +479,30 @@ public sealed class BoardToolTests : IDisposable
         Assert.Contains("; current)", (await _tool.ListBoards(Ct)).Split('\n').Single(line => line.Contains("Sprint 2")));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DuplicateBoardNames_RequireAnIdWithoutWritingToEitherBoard(bool duplicateByRename)
+    {
+        var first = await _service.CreateBoardAsync(_project, new CreateBoardRequest("Sprint"), Ct);
+        var second = await _service.CreateBoardAsync(_project, new CreateBoardRequest(duplicateByRename ? "Other" : "sPRINT"), Ct);
+        if (duplicateByRename)
+            await _service.UpdateBoardAsync(_project, second.Id, new UpdateBoardRequest("sPRINT"), Ct);
+
+        var listing = await _tool.ListBoardCards(board: "sprint", cancellationToken: Ct);
+        Assert.Contains("ambiguous", listing);
+        Assert.Contains("Use a board ID from list_boards", listing);
+        var creation = await _tool.CreateBoardCard("Wrong target", board: "SPRINT", cancellationToken: Ct);
+        Assert.Contains("ambiguous", creation);
+        Assert.Empty((await _service.GetCardsAsync(_project, Ct, first.Id)).Cards);
+        Assert.Empty((await _service.GetCardsAsync(_project, Ct, second.Id)).Cards);
+
+        Assert.Equal("Created VB-1: First", await _tool.CreateBoardCard("First", board: first.Id, cancellationToken: Ct));
+        Assert.Equal("Created VB-2: Second", await _tool.CreateBoardCard("Second", board: second.Id, cancellationToken: Ct));
+        Assert.Equal("First", Assert.Single((await _service.GetCardsAsync(_project, Ct, first.Id)).Cards).Title);
+        Assert.Equal("Second", Assert.Single((await _service.GetCardsAsync(_project, Ct, second.Id)).Cards).Title);
+    }
+
     private sealed class FakeResolver(string project) : IBoardProjectResolver
     {
         public string GitWorkingDirectory => project;

@@ -15,7 +15,7 @@ public partial interface IBoardService
     Task<BoardSummaryResponse> CreateBoardAsync(string projectPath, CreateBoardRequest request, CancellationToken cancellationToken = default);
     Task<BoardSummaryResponse?> UpdateBoardAsync(string projectPath, string boardId, UpdateBoardRequest request, CancellationToken cancellationToken = default);
     Task<DeleteBoardResponse?> DeleteBoardAsync(string projectPath, string boardId, CancellationToken cancellationToken = default);
-    /// <summary>Resolves a board by id or (case-insensitive) name within the project.</summary>
+    /// <summary>Resolves an id or case-insensitive name within the project; ambiguous names require an id.</summary>
     Task<BoardRecord?> FindBoardAsync(string projectPath, string idOrName, CancellationToken cancellationToken = default);
 
     Task<BoardColumnListResponse> GetColumnsAsync(string projectPath, CancellationToken cancellationToken = default, string? boardId = null);
@@ -122,8 +122,13 @@ public sealed partial class BoardService(
             return null;
         await store.EnsureDefaultColumnsAsync(projectPath, cancellationToken);
         var boards = await store.GetBoardsAsync(projectPath, cancellationToken);
-        return boards.FirstOrDefault(b => string.Equals(b.Id, wanted, StringComparison.Ordinal))
-            ?? boards.FirstOrDefault(b => string.Equals(b.Name, wanted, StringComparison.OrdinalIgnoreCase));
+        var byId = boards.FirstOrDefault(b => string.Equals(b.Id, wanted, StringComparison.Ordinal));
+        if (byId is not null)
+            return byId;
+        var matches = boards.Where(b => string.Equals(b.Name, wanted, StringComparison.OrdinalIgnoreCase)).Take(2).ToArray();
+        if (matches.Length > 1)
+            throw new BoardValidationException($"Board name '{wanted}' is ambiguous. Use a board ID from list_boards.");
+        return matches.FirstOrDefault();
     }
 
     // ------------------------------------------------------------------ columns

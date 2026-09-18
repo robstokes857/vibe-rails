@@ -15,13 +15,13 @@ natural one:
 vb.exe — Native AOT, two MCP entry points sharing the same tool classes
 │
 ├── HTTP (dashboard's Kestrel, root backend only)
-│     MapRegisterServices: static WithTools<...>() + dynamic signed-Python list/call handlers
+│     MapRegisterServices: explicit WithTools<...>() registrations
 │     Program.cs:          app.MapMcp("/mcp")
 │     CookieAuthMiddleware in front of /mcp     ← viberails_session + viberails_tab tokens required
 │
 └── stdio (`vb mcp`, McpStdioHost.cs)
       Program.cs branches BEFORE the web host:  if (McpStdioHost.IsRequested(args)) …
-      AddMcpServer().WithStdioServerTransport() + the same static and dynamic tools
+      AddMcpServer().WithStdioServerTransport() + the same explicit tools
       No web server, no port, no auth           ← inherently scoped to the spawning CLI
 ```
 
@@ -35,8 +35,8 @@ path registers its own minimal services in `McpStdioHost.ConfigureServices`.
 - **HTTP** (`ModelContextProtocol.AspNetCore`, `MapMcp`): `/mcp` is not under `/api/`, but
   `CookieAuthMiddleware` gates it at the **same bar as `/api/`** — **both** the
   `viberails_session` token (cookie or header) **and** the `viberails_tab` per-tab token
-  (header) are required. MCP tools can open a host shell and send input, so a leaked session
-  token alone must never be enough to reach them. Used by the Explorer.
+  (header) are required. A leaked session token alone must never be enough to reach
+  these capabilities. Used by the Explorer.
 - **stdio** (`ModelContextProtocol`, `WithStdioServerTransport`): the CLI spawns `vb mcp` and talks
   JSON-RPC over the child's stdin/stdout. The MCP transport itself has no listening socket or auth
   challenge because it is scoped to the spawning process. `McpStdioHost` clears the default console
@@ -56,7 +56,6 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 | `pause_token_saver` | `TokenSaverTool.PauseTokenSaver` | Turns VibeRails' token compression off for 5 minutes for this terminal tab, so an agent can read elided output verbatim. |
 | `resume_token_saver` | `TokenSaverTool.ResumeTokenSaver` | Restores token compression immediately, ending an active pause early. |
 | `get_token_saver_status` | `TokenSaverTool.GetTokenSaverStatus` | Reports whether compression is active and whether a pause window is open. |
-| `python_script_signing_help` | `PythonScriptTool.PythonScriptSigningHelp` | Explains signing and lists scripts plus explicit MCP exposure. |
 | `list_boards` | `BoardTool.ListBoards` | The project's boards (a project can hold several: sprints, sub-projects) with ids, lanes and card counts, and which one is current for this terminal. |
 | `list_board_columns` | `BoardTool.ListBoardColumns` | Lanes of one board with WIP limits and card counts. `board` (name or id) optional: defaults to the board of the card this terminal was launched for, else the first board. |
 | `list_board_cards` | `BoardTool.ListBoardCards` | Cards on one board (key, lane, type, priority, title, assignee, comment count, session open); optional lane/assignee/type filters and the same optional `board`. Card keys are project-unique, so `get_board_card VB-n` never needs a board. |
@@ -71,8 +70,6 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 | `get_board_notes` | `BoardTool.GetBoardNotes` | All notes on a card, oldest first (`get_board_card` shows only the most recent ~3,000 characters); optional `since`. |
 | `add_board_attachment` | `BoardTool.AddBoardAttachment` | Attach an agent-written `*.md` / `*.txt` file (UTF-8 text, ≤ 500,000 characters). The description revision it produces is attributed to the agent session. |
 | `link_board_commit` | `BoardTool.LinkBoardCommit` | Capture a commit from the terminal's checkout and atomically save its sha, metadata and changed-code snapshot on the card. |
-| user-defined | `PythonScriptMcpService` dynamic handler | Runs one user-configured, still-signed Python script with its declared typed inputs mapped to argv. |
-
 > The wire names are what tool callers use. Calling `SearchHistory` (PascalCase) returns "Unknown tool".
 
 ### Kanban board tools (`BoardTool`)
@@ -92,6 +89,9 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
   before/after blobs, then saves the link and `BoardCommitSnapshots` row in one transaction.
   Viewing never consults Git. Capture errors leave no link. More than 60 files is rejected;
   individual file previews retain at most 400,000 characters plus a visible truncation marker.
+- **Board name resolution**: names are case-insensitive; duplicate names fail with an explicit
+  instruction to use the board ID from `list_boards`. Exact IDs take precedence and remain scoped
+  to the current project.
 - **Card default**: every `card` argument accepts a key (`VB-12`) or an id; omitted, it means the
   card the session was launched for. A VibeRails session that touches a card it is not yet linked
   to gets linked with origin `mcp`, so the card's Sessions rail shows it.
@@ -147,10 +147,10 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
   description edits are attributed to the current session and never interrupt the TUI.
 - **Board launch authorization (2026-09-14)**: Start work sets the typed, false-by-default
   `AuthorizeBoardTools` marker for that session and explicitly authorizes the Board workflow in
-  the prompt for every provider. `Terminal/Commands/BoardMcpAuthorization.cs` grants every tool
-  of the `viberails-mcp` server for that session (VB-11, 2026-09-18): the compile-time list above
-  (`ToolNames`, which a test keeps in step) plus a server-wide rule where the CLI has one, so
-  user-exposed Python script tools are covered too. Nothing outside this one server is granted.
+  the prompt for every provider. `Terminal/Commands/BoardMcpAuthorization.cs` grants only the
+  fourteen Board tools for that session through an explicit `ToolNames` allowlist. No server
+  wildcard or unrelated MCP tool is authorized. Tests pin both the reviewed allowlist and exact
+  provider grants.
   Antigravity receives only the prompt because its only native switch is a global bypass. See
   [Terminal launch authorization](../Terminal/AGENTS.md#board-launch-options-and-input-sequences-2026-09-14).
   This is the requested Board-specific exception to the Environments editor's YOLO-only policy,
@@ -158,12 +158,9 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
   selected provider modes and managed policies can still restrict calls. Validation used CLI help,
   documentation and regression tests; no live provider session or deployment was performed.
 
-Dynamic Python tools are stored in `~/.vibe_rails/python_script_mcp.json`. They are appended to the
-static tool collection through `WithPythonScriptTools()` in both transports. List and call handlers
-read the document per request; a call still goes through `PythonScriptService.RunAsync`, which
-re-checks the signed content hash before launch. Enabling or editing exposure requires the user's
-signing PIN in the dashboard, but neither the PIN nor an approval operation is exposed through MCP.
-See [`../PythonScripts/AGENTS.md`](../PythonScripts/AGENTS.md) for the complete contract.
+Python script MCP tools, the signing-help tool, and their configuration UI/routes were removed
+2026-09-18 at the owner's request. Agents use their existing execution tools for Python. Ordinary
+signed Python scripts remain available from the dashboard; legacy MCP configuration is ignored.
 
 > **Not currently exposed (security review 2026-07-02):** `run_shell_command` / `get_shell_command_status` /
 > `cancel_shell_command` (`HostShellTools`) and `web_search` / `web_fetch` (`WebResearchTools`) are kept in the
@@ -298,10 +295,8 @@ case; the add step is intentionally not quiet.
 
 - `Tests/Services/Mcp/McpServerHttpTests.cs` — hosts the real `AddMcpServer().WithHttpTransport()
   + MapMcp` wiring on a loopback Kestrel and drives it through `McpClientService` over Streamable
-  HTTP; asserts the static tool list plus a dynamic Python tool, tool execution, and that the
+  HTTP; asserts the static tool list, rejection of removed Python tools, execution, and that the
   DI-injected `SessionSearchTool` resolves (with a deterministic fake `IUnifiedSearchService`).
-- `Tests/Services/PythonScriptMcpServiceTests.cs` — pins exposure authorization, persistence,
-  generated schemas, argv mapping, and fail-closed execution after a script changes.
 - `Tests/Services/Mcp/McpStdioHostTests.cs` — pins the `vb mcp` trigger and that
   `McpStdioHost.ConfigureServices` registers the tools (`SessionSearchTool`,
   `TokenSaverTool`) and the BERT read-path. These are service-descriptor assertions only;

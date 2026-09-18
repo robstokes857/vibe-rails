@@ -43,9 +43,8 @@ test('the controller loads boards first, remembers the selection, and scopes lan
     const source = readFileSync(controllerPath, 'utf8');
     assert.match(source, /const BOARD_STORAGE_KEY = 'viberails\.board\.selected\.v1'/);
     assert.match(source, /boards = await BoardApi\.getBoardsAsync\(\);/);
-    assert.match(source, /this\.state\.boardId = this\.pickBoardId\(boards\);/);
-    assert.match(source, /BoardApi\.getBoardColumnsAsync\(this\.state\.boardId\)/);
-    assert.match(source, /BoardApi\.getBoardCardsAsync\(this\.state\.boardId\)/);
+    assert.match(source, /BoardApi\.getBoardColumnsAsync\(boardId\)/);
+    assert.match(source, /BoardApi\.getBoardCardsAsync\(boardId\)/);
     assert.match(source, /BoardApi\.reorderBoardColumnsAsync\(orderedIds, this\.state\.boardId\)/);
     assert.match(source, /createBoardColumnAsync\(\{ name, wipLimit, color, boardId: this\.state\.boardId \}\)/);
     assert.match(source, /picker\?\.addEventListener\('change', \(\) => this\.switchBoard\(picker\.value\)\)/);
@@ -96,13 +95,11 @@ test('a card with a live session marches its border and shows a larger dot', () 
     assert.match(css, /prefers-reduced-motion: reduce\) \{\s*\.board-view \.board-card\.is-live \{ animation: none; \}/);
 });
 
-test('image previews paint from a data: URL so the VS Code webview CSP allows them', () => {
+test('image previews use tracked object URLs supported by the VS Code webview CSP', () => {
     const source = readFileSync(attachmentsPath, 'utf8');
-    assert.match(source, /export function blobToDataUrl\(blob\)/);
     const image = source.slice(source.indexOf("if (kind === 'image')"), source.indexOf("} else if (kind === 'text')"));
-    assert.match(image, /const src = await blobToDataUrl\(new Blob\(\[blob\], \{ type: attachment\.mimeType \}\)\);/);
-    assert.match(image, /img\.src = src;/);
-    assert.doesNotMatch(image, /objectUrl\(/, 'the image preview must not depend on a blob: URL');
+    assert.match(image, /img\.src = objectUrl\(/);
+    assert.doesNotMatch(image, /FileReader|readAsDataURL|blobToDataUrl/);
     // The webview CSP lets blob: images through as well, for everything else that paints one.
     assert.match(readFileSync(webviewPath, 'utf8'), /`img-src \$\{webview\.cspSource\} https: data: blob:`/);
     // The attachment list shows a thumbnail for small rasters (the same data: URL inline images use).

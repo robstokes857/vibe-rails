@@ -80,6 +80,8 @@ export class BoardController {
         this.launchOptionsDispose = null;
         this._openCardGeneration = 0;
         this._openCardAbort = null;
+        this._refreshGeneration = 0;
+        this._loadedBoardId = null;
         BoardApi.attach(app);
         this.state = {
             boards: [],
@@ -110,38 +112,13 @@ export class BoardController {
         this.state.filters = this.readStoredFilters();
         this.bindShell();
 
-        this.setBusy(true);
-        let boards;
-        let columns;
-        let cards;
-        try {
-            boards = await BoardApi.getBoardsAsync();
-            if (this.app.currentView !== 'board' || !this.root?.isConnected) return;
-            this.state.boards = boards;
-            this.state.boardId = this.pickBoardId(boards);
-            [columns, cards] = await Promise.all([
-                BoardApi.getBoardColumnsAsync(this.state.boardId),
-                BoardApi.getBoardCardsAsync(this.state.boardId)
-            ]);
-        } catch (error) {
-            // The view stayed mounted, so the failure belongs on screen, not in the console only.
-            if (this.app.currentView !== 'board' || !this.root?.isConnected) return;
-            this.setBusy(false);
-            this.app.showToast('Board', error?.message || 'Failed to load the board.', 'error');
-            return;
-        }
-
-        // Stand-down guard: the user may have navigated on while the load was in
-        // flight, in which case this render would paint over the new view.
-        if (this.app.currentView !== 'board' || !this.root?.isConnected) return;
-
-        this.state.columns = columns;
-        this.state.cards = cards;
-        this.setBusy(false);
-        this.renderAll();
+        this.state.columns = [];
+        this.state.cards = [];
+        await this.refresh({ restoreSelection: true });
     }
 
     unload() {
+        this._refreshGeneration += 1;
         this._openCardGeneration += 1;
         this._openCardAbort?.abort();
         this._openCardAbort = null;
@@ -225,9 +202,7 @@ export class BoardController {
         if (!boardId || boardId === this.state.boardId) return;
         this.state.boardId = boardId;
         this.persistBoardSelection();
-        this.setBusy(true);
         await this.refresh();
-        this.setBusy(false);
     }
 
     // ============================================
@@ -693,23 +668,41 @@ export class BoardController {
         await this.refresh();
     }
 
-    async refresh() {
+    async refresh({ restoreSelection = false } = {}) {
+        const generation = ++this._refreshGeneration;
+        const root = this.root;
+        const requestedBoardId = this.state.boardId;
+        const isCurrent = () => generation === this._refreshGeneration && root === this.root
+            && root?.isConnected && this.app.currentView === 'board' && requestedBoardId === this.state.boardId;
+        this.setBusy(true);
+        if (requestedBoardId !== this._loadedBoardId) {
+            // The picker already names the new board. Old lanes must not remain actionable.
+            this.state.columns = [];
+            this.state.cards = [];
+            this.renderAll();
+        }
         try {
             const boards = await BoardApi.getBoardsAsync();
-            if (this.app.currentView !== 'board' || !this.root?.isConnected) return;
-            this.state.boards = boards;
+            if (!isCurrent()) return;
             // The selected board may have been deleted (here or from another tab).
-            if (!boards.some(board => board.id === this.state.boardId)) this.state.boardId = this.pickBoardId(boards);
+            const boardId = !restoreSelection && boards.some(board => board.id === requestedBoardId)
+                ? requestedBoardId : this.pickBoardId(boards);
             const [columns, cards] = await Promise.all([
-                BoardApi.getBoardColumnsAsync(this.state.boardId),
-                BoardApi.getBoardCardsAsync(this.state.boardId)
+                BoardApi.getBoardColumnsAsync(boardId),
+                BoardApi.getBoardCardsAsync(boardId)
             ]);
-            if (this.app.currentView !== 'board' || !this.root?.isConnected) return;
+            if (!isCurrent()) return;
+            this.state.boards = boards;
+            this.state.boardId = boardId;
             this.state.columns = columns;
             this.state.cards = cards;
+            this._loadedBoardId = boardId;
+            this.persistBoardSelection();
             this.renderAll();
         } catch (error) {
-            this.app.showToast('Board', error?.message || 'Failed to refresh the board.', 'error');
+            if (isCurrent()) this.app.showToast('Board', error?.message || 'Failed to refresh the board.', 'error');
+        } finally {
+            if (generation === this._refreshGeneration && root === this.root) this.setBusy(false);
         }
     }
 

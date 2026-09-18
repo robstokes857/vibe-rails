@@ -22,9 +22,9 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | [js/modules/code-analyzer-dashboard.js](js/modules/code-analyzer-dashboard.js) | Compact MintLint score card plus the modal file/metric/source report |
 | [js/modules/project-health-fix-launcher.js](js/modules/project-health-fix-launcher.js) | Inline shared agent/environment pickers beside Project health Fix actions; synchronizes and remembers the target for direct launch |
 | [js/modules/jobs-controller.js](js/modules/jobs-controller.js) | Automation page: ordered repository-script/Worker workflow editor, automation CRUD, per-action run details, recipes, and "Run now" (queues a native terminal run; `launchFromNav` for the nav launcher); owns the shared `PythonScriptsController` |
-| [js/modules/python-scripts-controller.js](js/modules/python-scripts-controller.js) | "Python scripts" section of the Automation page + shared lifecycle flows; also owns the PIN-gated MCP switch/configurator and typed parameter-to-argv mapping fields |
+| [js/modules/python-scripts-controller.js](js/modules/python-scripts-controller.js) | "Python scripts" section of the Automation page + shared lifecycle and signing flows |
 | [js/modules/python-script-workbench.js](js/modules/python-script-workbench.js) | `python-script` view: Monaco editor beside a docked agent terminal for one script (see "Python script workbench" below) |
-| [js/modules/python-run-window.js](js/modules/python-run-window.js) | The little run window: typed inputs + free arguments + stdin in, exit code / output / return value out, no terminal (see "Python script run window" below) |
+| [js/modules/python-run-window.js](js/modules/python-run-window.js) | The little run window: argument rows + stdin in, exit code / output / return value out, no terminal (see "Python script run window" below) |
 | [js/modules/automation-launcher.js](js/modules/automation-launcher.js) | Nav "Launch" flyout (automations + Python scripts, unsigned ones disabled) and its order/show-hide customize modal over `/api/v1/automation-nav/preferences` |
 | [js/modules/board-controller.js](js/modules/board-controller.js) | `board` view: the lane board — drag cards between lanes, drag lanes to reorder, filter, and the card editor with comments |
 | [js/modules/board-api.js](js/modules/board-api.js) | Board data layer: a thin client over `/api/v1/board/*` (every call rides `app.apiCall`, so cookie + tab header apply). `BoardApi.attach(app)` once from the controller |
@@ -63,7 +63,8 @@ Application Settings. New card lives in the board toolbar. Top-left of the headi
 **board picker** (a project can hold several boards — sprints, sub-projects): a select, a `+`
 that creates one (default lanes; the new board opens at once), and a settings button for
 rename/delete. The selection persists in `localStorage` (`viberails.board.selected.v1`), every
-list call carries the board id, and the card editor's Lane field groups every board's lanes so a
+list call carries the board id. Refresh generations discard stale catalog, lane, card, and error
+responses; switching boards clears the previous lanes/cards until the new board loads. The card editor's Lane field groups every board's lanes so a
 card moves between boards by saving it into another board's lane. Card keys stay per project.
 
 **The board is per project and server-backed.** `board-api.js` is a thin client over
@@ -180,7 +181,8 @@ DOM through textContent, so Markdown previews as its own source and no Markdown 
 HTML sanitizer is vendored; PDF.js paints canvas pages without document scripting,
 annotations, XFA, or eval. Other file types only download as octet-stream. Uploaded
 filenames and metadata remain untrusted. Close/unload aborts requests, terminates PDF work,
-and revokes Blob URLs.
+and revokes Blob URLs. Image previews use tracked Blob URLs directly, avoiding a full base64 copy;
+both the browser and VS Code image CSP allow these URLs.
 
 `assets/board` holds exactly one dependency — PDF.js, as `pdf.min.js` plus
 `pdf.worker.min.js`. Its CMaps, standard fonts and Wasm decoders are deliberately not
@@ -639,17 +641,12 @@ See also: [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for back
   Launch flyout all drive the same surface. Styles: the "The run window" block in
   `style.css` (`.vb-run-*`). It is the small-space answer to the interactive tab — inputs,
   output and return value in one modal, nothing spawned.
-- **Inputs**. A script exposed to MCP has already declared its parameters (name, type,
-  required, default, positional-or-`--flag`); those render as typed fields with a locked
-  shape chip. Any script can also take free **argument** rows (optional flag + value) and
-  a **Standard input** box. Everything typed is remembered per script in localStorage
-  `viberails.pythonRun.<name>`, so re-running is one click. A script that declares nothing
-  and remembers nothing **runs the moment the window opens**.
-- **The command line** under the inputs is the payload, not a picture of it: `resolveArgv()`
-  builds one array, the window prints it and posts it, so a preview cannot drift from what
-  runs. It mirrors `PythonScriptMcpService.BuildArguments` (positional values in order,
-  then named options; a false boolean option is the absence of its flag), so a script
-  behaves the same whether a human or an agent calls it.
+- **Inputs**. Scripts take **argument** rows (optional flag + value) and a **Standard input**
+  box. Values persist per script in localStorage `viberails.pythonRun.<name>`. A script without
+  remembered inputs runs when the window opens. Legacy remembered typed MCP inputs suppress that
+  automatic run so the user can review argument rows first.
+- **The command line** under the inputs is the payload: `resolveArgv()` builds one array,
+  and the window prints and posts the same values.
 - **Output**. `POST /api/v1/python-scripts/run` with `{ name, arguments, standardInput }`
   returns exit code, duration, stdout/stderr and `returnJson` — the JSON object or array
   the script printed as the whole of stdout or on its last line
@@ -658,11 +655,8 @@ See also: [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for back
   **Output**. Argv and stdin are bounded server-side (64 args, 8k chars each, 256k stdin).
   The result also lands in the row's last-run drawer through `recordRun`.
 - **Keys**: Escape closes, Ctrl/⌘+Enter runs from anywhere including the stdin box.
-- **MCP exposure**: each script row has an MCP switch. Enabling/editing opens a PIN-gated dialog
-  for tool name, usage description, and zero or more typed parameters (required/default plus
-  positional or named-option argv mapping). Enabled tools render under a separate **Python script
-  tools** heading in the local MCP Explorer; disabling needs no PIN. Backend validation and the
-  signed hash remain authoritative.
+- **Python MCP removed (2026-09-18)**: the exposure switch, configurator, and special Explorer
+  group are gone. Signed scripts remain available for human-initiated runs.
 - **Ask agent**: with a live session (open socket) the brief naming the absolute script
   path is pasted with `injectText` **without submitting** (`…\n\nChange: `); otherwise
   `startTerminalWithOptions` starts the panel's picked CLI (default `claude`) in the

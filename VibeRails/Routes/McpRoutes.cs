@@ -4,7 +4,6 @@ using System.Net;
 using System.Text.Json;
 using VibeRails.DTOs;
 using VibeRails.Services.Mcp;
-using VibeRails.Services.PythonScripts;
 
 namespace VibeRails.Routes;
 
@@ -36,27 +35,13 @@ public static class McpRoutes
         // Lists the tools the in-process MCP server exposes.
         app.MapGet("/api/v1/mcp/tools", async (
             HttpContext ctx,
-            IPythonScriptMcpService pythonScriptMcpService,
             CancellationToken cancellationToken) =>
         {
             try
             {
                 await using var client = await ConnectAsync(ctx, null, null, cancellationToken);
                 var tools = await client.GetAvailableToolsAsync(cancellationToken);
-                var pythonToolSources = new Dictionary<string, string>(StringComparer.Ordinal);
-                foreach (var pythonTool in await pythonScriptMcpService.ListToolsAsync(cancellationToken))
-                {
-                    var sourceName = pythonTool.Meta?["scriptName"]?.GetValue<string>();
-                    if (!string.IsNullOrWhiteSpace(sourceName))
-                    {
-                        pythonToolSources.TryAdd(pythonTool.Name, sourceName);
-                    }
-                }
-                var toolInfos = tools.Select(tool =>
-                {
-                    pythonToolSources.TryGetValue(tool.Name, out var sourceName);
-                    return ToToolInfo(tool, sourceName);
-                }).ToList();
+                var toolInfos = tools.Select(tool => ToToolInfo(tool)).ToList();
                 return Results.Ok(toolInfos);
             }
             catch (Exception ex)
@@ -186,9 +171,7 @@ public static class McpRoutes
         return headers;
     }
 
-    private static McpToolInfo ToToolInfo(
-        McpClientTool tool,
-        string? pythonScriptName = null)
+    private static McpToolInfo ToToolInfo(McpClientTool tool)
     {
         var annotations = tool.ProtocolTool.Annotations;
         return new McpToolInfo(
@@ -197,8 +180,6 @@ public static class McpRoutes
             Title: tool.Title,
             InputSchema: CloneIfDefined(tool.JsonSchema),
             ReturnSchema: CloneIfDefined(tool.ReturnJsonSchema),
-            Category: pythonScriptName is null ? "built-in" : "python-script",
-            SourceName: pythonScriptName,
             Annotations: annotations is null ? null : new McpToolAnnotationsInfo(
                 ReadOnly: annotations.ReadOnlyHint,
                 Destructive: annotations.DestructiveHint,

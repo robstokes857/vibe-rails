@@ -43,19 +43,16 @@ Start work also sets `StartTerminalRequest.AuthorizeBoardTools` for base and sav
 launches. It defaults to false everywhere else and travels through TerminalRoutes,
 TerminalSessionService, TerminalRunner and CommandService. The launch prompt explicitly
 authorizes the Board workflow for every provider. `Commands/BoardMcpAuthorization.cs` grants
-every tool of the `viberails-mcp` server and nothing else (VB-11, 2026-09-18 — the earlier
-thirteen-tool list made agents stop for `search_history`, the token-saver tools and the Python
-tools). `ToolNames` is the compile-time list — the fourteen Board tools plus `validate_vca`,
-`search_history`, `get_token_saver_status`, `pause_token_saver`, `resume_token_saver` and
-`python_script_signing_help` — used one by one where a CLI names tools and repeated next to the
-server-wide rule elsewhere; only the server-wide rules reach user-named Python script tools.
+only the fourteen reviewed Board tools in `ToolNames`, using exact per-tool rules. Unrelated
+MCP tools retain their normal approval policy. Never add a server-wide grant: future tools must
+be reviewed individually before they enter this allowlist.
 
 | Provider | Session-only Board grants and evidence |
 |---|---|
-| Codex | `--config mcp_servers.viberails-mcp.default_tools_approval_mode="approve"` (server-wide, documented under `[mcp_servers.<name>]`) plus `--config mcp_servers.viberails-mcp.tools.<tool>.approval_mode="approve"` per listed tool; [official MCP reference](https://developers.openai.com/codex/mcp/). |
-| Claude | One comma-separated `--allowedTools=mcp__viberails-mcp,mcp__viberails-mcp__<tool>,…` (`mcp__<server>` matches every tool the server provides, per the permissions reference), then `--` before the positional prompt so it is not parsed as another grant; 2.1.271 help. |
+| Codex | `--config mcp_servers.viberails-mcp.tools.<tool>.approval_mode="approve"` per listed Board tool; [official MCP reference](https://developers.openai.com/codex/mcp/). |
+| Claude | One comma-separated `--allowedTools=mcp__viberails-mcp__<tool>,…` naming each Board tool, then `--` before the positional prompt so it is not parsed as another grant; 2.1.271 help. |
 | Copilot | Repeated `--allow-tool=viberails-mcp(<tool>)`; 1.0.71 permissions help. |
-| Grok | `--allow=MCPTool(viberails-mcp__*)` (the documented server glob) plus repeated `--allow=MCPTool(viberails-mcp__<tool>)`; 1.0.30 guide. |
+| Grok | Repeated `--allow=MCPTool(viberails-mcp__<tool>)` per Board tool; 1.0.30 guide. |
 | OpenCode and GLM/DeepSeek/Kimi variants | `OPENCODE_PERMISSION` entries mapping exact `viberails-mcp_<tool>` names to `allow`; OpenCode 1.18.30. |
 | Antigravity | Prompt authorization only; its only native switch is the global `--dangerously-skip-permissions`, which a board launch does not add. |
 
