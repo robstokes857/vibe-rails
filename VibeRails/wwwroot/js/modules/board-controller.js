@@ -30,6 +30,7 @@
 import { escapeHtml, confirmDialog, parseLlmSelection, getCliBrand } from './utils.js';
 import { mountLlmPicker, setLlmPickerValue, getEnabledLlmItems } from './pickers/llm-picker.js';
 import { BoardApi } from './board-api.js';
+import { renderCardLinksSection, bindCardLinks } from './board-card-links.js';
 import { renderCommentHtml, wrapSelectionAsCode, toPlainPreview } from './board-text.js';
 import { openDiffModal } from './diff-modal.js';
 import * as SessionDebug from './session-viewer.js';
@@ -78,6 +79,7 @@ export class BoardController {
         // Disposer for the LLM picker mounted in the card editor's Assignee field.
         this.assigneePickerDispose = null;
         this.launchOptionsDispose = null;
+        this.cardLinksDispose = null;
         this._openCardGeneration = 0;
         this._openCardAbort = null;
         this._refreshGeneration = 0;
@@ -126,6 +128,8 @@ export class BoardController {
         this.closeDiffModal();
         this.closeSessionModal();
         this.disposeAssigneePicker();
+        this.cardLinksDispose?.();
+        this.cardLinksDispose = null;
         disposeBoardAttachmentPreview();
         this.root = null;
     }
@@ -917,6 +921,8 @@ export class BoardController {
                         </div>
                     </div>
 
+                    ${renderCardLinksSection(card)}
+
                     <section class="board-side-section">
                         <h3 class="board-side-label">
                             <i class="fa-solid fa-code-branch" aria-hidden="true"></i>
@@ -980,7 +986,12 @@ export class BoardController {
                         </span>
                     </div>
             </div>
-        `, { onClose: () => { this.disposeAssigneePicker(); disposeBoardAttachmentPreview(); } });
+        `, { onClose: () => {
+            this.disposeAssigneePicker();
+            this.cardLinksDispose?.();
+            this.cardLinksDispose = null;
+            disposeBoardAttachmentPreview();
+        } });
 
         if (generation !== this._openCardGeneration) return;
 
@@ -1021,6 +1032,17 @@ export class BoardController {
     bindCardEditor(editor, card) {
         card = card || { id: null, attachments: [], pendingAttachments: [] };
         editor._boardCard = card;
+        this.cardLinksDispose = bindCardLinks(editor, card, {
+            openCard: id => this.openLinkedCard(editor, id),
+            showError: message => this.app.showToast('Board', message, 'error')
+        });
+        // Link navigation replaces this editor. Track form edits separately from link search.
+        const trackEdits = event => {
+            if (event.target.closest('.board-side-fields, [data-board-composer="description"], #board-card-title'))
+                editor._boardHasEdits = true;
+        };
+        editor.addEventListener('input', trackEdits);
+        editor.addEventListener('change', trackEdits);
         this.renderCommentsPanel(editor, card);
         this.renderCommitsPanel(editor, card);
         this.renderSessionsPanel(editor, card);
@@ -1093,6 +1115,29 @@ export class BoardController {
         });
 
         editor.querySelector('#board-card-title')?.focus();
+    }
+
+    async openLinkedCard(editor, cardId) {
+        if (editor._boardSaving || editor._boardUploading || editor._boardStarting || editor._boardOpeningLink) return;
+        editor._boardOpeningLink = true;
+        try {
+            const comment = editor.querySelector('[data-board-composer="comment"] [data-board-composer-input]')?.value.trim();
+            // Composer tools and the picker's Unassign button can change values silently.
+            const description = editor.querySelector('[data-board-composer="description"] [data-board-composer-input]')?.value;
+            const assignee = editor.querySelector('#board-card-assignee')?.value;
+            const changed = editor._boardHasEdits || comment
+                || description !== (editor._boardCard?.description || '')
+                || assignee !== (editor._boardCard?.assignee || '');
+            if (changed && !await confirmDialog({
+                title: 'Open linked card',
+                message: 'You have unsaved edits on this card. Discard them and open the linked card?',
+                confirmLabel: 'Discard and open',
+                danger: true
+            })) return;
+            if (editor.isConnected !== false) await this.openCardEditor(cardId);
+        } finally {
+            editor._boardOpeningLink = false;
+        }
     }
 
     // ============================================

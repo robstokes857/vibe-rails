@@ -28,6 +28,7 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | [js/modules/automation-launcher.js](js/modules/automation-launcher.js) | Nav "Launch" flyout (automations + Python scripts, unsigned ones disabled) and its order/show-hide customize modal over `/api/v1/automation-nav/preferences` |
 | [js/modules/board-controller.js](js/modules/board-controller.js) | `board` view: the lane board — drag cards between lanes, drag lanes to reorder, filter, and the card editor with comments |
 | [js/modules/board-api.js](js/modules/board-api.js) | Board data layer: a thin client over `/api/v1/board/*` (every call rides `app.apiCall`, so cookie + tab header apply). `BoardApi.attach(app)` once from the controller |
+| [js/modules/board-card-links.js](js/modules/board-card-links.js) | Linked cards rail: project-wide key/title search, immediate link/unlink, and navigation through the card editor's unsaved-edit guard |
 | [js/modules/board-text.js](js/modules/board-text.js) | Renders a comment/description body. **Escape-first**: the input is escaped before any transform, so no sanitizer is needed and none is present |
 | [js/modules/diff-modal.js](js/modules/diff-modal.js) | Shared Monaco diff viewer as a nested modal layer. Used by Board commits and the sandbox "View Diff" |
 
@@ -133,6 +134,15 @@ than solid fills; there are no solid `btn-primary` buttons in this view. The com
 in a footer **below** the textarea, not in its toolbar.
 
 **Do not reintroduce tabs here** — they were tried and rejected.
+
+**Linked cards** sits below the fields in the right rail. Saved cards can link to cards on any
+board in the same project; each relation appears on both cards. The full card response carries
+`linkedCards[]` with current key/title, board and lane names. `board-card-links.js` owns the
+search picker (up to 50 matches by key or title), immediate link/unlink calls, and its abortable
+search lifecycle. Self/already-linked cards are omitted. All displayed metadata is escaped.
+Opening a linked card checks for unsaved fields, description or comment text first; cancel
+leaves the draft intact. Link mutations never save or reload the surrounding form. New cards
+must be saved before links can be added. Dispose the rail on modal close/replacement and unload.
 
 Descriptions open as rendered text (including attached images), with an Edit/Preview toggle
 in the composer toolbar. Empty descriptions start in edit mode. The textarea remains the source

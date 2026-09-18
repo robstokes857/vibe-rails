@@ -105,6 +105,9 @@ public sealed class BoardRoutesTests : IAsyncLifetime
     [InlineData("POST", "/api/v1/board/cards/VB-1/attachments")]
     [InlineData("GET", "/api/v1/board/cards/VB-1/notes")]
     [InlineData("POST", "/api/v1/board/cards/VB-1/notes")]
+    [InlineData("GET", "/api/v1/board/cards/VB-1/links/candidates")]
+    [InlineData("POST", "/api/v1/board/cards/VB-1/links")]
+    [InlineData("DELETE", "/api/v1/board/cards/VB-1/links/VB-2")]
     public async Task NewBoardSurfaces_RequireSessionAndTab(string method, string path)
     {
         using var none = await SendAsync(new HttpMethod(method), path);
@@ -384,6 +387,47 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NotFound, gone.StatusCode);
         using var last = await SendAsync(HttpMethod.Delete, $"/api/v1/board/boards/{mainId}", "test-session", "test-tab");
         Assert.Equal(HttpStatusCode.Conflict, last.StatusCode);
+    }
+
+    [Fact]
+    public async Task CardLinks_RoundTrip_ThroughTheJsonContext_WithValidationAndProjectScope()
+    {
+        using var first = await PostJsonAsync("/api/v1/board/cards", new { title = "First" });
+        first.EnsureSuccessStatusCode();
+        using var second = await PostJsonAsync("/api/v1/board/cards", new { title = "Second" });
+        second.EnsureSuccessStatusCode();
+        using var candidates = await GetJsonAsync("/api/v1/board/cards/VB-1/links/candidates?q=second");
+        Assert.Equal("VB-2", candidates.RootElement.GetProperty("cards")[0].GetProperty("key").GetString());
+        using var linked = await PostJsonAsync("/api/v1/board/cards/VB-1/links", new { card = "vb-2" });
+        linked.EnsureSuccessStatusCode();
+        using var link = await ReadJsonAsync(linked);
+        Assert.Equal("VB-2", link.RootElement.GetProperty("key").GetString());
+        Assert.Equal("Main", link.RootElement.GetProperty("boardName").GetString());
+        using var repeated = await PostJsonAsync("/api/v1/board/cards/VB-2/links", new { card = "VB-1" });
+        repeated.EnsureSuccessStatusCode();
+        using var detail = await GetJsonAsync("/api/v1/board/cards/VB-2");
+        Assert.Equal(1, detail.RootElement.GetProperty("linkedCards").GetArrayLength());
+        Assert.Equal("VB-1", detail.RootElement.GetProperty("linkedCards")[0].GetProperty("key").GetString());
+
+        using var self = await PostJsonAsync("/api/v1/board/cards/VB-1/links", new { card = "VB-1" });
+        Assert.Equal(HttpStatusCode.BadRequest, self.StatusCode);
+        using var empty = await PostJsonAsync("/api/v1/board/cards/VB-1/links", new { card = " " });
+        Assert.Equal(HttpStatusCode.BadRequest, empty.StatusCode);
+        using var longSearch = await SendAsync(HttpMethod.Get, "/api/v1/board/cards/VB-1/links/candidates?q=" + new string('x', 301), "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.BadRequest, longSearch.StatusCode);
+        var store = _app.Services.GetRequiredService<IBoardStore>();
+        var otherProject = Path.Combine(_root, "other");
+        await store.EnsureDefaultColumnsAsync(otherProject, TestContext.Current.CancellationToken);
+        var foreign = await store.CreateCardAsync(otherProject, new NewBoardCard(null, "Foreign", "", null, "medium", null, [], false), TestContext.Current.CancellationToken);
+        using var crossProject = await PostJsonAsync("/api/v1/board/cards/VB-1/links", new { card = foreign.Id });
+        Assert.Equal(HttpStatusCode.NotFound, crossProject.StatusCode);
+        using var foreignSearch = await SendAsync(HttpMethod.Get, $"/api/v1/board/cards/{foreign.Id}/links/candidates", "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.NotFound, foreignSearch.StatusCode);
+
+        using var removed = await SendAsync(HttpMethod.Delete, "/api/v1/board/cards/VB-2/links/VB-1", "test-session", "test-tab");
+        removed.EnsureSuccessStatusCode();
+        using var after = await GetJsonAsync("/api/v1/board/cards/VB-1");
+        Assert.Equal(0, after.RootElement.GetProperty("linkedCards").GetArrayLength());
     }
 
     private async Task<JsonDocument> GetJsonAsync(string path)

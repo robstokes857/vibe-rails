@@ -5,7 +5,7 @@ const { test, expect } = process.env.VIBERAILS_BOARD_STATIC === '1'
 const IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=';
 const DESCRIPTION = 'Repro screenshot\n![Screenshot.png](attachment:att_image)\n<img src=x onerror="window.__injected=true">';
 
-async function openBoard(page, { active = false, assignee = null } = {}) {
+async function openBoard(page, { active = false, assignee = null, relatedCards = false } = {}) {
     if (process.env.VIBERAILS_BOARD_STATIC === '1') {
         await page.addInitScript(() => sessionStorage.setItem('viberails_tab', 'board-fixture'));
     }
@@ -23,13 +23,47 @@ async function openBoard(page, { active = false, assignee = null } = {}) {
     };
     const requests = [];
     const contents = new Map();
+    const related = relatedCards ? [{
+        ...card, id: 'card_related', key: 'VB-2', title: 'Related work', boardId: 'brd_sprint', columnId: 'col_build',
+        boardName: 'Sprint 2', columnName: 'Build', comments: [], attachments: [], sessions: [], linkedCards: []
+    }, {
+        ...card, id: 'card_markup', key: 'VB-3', title: '<img src=x onerror="window.__linkXss=1">',
+        boardId: 'brd_sprint', columnId: 'col_build', boardName: 'Sprint 2', columnName: 'Build', linkedCards: []
+    }] : [];
+    const linkedIds = new Set();
+    const linkSummary = item => ({ id: item.id, key: item.key, title: item.title,
+        boardId: item.boardId || 'brd_main', boardName: item.boardName || 'Main',
+        columnId: item.columnId, columnName: item.columnName || 'Ready' });
     await page.routeWebSocket('**/api/v1/events/ws*', () => {});
     await page.route('**/api/v1/**', async route => {
-        const path = new URL(route.request().url()).pathname;
+        const url = new URL(route.request().url());
+        const path = url.pathname;
         requests.push({ path, method: route.request().method(), body: route.request().postDataJSON() });
+        const linkPath = path.match(/^\/api\/v1\/board\/cards\/([^/]+)\/links(?:\/(.*))?$/);
+        if (linkPath && relatedCards) {
+            const [, source, action] = linkPath;
+            if (action === 'candidates') {
+                const query = (url.searchParams.get('q') || '').toLowerCase();
+                const candidates = source === card.id ? related.filter(item => !linkedIds.has(item.id))
+                    : (linkedIds.has(source) ? [] : [card]);
+                return route.fulfill({ json: { cards: candidates.filter(item => `${item.key} ${item.title}`.toLowerCase().includes(query)).map(linkSummary) } });
+            }
+            if (route.request().method() === 'DELETE') {
+                linkedIds.delete(source === card.id ? action : source);
+                return route.fulfill({ json: { ok: true } });
+            }
+            const targetId = route.request().postDataJSON().card;
+            linkedIds.add(source === card.id ? targetId : source);
+            return route.fulfill({ json: linkSummary(targetId === card.id ? card : related.find(item => item.id === targetId)) });
+        }
+        const relatedCard = related.find(item => path === `/api/v1/board/cards/${item.id}`);
+        if (relatedCard) {
+            if (route.request().method() === 'PUT') Object.assign(relatedCard, route.request().postDataJSON());
+            return route.fulfill({ json: { ...relatedCard, linkedCards: linkedIds.has(relatedCard.id) ? [linkSummary(card)] : [] } });
+        }
         if (path === '/api/v1/board/cards' && route.request().method() === 'POST') {
             card = { ...card, ...route.request().postDataJSON(), id: 'card_created', key: 'VB-2', attachments: [], comments: [], sessions: [], descriptionRevision: 1 };
-            return route.fulfill({ json: card });
+            return route.fulfill({ json: { ...card, linkedCards: related.filter(item => linkedIds.has(item.id)).map(linkSummary) } });
         }
         if (path === `/api/v1/board/cards/${card.id}`) {
             if (route.request().method() === 'PUT') {
@@ -37,7 +71,7 @@ async function openBoard(page, { active = false, assignee = null } = {}) {
                 const changed = patch.description !== undefined && patch.description !== card.description;
                 card = { ...card, ...patch, descriptionChanged: changed, descriptionRevision: card.descriptionRevision + (changed ? 1 : 0) };
             }
-            return route.fulfill({ json: card });
+            return route.fulfill({ json: { ...card, linkedCards: related.filter(item => linkedIds.has(item.id)).map(linkSummary) } });
         }
         if (path === `/api/v1/board/cards/${card.id}/attachments`) {
             const upload = route.request().postDataJSON();
@@ -58,7 +92,9 @@ async function openBoard(page, { active = false, assignee = null } = {}) {
                 { key: 'base:claude', kind: 'base', group: 'Base CLIs', label: 'Claude', cli: 'claude', enabled: true, order: 1 }
             ] },
             '/api/v1/board/boards': { boards: [{ id: 'brd_main', name: 'Main', position: 0, cardCount: 1,
-                columns: [{ id: 'col_ready', name: 'Ready', position: 0, color: '#3b82f6', boardId: 'brd_main' }] }] },
+                columns: [{ id: 'col_ready', name: 'Ready', position: 0, color: '#3b82f6', boardId: 'brd_main' }] },
+                ...(relatedCards ? [{ id: 'brd_sprint', name: 'Sprint 2', position: 1, cardCount: 2,
+                    columns: [{ id: 'col_build', name: 'Build', position: 0, color: '#06b6d4', boardId: 'brd_sprint' }] }] : [])] },
             '/api/v1/board/columns': { columns: [{ id: 'col_ready', name: 'Ready', position: 0, color: '#3b82f6', boardId: 'brd_main' }] },
             '/api/v1/board/cards': { cards: [card] }
         };
@@ -220,6 +256,7 @@ test('a description edit saves without touching the running agent, and history i
 test('new cards queue files until Save and do not launch', async ({ page }) => {
     const requests = await openBoard(page);
     await page.getByRole('button', { name: 'New card', exact: true }).click();
+    await expect(page.locator('[data-board-card-links]')).toContainText('Save the card to link other cards.');
     await page.locator('#board-card-title').fill('File first');
     await page.locator('[data-board-files]').setInputFiles({ name: 'notes.zip', mimeType: 'application/zip', buffer: Buffer.from('archive') });
     await expect(page.locator('[data-board-attachments]')).toContainText('Uploads when you save');
@@ -229,6 +266,66 @@ test('new cards queue files until Save and do not launch', async ({ page }) => {
     expect(requests.filter(request => request.path.endsWith('/attachments'))).toHaveLength(1);
     expect(requests.filter(request => request.path.endsWith('/launch'))).toHaveLength(0);
     await expect(page.locator('#app-content [data-view="board"]')).toBeVisible();
+});
+
+for (const width of [1440, 520]) {
+    test(`cards link across boards, persist and unlink at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 900 });
+        const requests = await openBoard(page, { relatedCards: true });
+        await page.getByText('Description images', { exact: true }).click();
+        await page.locator('[data-board-link-picker] > summary').click();
+        await expect(page.locator('[data-board-link-card]')).toHaveCount(2);
+        await expect(page.locator('[data-board-link-results] img')).toHaveCount(0);
+        expect(await page.evaluate(() => window.__linkXss)).toBeUndefined();
+        await page.locator('[data-board-link-search]').fill('VB-2');
+        await expect(page.locator('[data-board-link-card]')).toHaveCount(1);
+        await page.locator('[data-board-link-card="card_related"]').click();
+        await expect(page.locator('[data-board-linked-cards]')).toContainText('VB-2 · Related work');
+        await expect(page.locator('[data-board-linked-cards]')).toContainText('Sprint 2 · Build');
+        await expect(page.locator('[data-board-count="linked-cards"]')).toHaveText('1');
+        await expect(page.locator('[data-board-link-results] [data-board-link-card]')).toHaveCount(0);
+        expect(requests.filter(request => request.method === 'PUT')).toHaveLength(0);
+        await page.locator('[data-board-link-picker] > summary').click();
+        const layout = await page.locator('[data-board-card-editor]').evaluate(element => ({
+            width: element.clientWidth, scrollWidth: element.scrollWidth
+        }));
+        expect(layout.scrollWidth).toBeLessThanOrEqual(layout.width + 1);
+        await page.screenshot({ path: testInfo.outputPath('linked-cards.png') });
+
+        await page.locator('[data-board-save-card]').click();
+        await page.getByText('Description images', { exact: true }).click();
+        await expect(page.locator('[data-board-open-linked-card="card_related"]')).toBeVisible();
+        await page.locator('[data-board-open-linked-card="card_related"]').click();
+        await expect(page.locator('.board-card-modal-dialog .modal-title')).toHaveText('VB-2 · Related work');
+        await expect(page.locator('[data-board-linked-cards]')).toContainText('VB-1 · Description images');
+        await page.locator('[data-board-unlink-card="card_test"]').click();
+        await expect(page.locator('[data-board-count="linked-cards"]')).toHaveText('0');
+        await page.locator('[data-board-save-card]').click();
+        await page.getByText('Description images', { exact: true }).click();
+        await expect(page.locator('[data-board-linked-cards]')).toContainText('No cards linked.');
+    });
+}
+
+test('link navigation protects draft edits and an unsuccessful link leaves them intact', async ({ page }) => {
+    await openBoard(page, { relatedCards: true });
+    await page.getByText('Description images', { exact: true }).click();
+    await page.locator('#board-card-title').fill('Unsaved title');
+    await page.locator('[data-board-link-picker] > summary').click();
+    const failLink = route => route.fulfill({ status: 500, json: { error: 'Link unavailable' } });
+    await page.route('**/cards/card_test/links', failLink);
+    await page.locator('[data-board-link-card="card_related"]').click();
+    await expect(page.locator('[data-board-count="linked-cards"]')).toHaveText('0');
+    await expect(page.locator('#board-card-title')).toHaveValue('Unsaved title');
+    await page.unroute('**/cards/card_test/links', failLink);
+    await page.locator('[data-board-link-card="card_related"]').click();
+    await expect(page.locator('[data-board-open-linked-card="card_related"]')).toBeVisible();
+    await page.locator('[data-board-open-linked-card="card_related"]').click();
+    await expect(page.getByRole('alertdialog')).toContainText('unsaved edits');
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel' }).click();
+    await expect(page.locator('#board-card-title')).toHaveValue('Unsaved title');
+    await page.locator('[data-board-open-linked-card="card_related"]').click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Discard and open' }).click();
+    await expect(page.locator('.board-card-modal-dialog .modal-title')).toHaveText('VB-2 · Related work');
 });
 
 test('Markdown previews as literal source without HTML execution or external images', async ({ page }) => {

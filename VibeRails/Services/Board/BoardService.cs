@@ -551,7 +551,10 @@ public sealed partial class BoardService(
             detail.Sessions.Select(s => ToDto(s, live)).ToList(),
             detail.Attachments.Select(ToDto).ToList(),
             detail.Card.DescriptionRevision, detail.Card.BaseLlmOptions, detail.Card.DescriptionChanged,
-            notes, summary.Type, summary.BoardId);
+            notes, summary.Type, summary.BoardId)
+        {
+            LinkedCards = detail.LinkedCards.Select(ToDto).ToList()
+        };
     }
 
     private async Task<List<BoardCommentDto>> ResolveAuthorsAsync(IReadOnlyList<BoardCommentRecord> rows, Dictionary<string, BoardAuthor?> authors, CancellationToken cancellationToken)

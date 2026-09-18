@@ -39,6 +39,7 @@ public static class GitCli
             {
                 FileName = "git",
                 WorkingDirectory = workingDirectory,
+                RedirectStandardInput = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -46,6 +47,12 @@ public static class GitCli
             }
         };
 
+        // A one-shot index/object read never needs the fsmonitor daemon. Forcing it off keeps this
+        // child from starting or hand-shaking the daemon — which wedges when git is spawned inside the
+        // stdio MCP server, because the daemon inherits the redirected pipe handles and never lets go.
+        // git then runs past the timeout and is killed, surfacing as a bogus "commit not found". VB-14.
+        process.StartInfo.ArgumentList.Add("-c");
+        process.StartInfo.ArgumentList.Add("core.fsmonitor=false");
         foreach (var argument in arguments)
             process.StartInfo.ArgumentList.Add(argument);
 
@@ -61,6 +68,12 @@ public static class GitCli
         {
             return new GitCliResult(-1, string.Empty, ex.Message, TimedOut: false);
         }
+
+        // Hand git an immediately-closed stdin. Without redirection the child inherits this process's
+        // stdin, which for the stdio MCP server is the agent's live JSON-RPC pipe (never at EOF); any
+        // git that consults it would block until the kill-on-timeout. An EOF here severs that. VB-14.
+        try { process.StandardInput.Close(); }
+        catch { /* the write end still closes when the process is disposed, so git still gets EOF */ }
 
         using var drainCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var stdoutTask = ReadOutputAsync(process.StandardOutput, maxOutputChars, drainCts.Token);

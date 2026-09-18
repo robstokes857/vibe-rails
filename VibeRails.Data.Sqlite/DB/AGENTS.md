@@ -770,6 +770,8 @@ BoardCards        (Id TEXT PK, ProjectPath, Number, ColumnId → BoardColumns, P
                    UNIQUE(ProjectPath, Number))
 BoardCardSequences (ProjectPath TEXT PK, LastNumber)
 BoardCardOptions   (CardId → BoardCards CASCADE PK, OptionsJson)
+BoardCardLinks     (CardId → BoardCards CASCADE, LinkedCardId → BoardCards CASCADE,
+                   PK(CardId, LinkedCardId), CHECK(CardId < LinkedCardId))
 BoardDescriptionRevisions (CardId → BoardCards CASCADE, Revision, Description, CreatedUTC, Source,
                    AuthorKind, AuthorLabel, AuthorCli NULL, AuthorSessionId NULL, PK(CardId, Revision))
 BoardDescriptionSessionEvents (CardId, Revision → BoardDescriptionRevisions CASCADE, SessionId,
@@ -794,6 +796,11 @@ BoardCommitSnapshots (CardId, Sha → BoardCommits CASCADE, SnapshotJson, PK(Car
 - `BoardCards.Type` is one of `task`, `bug`, `feature`, `research-spike`, or `chore`. Migration
   `board/3` adds it with the neutral `task` default so existing cards are not guessed from tags or
   title text.
+- Migration `board/5` adds `BoardCardLinks`. Each undirected pair is stored once in ordinal id
+  order; repeated links are idempotent and either end can unlink. Both cards are resolved in the
+  same project inside the write transaction, including when they sit on different boards.
+  Deleting either card (or its board) cascades the link. Reads join current titles and board/lane
+  names; candidate search omits the source and existing links and returns at most 50 matches.
 - `Assignee` is an LLM picker key (`base:claude` / `env:7:codex`), validated by `BoardSelection`.
   Optional base-provider model, effort and startup-mode overrides are stored in `BoardCardOptions`;
   changing the assignee clears the old overrides unless the request supplies a new valid set.

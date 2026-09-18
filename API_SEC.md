@@ -1,5 +1,18 @@
 # API authentication coverage
 
+Card-linking amendment (2026-09-18): three authenticated active-root Board routes add candidate
+search, link, and unlink. Both cards resolve inside the server-derived project, including links
+across that project's boards; self-links are rejected and duplicates are idempotent. Searches
+are parameterized, capped at 50 results, and return only card identity/title and board/lane
+metadata. `get_board_card` also reads existing links through its existing project scope; no MCP
+tool or launch grant was added. The inventory is now **208 mapped surfaces**, **196 under
+`/api/v1`**, including **34 board routes**, superseding the earlier totals below. Route
+enumeration and both mandatory listener searches found only the main Kestrel host, non-serving
+port probe, and test-only hosts; the cross-runtime search had no matches. No listener,
+middleware, credential rule, or security exception changed.
+Validation: 344 Board/authentication/database tests passed, including the generated schema
+snapshot and legacy-compatibility checks; the Board frontend and browser regression suites passed.
+
 Python MCP removal amendment (2026-09-18): custom Python tools and
 `python_script_signing_help` are no longer registered in either MCP transport. Removed
 `GET|PUT|DELETE /api/v1/python-scripts/mcp`; ordinary signed-script authoring and execution
@@ -272,8 +285,8 @@ spoofer's own local exchange rows.
 Authentication is enforced primarily by
 [`CookieAuthMiddleware`](VibeRails/Middleware/CookieAuthMiddleware.cs). The LLM proxy
 routes additionally use
-[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 205 mapped route
-surfaces in this inventory: 193 `/api/v1` method/path mappings, nine non-`/api` protected
+[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 208 mapped route
+surfaces in this inventory: 196 `/api/v1` method/path mappings, nine non-`/api` protected
 API surfaces, and three bootstrap/page/probe routes. Static-file middleware and the
 global `OPTIONS` behavior are noted separately because they are not finite mapped-route
 lists.
@@ -639,7 +652,7 @@ transcript text out of messages and exception text; do not rely on the Logs view
 hidden. `Tests/Routes/InternalToolsRoutesTests.cs` pins the two-credential requirement, the
 whitelist rejection of path-like sources, and the absence of mutating verbs.
 
-### Kanban board (31; active root backend only)
+### Kanban board (34; active root backend only)
 
 All mapped by `BoardRoutes.Map` under `if (isActiveRootBackend)`; every path contains `/api/`,
 so both credentials are enforced by the middleware with no route-level registration. The
@@ -659,6 +672,12 @@ cannot read or write another project's board through this surface.
 - `GET /api/v1/board/cards`, `POST /api/v1/board/cards`, `GET /api/v1/board/cards/{card}`,
   `PUT /api/v1/board/cards/{card}`, `DELETE /api/v1/board/cards/{card}`,
   `POST /api/v1/board/cards/{card}/move` — cards (`{card}` is an id or a `VB-n` key).
+- `GET /api/v1/board/cards/{card}/links/candidates?q=`,
+  `POST /api/v1/board/cards/{card}/links`,
+  `DELETE /api/v1/board/cards/{card}/links/{linkedCard}` — related cards. The POST body supplies
+  `card` as an id or key. Both endpoints of a link must exist in the open project; foreign ids
+  return 404. Reads include links in the ordinary full card response. Link rows cascade when
+  either card is deleted, and linking does not launch a terminal or change a description.
 - `POST /api/v1/board/cards/{card}/launch` — "Start work": creates a terminal tab through the
   in-process tab host and starts the assigned LLM with the card prepended to the environment's
   Initial Message. Same capability class as `POST /api/v1/terminal/tabs/{tabId}/start`, which
