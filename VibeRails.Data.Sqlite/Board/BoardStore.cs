@@ -363,7 +363,10 @@ public sealed partial class BoardStore : IBoardStore
             await ReadSessionsAsync(connection, card.Id, cancellationToken),
             await ReadAttachmentsAsync(connection, card.Id, cancellationToken),
             await ReadCommitsAsync(connection, card.Id, cancellationToken),
-            await ReadCommentsAsync(connection, card.Id, BoardCommentKinds.Note, cancellationToken));
+            await ReadCommentsAsync(connection, card.Id, BoardCommentKinds.Note, cancellationToken))
+        {
+            LinkedCards = await ReadLinkedCardsAsync(connection, project, card.Id, cancellationToken)
+        };
     }
 
     public async Task<BoardCardRecord> CreateCardAsync(string projectPath, NewBoardCard card, CancellationToken cancellationToken = default)
@@ -1371,6 +1374,8 @@ public sealed partial class BoardStore : IBoardStore
             SqliteSchema.AdoptStatement(db, transaction, ColumnBoardIdSql);
             SqliteSchema.Execute(db, transaction, ColumnBoardIndexSql);
         });
+        SqliteMigrationRunner.Apply(connection, "board", 5, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, CardLinksSchemaSql));
         ReconcileDerivedRows(connection);
     }
 

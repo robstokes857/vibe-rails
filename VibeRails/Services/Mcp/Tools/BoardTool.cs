@@ -153,7 +153,7 @@ public sealed class BoardTool(
         }
     }
 
-    [McpServerTool, Description("Read one kanban card in full: fields, the board's lane names, description, comments, linked commits, linked terminal sessions (with each session's id, outcome and last comment), the tail of the agent notes, and attachment names. Omit the card to read the card this terminal was launched for. Pass since to see only activity after a point in time when resuming.")]
+    [McpServerTool, Description("Read one kanban card in full: fields, the board's lane names, description, comments, linked cards, linked commits, linked terminal sessions (with each session's id, outcome and last comment), the tail of the agent notes, and attachment names. Omit the card to read the card this terminal was launched for. Pass since to see only activity after a point in time when resuming.")]
     public async Task<string> GetBoardCard(
         [Description("Card key like VB-12 (or the card id). Optional when this terminal was launched for a card.")] string? card = null,
         [Description("ISO-8601 UTC timestamp, e.g. 2026-09-16T21:50:00Z. Only comments, notes, sessions and commits at or after this time are listed; earlier ones are counted. Optional.")] string? since = null,
@@ -668,6 +668,15 @@ public sealed class BoardTool(
 
         builder.Append("Description (revision ").Append(card.DescriptionRevision).Append("):\n")
             .Append(string.IsNullOrWhiteSpace(card.Description) ? "(none)" : card.Description).Append("\n\n");
+
+        if (card.LinkedCards.Count > 0)
+        {
+            builder.Append("Linked cards (").Append(card.LinkedCards.Count).Append("):\n");
+            foreach (var linked in card.LinkedCards)
+                builder.Append("- ").Append(linked.Key).Append(": ").Append(linked.Title)
+                    .Append(" (").Append(linked.BoardName).Append(" · ").Append(linked.ColumnName).Append(")\n");
+            builder.Append("Read a linked card by passing its key to get_board_card.\n\n");
+        }
 
         var comments = Since(card.Comments, c => c.CreatedAt, since, out var hiddenComments);
         builder.Append("Comments (").Append(comments.Count).Append(HiddenSuffix(hiddenComments)).Append("):\n");

@@ -517,6 +517,105 @@ public sealed class BoardStoreTests : IDisposable
         Assert.False(await reopened.EnsureDefaultColumnsAsync(_project, Ct));
     }
 
+    [Fact]
+    public async Task CardLinks_AreBidirectional_Idempotent_AndSurviveReopening()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var first = await _store.CreateCardAsync(_project, NewCard("First"), Ct);
+        var sprint = await _store.CreateBoardAsync(_project, "Sprint", Ct);
+        var second = await _store.CreateCardAsync(_project, NewCard("Second") with { BoardId = sprint.Id }, Ct);
+        var linked = await _store.LinkCardAsync(_project, first.Key, second.Id, Ct);
+        Assert.Equal(sprint.Id, linked!.BoardId);
+        Assert.Equal("Sprint", linked.BoardName);
+        Assert.Equal("Backlog", linked.ColumnName);
+        await _store.LinkCardAsync(_project, second.Key, first.Id, Ct);
+        await _store.LinkCardAsync(_project, first.Id, second.Key, Ct);
+
+        var reopened = new BoardStore(_connectionString);
+        Assert.Equal(second.Id, Assert.Single((await reopened.GetCardDetailAsync(_project, first.Id, Ct))!.LinkedCards).Id);
+        Assert.Equal(first.Id, Assert.Single((await reopened.GetCardDetailAsync(_project, second.Id, Ct))!.LinkedCards).Id);
+        Assert.Empty((await reopened.GetCardLinkCandidatesAsync(_project, first.Id, "", Ct))!);
+        await _store.UpdateCardAsync(_project, second.Id, new BoardCardPatch(Title: "Renamed"), Ct);
+        Assert.Equal("Renamed", Assert.Single((await reopened.GetCardDetailAsync(_project, first.Id, Ct))!.LinkedCards).Title);
+
+        Assert.True(await reopened.UnlinkCardAsync(_project, second.Key, first.Key, Ct));
+        Assert.Empty((await reopened.GetCardDetailAsync(_project, first.Id, Ct))!.LinkedCards);
+        Assert.Empty((await reopened.GetCardDetailAsync(_project, second.Id, Ct))!.LinkedCards);
+        Assert.False(await reopened.UnlinkCardAsync(_project, first.Id, second.Id, Ct));
+    }
+
+    [Fact]
+    public async Task CardLinks_RejectSelfLinks_AndNeverCrossProjects()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        await _store.EnsureDefaultColumnsAsync(_otherProject, Ct);
+        var first = await _store.CreateCardAsync(_project, NewCard("First"), Ct);
+        var second = await _store.CreateCardAsync(_project, NewCard("Second"), Ct);
+        var outside = await _store.CreateCardAsync(_otherProject, NewCard("Outside"), Ct);
+        await Assert.ThrowsAsync<BoardValidationException>(() => _store.LinkCardAsync(_project, first.Id, first.Key, Ct));
+        Assert.Null(await _store.LinkCardAsync(_project, first.Id, outside.Id, Ct));
+        Assert.Null(await _store.LinkCardAsync(_otherProject, first.Id, outside.Id, Ct));
+        Assert.Null(await _store.GetCardLinkCandidatesAsync(_otherProject, first.Id, "", Ct));
+        Assert.Equal(second.Id, Assert.Single((await _store.GetCardLinkCandidatesAsync(_project, first.Id, "", Ct))!).Id);
+        await _store.LinkCardAsync(_project, first.Id, second.Id, Ct);
+        Assert.False(await _store.UnlinkCardAsync(_otherProject, first.Id, second.Id, Ct));
+        Assert.Single((await _store.GetCardDetailAsync(_project, first.Id, Ct))!.LinkedCards);
+    }
+
+    [Fact]
+    public async Task CardLinks_CascadeWhenEitherCardOrItsBoardIsDeleted()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var first = await _store.CreateCardAsync(_project, NewCard("First"), Ct);
+        var second = await _store.CreateCardAsync(_project, NewCard("Second"), Ct);
+        var third = await _store.CreateCardAsync(_project, NewCard("Third"), Ct);
+        await _store.LinkCardAsync(_project, first.Id, second.Id, Ct);
+        await _store.LinkCardAsync(_project, second.Id, third.Id, Ct);
+        await _store.DeleteCardAsync(_project, second.Id, Ct);
+        Assert.Empty((await _store.GetCardDetailAsync(_project, first.Id, Ct))!.LinkedCards);
+        Assert.Empty((await _store.GetCardDetailAsync(_project, third.Id, Ct))!.LinkedCards);
+
+        var sprint = await _store.CreateBoardAsync(_project, "Sprint", Ct);
+        var otherBoardCard = await _store.CreateCardAsync(_project, NewCard("Sprint work") with { BoardId = sprint.Id }, Ct);
+        await _store.LinkCardAsync(_project, first.Id, otherBoardCard.Id, Ct);
+        await _store.DeleteBoardAsync(_project, sprint.Id, Ct);
+        Assert.Empty((await _store.GetCardDetailAsync(_project, first.Id, Ct))!.LinkedCards);
+    }
+
+    [Fact]
+    public async Task CardLinkSearch_IsBounded_SearchesKeysAndTitles_AndTreatsWildcardsLiterally()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var first = await _store.CreateCardAsync(_project, NewCard("First"), Ct);
+        var target = await _store.CreateCardAsync(_project, NewCard("Fix 100% coverage"), Ct);
+        for (var i = 0; i < 51; i++)
+            await _store.CreateCardAsync(_project, NewCard($"Other {i}"), Ct);
+        Assert.Equal(50, (await _store.GetCardLinkCandidatesAsync(_project, first.Id, "", Ct))!.Count);
+        Assert.Equal(target.Id, Assert.Single((await _store.GetCardLinkCandidatesAsync(_project, first.Id, "COVERAGE", Ct))!).Id);
+        Assert.Equal(target.Id, Assert.Single((await _store.GetCardLinkCandidatesAsync(_project, first.Id, "%", Ct))!).Id);
+        Assert.Equal(target.Id, (await _store.GetCardLinkCandidatesAsync(_project, first.Id, "vb-2", Ct))![0].Id);
+        Assert.Empty((await _store.GetCardLinkCandidatesAsync(_project, first.Id, "' OR 1=1 --", Ct))!);
+    }
+
+    [Fact]
+    public async Task CardLinksMigration_UpgradesAnExistingBoardWithoutChangingItsCards()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var first = await _store.CreateCardAsync(_project, NewCard("Existing"), Ct);
+        await using (var connection = new SqliteConnection(_connectionString))
+        {
+            await connection.OpenAsync(Ct);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "DROP TABLE BoardCardLinks; DELETE FROM SchemaMigrations WHERE Component='board' AND Version=5;";
+            await command.ExecuteNonQueryAsync(Ct);
+        }
+        var upgraded = new BoardStore(_connectionString);
+        var second = await upgraded.CreateCardAsync(_project, NewCard("New"), Ct);
+        await upgraded.LinkCardAsync(_project, first.Id, second.Id, Ct);
+        Assert.Equal("Existing", (await upgraded.GetCardDetailAsync(_project, first.Id, Ct))!.Card.Title);
+        Assert.Single((await upgraded.GetCardDetailAsync(_project, first.Id, Ct))!.LinkedCards);
+    }
+
     private static NewBoardCard NewCard(string title) =>
         new(null, title, "", null, "medium", null, [], false);
 

@@ -68,7 +68,17 @@ public sealed record BoardCardDetailRecord(
     IReadOnlyList<BoardSessionRecord> Sessions,
     IReadOnlyList<BoardAttachmentRecord> Attachments,
     IReadOnlyList<BoardCommitRecord> Commits,
-    IReadOnlyList<BoardCommentRecord> Notes);
+    IReadOnlyList<BoardCommentRecord> Notes)
+{
+    public IReadOnlyList<BoardLinkedCardRecord> LinkedCards { get; init; } = [];
+}
+
+/// <summary>A lightweight, current description of a related card, including its board and lane.</summary>
+public sealed record BoardLinkedCardRecord(
+    string Id, int Number, string Title, string BoardId, string BoardName, string ColumnId, string ColumnName)
+{
+    public string Key => BoardKeys.Format(Number);
+}
 
 /// <summary>
 /// The two kinds of BoardComments row. A <em>note</em> is the agent scratchpad: same shape and

@@ -103,6 +103,18 @@ public sealed class BoardToolTests : IDisposable
     }
 
     [Fact]
+    public async Task GetBoardCard_IncludesLinkedCardsFromOtherBoards_EvenWithSinceFilter()
+    {
+        var first = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "First"), Ct);
+        var sprint = await _service.CreateBoardAsync(_project, new CreateBoardRequest("Sprint 2"), Ct);
+        var second = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "Related work", BoardId: sprint.Id), Ct);
+        await _service.LinkCardAsync(_project, first.Id, second.Id, Ct);
+        var text = await _tool.GetBoardCard(first.Key, since: DateTime.UtcNow.AddMinutes(1).ToString("O"), cancellationToken: Ct);
+        Assert.Contains("Linked cards (1):\n- VB-2: Related work (Sprint 2 · Backlog)", text);
+        Assert.Contains("Read a linked card by passing its key to get_board_card.", text);
+    }
+
+    [Fact]
     public async Task OmittedCard_DefaultsToTheLaunchingSession_AndAutoLinks()
     {
         await _tool.CreateBoardCard("A", cancellationToken: Ct);

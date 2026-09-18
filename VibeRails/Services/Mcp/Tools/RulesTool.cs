@@ -1,9 +1,9 @@
 using System.ComponentModel;
-using System.Diagnostics;
 using System.Text.RegularExpressions;
 using ModelContextProtocol.Server;
 using Serilog;
 using VibeRails.Services;
+using VibeRails.Services.Git;
 using VibeRails.Services.GitPreflight;
 using VibeRails.Services.VCA;
 using VibeRails.Services.VCA.Hooks;
@@ -17,7 +17,6 @@ namespace VibeRails.Services.Mcp.Tools;
 [McpServerToolType]
 public class RulesTool
 {
-    private static readonly TimeSpan GitCommandTimeout = TimeSpan.FromSeconds(10);
     private static readonly IFileClassifier FileClassifier = new FileClassifier();
     private static readonly StringComparer GitPathComparer = OperatingSystem.IsWindows()
         ? StringComparer.OrdinalIgnoreCase
@@ -72,12 +71,6 @@ public class RulesTool
         public static RuleValidationResult Unrecognized(string message) =>
             new(RuleValidationState.Unrecognized, message);
     }
-
-    private sealed record GitCommandResult(
-        int ExitCode,
-        string StdOut,
-        string StdErr,
-        bool TimedOut);
 
     [McpServerTool]
     [Description("Validates staged files against VCA rules defined in vc.rules.md files. Supports '- [WARN] Rule' and '- Rule (WARN)' formats. Call this BEFORE attempting to commit changes. Returns validation results with any COMMIT-level violations that require acknowledgment.")]
@@ -457,7 +450,7 @@ public class RulesTool
         string gitRoot,
         CancellationToken cancellationToken)
     {
-        var result = await RunGitAsync(
+        var result = await GitCli.RunAsync(
             gitRoot,
             ["--no-pager", "ls-files", "--cached", "-z"],
             cancellationToken);
@@ -475,7 +468,7 @@ public class RulesTool
     {
         // `-z` is essential: newline, tab, quote, and backslash are all legal in Git paths.
         // `--no-renames` also keeps numstat records to one unambiguous path apiece.
-        var namesResult = await RunGitAsync(
+        var namesResult = await GitCli.RunAsync(
             gitRoot,
             ["--no-pager", "diff", "--cached", "--name-only", "--no-renames", "-z"],
             cancellationToken);
@@ -499,7 +492,7 @@ public class RulesTool
         string gitRoot,
         CancellationToken cancellationToken)
     {
-        var result = await RunGitAsync(
+        var result = await GitCli.RunAsync(
             gitRoot,
             ["--no-pager", "diff", "--cached", "--numstat", "--no-renames", "-z"],
             cancellationToken);
@@ -561,7 +554,7 @@ public class RulesTool
         string relativePath,
         CancellationToken cancellationToken)
     {
-        var result = await RunGitAsync(
+        var result = await GitCli.RunAsync(
             gitRoot,
             ["--no-pager", "show", "--no-textconv", $":./{relativePath}"],
             cancellationToken);
@@ -929,107 +922,23 @@ public class RulesTool
         };
     }
 
-    private static async Task<GitCommandResult> RunGitAsync(
-        string workingDirectory,
-        IReadOnlyList<string> arguments,
-        CancellationToken cancellationToken)
-    {
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "git",
-                WorkingDirectory = workingDirectory,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            }
-        };
-
-        foreach (var argument in arguments)
-        {
-            process.StartInfo.ArgumentList.Add(argument);
-        }
-
-        try
-        {
-            process.Start();
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            return new GitCommandResult(-1, string.Empty, ex.Message, TimedOut: false);
-        }
-
-        var stdoutTask = process.StandardOutput.ReadToEndAsync();
-        var stderrTask = process.StandardError.ReadToEndAsync();
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(GitCommandTimeout);
-
-        var timedOut = false;
-        try
-        {
-            await process.WaitForExitAsync(timeoutCts.Token);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            timedOut = true;
-            TryKillGitProcess(process);
-        }
-        catch (OperationCanceledException)
-        {
-            TryKillGitProcess(process);
-            throw;
-        }
-
-        if (!process.HasExited)
-        {
-            await Task.WhenAny(process.WaitForExitAsync(), Task.Delay(TimeSpan.FromSeconds(2)));
-        }
-
-        var stdout = await stdoutTask;
-        var stderr = await stderrTask;
-        return new GitCommandResult(
-            process.HasExited ? process.ExitCode : -1,
-            stdout,
-            stderr,
-            timedOut);
-    }
-
+    // Every git invocation here goes through GitCli, the one helper with the no-shell, kill-on-timeout,
+    // closed-stdin, fsmonitor-off discipline. There is deliberately no second git-spawn path in this file.
     private static void EnsureGitSucceeded(
-        GitCommandResult result,
+        GitCliResult result,
         string operation,
         string gitRoot)
     {
         if (result.TimedOut)
         {
             throw new TimeoutException(
-                $"{operation} timed out after {(int)GitCommandTimeout.TotalSeconds} seconds in {gitRoot}.");
+                $"{operation} timed out after {(int)GitCli.DefaultTimeout.TotalSeconds} seconds in {gitRoot}.");
         }
 
         if (result.ExitCode != 0)
         {
             throw new InvalidOperationException(
                 $"{operation} failed with exit code {result.ExitCode} in {gitRoot}: {result.StdErr.Trim()}");
-        }
-    }
-
-    private static void TryKillGitProcess(Process process)
-    {
-        try
-        {
-            if (!process.HasExited)
-            {
-                process.Kill(entireProcessTree: true);
-            }
-        }
-        catch
-        {
-            // Best effort while preserving the original timeout or cancellation.
         }
     }
 

@@ -34,6 +34,7 @@ public sealed partial class BoardCommitService : IBoardCommitService
         var result = await GitCli.RunAsync(projectPath,
             ["show", "-s", "--no-color", $"--format=%H{Unit}%an{Unit}%cI{Unit}%s", normalized, "--"],
             cancellationToken);
+        EnsureGitAnswered(result, normalized);
         if (!result.Succeeded)
             throw new BoardValidationException($"Commit {normalized} was not found in this project's repository.");
 
@@ -53,6 +54,7 @@ public sealed partial class BoardCommitService : IBoardCommitService
         var listing = await GitCli.RunAsync(projectPath,
             ["diff-tree", "--no-commit-id", "--raw", "--no-abbrev", "-z", "-r", "-M", "--root", "--diff-merges=first-parent", normalized, "--"],
             cancellationToken, maxOutputChars: MaxListingChars + 1);
+        EnsureGitAnswered(listing, normalized);
         if (!listing.Succeeded)
             throw new BoardValidationException($"Commit {normalized} was not found in this project's repository.");
         if (listing.StdOut.Length > MaxListingChars)
@@ -99,12 +101,26 @@ public sealed partial class BoardCommitService : IBoardCommitService
         // Keep one extra character to detect truncation without ever buffering the full blob.
         var result = await GitCli.RunAsync(projectPath, ["cat-file", "blob", objectId], cancellationToken,
             maxOutputChars: MaxFileChars + 1);
+        EnsureGitAnswered(result, objectId);
         if (!result.Succeeded)
             throw new BoardValidationException($"Could not capture '{path}' from git. The commit was not linked.");
         var content = result.StdOut;
         if (content.Contains('\0'))
             return "(binary file)";
         return content.Length > MaxFileChars ? content[..MaxFileChars] + "\n… (truncated)" : content;
+    }
+
+    /// <summary>
+    /// A killed-on-timeout git run is not a missing commit. Reporting it as "not found" sent agents
+    /// chasing a healthy HEAD that was really just a wedged git spawn — so a timeout gets its own,
+    /// truthful message and never falls through to the not-found / could-not-capture wording. VB-14.
+    /// </summary>
+    private static void EnsureGitAnswered(GitCliResult result, string target)
+    {
+        if (result.TimedOut)
+            throw new BoardValidationException(
+                $"Git did not respond within {(int)GitCli.DefaultTimeout.TotalSeconds}s while reading {target}. "
+                + "The commit was not linked. This is a git spawn problem, not a missing commit — retry, and if it persists check for a stuck git process.");
     }
 
     /// <summary>Only a hex sha reaches git — the value is an argument, never a shell string, but a ref like <c>HEAD~1</c> is still refused.</summary>

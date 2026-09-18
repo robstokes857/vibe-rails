@@ -74,6 +74,11 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 
 ### Kanban board tools (`BoardTool`)
 
+`get_board_card` also lists the card's current linked cards (key, title, board and lane), so an
+agent can read related work by key. These are current relationships, unaffected by the activity
+`since` filter. Linking/unlinking cards is managed in the dashboard; no extra MCP tool or grant
+is added for this section.
+
 Instance tool (ctor-injected `IBoardService`, `IBoardProjectResolver`, `IBoardStore`), registered in
 **both** transports and backed by the board's own SQLite store (`Services/Board/BoardStore.cs`)
 rather than by HTTP calls to a root backend — so an LLM can pick up a card from *any* terminal that

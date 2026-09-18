@@ -114,6 +114,20 @@ public static class BoardRoutes
 
         // ---------------------------------------------------------------- rails
 
+        app.MapGet("/api/v1/board/cards/{card}/links/candidates", (IBoardService board, string card, string? q, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(await board.GetCardLinkCandidatesAsync(Project(), card, q, cancellationToken), "Card")))
+            .WithName("GetBoardCardLinkCandidates");
+
+        app.MapPost("/api/v1/board/cards/{card}/links", (IBoardService board, string card, LinkBoardCardRequest request, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(await board.LinkCardAsync(Project(), card, request.Card, cancellationToken), "Card")))
+            .WithName("LinkBoardCard");
+
+        app.MapDelete("/api/v1/board/cards/{card}/links/{linkedCard}", (IBoardService board, string card, string linkedCard, CancellationToken cancellationToken) =>
+            RunAsync(async () => await board.UnlinkCardAsync(Project(), card, linkedCard, cancellationToken)
+                ? Results.Ok(new OK("Card unlinked"))
+                : NotFound("Card link", linkedCard)))
+            .WithName("UnlinkBoardCard");
+
         app.MapPost("/api/v1/board/cards/{card}/comments", (IBoardService board, string card, AddBoardCommentRequest request, CancellationToken cancellationToken) =>
             RunAsync(async () => OkOrNotFound(await board.AddCommentAsync(Project(), card, BoardAuthor.User(), request.Body ?? string.Empty, cancellationToken), "Card")))
             .WithName("AddBoardComment");

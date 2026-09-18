@@ -5,6 +5,9 @@
 -- index IX_BoardAttachments_Card
 CREATE INDEX IX_BoardAttachments_Card ON BoardAttachments(CardId);
 
+-- index IX_BoardCardLinks_LinkedCard
+CREATE INDEX IX_BoardCardLinks_LinkedCard ON BoardCardLinks(LinkedCardId);
+
 -- index IX_BoardCardSessions_Card
 CREATE INDEX IX_BoardCardSessions_Card ON BoardCardSessions(CardId);
 
@@ -118,6 +121,9 @@ CREATE TABLE BoardAttachmentContents ( AttachmentId TEXT PRIMARY KEY REFERENCES 
 
 -- table BoardAttachments
 CREATE TABLE BoardAttachments ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, Name TEXT NOT NULL, MimeType TEXT NOT NULL, Bytes INTEGER NOT NULL, DataUrl TEXT NOT NULL, CreatedUTC TEXT NOT NULL , DeletedUTC TEXT);
+
+-- table BoardCardLinks
+CREATE TABLE BoardCardLinks ( CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, LinkedCardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, PRIMARY KEY (CardId, LinkedCardId), CHECK (CardId < LinkedCardId) );
 
 -- table BoardCardOptions
 CREATE TABLE BoardCardOptions ( CardId TEXT PRIMARY KEY REFERENCES BoardCards(Id) ON DELETE CASCADE, OptionsJson TEXT NOT NULL );

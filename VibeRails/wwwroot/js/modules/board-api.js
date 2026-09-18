@@ -12,7 +12,8 @@
 //   card       { id, key 'VB-n', columnId, position, title, description, assignee, type, priority,
 //                points, tags[], blocked, commentCount, activeSessionId, activeTabId,
 //                createdAt, updatedAt }                      (board list = these summaries)
-//   card+rails { ...card, comments[], commits[], sessions[], attachments[], notes[] }  (getBoardCardAsync)
+//   card+rails { ...card, comments[], commits[], sessions[], attachments[], notes[], linkedCards[] }  (getBoardCardAsync)
+//   linkedCard { id, key, title, boardId, boardName, columnId, columnName }
 //   comment    { id, author: { kind: 'user'|'agent', label, cli }, body, createdAt }
 //   note       same shape as a comment (id 'note_…'); the agent scratchpad, never in comments[]
 //   session    { id, tabId, displayName, cli, selection, origin, createdAt, active }
@@ -119,6 +120,21 @@ async function moveBoardCardAsync(cardId, { columnId, position }) {
 /** Start work: the server opens a terminal tab with the card prepended to the LLM's initial message. */
 async function launchBoardCardAsync(cardId, { selection } = {}) {
     return call(`/cards/${enc(cardId)}/launch`, 'POST', { selection: selection || null });
+}
+
+// ---------------------------------------------- linked cards
+
+async function getCardLinkCandidatesAsync(cardId, query = '', extra = {}) {
+    const response = await call(`/cards/${enc(cardId)}/links/candidates?q=${enc(query)}`, 'GET', null, extra);
+    return response?.cards || [];
+}
+
+async function linkCardAsync(cardId, linkedCardId) {
+    return call(`/cards/${enc(cardId)}/links`, 'POST', { card: linkedCardId });
+}
+
+async function unlinkCardAsync(cardId, linkedCardId) {
+    return call(`/cards/${enc(cardId)}/links/${enc(linkedCardId)}`, 'DELETE');
 }
 
 // ---------------------------------------------- comments
@@ -234,6 +250,9 @@ export const BoardApi = {
     deleteBoardCardAsync,
     moveBoardCardAsync,
     launchBoardCardAsync,
+    getCardLinkCandidatesAsync,
+    linkCardAsync,
+    unlinkCardAsync,
     addBoardCommentAsync,
     getCardNotesAsync,
     addCardNoteAsync,

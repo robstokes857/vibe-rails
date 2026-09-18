@@ -192,6 +192,9 @@ namespace VibeRails.DTOs
         string Type = BoardCardTypes.Default,
         string BoardId = "");
     public record BoardCardListResponse(List<BoardCardSummaryResponse> Cards);
+    public record BoardLinkedCardDto(string Id, string Key, string Title, string BoardId, string BoardName, string ColumnId, string ColumnName);
+    public record BoardCardLinkCandidatesResponse(List<BoardLinkedCardDto> Cards);
+    public record LinkBoardCardRequest(string? Card = null);
     public record BoardCardResponse(
         string Id,
         string Key,
@@ -218,7 +221,10 @@ namespace VibeRails.DTOs
         bool DescriptionChanged = false,
         List<BoardCommentDto>? Notes = null,
         string Type = BoardCardTypes.Default,
-        string BoardId = "");
+        string BoardId = "")
+    {
+        public List<BoardLinkedCardDto> LinkedCards { get; init; } = [];
+    }
     public record CreateBoardCardRequest(
         string? Title = null,
         string? ColumnId = null,
@@ -1690,6 +1696,9 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(List<BoardCardSummaryResponse>))]
     [JsonSerializable(typeof(BoardCardListResponse))]
     [JsonSerializable(typeof(BoardCardResponse))]
+    [JsonSerializable(typeof(BoardLinkedCardDto))]
+    [JsonSerializable(typeof(BoardCardLinkCandidatesResponse))]
+    [JsonSerializable(typeof(LinkBoardCardRequest))]
     [JsonSerializable(typeof(CreateBoardCardRequest))]
     [JsonSerializable(typeof(UpdateBoardCardRequest))]
     [JsonSerializable(typeof(BoardDescriptionSessionDto))]
