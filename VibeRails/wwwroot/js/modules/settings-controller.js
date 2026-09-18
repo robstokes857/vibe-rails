@@ -47,7 +47,6 @@ export class SettingsController {
             claudeTokenSaverEnabled: true,
             codexTokenSaverEnabled: true,
             openCodeTokenSaverEnabled: true,
-            tokenSaverCaptureEnabled: false,
             removeCoAuthorTrailers: true,
             showVibeAiUi: false,
             dataExportOptIn: false,
@@ -108,7 +107,6 @@ export class SettingsController {
             const codexTokenSaverToggle = root.querySelector('#setting-token-saver-codex');
             const opencodeTokenSaverToggle = root.querySelector('#setting-token-saver-opencode');
             const grokTokenSaverToggle = root.querySelector('#setting-token-saver-grok');
-            const tokenSaverCaptureToggle = root.querySelector('#setting-token-saver-capture');
             const removeCoAuthorTrailersToggle = root.querySelector('#setting-remove-co-author-trailers');
             const showVibeAiUiToggle = root.querySelector('#setting-show-vibe-ai-ui');
 
@@ -198,9 +196,6 @@ export class SettingsController {
             if (grokTokenSaverToggle) {
                 grokTokenSaverToggle.checked = settings.grokTokenSaverEnabled !== false;
             }
-            if (tokenSaverCaptureToggle) {
-                tokenSaverCaptureToggle.checked = settings.tokenSaverCaptureEnabled === true;
-            }
             if (removeCoAuthorTrailersToggle) {
                 // Missing on older servers/settings files means the documented default: enabled.
                 removeCoAuthorTrailersToggle.checked = settings.removeCoAuthorTrailers !== false;
@@ -252,7 +247,6 @@ export class SettingsController {
                             codexTokenSaverToggle?.checked ?? true,
                             opencodeTokenSaverToggle?.checked ?? true,
                             grokTokenSaverToggle?.checked ?? true,
-                            tokenSaverCaptureToggle?.checked ?? false,
                             removeCoAuthorTrailersToggle?.checked ?? true,
                             routeThroughVibeRailsAiToggle?.checked ?? false,
                             showVibeAiUiToggle?.checked === true,
@@ -284,7 +278,7 @@ export class SettingsController {
         }
     }
 
-    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, openCodeLlmProxyEnabled, grokLlmProxyEnabled, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, tokenSaverCaptureEnabled, removeCoAuthorTrailers, routeThroughVibeRailsAi, showVibeAiUi = false, clearApiKey = false, dataExportOptIn = false) {
+    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, openCodeLlmProxyEnabled, grokLlmProxyEnabled, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, removeCoAuthorTrailers, routeThroughVibeRailsAi, showVibeAiUi = false, clearApiKey = false, dataExportOptIn = false) {
         try {
             const savedSettings = await this.app.apiCall('/api/v1/settings', 'POST', {
                 remoteAccess: remoteAccess,
@@ -302,7 +296,6 @@ export class SettingsController {
                 codexTokenSaverEnabled: codexTokenSaverEnabled,
                 openCodeTokenSaverEnabled: openCodeTokenSaverEnabled,
                 grokTokenSaverEnabled: grokTokenSaverEnabled,
-                tokenSaverCaptureEnabled: tokenSaverCaptureEnabled,
                 removeCoAuthorTrailers: removeCoAuthorTrailers,
                 routeThroughVibeRailsAi: routeThroughVibeRailsAi,
                 showVibeAiUi: showVibeAiUi,
@@ -416,7 +409,6 @@ export class SettingsController {
             '#setting-token-saver-codex',
             '#setting-token-saver-opencode',
             '#setting-token-saver-grok',
-            '#setting-token-saver-capture',
             '#setting-remove-co-author-trailers',
             '#setting-show-vibe-ai-ui'
         ].join(',');
@@ -443,7 +435,6 @@ export class SettingsController {
             codexTokenSaverEnabled: isChecked('#setting-token-saver-codex'),
             openCodeTokenSaverEnabled: isChecked('#setting-token-saver-opencode'),
             grokTokenSaverEnabled: isChecked('#setting-token-saver-grok'),
-            tokenSaverCaptureEnabled: isChecked('#setting-token-saver-capture'),
             removeCoAuthorTrailers: isChecked('#setting-remove-co-author-trailers'),
             showVibeAiUi: isChecked('#setting-show-vibe-ai-ui')
         });
@@ -544,9 +535,6 @@ export class SettingsController {
         if (codexTokenSaverToggle) codexTokenSaverToggle.checked = settings.codexTokenSaverEnabled !== false;
         if (opencodeTokenSaverToggle) opencodeTokenSaverToggle.checked = settings.openCodeTokenSaverEnabled !== false;
         if (grokTokenSaverToggle) grokTokenSaverToggle.checked = settings.grokTokenSaverEnabled !== false;
-
-        const tokenSaverCaptureToggle = root.querySelector('#setting-token-saver-capture');
-        if (tokenSaverCaptureToggle) tokenSaverCaptureToggle.checked = settings.tokenSaverCaptureEnabled === true;
 
         const removeCoAuthorTrailersToggle = root.querySelector('#setting-remove-co-author-trailers');
         if (removeCoAuthorTrailersToggle) removeCoAuthorTrailersToggle.checked = settings.removeCoAuthorTrailers !== false;

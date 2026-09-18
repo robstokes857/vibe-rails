@@ -41,11 +41,8 @@ public static class LlmAnthropicProxyRoutes
             // disabled without tearing down the relay itself.
             var plan = settings.ResolvedPlan;
             var saverHasWork = !plan.IsNoOp && plan.AnthropicAllowlist.Count > 0;
-            var captureSink = settings.TokenSaverCaptureEnabled
-                ? context.RequestServices.GetService<ICompressionCaptureSink>()
-                : null;
             var transform = settings.ClaudeTokenSaverEnabled && saverHasWork
-                ? new AnthropicBodyTransform(plan, captureSink)
+                ? new AnthropicBodyTransform(plan)
                 : null;
             // Independent of the saver toggles on purpose: every authenticated request relayed
             // through the proxy is recorded, including requests the saver declines.

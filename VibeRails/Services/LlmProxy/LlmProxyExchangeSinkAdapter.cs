@@ -4,9 +4,9 @@ using VibeRails.DB;
 namespace VibeRails.Services.LlmProxy;
 
 /// <summary>
-/// Bridges the TokenSaver library's exchange seam to its own SQLite file. Sibling of
-/// <see cref="CompressionCaptureSinkAdapter"/>, same division of labour: the library decides what an
-/// exchange is and requires every proxied exchange to be recorded; the host decides where it lands.
+/// Bridges the TokenSaver library's exchange seam to its own SQLite file. Same division of labour
+/// as <see cref="LlmProxyEventSinkAdapter"/>: the library decides what an exchange is and requires
+/// every proxied exchange to be recorded; the host decides where it lands.
 /// </summary>
 public sealed class LlmProxyExchangeSinkAdapter(ILlmExchangeLogStore store) : ILlmProxyExchangeSink
 {

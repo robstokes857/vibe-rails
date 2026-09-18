@@ -531,7 +531,7 @@ tools (security review 2026-07-02).
 - `TerminalSessionLogs` - Per-terminal-session structured log rows
 - `Jobs` / `JobActions` / `JobTriggers` - Automation definitions, ordered actions, and triggers
 - `JobRuns` / `JobRunActions` - Immutable per-run workflow snapshots and per-action outcomes/output
-- Additional tables: `AgentMetadata`, `ChatSummary`, `sessionOutPut`, `TokenSavings`, `CompressionCaptures`, `CodeAnalyzerIgnores`, `ProjectCache`, `GlobalCache`
+- Additional tables: `AgentMetadata`, `ChatSummary`, `sessionOutPut`, `TokenSavings`, `CompressionCaptures` (retired 2026-09-17, schema-only), `CodeAnalyzerIgnores`, `ProjectCache`, `GlobalCache`
 
 **Configuration**:
 - WAL mode enabled for concurrent access

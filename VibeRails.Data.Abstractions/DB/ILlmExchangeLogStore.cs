@@ -19,7 +19,7 @@ namespace VibeRails.DB;
 /// outage. Its own file means the log can also be deleted with `rm`, which is the only retention
 /// policy this table has.
 ///
-/// Errors are swallowed for the same reason <see cref="CompressionCaptureStore"/> swallows them:
+/// Errors are swallowed for the same reason <c>TokenSavingsStore</c> swallows them:
 /// this sits on the LLM relay's hot path, and nothing it records is worth failing a request over.
 /// </summary>
 public interface ILlmExchangeLogStore

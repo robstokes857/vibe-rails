@@ -94,8 +94,6 @@ public static class AppSettingsRoutes
                 settings.OpenCodeTokenSaverEnabled = settingsDto.OpenCodeTokenSaverEnabled.Value;
             if (settingsDto.GrokTokenSaverEnabled.HasValue)
                 settings.GrokTokenSaverEnabled = settingsDto.GrokTokenSaverEnabled.Value;
-            if (settingsDto.TokenSaverCaptureEnabled.HasValue)
-                settings.TokenSaverCaptureEnabled = settingsDto.TokenSaverCaptureEnabled.Value;
             if (settingsDto.RemoveCoAuthorTrailers.HasValue)
                 settings.RemoveCoAuthorTrailers = settingsDto.RemoveCoAuthorTrailers.Value;
 
@@ -180,7 +178,6 @@ public static class AppSettingsRoutes
             // exactly as LlmProxySettingsService.Resolve does, so the UI shows what actually runs.
             settings.CodexTokenSaverEnabled ?? settings.ClaudeTokenSaverEnabled,
             settings.OpenCodeTokenSaverEnabled ?? settings.ClaudeTokenSaverEnabled,
-            settings.TokenSaverCaptureEnabled,
             ComputerNameFormatter.Machine(),
             // Response-only; the request flag is never echoed back.
             ClearApiKey: null,

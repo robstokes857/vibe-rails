@@ -589,7 +589,8 @@ earlier installs are dropped; only the delete trigger remains for sync.
 
 All created in `SqlStrings.InitStatements` (run by `Repository.EnsureInitialized()`). Some are
 also created on demand by their respective store classes (`TokenSavingsStore`,
-`CompressionCaptureStore`, `CodeAnalyzerIgnoreStore`) since those writers can run before the
+`CodeAnalyzerIgnoreStore`; `CompressionCapturesSchema` for the retired, schema-only
+`CompressionCaptures` table) since those writers can run before the
 first `Repository` initializes the schema.
 
 ### TerminalSessionLogs

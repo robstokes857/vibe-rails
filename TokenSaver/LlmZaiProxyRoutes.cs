@@ -41,11 +41,8 @@ public static class LlmZaiProxyRoutes
             // disabled without tearing down the relay itself.
             var plan = settings.ResolvedPlan;
             var saverHasWork = !plan.IsNoOp && plan.ZaiAllowlist.Count > 0;
-            var captureSink = settings.TokenSaverCaptureEnabled
-                ? context.RequestServices.GetService<ICompressionCaptureSink>()
-                : null;
             var transform = settings.OpenCodeTokenSaverEnabled && saverHasWork
-                ? new ZaiBodyTransform(plan, captureSink)
+                ? new ZaiBodyTransform(plan)
                 : null;
             // Exchange logging is an invariant of using the proxy, not a setting.
             var exchangeSink = context.RequestServices.GetRequiredService<ILlmProxyExchangeSink>();
