@@ -1,5 +1,45 @@
 # Vibe Board architecture and review
 
+## VB-16 implementation amendment (2026-09-19)
+
+Board settings now include a default agent message and per-type `default`, `replace`, or
+`append` modes (default only, type only, or default then type). Each message is capped at
+4,000 characters. `BoardContextSettings` persists per board with a revision-checked save;
+the authenticated `GET|PUT /api/v1/board/boards/{boardId}/context` routes derive project scope
+from the backend. Launch selects context from the card's current board/type. Context is literal:
+template braces and control/bidi characters are neutralized. Only the existing environment
+Initial Message remains a template. Oversized combined launch prompts fail before starting a tab.
+
+`POST /api/v1/board/cards/{card}/launch` accepts `intent: "work" | "chat"` (omitted = work).
+Both paths preserve the shared workspace, assignee/options, Board-only grants, session link and
+exact description-revision provenance. Work stays on the Board. **Chat with agent** saves the
+form then adopts/focuses the returned terminal, with instructions to read current card activity
+and history, summarize status, and wait for discussion. Opening chat does not move the card or
+authorize implementation merely by opening a terminal. Existing root-local launch exclusion (F3)
+still applies to both intents.
+
+Lane settings now select one existing enabled Automation from the current project through
+`GET|PUT /api/v1/board/columns/{columnId}/automation`. Saves require the settings revision.
+Creating a card in a configured lane or moving it to a different lane records one pending
+trigger for that card, due **60 seconds** after the latest entry. Another move replaces/cancels
+it, including cross-board moves, MCP moves, form saves and lane-deletion relocation. Same-lane
+reordering and metadata edits do not restart the timer or trigger a run. Saving lane Automation
+settings cancels pending entries for that lane and affects future entries only.
+
+Additive `board/6` creates `BoardContextSettings`, `BoardLaneAutomations`,
+`BoardPendingAutomations`, a due-time index and two card triggers. Triggers write only to the new
+tables and preserve old card SQL compatibility. The existing leased Automation scheduler drains
+settled entries on its normal cycle (normally within 10 seconds after the 60-second delay).
+Consumption and `JobRuns`/`JobRunActions` snapshots share one SQLite transaction, preventing
+duplicate enqueue across roots or restart. It rechecks the current lane, configured job, project,
+enabled/deleted state and ordinary job overlap guard. Invalid/disabled/overlapping events are
+consumed without queuing and are not retried when the job later becomes available. Once queued,
+the normal Automation run lifecycle applies; a later move does not cancel a running job.
+Pending entries survive backend shutdown and are processed when a root backend is open again.
+There is no additional scheduler host, daemon, OS registration, listener, or MCP grant.
+
+The original review below remains historical. Its open findings have not been resolved by VB-16.
+
 Reviewed for **VB-18, description revision 1**, on **2026-09-18**, against commit
 `1f4fd71` (`Add linked-card relationships to board cards`). This is the component reference
 and the review of that implementation. Findings below remain open; this documentation change

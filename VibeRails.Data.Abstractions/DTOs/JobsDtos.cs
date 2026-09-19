@@ -9,7 +9,8 @@ public enum JobTriggerKind
     // Commit/Manual numeric values stay stable. Before-commit automations use PreCommit = 4.
     Commit = 2,
     Manual = 3,
-    PreCommit = 4
+    PreCommit = 4,
+    BoardLane = 5
 }
 
 public enum JobScheduleKind

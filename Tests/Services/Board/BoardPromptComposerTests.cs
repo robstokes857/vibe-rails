@@ -8,6 +8,52 @@ namespace Tests.Services.Board;
 
 public sealed class BoardPromptComposerTests
 {
+    [Theory]
+    [InlineData("default", true, false)]
+    [InlineData("replace", false, true)]
+    [InlineData("append", true, true)]
+    public void Context_ResolvesOnlyTheMatchingType_AndNeutralizesTemplates(string mode, bool hasDefault, bool hasType)
+    {
+        var settings = new BoardContextSettings("Shared instructions {{step:unsafe}}", [
+            new("bug", mode, "Reproduce the issue"), new("research-spike", "replace", "Research only")]);
+        var context = new BoardPromptComposer.LaunchContext([], [], [], Settings: settings);
+        foreach (var intent in new[] { "work", "chat" })
+        {
+            var prompt = BoardPromptComposer.Compose(Card() with { Type = "bug" }, "Build", "codex", null, context, intent);
+            Assert.Equal(hasDefault, prompt.Contains("Shared instructions"));
+            Assert.Equal(hasType, prompt.Contains("Reproduce the issue"));
+            Assert.DoesNotContain("Research only", prompt);
+            Assert.DoesNotContain("{{", prompt);
+            if (mode == "append") Assert.True(prompt.IndexOf("Shared instructions", StringComparison.Ordinal) < prompt.IndexOf("Reproduce the issue", StringComparison.Ordinal));
+        }
+        Assert.Contains("Shared instructions", BoardPromptComposer.Compose(Card(), "Build", null, null, context));
+    }
+
+    [Fact]
+    public void Chat_ReadsStatusThenWaits_AndDoesNotUseWorkResumeInstructions()
+    {
+        var prompt = BoardPromptComposer.Compose(Card(), "Backlog", "codex", "Start implementing immediately", intent: "chat");
+        Assert.StartsWith("The user wants to talk with you", prompt);
+        Assert.Contains("get_board_card VB-12", prompt);
+        Assert.Contains("get_board_card_history", prompt);
+        Assert.Contains("brief status summary and wait", prompt);
+        Assert.DoesNotContain("resume from there instead of starting over", prompt);
+        Assert.DoesNotContain("move_board_card when", prompt);
+        Assert.EndsWith("Start work only if the user subsequently asks you to.", prompt);
+    }
+
+    [Fact]
+    public void Context_RejectsAnOversizedCombinedLaunch_InsteadOfDroppingInstructions()
+    {
+        var context = new BoardPromptComposer.LaunchContext([], [], [], Settings:
+            new(new string('s', 4000), [new("task", "append", new string('t', 4000))]));
+        Assert.Throws<BoardValidationException>(() => BoardPromptComposer.Compose(Card(), "Build", null, new string('e', 23_000), context));
+        var prompt = BoardPromptComposer.Compose(Card(), "Build", null, "Today {{datetime}}", context);
+        Assert.Contains(new string('s', 4000), prompt);
+        Assert.Contains(new string('t', 4000), prompt);
+        Assert.EndsWith("Today {{datetime}}", prompt);
+    }
+
     private static BoardCardRecord Card(string title = "Fix refresh-token race", string description = "Two overlapping 401s…") =>
         new("card_1", "/p", 12, "col_build", 0, title, description, "env:7:codex", "high", 5, ["auth"], false, 2,
             DateTime.UtcNow, DateTime.UtcNow);

@@ -60,11 +60,11 @@ test('the assignee is the app-wide LLM picker, not a list of people', () => {
 test('Start work launches through the server without changing the current view', () => {
     const source = readFileSync(controllerPath, 'utf8');
     assert.match(source, /data-board-start-work/);
-    assert.match(source, /BoardApi\.launchBoardCardAsync\(card\.id, \{ selection: payload\.assignee \}\)/);
+    assert.match(source, /BoardApi\.launchBoardCardAsync\(card\.id, \{ selection: payload\.assignee, intent \}\)/);
     assert.match(source, /rememberTabLaunch\?\.\(tabId, \{[\s\S]*taskKey: CARD_TASK_KEY\(card\.id\)/,
         'the tab is tagged with the board-card:<id> task key');
     const start = source.slice(source.indexOf('async startWork('), source.indexOf('async deleteCurrentCard('));
-    assert.doesNotMatch(start, /adoptLaunchedTab|navigate\?\./, 'background launch must not focus a terminal');
+    // Foreground chat and background work behavior are exercised in board-card-actions.test.mjs.
     assert.match(start, /await this\.refresh\(\)/, 'refresh the board after starting');
     assert.match(source, /TODO\(board\): "Auto Launch"/, 'the Auto Launch follow-up note stays in the code');
     // Save/Delete remain siblings of the scroller (see board-card-modal.test.mjs); Start work sits with Save.

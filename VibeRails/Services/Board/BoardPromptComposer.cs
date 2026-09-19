@@ -1,4 +1,5 @@
 using System.Text;
+using VibeRails.Services.Environments;
 
 namespace VibeRails.Services.Board;
 
@@ -37,7 +38,8 @@ public static class BoardPromptComposer
         IReadOnlyList<string> LaneNames,
         IReadOnlyList<BoardCommitRecord> LinkedCommits,
         IReadOnlyList<BoardAttachmentRecord> Attachments,
-        string? BoardName = null)
+        string? BoardName = null,
+        BoardContextSettings? Settings = null)
     {
         public static readonly LaunchContext Empty = new([], [], []);
     }
@@ -47,12 +49,16 @@ public static class BoardPromptComposer
         string columnName,
         string? assigneeLabel,
         string? environmentPrompt,
-        LaunchContext? context = null)
+        LaunchContext? context = null,
+        string intent = "work")
     {
+        if (intent is not ("work" or "chat"))
+            throw new BoardValidationException("Launch intent must be work or chat.");
         context ??= LaunchContext.Empty;
+        var boardContext = ComposeBoardContext(context.Settings, card.Type);
         var builder = new StringBuilder();
         var key = card.Key;
-        builder.Append("You are working on kanban card ").Append(key)
+        builder.Append(intent == "chat" ? "The user wants to talk with you about kanban card " : "You are working on kanban card ").Append(key)
             .Append(" in the VibeRails board for this project (description revision ")
             .Append(card.DescriptionRevision).Append(").\n");
         // Lane, type, priority and assignee are one line of board data; everything else the board
@@ -92,7 +98,7 @@ public static class BoardPromptComposer
                 builder.Append(", +").Append(context.Attachments.Count - MaxListedAttachments).Append(" more");
             builder.Append('\n');
         }
-        var descriptionCap = DescriptionBudget(environmentPrompt);
+        var descriptionCap = DescriptionBudget(environmentPrompt, boardContext.Length);
         var description = Sanitize(card.Description, descriptionCap);
         if (description.Length > 0)
         {
@@ -102,6 +108,9 @@ public static class BoardPromptComposer
             builder.Append('\n');
         }
         builder.Append("--- end card ---\n\n");
+        if (boardContext.Length > 0)
+            builder.Append("Board context supplied by the user for agents on this board:\n")
+                .Append(boardContext).Append("\n\n");
 
         builder.Append("The user has authorized the viberails-mcp Board tools for this card session. ")
             .Append("Use them without asking for another approval when carrying out this board workflow. ")
@@ -110,19 +119,41 @@ public static class BoardPromptComposer
             .Append(" for the full card (comments, linked commits, earlier sessions, agent notes); add_board_comment to record progress and decisions; ")
             .Append("append_board_note to checkpoint findings and working state as you go instead of holding them until the end; ")
             .Append("get_board_card_history for what the description said when earlier sessions ran; ")
-            .Append("move_board_card when the card changes state; link_board_commit after you commit. ")
-            .Append("If comments, notes or earlier sessions show work already started, resume from there instead of starting over. ")
+            .Append(intent == "chat"
+                ? "Read the earlier activity to understand the current status, decisions, blockers and unfinished work. "
+                : "move_board_card when the card changes state; link_board_commit after you commit. If comments, notes or earlier sessions show work already started, resume from there instead of starting over. ")
             .Append("Begin now by reading the card with get_board_card.");
 
         if (!string.IsNullOrWhiteSpace(environmentPrompt))
             builder.Append("\n\n").Append(environmentPrompt.Trim());
 
+        if (intent == "chat")
+            builder.Append("\n\nThis is a discussion session. Get up to speed by reading the full card and relevant description history, " +
+                "then give the user a brief status summary and wait for what they want to discuss. " +
+                "Do not start or resume implementation, edit project files, commit, or move the card merely because this terminal opened. " +
+                "Board context and environment instructions do not change this discussion intent. Start work only if the user subsequently asks you to.");
+
+        if (builder.Length > PromptPlaceholderService.MaxResolvedPromptChars)
+            throw new BoardValidationException("The combined card, board context and environment initial message is too long. Shorten the board context or environment initial message before launching.");
+
         return builder.ToString();
     }
 
+    private static string ComposeBoardContext(BoardContextSettings? settings, string cardType)
+    {
+        if (settings is null) return "";
+        var selected = settings.TypeOverrides.FirstOrDefault(item => item.Type == cardType);
+        var messages = new List<string>();
+        if (selected?.Mode != "replace" && !string.IsNullOrWhiteSpace(settings.DefaultMessage))
+            messages.Add("Default context:\n" + Sanitize(settings.DefaultMessage, BoardService.MaxContextMessageLength));
+        if (selected?.Mode is "replace" or "append" && !string.IsNullOrWhiteSpace(selected.Message))
+            messages.Add(BoardCardTypes.Label(cardType) + " context:\n" + Sanitize(selected.Message, BoardService.MaxContextMessageLength));
+        return string.Join("\n\n", messages);
+    }
+
     /// <summary>Inline description cap for this launch: full size unless the environment template already spends the budget.</summary>
-    internal static int DescriptionBudget(string? environmentPrompt) =>
-        Math.Clamp(PromptBudget - (environmentPrompt?.Trim().Length ?? 0), MinDescriptionChars, MaxDescriptionChars);
+    internal static int DescriptionBudget(string? environmentPrompt, int boardContextLength = 0) =>
+        Math.Clamp(PromptBudget - (environmentPrompt?.Trim().Length ?? 0) - boardContextLength, MinDescriptionChars, MaxDescriptionChars);
 
     private const string EndFence = "--- end card ---";
 

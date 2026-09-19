@@ -120,7 +120,7 @@ test('Start work waits for the current edits to save before launching', async ()
     await starting;
 
     assert.deepEqual(h.calls[1], {
-        url: '/api/v1/board/cards/card-1/launch', method: 'POST', body: { selection: 'base:claude' }
+        url: '/api/v1/board/cards/card-1/launch', method: 'POST', body: { selection: 'base:claude', intent: 'work' }
     });
     assert.equal(h.closed, true);
 });
@@ -143,6 +143,31 @@ test('description saves submit the revision seen by the editor', async () => {
     h.editor.dataset.descriptionRevision = '4';
     await h.controller.saveCard(h.editor);
     assert.equal(h.calls[0].body.expectedDescriptionRevision, 4);
+});
+
+for (const adopted of [true, false]) {
+    test(`Chat saves the card then focuses its terminal (adopted=${adopted})`, async () => {
+        const h = harness();
+        const actions = [];
+        h.app.terminalController = { rememberTabLaunch() {}, async adoptLaunchedTab(id) { actions.push(['adopt', id]); return adopted; } };
+        h.app.navigate = (view, data) => actions.push([view, data]);
+        await h.controller.startWork(h.editor, h.card, 'chat');
+        assert.equal(h.calls[0].method, 'PUT');
+        assert.deepEqual(h.calls[1].body, { selection: 'base:claude', intent: 'chat' });
+        assert.equal(h.closed, true);
+        assert.deepEqual(actions[0], ['adopt', 'tab-1']);
+        assert.equal(actions.length, adopted ? 1 : 2);
+        if (!adopted) assert.deepEqual(actions[1], ['terminal-focus', { preferredTabId: 'tab-1', preferredSelection: 'base:claude' }]);
+    });
+}
+
+test('Chat cannot start alongside an in-flight work launch or a running session', async () => {
+    const h = harness();
+    h.editor._boardStarting = true;
+    await h.controller.startWork(h.editor, h.card, 'chat');
+    h.editor._boardStarting = false;
+    await h.controller.startWork(h.editor, { ...h.card, activeSessionId: 'running' }, 'chat');
+    assert.deepEqual(h.calls, []);
 });
 
 test('saving a description never sends terminal input to a running agent', async () => {
