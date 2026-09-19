@@ -9,6 +9,11 @@ import * as SessionDebug from './session-viewer.js';
 const DEFAULT_PAGE_SIZE = 20;
 const SCROLL_LOAD_THRESHOLD_PX = 48;
 const CONTEXT_MENU_VIEWPORT_MARGIN_PX = 8;
+// Session lifecycle events arrive in bursts (started, then the first submit a moment
+// later, then busy/idle churn); coalesce them into one soft refresh. The rows a soft
+// refresh re-fetches in one request are capped by the server's pageSize clamp.
+const SOFT_REFRESH_DEBOUNCE_MS = 600;
+const SOFT_REFRESH_MAX_ROWS = 100;
 const HISTORY_OPEN_STORAGE_KEY = 'viberails_history_sidebar_open';
 const HISTORY_SEEN_STORAGE_KEY = 'viberails_history_sidebar_seen';
 // Standard dashed GUID (8-4-4-4-12) or "N" format (32 hex chars), case-insensitive.
@@ -42,6 +47,9 @@ export class ChatHistorySidebar {
         this._documentKeydownHandler = null;
         this._bodyResizeObserver = null;
         this._sidebarMutationObserver = null;
+        this._softRefreshTimer = null;
+        this._softRefreshSessionIds = new Set();
+        this._softRefreshInFlight = false;
     }
 
     static renderHtml() {
@@ -376,6 +384,11 @@ export class ChatHistorySidebar {
         this._bodyResizeObserver = null;
         this._sidebarMutationObserver?.disconnect();
         this._sidebarMutationObserver = null;
+        if (this._softRefreshTimer) {
+            window.clearTimeout(this._softRefreshTimer);
+            this._softRefreshTimer = null;
+        }
+        this._softRefreshSessionIds.clear();
         this.sidebar = null;
         this.search = null;
         this.body = null;
@@ -496,6 +509,98 @@ export class ChatHistorySidebar {
             this.isLoadingForSearch = false;
             this._setRefreshButtonState();
             this._renderItems();
+        }
+    }
+
+    /**
+     * Soft refresh, safe to fire on every session lifecycle event. Unlike _load() it never
+     * blanks the list or resets pagination: it re-fetches the rows already loaded (page 1..N
+     * as one request, capped at the server's pageSize clamp) plus any session the caller
+     * names, and merges them in place. Naming a session matters for one that just ended
+     * below the re-fetched window, so its Live badge still flips to Ended.
+     *
+     * @param {{ sessionId?: string|null, onlyIfUnnamed?: boolean }} [options]
+     *   onlyIfUnnamed skips the refresh when that session is already listed with a real
+     *   name — the first prompt names a row, later prompts change nothing visible.
+     */
+    refresh({ sessionId = null, onlyIfUnnamed = false } = {}) {
+        if (!this.body) {
+            return;
+        }
+
+        const id = typeof sessionId === 'string' ? sessionId.trim() : '';
+        if (onlyIfUnnamed && id) {
+            const known = this.allItems.find(item => item.id === id);
+            if (known && this._getDisplayName(known)) {
+                return;
+            }
+        }
+
+        if (id) {
+            this._softRefreshSessionIds.add(id);
+        }
+        if (this._softRefreshTimer) {
+            return;
+        }
+        this._softRefreshTimer = window.setTimeout(() => {
+            this._softRefreshTimer = null;
+            void this._runSoftRefresh();
+        }, SOFT_REFRESH_DEBOUNCE_MS);
+    }
+
+    async _runSoftRefresh() {
+        if (!this.body?.isConnected) {
+            this._softRefreshSessionIds.clear();
+            return;
+        }
+
+        // A page walk, a search sweep, an earlier soft refresh, or an open row menu (which
+        // is anchored to an element a re-render would replace): come back once it settles.
+        if (this.isLoadingPage
+            || this.isLoadingForSearch
+            || this._softRefreshInFlight
+            || this.contextMenu?.classList.contains('show')) {
+            this.refresh();
+            return;
+        }
+
+        const sessionIds = Array.from(this._softRefreshSessionIds);
+        this._softRefreshSessionIds.clear();
+        this._softRefreshInFlight = true;
+
+        try {
+            const loadedRows = Math.max(this.pageSize, this.currentPage * this.pageSize);
+            const params = new URLSearchParams({
+                page: '1',
+                pageSize: String(Math.min(loadedRows, SOFT_REFRESH_MAX_ROWS))
+            });
+            const requests = [
+                this.app.apiCall(`/api/v1/chatHistory?${params.toString()}`, 'GET', null, { showLoading: false })
+            ];
+            for (const id of sessionIds) {
+                // A session that was just deleted 404s; that is not a refresh failure.
+                requests.push(this.app.apiCall(
+                    `/api/v1/chatHistory/${encodeURIComponent(id)}`,
+                    'GET',
+                    null,
+                    { showLoading: false }
+                ).catch(() => null));
+            }
+
+            const [pageData, ...singles] = await Promise.all(requests);
+            if (!this.body?.isConnected) {
+                return;
+            }
+
+            const fetchedItems = Array.isArray(pageData?.items) ? pageData.items : [];
+            this._mergeItems([...fetchedItems, ...singles.filter(Boolean)]);
+            this._renderItems();
+        } catch (error) {
+            // Background refresh: the list on screen is still valid, so stay quiet. The
+            // refresh button remains the loud path that surfaces a broken backend.
+            console.warn('[ChatHistory] Soft refresh failed:', error);
+        } finally {
+            this._softRefreshInFlight = false;
         }
     }
 
@@ -652,7 +757,19 @@ export class ChatHistorySidebar {
 
     _shouldDisplayItem(item) {
         const displayName = this._getDisplayName(item);
-        return displayName.length > 0 && displayName.toLowerCase() !== 'untitled';
+        if (displayName.length > 0 && displayName.toLowerCase() !== 'untitled') {
+            return true;
+        }
+
+        // A session that has started but not recorded its first prompt has nothing to be
+        // named after yet. Keep it visible while it is live so a Start click shows up here
+        // at once; if it ends without ever getting a prompt it drops out on the next
+        // refresh, exactly as nameless sessions always did.
+        return !item?.endedUTC;
+    }
+
+    _getPlaceholderName(brand) {
+        return `New ${brand?.label || 'CLI'} session`;
     }
 
     async _showRenameModal() {
@@ -844,8 +961,11 @@ export class ChatHistorySidebar {
 
         this.body.innerHTML = `${filteredItems.map(item => {
             const brand = this.app.getCliBrand(item.cli);
-            const rawName = this._getDisplayName(item);
+            const namedRaw = this._getDisplayName(item);
+            const isPlaceholder = namedRaw.length === 0;
+            const rawName = isPlaceholder ? this._getPlaceholderName(brand) : namedRaw;
             const name = rawName.length > 80 ? rawName.slice(0, 80) + '…' : rawName;
+            const nameClass = isPlaceholder ? 'ch-item-name ch-item-name-placeholder' : 'ch-item-name';
             const time = formatRelativeTime(item.startedUTC);
             const isActive = !item.endedUTC;
             const logoHtml = this._renderBrandLogo(brand, 'ch-item-logo');
@@ -875,7 +995,7 @@ export class ChatHistorySidebar {
                     <div class="ch-item-icon">${logoHtml}</div>
                     <div class="ch-item-content">
                         <div class="ch-item-header">
-                            <div class="ch-item-name" title="${escapeHtml(rawName)}">${escapeHtml(name)}</div>
+                            <div class="${nameClass}" title="${escapeHtml(rawName)}">${escapeHtml(name)}</div>
                             <span class="ch-project-badge" title="${escapeHtml(item.workingDirectory || '')}"><i class="fa-solid fa-folder-open"></i> ${escapeHtml(projectDisplayName)}</span>
                         </div>
                         ${relationshipHtml}
@@ -1249,6 +1369,12 @@ export class ChatHistorySidebar {
             : '';
 
         return this.allItems.filter(item => {
+            // Pages are pre-filtered on fetch, but a soft refresh merges whatever the server
+            // returns: a placeholder row that has since ended must leave the list here.
+            if (!this._shouldDisplayItem(item)) {
+                return false;
+            }
+
             if (this.llmFilters.size > 0 && !this.llmFilters.has((item?.cli || '').toLowerCase())) {
                 return false;
             }

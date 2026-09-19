@@ -9516,6 +9516,14 @@ input.form-control:disabled {
     color: #fff;
 }
 
+/* A live session that has not recorded its first prompt yet — named after its CLI
+   until the first submit gives it a real title. */
+.ch-item-name.ch-item-name-placeholder {
+    font-weight: 500;
+    font-style: italic;
+    color: var(--color-text-muted, #94a3b8);
+}
+
 /* Project badge — refined pill with mono face */
 .ch-project-badge {
     align-self: flex-start;

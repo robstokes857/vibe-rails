@@ -756,15 +756,21 @@ the browser. Reset removes the cache document and makes supported custom Environ
 
 ### Kanban board tables (Board*)
 
-Owned by `Services/Board/BoardStore.cs` (singleton, own connection string, `EnsureSchema()` in its
+See the [Board architecture/data model](../../VibeRails/Services/Board/ARCHITECTURE.md) and
+[contributor guide](../../VibeRails/Services/Board/AGENTS.md) for cross-layer contracts and open
+review findings.
+
+Owned by `VibeRails.Data.Sqlite/Board/BoardStore.cs` (singleton, own connection string, `EnsureSchema()` in its
 constructor — the JobStore pattern), **not** by `Repository.InitStatements`. That is what lets the
 stdio MCP host (`vb mcp`) construct the store without running the dashboard's migration pass.
-Every row is scoped by `ProjectPath` (the git root of the open workspace, normalised, NOCASE on
-Windows/macOS) and the project path never comes from a request — `BoardProjectResolver` derives
+Board/lane/card rows carry `ProjectPath`; dependent rows inherit scope through their card.
+Project lookups are normalised, NOCASE on Windows/macOS, and the project path never comes from
+a request — `BoardProjectResolver` derives
 it (dashboard root path → the launching terminal session's card → git root of cwd → cwd).
 
 ```sql
-BoardColumns      (Id TEXT PK, ProjectPath, Name, WipLimit NULL, Position, Color, CreatedUTC, UpdatedUTC)
+Boards            (Id TEXT PK, ProjectPath, Name, Position, CreatedUTC, UpdatedUTC)
+BoardColumns      (Id TEXT PK, ProjectPath, BoardId NULL, Name, WipLimit NULL, Position, Color, CreatedUTC, UpdatedUTC)
 BoardCards        (Id TEXT PK, ProjectPath, Number, ColumnId → BoardColumns, Position, Title, Description,
                    Assignee NULL, Priority, Type, Points NULL, Tags JSON, Blocked, CreatedUTC, UpdatedUTC,
                    UNIQUE(ProjectPath, Number))
@@ -779,7 +785,7 @@ BoardDescriptionSessionEvents (CardId, Revision → BoardDescriptionRevisions CA
 BoardDescriptionRevisionAttachments (CardId, Revision → BoardDescriptionRevisions CASCADE,
                    AttachmentId → BoardAttachments CASCADE, PK(CardId, Revision, AttachmentId))
 BoardComments     (Id TEXT PK, CardId → BoardCards CASCADE, AuthorKind 'user'|'agent', AuthorLabel,
-                   AuthorCli NULL, SessionId NULL, Body, CreatedUTC)
+                   AuthorCli NULL, SessionId NULL, Body, CreatedUTC, Kind 'comment'|'note')
 BoardCardSessions (SessionId TEXT PK, CardId → BoardCards CASCADE, TabId NULL, Selection, Cli,
                    DisplayName, Origin 'launch'|'mcp'|'manual', CreatedUTC)
 BoardAttachments  (Id TEXT PK, CardId → BoardCards CASCADE, Name, MimeType, Bytes, DataUrl, CreatedUTC, DeletedUTC NULL)
@@ -793,6 +799,9 @@ BoardCommitSnapshots (CardId, Sha → BoardCommits CASCADE, SnapshotJson, PK(Car
   and restarting; schema initialization seeds it from existing cards without decreasing it.
   Lookups accept the id or the key. Positions are dense `0..n-1` per lane after every
   create/move/delete (`WriteCardPositionsAsync`).
+- Migration `board/4` adds multiple boards per project. Card ownership follows the lane's
+  `BoardId`; it is nullable with no FK for legacy compatibility. Startup adopts null-board
+  lanes into the project's default board. Card numbers stay unique across a project's boards.
 - `BoardCards.Type` is one of `task`, `bug`, `feature`, `research-spike`, or `chore`. Migration
   `board/3` adds it with the neutral `task` default so existing cards are not guessed from tags or
   title text.
@@ -830,7 +839,7 @@ BoardCommitSnapshots (CardId, Sha → BoardCommits CASCADE, SnapshotJson, PK(Car
   the history rail no longer renders `Status`. Session events survive unlinking a session; card
   deletion cascades all its history.
 - Uploaded attachments retain immutable bytes in `BoardAttachmentContents`; old raster data URLs
-  remain readable. There is **no byte limit** per file or per card — only 12 current files —
+  remain readable. There is **no byte limit** per file or per card — only 40 current files —
   because the old budget counted history-retained bytes that nothing could ever reclaim, so a few
   mistaken uploads permanently exhausted a card. Removing an attachment hides it through
   `DeletedUTC` while historical manifests retain access, and the removal confirmation says so.

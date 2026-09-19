@@ -274,6 +274,8 @@ class TerminalManager {
         this.disableLockedLayout(this.lockedPanel);
         this.downloadMenu?.destroy();
         this.downloadMenu = null;
+        this._historySettleTimers?.forEach(timer => clearTimeout(timer));
+        this._historySettleTimers?.clear();
         this.historySidebar?.destroy();
         this.historySidebar = null;
         this.toast?.dispose();
@@ -959,6 +961,7 @@ class TerminalManager {
             this._refreshUndoControl();
         }
 
+        const endingSessionId = tab.state.hasActiveSession ? tab.state.sessionId : null;
         try {
             await this.app.apiCall(`/api/v1/terminal/tabs/${encodeURIComponent(tabId)}`, 'DELETE');
         } catch (error) {
@@ -967,6 +970,11 @@ class TerminalManager {
                 this.app.showError(`Failed to close terminal tab: ${error.message}`);
             }
             // Always fall through to local cleanup so the tab is removed from the UI
+        }
+        if (endingSessionId) {
+            // The child's own session_completed event is lost here: the DELETE cancels the
+            // event relay before the graceful stop lands, so ask the sidebar directly.
+            this._touchHistory(endingSessionId, { settleMs: 3000 });
         }
 
         this.settings?.unbindTab(tabId);
@@ -1235,6 +1243,7 @@ class TerminalManager {
         }
 
         tab.state.hasActiveSession = true;
+        this._touchHistory(tab.state.sessionId);
         const responseWorkingDirectory = cleanString(started?.workingDirectory) || workingDirectory;
         this.updateTabMetadata(tab, {
             label: meta.displayName,
@@ -1370,6 +1379,7 @@ class TerminalManager {
         }
 
         tab.state.hasActiveSession = true;
+        this._touchHistory(tab.state.sessionId);
         const responseWorkingDirectory = cleanString(started?.workingDirectory) || requestedWorkingDirectory;
         this.updateTabMetadata(tab, {
             label: requestedLabel,
@@ -1404,6 +1414,7 @@ class TerminalManager {
             return;
         }
 
+        const endingSessionId = tab.state.sessionId;
         const stopped = await tab.instance.stopSession();
         if (!stopped) {
             return;
@@ -1411,6 +1422,7 @@ class TerminalManager {
 
         tab.state.hasActiveSession = false;
         tab.state.sessionId = null;
+        this._touchHistory(endingSessionId, { settleMs: 3000 });
         // Mirror the start path: the plain shell's label is already "Terminal", so don't
         // append " Terminal" again (avoids "Terminal Terminal").
         const stopMeta = this.getSelectionMeta(tab.state.selection);
@@ -2753,6 +2765,30 @@ class TerminalManager {
         this.settings?.togglePanel(forceOpen);
     }
 
+    /**
+     * Ask the Chat History sidebar to fold a session's latest state into its list. The
+     * server writes the row a beat after the request that started or ended the session
+     * returns, so an ended session gets a second, settled look as well.
+     */
+    _touchHistory(sessionId, { settleMs = 0 } = {}) {
+        const sidebar = this.historySidebar;
+        if (!sidebar) {
+            return;
+        }
+
+        sidebar.refresh({ sessionId: sessionId || null });
+        if (settleMs > 0 && sessionId) {
+            this._historySettleTimers ??= new Set();
+            const timer = window.setTimeout(() => {
+                this._historySettleTimers.delete(timer);
+                if (!this._destroyed) {
+                    this.historySidebar?.refresh({ sessionId });
+                }
+            }, settleMs);
+            this._historySettleTimers.add(timer);
+        }
+    }
+
     syncHistoryPanelState(forceOpen) {
         const sidebar = document.getElementById('ch-sidebar');
         if (!sidebar) return;
@@ -2996,7 +3032,15 @@ export class TerminalController {
             }
         };
 
+        // The Chat History sidebar only fetched on mount and on its refresh button, so a
+        // session started here (or its first prompt) never appeared until the user left
+        // and re-entered the view. Nudge it on the lifecycle events; it debounces.
+        const touchHistory = (payload, options = {}) => {
+            this.manager?.historySidebar?.refresh({ sessionId: payload?.sessionId || null, ...options });
+        };
+
         appEventClient.on('session_started', (payload) => {
+            touchHistory(payload);
             const tab = findTab(payload);
             if (!tab) return;
             setSessionState(tab, 'tab-busy');
@@ -3011,9 +3055,14 @@ export class TerminalController {
         });
 
         appEventClient.on('session_input', (payload) => {
+            const isSubmit = (payload?.kind || '').toLowerCase() === 'submit';
+            if (isSubmit) {
+                // The first submit is what names a history row; later ones change nothing there.
+                touchHistory(payload, { onlyIfUnnamed: true });
+            }
             const tab = findTab(payload);
             if (!tab) return;
-            if ((payload?.kind || '').toLowerCase() === 'submit') {
+            if (isSubmit) {
                 setSessionState(tab, 'tab-busy');
             }
             tab.instance?.statusController?.onSessionInput(payload?.kind);
@@ -3038,6 +3087,7 @@ export class TerminalController {
         });
 
         appEventClient.on('session_completed', (payload) => {
+            touchHistory(payload);
             const tab = findTab(payload);
             const cli = payload?.cli || 'Session';
             const exitCode = payload?.exitCode;

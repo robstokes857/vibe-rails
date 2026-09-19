@@ -8,10 +8,9 @@ public sealed class GlobalRuntimePathsTests
     [Fact]
     public void ResolveGlobalDirectory_DefaultsAndTrimsTheConfiguredName()
     {
-        // The default name resolves through the data-directory policy (VIBE_RAILS_HOME, a Debug
-        // build's dev directory) rather than to a fixed ~/.vibe_rails: a Debug test run must land
-        // in the same place a Debug dashboard would, never in the shipped extension's data.
-        var expectedDefault = PathConstants.GetInstallDirPath();
+        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var expectedDefault = Path.GetFullPath(
+            Path.Combine(profile, PathConstants.DEFAULT_INSTALL_DIR_NAME));
 
         Assert.Equal(expectedDefault, GlobalRuntimePaths.ResolveGlobalDirectory(null));
         Assert.Equal(expectedDefault, GlobalRuntimePaths.ResolveGlobalDirectory("   "));

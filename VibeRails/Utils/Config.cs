@@ -94,8 +94,7 @@ public static class Config
 
     static Config()
     {
-        // The same directory policy as every other path (VIBE_RAILS_HOME, Debug builds' dev
-        // directory): settings.json must live next to the state.db it describes.
+        // settings.json lives next to the state.db it describes.
         var dir = PathConstants.GetInstallDirPath();
         PrivateFilePermissions.EnsureDirectory(dir);
         _settingsPath = Path.Combine(dir, PathConstants.SETTINGS_FILENAME);

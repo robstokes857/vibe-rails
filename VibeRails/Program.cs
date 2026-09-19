@@ -46,16 +46,12 @@ Log.Logger = new LoggerConfiguration()
         outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
     .CreateLogger();
 
-// dataDirectory and dataPolicy answer "which database did this process open, and why" -- the
-// first thing to check when two builds are running at once.
 Log.Information(
-    "[Startup] Booting processId={ProcessId} launchDirectory={LaunchDirectory} exeDirectory={ExeDirectory} dataDirectory={DataDirectory} dataPolicy={DataPolicy} build={Build} argCount={ArgCount}",
+    "[Startup] Booting processId={ProcessId} launchDirectory={LaunchDirectory} exeDirectory={ExeDirectory} dataDirectory={DataDirectory} argCount={ArgCount}",
     Environment.ProcessId,
     launchDirectory,
     exeDirectory,
     installDir,
-    PathConstants.DescribeDataDirectoryPolicy(),
-    PathConstants.IsDebugBuild ? "Debug" : "Release",
     args.Length);
 
 AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
