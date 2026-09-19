@@ -47,13 +47,10 @@ public static class GlobalRuntimePaths
     {
         var directoryName = string.IsNullOrWhiteSpace(installDirectoryName) ? null : installDirectoryName.Trim();
 
-        // The default name means "the default location", and the default location is a policy
-        // (VIBE_RAILS_HOME, a Debug build's development directory) rather than a fixed path. Only a
-        // custom name keeps the historical profile-relative semantics, and VIBE_RAILS_HOME wins
-        // even over that so one environment variable can redirect any build.
+        // The default name means the default location; only a custom name keeps the historical
+        // profile-relative semantics.
         if (directoryName is null
-            || directoryName.Equals(PathConstants.DEFAULT_INSTALL_DIR_NAME, StringComparison.OrdinalIgnoreCase)
-            || PathConstants.ExplicitHome is not null)
+            || directoryName.Equals(PathConstants.DEFAULT_INSTALL_DIR_NAME, StringComparison.OrdinalIgnoreCase))
             return PathConstants.GetInstallDirPath();
 
         var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);

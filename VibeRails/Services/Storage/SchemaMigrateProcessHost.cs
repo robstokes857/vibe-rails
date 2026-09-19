@@ -33,7 +33,7 @@ public static class SchemaMigrateProcessHost
             Path.Combine(bert.DataDirectory, BertSearchSchema.DatabaseFileName));
 
         Console.WriteLine($"vb {VersionInfo.Version} {Argument}");
-        Console.WriteLine($"Data directory: {dataDirectory} ({PathConstants.DescribeDataDirectoryPolicy()})");
+        Console.WriteLine($"Data directory: {dataDirectory}");
         Console.WriteLine();
 
         SqliteStorage.AllowBreakingMigrationsForThisProcess();
