@@ -1,5 +1,36 @@
 # API authentication coverage
 
+Full route/authentication reconciliation (2026-09-19): **212 mapped surfaces**, including
+**200 under `/api/v1`** and **38 Board routes**, in the current working tree, including
+uncommitted and untracked source. Added four previously undocumented Board mappings:
+GET/PUT board context settings and GET/PUT lane automation settings. No active inventory
+entry refers to a removed endpoint. These totals supersede all dated historical totals below.
+
+The only session-authentication exceptions remain exact `GET /health`, `OPTIONS *`, and
+exact `GET /auth/bootstrap?code={one-time-code}&redirect={local-path}`. Bootstrap validates
+and atomically consumes a code that expires after two minutes. Every other endpoint requires
+a valid session credential; `/api/v1`, MCP, WebSocket upgrades, and enabled proxy operations
+additionally require the tab credential. Cookie and session header are alternative transports
+of the same secret. Session-only page/static loads and conditional proxy responses remain
+documented in section 2. No additional unauthenticated endpoint was found, so no
+`SECURITY_ERROR.md` was created.
+
+Resolved grouped and constant-based routes and the inherited event-WebSocket mapping;
+checked production registration, middleware ordering, session/tab validation, bootstrap
+validation, and shared proxy/control authentication. Both mandatory repository-wide listener
+searches found only the main Kestrel host, non-serving port probe, and test-only hosts; the
+cross-runtime search had no matches. This is source reconciliation plus targeted regression
+validation, not a live request sweep of every production endpoint.
+
+Validation: **109 passed, 0 failed, 0 skipped**, covering `CookieAuthMiddlewareTests`,
+`AuthServiceTests`, `AuthRoutesTests`, all five LLM proxy route test classes,
+`TokenSaverPauseRoutesTests`, `McpServerHttpTests`, `InternalToolsRoutesTests`,
+`SigningKeyRoutesTests`, and `BoardRoutesTests`. Ran `dotnet test Tests/Tests.csproj`
+with a `FullyQualifiedName` filter for those classes and
+`--artifacts-path C:/source/vibe-rails/Tests/obj/ApiSecAuditArtifacts --verbosity quiet`.
+The initial build with only a separate output path hit a compiler-held intermediate DLL;
+the successful run isolated both intermediate and output artifacts.
+
 Card-linking amendment (2026-09-18): three authenticated active-root Board routes add candidate
 search, link, and unlink. Both cards resolve inside the server-derived project, including links
 across that project's boards; self-links are rejected and duplicates are idempotent. Searches
@@ -246,7 +277,7 @@ discovery alone is insufficient if the same feature change is allowed to expand 
 set. The production listener set is now frozen above so a new match starts as a finding, not as
 an expectation.
 
-### Repository-wide listener result — 2026-09-15
+### Repository-wide listener result — 2026-09-19
 
 - Approved serving implementation: the main Kestrel host in `VibeRails/Program.cs`.
 - Rejected and removed before merge: `GrokLoopbackBridge`'s `HttpListener`.
@@ -285,8 +316,8 @@ spoofer's own local exchange rows.
 Authentication is enforced primarily by
 [`CookieAuthMiddleware`](VibeRails/Middleware/CookieAuthMiddleware.cs). The LLM proxy
 routes additionally use
-[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 208 mapped route
-surfaces in this inventory: 196 `/api/v1` method/path mappings, nine non-`/api` protected
+[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 212 mapped route
+surfaces in this inventory: 200 `/api/v1` method/path mappings, nine non-`/api` protected
 API surfaces, and three bootstrap/page/probe routes. Static-file middleware and the
 global `OPTIONS` behavior are noted separately because they are not finite mapped-route
 lists.
@@ -652,7 +683,7 @@ transcript text out of messages and exception text; do not rely on the Logs view
 hidden. `Tests/Routes/InternalToolsRoutesTests.cs` pins the two-credential requirement, the
 whitelist rejection of path-like sources, and the absence of mutating verbs.
 
-### Kanban board (34; active root backend only)
+### Kanban board (38; active root backend only)
 
 All mapped by `BoardRoutes.Map` under `if (isActiveRootBackend)`; every path contains `/api/`,
 so both credentials are enforced by the middleware with no route-level registration. The
@@ -667,6 +698,12 @@ cannot read or write another project's board through this surface.
   reorder and create-card bodies take `boardId`; omitted, the project's first board is meant, so
   every pre-board client reads exactly what it did before. A board id is looked up within the
   current project only — an id from another project is a 400, never a cross-project read.
+- `GET /api/v1/board/boards/{boardId}/context`,
+  `PUT /api/v1/board/boards/{boardId}/context` — read/save Board context settings.
+  Both require session and tab credentials and use the server-derived project.
+- `GET /api/v1/board/columns/{columnId}/automation`,
+  `PUT /api/v1/board/columns/{columnId}/automation` — read/save lane automation settings.
+  Both require session and tab credentials and use the server-derived project.
 - `GET /api/v1/board/columns`, `POST /api/v1/board/columns`, `PUT /api/v1/board/columns/order`,
   `PUT /api/v1/board/columns/{columnId}`, `DELETE /api/v1/board/columns/{columnId}` — lanes.
 - `GET /api/v1/board/cards`, `POST /api/v1/board/cards`, `GET /api/v1/board/cards/{card}`,
