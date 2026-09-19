@@ -12,6 +12,8 @@ namespace Tests.DB;
 /// which still inserts into UserInputs_fts directly. When a migration changes what the shipped
 /// binary can do, these tests must change with it -- either the old writes stay consistent, or
 /// the old binary is refused by the generation gate. Silent drift is the failing answer.
+/// Additive board/6 adoption and legacy card UPDATE compatibility are covered by
+/// BoardSettingsTests.UpgradeFromBoard5_PreservesCards_AndLegacyLaneWritesStillWork.
 /// </summary>
 public sealed class PreviousReleaseCompatibilityTests : IDisposable
 {

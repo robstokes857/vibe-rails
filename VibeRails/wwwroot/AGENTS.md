@@ -69,7 +69,11 @@ The page heading is **Vibe Board**, using the same centered, uppercase gradient 
 Application Settings. New card lives in the board toolbar. Top-left of the heading sits the
 **board picker** (a project can hold several boards — sprints, sub-projects): a select, a `+`
 that creates one (default lanes; the new board opens at once), and a settings button for
-rename/delete. The selection persists in `localStorage` (`viberails.board.selected.v1`), every
+rename/delete. The settings modal also includes **Agent context**: a default message plus default-only,
+type-only, or combined messages for each card type. `board-settings.js` owns these asynchronous,
+abortable editors and revision-checked saves. Context is sent for both Start work and Chat with
+agent. **Save context** is independent of **Save name**.
+The selection persists in `localStorage` (`viberails.board.selected.v1`), every
 list call carries the board id. Refresh generations discard stale catalog, lane, card, and error
 responses; switching boards clears the previous lanes/cards until the new board loads. The card editor's Lane field groups every board's lanes so a
 card moves between boards by saving it into another board's lane. Card keys stay per project.
@@ -90,7 +94,12 @@ Automation Workers) with an unassign button beside it; `assigneeInfo()` turns a 
 filter lists the keys present on the board. **Start work** (`startWork`) saves the form, POSTs
 `/cards/{id}/launch`, remembers the tab with `taskKey: 'board-card:<cardId>'`, and refreshes
 the board without adopting/focusing the terminal or navigating away. Creating or saving a
-card never launches an agent. Sessions is the explicit way to open its terminal. The
+card never immediately launches an agent (a lane Automation can queue after its delay). Sessions
+opens a linked terminal. The
+**Chat with agent** action saves the card and uses the same launch route with `intent: 'chat'`,
+then adopts/focuses the returned tab (or navigates to `terminal-focus`). The prompt asks for a
+status/history review and discussion, waiting for the user before implementation. Both launch
+actions share the in-flight guard and are disabled for a known running session. The
 server composes the LLM's first message from the card and prepends it to the environment's
 Initial Message (`Services/Board/BoardPromptComposer.cs`), then links the session to the card.
 Task-key namespace: `board-card:<cardId>` (keep it distinct from `python-script*:`).
@@ -115,6 +124,14 @@ when its live tab list already contains one of the card's linked sessions.
 `TODO(board)`: an **Auto Launch** option (per card and/or per lane) so dropping an assigned card
 into a lane starts work by itself — noted in the controller header and `BoardLaunchService`;
 not built.
+
+Lane **Automations** are separate from that assignee-launch TODO. The lane settings modal
+selects one existing project Automation, with a separate **Save automation** action. The server
+waits 60 seconds after a card enters the lane; another move replaces the pending trigger. The
+browser owns no debounce timer. New cards count as lane entries; same-lane edits/reorders do
+not. Saved settings affect future entries and cancel pending entries for the lane. Disabled
+Automations and active-job overlap are skipped. The ordinary root Automation scheduler and
+native-terminal run lifecycle apply.
 
 The view uses the app's shared surfaces rather than its own: `app.showModal` (upgraded to
 `modal-xl` for the card editor, the same way the rule and quality modals do it), `confirmDialog`

@@ -30,6 +30,7 @@
 import { escapeHtml, confirmDialog, parseLlmSelection, getCliBrand } from './utils.js';
 import { mountLlmPicker, setLlmPickerValue, getEnabledLlmItems } from './pickers/llm-picker.js';
 import { BoardApi } from './board-api.js';
+import { boardContextSection, laneAutomationSection, mountBoardContext, mountLaneAutomation } from './board-settings.js';
 import { renderCardLinksSection, bindCardLinks } from './board-card-links.js';
 import { renderCommentHtml, wrapSelectionAsCode, toPlainPreview } from './board-text.js';
 import { openDiffModal } from './diff-modal.js';
@@ -120,6 +121,8 @@ export class BoardController {
     }
 
     unload() {
+        this.boardSettingsDispose?.();
+        this.boardSettingsDispose = null;
         this._refreshGeneration += 1;
         this._openCardGeneration += 1;
         this._openCardAbort?.abort();
@@ -978,6 +981,10 @@ export class BoardController {
                             <i class="fa-solid fa-trash" aria-hidden="true"></i> Delete
                         </button>` : '<span></span>'}
                         <span class="board-editor-actions-main">
+                            ${card ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-board-chat
+                                title="Open a terminal to discuss this card with the assigned LLM">
+                                <i class="fa-solid fa-comments" aria-hidden="true"></i> Chat with agent
+                            </button>` : ''}
                             ${card ? `<button type="button" class="btn btn-sm btn-outline-success" data-board-start-work
                                 title="Start the assigned LLM in the background with this card as its first message">
                                 <i class="fa-solid fa-play" aria-hidden="true"></i> <span data-board-start-work-label>Start work</span>
@@ -1070,6 +1077,7 @@ export class BoardController {
         editor.querySelector('[data-board-save-card]')?.addEventListener('click', () => this.saveCard(editor));
         editor.querySelector('[data-board-delete-card]')?.addEventListener('click', () => this.deleteCurrentCard(editor));
         editor.querySelector('[data-board-start-work]')?.addEventListener('click', () => this.startWork(editor, card));
+        editor.querySelector('[data-board-chat]')?.addEventListener('click', () => this.startWork(editor, card, 'chat'));
 
         // The Assignee field is the app-wide LLM picker ('sandbox' context: saved
         // environments plus the bare CLIs, never a shell, never a Worker).
@@ -1902,6 +1910,11 @@ export class BoardController {
     }
 
     updateStartWorkButton(editor, card) {
+        const chat = editor.querySelector('[data-board-chat]');
+        if (chat) {
+            chat.disabled = this.hasRunningSession(card);
+            chat.title = chat.disabled ? 'An agent is already running. Open it from Sessions.' : 'Open a terminal to discuss this card with the assigned LLM';
+        }
         const button = editor.querySelector('[data-board-start-work]');
         if (!button) return;
         const running = this.hasRunningSession(card);
@@ -1913,14 +1926,14 @@ export class BoardController {
         if (label) label.textContent = running ? 'Agent running' : 'Start work';
     }
 
-    async startWork(editor, card) {
+    async startWork(editor, card, intent = 'work') {
         if (!card?.id) return;
         if (editor._boardSaving || editor._boardUploading || editor._boardStarting) return;
         if (this.hasRunningSession(card)) {
             this.updateStartWorkButton(editor, card);
             return;
         }
-        const button = editor.querySelector('[data-board-start-work]');
+        const button = editor.querySelector(intent === 'chat' ? '[data-board-chat]' : '[data-board-start-work]');
         if (button?.disabled) return;
         const payload = this.readCardForm(editor);
         if (!this.validateCardTitle(editor, payload)) return;
@@ -1939,7 +1952,7 @@ export class BoardController {
                 this.app.showToast('Board', 'An agent is already running on this card. Open it from Sessions.', 'info');
                 return;
             }
-            const result = await BoardApi.launchBoardCardAsync(card.id, { selection: payload.assignee });
+            const result = await BoardApi.launchBoardCardAsync(card.id, { selection: payload.assignee, intent });
             const tabId = String(result?.tabId || '').trim();
             if (!tabId) throw new Error('The launch did not return a terminal tab.');
 
@@ -1952,6 +1965,15 @@ export class BoardController {
                 accentColor: info?.color || null,
                 workingDirectory: result.workingDirectory || null
             });
+            if (intent === 'chat') {
+                if (editor.isConnected !== false) {
+                    this.app.closeModal();
+                    if (!(await this.app.terminalController?.adoptLaunchedTab?.(tabId))) {
+                        this.app.navigate?.('terminal-focus', { preferredTabId: tabId, preferredSelection: result.selection || payload.assignee });
+                    }
+                }
+                return;
+            }
             if (editor.isConnected !== false) this.app.closeModal();
             this.app.showToast('Board', `${result.cardKey || card.key} started with ${info?.label || 'the LLM'}. Open it from Sessions when ready.`, 'success');
             await this.refresh();
@@ -2015,14 +2037,16 @@ export class BoardController {
                     ${board ? `<button type="button" class="btn btn-sm btn-outline-danger" data-board-delete-board>
                         <i class="fa-solid fa-trash" aria-hidden="true"></i> Delete board
                     </button>` : '<span></span>'}
-                    <button type="button" class="btn btn-sm btn-outline-primary" data-board-save-board>${board ? 'Save' : 'Create'}</button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" data-board-save-board>${board ? 'Save name' : 'Create'}</button>
                 </div>
+                ${board ? boardContextSection() : '<p class="board-editor-muted">Save the board to configure agent context.</p>'}
             </div>
-        `);
+        `, { onClose: () => { this.boardSettingsDispose?.(); this.boardSettingsDispose = null; } });
 
         const container = document.getElementById('modal-container');
         const editor = container?.querySelector('[data-board-board-editor]');
         if (!editor) return;
+        if (board) this.boardSettingsDispose = mountBoardContext(this.app, editor.querySelector('[data-board-context]'), board.id);
         editor.querySelector('[data-board-save-board]')?.addEventListener('click', () => this.saveBoard(editor, board));
         editor.querySelector('[data-board-delete-board]')?.addEventListener('click', () => this.deleteBoard(board));
         editor.addEventListener('keydown', event => {
@@ -2119,12 +2143,14 @@ export class BoardController {
                     </button>` : '<span></span>'}
                     <button type="button" class="btn btn-sm btn-outline-primary" data-board-save-lane>Save</button>
                 </div>
+                ${column ? laneAutomationSection() : '<p class="board-editor-muted mt-3">Save the lane to configure an Automation.</p>'}
             </div>
-        `, { onClose: () => { this.state.editingColumnId = null; } });
+        `, { onClose: () => { this.state.editingColumnId = null; this.boardSettingsDispose?.(); this.boardSettingsDispose = null; } });
 
         const container = document.getElementById('modal-container');
         const editor = container?.querySelector('[data-board-lane-editor]');
         if (!editor) return;
+        if (column) this.boardSettingsDispose = mountLaneAutomation(this.app, editor.querySelector('[data-lane-automation]'), column.id);
 
         editor.querySelector('[data-board-swatches]')?.addEventListener('click', event => {
             const swatch = event.target.closest('[data-board-color]');

@@ -47,7 +47,9 @@ serialization or tool discovery into the Native AOT path.
   creating a link; preserve bounds, truncation markers and unique-prefix handling.
 - Explicit Save/Create never starts an agent. Start work saves first, retains normal workspace
   resolution, grants only Board tools, links the session, and stays on the Board. Opening a
-  terminal is a separate Sessions action. Auto Launch is a TODO, not implemented behavior.
+  terminal is a Sessions action or **Chat with agent**, which saves first and launches with
+  discussion intent, then focuses the returned terminal. Lane Automations are independent
+  existing Jobs, queued after a 60-second settling period; automatic assignee launch is still a TODO.
 - Current launch exclusion is root-local (F3). Do not assert cross-process mutual exclusion from
   a static dictionary or confuse a removable session-display link with execution ownership.
 - Saving a card never sends terminal input. Do not reintroduce the removed notification/TUI
@@ -94,7 +96,7 @@ count the full lane. Tests should use realistic asynchronous races, not only mar
 ## Storage changes
 
 Read [database migration instructions](../../../VibeRails.Data.Sqlite/DB/AGENTS.md).
-`board/1`–`board/5` already exist. Add the next numbered migration rather than editing applied SQL.
+`board/1`–`board/6` already exist. Add the next numbered migration rather than editing applied SQL.
 Honor generation checks, additive/breaking policy and explicit migration flow. Update schema
 snapshots and compatibility tests when the schema changes. Do not create a writer transaction
 merely to read; use a deferred read snapshot if coherence requires a transaction. Connection
@@ -103,6 +105,12 @@ policy belongs in the shared SQLite factory, not a Board-specific timeout/WAL wo
 Do not query or mutate the user's `state.db` to test a change. Use isolated temporary databases
 and fake tab hosts. Live-provider launch, large uploads, retention deletion and migrations are
 separate actions with concrete consequences, not required setup for unit tests.
+
+Board context and lane Automation settings use their own expected revisions, separate from
+card descriptions. Settings writes must remain project-scoped and reject stale revisions.
+Lane-entry triggers write one pending row per card in the move transaction. Keep pending-event
+consumption atomic with normal Job run/action snapshot creation; never replace this with a
+browser timer or an in-memory queue. The existing leased root scheduler owns execution.
 
 ## Validation by change
 

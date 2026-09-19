@@ -8,7 +8,7 @@ using VibeRails.Services.Jobs;
 
 namespace VibeRails.DB;
 
-public sealed class JobStore : IJobStore
+public sealed partial class JobStore : IJobStore
 {
     private readonly string _connectionString;
 
@@ -461,7 +461,9 @@ public sealed class JobStore : IJobStore
             }
         }
 
-        var runIds = new List<string>();
+        // The existing root scheduler drains settled Board transitions in the same cycle. This
+        // also works when a separate stdio/older host performed the move; no UI timer is involved.
+        var runIds = await EnqueueDueBoardRunsAsync(connection, nowUtc, cancellationToken);
         foreach (var item in due)
         {
             DateTime next;

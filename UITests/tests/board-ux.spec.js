@@ -148,6 +148,83 @@ test('board heading matches Settings and description images survive editing and 
     await expect(preview.locator('img.board-image')).toBeVisible();
 });
 
+test('board context settings persist default and per-type choices and preserve a conflicted draft', async ({ page }) => {
+    await openBoard(page);
+    let saved = { revision: 0, context: { defaultMessage: '', typeOverrides: [] } };
+    let conflict = false;
+    await page.route('**/api/v1/board/boards/brd_main/context', async route => {
+        if (route.request().method() === 'PUT') {
+            if (conflict) return route.fulfill({ status: 409, json: { error: 'Board context changed while you were editing.' } });
+            const body = route.request().postDataJSON();
+            expect(body.expectedRevision).toBe(saved.revision);
+            saved = { revision: saved.revision + 1, context: body.context };
+        }
+        return route.fulfill({ json: saved });
+    });
+    await page.getByRole('button', { name: 'Board settings', exact: true }).click();
+    await page.getByLabel('Default message', { exact: true }).fill('Read project conventions. <img src=x onerror="window.__contextXss=1">');
+    await page.locator('[data-board-context] summary').filter({ hasText: /^Bug$/ }).click();
+    await page.getByLabel('Bug context', { exact: true }).selectOption('append');
+    await page.getByLabel('Bug message', { exact: true }).fill('Reproduce before changing code.');
+    await page.getByRole('button', { name: 'Save context', exact: true }).click();
+    await expect.poll(() => saved.revision).toBe(1);
+    expect(saved.context.typeOverrides.find(item => item.type === 'bug')).toEqual({ type: 'bug', mode: 'append', message: 'Reproduce before changing code.' });
+    await page.locator('#modal-container [data-action="close-modal"]').first().click();
+    await page.getByRole('button', { name: 'Board settings', exact: true }).click();
+    await expect(page.getByLabel('Default message', { exact: true })).toHaveValue(saved.context.defaultMessage);
+    await page.locator('[data-board-context] summary').filter({ hasText: /^Bug$/ }).click();
+    await expect(page.getByLabel('Bug context', { exact: true })).toHaveValue('append');
+    expect(await page.evaluate(() => window.__contextXss)).toBeUndefined();
+    await page.screenshot({ path: '../.codex-test-artifacts/vb16-context.png' });
+    conflict = true;
+    await page.getByLabel('Default message', { exact: true }).fill('Keep my draft');
+    await page.getByRole('button', { name: 'Save context', exact: true }).click();
+    await expect(page.getByText('Board context changed while you were editing.', { exact: true })).toBeVisible();
+    await expect(page.getByLabel('Default message', { exact: true })).toHaveValue('Keep my draft');
+});
+
+test('lane automation selects an existing job, persists and can be removed', async ({ page }) => {
+    await openBoard(page);
+    let saved = { jobId: null, revision: 0 };
+    await page.route('**/api/v1/board/columns/col_ready/automation', async route => {
+        if (route.request().method() === 'PUT') {
+            const body = route.request().postDataJSON();
+            expect(body.expectedRevision).toBe(saved.revision);
+            saved = { jobId: body.jobId, revision: saved.revision + 1 };
+        }
+        return route.fulfill({ json: { ...saved, jobs: [{ id: 12, name: 'Run review', enabled: true }, { id: 13, name: 'Paused', enabled: false }] } });
+    });
+    await page.getByRole('button', { name: 'Settings for Ready', exact: true }).click();
+    await expect(page.getByText(/stays for 60 seconds/)).toBeVisible();
+    await page.getByLabel('Automation on entry', { exact: true }).selectOption('12');
+    await expect(page.locator('#board-lane-automation option[value="13"]')).toBeDisabled();
+    await page.getByRole('button', { name: 'Save automation', exact: true }).click();
+    await expect.poll(() => saved).toEqual({ jobId: 12, revision: 1 });
+    await page.screenshot({ path: '../.codex-test-artifacts/vb16-lane.png' });
+    await page.locator('#modal-container [data-action="close-modal"]').first().click();
+    await page.getByRole('button', { name: 'Settings for Ready', exact: true }).click();
+    await expect(page.getByLabel('Automation on entry', { exact: true })).toHaveValue('12');
+    await page.getByLabel('Automation on entry', { exact: true }).selectOption('');
+    await page.getByRole('button', { name: 'Save automation', exact: true }).click();
+    await expect.poll(() => saved).toEqual({ jobId: null, revision: 2 });
+});
+
+test('Chat with agent saves first, sends discussion intent and focuses the returned tab', async ({ page }) => {
+    const requests = await openBoard(page, { assignee: 'base:codex' });
+    await page.evaluate(() => {
+        window.__chatTabs = [];
+        window.app.terminalController.adoptLaunchedTab = async id => { window.__chatTabs.push(id); return true; };
+    });
+    await page.getByText('Description images', { exact: true }).click();
+    await page.locator('#board-card-title').fill('Discuss this card');
+    await page.getByRole('button', { name: 'Chat with agent', exact: true }).click();
+    await expect.poll(() => page.evaluate(() => window.__chatTabs)).toEqual(['board_background']);
+    const writes = requests.filter(item => item.method === 'PUT' || item.path.endsWith('/launch'));
+    expect(writes[0].body.title).toBe('Discuss this card');
+    expect(writes[1].body).toEqual({ selection: 'base:codex', intent: 'chat' });
+    await expect(page.locator('[data-board-card-editor]')).toHaveCount(0);
+});
+
 test('description previews newly uploaded images and new cards start in edit mode', async ({ page }) => {
     await openBoard(page);
     await page.getByText('Description images', { exact: true }).click();
@@ -212,6 +289,7 @@ test('a running agent disables Start work while keeping Save and the session ava
     await openBoard(page, { active: true });
     await page.getByText('Description images', { exact: true }).click();
     await expect(page.getByRole('button', { name: 'Agent running', exact: true })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Chat with agent', exact: true })).toBeDisabled();
     await expect(page.locator('[data-board-save-card]')).toBeEnabled();
     await expect(page.locator('[data-board-open-session="session_test"]')).toBeEnabled();
 });
@@ -232,6 +310,21 @@ test('Start work preserves the board and stores model and effort', async ({ page
     expect(requests.filter(request => request.path.endsWith('/launch'))).toHaveLength(1);
     await page.getByText('Description images', { exact: true }).click();
     await expect(page.locator('[data-board-launch-effort]')).toHaveValue('high');
+});
+
+test('work and discussion actions remain reachable on a narrow screen', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openBoard(page, { assignee: 'base:codex' });
+    await page.getByText('Description images', { exact: true }).click();
+    for (const name of ['Chat with agent', 'Start work', 'Save']) {
+        const button = page.locator('.board-editor-actions-main').getByRole('button', { name, exact: true });
+        await expect(button).toBeVisible();
+        const bounds = await button.boundingBox();
+        expect(bounds.x).toBeGreaterThanOrEqual(0);
+        expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
+        expect(bounds.y + bounds.height).toBeLessThanOrEqual(844);
+    }
+    await page.screenshot({ path: '../.codex-test-artifacts/vb16-chat-narrow.png' });
 });
 
 test('a description edit saves without touching the running agent, and history identifies the session', async ({ page }) => {

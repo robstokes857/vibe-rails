@@ -55,6 +55,14 @@ public static class BoardRoutes
 
         // ---------------------------------------------------------------- columns
 
+        app.MapGet("/api/v1/board/boards/{boardId}/context", (IBoardService board, string boardId, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(await board.GetContextSettingsAsync(Project(), boardId, cancellationToken), "Board")))
+            .WithName("GetBoardContext");
+
+        app.MapPut("/api/v1/board/boards/{boardId}/context", (IBoardService board, string boardId, UpdateBoardContextRequest request, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(await board.SaveContextSettingsAsync(Project(), boardId, request, cancellationToken), "Board")))
+            .WithName("SaveBoardContext");
+
         app.MapGet("/api/v1/board/columns", (IBoardService board, string? boardId, CancellationToken cancellationToken) =>
             RunAsync(async () => Results.Ok(await board.GetColumnsAsync(Project(), cancellationToken, boardId))))
             .WithName("GetBoardColumns");
@@ -77,6 +85,14 @@ public static class BoardRoutes
             .WithName("DeleteBoardColumn");
 
         // ---------------------------------------------------------------- cards
+
+        app.MapGet("/api/v1/board/columns/{columnId}/automation", (BoardAutomationService automation, string columnId, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(await automation.GetAsync(Project(), columnId, cancellationToken), "Lane")))
+            .WithName("GetBoardLaneAutomation");
+
+        app.MapPut("/api/v1/board/columns/{columnId}/automation", (BoardAutomationService automation, string columnId, UpdateBoardLaneAutomationRequest request, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(await automation.SaveAsync(Project(), columnId, request, cancellationToken), "Lane")))
+            .WithName("SaveBoardLaneAutomation");
 
         app.MapGet("/api/v1/board/cards", (IBoardService board, string? boardId, CancellationToken cancellationToken) =>
             RunAsync(async () => Results.Ok(await board.GetCardsAsync(Project(), cancellationToken, boardId))))
@@ -109,7 +125,7 @@ public static class BoardRoutes
             .WithName("MoveBoardCard");
 
         app.MapPost("/api/v1/board/cards/{card}/launch", (IBoardLaunchService launcher, string card, LaunchBoardCardRequest? request, CancellationToken cancellationToken) =>
-            RunAsync(async () => OkOrNotFound(await launcher.LaunchAsync(Project(), card, request?.Selection, cancellationToken), "Card")))
+            RunAsync(async () => OkOrNotFound(await launcher.LaunchAsync(Project(), card, request?.Selection, cancellationToken, request?.Intent ?? "work"), "Card")))
             .WithName("LaunchBoardCard");
 
         // ---------------------------------------------------------------- rails

@@ -59,6 +59,22 @@ async function updateBoardAsync(boardId, patch) {
     return call(`/boards/${enc(boardId)}`, 'PUT', patch);
 }
 
+async function getBoardContextAsync(boardId, extra = {}) {
+    return call(`/boards/${enc(boardId)}/context`, 'GET', null, extra);
+}
+
+async function saveBoardContextAsync(boardId, payload) {
+    return call(`/boards/${enc(boardId)}/context`, 'PUT', payload);
+}
+
+async function getLaneAutomationAsync(columnId, extra = {}) {
+    return call(`/columns/${enc(columnId)}/automation`, 'GET', null, extra);
+}
+
+async function saveLaneAutomationAsync(columnId, payload) {
+    return call(`/columns/${enc(columnId)}/automation`, 'PUT', payload);
+}
+
 /** Deletes the board with its lanes and cards; the server refuses the project's last board. */
 async function deleteBoardAsync(boardId) {
     return call(`/boards/${enc(boardId)}`, 'DELETE');
@@ -118,8 +134,8 @@ async function moveBoardCardAsync(cardId, { columnId, position }) {
 }
 
 /** Start work: the server opens a terminal tab with the card prepended to the LLM's initial message. */
-async function launchBoardCardAsync(cardId, { selection } = {}) {
-    return call(`/cards/${enc(cardId)}/launch`, 'POST', { selection: selection || null });
+async function launchBoardCardAsync(cardId, { selection, intent = 'work' } = {}) {
+    return call(`/cards/${enc(cardId)}/launch`, 'POST', { selection: selection || null, intent });
 }
 
 // ---------------------------------------------- linked cards
@@ -237,6 +253,10 @@ export const BoardApi = {
     getBoardsAsync,
     createBoardAsync,
     updateBoardAsync,
+    getBoardContextAsync,
+    saveBoardContextAsync,
+    getLaneAutomationAsync,
+    saveLaneAutomationAsync,
     deleteBoardAsync,
     getBoardColumnsAsync,
     createBoardColumnAsync,

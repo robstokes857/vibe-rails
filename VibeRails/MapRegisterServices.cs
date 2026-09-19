@@ -149,6 +149,7 @@ namespace VibeRails
             serviceCollection.AddSingleton<Services.Board.IBoardProjectResolver, Services.Board.BoardProjectResolver>();
             serviceCollection.AddSingleton<Services.Board.IBoardCommitService, Services.Board.BoardCommitService>();
             serviceCollection.AddScoped<Services.Board.IBoardService, Services.Board.BoardService>();
+            serviceCollection.AddScoped<Services.Board.BoardAutomationService>();
             if (isActiveRootBackendProcess)
             {
                 serviceCollection.AddSingleton<Services.Board.IBoardLiveSessionProbe, Services.Board.TerminalTabLiveSessionProbe>();

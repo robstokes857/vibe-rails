@@ -10,7 +10,7 @@ namespace VibeRails.Services.Board;
 /// <summary>"Start work": open a web terminal tab for a card with the card prepended to the environment's Initial Message.</summary>
 public interface IBoardLaunchService
 {
-    Task<LaunchBoardCardResponse?> LaunchAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken = default);
+    Task<LaunchBoardCardResponse?> LaunchAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken = default, string intent = "work");
 }
 
 /// <summary>
@@ -32,8 +32,10 @@ public sealed class BoardLaunchService(
     // queued semaphore, so removal cannot strand waiters or create two gates for one card.
     private static readonly ConcurrentDictionary<string, byte> LaunchingCards = new(StringComparer.Ordinal);
 
-    public async Task<LaunchBoardCardResponse?> LaunchAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken = default)
+    public async Task<LaunchBoardCardResponse?> LaunchAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken = default, string intent = "work")
     {
+        if (intent is not ("work" or "chat"))
+            throw new BoardValidationException("Launch intent must be work or chat.");
         var card = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
         if (card is null) return null;
         // Card ids are globally unique in the shared database; VB numbers are project-local.
@@ -42,12 +44,12 @@ public sealed class BoardLaunchService(
         try
         {
             // Re-read after the reservation: fields may have changed while resolving the key.
-            return await LaunchCoreAsync(projectPath, card.Id, selectionOverride, cancellationToken);
+            return await LaunchCoreAsync(projectPath, card.Id, selectionOverride, cancellationToken, intent);
         }
         finally { LaunchingCards.TryRemove(card.Id, out _); }
     }
 
-    private async Task<LaunchBoardCardResponse?> LaunchCoreAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken)
+    private async Task<LaunchBoardCardResponse?> LaunchCoreAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken, string intent)
     {
         var card = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
         if (card is null)
@@ -76,6 +78,7 @@ public sealed class BoardLaunchService(
         var columns = await store.GetColumnsAsync(projectPath, cancellationToken, boardId);
         var column = columns.FirstOrDefault(c => c.Id == card.ColumnId);
         var boardName = boardId is null ? null : (await store.GetBoardAsync(projectPath, boardId, cancellationToken))?.Name;
+        var boardContext = boardId is null ? null : await store.GetContextSettingsAsync(projectPath, boardId, cancellationToken);
         var assigneeLabel = environment is not null
             ? $"{environment.CustomName} ({parsed.Cli})"
             : parsed.Cli;
@@ -86,8 +89,9 @@ public sealed class BoardLaunchService(
             columns.OrderBy(c => c.Position).Select(c => c.Name).ToList(),
             detail?.Commits ?? [],
             detail?.Attachments ?? [],
-            boardName);
-        var prompt = BoardPromptComposer.Compose(card, column?.Name ?? "(no lane)", assigneeLabel, environment?.CustomPrompt, context);
+            boardName,
+            boardContext?.Context);
+        var prompt = BoardPromptComposer.Compose(card, column?.Name ?? "(no lane)", assigneeLabel, environment?.CustomPrompt, context, intent);
         var title = $"{card.Key} · {Truncate(card.Title, 60)}";
 
         var tabs = await tabHost.ListTabsAsync(cancellationToken);

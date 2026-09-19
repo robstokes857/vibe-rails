@@ -781,7 +781,7 @@ export class JobController {
         const retryable = statusCode >= RUN_STATUS_CODE.FAILED;
         const runId = this.escape(run.id);
         const detail = this.runDetail(run);
-        const trigger = { 0: 'Schedule', 2: 'After commit', 3: 'Manual', 4: 'Before commit' }[Number(run.triggerKind)] || 'Manual';
+        const trigger = { 0: 'Schedule', 2: 'After commit', 3: 'Manual', 4: 'Before commit', 5: 'Board lane' }[Number(run.triggerKind)] || 'Manual';
         const watchTitle = active ? 'Watch this run live' : 'Watch this recording';
         const selected = this.historySelection.has(run.id);
         return `<tr>

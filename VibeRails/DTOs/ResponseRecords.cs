@@ -147,6 +147,10 @@ namespace VibeRails.DTOs
     public record BoardListResponse(List<BoardSummaryResponse> Boards);
     public record CreateBoardRequest(string? Name = null);
     public record UpdateBoardRequest(string? Name = null);
+    public record UpdateBoardContextRequest(BoardContextSettings? Context = null, int? ExpectedRevision = null);
+    public record BoardAutomationOption(long Id, string Name, bool Enabled);
+    public record BoardLaneAutomationResponse(long? JobId, int Revision, List<BoardAutomationOption> Jobs);
+    public record UpdateBoardLaneAutomationRequest(long? JobId = null, int? ExpectedRevision = null);
     public record DeleteBoardResponse(bool Ok, int DeletedColumns, int DeletedCards);
 
     public record BoardColumnResponse(string Id, string Name, int? WipLimit, int Position, string Color, string BoardId = "");
@@ -263,7 +267,7 @@ namespace VibeRails.DTOs
     public record LinkBoardCommitRequest(string? Sha = null);
     public record AddBoardSessionRequest(string? Id = null, string? DisplayName = null);
     public record UpdateBoardSessionRequest(string? DisplayName = null);
-    public record LaunchBoardCardRequest(string? Selection = null);
+    public record LaunchBoardCardRequest(string? Selection = null, string? Intent = null);
     public record LaunchBoardCardResponse(
         string TabId,
         string? SessionId,
@@ -1675,6 +1679,11 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(BoardListResponse))]
     [JsonSerializable(typeof(CreateBoardRequest))]
     [JsonSerializable(typeof(UpdateBoardRequest))]
+    [JsonSerializable(typeof(UpdateBoardContextRequest))]
+    [JsonSerializable(typeof(BoardContextSettingsRecord))]
+    [JsonSerializable(typeof(BoardLaneAutomationResponse))]
+    [JsonSerializable(typeof(UpdateBoardLaneAutomationRequest))]
+    [JsonSerializable(typeof(BoardLaneAutomation))]
     [JsonSerializable(typeof(DeleteBoardResponse))]
     [JsonSerializable(typeof(BoardColumnResponse))]
     [JsonSerializable(typeof(List<BoardColumnResponse>))]

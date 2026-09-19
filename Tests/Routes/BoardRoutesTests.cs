@@ -65,6 +65,8 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         commits.Setup(c => c.GetDiffAsync(It.IsAny<string>(), "abc1234abc1234abc1234abc1234abc1234abc12", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new BoardCommitDiff([new BoardCommitDiffFile("a.cs", "csharp", "old", "new")], 1));
         builder.Services.AddSingleton<IBoardStore>(new BoardStore(_connectionString));
+        builder.Services.AddSingleton<IJobStore>(new JobStore(_connectionString));
+        builder.Services.AddScoped<BoardAutomationService>();
         builder.Services.AddSingleton(commits.Object);
         builder.Services.AddSingleton<IBoardLiveSessionProbe, NullBoardLiveSessionProbe>();
         builder.Services.AddScoped<IBoardService, BoardService>();
@@ -428,6 +430,72 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         removed.EnsureSuccessStatusCode();
         using var after = await GetJsonAsync("/api/v1/board/cards/VB-1");
         Assert.Equal(0, after.RootElement.GetProperty("linkedCards").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task ContextAndLaneSettings_UseBothCredentials_Scope_AndExpectedRevisions()
+    {
+        using var catalog = await GetJsonAsync("/api/v1/board/boards");
+        var board = catalog.RootElement.GetProperty("boards")[0];
+        var contextPath = $"/api/v1/board/boards/{board.GetProperty("id").GetString()}/context";
+        var lanePath = $"/api/v1/board/columns/{board.GetProperty("columns")[0].GetProperty("id").GetString()}/automation";
+        foreach (var path in new[] { contextPath, lanePath })
+        {
+            foreach (var method in new[] { HttpMethod.Get, HttpMethod.Put })
+            {
+                using var noAuth = await SendAsync(method, path);
+                using var noTab = await SendAsync(method, path, "test-session");
+                Assert.Equal(HttpStatusCode.Unauthorized, noAuth.StatusCode);
+                Assert.Equal(HttpStatusCode.Unauthorized, noTab.StatusCode);
+            }
+        }
+        var payload = new { context = new { defaultMessage = "Shared", typeOverrides = new[] { new { type = "bug", mode = "append", message = "Reproduce" } } }, expectedRevision = 0 };
+        using var saved = await SendJsonAsync(HttpMethod.Put, contextPath, payload);
+        saved.EnsureSuccessStatusCode();
+        using var value = await GetJsonAsync(contextPath);
+        Assert.Equal("Shared", value.RootElement.GetProperty("context").GetProperty("defaultMessage").GetString());
+        using var stale = await SendJsonAsync(HttpMethod.Put, contextPath, payload);
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        using var laneSaved = await SendJsonAsync(HttpMethod.Put, lanePath, new { jobId = (long?)null, expectedRevision = 0 });
+        laneSaved.EnsureSuccessStatusCode();
+        using var invalidJob = await SendJsonAsync(HttpMethod.Put, lanePath, new { jobId = 999, expectedRevision = 1 });
+        Assert.Equal(HttpStatusCode.BadRequest, invalidJob.StatusCode);
+        var foreignBoard = await _app.Services.GetRequiredService<IBoardStore>().CreateBoardAsync(_root + "-foreign", "Foreign", TestContext.Current.CancellationToken);
+        using var foreign = await SendJsonAsync(HttpMethod.Put, $"/api/v1/board/boards/{foreignBoard.Id}/context", payload);
+        Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
+    }
+
+    [Fact]
+    public async Task ChatLaunch_UsesBoardContext_PreservesLane_AndLinksExactRevision()
+    {
+        using var created = await PostJsonAsync("/api/v1/board/cards", new { title = "Discuss", assignee = "base:codex", type = "bug" });
+        created.EnsureSuccessStatusCode();
+        using var card = await ReadJsonAsync(created);
+        var boardId = card.RootElement.GetProperty("boardId").GetString();
+        using var settings = await SendJsonAsync(HttpMethod.Put, $"/api/v1/board/boards/{boardId}/context", new {
+            context = new { defaultMessage = "Shared context", typeOverrides = new[] { new { type = "bug", mode = "append", message = "Bug context" } } }, expectedRevision = 0 });
+        settings.EnsureSuccessStatusCode();
+        _tabHost.SetupGet(t => t.MaxTabs).Returns(8);
+        _tabHost.Setup(t => t.ListTabsAsync(It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        _tabHost.Setup(t => t.CreateTabAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new TerminalTabStatusResponse("chat-tab", DateTime.UtcNow, false));
+        StartTerminalRequest? started = null;
+        _tabHost.Setup(t => t.StartSessionAsync("chat-tab", It.IsAny<StartTerminalRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<string, StartTerminalRequest, CancellationToken>((_, request, _) => started = request)
+            .ReturnsAsync(new TerminalStatusResponse(true, "chat-session", "codex", _project));
+        using var invalid = await PostJsonAsync("/api/v1/board/cards/VB-1/launch", new { intent = "surprise" });
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        using var launched = await PostJsonAsync("/api/v1/board/cards/VB-1/launch", new { intent = "chat" });
+        launched.EnsureSuccessStatusCode();
+        Assert.NotNull(started);
+        Assert.True(started.AuthorizeBoardTools);
+        Assert.Contains("Shared context", started.InitialPrompt);
+        Assert.Contains("Bug context", started.InitialPrompt);
+        Assert.Contains("This is a discussion session", started.InitialPrompt);
+        using var after = await GetJsonAsync("/api/v1/board/cards/VB-1");
+        Assert.Equal(card.RootElement.GetProperty("columnId").GetString(), after.RootElement.GetProperty("columnId").GetString());
+        Assert.Equal("chat-session", Assert.Single(after.RootElement.GetProperty("sessions").EnumerateArray()).GetProperty("id").GetString());
+        using var history = await GetJsonAsync("/api/v1/board/cards/VB-1/history");
+        Assert.Contains("chat-session", history.RootElement.GetRawText());
     }
 
     private async Task<JsonDocument> GetJsonAsync(string path)
