@@ -188,7 +188,7 @@ public sealed partial class BoardSettingsTests : IDisposable
             await command.ExecuteNonQueryAsync(Ct);
         }
         var upgraded = new BoardStore(_connectionString);
-        Assert.Equal(card.DescriptionRevision, (await upgraded.FindCardAsync(_root, card.Id, Ct))!.DescriptionRevision);
+        Assert.Equal(card.Description, (await upgraded.FindCardAsync(_root, card.Id, Ct))!.Description);
         Assert.Empty((await upgraded.GetContextSettingsAsync(_root, board, Ct))!.Context.DefaultMessage);
         Assert.Null((await upgraded.GetLaneAutomationAsync(_root, b, Ct))!.JobId);
         var job = await Job();

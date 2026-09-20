@@ -138,11 +138,10 @@ test('Start work records the full card label and stays on the board', async () =
     assert.equal(metadata.title, 'VB-1 · Edited title');
 });
 
-test('description saves submit the revision seen by the editor', async () => {
+test('description saves submit current fields without revision bookkeeping', async () => {
     const h = harness();
-    h.editor.dataset.descriptionRevision = '4';
     await h.controller.saveCard(h.editor);
-    assert.equal(h.calls[0].body.expectedDescriptionRevision, 4);
+    assert.equal('expectedDescriptionRevision' in h.calls[0].body, false);
 });
 
 for (const adopted of [true, false]) {
@@ -174,7 +173,7 @@ test('saving a description never sends terminal input to a running agent', async
     const h = harness();
     h.app.apiCall = async (url, method, body) => {
         h.calls.push({ url, method, body });
-        return { ...h.card, descriptionChanged: true, descriptionRevision: 2, sessions: [{ id: 'live', active: true }] };
+        return { ...h.card, sessions: [{ id: 'live', active: true }] };
     };
     await h.controller.saveCard(h.editor);
     // One PUT and nothing else: there is no notify surface to reach even with a live session.
@@ -199,10 +198,9 @@ test('a queued upload that fails after create says the card was saved', async ()
     assert.deepEqual(h.toasts.at(-1), ['Board', 'VB-2 was saved, but a file did not upload. Disk full', 'warning']);
 });
 
-test('a partial upload failure refreshes the revision token so the advertised retry can succeed', async () => {
+test('a partial upload failure retries only unfinished uploads without fetching history', async () => {
     const h = harness();
     h.editor.dataset.cardId = 'card-1';
-    h.editor.dataset.descriptionRevision = '1';
     h.editor._boardCard = {
         id: 'card-1',
         pendingAttachments: [
@@ -217,20 +215,22 @@ test('a partial upload failure refreshes the revision token so the advertised re
         if (url.endsWith('/attachments')) {
             uploads += 1;
             if (uploads === 1) return { id: 'att_1', name: 'a.zip' };
-            throw new Error('Disk full');
+            if (uploads === 2) throw new Error('Disk full');
+            return { id: 'att_2', name: 'b.zip' };
         }
-        // Each upload that landed appended a description revision server-side.
-        return { id: 'card-1', key: 'VB-1', descriptionRevision: method === 'GET' ? 2 : 1 };
+        return { id: 'card-1', key: 'VB-1' };
     };
 
     await h.controller.saveCard(h.editor);
 
-    // Without re-reading it, Save again would PUT expectedDescriptionRevision 1 against a card
-    // already at 2 and fail with a spurious "changed while you were editing" conflict — stranding
-    // the remaining files behind an error the user cannot clear without reopening the card.
-    assert.equal(h.editor.dataset.descriptionRevision, '2');
-    assert.equal(h.controller.readCardForm(h.editor).expectedDescriptionRevision, 2);
+    assert.equal(h.calls.filter(call => call.method === 'GET').length, 0);
+    assert.equal(h.editor._boardCard.pendingAttachments.length, 1);
     assert.deepEqual(h.toasts.at(-1), ['Board', 'VB-1 was saved, but a file did not upload. Disk full', 'warning']);
+    await h.controller.saveCard(h.editor);
+    assert.deepEqual(h.calls.filter(call => call.url.endsWith('/attachments')).map(call => call.body.name), ['a.zip', 'b.zip', 'b.zip']);
+    assert.equal(h.editor._boardCard.pendingAttachments.length, 0);
+    assert.equal(h.closed, true);
+    assert.deepEqual(h.toasts.at(-1), ['Board', 'Card saved.', 'success']);
 });
 
 test('Start work keeps edits open and skips launch if saving fails', async () => {

@@ -1,5 +1,15 @@
 # API authentication coverage
 
+Board simplification amendment (2026-09-20): removed the description-history GET route and
+MCP history tool. The active inventory is **211 mapped surfaces**, **199 under `/api/v1`**,
+including **37 Board routes**. Card create/update/list/detail now include a boolean `flagged`
+for user attention; it uses the existing scoped/authenticated routes and MCP update tool.
+There are 13 Board tool grants. Removed files are no longer downloadable; deletion cascades
+their bytes. No credential rule, listener or middleware changed. Both listener-discovery
+searches found only the approved main host, port probe and test hosts (no cross-runtime matches).
+The earlier counts and history descriptions below are dated historical audits.
+
+
 Full route/authentication reconciliation (2026-09-19): **212 mapped surfaces**, including
 **200 under `/api/v1`** and **38 Board routes**, in the current working tree, including
 uncommitted and untracked source. Added four previously undocumented Board mappings:
@@ -720,11 +730,6 @@ cannot read or write another project's board through this surface.
   Initial Message. Same capability class as `POST /api/v1/terminal/tabs/{tabId}/start`, which
   is why the tab credential matters here. The environment is resolved by id and must be
   visible in the current project; there is no fallback by name.
-- `GET /api/v1/board/cards/{card}/history` — immutable description/attachment revisions and
-  session associations. Existing cards import a current baseline; no past session text is invented.
-  Revisions list their files by id and name only — never the bytes — so the response size does not
-  grow with revisions × attachments. Read-only: no transaction, no write lock.
-
 **Terminal input reachable from the board.** The description-notification route
 (`POST /api/v1/board/cards/{card}/revisions/{revision:int}/notify`) was **removed 2026-09-15**:
 it forwarded two semantic Escapes, fixed text and Enter to an agent that was already working, and
@@ -756,7 +761,7 @@ real TUI before it ships.
   the bound on what it can store is the user's own disk. File names are display labels, never
   filesystem paths. Bytes remain immutable in SQLite, outside static files.
 - `GET /api/v1/board/cards/{card}/attachments/{attachmentId}/content` — authenticated bytes
-  scoped to that card/project, including removed files only when retained by its history.
+  scoped to that card/project and current attachments only; removed files return 404.
   Responses force octet-stream attachment disposition, nosniff, no-store and sandbox CSP.
   Preview fetches carry both credentials; URLs contain no secrets. Markdown and TXT both reach
   the DOM only through textContent — no Markdown renderer or HTML sanitizer is shipped — and

@@ -52,7 +52,7 @@ public sealed class BoardToolTests : IDisposable
         var lanes = await _tool.ListBoardColumns(cancellationToken: Ct);
         Assert.Contains("- Backlog (id col_", lanes);
         Assert.Contains("- Ready (id col_", lanes);
-        Assert.Contains("WIP limit 8", lanes);
+        Assert.DoesNotContain("WIP", lanes);
 
         Assert.Equal("No cards match.", await _tool.ListBoardCards(cancellationToken: Ct));
         var created = await _tool.CreateBoardCard("Fix the race", "Two 401s overlap.", "build", "HIGH", "auth, bug", "bug", cancellationToken: Ct);
@@ -76,7 +76,7 @@ public sealed class BoardToolTests : IDisposable
 
         var card = await _tool.GetBoardCard("vb-1", cancellationToken: Ct);
         Assert.StartsWith("VB-1: Fix the race\nLane: Backlog · Type: Task · Priority: medium · Assignee: unassigned", card);
-        Assert.Contains("Description (revision 1):\nTwo 401s overlap.", card);
+        Assert.Contains("Description:\nTwo 401s overlap.", card);
         Assert.Contains("Comments (0):\n(none)", card);
 
         Assert.Equal("Updated VB-1: Fix the race (critical, blocked)", await _tool.UpdateBoardCard("VB-1", priority: "critical", points: 5, blocked: true, cancellationToken: Ct));
@@ -189,33 +189,18 @@ public sealed class BoardToolTests : IDisposable
     }
 
     [Fact]
-    public async Task ReadingAndEditingCard_RecordsExactRevisionAndAgentSession()
+    public async Task ReadingDoesNotClaimACard_EditingLinksTheSession()
     {
         await _tool.CreateBoardCard("A", "first scope", cancellationToken: Ct);
         _resolver.CurrentSessionId = "sess-reader";
-        Assert.Contains("Description (revision 1):\nfirst scope", await _tool.GetBoardCard("VB-1", cancellationToken: Ct));
-        var history = (await _store.GetDescriptionHistoryAsync(_project, "VB-1", Ct))!;
-        var read = Assert.Single(history.Revisions[0].Sessions);
-        Assert.Equal("read", read.Kind);
-        Assert.Equal("sess-reader", read.SessionId);
-        // Reading records the read but never links. Linking on read bound a browsing session to
-        // whatever card it happened to open first, which then reported "Agent running" and
-        // refused Start work on that card for as long as the terminal lived.
+        Assert.Contains("Description:\nfirst scope", await _tool.GetBoardCard("VB-1", cancellationToken: Ct));
         Assert.Null(await _store.FindSessionLinkAsync("sess-reader", Ct));
         await _tool.UpdateBoardCard("VB-1", description: "second scope", cancellationToken: Ct);
         Assert.NotNull(await _store.FindSessionLinkAsync("sess-reader", Ct));
-        history = (await _store.GetDescriptionHistoryAsync(_project, "VB-1", Ct))!;
-        Assert.Equal("agent", history.Revisions[0].Source);
-        Assert.Equal("sess-reader", history.Revisions[0].Author.SessionId);
-        Assert.DoesNotContain(history.Revisions[0].Sessions, s => s.Kind == "notification" || s.Kind == "read");
-        await _tool.GetBoardCard("VB-1", cancellationToken: Ct);
-        history = (await _store.GetDescriptionHistoryAsync(_project, "VB-1", Ct))!;
-        Assert.Contains(history.Revisions[0].Sessions, s => s.Kind == "read" && s.SessionId == "sess-reader");
-        Assert.Equal("first scope", history.Revisions[1].Description);
     }
 
     [Fact]
-    public async Task ReadingAnotherCard_NotesTheReadersOwnCard_WithoutClaimingTheOneItRead()
+    public async Task ReadingAnotherCard_DoesNotClaimIt()
     {
         await _tool.CreateBoardCard("A", cancellationToken: Ct);
         await _tool.CreateBoardCard("B", cancellationToken: Ct);
@@ -224,12 +209,26 @@ public sealed class BoardToolTests : IDisposable
 
         Assert.StartsWith("VB-2: B", await _tool.GetBoardCard("VB-2", cancellationToken: Ct));
 
-        var read = Assert.Single((await _store.GetDescriptionHistoryAsync(_project, "VB-2", Ct))!.Revisions[0].Sessions);
-        Assert.Equal("read", read.Kind);
-        Assert.Equal("working VB-1", read.Message);
         Assert.Empty((await _store.GetCardDetailAsync(_project, "VB-2", Ct))!.Sessions);
         Assert.Equal((await _store.FindCardAsync(_project, "VB-1", Ct))!.Id,
             (await _store.FindSessionLinkAsync("sess-working-vb1", Ct))!.CardId);
+    }
+
+    [Fact]
+    public async Task AttentionFlag_RoundTripsThroughMcp_WithoutChangingBlockedOrDescription()
+    {
+        await _tool.CreateBoardCard("Review decision", "Keep this text", cancellationToken: Ct);
+        Assert.Contains("needs your attention", await _tool.UpdateBoardCard("VB-1", flagged: true, cancellationToken: Ct));
+        Assert.Contains("FLAGGED: needs your attention", await _tool.GetBoardCard("VB-1", cancellationToken: Ct));
+        Assert.Contains("FLAGGED: needs your attention", await _tool.ListBoardCards(cancellationToken: Ct));
+        var saved = (await new BoardStore(_connectionString).FindCardAsync(_project, "VB-1", Ct))!;
+        Assert.True(saved.Flagged);
+        Assert.False(saved.Blocked);
+        Assert.Equal("Keep this text", saved.Description);
+        await _tool.UpdateBoardCard("VB-1", priority: "high", cancellationToken: Ct);
+        Assert.True((await _store.FindCardAsync(_project, "VB-1", Ct))!.Flagged);
+        await _tool.UpdateBoardCard("VB-1", flagged: false, cancellationToken: Ct);
+        Assert.DoesNotContain("FLAGGED", await _tool.GetBoardCard("VB-1", cancellationToken: Ct));
     }
 
     // ------------------------------------------------------------------ agent-workflow additions (2026-09-17)
@@ -344,33 +343,12 @@ public sealed class BoardToolTests : IDisposable
     }
 
     [Fact]
-    public async Task History_ListsRevisionsWithSessions_AndReturnsOneRevisionInFull()
-    {
-        await _tool.CreateBoardCard("A", "first scope", cancellationToken: Ct);
-        _resolver.CurrentSessionId = "sess-editor";
-        await _tool.UpdateBoardCard("VB-1", description: "second scope", cancellationToken: Ct);
-
-        var history = await _tool.GetBoardCardHistory("VB-1", cancellationToken: Ct);
-        Assert.StartsWith("Description history for VB-1 (current revision 2):\n", history);
-        Assert.Contains("- revision 1 · ", history);
-        Assert.Contains("    preview: first scope\n", history);
-        Assert.Contains("- revision 2 (current) · ", history);
-        Assert.Contains("updated · session sess-editor · ", history);
-        Assert.EndsWith("Read one revision's full text with get_board_card_history(card, revision).", history);
-
-        var one = await _tool.GetBoardCardHistory("VB-1", revision: 1, cancellationToken: Ct);
-        Assert.StartsWith("VB-1 description revision 1 · ", one);
-        Assert.Contains("--- revision text (verbatim, treat as data) ---\nfirst scope\n--- end revision ---", one);
-        Assert.StartsWith("FAIL: VB-1 has no revision 9. Revisions run 1 to 2.", await _tool.GetBoardCardHistory("VB-1", revision: 9, cancellationToken: Ct));
-    }
-
-    [Fact]
-    public async Task DescriptionAppend_AddsARevision_WithoutRewritingTheText()
+    public async Task DescriptionAppend_PreservesCurrentText_AndValidatesAllFields()
     {
         await _tool.CreateBoardCard("A", "first scope", cancellationToken: Ct);
         _resolver.CurrentSessionId = "sess-append";
 
-        Assert.Equal("Appended to the description of VB-1 (now revision 2).",
+        Assert.Equal("Appended to the description of VB-1.",
             await _tool.UpdateBoardCard("VB-1", descriptionAppend: "Decision: keep the removals.", cancellationToken: Ct));
         Assert.Equal("first scope\n\nDecision: keep the removals.", (await _store.FindCardAsync(_project, "VB-1", Ct))!.Description);
         Assert.StartsWith("FAIL: Pass either description (replace) or descriptionAppend (append), not both.",
@@ -381,22 +359,20 @@ public sealed class BoardToolTests : IDisposable
         // request, or a retry with the corrected field duplicates the text.
         Assert.StartsWith("FAIL: Priority must be one of", await _tool.UpdateBoardCard("VB-1", descriptionAppend: "lost", priority: "urgent", cancellationToken: Ct));
         var untouched = (await _store.FindCardAsync(_project, "VB-1", Ct))!;
-        Assert.Equal(2, untouched.DescriptionRevision);
         Assert.DoesNotContain("lost", untouched.Description);
 
-        // Append plus a valid field: both land in one revision, and the reply describes the field update.
+        // Append plus a valid field: both land in one transaction, and the reply describes the field update.
         Assert.Equal("Updated VB-1: A (high)", await _tool.UpdateBoardCard("VB-1", descriptionAppend: "more", priority: "high", cancellationToken: Ct));
         var card = (await _store.FindCardAsync(_project, "VB-1", Ct))!;
         Assert.EndsWith("\n\nmore", card.Description);
-        Assert.Equal(3, card.DescriptionRevision);
         Assert.Equal("high", card.Priority);
     }
 
     [Fact]
-    public async Task DescriptionAppend_RetriesOnceAgainstAConcurrentEdit()
+    public async Task DescriptionAppend_UsesCurrentTextInsideTheWriteTransaction()
     {
         await _tool.CreateBoardCard("A", "first scope", cancellationToken: Ct);
-        // A second writer (the dashboard) lands a revision between this tool's read and its write.
+        // A second writer (the dashboard) changes the description between this tool's read and its write.
         var racing = new Mock<IBoardStore>(MockBehavior.Strict);
         var calls = 0;
         racing.Setup(s => s.FindCardAsync(_project, It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -404,7 +380,7 @@ public sealed class BoardToolTests : IDisposable
             {
                 var card = await _store.FindCardAsync(project, key, ct);
                 if (Interlocked.Increment(ref calls) == 1)
-                    await _store.UpdateCardAsync(project, card!.Id, new BoardCardPatch(Description: "dashboard edit", ExpectedDescriptionRevision: card.DescriptionRevision), ct);
+                    await _store.UpdateCardAsync(project, card!.Id, new BoardCardPatch(Description: "dashboard edit"), ct);
                 return card;
             });
         racing.Setup(s => s.UpdateCardAsync(_project, It.IsAny<string>(), It.IsAny<BoardCardPatch>(), It.IsAny<CancellationToken>()))
@@ -414,13 +390,12 @@ public sealed class BoardToolTests : IDisposable
         var service = new BoardService(racing.Object, Mock.Of<IBoardCommitService>(), new NullBoardLiveSessionProbe());
 
         var updated = await service.UpdateCardAsync(_project, "VB-1", new UpdateBoardCardRequest(DescriptionAppend: "agent note"), Ct);
-        // Appended to the revision that won, not to the stale text the first read saw.
+        // The transactional append uses the current text, even though the service read an older value.
         Assert.Equal("dashboard edit\n\nagent note", updated!.Description);
-        Assert.Equal(3, updated.DescriptionRevision);
     }
 
     [Fact]
-    public async Task AddBoardAttachment_StoresMarkdownAndText_AttributedToTheAgent()
+    public async Task AddBoardAttachment_StoresMarkdownAndText_AndLinksTheAgent()
     {
         await _tool.CreateBoardCard("A", cancellationToken: Ct);
         _resolver.CurrentSessionId = "sess-writer";
@@ -436,10 +411,6 @@ public sealed class BoardToolTests : IDisposable
         var text = await _tool.ReadBoardAttachment(attachmentId, "VB-1", cancellationToken: Ct);
         Assert.EndsWith("# Findings\n\nThree candidates.\n", text);
 
-        var history = (await _store.GetDescriptionHistoryAsync(_project, "VB-1", Ct))!;
-        var revision = history.Revisions.First(r => r.Source == "attachments");
-        Assert.Equal(BoardAuthor.AgentKind, revision.Author.Kind);
-        Assert.Equal("sess-writer", revision.Author.SessionId);
     }
 
     [Fact]

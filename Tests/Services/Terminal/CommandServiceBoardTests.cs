@@ -148,7 +148,7 @@ public partial class CommandServiceTests
         string[] expected =
         [
             "list_boards", "list_board_columns", "list_board_cards", "get_board_card",
-            "get_board_card_history", "get_board_notes", "read_board_attachment",
+            "get_board_notes", "read_board_attachment",
             "create_board_card", "update_board_card", "move_board_card", "add_board_comment",
             "append_board_note", "add_board_attachment", "link_board_commit"
         ];

@@ -196,7 +196,7 @@ public sealed partial class BoardStore : IBoardStore
         return await ReadColumnAsync(connection, null, project, columnId, cancellationToken);
     }
 
-    public async Task<BoardColumnRecord> CreateColumnAsync(string projectPath, string name, int? wipLimit, string color, CancellationToken cancellationToken = default, string? boardId = null)
+    public async Task<BoardColumnRecord> CreateColumnAsync(string projectPath, string name, string color, CancellationToken cancellationToken = default, string? boardId = null)
     {
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
@@ -208,12 +208,12 @@ public sealed partial class BoardStore : IBoardStore
             ("$board", board), cancellationToken);
         var id = NewId("col");
         var now = DateTime.UtcNow;
-        await InsertColumnAsync(connection, transaction, id, project, board, name, wipLimit, position, color, now, cancellationToken);
+        await InsertColumnAsync(connection, transaction, id, project, board, name, position, color, now, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        return new BoardColumnRecord(id, project, name, wipLimit, position, color, now, now, board);
+        return new BoardColumnRecord(id, project, name, position, color, now, now, board);
     }
 
-    public async Task<BoardColumnRecord?> UpdateColumnAsync(string projectPath, string columnId, string? name, int? wipLimit, bool clearWipLimit, string? color, CancellationToken cancellationToken = default)
+    public async Task<BoardColumnRecord?> UpdateColumnAsync(string projectPath, string columnId, string? name, string? color, CancellationToken cancellationToken = default)
     {
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
@@ -225,7 +225,6 @@ public sealed partial class BoardStore : IBoardStore
         var updated = existing with
         {
             Name = name ?? existing.Name,
-            WipLimit = clearWipLimit ? null : (wipLimit ?? existing.WipLimit),
             Color = color ?? existing.Color,
             UpdatedUtc = DateTime.UtcNow
         };
@@ -234,11 +233,10 @@ public sealed partial class BoardStore : IBoardStore
         {
             command.Transaction = transaction;
             command.CommandText = """
-                UPDATE BoardColumns SET Name = $name, WipLimit = $wip, Color = $color, UpdatedUTC = $updated
+                UPDATE BoardColumns SET Name = $name, Color = $color, UpdatedUTC = $updated
                 WHERE Id = $id;
                 """;
             command.Parameters.AddWithValue("$name", updated.Name);
-            command.Parameters.AddWithValue("$wip", updated.WipLimit is int w ? w : DBNull.Value);
             command.Parameters.AddWithValue("$color", updated.Color);
             command.Parameters.AddWithValue("$updated", ToDb(updated.UpdatedUtc));
             command.Parameters.AddWithValue("$id", existing.Id);
@@ -412,9 +410,9 @@ public sealed partial class BoardStore : IBoardStore
             insert.Transaction = transaction;
             insert.CommandText = """
                 INSERT INTO BoardCards
-                    (Id, ProjectPath, Number, ColumnId, Position, Title, Description, Assignee, Priority, Type, Points, Tags, Blocked, CreatedUTC, UpdatedUTC)
+                    (Id, ProjectPath, Number, ColumnId, Position, Title, Description, Assignee, Priority, Type, Points, Tags, Blocked, Flagged, CreatedUTC, UpdatedUTC)
                 VALUES
-                    ($id, $project, $number, $column, $position, $title, $description, $assignee, $priority, $type, $points, $tags, $blocked, $created, $updated);
+                    ($id, $project, $number, $column, $position, $title, $description, $assignee, $priority, $type, $points, $tags, $blocked, $flagged, $created, $updated);
                 """;
             insert.Parameters.AddWithValue("$id", id);
             insert.Parameters.AddWithValue("$project", project);
@@ -429,19 +427,16 @@ public sealed partial class BoardStore : IBoardStore
             insert.Parameters.AddWithValue("$points", card.Points is int p ? p : DBNull.Value);
             insert.Parameters.AddWithValue("$tags", SerializeTags(card.Tags));
             insert.Parameters.AddWithValue("$blocked", card.Blocked ? 1 : 0);
+            insert.Parameters.AddWithValue("$flagged", card.Flagged ? 1 : 0);
             insert.Parameters.AddWithValue("$created", ToDb(now));
             insert.Parameters.AddWithValue("$updated", ToDb(now));
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
         await WriteBaseLlmOptionsAsync(connection, transaction, id, card.BaseLlmOptions, cancellationToken);
-        var revision = await AppendDescriptionRevisionAsync(connection, transaction,
-            new BoardCardRecord(id, project, number, column.Id, position, card.Title, card.Description,
-                card.Assignee, card.Priority, card.Points, card.Tags, card.Blocked, 0, now, now, 0, Type: card.Type, BoardId: column.BoardId),
-            card.Description, "created", card.Author ?? BoardAuthor.User(), null, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         return new BoardCardRecord(id, project, number, column.Id, position, card.Title, card.Description,
-            card.Assignee, card.Priority, card.Points, card.Tags, card.Blocked, 0, now, now, revision, card.BaseLlmOptions, Type: card.Type, BoardId: column.BoardId);
+            card.Assignee, card.Priority, card.Points, card.Tags, card.Blocked, 0, now, now, card.BaseLlmOptions, Type: card.Type, BoardId: column.BoardId, Flagged: card.Flagged);
     }
 
     public async Task<BoardCardRecord?> UpdateCardAsync(string projectPath, string cardId, BoardCardPatch patch, CancellationToken cancellationToken = default)
@@ -452,10 +447,6 @@ public sealed partial class BoardStore : IBoardStore
         var existing = await ReadCardAsync(connection, transaction, project, cardId, cancellationToken);
         if (existing is null)
             return null;
-
-        if (patch.Description is not null && patch.ExpectedDescriptionRevision is int expected
-            && expected != existing.DescriptionRevision)
-            throw new BoardConflictException("The card description changed while you were editing. Reload it before saving your changes.");
 
         var moving = !string.IsNullOrWhiteSpace(patch.ColumnId)
             && !string.Equals(patch.ColumnId.Trim(), existing.ColumnId, StringComparison.Ordinal);
@@ -473,22 +464,35 @@ public sealed partial class BoardStore : IBoardStore
                 ("$column", columnId), cancellationToken, ("$id", (object)existing.Id));
         }
 
+        // Append reads the current text while holding the same write transaction as the update.
+        // Replacements deliberately accept the last write; neither operation retains old states.
+        var description = patch.Description ?? existing.Description;
+        if (patch.DescriptionAppend is not null)
+        {
+            if (patch.Description is not null)
+                throw new BoardValidationException("Pass either description or descriptionAppend, not both.");
+            description = existing.Description.Length == 0 ? patch.DescriptionAppend
+                : existing.Description + "\n\n" + patch.DescriptionAppend;
+        }
+        if (description.Length > BoardCardLimits.MaxDescriptionLength)
+            throw new BoardValidationException($"Description is too long (max {BoardCardLimits.MaxDescriptionLength} characters).");
+
         var updated = existing with
         {
             ColumnId = columnId,
             BoardId = boardId,
             Position = position,
             Title = patch.Title ?? existing.Title,
-            Description = patch.Description ?? existing.Description,
+            Description = description,
             Assignee = patch.ClearAssignee ? null : (patch.Assignee ?? existing.Assignee),
             Priority = patch.Priority ?? existing.Priority,
             Type = patch.Type ?? existing.Type,
             Points = patch.ClearPoints ? null : (patch.Points ?? existing.Points),
             Tags = patch.Tags ?? existing.Tags,
             Blocked = patch.Blocked ?? existing.Blocked,
+            Flagged = patch.Flagged ?? existing.Flagged,
             UpdatedUtc = DateTime.UtcNow,
-            BaseLlmOptions = patch.ClearBaseLlmOptions ? null : patch.BaseLlmOptions ?? existing.BaseLlmOptions,
-            DescriptionChanged = patch.Description is not null && patch.Description != existing.Description
+            BaseLlmOptions = patch.ClearBaseLlmOptions ? null : patch.BaseLlmOptions ?? existing.BaseLlmOptions
         };
 
         await using (var command = connection.CreateCommand())
@@ -496,7 +500,7 @@ public sealed partial class BoardStore : IBoardStore
             command.Transaction = transaction;
             command.CommandText = """
                 UPDATE BoardCards SET ColumnId = $column, Position = $position, Title = $title, Description = $description,
-                    Assignee = $assignee, Priority = $priority, Type = $type, Points = $points, Tags = $tags, Blocked = $blocked, UpdatedUTC = $updated
+                    Assignee = $assignee, Priority = $priority, Type = $type, Points = $points, Tags = $tags, Blocked = $blocked, Flagged = $flagged, UpdatedUTC = $updated
                 WHERE Id = $id;
                 """;
             command.Parameters.AddWithValue("$column", updated.ColumnId);
@@ -509,6 +513,7 @@ public sealed partial class BoardStore : IBoardStore
             command.Parameters.AddWithValue("$points", updated.Points is int p ? p : DBNull.Value);
             command.Parameters.AddWithValue("$tags", SerializeTags(updated.Tags));
             command.Parameters.AddWithValue("$blocked", updated.Blocked ? 1 : 0);
+            command.Parameters.AddWithValue("$flagged", updated.Flagged ? 1 : 0);
             command.Parameters.AddWithValue("$updated", ToDb(updated.UpdatedUtc));
             command.Parameters.AddWithValue("$id", updated.Id);
             await command.ExecuteNonQueryAsync(cancellationToken);
@@ -516,14 +521,6 @@ public sealed partial class BoardStore : IBoardStore
 
         if (patch.ClearBaseLlmOptions || patch.BaseLlmOptions is not null)
             await WriteBaseLlmOptionsAsync(connection, transaction, updated.Id, updated.BaseLlmOptions, cancellationToken);
-        if (updated.DescriptionChanged)
-        {
-            var author = patch.Author ?? BoardAuthor.User();
-            var revision = await AppendDescriptionRevisionAsync(connection, transaction, existing, updated.Description,
-                author.Kind, author, patch.ActiveSessionIds, cancellationToken);
-            updated = updated with { DescriptionRevision = revision };
-        }
-
         if (moving)
         {
             await RenumberColumnAsync(connection, transaction, existing.ColumnId, cancellationToken);
@@ -864,15 +861,13 @@ public sealed partial class BoardStore : IBoardStore
         await using (var delete = connection.CreateCommand())
         {
             delete.Transaction = transaction;
-            delete.CommandText = "UPDATE BoardAttachments SET DeletedUTC = $deleted WHERE Id = $id AND CardId = $card AND DeletedUTC IS NULL;";
-            delete.Parameters.AddWithValue("$deleted", ToDb(DateTime.UtcNow));
+            delete.CommandText = "DELETE FROM BoardAttachments WHERE Id = $id AND CardId = $card;";
             delete.Parameters.AddWithValue("$id", attachmentId);
             delete.Parameters.AddWithValue("$card", card.Id);
             removed = await delete.ExecuteNonQueryAsync(cancellationToken) > 0;
         }
         if (removed)
         {
-            await AppendDescriptionRevisionAsync(connection, transaction, card, card.Description, "attachments", BoardAuthor.User(), null, cancellationToken);
             await TouchCardAsync(connection, transaction, card.Id, cancellationToken);
         }
         await transaction.CommitAsync(cancellationToken);
@@ -978,7 +973,7 @@ public sealed partial class BoardStore : IBoardStore
     // ------------------------------------------------------------------ readers
 
     private const string ColumnSelectSql =
-        "SELECT c.Id, c.ProjectPath, c.Name, c.WipLimit, c.Position, c.Color, c.CreatedUTC, c.UpdatedUTC, c.BoardId FROM BoardColumns c";
+        "SELECT c.Id, c.ProjectPath, c.Name, c.Position, c.Color, c.CreatedUTC, c.UpdatedUTC, c.BoardId FROM BoardColumns c";
 
     private const string BoardSelectSql =
         "SELECT Id, ProjectPath, Name, Position, CreatedUTC, UpdatedUTC FROM Boards";
@@ -987,10 +982,9 @@ public sealed partial class BoardStore : IBoardStore
         SELECT c.Id, c.ProjectPath, c.Number, c.ColumnId, c.Position, c.Title, c.Description, c.Assignee, c.Priority,
                c.Points, c.Tags, c.Blocked, c.CreatedUTC, c.UpdatedUTC,
                (SELECT COUNT(*) FROM BoardComments m WHERE m.CardId = c.Id AND m.Kind = 'comment') AS CommentCount,
-               COALESCE((SELECT MAX(r.Revision) FROM BoardDescriptionRevisions r WHERE r.CardId = c.Id), 0),
                (SELECT o.OptionsJson FROM BoardCardOptions o WHERE o.CardId = c.Id),
                c.Type,
-               (SELECT k.BoardId FROM BoardColumns k WHERE k.Id = c.ColumnId)
+               (SELECT k.BoardId FROM BoardColumns k WHERE k.Id = c.ColumnId), c.Flagged
         FROM BoardCards c
         """;
 
@@ -1026,12 +1020,11 @@ public sealed partial class BoardStore : IBoardStore
         reader.GetString(0),
         reader.GetString(1),
         reader.GetString(2),
-        reader.IsDBNull(3) ? null : reader.GetInt32(3),
-        reader.GetInt32(4),
-        reader.GetString(5),
+        reader.GetInt32(3),
+        reader.GetString(4),
+        ParseDb(reader.GetString(5)),
         ParseDb(reader.GetString(6)),
-        ParseDb(reader.GetString(7)),
-        reader.IsDBNull(8) ? string.Empty : reader.GetString(8));
+        reader.IsDBNull(7) ? string.Empty : reader.GetString(7));
 
     private static async Task<IReadOnlyList<BoardRecord>> ReadBoardsAsync(SqliteConnection connection, SqliteTransaction? transaction, string project, CancellationToken cancellationToken)
     {
@@ -1117,10 +1110,10 @@ public sealed partial class BoardStore : IBoardStore
         reader.GetInt32(14),
         ParseDb(reader.GetString(12)),
         ParseDb(reader.GetString(13)),
-        reader.GetInt32(15),
-        reader.IsDBNull(16) ? null : JsonSerializer.Deserialize(reader.GetString(16), StorageJsonSerializerContext.Default.BaseLlmOptions),
-        Type: reader.GetString(17),
-        BoardId: reader.IsDBNull(18) ? string.Empty : reader.GetString(18));
+        reader.IsDBNull(15) ? null : JsonSerializer.Deserialize(reader.GetString(15), StorageJsonSerializerContext.Default.BaseLlmOptions),
+        Type: reader.GetString(16),
+        BoardId: reader.IsDBNull(17) ? string.Empty : reader.GetString(17),
+        Flagged: reader.GetInt32(18) != 0);
 
     private static async Task<IReadOnlyList<BoardCommentRecord>> ReadCommentsAsync(SqliteConnection connection, string cardId, string kind, CancellationToken cancellationToken)
     {
@@ -1175,7 +1168,7 @@ public sealed partial class BoardStore : IBoardStore
     private static async Task<IReadOnlyList<BoardAttachmentRecord>> ReadAttachmentsAsync(SqliteConnection connection, string cardId, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, CardId, Name, MimeType, Bytes, DataUrl, CreatedUTC FROM BoardAttachments WHERE CardId = $card AND DeletedUTC IS NULL ORDER BY CreatedUTC, Id;";
+        command.CommandText = "SELECT Id, CardId, Name, MimeType, Bytes, DataUrl, CreatedUTC FROM BoardAttachments WHERE CardId = $card ORDER BY CreatedUTC, Id;";
         command.Parameters.AddWithValue("$card", cardId);
         var attachments = new List<BoardAttachmentRecord>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -1226,8 +1219,8 @@ public sealed partial class BoardStore : IBoardStore
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
         var lanePosition = 0;
-        foreach (var (laneName, wip, color) in DefaultLanes)
-            await InsertColumnAsync(connection, transaction, NewId("col"), project, board.Id, laneName, wip, lanePosition++, color, now, cancellationToken);
+        foreach (var (laneName, color) in DefaultLanes)
+            await InsertColumnAsync(connection, transaction, NewId("col"), project, board.Id, laneName, lanePosition++, color, now, cancellationToken);
         return board;
     }
 
@@ -1246,19 +1239,18 @@ public sealed partial class BoardStore : IBoardStore
         }
     }
 
-    private static async Task InsertColumnAsync(SqliteConnection connection, SqliteTransaction transaction, string id, string project, string boardId, string name, int? wipLimit, int position, string color, DateTime now, CancellationToken cancellationToken)
+    private static async Task InsertColumnAsync(SqliteConnection connection, SqliteTransaction transaction, string id, string project, string boardId, string name, int position, string color, DateTime now, CancellationToken cancellationToken)
     {
         await using var insert = connection.CreateCommand();
         insert.Transaction = transaction;
         insert.CommandText = """
-            INSERT INTO BoardColumns (Id, ProjectPath, BoardId, Name, WipLimit, Position, Color, CreatedUTC, UpdatedUTC)
-            VALUES ($id, $project, $board, $name, $wip, $position, $color, $created, $updated);
+            INSERT INTO BoardColumns (Id, ProjectPath, BoardId, Name, Position, Color, CreatedUTC, UpdatedUTC)
+            VALUES ($id, $project, $board, $name, $position, $color, $created, $updated);
             """;
         insert.Parameters.AddWithValue("$id", id);
         insert.Parameters.AddWithValue("$project", project);
         insert.Parameters.AddWithValue("$board", boardId);
         insert.Parameters.AddWithValue("$name", name);
-        insert.Parameters.AddWithValue("$wip", wipLimit is int w ? w : DBNull.Value);
         insert.Parameters.AddWithValue("$position", position);
         insert.Parameters.AddWithValue("$color", color);
         insert.Parameters.AddWithValue("$created", ToDb(now));
@@ -1383,6 +1375,21 @@ public sealed partial class BoardStore : IBoardStore
         });
         SqliteMigrationRunner.Apply(connection, "board", 7, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, AdditionalLaneAutomationSchemaSql));
+        SqliteMigrationRunner.Apply(connection, "board", 8, MigrationKind.Breaking, (db, transaction) =>
+        {
+            SqliteSchema.Execute(db, transaction, """
+                DROP TABLE IF EXISTS BoardDescriptionRevisionAttachments;
+                DROP TABLE IF EXISTS BoardDescriptionSessionEvents;
+                DROP TABLE IF EXISTS BoardDescriptionRevisions;
+                PRAGMA user_version=3;
+                """);
+            if (SqliteSchema.HasColumn(db, transaction, "BoardAttachments", "DeletedUTC"))
+                SqliteSchema.Execute(db, transaction, "DELETE FROM BoardAttachments WHERE DeletedUTC IS NOT NULL; ALTER TABLE BoardAttachments DROP COLUMN DeletedUTC;");
+            if (SqliteSchema.HasColumn(db, transaction, "BoardColumns", "WipLimit"))
+                SqliteSchema.Execute(db, transaction, "ALTER TABLE BoardColumns DROP COLUMN WipLimit;");
+        });
+        SqliteMigrationRunner.Apply(connection, "board", 9, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardCards ADD COLUMN Flagged INTEGER NOT NULL DEFAULT 0"));
         ReconcileDerivedRows(connection);
     }
 
@@ -1400,7 +1407,7 @@ public sealed partial class BoardStore : IBoardStore
 
     /// <summary>
     /// Re-derives the rows that are a function of BoardCards rather than schema: the
-    /// BoardCardSequences high-water mark and the imported description-revision baseline.
+    /// BoardCardSequences high-water mark and board ownership of orphaned lanes.
     /// These ran on every startup before the schema became a one-shot migration, and they have to
     /// keep doing so -- a state.db written by an older build, or restored from a partial backup,
     /// can hold cards with no sequence row at all, and the next CreateCardAsync then reissues a
@@ -1418,9 +1425,6 @@ public sealed partial class BoardStore : IBoardStore
                     LEFT JOIN BoardCardSequences s ON s.ProjectPath = c.ProjectPath{ProjectPathCollation}
                     WHERE s.ProjectPath IS NULL OR s.LastNumber < c.Number
                 ) OR EXISTS (
-                    SELECT 1 FROM BoardCards c
-                    WHERE NOT EXISTS (SELECT 1 FROM BoardDescriptionRevisions r WHERE r.CardId = c.Id)
-                ) OR EXISTS (
                     SELECT 1 FROM BoardColumns k WHERE k.BoardId IS NULL
                 );
                 """;
@@ -1432,7 +1436,7 @@ public sealed partial class BoardStore : IBoardStore
         using (var repair = connection.CreateCommand())
         {
             repair.Transaction = transaction;
-            repair.CommandText = CardSequenceReseedSql + DescriptionBaselineSql + OrphanLaneAdoptionSql;
+            repair.CommandText = CardSequenceReseedSql + OrphanLaneAdoptionSql;
             repair.Parameters.AddWithValue("$now", ToDb(DateTime.UtcNow));
             repair.ExecuteNonQuery();
         }
@@ -1499,13 +1503,13 @@ public sealed partial class BoardStore : IBoardStore
     private static DateTime ParseDb(string value) => DateTime.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind).ToUniversalTime();
 
     /// <summary>The lanes a new project's board starts with (the placeholder's seed, minus its sample cards).</summary>
-    public static readonly IReadOnlyList<(string Name, int? WipLimit, string Color)> DefaultLanes =
+    public static readonly IReadOnlyList<(string Name, string Color)> DefaultLanes =
     [
-        ("Backlog", null, "#64748b"),
-        ("Ready", 8, "#3b82f6"),
-        ("Build", 4, "#06b6d4"),
-        ("Review", 3, "#f59e0b"),
-        ("Done", null, "#10b981")
+        ("Backlog", "#64748b"),
+        ("Ready", "#3b82f6"),
+        ("Build", "#06b6d4"),
+        ("Review", "#f59e0b"),
+        ("Done", "#10b981")
     ];
 
     internal const string BoardsTableSql = """

@@ -126,7 +126,7 @@ CREATE TABLE AgentMetadata ( Id INTEGER PRIMARY KEY AUTOINCREMENT, Path TEXT NOT
 CREATE TABLE BoardAttachmentContents ( AttachmentId TEXT PRIMARY KEY REFERENCES BoardAttachments(Id) ON DELETE CASCADE, Content BLOB NOT NULL );
 
 -- table BoardAttachments
-CREATE TABLE BoardAttachments ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, Name TEXT NOT NULL, MimeType TEXT NOT NULL, Bytes INTEGER NOT NULL, DataUrl TEXT NOT NULL, CreatedUTC TEXT NOT NULL , DeletedUTC TEXT);
+CREATE TABLE BoardAttachments ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, Name TEXT NOT NULL, MimeType TEXT NOT NULL, Bytes INTEGER NOT NULL, DataUrl TEXT NOT NULL, CreatedUTC TEXT NOT NULL );
 
 -- table BoardCardLinks
 CREATE TABLE BoardCardLinks ( CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, LinkedCardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, PRIMARY KEY (CardId, LinkedCardId), CHECK (CardId < LinkedCardId) );
@@ -141,10 +141,10 @@ CREATE TABLE BoardCardSequences ( ProjectPath TEXT PRIMARY KEY COLLATE NOCASE, L
 CREATE TABLE BoardCardSessions ( SessionId TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, TabId TEXT NULL, Selection TEXT NOT NULL, Cli TEXT NOT NULL, DisplayName TEXT NOT NULL, Origin TEXT NOT NULL, CreatedUTC TEXT NOT NULL );
 
 -- table BoardCards
-CREATE TABLE BoardCards ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Number INTEGER NOT NULL, ColumnId TEXT NOT NULL REFERENCES BoardColumns(Id), Position INTEGER NOT NULL, Title TEXT NOT NULL, Description TEXT NOT NULL DEFAULT '', Assignee TEXT NULL, Priority TEXT NOT NULL DEFAULT 'medium', Type TEXT NOT NULL DEFAULT 'task', Points INTEGER NULL, Tags TEXT NOT NULL DEFAULT '[]', Blocked INTEGER NOT NULL DEFAULT 0, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, UNIQUE(ProjectPath, Number) );
+CREATE TABLE BoardCards ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Number INTEGER NOT NULL, ColumnId TEXT NOT NULL REFERENCES BoardColumns(Id), Position INTEGER NOT NULL, Title TEXT NOT NULL, Description TEXT NOT NULL DEFAULT '', Assignee TEXT NULL, Priority TEXT NOT NULL DEFAULT 'medium', Type TEXT NOT NULL DEFAULT 'task', Points INTEGER NULL, Tags TEXT NOT NULL DEFAULT '[]', Blocked INTEGER NOT NULL DEFAULT 0, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, Flagged INTEGER NOT NULL DEFAULT 0, UNIQUE(ProjectPath, Number) );
 
 -- table BoardColumns
-CREATE TABLE BoardColumns ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Name TEXT NOT NULL, WipLimit INTEGER NULL, Position INTEGER NOT NULL, Color TEXT NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, BoardId TEXT NULL );
+CREATE TABLE BoardColumns ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Name TEXT NOT NULL, Position INTEGER NOT NULL, Color TEXT NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, BoardId TEXT NULL );
 
 -- table BoardComments
 CREATE TABLE BoardComments ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, AuthorKind TEXT NOT NULL, AuthorLabel TEXT NOT NULL, AuthorCli TEXT NULL, SessionId TEXT NULL, Body TEXT NOT NULL, CreatedUTC TEXT NOT NULL, Kind TEXT NOT NULL DEFAULT 'comment' );
@@ -157,15 +157,6 @@ CREATE TABLE BoardCommits ( CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DE
 
 -- table BoardContextSettings
 CREATE TABLE BoardContextSettings ( BoardId TEXT PRIMARY KEY REFERENCES Boards(Id) ON DELETE CASCADE, ContextJson TEXT NOT NULL, Revision INTEGER NOT NULL );
-
--- table BoardDescriptionRevisionAttachments
-CREATE TABLE BoardDescriptionRevisionAttachments ( CardId TEXT NOT NULL, Revision INTEGER NOT NULL, AttachmentId TEXT NOT NULL REFERENCES BoardAttachments(Id) ON DELETE CASCADE, PRIMARY KEY (CardId, Revision, AttachmentId), FOREIGN KEY (CardId, Revision) REFERENCES BoardDescriptionRevisions(CardId, Revision) ON DELETE CASCADE );
-
--- table BoardDescriptionRevisions
-CREATE TABLE BoardDescriptionRevisions ( CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, Revision INTEGER NOT NULL, Description TEXT NOT NULL, CreatedUTC TEXT NOT NULL, Source TEXT NOT NULL, AuthorKind TEXT NOT NULL, AuthorLabel TEXT NOT NULL, AuthorCli TEXT NULL, AuthorSessionId TEXT NULL, PRIMARY KEY (CardId, Revision) );
-
--- table BoardDescriptionSessionEvents
-CREATE TABLE BoardDescriptionSessionEvents ( CardId TEXT NOT NULL, Revision INTEGER NOT NULL, SessionId TEXT NOT NULL, Kind TEXT NOT NULL, Status TEXT NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, Message TEXT NULL, PRIMARY KEY (CardId, Revision, SessionId, Kind), FOREIGN KEY (CardId, Revision) REFERENCES BoardDescriptionRevisions(CardId, Revision) ON DELETE CASCADE );
 
 -- table BoardLaneAdditionalAutomations
 CREATE TABLE BoardLaneAdditionalAutomations ( ColumnId TEXT NOT NULL REFERENCES BoardLaneAutomations(ColumnId) ON DELETE CASCADE, JobId INTEGER NOT NULL, Position INTEGER NOT NULL, PRIMARY KEY (ColumnId, JobId) );

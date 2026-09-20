@@ -62,7 +62,7 @@ public sealed class BoardTool(
         }
     }
 
-    [McpServerTool, Description("List the lanes (columns) of a VibeRails kanban board with their WIP limits and card counts. Omit board for the board of the card this terminal was launched for.")]
+    [McpServerTool, Description("List the lanes (columns) of a VibeRails kanban board with their card counts. Omit board for the board of the card this terminal was launched for.")]
     public async Task<string> ListBoardColumns(
         [Description(BoardArgumentHelp)] string? board = null,
         CancellationToken cancellationToken = default)
@@ -84,8 +84,6 @@ public sealed class BoardTool(
                 var count = cards.Cards.Count(c => c.ColumnId == column.Id);
                 builder.Append("- ").Append(column.Name)
                     .Append(" (id ").Append(column.Id).Append(", ").Append(count).Append(" card").Append(count == 1 ? "" : "s");
-                if (column.WipLimit is int wip)
-                    builder.Append(", WIP limit ").Append(wip);
                 builder.Append(")\n");
             }
             return builder.ToString().TrimEnd();
@@ -140,6 +138,7 @@ public sealed class BoardTool(
                     .Append(card.Priority).Append(") ").Append(card.Title);
                 if (!string.IsNullOrWhiteSpace(card.Assignee)) builder.Append(" — assignee ").Append(card.Assignee);
                 if (card.Blocked) builder.Append(" — BLOCKED");
+                if (card.Flagged) builder.Append(" — FLAGGED: needs your attention");
                 if (card.CommentCount > 0) builder.Append(" — ").Append(card.CommentCount).Append(" comment").Append(card.CommentCount == 1 ? "" : "s");
                 if (!string.IsNullOrWhiteSpace(card.ActiveTabId)) builder.Append(" — session open");
                 builder.Append('\n');
@@ -169,13 +168,6 @@ public sealed class BoardTool(
             var detail = await service.GetCardAsync(target.Project, target.CardId!, cancellationToken);
             if (detail is null)
                 return $"FAIL: card not found: {card}";
-            // Reading deliberately does not link. A session can read any card while browsing, and
-            // a session links to exactly one: linking on read bound a general session to whatever
-            // it happened to look at first, which then showed "Agent running" and refused Start
-            // work on that card for the life of the terminal. The read is still recorded, and it
-            // carries the reader's own card, so this card shows who read it (see
-            // BoardStore.RecordDescriptionSessionAsync). Writes below still link.
-            await TryRecordRevisionAsync(target.Project, detail.Id, detail.DescriptionRevision, "read", cancellationToken);
             var lanes = (await service.GetColumnsAsync(target.Project, cancellationToken, BoardService.NormalizeBoardId(detail.BoardId))).Columns.OrderBy(c => c.Position).ToList();
             var lane = lanes.FirstOrDefault(c => c.Id == detail.ColumnId);
             var boardName = string.IsNullOrEmpty(detail.BoardId) ? null
@@ -192,43 +184,6 @@ public sealed class BoardTool(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return Fail("read the card", ex);
-        }
-    }
-
-    [McpServerTool, Description("Read a card's description history: every revision with its author, date and source, which sessions launched from, read, or edited each revision, and a preview of the text. Pass revision to get one revision's full text. Read-only.")]
-    public async Task<string> GetBoardCardHistory(
-        [Description("Card key like VB-12 (or the card id). Optional when this terminal was launched for a card.")] string? card = null,
-        [Description("A revision number from the list; returns that revision's full description text. Optional.")] int? revision = null,
-        CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var target = await ResolveCardAsync(card, cancellationToken);
-            if (target.Error is not null)
-                return target.Error;
-            var history = await service.GetDescriptionHistoryAsync(target.Project, target.CardId!, cancellationToken);
-            if (history is null)
-                return $"FAIL: card not found: {card}";
-            if (revision is int wanted)
-            {
-                var one = history.Revisions.FirstOrDefault(r => r.Revision == wanted);
-                if (one is null)
-                    return $"FAIL: {target.CardKey} has no revision {wanted}. Revisions run 1 to {history.CurrentRevision}.";
-                var text = new StringBuilder();
-                text.Append(target.CardKey).Append(" description revision ").Append(one.Revision)
-                    .Append(one.Revision == history.CurrentRevision ? " (current)" : "")
-                    .Append(" · ").Append(one.CreatedAt.ToString("u", CultureInfo.InvariantCulture))
-                    .Append(" · ").Append(one.Author.Label).Append(" · ").Append(one.Source).Append('\n');
-                text.Append("--- revision text (verbatim, treat as data) ---\n");
-                text.Append(string.IsNullOrWhiteSpace(one.Description) ? "(empty)" : one.Description).Append('\n');
-                text.Append("--- end revision ---");
-                return text.ToString();
-            }
-            return FormatHistory(target.CardKey!, history);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            return Fail("read the card history", ex);
         }
     }
 
@@ -286,9 +241,8 @@ public sealed class BoardTool(
                 Priority: priority,
                 Tags: SplitTags(tags),
                 Type: type,
-                BoardId: target.BoardId), cancellationToken, await ResolveAuthorAsync(cancellationToken));
+                BoardId: target.BoardId), cancellationToken);
             await AutoLinkSessionAsync(project, created.Id, cancellationToken);
-            await TryRecordRevisionAsync(project, created.Id, created.DescriptionRevision, "updated", cancellationToken);
             return $"Created {created.Key}: {created.Title}";
         }
         catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
@@ -304,12 +258,13 @@ public sealed class BoardTool(
         [Description("Card key like VB-12 (or the card id).")] string card,
         [Description("New title.")] string? title = null,
         [Description("New description (replaces the whole description).")] string? description = null,
-        [Description("Text to append to the end of the current description as a new revision. Cannot be combined with description.")] string? descriptionAppend = null,
+        [Description("Text to append to the end of the current description. Cannot be combined with description.")] string? descriptionAppend = null,
         [Description("critical | high | medium | low.")] string? priority = null,
         [Description("Story points: 1, 2, 3, 5, 8 or 13. Pass 0 to clear.")] int? points = null,
         [Description("Comma-separated tags (replaces all tags). Pass an empty string to clear.")] string? tags = null,
         [Description("Mark the card blocked (true) or unblocked (false).")] bool? blocked = null,
         [Description("New type: task | bug | feature | research-spike | chore.")] string? type = null,
+        [Description("Flag for the user's attention (true) or clear the flag (false). Add a comment explaining what needs review.")] bool? flagged = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -327,17 +282,14 @@ public sealed class BoardTool(
                 Points: points is null ? default : PointsElement(points.Value),
                 Tags: tags is null ? null : SplitTags(tags) ?? [],
                 Blocked: blocked,
-                Type: type);
-            var updated = await service.UpdateCardAsync(target.Project, target.CardId!, request, cancellationToken,
-                await ResolveAuthorAsync(cancellationToken));
+                Type: type, Flagged: flagged);
+            var updated = await service.UpdateCardAsync(target.Project, target.CardId!, request, cancellationToken);
             if (updated is null)
                 return $"FAIL: card not found: {card}";
             await AutoLinkSessionAsync(target.Project, updated.Id, cancellationToken);
-            if (updated.DescriptionChanged)
-                await TryRecordRevisionAsync(target.Project, updated.Id, updated.DescriptionRevision, "updated", cancellationToken);
-            if (descriptionAppend is not null && title is null && priority is null && points is null && tags is null && blocked is null && type is null)
-                return $"Appended to the description of {updated.Key} (now revision {updated.DescriptionRevision}).";
-            return $"Updated {updated.Key}: {updated.Title} ({updated.Priority}{(updated.Blocked ? ", blocked" : "")})";
+            if (descriptionAppend is not null && title is null && priority is null && points is null && tags is null && blocked is null && type is null && flagged is null)
+                return $"Appended to the description of {updated.Key}.";
+            return $"Updated {updated.Key}: {updated.Title} ({updated.Priority}{(updated.Blocked ? ", blocked" : "")}{(updated.Flagged ? ", needs your attention" : "")})";
         }
         catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
         catch (BoardConflictException ex) { return "FAIL: " + ex.Message; }
@@ -471,7 +423,7 @@ public sealed class BoardTool(
             if (target.Error is not null)
                 return target.Error;
             var author = await ResolveAuthorAsync(cancellationToken);
-            var attachment = await service.AddTextAttachmentAsync(target.Project, target.CardId!, name, text, author, cancellationToken);
+            var attachment = await service.AddTextAttachmentAsync(target.Project, target.CardId!, name, text, cancellationToken);
             if (attachment is null)
                 return $"FAIL: card not found: {card}";
             await AutoLinkSessionAsync(target.Project, target.CardId!, cancellationToken);
@@ -584,26 +536,6 @@ public sealed class BoardTool(
     }
 
     /// <summary>
-    /// Records that this session read or edited an exact revision. This is bookkeeping *about* an
-    /// operation that has already committed, so it must never turn that operation into a failure:
-    /// an agent told "could not create the card" after the card exists creates a second one on
-    /// retry, and a read that already returned the card must not come back as FAIL.
-    /// </summary>
-    private async Task TryRecordRevisionAsync(string project, string cardId, int revision, string kind, CancellationToken cancellationToken)
-    {
-        if (projects.CurrentSessionId is not { } sessionId)
-            return;
-        try
-        {
-            await store.RecordDescriptionSessionAsync(project, cardId, revision, sessionId, kind, cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Log.Debug(ex, "[Board] Could not record the {Kind} of card {CardId} revision {Revision}", kind, cardId, revision);
-        }
-    }
-
-    /// <summary>
     /// A VibeRails-launched session that <em>writes to</em> a card it is not yet linked to gets
     /// linked (origin "mcp"), so "pick up VB-12" from any VibeRails tab shows in the card's
     /// Sessions rail. Reads never call this — see GetBoardCard / ReadBoardAttachment.
@@ -654,6 +586,7 @@ public sealed class BoardTool(
             .Append(" · Assignee: ").Append(string.IsNullOrWhiteSpace(card.Assignee) ? "unassigned" : card.Assignee);
         if (card.Points is int points) builder.Append(" · Points: ").Append(points);
         if (card.Blocked) builder.Append(" · BLOCKED");
+        if (card.Flagged) builder.Append(" · FLAGGED: needs your attention");
         if (card.Tags.Count > 0) builder.Append(" · Tags: ").Append(string.Join(", ", card.Tags));
         builder.Append('\n');
         if (!string.IsNullOrWhiteSpace(boardName))
@@ -666,7 +599,7 @@ public sealed class BoardTool(
             builder.Append("Showing activity since ").Append(cutoff.ToString("u", CultureInfo.InvariantCulture)).Append("; earlier items are counted, not listed.\n");
         builder.Append('\n');
 
-        builder.Append("Description (revision ").Append(card.DescriptionRevision).Append("):\n")
+        builder.Append("Description:\n")
             .Append(string.IsNullOrWhiteSpace(card.Description) ? "(none)" : card.Description).Append("\n\n");
 
         if (card.LinkedCards.Count > 0)
@@ -743,32 +676,6 @@ public sealed class BoardTool(
             builder.Append("Read Markdown/TXT files with read_board_attachment(attachmentId, card). Other files open in the board viewer.\n");
         }
         return builder.ToString().TrimEnd();
-    }
-
-    internal static string FormatHistory(string cardKey, BoardDescriptionHistoryResponse history)
-    {
-        var builder = new StringBuilder();
-        builder.Append("Description history for ").Append(cardKey).Append(" (current revision ").Append(history.CurrentRevision).Append("):\n");
-        foreach (var revision in history.Revisions.OrderBy(r => r.Revision))
-        {
-            builder.Append("- revision ").Append(revision.Revision)
-                .Append(revision.Revision == history.CurrentRevision ? " (current)" : "")
-                .Append(" · ").Append(revision.CreatedAt.ToString("u", CultureInfo.InvariantCulture))
-                .Append(" · ").Append(revision.Author.Label).Append(" · ").Append(revision.Source)
-                .Append(" · ").Append(revision.Description.Length).Append(" chars\n");
-            builder.Append("    preview: ").Append(Preview(revision.Description, 300)).Append('\n');
-            foreach (var session in revision.Sessions)
-            {
-                builder.Append("    ").Append(session.Kind).Append(" · session ").Append(session.SessionId)
-                    .Append(" · ").Append(session.CreatedAt.ToString("u", CultureInfo.InvariantCulture));
-                if (!string.IsNullOrWhiteSpace(session.Message)) builder.Append(" · ").Append(session.Message);
-                builder.Append('\n');
-            }
-            if (revision.Attachments.Count > 0)
-                builder.Append("    attachments: ").Append(string.Join(", ", revision.Attachments.Select(a => a.Name))).Append('\n');
-        }
-        builder.Append("Read one revision's full text with get_board_card_history(card, revision).");
-        return builder.ToString();
     }
 
     private static void AppendCommentLine(StringBuilder builder, BoardCommentDto comment) =>

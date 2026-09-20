@@ -26,12 +26,10 @@ public partial interface IBoardService
 
     Task<BoardCardListResponse> GetCardsAsync(string projectPath, CancellationToken cancellationToken = default, string? boardId = null);
     Task<BoardCardResponse?> GetCardAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
-    Task<BoardCardResponse> CreateCardAsync(string projectPath, CreateBoardCardRequest request, CancellationToken cancellationToken = default, BoardAuthor? author = null);
-    Task<BoardCardResponse?> UpdateCardAsync(string projectPath, string idOrKey, UpdateBoardCardRequest request, CancellationToken cancellationToken = default, BoardAuthor? author = null);
+    Task<BoardCardResponse> CreateCardAsync(string projectPath, CreateBoardCardRequest request, CancellationToken cancellationToken = default);
+    Task<BoardCardResponse?> UpdateCardAsync(string projectPath, string idOrKey, UpdateBoardCardRequest request, CancellationToken cancellationToken = default);
     Task<bool> DeleteCardAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
     Task<BoardCardResponse?> MoveCardAsync(string projectPath, string idOrKey, string columnIdOrName, int? position, CancellationToken cancellationToken = default);
-
-    Task<BoardDescriptionHistoryResponse?> GetDescriptionHistoryAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
 
     Task<BoardCommentDto?> AddCommentAsync(string projectPath, string idOrKey, BoardAuthor author, string body, CancellationToken cancellationToken = default);
     /// <summary>Agent scratchpad entry: same validation as a comment, never shown in the comment stream.</summary>
@@ -39,7 +37,7 @@ public partial interface IBoardService
     Task<List<BoardCommentDto>?> GetNotesAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
     Task<BoardAttachmentDto?> AddAttachmentAsync(string projectPath, string idOrKey, AddBoardAttachmentRequest request, CancellationToken cancellationToken = default);
     /// <summary>Agent-written Markdown/TXT attachment. Only these two types; the text is stored as UTF-8 bytes.</summary>
-    Task<BoardAttachmentDto?> AddTextAttachmentAsync(string projectPath, string idOrKey, string name, string text, BoardAuthor author, CancellationToken cancellationToken = default);
+    Task<BoardAttachmentDto?> AddTextAttachmentAsync(string projectPath, string idOrKey, string name, string text, CancellationToken cancellationToken = default);
     Task<BoardSessionOutcomeRecord?> FindSessionOutcomeAsync(string sessionId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAttachmentAsync(string projectPath, string idOrKey, string attachmentId, CancellationToken cancellationToken = default);
 
@@ -69,7 +67,7 @@ public sealed partial class BoardService(
     // Raised 2026-09-17 (description 20k→100k, comment 10k→50k, attachments 12→40 per card): the
     // first agents to work cards split multi-part reports across comments and hit the old caps.
     public const int MaxTitleLength = 300;
-    public const int MaxDescriptionLength = 100_000;
+    public const int MaxDescriptionLength = BoardCardLimits.MaxDescriptionLength;
     public const int MaxCommentLength = 50_000;
     public const int MaxTags = 20;
     public const int MaxTagLength = 40;
@@ -143,10 +141,9 @@ public sealed partial class BoardService(
     public async Task<BoardColumnResponse> CreateColumnAsync(string projectPath, CreateBoardColumnRequest request, CancellationToken cancellationToken = default)
     {
         var name = NormalizeColumnName(request.Name) ?? "New lane";
-        var wip = IsNoLimit(request.WipLimit) ? null : NormalizeWip(request.WipLimit);
         var color = NormalizeColor(request.Color) ?? "#64748b";
         await store.EnsureDefaultColumnsAsync(projectPath, cancellationToken);
-        var column = await store.CreateColumnAsync(projectPath, name, wip, color, cancellationToken, NormalizeBoardId(request.BoardId));
+        var column = await store.CreateColumnAsync(projectPath, name, color, cancellationToken, NormalizeBoardId(request.BoardId));
         return ToDto(column);
     }
 
@@ -158,8 +155,7 @@ public sealed partial class BoardService(
         var color = request.Color is null ? null : NormalizeColor(request.Color);
         if (request.Color is not null && color is null)
             throw new BoardValidationException("Lane color must be a hex color like #3b82f6.");
-        var clearWip = IsNoLimit(request.WipLimit);
-        var column = await store.UpdateColumnAsync(projectPath, columnId, name, clearWip ? null : NormalizeWip(request.WipLimit), clearWip, color, cancellationToken);
+        var column = await store.UpdateColumnAsync(projectPath, columnId, name, color, cancellationToken);
         return column is null ? null : ToDto(column);
     }
 
@@ -221,7 +217,7 @@ public sealed partial class BoardService(
     public Task<BoardCardRecord?> FindCardAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default) =>
         store.FindCardAsync(projectPath, idOrKey, cancellationToken);
 
-    public async Task<BoardCardResponse> CreateCardAsync(string projectPath, CreateBoardCardRequest request, CancellationToken cancellationToken = default, BoardAuthor? author = null)
+    public async Task<BoardCardResponse> CreateCardAsync(string projectPath, CreateBoardCardRequest request, CancellationToken cancellationToken = default)
     {
         var title = NormalizeTitle(request.Title) ?? throw new BoardValidationException("Title is required.");
         // A brand-new project's first card may arrive over MCP before anything listed the lanes.
@@ -236,50 +232,26 @@ public sealed partial class BoardService(
             NormalizeTags(request.Tags) ?? [],
             request.Blocked ?? false,
             NormalizeBaseOptions(NormalizeAssignee(request.Assignee), request.BaseLlmOptions),
-            Author: author,
             Type: NormalizeCardType(request.Type) ?? BoardCardTypes.Default,
-            BoardId: NormalizeBoardId(request.BoardId)), cancellationToken);
+            BoardId: NormalizeBoardId(request.BoardId), Flagged: request.Flagged ?? false), cancellationToken);
         return (await GetCardAsync(projectPath, card.Id, cancellationToken))!;
     }
 
-    public async Task<BoardCardResponse?> UpdateCardAsync(string projectPath, string idOrKey, UpdateBoardCardRequest request, CancellationToken cancellationToken = default, BoardAuthor? author = null)
-    {
-        // Append mode is optimistic on the revision this call reads. Without a caller-supplied
-        // expected revision, a concurrent edit is retried once against the fresh text; with one,
-        // the caller asked to be told. Every field, including the append, is validated before the
-        // store write and lands in that single write -- an invalid priority must not leave the
-        // appended text behind for a retry to duplicate.
-        var retryOnConflict = request.DescriptionAppend is not null && request.ExpectedDescriptionRevision is null;
-        for (var attempt = 1; ; attempt++)
-        {
-            try
-            {
-                return await UpdateCardOnceAsync(projectPath, idOrKey, request, cancellationToken, author);
-            }
-            catch (BoardConflictException) when (retryOnConflict && attempt == 1)
-            {
-                // Re-read and append to the revision that won.
-            }
-        }
-    }
-
-    private async Task<BoardCardResponse?> UpdateCardOnceAsync(string projectPath, string idOrKey, UpdateBoardCardRequest request, CancellationToken cancellationToken, BoardAuthor? author)
+    public async Task<BoardCardResponse?> UpdateCardAsync(string projectPath, string idOrKey, UpdateBoardCardRequest request, CancellationToken cancellationToken = default)
     {
         var existing = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
         if (existing is null)
             return null;
 
         var description = request.Description;
-        var expectedRevision = request.ExpectedDescriptionRevision;
+        string? addition = null;
         if (request.DescriptionAppend is not null)
         {
             if (description is not null)
                 throw new BoardValidationException("Pass either description (replace) or descriptionAppend (append), not both.");
-            var addition = request.DescriptionAppend.Replace("\r\n", "\n").Trim();
+            addition = NormalizeDescription(request.DescriptionAppend);
             if (addition.Length == 0)
                 throw new BoardValidationException("Nothing to append.");
-            description = existing.Description.Length == 0 ? addition : existing.Description + "\n\n" + addition;
-            expectedRevision ??= existing.DescriptionRevision;
         }
 
         string? title = null;
@@ -304,15 +276,10 @@ public sealed partial class BoardService(
         var clearOptions = request.ClearBaseLlmOptions || assigneeChanged
             || (request.BaseLlmOptions is not null && options is null);
         if (options is not null) clearOptions = false;
-        if (expectedRevision is < 1)
-            throw new BoardValidationException("Description revision must be a positive number.");
-        var normalizedDescription = description is null ? null : NormalizeDescription(description);
-        var activeSessionIds = description is null ? null
-            : (await liveSessions.GetLiveSessionsAsync(cancellationToken)).Keys.ToList();
-
         var patch = new BoardCardPatch(
             Title: title,
-            Description: normalizedDescription,
+            Description: description is null ? null : NormalizeDescription(description),
+            DescriptionAppend: addition,
             Assignee: assignee,
             ClearAssignee: clearAssignee,
             Priority: priority,
@@ -321,12 +288,9 @@ public sealed partial class BoardService(
             Tags: NormalizeTags(request.Tags),
             Blocked: request.Blocked,
             ColumnId: request.ColumnId,
-            ExpectedDescriptionRevision: expectedRevision,
             BaseLlmOptions: options,
             ClearBaseLlmOptions: clearOptions,
-            Author: author,
-            ActiveSessionIds: activeSessionIds,
-            Type: type);
+            Type: type, Flagged: request.Flagged);
         var updated = await store.UpdateCardAsync(projectPath, existing.Id, patch, cancellationToken);
         if (updated is null) return null;
         var detail = await store.GetCardDetailAsync(projectPath, updated.Id, cancellationToken);
@@ -354,9 +318,6 @@ public sealed partial class BoardService(
     }
 
     // ------------------------------------------------------------------ rails
-
-    public Task<BoardDescriptionHistoryResponse?> GetDescriptionHistoryAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default) =>
-        store.GetDescriptionHistoryAsync(projectPath, idOrKey, cancellationToken);
 
     public async Task<BoardCommentDto?> AddCommentAsync(string projectPath, string idOrKey, BoardAuthor author, string body, CancellationToken cancellationToken = default)
     {
@@ -400,7 +361,7 @@ public sealed partial class BoardService(
         return attachment is null ? null : ToDto(attachment);
     }
 
-    public async Task<BoardAttachmentDto?> AddTextAttachmentAsync(string projectPath, string idOrKey, string name, string text, BoardAuthor author, CancellationToken cancellationToken = default)
+    public async Task<BoardAttachmentDto?> AddTextAttachmentAsync(string projectPath, string idOrKey, string name, string text, CancellationToken cancellationToken = default)
     {
         var label = NormalizeAttachmentName(name);
         var extension = Path.GetExtension(label).ToLowerInvariant();
@@ -416,7 +377,7 @@ public sealed partial class BoardService(
             return null;
         var content = new System.Text.UTF8Encoding(false).GetBytes(body);
         var mimeType = DetectAttachmentMimeType(label, content);
-        var attachment = await store.AddAttachmentContentAsync(projectPath, card.Id, label, mimeType, content, cancellationToken, author);
+        var attachment = await store.AddAttachmentContentAsync(projectPath, card.Id, label, mimeType, content, cancellationToken);
         return attachment is null ? null : ToDto(attachment);
     }
 
@@ -550,8 +511,8 @@ public sealed partial class BoardService(
             detail.Commits.Select(ToDto).ToList(),
             detail.Sessions.Select(s => ToDto(s, live)).ToList(),
             detail.Attachments.Select(ToDto).ToList(),
-            detail.Card.DescriptionRevision, detail.Card.BaseLlmOptions, detail.Card.DescriptionChanged,
-            notes, summary.Type, summary.BoardId)
+            detail.Card.BaseLlmOptions,
+            notes, summary.Type, summary.BoardId, summary.Flagged)
         {
             LinkedCards = detail.LinkedCards.Select(ToDto).ToList()
         };
@@ -581,10 +542,10 @@ public sealed partial class BoardService(
     internal static BoardCardSummaryResponse ToSummary(BoardCardRecord card, string? activeSessionId, string? activeTabId) => new(
         card.Id, card.Key, card.ColumnId, card.Position, card.Title, card.Description, card.Assignee, card.Priority,
         card.Points, card.Tags.ToList(), card.Blocked, card.CommentCount, activeSessionId, activeTabId, card.CreatedUtc, card.UpdatedUtc,
-        card.DescriptionRevision, card.BaseLlmOptions, card.Type, card.BoardId);
+        card.BaseLlmOptions, card.Type, card.BoardId, card.Flagged);
 
     internal static BoardColumnResponse ToDto(BoardColumnRecord column) =>
-        new(column.Id, column.Name, column.WipLimit, column.Position, column.Color, column.BoardId);
+        new(column.Id, column.Name, column.Position, column.Color, column.BoardId);
 
     internal static BoardSummaryResponse ToDto(BoardRecord board, IReadOnlyList<BoardColumnRecord> columns, IReadOnlyDictionary<string, int> counts) =>
         new(board.Id, board.Name, board.Position, board.CreatedUtc,
@@ -767,33 +728,6 @@ public sealed partial class BoardService(
         if (string.IsNullOrEmpty(name))
             return null;
         return name.Length > MaxColumnNameLength ? name[..MaxColumnNameLength] : name;
-    }
-
-    /// <summary>null, "" or 0 all mean "no WIP limit" — that is what the lane editor sends when the field is blank.</summary>
-    private static bool IsNoLimit(System.Text.Json.JsonElement element) =>
-        IsClearValue(element)
-        || (element.ValueKind == System.Text.Json.JsonValueKind.Number && element.TryGetInt32(out var n) && n <= 0);
-
-    /// <summary>Undefined → leave alone; otherwise a positive whole number.</summary>
-    private static int? NormalizeWip(System.Text.Json.JsonElement element)
-    {
-        switch (element.ValueKind)
-        {
-            case System.Text.Json.JsonValueKind.Number:
-                return element.TryGetInt32(out var number) && number > 0 ? number : null;
-            case System.Text.Json.JsonValueKind.String:
-                var text = element.GetString()?.Trim();
-                if (string.IsNullOrEmpty(text))
-                    return null;
-                return int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var parsed) && parsed > 0
-                    ? parsed
-                    : throw new BoardValidationException("WIP limit must be a whole number.");
-            case System.Text.Json.JsonValueKind.Null:
-            case System.Text.Json.JsonValueKind.Undefined:
-                return null;
-            default:
-                throw new BoardValidationException("WIP limit must be a whole number.");
-        }
     }
 
     private static string? NormalizeColor(string? value)

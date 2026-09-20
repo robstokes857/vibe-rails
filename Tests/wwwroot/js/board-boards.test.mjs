@@ -46,7 +46,7 @@ test('the controller loads boards first, remembers the selection, and scopes lan
     assert.match(source, /BoardApi\.getBoardColumnsAsync\(boardId\)/);
     assert.match(source, /BoardApi\.getBoardCardsAsync\(boardId\)/);
     assert.match(source, /BoardApi\.reorderBoardColumnsAsync\(orderedIds, this\.state\.boardId\)/);
-    assert.match(source, /createBoardColumnAsync\(\{ name, wipLimit, color, boardId: this\.state\.boardId \}\)/);
+    assert.match(source, /createBoardColumnAsync\(\{ name, color, boardId: this\.state\.boardId \}\)/);
     assert.match(source, /picker\?\.addEventListener\('change', \(\) => this\.switchBoard\(picker\.value\)\)/);
     assert.match(source, /case 'new-board':\s*this\.openBoardEditor\(null\)/);
     assert.match(source, /case 'edit-board':\s*this\.openBoardEditor\(this\.state\.boardId\)/);

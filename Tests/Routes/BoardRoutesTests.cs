@@ -102,7 +102,6 @@ public sealed class BoardRoutesTests : IAsyncLifetime
     }
 
     [Theory]
-    [InlineData("GET", "/api/v1/board/cards/VB-1/history")]
     [InlineData("GET", "/api/v1/board/cards/VB-1/attachments/missing/content")]
     [InlineData("POST", "/api/v1/board/cards/VB-1/attachments")]
     [InlineData("GET", "/api/v1/board/cards/VB-1/notes")]
@@ -142,14 +141,15 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         Assert.Equal("nosniff", download.Headers.GetValues("X-Content-Type-Options").Single());
         Assert.Contains("sandbox", download.Headers.GetValues("Content-Security-Policy").Single());
         Assert.Contains("<script>", await download.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
-        using var history = await GetJsonAsync("/api/v1/board/cards/VB-1/history");
-        var revision = history.RootElement.GetProperty("currentRevision").GetInt32();
-        using var updated = await SendJsonAsync(HttpMethod.Put, "/api/v1/board/cards/VB-1", new { description = "Updated scope", expectedDescriptionRevision = revision });
+        using var updated = await SendJsonAsync(HttpMethod.Put, "/api/v1/board/cards/VB-1", new { description = "Updated scope" });
         updated.EnsureSuccessStatusCode();
-        using var stale = await SendJsonAsync(HttpMethod.Put, "/api/v1/board/cards/VB-1", new { description = "Stale scope", expectedDescriptionRevision = revision });
-        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
-        using var finalHistory = await GetJsonAsync("/api/v1/board/cards/VB-1/history");
-        Assert.Equal("Updated scope", finalHistory.RootElement.GetProperty("revisions")[0].GetProperty("description").GetString());
+        using var replaced = await SendJsonAsync(HttpMethod.Put, "/api/v1/board/cards/VB-1", new { description = "Latest scope", expectedDescriptionRevision = 1 });
+        replaced.EnsureSuccessStatusCode();
+        using var current = await GetJsonAsync("/api/v1/board/cards/VB-1");
+        Assert.Equal("Latest scope", current.RootElement.GetProperty("description").GetString());
+        Assert.False(current.RootElement.TryGetProperty("descriptionRevision", out _));
+        using var history = await SendAsync(HttpMethod.Get, "/api/v1/board/cards/VB-1/history", "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.NotFound, history.StatusCode);
     }
 
     [Fact]
@@ -160,8 +160,8 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         Assert.Equal(5, columns.GetArrayLength());
         var backlogId = columns[0].GetProperty("id").GetString()!;
         var reviewId = columns[3].GetProperty("id").GetString()!;
-        Assert.Equal(8, columns[1].GetProperty("wipLimit").GetInt32());
-        Assert.Equal(JsonValueKind.Null, columns[0].GetProperty("wipLimit").ValueKind);
+        Assert.False(columns[1].TryGetProperty("wipLimit", out _));
+        Assert.False(columns[0].TryGetProperty("wipLimit", out _));
 
         // Create: the wire shape board-api.js sends (points "" clears, tags array).
         using var created = await PostJsonAsync("/api/v1/board/cards", new
@@ -510,7 +510,7 @@ public sealed class BoardRoutesTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ChatLaunch_UsesBoardContext_PreservesLane_AndLinksExactRevision()
+    public async Task ChatLaunch_UsesBoardContext_PreservesLane_AndLinksSession()
     {
         using var created = await PostJsonAsync("/api/v1/board/cards", new { title = "Discuss", assignee = "base:codex", type = "bug" });
         created.EnsureSuccessStatusCode();
@@ -538,8 +538,20 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         using var after = await GetJsonAsync("/api/v1/board/cards/VB-1");
         Assert.Equal(card.RootElement.GetProperty("columnId").GetString(), after.RootElement.GetProperty("columnId").GetString());
         Assert.Equal("chat-session", Assert.Single(after.RootElement.GetProperty("sessions").EnumerateArray()).GetProperty("id").GetString());
-        using var history = await GetJsonAsync("/api/v1/board/cards/VB-1/history");
-        Assert.Contains("chat-session", history.RootElement.GetRawText());
+    }
+
+    [Fact]
+    public async Task AttentionFlag_CreatesPersistsAndClearsThroughTheApi()
+    {
+        using var created = await PostJsonAsync("/api/v1/board/cards", new { title = "Needs review", flagged = true });
+        created.EnsureSuccessStatusCode();
+        using var card = await GetJsonAsync("/api/v1/board/cards/VB-1");
+        Assert.True(card.RootElement.GetProperty("flagged").GetBoolean());
+        Assert.False(card.RootElement.GetProperty("blocked").GetBoolean());
+        using var updated = await SendJsonAsync(HttpMethod.Put, "/api/v1/board/cards/VB-1", new { flagged = false });
+        updated.EnsureSuccessStatusCode();
+        using var list = await GetJsonAsync("/api/v1/board/cards");
+        Assert.False(list.RootElement.GetProperty("cards")[0].GetProperty("flagged").GetBoolean());
     }
 
     private async Task<JsonDocument> GetJsonAsync(string path)

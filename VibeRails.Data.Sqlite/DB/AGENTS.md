@@ -33,6 +33,9 @@ Every `SqliteMigrationRunner.Apply` call declares a `MigrationKind`:
   only when no other `vb` process is alive, and only after a copy is written to `backups/` beside
   the file. Files this process created are never guarded. See `SchemaUpgradePolicy`.
 
+Board migration `board/8` retires description history, WIP limits and removed-file retention
+(state generation 3); `board/9` adds the current attention flag. It follows the breaking gate above.
+
 Each database file carries a **generation** in `PRAGMA user_version`, bumped only by breaking
 changes (`StateDatabaseSchema.Generation`, `LlmExchangeLogStore.Generation`,
 `BertVectorDatabase.Generation`). Every schema entry point first calls
@@ -770,25 +773,19 @@ it (dashboard root path → the launching terminal session's card → git root o
 
 ```sql
 Boards            (Id TEXT PK, ProjectPath, Name, Position, CreatedUTC, UpdatedUTC)
-BoardColumns      (Id TEXT PK, ProjectPath, BoardId NULL, Name, WipLimit NULL, Position, Color, CreatedUTC, UpdatedUTC)
+BoardColumns      (Id TEXT PK, ProjectPath, BoardId NULL, Name, Position, Color, CreatedUTC, UpdatedUTC)
 BoardCards        (Id TEXT PK, ProjectPath, Number, ColumnId → BoardColumns, Position, Title, Description,
-                   Assignee NULL, Priority, Type, Points NULL, Tags JSON, Blocked, CreatedUTC, UpdatedUTC,
+                   Assignee NULL, Priority, Type, Points NULL, Tags JSON, Blocked, Flagged, CreatedUTC, UpdatedUTC,
                    UNIQUE(ProjectPath, Number))
 BoardCardSequences (ProjectPath TEXT PK, LastNumber)
 BoardCardOptions   (CardId → BoardCards CASCADE PK, OptionsJson)
 BoardCardLinks     (CardId → BoardCards CASCADE, LinkedCardId → BoardCards CASCADE,
                    PK(CardId, LinkedCardId), CHECK(CardId < LinkedCardId))
-BoardDescriptionRevisions (CardId → BoardCards CASCADE, Revision, Description, CreatedUTC, Source,
-                   AuthorKind, AuthorLabel, AuthorCli NULL, AuthorSessionId NULL, PK(CardId, Revision))
-BoardDescriptionSessionEvents (CardId, Revision → BoardDescriptionRevisions CASCADE, SessionId,
-                   Kind, Status, CreatedUTC, UpdatedUTC, Message NULL, PK(CardId, Revision, SessionId, Kind))
-BoardDescriptionRevisionAttachments (CardId, Revision → BoardDescriptionRevisions CASCADE,
-                   AttachmentId → BoardAttachments CASCADE, PK(CardId, Revision, AttachmentId))
 BoardComments     (Id TEXT PK, CardId → BoardCards CASCADE, AuthorKind 'user'|'agent', AuthorLabel,
                    AuthorCli NULL, SessionId NULL, Body, CreatedUTC, Kind 'comment'|'note')
 BoardCardSessions (SessionId TEXT PK, CardId → BoardCards CASCADE, TabId NULL, Selection, Cli,
                    DisplayName, Origin 'launch'|'mcp'|'manual', CreatedUTC)
-BoardAttachments  (Id TEXT PK, CardId → BoardCards CASCADE, Name, MimeType, Bytes, DataUrl, CreatedUTC, DeletedUTC NULL)
+BoardAttachments  (Id TEXT PK, CardId → BoardCards CASCADE, Name, MimeType, Bytes, DataUrl, CreatedUTC)
 BoardAttachmentContents (AttachmentId → BoardAttachments CASCADE PK, Content BLOB)
 BoardCommits      (CardId → BoardCards CASCADE, Sha, Author, Message, CommittedUTC, LinkedUTC, PK(CardId, Sha))
 BoardCommitSnapshots (CardId, Sha → BoardCommits CASCADE, SnapshotJson, PK(CardId, Sha))
@@ -816,35 +813,17 @@ BoardCommitSnapshots (CardId, Sha → BoardCommits CASCADE, SnapshotJson, PK(Car
 - `BoardCardSessions.SessionId` is the terminal `Sessions.Id` (no FK: sessions are written by other
   processes). "Live" is computed at read time by the root backend from its in-memory tab host.
 - Deleting the last lane is refused; deleting another lane moves its cards to the left-most one.
-- Description revisions are immutable and allocated inside the same transaction as card creation,
-  an actual description change, or attachment membership changes. `DescriptionRevision` is the
-  per-card maximum; a stale `ExpectedDescriptionRevision` rejects a description save with 409.
-  Existing cards receive an `imported` baseline at migration time, without guessed past session
-  links. Each revision retains its attachment manifest. Launch events reference the exact revision
-  used for the prompt; MCP reads reference the exact revision returned. An `updated` event only
-  means the description changed while that linked session was live, not that the agent read it.
-- `read` is the one event kind that does **not** require a `BoardCardSessions` link, because
-  reading a card is not a claim on it. A read by a session linked to another card stores that
-  card in `Message` (`working VB-3`), so the card shows who read it without binding the reader;
-  `launch` and `updated` describe the card's own sessions and keep the link requirement.
-  `RecordDescriptionSessionAsync` checks for the event first and writes only when it is new, with
-  no surrounding transaction — a re-read of the same revision takes no write lock at all. Reading
-  history runs without one either; both used to open a Serializable (`BEGIN IMMEDIATE`)
-  transaction and take the write lock merely to read.
-- Saving never sends terminal input, and neither does anything else on the board: the notification
-  feature and its `notification` event kind were removed 2026-09-15, along with the Codex
-  plan-mode TUI handshake that Start work used to run. With
-  `notification` gone, `Status` is always `recorded` and `UpdatedUTC` never diverges from
-  `CreatedUTC`; both columns are kept for the schema's shape but no longer carry information, and
-  the history rail no longer renders `Status`. Session events survive unlinking a session; card
-  deletion cascades all its history.
-- Uploaded attachments retain immutable bytes in `BoardAttachmentContents`; old raster data URLs
-  remain readable. There is **no byte limit** per file or per card — only 40 current files —
-  because the old budget counted history-retained bytes that nothing could ever reclaim, so a few
-  mistaken uploads permanently exhausted a card. Removing an attachment hides it through
-  `DeletedUTC` while historical manifests retain access, and the removal confirmation says so.
-  The history response returns file ids and names only, never `DataUrl`. Content routes require
-  the same project/card scope and both API credentials.
+- Cards keep only their current state. Description replacement accepts the last write; append
+  reads current text and validates the combined length inside the same write transaction.
+  Board context and lane Automation settings retain their separate revision checks.
+- `Flagged` (board/9, default false) requests human attention independently of `Blocked`.
+  Reads do not claim a card or record read events; writes can link an unlinked agent session.
+- Saving never sends terminal input. Launches compose their prompt from the current card;
+  sessions remain linked without revision provenance.
+- Current attachments store bytes in `BoardAttachmentContents`; old raster data URLs remain
+  readable. There is no byte quota, only 40 current files. Removal deletes the metadata and
+  cascades the bytes; removed IDs are not readable. Content routes keep card/project scoping
+  and both API credentials. Migration backups can retain retired content.
 - A commit link and its changed-code snapshot are inserted in one transaction, after Git capture
   succeeds. `SnapshotJson` uses the existing AOT `SandboxDiffResponse` shape (file name, language,
   before/after content, total changes). Viewing reads only the saved snapshot, so deleting a

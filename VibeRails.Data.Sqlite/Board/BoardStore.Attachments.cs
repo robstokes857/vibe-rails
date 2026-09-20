@@ -23,21 +23,19 @@ public sealed partial class BoardStore
     }
 
     /// <summary>
-    /// Only the count of <em>current</em> files is bounded, and removed files never count against
-    /// it. There is no byte budget: when there was one, it counted history-retained bytes that
-    /// nothing could ever reclaim, so a few mistaken uploads permanently exhausted a card.
+    /// Only file count is bounded. There is no byte budget; removal deletes the file and its bytes.
     /// </summary>
     private static async Task ValidateAttachmentCountAsync(SqliteConnection connection, SqliteTransaction transaction, string cardId, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT COUNT(*) FROM BoardAttachments WHERE CardId = $card AND DeletedUTC IS NULL;";
+        command.CommandText = "SELECT COUNT(*) FROM BoardAttachments WHERE CardId = $card;";
         command.Parameters.AddWithValue("$card", cardId);
         if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken)) >= BoardAttachmentData.MaxAttachmentsPerCard)
             throw new BoardValidationException($"A card can hold at most {BoardAttachmentData.MaxAttachmentsPerCard} current attachments.");
     }
 
-    public async Task<BoardAttachmentRecord?> AddAttachmentContentAsync(string projectPath, string cardId, string name, string mimeType, byte[] content, CancellationToken cancellationToken = default, BoardAuthor? author = null)
+    public async Task<BoardAttachmentRecord?> AddAttachmentContentAsync(string projectPath, string cardId, string name, string mimeType, byte[] content, CancellationToken cancellationToken = default)
     {
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
@@ -68,9 +66,6 @@ public sealed partial class BoardStore
             insert.Parameters.Add("$content", SqliteType.Blob).Value = content;
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
-        // The revision names who added the file: the user from the dashboard, or the agent session
-        // that wrote it over MCP. The attachment row itself carries no author.
-        await AppendDescriptionRevisionAsync(connection, transaction, card, card.Description, "attachments", author ?? BoardAuthor.User(), null, cancellationToken);
         await TouchCardAsync(connection, transaction, card.Id, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return record;
@@ -83,15 +78,10 @@ public sealed partial class BoardStore
         var card = await ReadCardAsync(connection, null, project, idOrKey, cancellationToken);
         if (card is null) return null;
         await using var command = connection.CreateCommand();
-        // Deleted rows remain readable only through their original, project-scoped card so
-        // a session's historical description can still open its exact original attachments.
         command.CommandText = """
             SELECT a.Id, a.CardId, a.Name, a.MimeType, a.Bytes, a.DataUrl, a.CreatedUTC, c.Content
             FROM BoardAttachments a LEFT JOIN BoardAttachmentContents c ON c.AttachmentId = a.Id
-            WHERE a.CardId = $card AND a.Id = $attachment
-                AND (a.DeletedUTC IS NULL OR EXISTS (
-                    SELECT 1 FROM BoardDescriptionRevisionAttachments r
-                    WHERE r.CardId = a.CardId AND r.AttachmentId = a.Id));
+            WHERE a.CardId = $card AND a.Id = $attachment;
             """;
         command.Parameters.AddWithValue("$card", card.Id);
         command.Parameters.AddWithValue("$attachment", attachmentId);

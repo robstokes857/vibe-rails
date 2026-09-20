@@ -35,7 +35,7 @@ public sealed class BoardPromptComposerTests
         var prompt = BoardPromptComposer.Compose(Card(), "Backlog", "codex", "Start implementing immediately", intent: "chat");
         Assert.StartsWith("The user wants to talk with you", prompt);
         Assert.Contains("get_board_card VB-12", prompt);
-        Assert.Contains("get_board_card_history", prompt);
+        Assert.DoesNotContain("get_board_card_history", prompt);
         Assert.Contains("brief status summary and wait", prompt);
         Assert.DoesNotContain("resume from there instead of starting over", prompt);
         Assert.DoesNotContain("move_board_card when", prompt);
@@ -135,7 +135,7 @@ public sealed class BoardPromptComposerTests
         Assert.Contains("Linked commits: 1f79d45 Codex/db storage refactor (#47)\n", prompt);
         Assert.Contains("Attachments: att_7f7ada2a8968 css_cleanup.md\n", prompt);
         Assert.Contains("append_board_note", prompt);
-        Assert.Contains("get_board_card_history", prompt);
+        Assert.DoesNotContain("get_board_card_history", prompt);
         // Board-supplied lists are data: they sit INSIDE the fence, after the title, never in the
         // app's preamble where a hostile lane name or commit subject would read as an instruction.
         var fenceStart = prompt.IndexOf("--- Card VB-12", StringComparison.Ordinal);

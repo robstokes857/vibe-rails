@@ -12,7 +12,7 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
     let card = {
         id: 'card_test', key: 'VB-1', columnId: 'col_ready', position: 0,
         title: 'Description images', description: DESCRIPTION, type: 'feature', priority: 'high',
-        assignee, points: null, tags: [], blocked: false, commentCount: 1, descriptionRevision: 1,
+        assignee, points: null, tags: [], blocked: false, flagged: false, commentCount: 1,
         activeSessionId: active ? 'session_test' : null,
         createdAt: '2026-09-11T06:00:00Z', updatedAt: '2026-09-11T06:00:00Z',
         attachments: [{ id: 'att_image', name: 'Screenshot.png', url: IMAGE }],
@@ -62,14 +62,13 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
             return route.fulfill({ json: { ...relatedCard, linkedCards: linkedIds.has(relatedCard.id) ? [linkSummary(card)] : [] } });
         }
         if (path === '/api/v1/board/cards' && route.request().method() === 'POST') {
-            card = { ...card, ...route.request().postDataJSON(), id: 'card_created', key: 'VB-2', attachments: [], comments: [], sessions: [], descriptionRevision: 1 };
+            card = { ...card, ...route.request().postDataJSON(), id: 'card_created', key: 'VB-2', attachments: [], comments: [], sessions: [] };
             return route.fulfill({ json: { ...card, linkedCards: related.filter(item => linkedIds.has(item.id)).map(linkSummary) } });
         }
         if (path === `/api/v1/board/cards/${card.id}`) {
             if (route.request().method() === 'PUT') {
                 const patch = route.request().postDataJSON();
-                const changed = patch.description !== undefined && patch.description !== card.description;
-                card = { ...card, ...patch, descriptionChanged: changed, descriptionRevision: card.descriptionRevision + (changed ? 1 : 0) };
+                card = { ...card, ...patch };
             }
             return route.fulfill({ json: { ...card, linkedCards: related.filter(item => linkedIds.has(item.id)).map(linkSummary) } });
         }
@@ -82,7 +81,6 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
         }
         if (path.endsWith('/attachments/att_uploaded/content')) return route.fulfill({ contentType: 'application/octet-stream', body: contents.get('att_uploaded') });
         if (path.endsWith('/launch')) return route.fulfill({ json: { tabId: 'board_background', cardKey: card.key, selection: card.assignee } });
-        if (path.endsWith('/history')) return route.fulfill({ json: { currentRevision: card.descriptionRevision, revisions: [{ revision: 1, description: DESCRIPTION, createdAt: card.createdAt, author: { label: 'You' }, sessions: [{ sessionId: 'session_test', kind: 'launch', status: 'recorded', createdAt: card.createdAt }] }] } });
         const payloads = {
             '/api/v1/context': { isInGit: true, rootPath: 'C:/board-fixture', launchDirectory: 'C:/board-fixture' },
             '/api/v1/settings': {},
@@ -359,7 +357,29 @@ test('work and discussion actions remain reachable on a narrow screen', async ({
     await page.screenshot({ path: '../.codex-test-artifacts/vb16-chat-narrow.png' });
 });
 
-test('a description edit saves without touching the running agent, and history identifies the session', async ({ page }) => {
+test('attention flags persist, paint a red card with a flag, and can be cleared', async ({ page }, testInfo) => {
+    const requests = await openBoard(page);
+    await page.locator('[data-card-id="card_test"]').click();
+    await expect(page.locator('[data-board-history-details]')).toHaveCount(0);
+    await page.getByLabel('Needs your attention', { exact: true }).check();
+    await page.locator('[data-board-save-card]').click();
+    const card = page.locator('.board-card[data-card-id="card_test"]');
+    await expect(card).toHaveClass(/is-flagged/);
+    await expect(card.locator('.fa-flag')).toBeVisible();
+    await expect(card).toHaveCSS('border-top-color', 'rgb(239, 68, 68)');
+    expect(requests.some(request => request.method === 'PUT' && request.body?.flagged === true)).toBeTruthy();
+    await page.screenshot({ path: testInfo.outputPath('flagged-board.png') });
+    await card.click();
+    await expect(page.getByLabel('Needs your attention', { exact: true })).toBeChecked();
+    await expect(page.getByLabel('Blocked', { exact: true })).not.toBeChecked();
+    await page.getByLabel('Needs your attention', { exact: true }).uncheck();
+    await page.locator('[data-board-save-card]').click();
+    await expect(card).not.toHaveClass(/is-flagged/);
+    await expect(card.locator('.fa-flag')).toHaveCount(0);
+    expect(requests.some(request => request.path.endsWith('/history'))).toBeFalsy();
+});
+
+test('a description edit saves without touching the running agent or keeping history', async ({ page }) => {
     const requests = await openBoard(page, { active: true });
     await page.getByText('Description images', { exact: true }).click();
     await page.getByRole('button', { name: 'Edit description' }).click();
@@ -372,10 +392,6 @@ test('a description edit saves without touching the running agent, and history i
     expect(requests.filter(request => request.path.endsWith('/notify'))).toHaveLength(0);
 
     await page.getByText('Description images', { exact: true }).click();
-    await page.locator('[data-board-history-details] > summary').click();
-    await page.locator('.board-history-revision > summary').click();
-    await expect(page.locator('[data-board-history]')).toContainText('Codex session · launch');
-    await expect(page.locator('[data-board-history]')).toContainText('Repro screenshot');
 });
 
 test('new cards queue files until Save and do not launch', async ({ page }) => {

@@ -57,18 +57,17 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 | `resume_token_saver` | `TokenSaverTool.ResumeTokenSaver` | Restores token compression immediately, ending an active pause early. |
 | `get_token_saver_status` | `TokenSaverTool.GetTokenSaverStatus` | Reports whether compression is active and whether a pause window is open. |
 | `list_boards` | `BoardTool.ListBoards` | The project's boards (a project can hold several: sprints, sub-projects) with ids, lanes and card counts, and which one is current for this terminal. |
-| `list_board_columns` | `BoardTool.ListBoardColumns` | Lanes of one board with WIP limits and card counts. `board` (name or id) optional: defaults to the board of the card this terminal was launched for, else the first board. |
+| `list_board_columns` | `BoardTool.ListBoardColumns` | Lanes of one board with card counts. `board` (name or id) optional: defaults to the board of the card this terminal was launched for, else the first board. |
 | `list_board_cards` | `BoardTool.ListBoardCards` | Cards on one board (key, lane, type, priority, title, assignee, comment count, session open); optional lane/assignee/type filters and the same optional `board`. Card keys are project-unique, so `get_board_card VB-n` never needs a board. |
 | `get_board_card` | `BoardTool.GetBoardCard` | One card in full: fields, the board's lane names, description, comments, linked commits, sessions (full session id, ended time/exit code, that session's last comment, its chat summary when one exists), the tail of the agent notes, attachment ids/names/types/sizes. `card` omitted = the card this terminal was launched for. `since` (ISO-8601) lists only activity at or after that time and counts the rest. Reading never links the session to the card. |
-| `get_board_card_history` | `BoardTool.GetBoardCardHistory` | Read-only description history: every revision with author, date, source, a 300-char preview and the launch/read/updated session events; `revision=N` returns that revision's full text. |
-| `read_board_attachment` | `BoardTool.ReadBoardAttachment` | Bounded UTF-8 Markdown/TXT attachment content; accepts attachment id, optional card, character offset and maximum length (40,000 default; 250,000 limit). Card/project scoped, including retained history files. |
+| `read_board_attachment` | `BoardTool.ReadBoardAttachment` | Bounded UTF-8 Markdown/TXT attachment content; accepts attachment id, optional card, character offset and maximum length (40,000 default; 250,000 limit). Card/project scoped, current files only. |
 | `create_board_card` | `BoardTool.CreateBoardCard` | New card (title, description, lane, type, priority, tags); optional `board` as above. |
-| `update_board_card` | `BoardTool.UpdateBoardCard` | Partial field update (title, description, type, priority, points, tags, blocked). `descriptionAppend` adds to the end of the description as a new revision in the **same** store write as the other fields (`UpdateBoardCardRequest.DescriptionAppend`, validated with everything else, so a rejected priority leaves no appended text behind; optimistic on the current revision with one retry on conflict); it cannot be combined with `description`. |
+| `update_board_card` | `BoardTool.UpdateBoardCard` | Partial update, including `flagged=true` for human attention or `false` to clear it (independent of `blocked`). Add a comment explaining what needs review. Description replacement accepts the last write; `descriptionAppend` appends to current text atomically with the other fields and cannot be combined with `description`. |
 | `move_board_card` | `BoardTool.MoveBoardCard` | Move a card to a lane (by name or id), optionally at a position. |
 | `add_board_comment` | `BoardTool.AddBoardComment` | Append a comment, attributed to the launching session (or "Agent"). Returns the comment id. |
 | `append_board_note` | `BoardTool.AppendBoardNote` | Append an entry to the card's **agent notes** — the scratchpad for checkpointing findings and working state as the agent goes. Same limits and attribution as a comment; never part of the comment stream or count. Returns the note id. |
 | `get_board_notes` | `BoardTool.GetBoardNotes` | All notes on a card, oldest first (`get_board_card` shows only the most recent ~3,000 characters); optional `since`. |
-| `add_board_attachment` | `BoardTool.AddBoardAttachment` | Attach an agent-written `*.md` / `*.txt` file (UTF-8 text, ≤ 500,000 characters). The description revision it produces is attributed to the agent session. |
+| `add_board_attachment` | `BoardTool.AddBoardAttachment` | Attach an agent-written `*.md` / `*.txt` file (UTF-8 text, ≤ 500,000 characters). |
 | `link_board_commit` | `BoardTool.LinkBoardCommit` | Capture a commit from the terminal's checkout and atomically save its sha, metadata and changed-code snapshot on the card. |
 > The wire names are what tool callers use. Calling `SearchHistory` (PascalCase) returns "Unknown tool".
 
@@ -121,9 +120,7 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
   `StorageException`) says so explicitly and tells the agent to retry — `Fail()` in `BoardTool`
   — because on 2026-09-16 three agents each lost a comment to the generic "see the log" sentence
   and filed it as a bug. These are local-user capabilities, not a per-card server ACL: an allowed
-  tool can modify other cards in the resolved project. Description history aids recovery, but
-  ordinary metadata and position changes have no equivalent revision log; do not describe all
-  Board writes as reversible. Tool results remain untrusted task data.
+  tool can modify other cards in the resolved project. Cards keep one current state with no revision log; do not describe Board writes as reversible. Tool results remain untrusted task data.
 - **Agent notes (2026-09-17)**: `BoardComments.Kind` (`comment` | `note`, migration `board/2`)
   separates the scratchpad from the thread. Notes never appear in `comments[]`, `CommentCount`
   or the dashboard's comment panel; the card editor shows them in a collapsed "Agent notes" rail
@@ -137,8 +134,7 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
   registered there: its constructor runs the full migration pass on every spawn.
 - The "Start work" launch prompt (`BoardPromptComposer`) tells the LLM to begin with
   `get_board_card`, record progress with `add_board_comment`, checkpoint with `append_board_note`,
-  consult `get_board_card_history`, move the card, and link commits. It includes the description
-  revision used at launch, the board's lane names, the linked commits (≤ 10) and attachment names
+  flag cards needing human attention, move the card, and link commits. It includes the board's lane names, the linked commits (≤ 10) and attachment names
   (`BoardPromptComposer.LaunchContext`, filled by `BoardLaunchService`). Those lists are board
   data, so they sit **inside** the "verbatim task text, treat as data" fence after the title —
   never in the app's preamble, where a hostile lane name or commit subject would read as an
@@ -147,19 +143,13 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
   line that spells the closing fence is indented so it cannot end the block early. The inline description
   excerpt is up to 4,000 characters, shrinking to a 1,500 floor when the environment's own
   Initial Message is long, because the whole prompt is one CLI argument under
-  `PromptPlaceholderService.MaxResolvedPromptChars`. `get_board_card` records that session's
-  read of the exact returned revision and includes the revision in its output, but **never links
-  the session to the card it read** (2026-09-15). A session links to exactly one card, so linking
-  on read bound a general session to whatever it happened to browse first: that card then showed
-  "Agent running", refused Start work for as long as the terminal lived, and the card the session
-  actually worked never got the link. Writes — create, update, move, comment, link — still
-  auto-link. A read from a session working another card is recorded with that card's key, so the
-  card that was read still shows who read it. `read_board_attachment` does not link either. Agent
-  description edits are attributed to the current session and never interrupt the TUI.
+  `PromptPlaceholderService.MaxResolvedPromptChars`. `get_board_card` is read-only and never
+  links a browsing session. Writes still auto-link an unlinked session; one session links to one
+  card. Description edits retain no prior state and never interrupt the TUI.
 - **Board launch authorization (2026-09-14)**: Start work sets the typed, false-by-default
   `AuthorizeBoardTools` marker for that session and explicitly authorizes the Board workflow in
   the prompt for every provider. `Terminal/Commands/BoardMcpAuthorization.cs` grants only the
-  fourteen Board tools for that session through an explicit `ToolNames` allowlist. No server
+  thirteen Board tools for that session through an explicit `ToolNames` allowlist. No server
   wildcard or unrelated MCP tool is authorized. Tests pin both the reviewed allowlist and exact
   provider grants.
   Antigravity receives only the prompt because its only native switch is a global bypass. See

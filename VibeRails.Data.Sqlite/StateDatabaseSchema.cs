@@ -10,11 +10,11 @@ internal static class StateDatabaseSchema
 {
     /// <summary>
     /// The state.db schema generation this build writes, stored in PRAGMA user_version. Bumped only
-    /// by breaking migrations (state/2 re-pointed the search index: generation 2). A build refuses a
+    /// by breaking migrations (state/2 search index: generation 2; board/8 history retirement: 3). A build refuses a
     /// database above its own generation; additive changes never move it. Values stay at or above 1
     /// because the shipped 1.10.10 binary reads user_version &lt; 1 as "rebuild the FTS table".
     /// </summary>
-    internal const int Generation = 2;
+    internal const int Generation = 3;
 
     internal static void Ensure(string connectionString, ILogger? logger = null)
     {

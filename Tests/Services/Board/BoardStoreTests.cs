@@ -471,7 +471,7 @@ public sealed class BoardStoreTests : IDisposable
         Assert.Empty(await _store.GetCardsAsync(_project, Ct, main.Id));
 
         // Lane operations stay on their board: a new lane appends to its board, a reorder names its board's lanes.
-        var extra = await _store.CreateColumnAsync(_project, "QA", null, "#ffffff", Ct, sprint.Id);
+        var extra = await _store.CreateColumnAsync(_project, "QA", "#ffffff", Ct, sprint.Id);
         Assert.Equal(sprint.Id, extra.BoardId);
         Assert.Equal(5, extra.Position);
         var sprintIds = (await _store.GetColumnsAsync(_project, Ct, sprint.Id)).Select(c => c.Id).ToList();

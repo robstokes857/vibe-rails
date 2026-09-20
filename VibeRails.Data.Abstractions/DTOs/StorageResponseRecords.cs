@@ -91,13 +91,3 @@ public record ChatHistoryItem(
 public record BoardAuthorDto(string Kind, string Label, string? Cli, string? SessionId = null);
 
 public record BoardAttachmentDto(string Id, string Name, string Url, string MimeType, long Bytes, DateTime CreatedAt);
-
-public record BoardDescriptionSessionDto(string SessionId, string Kind, string Status,
-    DateTime CreatedAt, DateTime UpdatedAt, string? Message = null);
-
-public record BoardDescriptionRevisionDto(int Revision, string Description, DateTime CreatedAt,
-    string Source, BoardAuthorDto Author, List<BoardDescriptionSessionDto> Sessions,
-    List<BoardAttachmentDto> Attachments);
-
-public record BoardDescriptionHistoryResponse(string CardId, int CurrentRevision,
-    List<BoardDescriptionRevisionDto> Revisions);
