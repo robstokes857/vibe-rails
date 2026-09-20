@@ -126,11 +126,12 @@ into a lane starts work by itself — noted in the controller header and `BoardL
 not built.
 
 Lane **Automations** are separate from that assignee-launch TODO. The lane settings modal
-selects one existing project Automation, with a separate **Save automation** action. The server
+selects any number of existing project Automations using checkboxes, with a separate **Save automations** action. The server
 waits 60 seconds after a card enters the lane; another move replaces the pending trigger. The
 browser owns no debounce timer. New cards count as lane entries; same-lane edits/reorders do
 not. Saved settings affect future entries and cancel pending entries for the lane. Disabled
-Automations and active-job overlap are skipped. The ordinary root Automation scheduler and
+Automations and active-job overlap are skipped independently for each selection. Clear all
+checkboxes to disable lane Automations; selected disabled/deleted jobs remain removable. The ordinary root Automation scheduler and
 native-terminal run lifecycle apply.
 
 The view uses the app's shared surfaces rather than its own: `app.showModal` (upgraded to

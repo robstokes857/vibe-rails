@@ -16,7 +16,7 @@ export const boardContextSection = () => `
 export const laneAutomationSection = () => `
     <section class="mt-3 border-top pt-3" data-lane-automation>
         <h6>Automations</h6>
-        <p class="board-editor-muted">Run an Automation after a card enters this lane and stays for 60 seconds. Moving again restarts the wait. Reordering or editing a card in the same lane does not trigger it.</p>
+        <p class="board-editor-muted">Run selected Automations after a card enters this lane and stays for 60 seconds. Each runs independently. Moving again restarts the wait. Reordering or editing a card in the same lane does not trigger them.</p>
         <div data-board-settings-content>Loading Automations…</div>
         <p class="board-editor-muted mt-2">Runs while a VibeRails backend is open. Disabled Automations and overlapping runs are skipped. Saving this setting cancels pending triggers for this lane and applies to future entries.</p>
     </section>`;
@@ -104,17 +104,23 @@ export function mountBoardContext(app, element, boardId) {
 export function mountLaneAutomation(app, element, columnId) {
     return mountSettings(app, element, {
         load: extra => BoardApi.getLaneAutomationAsync(columnId, extra),
-        render: ({ jobs, jobId }) => `
-            <label class="board-editor-label" for="board-lane-automation">Automation on entry</label>
-            <select id="board-lane-automation" class="form-select form-select-sm mb-2">
-                <option value="">None</option>
-                ${jobId && !jobs.some(job => job.id === jobId) ? `<option value="${Number(jobId)}" selected disabled>Unavailable Automation</option>` : ''}
-                ${jobs.map(job => `<option value="${Number(job.id)}" ${job.id === jobId ? 'selected' : ''} ${job.enabled ? '' : 'disabled'}>${escapeHtml(job.name)}${job.enabled ? '' : ' (disabled)'}</option>`).join('')}
-            </select>
+        render: ({ jobs, jobIds, jobId }) => {
+            const selected = new Set(jobIds ?? (jobId ? [jobId] : []));
+            const choices = [...jobs, ...[...selected].filter(id => !jobs.some(job => job.id === id))
+                .map(id => ({ id, name: `Unavailable Automation (${id})`, enabled: false }))];
+            return `<fieldset class="mb-2">
+                <legend class="board-editor-label">Automations on entry</legend>
+                <p class="board-editor-muted">Select any number, or clear all to turn off Automations for this lane. Remove unavailable or disabled selections before saving.</p>
+                ${choices.map(job => `<label class="d-flex align-items-start gap-2 mb-2">
+                    <input type="checkbox" class="form-check-input flex-shrink-0" data-lane-automation-job value="${Number(job.id)}" ${selected.has(job.id) ? 'checked' : ''} ${!job.enabled && !selected.has(job.id) ? 'disabled' : ''}>
+                    <span class="text-break">${escapeHtml(job.name)}${job.enabled ? '' : ' (disabled)'}</span>
+                </label>`).join('')}
+            </fieldset>
             ${jobs.length ? '' : '<p class="board-editor-muted">Create an Automation for this project on the Automations page first.</p>'}
-            <button type="button" class="btn btn-sm btn-outline-primary" data-settings-save>Save automation</button>`,
-        read: root => ({ jobId: Number(root.querySelector('#board-lane-automation').value) || null }),
+            <button type="button" class="btn btn-sm btn-outline-primary" data-settings-save>Save automations</button>`;
+        },
+        read: root => ({ jobIds: [...root.querySelectorAll('[data-lane-automation-job]:checked')].map(input => Number(input.value)) }),
         save: payload => BoardApi.saveLaneAutomationAsync(columnId, payload),
-        savedMessage: 'Lane automation saved.'
+        savedMessage: 'Lane automations saved.'
     });
 }

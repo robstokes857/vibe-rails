@@ -14,6 +14,8 @@ namespace Tests.DB;
 /// the old binary is refused by the generation gate. Silent drift is the failing answer.
 /// Additive board/6 adoption and legacy card UPDATE compatibility are covered by
 /// BoardSettingsTests.UpgradeFromBoard5_PreservesCards_AndLegacyLaneWritesStillWork.
+/// BoardSettingsTests.Board7Upgrade_PreservesSingleSelectionsAndPendingEntries_AndLegacyWritersRemainCompatible
+/// also covers board/7 adoption, old card/settings writes and independent old-scheduler consumption.
 /// </summary>
 public sealed class PreviousReleaseCompatibilityTests : IDisposable
 {

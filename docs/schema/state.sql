@@ -23,6 +23,9 @@ CREATE INDEX IX_BoardColumns_Project ON BoardColumns(ProjectPath, Position);
 -- index IX_BoardComments_Card
 CREATE INDEX IX_BoardComments_Card ON BoardComments(CardId, CreatedUTC);
 
+-- index IX_BoardPendingAdditionalAutomations_Due
+CREATE INDEX IX_BoardPendingAdditionalAutomations_Due ON BoardPendingAdditionalAutomations(DueUnixMs);
+
 -- index IX_BoardPendingAutomations_Due
 CREATE INDEX IX_BoardPendingAutomations_Due ON BoardPendingAutomations(DueUnixMs);
 
@@ -164,8 +167,14 @@ CREATE TABLE BoardDescriptionRevisions ( CardId TEXT NOT NULL REFERENCES BoardCa
 -- table BoardDescriptionSessionEvents
 CREATE TABLE BoardDescriptionSessionEvents ( CardId TEXT NOT NULL, Revision INTEGER NOT NULL, SessionId TEXT NOT NULL, Kind TEXT NOT NULL, Status TEXT NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, Message TEXT NULL, PRIMARY KEY (CardId, Revision, SessionId, Kind), FOREIGN KEY (CardId, Revision) REFERENCES BoardDescriptionRevisions(CardId, Revision) ON DELETE CASCADE );
 
+-- table BoardLaneAdditionalAutomations
+CREATE TABLE BoardLaneAdditionalAutomations ( ColumnId TEXT NOT NULL REFERENCES BoardLaneAutomations(ColumnId) ON DELETE CASCADE, JobId INTEGER NOT NULL, Position INTEGER NOT NULL, PRIMARY KEY (ColumnId, JobId) );
+
 -- table BoardLaneAutomations
 CREATE TABLE BoardLaneAutomations ( ColumnId TEXT PRIMARY KEY REFERENCES BoardColumns(Id) ON DELETE CASCADE, JobId INTEGER NULL, Revision INTEGER NOT NULL );
+
+-- table BoardPendingAdditionalAutomations
+CREATE TABLE BoardPendingAdditionalAutomations ( CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, ColumnId TEXT NOT NULL, JobId INTEGER NOT NULL, EventKey TEXT NOT NULL, DueUnixMs INTEGER NOT NULL, PRIMARY KEY (CardId, JobId), FOREIGN KEY (ColumnId, JobId) REFERENCES BoardLaneAdditionalAutomations(ColumnId, JobId) ON DELETE CASCADE );
 
 -- table BoardPendingAutomations
 CREATE TABLE BoardPendingAutomations ( CardId TEXT PRIMARY KEY REFERENCES BoardCards(Id) ON DELETE CASCADE, ColumnId TEXT NOT NULL REFERENCES BoardColumns(Id) ON DELETE CASCADE, JobId INTEGER NOT NULL, EventKey TEXT NOT NULL, DueUnixMs INTEGER NOT NULL );
@@ -263,11 +272,20 @@ CREATE TABLE sessionOutPut ( Id INTEGER PRIMARY KEY AUTOINCREMENT, SessionId TEX
 -- table sqlite_sequence
 CREATE TABLE sqlite_sequence(name,seq);
 
+-- trigger BoardCards_AdditionalLaneAutomation_Insert
+CREATE TRIGGER BoardCards_AdditionalLaneAutomation_Insert AFTER INSERT ON BoardCards BEGIN INSERT INTO BoardPendingAdditionalAutomations (CardId, ColumnId, JobId, EventKey, DueUnixMs) SELECT NEW.Id, NEW.ColumnId, a.JobId, lower(hex(randomblob(16))), CAST(unixepoch('subsec') * 1000 AS INTEGER) + 60000 FROM BoardLaneAdditionalAutomations a WHERE a.ColumnId = NEW.ColumnId; END;
+
+-- trigger BoardCards_AdditionalLaneAutomation_Move
+CREATE TRIGGER BoardCards_AdditionalLaneAutomation_Move AFTER UPDATE OF ColumnId ON BoardCards WHEN OLD.ColumnId <> NEW.ColumnId BEGIN DELETE FROM BoardPendingAdditionalAutomations WHERE CardId = NEW.Id; INSERT INTO BoardPendingAdditionalAutomations (CardId, ColumnId, JobId, EventKey, DueUnixMs) SELECT NEW.Id, NEW.ColumnId, a.JobId, lower(hex(randomblob(16))), CAST(unixepoch('subsec') * 1000 AS INTEGER) + 60000 FROM BoardLaneAdditionalAutomations a WHERE a.ColumnId = NEW.ColumnId; END;
+
 -- trigger BoardCards_LaneAutomation_Insert
 CREATE TRIGGER BoardCards_LaneAutomation_Insert AFTER INSERT ON BoardCards BEGIN INSERT INTO BoardPendingAutomations (CardId, ColumnId, JobId, EventKey, DueUnixMs) SELECT NEW.Id, NEW.ColumnId, a.JobId, lower(hex(randomblob(16))), CAST(unixepoch('subsec') * 1000 AS INTEGER) + 60000 FROM BoardLaneAutomations a WHERE a.ColumnId = NEW.ColumnId AND a.JobId IS NOT NULL; END;
 
 -- trigger BoardCards_LaneAutomation_Move
 CREATE TRIGGER BoardCards_LaneAutomation_Move AFTER UPDATE OF ColumnId ON BoardCards WHEN OLD.ColumnId <> NEW.ColumnId BEGIN DELETE FROM BoardPendingAutomations WHERE CardId = NEW.Id; INSERT INTO BoardPendingAutomations (CardId, ColumnId, JobId, EventKey, DueUnixMs) SELECT NEW.Id, NEW.ColumnId, a.JobId, lower(hex(randomblob(16))), CAST(unixepoch('subsec') * 1000 AS INTEGER) + 60000 FROM BoardLaneAutomations a WHERE a.ColumnId = NEW.ColumnId AND a.JobId IS NOT NULL; END;
+
+-- trigger BoardLaneAutomations_ClearAdditional
+CREATE TRIGGER BoardLaneAutomations_ClearAdditional AFTER UPDATE ON BoardLaneAutomations BEGIN DELETE FROM BoardLaneAdditionalAutomations WHERE ColumnId = NEW.ColumnId; END;
 
 -- trigger Sessions_LinkJobRunSession
 CREATE TRIGGER Sessions_LinkJobRunSession AFTER INSERT ON Sessions WHEN NEW.JobRunId IS NOT NULL BEGIN UPDATE JobRuns SET SessionId = NEW.Id WHERE Id = NEW.JobRunId AND DeletedUTC IS NULL; SELECT RAISE(ABORT, 'The Job run for this terminal session no longer exists.') WHERE changes() <> 1; END;

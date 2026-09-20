@@ -1,5 +1,27 @@
 # Vibe Board architecture and review
 
+## VB-22 implementation amendment (2026-09-20)
+
+Lane settings now select multiple existing project Automations. `jobIds` carries the full,
+distinct list; an empty list disables lane Automations. The existing route and expected revision
+are unchanged. Legacy `jobId` requests still replace the selection with zero or one job; responses
+retain `jobId` for the first selection alongside `jobIds`. Sending both fields is rejected.
+Every selected job must be enabled, undeleted and in the lane's project at save time.
+
+Additive `board/7` leaves board/6 SQL and data intact. The first selection and pending event stay
+in their original tables; `BoardLaneAdditionalAutomations` and `BoardPendingAdditionalAutomations`
+hold the remainder. New card insert/move triggers fill the additional queue in the card-write
+transaction. Header updates clear additional selections and cascade their pending events, so a
+legacy settings save also replaces the full list. New saves validate the full list before writing,
+advance the shared revision, and rebuild additional selections atomically. No backfill is needed.
+
+Each Automation queues independently after the same 60-second settling period, with its own
+enabled/deleted/project/overlap checks. There is no execution-order dependency. The scheduler
+consumes each queue in a transaction with the resulting run/action snapshots; an old scheduler
+can consume the original queue without discarding additional events. Extra jobs wait until a
+backend supporting board/7 runs. Moving away, settings saves and card/board deletion cancel all
+applicable pending events. Same-lane edits/reorders and already-queued runs keep existing behavior.
+
 ## VB-16 implementation amendment (2026-09-19)
 
 Board settings now include a default agent message and per-type `default`, `replace`, or

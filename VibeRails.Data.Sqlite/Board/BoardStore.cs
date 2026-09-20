@@ -1381,6 +1381,8 @@ public sealed partial class BoardStore : IBoardStore
             SqliteSchema.Execute(db, transaction, ContextSettingsSchemaSql);
             SqliteSchema.Execute(db, transaction, LaneAutomationSchemaSql);
         });
+        SqliteMigrationRunner.Apply(connection, "board", 7, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, AdditionalLaneAutomationSchemaSql));
         ReconcileDerivedRows(connection);
     }
 

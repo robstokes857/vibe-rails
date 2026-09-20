@@ -96,7 +96,7 @@ count the full lane. Tests should use realistic asynchronous races, not only mar
 ## Storage changes
 
 Read [database migration instructions](../../../VibeRails.Data.Sqlite/DB/AGENTS.md).
-`board/1`–`board/6` already exist. Add the next numbered migration rather than editing applied SQL.
+`board/1`–`board/7` already exist. Add the next numbered migration rather than editing applied SQL.
 Honor generation checks, additive/breaking policy and explicit migration flow. Update schema
 snapshots and compatibility tests when the schema changes. Do not create a writer transaction
 merely to read; use a deferred read snapshot if coherence requires a transaction. Connection
@@ -108,7 +108,9 @@ separate actions with concrete consequences, not required setup for unit tests.
 
 Board context and lane Automation settings use their own expected revisions, separate from
 card descriptions. Settings writes must remain project-scoped and reject stale revisions.
-Lane-entry triggers write one pending row per card in the move transaction. Keep pending-event
+Lane-entry triggers write one pending row per selected Automation and card in the move transaction.
+The first selection uses the board/6 tables; additional selections use the additive board/7 tables.
+Keep pending-event
 consumption atomic with normal Job run/action snapshot creation; never replace this with a
 browser timer or an in-memory queue. The existing leased root scheduler owns execution.
 

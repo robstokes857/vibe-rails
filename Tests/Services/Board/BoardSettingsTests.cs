@@ -8,7 +8,7 @@ using Xunit;
 
 namespace Tests.Services.Board;
 
-public sealed class BoardSettingsTests : IDisposable
+public sealed partial class BoardSettingsTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "vb16-" + Guid.NewGuid().ToString("N"));
     private readonly string _connectionString;
@@ -48,9 +48,14 @@ public sealed class BoardSettingsTests : IDisposable
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(Ct);
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT DueUnixMs FROM BoardPendingAutomations WHERE CardId = $card;";
+        command.CommandText = """
+            SELECT MAX(DueUnixMs) FROM (
+                SELECT DueUnixMs FROM BoardPendingAutomations WHERE CardId = $card
+                UNION ALL SELECT DueUnixMs FROM BoardPendingAdditionalAutomations WHERE CardId = $card);
+            """;
         command.Parameters.AddWithValue("$card", card);
-        return Convert.ToInt64(await command.ExecuteScalarAsync(Ct));
+        var result = await command.ExecuteScalarAsync(Ct);
+        return result is null or DBNull ? 0 : Convert.ToInt64(result);
     }
 
     private Task<IReadOnlyList<string>> Tick(long unixMs, JobStore? store = null) =>
@@ -87,9 +92,9 @@ public sealed class BoardSettingsTests : IDisposable
         var jobA = await Job("A");
         var jobB = await Job("B");
         var jobC = await Job("C");
-        await _boards.SaveLaneAutomationAsync(_root, a, jobA.Id, 0, Ct);
-        await _boards.SaveLaneAutomationAsync(_root, b, jobB.Id, 0, Ct);
-        await _boards.SaveLaneAutomationAsync(_root, c, jobC.Id, 0, Ct);
+        await _boards.SaveLaneAutomationAsync(_root, a, [jobA.Id], 0, Ct);
+        await _boards.SaveLaneAutomationAsync(_root, b, [jobB.Id], 0, Ct);
+        await _boards.SaveLaneAutomationAsync(_root, c, [jobC.Id], 0, Ct);
         var before = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var card = await Card(a);
         await _boards.MoveCardAsync(_root, card.Id, b, null, Ct);
@@ -113,7 +118,7 @@ public sealed class BoardSettingsTests : IDisposable
     {
         var (_, a, b, _) = await Lanes();
         var job = await Job();
-        await _boards.SaveLaneAutomationAsync(_root, a, job.Id, 0, Ct);
+        await _boards.SaveLaneAutomationAsync(_root, a, [job.Id], 0, Ct);
         var card = await Card(a);
         var due = await Due(card.Id);
         await _boards.MoveCardAsync(_root, card.Id, a, 0, Ct);
@@ -135,14 +140,14 @@ public sealed class BoardSettingsTests : IDisposable
     {
         var (_, a, _, _) = await Lanes();
         var job = await Job();
-        await _boards.SaveLaneAutomationAsync(_root, a, job.Id, 0, Ct);
+        await _boards.SaveLaneAutomationAsync(_root, a, [job.Id], 0, Ct);
         var card = await Card(a);
         var due = await Due(card.Id);
         if (reason == "disabled")
             await _jobs.UpdateJobAsync(job.Id, new(job.Name, _root, LLM.NotSet, null, "", null, false, []), Ct);
         if (reason == "deleted-job") await _jobs.SoftDeleteJobAsync(job.Id, Ct);
         if (reason == "deleted-card") await _boards.DeleteCardAsync(_root, card.Id, Ct);
-        if (reason == "removed-setting") await _boards.SaveLaneAutomationAsync(_root, a, null, 1, Ct);
+        if (reason == "removed-setting") await _boards.SaveLaneAutomationAsync(_root, a, [], 1, Ct);
         if (reason == "overlap") Assert.NotNull(await _jobs.EnqueueManualRunAsync(job.Id, Ct));
         Assert.Empty(await Tick(due));
         Assert.Equal(0, await Due(card.Id));
@@ -154,11 +159,11 @@ public sealed class BoardSettingsTests : IDisposable
         var (_, a, _, _) = await Lanes();
         var card = await Card(a);
         var foreign = await Job(project: _root + "-other");
-        await Assert.ThrowsAsync<BoardValidationException>(() => _boards.SaveLaneAutomationAsync(_root, a, foreign.Id, 0, Ct));
+        await Assert.ThrowsAsync<BoardValidationException>(() => _boards.SaveLaneAutomationAsync(_root, a, [foreign.Id], 0, Ct));
         var job = await Job();
-        Assert.Null(await _boards.SaveLaneAutomationAsync(_root + "-other", a, job.Id, 0, Ct));
-        await _boards.SaveLaneAutomationAsync(_root, a, job.Id, 0, Ct);
-        await Assert.ThrowsAsync<BoardConflictException>(() => _boards.SaveLaneAutomationAsync(_root, a, null, 0, Ct));
+        Assert.Null(await _boards.SaveLaneAutomationAsync(_root + "-other", a, [job.Id], 0, Ct));
+        await _boards.SaveLaneAutomationAsync(_root, a, [job.Id], 0, Ct);
+        await Assert.ThrowsAsync<BoardConflictException>(() => _boards.SaveLaneAutomationAsync(_root, a, [], 0, Ct));
         Assert.Equal(0, await Due(card.Id));
     }
 
@@ -167,6 +172,7 @@ public sealed class BoardSettingsTests : IDisposable
     {
         var (board, a, b, _) = await Lanes();
         var card = await Card(a);
+        await RemoveBoard7();
         await using (var connection = new SqliteConnection(_connectionString))
         {
             await connection.OpenAsync(Ct);
@@ -186,7 +192,7 @@ public sealed class BoardSettingsTests : IDisposable
         Assert.Empty((await upgraded.GetContextSettingsAsync(_root, board, Ct))!.Context.DefaultMessage);
         Assert.Null((await upgraded.GetLaneAutomationAsync(_root, b, Ct))!.JobId);
         var job = await Job();
-        await upgraded.SaveLaneAutomationAsync(_root, b, job.Id, 0, Ct);
+        await upgraded.SaveLaneAutomationAsync(_root, b, [job.Id], 0, Ct);
         // Previous binaries only know these card columns. Their UPDATE still succeeds and
         // participates in durable debounce without needing to know the new settings tables.
         await using (var connection = new SqliteConnection(_connectionString))
@@ -209,12 +215,13 @@ public sealed class BoardSettingsTests : IDisposable
         var second = await _boards.CreateBoardAsync(_root, "Second", Ct);
         var lanes = await _boards.GetColumnsAsync(_root, Ct, second.Id);
         var job = await Job();
-        await _boards.SaveLaneAutomationAsync(_root, lanes[0].Id, job.Id, 0, Ct);
+        var additional = await Job("Additional");
+        await _boards.SaveLaneAutomationAsync(_root, lanes[0].Id, [job.Id, additional.Id], 0, Ct);
         var card = await Card(a);
         await _boards.MoveCardAsync(_root, card.Id, lanes[1].Id, null, Ct);
         await _boards.DeleteColumnAsync(_root, lanes[1].Id, Ct);
         Assert.Equal(lanes[0].Id, (await _boards.FindCardAsync(_root, card.Id, Ct))!.ColumnId);
-        Assert.Single(await Tick(await Due(card.Id)));
+        Assert.Equal(2, (await Tick(await Due(card.Id))).Count);
     }
 
     public void Dispose()

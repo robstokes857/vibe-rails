@@ -466,6 +466,50 @@ public sealed class BoardRoutesTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task LaneAutomations_RoundTripMultipleJobs_RejectInvalidLists_AndAcceptLegacyClients()
+    {
+        using var catalog = await GetJsonAsync("/api/v1/board/boards");
+        var lane = catalog.RootElement.GetProperty("boards")[0].GetProperty("columns")[0].GetProperty("id").GetString();
+        var path = $"/api/v1/board/columns/{lane}/automation";
+        await using (var connection = new SqliteConnection(_connectionString))
+        {
+            await connection.OpenAsync(TestContext.Current.CancellationToken);
+            await using var command = connection.CreateCommand();
+            command.CommandText = SqlStrings.CreateEnvironmentsTable;
+            await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
+        var jobs = _app.Services.GetRequiredService<IJobStore>();
+        async Task<long> CreateJob(string name) => (await jobs.CreateJobAsync(new(name, _project, LLM.NotSet, null, "", null, true, [], Actions:
+            [new(null, JobActionKind.Script, ScriptPath: "check.py", ScriptRuntime: JobScriptRuntime.Python, ApprovedHash: "pinned")]), TestContext.Current.CancellationToken)).Id;
+        var first = await CreateJob("First");
+        var second = await CreateJob("Second");
+        using var saved = await SendJsonAsync(HttpMethod.Put, path, new { jobIds = new[] { first, second }, expectedRevision = 0 });
+        saved.EnsureSuccessStatusCode();
+        using var savedValue = await ReadJsonAsync(saved);
+        Assert.Equal(new[] { first, second }, savedValue.RootElement.GetProperty("jobIds").EnumerateArray().Select(id => id.GetInt64()));
+        using var read = await GetJsonAsync(path);
+        Assert.Equal(2, read.RootElement.GetProperty("jobs").GetArrayLength());
+        Assert.Equal(2, read.RootElement.GetProperty("jobIds").GetArrayLength());
+        Assert.Equal(first, read.RootElement.GetProperty("jobId").GetInt64());
+        using var stale = await SendJsonAsync(HttpMethod.Put, path, new { jobIds = Array.Empty<long>(), expectedRevision = 0 });
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        using var duplicate = await SendJsonAsync(HttpMethod.Put, path, new { jobIds = new[] { first, first }, expectedRevision = 1 });
+        Assert.Equal(HttpStatusCode.BadRequest, duplicate.StatusCode);
+        using var mixed = await SendJsonAsync(HttpMethod.Put, path, new { jobId = first, jobIds = new[] { second }, expectedRevision = 1 });
+        Assert.Equal(HttpStatusCode.BadRequest, mixed.StatusCode);
+        using var missingRevision = await SendJsonAsync(HttpMethod.Put, path, new { jobIds = new[] { second } });
+        Assert.Equal(HttpStatusCode.BadRequest, missingRevision.StatusCode);
+        using var legacy = await SendJsonAsync(HttpMethod.Put, path, new { jobId = second, expectedRevision = 1 });
+        legacy.EnsureSuccessStatusCode();
+        using var legacyValue = await ReadJsonAsync(legacy);
+        Assert.Equal(second, Assert.Single(legacyValue.RootElement.GetProperty("jobIds").EnumerateArray()).GetInt64());
+        using var cleared = await SendJsonAsync(HttpMethod.Put, path, new { jobIds = Array.Empty<long>(), expectedRevision = 2 });
+        cleared.EnsureSuccessStatusCode();
+        using var empty = await GetJsonAsync(path);
+        Assert.Equal(0, empty.RootElement.GetProperty("jobIds").GetArrayLength());
+    }
+
+    [Fact]
     public async Task ChatLaunch_UsesBoardContext_PreservesLane_AndLinksExactRevision()
     {
         using var created = await PostJsonAsync("/api/v1/board/cards", new { title = "Discuss", assignee = "base:codex", type = "bug" });

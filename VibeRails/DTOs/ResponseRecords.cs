@@ -149,8 +149,8 @@ namespace VibeRails.DTOs
     public record UpdateBoardRequest(string? Name = null);
     public record UpdateBoardContextRequest(BoardContextSettings? Context = null, int? ExpectedRevision = null);
     public record BoardAutomationOption(long Id, string Name, bool Enabled);
-    public record BoardLaneAutomationResponse(long? JobId, int Revision, List<BoardAutomationOption> Jobs);
-    public record UpdateBoardLaneAutomationRequest(long? JobId = null, int? ExpectedRevision = null);
+    public record BoardLaneAutomationResponse(long? JobId, int Revision, List<BoardAutomationOption> Jobs, IReadOnlyList<long> JobIds);
+    public record UpdateBoardLaneAutomationRequest(long? JobId = null, int? ExpectedRevision = null, IReadOnlyList<long>? JobIds = null);
     public record DeleteBoardResponse(bool Ok, int DeletedColumns, int DeletedCards);
 
     public record BoardColumnResponse(string Id, string Name, int? WipLimit, int Position, string Color, string BoardId = "");

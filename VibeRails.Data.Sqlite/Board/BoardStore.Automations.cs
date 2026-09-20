@@ -11,10 +11,11 @@ public sealed partial class BoardStore
         return await ReadLaneAutomationAsync(connection, null, NormalizeProjectPath(projectPath), columnId, cancellationToken);
     }
 
-    public async Task<BoardLaneAutomation?> SaveLaneAutomationAsync(string projectPath, string columnId, long? jobId, int expectedRevision, CancellationToken cancellationToken = default)
+    public async Task<BoardLaneAutomation?> SaveLaneAutomationAsync(string projectPath, string columnId, IReadOnlyList<long> jobIds, int expectedRevision, CancellationToken cancellationToken = default)
     {
-        if (jobId is <= 0 || expectedRevision < 0)
-            throw new BoardValidationException("Invalid Automation or settings revision.");
+        var selected = jobIds.ToArray();
+        if (selected.Any(id => id <= 0) || selected.Distinct().Count() != selected.Length || expectedRevision < 0)
+            throw new BoardValidationException("Choose distinct Automations and a valid settings revision.");
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
@@ -22,17 +23,17 @@ public sealed partial class BoardStore
         if (current is null) return null;
         if (current.Revision != expectedRevision)
             throw new BoardConflictException("Lane automation changed while you were editing. Reopen the lane to load the latest version.");
-        if (jobId is not null)
+        foreach (var jobId in selected)
         {
             await using var validate = connection.CreateCommand();
             validate.Transaction = transaction;
             validate.CommandText = $"SELECT COUNT(*) FROM Jobs WHERE Id = $job AND ProjectPath = $project{ProjectPathCollation} AND DeletedUTC IS NULL AND Enabled = 1;";
-            validate.Parameters.AddWithValue("$job", jobId.Value);
+            validate.Parameters.AddWithValue("$job", jobId);
             validate.Parameters.AddWithValue("$project", project);
             if (Convert.ToInt64(await validate.ExecuteScalarAsync(cancellationToken)) == 0)
                 throw new BoardValidationException("Choose an enabled Automation from this project.");
         }
-        var saved = new BoardLaneAutomation(jobId, checked(current.Revision + 1));
+        var saved = new BoardLaneAutomation(selected, checked(current.Revision + 1));
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
@@ -41,9 +42,21 @@ public sealed partial class BoardStore
             DELETE FROM BoardPendingAutomations WHERE ColumnId = $column;
             """;
         command.Parameters.AddWithValue("$column", columnId.Trim());
-        command.Parameters.AddWithValue("$job", (object?)jobId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$job", (object?)saved.JobId ?? DBNull.Value);
         command.Parameters.AddWithValue("$revision", saved.Revision);
         await command.ExecuteNonQueryAsync(cancellationToken);
+        // Updating the legacy header clears additional selections and pending entries, including
+        // when an older binary saves a single selection. Rebuild the remainder in this transaction.
+        for (var position = 1; position < selected.Length; position++)
+        {
+            await using var insert = connection.CreateCommand();
+            insert.Transaction = transaction;
+            insert.CommandText = "INSERT INTO BoardLaneAdditionalAutomations (ColumnId, JobId, Position) VALUES ($column, $job, $position);";
+            insert.Parameters.AddWithValue("$column", columnId.Trim());
+            insert.Parameters.AddWithValue("$job", selected[position]);
+            insert.Parameters.AddWithValue("$position", position);
+            await insert.ExecuteNonQueryAsync(cancellationToken);
+        }
         await transaction.CommitAsync(cancellationToken);
         return saved;
     }
@@ -53,15 +66,24 @@ public sealed partial class BoardStore
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = $"""
-            SELECT a.JobId, a.Revision FROM BoardColumns c
+            SELECT a.JobId, a.Revision, extra.JobId FROM BoardColumns c
             LEFT JOIN BoardLaneAutomations a ON a.ColumnId = c.Id
-            WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.Id = $column;
+            LEFT JOIN BoardLaneAdditionalAutomations extra ON extra.ColumnId = c.Id
+            WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.Id = $column
+            ORDER BY extra.Position;
             """;
         command.Parameters.AddWithValue("$project", project);
         command.Parameters.AddWithValue("$column", columnId.Trim());
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken)) return null;
-        return new(reader.IsDBNull(0) ? null : reader.GetInt64(0), reader.IsDBNull(1) ? 0 : reader.GetInt32(1));
+        var jobIds = new List<long>();
+        if (!reader.IsDBNull(0)) jobIds.Add(reader.GetInt64(0));
+        var revision = reader.IsDBNull(1) ? 0 : reader.GetInt32(1);
+        do
+        {
+            if (!reader.IsDBNull(2)) jobIds.Add(reader.GetInt64(2));
+        } while (await reader.ReadAsync(cancellationToken));
+        return new(jobIds, revision);
     }
 
     // Triggers write only to new tables: legacy card writers still work and also participate in

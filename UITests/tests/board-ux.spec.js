@@ -183,30 +183,62 @@ test('board context settings persist default and per-type choices and preserve a
     await expect(page.getByLabel('Default message', { exact: true })).toHaveValue('Keep my draft');
 });
 
-test('lane automation selects an existing job, persists and can be removed', async ({ page }) => {
+test('lane automations select multiple jobs, persist, remove one and clear all', async ({ page }) => {
     await openBoard(page);
-    let saved = { jobId: null, revision: 0 };
+    let saved = { jobIds: [], revision: 0 };
     await page.route('**/api/v1/board/columns/col_ready/automation', async route => {
         if (route.request().method() === 'PUT') {
             const body = route.request().postDataJSON();
             expect(body.expectedRevision).toBe(saved.revision);
-            saved = { jobId: body.jobId, revision: saved.revision + 1 };
+            saved = { jobIds: body.jobIds, revision: saved.revision + 1 };
         }
-        return route.fulfill({ json: { ...saved, jobs: [{ id: 12, name: 'Run review', enabled: true }, { id: 13, name: 'Paused', enabled: false }] } });
+        return route.fulfill({ json: { ...saved, jobs: [{ id: 12, name: 'Run review', enabled: true }, { id: 13, name: 'Paused', enabled: false }, { id: 14, name: 'Run checks', enabled: true }] } });
     });
     await page.getByRole('button', { name: 'Settings for Ready', exact: true }).click();
     await expect(page.getByText(/stays for 60 seconds/)).toBeVisible();
-    await page.getByLabel('Automation on entry', { exact: true }).selectOption('12');
-    await expect(page.locator('#board-lane-automation option[value="13"]')).toBeDisabled();
-    await page.getByRole('button', { name: 'Save automation', exact: true }).click();
-    await expect.poll(() => saved).toEqual({ jobId: 12, revision: 1 });
-    await page.screenshot({ path: '../.codex-test-artifacts/vb16-lane.png' });
+    await page.getByRole('checkbox', { name: 'Run review', exact: true }).check();
+    await page.getByRole('checkbox', { name: 'Run checks', exact: true }).check();
+    await expect(page.getByRole('checkbox', { name: 'Paused (disabled)', exact: true })).toBeDisabled();
+    await page.getByRole('button', { name: 'Save automations', exact: true }).click();
+    await expect.poll(() => saved).toEqual({ jobIds: [12, 14], revision: 1 });
+    await page.screenshot({ path: '../.codex-test-artifacts/vb22-lane.png' });
     await page.locator('#modal-container [data-action="close-modal"]').first().click();
     await page.getByRole('button', { name: 'Settings for Ready', exact: true }).click();
-    await expect(page.getByLabel('Automation on entry', { exact: true })).toHaveValue('12');
-    await page.getByLabel('Automation on entry', { exact: true }).selectOption('');
-    await page.getByRole('button', { name: 'Save automation', exact: true }).click();
-    await expect.poll(() => saved).toEqual({ jobId: null, revision: 2 });
+    await expect(page.getByRole('checkbox', { name: 'Run review', exact: true })).toBeChecked();
+    await expect(page.getByRole('checkbox', { name: 'Run checks', exact: true })).toBeChecked();
+    await page.getByRole('checkbox', { name: 'Run review', exact: true }).uncheck();
+    await page.getByRole('button', { name: 'Save automations', exact: true }).click();
+    await expect.poll(() => saved).toEqual({ jobIds: [14], revision: 2 });
+    await page.getByRole('checkbox', { name: 'Run checks', exact: true }).uncheck();
+    await page.getByRole('button', { name: 'Save automations', exact: true }).click();
+    await expect.poll(() => saved).toEqual({ jobIds: [], revision: 3 });
+});
+
+test('lane automation conflicts preserve selections and unavailable jobs can be removed', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openBoard(page);
+    let payload;
+    await page.route('**/api/v1/board/columns/col_ready/automation', route => {
+        if (route.request().method() === 'PUT') {
+            payload = route.request().postDataJSON();
+            return route.fulfill({ status: 409, json: { error: 'Lane automation changed while you were editing.' } });
+        }
+        return route.fulfill({ json: { jobIds: [12, 13, 99], revision: 7, jobs: [
+            { id: 12, name: '<img src=x onerror="window.__laneXss=1"> Review', enabled: true },
+            { id: 13, name: 'Paused', enabled: false }, { id: 14, name: 'Checks', enabled: true }
+        ] } });
+    });
+    await page.getByRole('button', { name: 'Settings for Ready', exact: true }).click();
+    await page.getByRole('checkbox', { name: 'Paused (disabled)', exact: true }).uncheck();
+    await page.getByRole('checkbox', { name: 'Unavailable Automation (99) (disabled)', exact: true }).uncheck();
+    await page.getByRole('checkbox', { name: 'Checks', exact: true }).check();
+    await page.getByRole('button', { name: 'Save automations', exact: true }).click();
+    await expect(page.getByText('Lane automation changed while you were editing.', { exact: true })).toBeVisible();
+    expect(payload).toEqual({ jobIds: [12, 14], expectedRevision: 7 });
+    await expect(page.getByRole('checkbox', { name: 'Checks', exact: true })).toBeChecked();
+    await expect(page.getByRole('checkbox', { name: 'Paused (disabled)', exact: true })).not.toBeChecked();
+    expect(await page.evaluate(() => window.__laneXss)).toBeUndefined();
+    await page.screenshot({ path: '../.codex-test-artifacts/vb22-lane-narrow.png' });
 });
 
 test('Chat with agent saves first, sends discussion intent and focuses the returned tab', async ({ page }) => {
