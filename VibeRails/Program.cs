@@ -12,7 +12,6 @@ using VibeRails.Services.Terminal;
 using VibeRails.Services.VCA.Hooks;
 using VibeRails.Services.Jobs;
 using VibeRails.Services.PythonScripts;
-using VibeRails.Services.Storage;
 
 using VibeRails.Utils;
 
@@ -127,15 +126,6 @@ AppDomain.CurrentDomain.ProcessExit += (_, _) =>
         ShutdownDiagnostics.FormatSnapshot(snapshot));
     Log.CloseAndFlush();
 };
-
-// Explicit schema upgrade: `vb --migrate`. The only launch path allowed to apply a breaking
-// migration to an existing database, and only with no other vb process alive and a backup taken.
-// Applies everything pending, prints the ledger, exits. No web server, no browser.
-if (SchemaMigrateProcessHost.IsRequested(args))
-{
-    Environment.ExitCode = await SchemaMigrateProcessHost.RunAsync();
-    return;
-}
 
 // MCP stdio server mode: `vb mcp`. Speaks MCP over stdin/stdout for CLIs that spawn it
 // (claude/codex `mcp add`). No web server, no port, no auth — stdio is inherently scoped to the

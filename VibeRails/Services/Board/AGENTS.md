@@ -98,16 +98,20 @@ the header displays the full card count. Tests should use realistic asynchronous
 
 Read [database migration instructions](../../../VibeRails.Data.Sqlite/DB/AGENTS.md).
 `board/1`–`board/9` already exist. `board/8` is a breaking retirement (state generation 3)
-that drops history tables, WIP limits and removed-file retention through backed-up `vb --migrate`;
+that drops history tables, WIP limits and removed-file retention through an automatic, backed-up upgrade;
 `board/9` adds the current-state attention flag. Historical migration SQL stays immutable. Add the next numbered migration rather than editing applied SQL.
-Honor generation checks, additive/breaking policy and explicit migration flow. Update schema
-snapshots and compatibility tests when the schema changes. Do not create a writer transaction
+Honor generation checks, automatic backups and transactional migration coordination. Users must
+never need a special command or manual preparation to use a new version. Prefer additive changes
+for concurrently running versions; retire a feature by stopping reads/writes, retaining its tables.
+Do not add historical-data conversion or backfills unless explicitly requested. Update schema
+snapshots and relevant compatibility tests when the schema changes. Do not create a writer transaction
 merely to read; use a deferred read snapshot if coherence requires a transaction. Connection
 policy belongs in the shared SQLite factory, not a Board-specific timeout/WAL workaround.
 
-Do not query or mutate the user's `state.db` to test a change. Use isolated temporary databases
-and fake tab hosts. Live-provider launch, large uploads, retention deletion and migrations are
-separate actions with concrete consequences, not required setup for unit tests.
+Automated regression tests use temporary database fixtures and fake tab hosts, not the user's
+stored data. Running/debugging the application uses its normal `state.db`; do not introduce a
+separate development database to conceal unsafe code. Live-provider launches and other real
+application actions are not required setup for unit tests.
 
 Board context and lane Automation settings still use their own expected revisions. Settings writes must remain project-scoped and reject stale revisions.
 Lane-entry triggers write one pending row per selected Automation and card in the move transaction.

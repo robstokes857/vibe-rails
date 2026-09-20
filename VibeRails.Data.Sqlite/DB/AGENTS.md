@@ -17,24 +17,54 @@ Migration does not silently rename or delete user environments.
 
 Pending migrations wait up to 60 seconds for database locks so startup can coexist with an older
 VibeRails process finishing a write. Their log entries identify the component, version, and file.
-A lock timeout reports which migration is pending and asks the operator to close other instances
-and retry; it never records completion. The connection returns to its previous timeout afterward
+A lock timeout reports which migration is pending and leaves it eligible for the next initialization;
+it never records completion. The connection returns to its previous timeout afterward
 (ordinary store operations retain the five-second policy).
 
-### Migration kinds, generations, and `vb --migrate` (added 2026-09-16)
+### Automatic database upgrades (updated 2026-09-20)
+
+**Installing and opening a new version must be sufficient to use it. Database upgrades are
+transparent to the user. Never require a migration command, opt-in flag, acknowledgement,
+manual backup, or closing other VibeRails windows as a normal upgrade step.** This supersedes
+the manual-upgrade policy introduced on 2026-09-16. There is no user-facing migration command.
+
+Debug builds and F5 use the same normal application state database as other launches:
+`~/.vibe_rails/state.db`. The former separate development database was removed; never restore
+`.vibe_rails_dev`, build/branch-specific data paths, or a Debug permission flag as a safety
+workaround. Code must be safe for the running database. If it is not, fix the implementation
+instead of redirecting the app to an alternate database or copy. Disposable databases belong
+in automated tests, not in the application's debug/runtime path policy.
+
+**Prefer additive schema changes and preserve compatibility with older versions where possible:
+different versions can run on the same machine.** Removing a feature normally means stopping
+reads/writes to its old tables, leaving those tables and their data in place. Do not drop tables
+or columns or delete stored data merely because the UI or service no longer uses them.
+Feature removal is not a request for destructive schema cleanup. Unused schema is accepted
+technical debt; leave it alone unless the owner explicitly requests that cleanup.
+Unless explicitly requested, do not plan or add historical-data conversion or backfill work.
+Make schema setup needed by the requested change automatic. Do not expand a feature or fix into
+a migration project or a manual upgrade procedure.
 
 Every `SqliteMigrationRunner.Apply` call declares a `MigrationKind`:
 
 - **Additive** — older binaries keep working unchanged (new table, nullable column, index, trigger
   that writes only to new tables, virtual table over a *new* content table). Runs at startup.
 - **Breaking** — anything an older binary could misuse afterwards (drop, rename, re-pointed
-  virtual-table content, changed trigger or constraint, row deletion). Never runs automatically
-  against a database that existed before the process started. It runs only from `vb --migrate`,
-  only when no other `vb` process is alive, and only after a copy is written to `backups/` beside
-  the file. Files this process created are never guarded. See `SchemaUpgradePolicy`.
+  virtual-table content, changed trigger or constraint, row deletion). Runs automatically too.
+  Existing databases receive a consistent SQLite backup under `backups/` beside the file before
+  the schema changes. Fresh databases need no backup. See `SchemaUpgradePolicy`.
+
+The runner acquires SQLite's writer transaction, rechecks the completion receipt, and then
+backs up through a separate read connection before executing migration SQL. Competing starts
+wait and skip completed work; open processes alone never block an upgrade. Schema changes and
+the completion receipt commit together. A failed backup prevents the migration; failed SQL
+rolls back and can retry on the next initialization. Retry backups never overwrite older copies.
+Do not replace transaction coordination with process enumeration or user intervention.
 
 Board migration `board/8` retires description history, WIP limits and removed-file retention
-(state generation 3); `board/9` adds the current attention flag. It follows the breaking gate above.
+(state generation 3); `board/9` adds the current attention flag. Both apply automatically.
+The owner accepted this already-shipped cleanup as an exception; it is not the template for
+future feature removals. Retire future code paths while retaining unused schema by default.
 
 Each database file carries a **generation** in `PRAGMA user_version`, bumped only by breaking
 changes (`StateDatabaseSchema.Generation`, `LlmExchangeLogStore.Generation`,
@@ -44,14 +74,12 @@ it. The shipped 1.10.10 binary predates the gate and reads `user_version < 1` as
 table", so generations stay at or above 1.
 
 `SchemaMigrations.AppliedBy` records which binary (name, version, configuration, pid, host)
-applied each step. `SqliteStorage.EnsureAllSchemas` brings every store current in one call; the
-`--migrate` host and `Tests/DB/SchemaSnapshotTests.cs` both use it. That test pins the schema of
+applied each step. `SqliteStorage.EnsureAllSchemas` brings every store current in one call for
+`Tests/DB/SchemaSnapshotTests.cs`. That test pins the schema of
 every table to `docs/schema/*.sql`; a table change is a diff there and needs the owner's sign-off.
-`Tests/DB/PreviousReleaseCompatibilityTests.cs` replays the shipped binary's FTS writes against this
-schema and must be updated with any change to what that binary can do.
-
-Prefer expand/contract for anything breaking: ship the new structure additively first, drop the old
-one in a later release once every install has moved, and bump the generation then.
+Use the existing compatibility fixtures when changing a schema or write contract so concurrently
+running versions keep working where possible. Prefer retaining unused tables and columns over
+forcing an incompatible cleanup. Never require database administration to use an update.
 
 Input recording and Git capture are orchestrated by `VibeRails/Services/UserInputRecordingService.cs`.
 Session export schema v2 includes a nested proxy-exchange archive. Retention uses the existing

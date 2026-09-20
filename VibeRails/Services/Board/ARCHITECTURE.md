@@ -16,13 +16,19 @@ the history/WIP contracts and recommendations in the historical review below.
   `update_board_card(flagged: true|false)`. It is independent of blocked. Launch prompts tell
   agents to flag a card and comment when human review is needed.
 - Breaking `board/8` retires history/WIP and removed files, advancing state generation to 3.
-  Existing installs use `vb --migrate` with its backup and exclusive-process checks. Additive
+  Existing installs upgrade automatically with a backup and SQLite transaction coordination. Additive
   `board/9` adds the attention flag. Board context and lane Automation revision checks remain.
 
 The Board now has **37 REST routes and 13 MCP tools**. F1's last-write behavior is an explicit
 owner choice; F2's revision recovery path is gone. F4's WIP portion is removed, but its filtered
 ordering issue remains. F3 remains open and was deprioritized in discussion; F5/F6/F7/F8 are
 outside this change. The following VB-22 and VB-16 automation/context behavior is preserved.
+
+Upgrade policy correction (2026-09-20): the initially shipped manual `vb --migrate` gate caused
+Board initialization to fail on existing installs. All migrations now run automatically during
+normal initialization. Breaking steps back up the existing database under the writer lock;
+concurrent initializations wait and recheck the ledger. Users never need a migration command,
+opt-in setting, or manual shutdown of other VibeRails windows to use a new version.
 
 
 ## VB-22 implementation amendment (2026-09-20)

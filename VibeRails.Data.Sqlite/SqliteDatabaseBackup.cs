@@ -21,7 +21,8 @@ internal static class SqliteDatabaseBackup
         Directory.CreateDirectory(backups);
 
         var stamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
-        var target = Path.Combine(backups, $"{Path.GetFileNameWithoutExtension(full)}.{stamp}.before-{reason}.db");
+        // A failed migration can retry immediately. Never overwrite its earlier recovery copy.
+        var target = Path.Combine(backups, $"{Path.GetFileNameWithoutExtension(full)}.{stamp}.{Guid.NewGuid():N}.before-{reason}.db");
 
         var needed = new FileInfo(full).Length + WalLength(full) + HeadroomBytes;
         var free = AvailableFreeSpace(full);

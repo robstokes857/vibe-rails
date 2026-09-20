@@ -41,8 +41,8 @@ internal static class StateDatabaseSchema
         });
         var queued = 0;
         // Breaking: 1.10.10 writes UserInputs_fts directly over UserInputs; after this the index is
-        // fed from UserInputSearchDocuments. Already applied on the owner's database (2026-09-16);
-        // any other existing database takes it only through `vb --migrate`.
+        // fed from UserInputSearchDocuments. Existing databases upgrade automatically with a
+        // pre-migration backup, just like every other breaking migration.
         SqliteMigrationRunner.Apply(connection, "state", 2, MigrationKind.Breaking, (db, transaction) =>
         {
             if (SqliteSchema.HasColumn(db, transaction, "UserInputs", "CleanedId"))

@@ -11,6 +11,31 @@ build/install scripts, and component documentation in this repository.
 Read it before changing API exposure, authentication, or production listeners;
 record security violations in `SECURITY_ERROR.md` for the owner to review.
 
+## Database change policy
+
+Opening a new version must just work. Required schema setup is automatic; never require a
+migration command, opt-in flag, manual backup, or closing other VibeRails instances to upgrade.
+Prefer additive changes and preserve older-version compatibility where possible, because
+different versions can run on the same machine.
+
+**Debugging uses the normal application state database, `~/.vibe_rails/state.db`.** Do not
+reintroduce a separate debug/development database, a build- or branch-dependent data directory,
+or a permission flag to let Debug builds use the normal database. Do not redirect the app to a
+copy to make unsafe code seem acceptable. If a change cannot safely use the running database,
+fix the change; an alternate runtime database is not the solution. Automated tests may still
+use disposable fixtures; that does not authorize a separate database for application debugging.
+
+**Removing a feature does not authorize deleting its stored data, tables, or columns.** Stop
+reading and writing the retired fields/tables in the current code and leave them in place.
+Unused schema is acceptable technical debt; do not prioritize its cleanup over requested work.
+Only perform destructive schema cleanup, historical-data conversion, or backfills when the
+owner explicitly requests that work. The existing Board cleanup was accepted for that release;
+it is not a precedent for future feature removals.
+
+For implementation details, read [SQLite instructions](VibeRails.Data.Sqlite/AGENTS.md) and the
+[database reference](VibeRails.Data.Sqlite/DB/AGENTS.md). This policy supersedes contradictory
+historical migration plans or runbooks.
+
 ## Terminology Note
 
 **"Web UI Chat"** refers to the xterm.js-based terminal interface where users interact with CLI tools (Claude, Codex, Antigravity) through a browser-based terminal emulator. This is NOT a separate chat UI - it's the PTY-backed terminal that runs actual CLI sessions.
@@ -550,6 +575,10 @@ tools (security review 2026-07-02).
 
 **Database Location**:
 - Global: `~/.vibe_rails/state.db` (single shared database; no per-project database)
+
+Follow the [database change policy](#database-change-policy) above. Normal startup applies
+pending schema changes automatically, with backups for breaking steps and SQLite transaction
+coordination; see the [database reference](VibeRails.Data.Sqlite/DB/AGENTS.md).
 
 ### API Layer
 
