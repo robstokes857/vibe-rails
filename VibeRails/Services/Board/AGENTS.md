@@ -13,7 +13,7 @@ across UI, REST, MCP and storage. The root [AGENTS.md](../../../AGENTS.md),
 | Text, uploads/previews, card links, base options | Adjacent `board-text`, `board-attachments`, `board-card-links`, `board-launch-options` modules |
 | Browser requests / REST shape | `board-api.js`, `VibeRails/Routes/BoardRoutes.cs`, Board DTOs in `ResponseRecords.cs` |
 | Validation and orchestration | `BoardService.cs` and its partials in this directory |
-| SQL and migration | `VibeRails.Data.Sqlite/Board/BoardStore*.cs`, `BoardDescriptionHistory.cs`; contracts in `VibeRails.Data.Abstractions/Board` |
+| SQL and migration | `VibeRails.Data.Sqlite/Board/BoardStore*.cs`, `BoardStore.Options.cs`; contracts in `VibeRails.Data.Abstractions/Board` |
 | Start work / prompt | `BoardLaunchService.cs`, `BoardPromptComposer.cs`, `BoardSelection.cs` |
 | Agent tools and project context | `Services/Mcp/Tools/BoardTool.cs`, `BoardProjectResolver.cs`; read [MCP instructions](../Mcp/AGENTS.md) |
 | Provider grants / child context | `Services/Terminal/Commands/BoardMcpAuthorization.cs`, OpenCode companion; read [terminal instructions](../Terminal/AGENTS.md) |
@@ -30,18 +30,19 @@ serialization or tool discovery into the Native AOT path.
   across boards; its high-water sequence must survive card/board deletion.
 - A card's board comes from its lane. Names are display values and can be duplicated. Prefer IDs
   for mutations; when resolving names, reject ambiguity. Current lane resolution still needs F5.
-- Keep number allocation, lane renumbering, description/revision writes, attachment membership,
+- Keep number allocation, lane renumbering, card writes, attachment membership,
   and commit link/snapshot atomic. Perform slow Git/process work outside write transactions.
-- A session links to at most one card. Reads record provenance without claiming ownership;
-  writes may auto-link an unlinked session. `read` events can reference another card's session.
-  Do not turn a browsing read into “Agent running.” Unknown session status is not ended (F6).
-- Description revision is provenance for **description plus attachment membership**, not a
-  whole-card version. Preserve expected-revision checks and the single append retry. Do not
-  advance a form's token without validating its base text (F2), or assume it protects metadata
-  from stale saves (F1). Fix those behaviors with focused concurrency coverage.
-- Revisions and original attachment bytes are immutable. Current-file removal is soft deletion;
-  historical manifests remain readable in the original card scope. Card/board deletion is a
-  different, cascading operation. Never imply that removal securely erases historical content.
+- A session links to at most one card. Reads never claim ownership; writes may auto-link an
+  unlinked session. Unknown session status is not ended (F6).
+- Cards keep one current state. Replacements accept the last write; no description revision,
+  expected-description token, history rail, history MCP tool or launch/read revision events.
+  Description append runs against the current text inside the same write transaction as the
+  other fields, with length validation before any writes. Do not restore revision tracking.
+- Attachment removal deletes its row and cascades its bytes. Only current attachments are
+  readable. Database backups can retain older data; removal is not secure erasure.
+- `Flagged` means **Needs your attention**, independently of `Blocked`. The editor saves it;
+  the tile paints red with a flag icon. Agents set/clear `flagged` through `update_board_card`
+  and explain the requested review in a comment. Omitted patch fields leave the flag unchanged.
 - Commit viewing reads durable snapshots, never the current checkout. Capture from the caller's
   actual checkout, not automatically the source board directory. Reject capture failure before
   creating a link; preserve bounds, truncation markers and unique-prefix handling.
@@ -53,7 +54,7 @@ serialization or tool discovery into the Native AOT path.
 - Current launch exclusion is root-local (F3). Do not assert cross-process mutual exclusion from
   a static dictionary or confuse a removable session-display link with execution ownership.
 - Saving a card never sends terminal input. Do not reintroduce the removed notification/TUI
-  handshake. Launch provenance must reference the snapshot used to compose the prompt.
+  handshake. Compose the launch prompt from the card read for that launch.
 
 ## Security and resource policy
 
@@ -90,13 +91,15 @@ responses through request generations and cancellation.
 
 Protect drafts across all close/navigation paths (F8); guard only linked-card navigation is
 insufficient. Do not let background rail mutations overwrite the surrounding form. Account for
-hidden cards when converting a drag target to a full-lane position (F4). WIP is advisory and must
-count the full lane. Tests should use realistic asynchronous races, not only markup assertions.
+hidden cards when converting a drag target to a full-lane position (F4). Lanes have no WIP limits;
+the header displays the full card count. Tests should use realistic asynchronous races, not only markup assertions.
 
 ## Storage changes
 
 Read [database migration instructions](../../../VibeRails.Data.Sqlite/DB/AGENTS.md).
-`board/1`–`board/6` already exist. Add the next numbered migration rather than editing applied SQL.
+`board/1`–`board/9` already exist. `board/8` is a breaking retirement (state generation 3)
+that drops history tables, WIP limits and removed-file retention through backed-up `vb --migrate`;
+`board/9` adds the current-state attention flag. Historical migration SQL stays immutable. Add the next numbered migration rather than editing applied SQL.
 Honor generation checks, additive/breaking policy and explicit migration flow. Update schema
 snapshots and compatibility tests when the schema changes. Do not create a writer transaction
 merely to read; use a deferred read snapshot if coherence requires a transaction. Connection
@@ -106,9 +109,10 @@ Do not query or mutate the user's `state.db` to test a change. Use isolated temp
 and fake tab hosts. Live-provider launch, large uploads, retention deletion and migrations are
 separate actions with concrete consequences, not required setup for unit tests.
 
-Board context and lane Automation settings use their own expected revisions, separate from
-card descriptions. Settings writes must remain project-scoped and reject stale revisions.
-Lane-entry triggers write one pending row per card in the move transaction. Keep pending-event
+Board context and lane Automation settings still use their own expected revisions. Settings writes must remain project-scoped and reject stale revisions.
+Lane-entry triggers write one pending row per selected Automation and card in the move transaction.
+The first selection uses the board/6 tables; additional selections use the additive board/7 tables.
+Keep pending-event
 consumption atomic with normal Job run/action snapshot creation; never replace this with a
 browser timer or an in-memory queue. The existing leased root scheduler owns execution.
 
@@ -116,7 +120,7 @@ browser timer or an in-memory queue. The existing leased root scheduler owns exe
 
 | Change | Relevant coverage |
 | --- | --- |
-| Store/service/history | `Tests/Services/Board/BoardStoreTests.cs`, `BoardServiceTests.cs`, `BoardDescriptionHistoryTests.cs`, attachment and commit tests |
+| Store/service/current state | `Tests/Services/Board/BoardStoreTests.cs`, `BoardServiceTests.cs`, `BoardCurrentStateTests.cs`, `BoardSimplificationMigrationTests.cs`, attachment and commit tests |
 | Routes/scope/auth | `Tests/Routes/BoardRoutesTests.cs`, `CookieAuthMiddlewareTests` |
 | MCP / grants | `BoardToolTests`, `McpServerHttpTests`, `McpStdioHostTests`, `BoardToolAuthorizationTests`, OpenCode/command Board tests |
 | Launch concurrency/prompt | `BoardLaunchConcurrencyTests`, `BoardPromptComposerTests`, launch cases in `BoardServiceTests` |
@@ -134,7 +138,7 @@ From `UITests`: `npx playwright test --config playwright.board.config.js`. That 
 mock APIs and no user database or real CLI. Passing it does not verify the production launch
 handshake. Report the actual validation scope and unresolved findings, not just “tests pass.”
 
-For Board-card sessions, read the full card/history before resuming, checkpoint findings in notes,
+For Board-card sessions, read the full card and earlier activity before resuming, checkpoint findings in notes,
 record user-facing decisions in comments, and link commits after capture succeeds. Move work to
 Review when it is ready for human review; do not treat open implementation findings in a research
 spike as fixed. Component documentation belongs here; runbooks and diagnostic history belong in

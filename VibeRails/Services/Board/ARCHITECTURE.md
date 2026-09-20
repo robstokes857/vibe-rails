@@ -1,5 +1,52 @@
 # Vibe Board architecture and review
 
+## VB-18 simplification and attention flag (2026-09-20)
+
+The owner requested one current card state and no WIP limits. This amendment supersedes
+the history/WIP contracts and recommendations in the historical review below.
+
+- Removed the WIP editor, thresholds, warnings, wire fields and stored limit. Lane headers retain counts.
+- Removed description revision history, manifests, session read/edit/launch events, the REST
+  `GET /api/v1/board/cards/{card}/history` route and `get_board_card_history` MCP tool/grant.
+  Current description replacements accept the last write; append reads current text within
+  the write transaction and validates the combined length. There is no revision retry logic.
+- Attachment deletion removes its row and bytes; no historical attachment download remains.
+  Comments, notes, sessions, linked commits and their code snapshots remain.
+- Added `Flagged`: **Needs your attention** in the editor, red tile with a flag icon, and
+  `update_board_card(flagged: true|false)`. It is independent of blocked. Launch prompts tell
+  agents to flag a card and comment when human review is needed.
+- Breaking `board/8` retires history/WIP and removed files, advancing state generation to 3.
+  Existing installs use `vb --migrate` with its backup and exclusive-process checks. Additive
+  `board/9` adds the attention flag. Board context and lane Automation revision checks remain.
+
+The Board now has **37 REST routes and 13 MCP tools**. F1's last-write behavior is an explicit
+owner choice; F2's revision recovery path is gone. F4's WIP portion is removed, but its filtered
+ordering issue remains. F3 remains open and was deprioritized in discussion; F5/F6/F7/F8 are
+outside this change. The following VB-22 and VB-16 automation/context behavior is preserved.
+
+
+## VB-22 implementation amendment (2026-09-20)
+
+Lane settings now select multiple existing project Automations. `jobIds` carries the full,
+distinct list; an empty list disables lane Automations. The existing route and expected revision
+are unchanged. Legacy `jobId` requests still replace the selection with zero or one job; responses
+retain `jobId` for the first selection alongside `jobIds`. Sending both fields is rejected.
+Every selected job must be enabled, undeleted and in the lane's project at save time.
+
+Additive `board/7` leaves board/6 SQL and data intact. The first selection and pending event stay
+in their original tables; `BoardLaneAdditionalAutomations` and `BoardPendingAdditionalAutomations`
+hold the remainder. New card insert/move triggers fill the additional queue in the card-write
+transaction. Header updates clear additional selections and cascade their pending events, so a
+legacy settings save also replaces the full list. New saves validate the full list before writing,
+advance the shared revision, and rebuild additional selections atomically. No backfill is needed.
+
+Each Automation queues independently after the same 60-second settling period, with its own
+enabled/deleted/project/overlap checks. There is no execution-order dependency. The scheduler
+consumes each queue in a transaction with the resulting run/action snapshots; an old scheduler
+can consume the original queue without discarding additional events. Extra jobs wait until a
+backend supporting board/7 runs. Moving away, settings saves and card/board deletion cancel all
+applicable pending events. Same-lane edits/reorders and already-queued runs keep existing behavior.
+
 ## VB-16 implementation amendment (2026-09-19)
 
 Board settings now include a default agent message and per-type `default`, `replace`, or

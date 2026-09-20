@@ -486,13 +486,13 @@ export class BoardController {
 
         // is-live paints the marching "an agent is on this" border (see the template CSS).
         return `
-            <article class="board-card${card.blocked ? ' is-blocked' : ''}${card.activeTabId ? ' is-live' : ''}" data-card-id="${escapeHtml(card.id)}"
-                tabindex="0" role="button" aria-label="${escapeHtml(card.key)}: ${escapeHtml(card.title)}">
+            <article class="board-card${card.flagged ? ' is-flagged' : ''}${card.blocked ? ' is-blocked' : ''}${card.activeTabId ? ' is-live' : ''}" data-card-id="${escapeHtml(card.id)}"
+                tabindex="0" role="button" aria-label="${escapeHtml(card.key)}: ${escapeHtml(card.title)}${card.flagged ? ' — Needs your attention' : ''}">
                 <span class="board-card-rail" data-priority="${escapeHtml(card.priority)}"
                     title="${escapeHtml(card.priority)} priority"></span>
                 <div class="board-card-body">
                     <div class="board-card-top">
-                        <span class="board-key">${escapeHtml(card.key)}</span>
+                        <span class="board-key">${card.flagged ? '<i class="fa-solid fa-flag board-attention-flag" title="Needs your attention" aria-hidden="true"></i> ' : ''}${escapeHtml(card.key)}</span>
                         <span class="board-card-top-right">
                             <span class="board-type-chip" data-type="${escapeHtml(type.value)}"
                                 title="${escapeHtml(type.label)}">${escapeHtml(type.label)}</span>
@@ -537,13 +537,11 @@ export class BoardController {
                     .filter(card => card.columnId === column.id)
                     .sort((a, b) => a.position - b.position);
                 const total = this.state.cards.filter(card => card.columnId === column.id).length;
-                const over = column.wipLimit != null && total > column.wipLimit;
-                const wip = column.wipLimit != null ? `${total} / ${column.wipLimit}` : String(total);
                 const list = cards.map(card => this.renderCard(card)).join('')
                     || `<p class="board-lane-empty">${escapeHtml(this.emptyLaneCopy(column, total > 0))}</p>`;
 
                 return `
-                    <section class="board-lane${over ? ' is-over-wip' : ''}" data-column-id="${escapeHtml(column.id)}"
+                    <section class="board-lane" data-column-id="${escapeHtml(column.id)}"
                         style="--lane-color:${escapeHtml(column.color)}">
                         <header class="board-lane-head">
                             <button type="button" class="board-lane-grip" title="Drag to reorder this lane"
@@ -551,7 +549,7 @@ export class BoardController {
                                 <i class="fa-solid fa-grip-vertical" aria-hidden="true"></i>
                             </button>
                             <h2 class="board-lane-title">${escapeHtml(column.name)}</h2>
-                            <span class="board-wip" title="${column.wipLimit != null ? 'Cards in lane / WIP limit' : 'Cards in lane'}">${escapeHtml(wip)}</span>
+                            <span class="board-card-count" title="Cards in lane">${total}</span>
                             <button type="button" class="board-icon-btn" data-board-action="edit-lane"
                                 data-column-id="${escapeHtml(column.id)}" title="Lane settings"
                                 aria-label="Settings for ${escapeHtml(column.name)}">
@@ -654,11 +652,6 @@ export class BoardController {
 
         try {
             await BoardApi.moveBoardCardAsync(cardId, { columnId, position });
-            const column = this.columnById(columnId);
-            const count = event.to.querySelectorAll('.board-card').length;
-            if (column?.wipLimit != null && count > column.wipLimit) {
-                this.app.showToast('Over WIP limit', `${column.name} now holds ${count} cards, over its limit of ${column.wipLimit}.`, 'warning');
-            }
         } catch (error) {
             this.app.showToast('Board', error?.message || 'Failed to move the card.', 'error');
         }
@@ -823,8 +816,7 @@ export class BoardController {
         const columnId = card?.columnId || this.state.columns[0]?.id || '';
 
         this.app.showModal(card ? `${card.key} · ${card.title}` : 'New card', `
-            <div class="board-card-editor" data-board-card-editor data-card-id="${escapeHtml(card?.id || '')}"
-                data-description-revision="${Number(card?.descriptionRevision) || 0}">
+            <div class="board-card-editor" data-board-card-editor data-card-id="${escapeHtml(card?.id || '')}">
                 <div class="board-editor-scroll">
                 <div class="board-editor-main">
                     <input type="text" class="form-control board-editor-title" id="board-card-title"
@@ -918,6 +910,11 @@ export class BoardController {
                                 placeholder="auth, bug" value="${escapeHtml((card?.tags || []).join(', '))}">
                         </div>
                         <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="board-card-flagged"
+                                data-board-flagged${card?.flagged ? ' checked' : ''}>
+                            <label class="form-check-label" for="board-card-flagged"><i class="fa-solid fa-flag" aria-hidden="true"></i> Needs your attention</label>
+                        </div>
+                        <div class="form-check">
                             <input class="form-check-input" type="checkbox" id="board-card-blocked"
                                 data-board-blocked${card?.blocked ? ' checked' : ''}>
                             <label class="form-check-label" for="board-card-blocked">Blocked</label>
@@ -963,13 +960,7 @@ export class BoardController {
                         <details data-board-notes-details>
                             <summary class="board-side-label"><i class="fa-solid fa-pen-ruler" aria-hidden="true"></i> Agent notes <span class="board-count" data-board-count="notes">${card?.notes?.length || 0}</span></summary>
                             <p class="board-editor-muted">The scratchpad agents checkpoint findings in while they work. Not part of the comment thread.</p>
-                            <div data-board-notes class="board-history-list"></div>
-                        </details>
-                    </section>
-                    <section class="board-side-section">
-                        <details data-board-history-details>
-                            <summary class="board-side-label"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Description history</summary>
-                            <div data-board-history class="board-history-list"></div>
+                            <div data-board-notes class="board-notes-list"></div>
                         </details>
                     </section>` : ''}
                     </div>
@@ -1060,9 +1051,6 @@ export class BoardController {
             event.target.value = '';
             this.attachImages(editor.querySelector('[data-board-composer="description"]'),
                 editor.querySelector('[data-board-composer="description"] [data-board-composer-input]'), card, files, { inline: false });
-        });
-        editor.querySelector('[data-board-history-details]')?.addEventListener('toggle', event => {
-            if (event.target.open) void this.renderDescriptionHistory(editor, card);
         });
         editor.querySelector('[data-board-notes-details]')?.addEventListener('toggle', event => {
             if (event.target.open) this.renderNotesPanel(editor, card);
@@ -1324,38 +1312,8 @@ export class BoardController {
         } catch (error) {
             this.app.showToast('Board', error?.message || 'Failed to add the file.', 'error');
         } finally {
-            if (card.id && editor) await this.syncAttachmentRevision(editor, card);
             if (busy) busy.hidden = true;
             if (editor) editor._boardUploading = false;
-        }
-    }
-
-    async syncAttachmentRevision(editor, card) {
-        try {
-            const fresh = await BoardApi.getBoardCardAsync(card.id);
-            if (fresh.description === card.description && fresh.descriptionRevision) {
-                card.descriptionRevision = fresh.descriptionRevision;
-                editor.dataset.descriptionRevision = String(fresh.descriptionRevision);
-            }
-            card.attachments = fresh.attachments || card.attachments;
-            this.renderAttachmentsPanel(editor, card);
-        } catch (error) {
-            this.app.showToast('Board', 'Files were updated, but the card could not be refreshed. Reopen it before saving.', 'warning');
-        }
-    }
-
-    // Every attachment upload appends a description revision server-side (the revision owns the
-    // attachment manifest), so the token the editor would send on its next save goes stale as soon
-    // as one file lands. Re-read it rather than guessing, and never let this failure mask the
-    // caller's own error — a stale token only costs a conflict the user can retry past.
-    async restampDescriptionRevision(editor, cardId) {
-        try {
-            const fresh = await BoardApi.getBoardCardAsync(cardId);
-            if (!fresh?.descriptionRevision) return;
-            editor.dataset.descriptionRevision = String(fresh.descriptionRevision);
-            if (editor._boardCard) editor._boardCard.descriptionRevision = fresh.descriptionRevision;
-        } catch {
-            // Leave the old token: the retry surfaces a readable conflict instead of a silent loss.
         }
     }
 
@@ -1396,51 +1354,13 @@ export class BoardController {
         host.querySelectorAll('[data-board-remove-attachment]').forEach(button => button.addEventListener('click', async () => {
             if (editor._boardUploading || editor._boardSaving || editor._boardStarting) return;
             const attachment = attachments.find(item => item.id === button.dataset.boardRemoveAttachment);
-            // "Remove" takes the file off the current card; earlier description revisions keep
-            // their own manifest, so the bytes stay reachable from history. Say so rather than
-            // implying the file is gone.
-            if (!attachment || !await confirmDialog({ title: 'Remove attachment', message: `Remove ${attachment.name} from this card? Earlier description revisions can still open it.`, confirmLabel: 'Remove', danger: true })) return;
+            if (!attachment || !await confirmDialog({ title: 'Remove attachment', message: `Remove ${attachment.name} from this card?`, confirmLabel: 'Remove', danger: true })) return;
             try {
                 await BoardApi.deleteCardAttachmentAsync(card.id, attachment.id);
                 card.attachments = attachments.filter(item => item.id !== attachment.id);
                 this.renderAttachmentsPanel(editor, card);
-                await this.syncAttachmentRevision(editor, card);
             } catch (error) { this.app.showToast('Board', error?.message || 'Could not remove the file.', 'error'); }
         }));
-    }
-
-    async renderDescriptionHistory(editor, card) {
-        const host = editor.querySelector('[data-board-history]');
-        if (!host || !card?.id) return;
-        host.textContent = 'Loading history…';
-        try {
-            const history = await BoardApi.getCardDescriptionHistoryAsync(card.id);
-            if (!host.isConnected) return;
-            host.innerHTML = (history?.revisions || []).map(revision => `
-                <details class="board-history-revision">
-                    <summary>Revision ${Number(revision.revision)} · ${escapeHtml(this.formatDateTime(revision.createdAt))}</summary>
-                    <p class="board-editor-muted">${escapeHtml(revision.author?.label || revision.source || '')}</p>
-                    <div class="board-comment-body">${renderCommentHtml(revision.description || '(Empty description)', { attachments: revision.attachments || [] })}</div>
-                    ${(revision.attachments || []).map(attachment => `<button type="button" class="btn btn-sm btn-outline-secondary my-1" data-board-history-file="${escapeHtml(attachment.id)}">${escapeHtml(attachment.name)}</button>`).join('')}
-                    <ul class="board-history-events">${(revision.sessions || []).map(event => {
-                        const session = card.sessions?.find(item => item.id === event.sessionId);
-                        // A read can come from a session this card does not own — reads never link
-                        // — so there is no display name for it. Show the short id; the event's
-                        // message says which card that agent is actually working.
-                        const who = session?.displayName || `Agent session ${String(event.sessionId || '').slice(0, 8)}`;
-                        // `status` is not rendered: it tracked notification delivery, and with that
-                        // feature gone every event is "recorded", so printing it says nothing.
-                        return `<li>${escapeHtml(who)} · ${escapeHtml(event.kind)}
-                            <span class="board-side-sub">${escapeHtml(this.formatDateTime(event.createdAt))}${event.message ? ` · ${escapeHtml(event.message)}` : ''}</span></li>`;
-                    }).join('')}</ul>
-                </details>`).join('') || '<p class="board-editor-muted">No history yet.</p>';
-            host.querySelectorAll('[data-board-history-file]').forEach(button => button.addEventListener('click', async () => {
-                const attachment = history.revisions.flatMap(revision => revision.attachments || []).find(item => item.id === button.dataset.boardHistoryFile);
-                if (!attachment) return;
-                try { await openBoardAttachment(this.app, card.id, attachment); }
-                catch (error) { this.app.showToast('Board', error?.message || 'Could not open the historical file.', 'error'); }
-            }));
-        } catch (error) { host.textContent = error?.message || 'Could not load history.'; }
     }
 
     // Agent notes ride on the card response (card.notes), so no fetch: the section is collapsed by
@@ -1839,12 +1759,11 @@ export class BoardController {
             type: value('#board-card-type'),
             assignee: value('#board-card-assignee'),
             baseLlmOptions: readBoardLaunchOptions(editor, value('#board-card-assignee')),
-            ...(Number(editor.dataset?.descriptionRevision) > 0
-                ? { expectedDescriptionRevision: Number(editor.dataset.descriptionRevision) } : {}),
             priority: value('#board-card-priority'),
             points: value('#board-card-points'),
             tags: value('#board-card-tags').split(',').map(tag => tag.trim()).filter(Boolean),
-            blocked: Boolean(editor.querySelector('[data-board-blocked]')?.checked)
+            blocked: Boolean(editor.querySelector('[data-board-blocked]')?.checked),
+            flagged: Boolean(editor.querySelector('[data-board-flagged]')?.checked)
         };
     }
 
@@ -1874,7 +1793,6 @@ export class BoardController {
                 if (editor._boardCard) Object.assign(editor._boardCard, saved);
                 this.app.showToast('Board', `Created ${saved.key}.`, 'success');
             }
-            if (saved?.descriptionRevision) editor.dataset.descriptionRevision = String(saved.descriptionRevision);
             const pending = editor._boardCard?.pendingAttachments || [];
             while (pending.length) {
                 const attachment = await BoardApi.addCardAttachmentAsync(saved.id, pending[0]);
@@ -1887,12 +1805,8 @@ export class BoardController {
             await this.refresh();
         } catch (error) {
             // The card itself may already be saved and only a queued upload failed — saying the
-            // card failed to save sends the user looking for a card that exists. The editor keeps
-            // the new id, so retrying Save uploads the rest. That retry only works if the revision
-            // token is refreshed first: each upload that DID land advanced it, so leaving the
-            // pre-upload value here would fail the retry with a spurious "changed while you were
-            // editing" conflict and strand the remaining files behind an error the user cannot clear.
-            if (saved) await this.restampDescriptionRevision(editor, saved.id);
+            // card failed to save sends the user looking for a card that exists. Keep the saved
+            // id and remaining upload queue so Save can retry the unfinished uploads.
             this.app.showToast('Board', saved
                 ? `${saved.key} was saved, but a file did not upload. ${error?.message || ''}`.trim()
                 : error?.message || 'Failed to save the card.', saved ? 'warning' : 'error');
@@ -1946,7 +1860,6 @@ export class BoardController {
         editor._boardStarting = true;
         try {
             const saved = await BoardApi.updateBoardCardAsync(card.id, payload);
-            if (saved?.descriptionRevision) editor.dataset.descriptionRevision = String(saved.descriptionRevision);
             if (this.hasRunningSession(saved)) {
                 this.updateStartWorkButton(editor, saved);
                 this.app.showToast('Board', 'An agent is already running on this card. Open it from Sessions.', 'info');
@@ -2123,10 +2036,6 @@ export class BoardController {
                 <input type="text" class="form-control form-control-sm mb-3" id="board-lane-name"
                     placeholder="Lane name" value="${escapeHtml(column?.name || '')}">
 
-                <label class="board-editor-label" for="board-lane-wip">WIP limit</label>
-                <input type="number" class="form-control form-control-sm mb-3" id="board-lane-wip" min="1"
-                    placeholder="None" value="${escapeHtml(column?.wipLimit ?? '')}">
-                <p class="board-editor-muted mb-3">A lane over its limit is flagged, never blocked.</p>
 
                 <span class="board-editor-label">Colour</span>
                 <div class="board-swatches" data-board-swatches role="group" aria-label="Lane colour">
@@ -2175,16 +2084,14 @@ export class BoardController {
             editor.querySelector('#board-lane-name')?.focus();
             return;
         }
-        const rawWip = editor.querySelector('#board-lane-wip')?.value ?? '';
-        const wipLimit = rawWip === '' ? null : Number(rawWip);
         const color = this.state.editingColumnColor;
 
         try {
             if (this.state.editingColumnId) {
-                await BoardApi.updateBoardColumnAsync(this.state.editingColumnId, { name, wipLimit, color });
+                await BoardApi.updateBoardColumnAsync(this.state.editingColumnId, { name, color });
                 this.app.showToast('Board', 'Lane saved.', 'success');
             } else {
-                await BoardApi.createBoardColumnAsync({ name, wipLimit, color, boardId: this.state.boardId });
+                await BoardApi.createBoardColumnAsync({ name, color, boardId: this.state.boardId });
                 this.app.showToast('Board', 'Lane added.', 'success');
             }
             this.app.closeModal();

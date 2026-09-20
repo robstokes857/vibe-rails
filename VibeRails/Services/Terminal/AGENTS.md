@@ -43,7 +43,7 @@ Start work also sets `StartTerminalRequest.AuthorizeBoardTools` for base and sav
 launches. It defaults to false everywhere else and travels through TerminalRoutes,
 TerminalSessionService, TerminalRunner and CommandService. The launch prompt explicitly
 authorizes the Board workflow for every provider. `Commands/BoardMcpAuthorization.cs` grants
-only the fourteen reviewed Board tools in `ToolNames`, using exact per-tool rules. Unrelated
+only the thirteen reviewed Board tools in `ToolNames`, using exact per-tool rules. Unrelated
 MCP tools retain their normal approval policy. Never add a server-wide grant: future tools must
 be reviewed individually before they enter this allowlist.
 

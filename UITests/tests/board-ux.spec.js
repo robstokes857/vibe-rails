@@ -12,7 +12,7 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
     let card = {
         id: 'card_test', key: 'VB-1', columnId: 'col_ready', position: 0,
         title: 'Description images', description: DESCRIPTION, type: 'feature', priority: 'high',
-        assignee, points: null, tags: [], blocked: false, commentCount: 1, descriptionRevision: 1,
+        assignee, points: null, tags: [], blocked: false, flagged: false, commentCount: 1,
         activeSessionId: active ? 'session_test' : null,
         createdAt: '2026-09-11T06:00:00Z', updatedAt: '2026-09-11T06:00:00Z',
         attachments: [{ id: 'att_image', name: 'Screenshot.png', url: IMAGE }],
@@ -62,14 +62,13 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
             return route.fulfill({ json: { ...relatedCard, linkedCards: linkedIds.has(relatedCard.id) ? [linkSummary(card)] : [] } });
         }
         if (path === '/api/v1/board/cards' && route.request().method() === 'POST') {
-            card = { ...card, ...route.request().postDataJSON(), id: 'card_created', key: 'VB-2', attachments: [], comments: [], sessions: [], descriptionRevision: 1 };
+            card = { ...card, ...route.request().postDataJSON(), id: 'card_created', key: 'VB-2', attachments: [], comments: [], sessions: [] };
             return route.fulfill({ json: { ...card, linkedCards: related.filter(item => linkedIds.has(item.id)).map(linkSummary) } });
         }
         if (path === `/api/v1/board/cards/${card.id}`) {
             if (route.request().method() === 'PUT') {
                 const patch = route.request().postDataJSON();
-                const changed = patch.description !== undefined && patch.description !== card.description;
-                card = { ...card, ...patch, descriptionChanged: changed, descriptionRevision: card.descriptionRevision + (changed ? 1 : 0) };
+                card = { ...card, ...patch };
             }
             return route.fulfill({ json: { ...card, linkedCards: related.filter(item => linkedIds.has(item.id)).map(linkSummary) } });
         }
@@ -82,7 +81,6 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
         }
         if (path.endsWith('/attachments/att_uploaded/content')) return route.fulfill({ contentType: 'application/octet-stream', body: contents.get('att_uploaded') });
         if (path.endsWith('/launch')) return route.fulfill({ json: { tabId: 'board_background', cardKey: card.key, selection: card.assignee } });
-        if (path.endsWith('/history')) return route.fulfill({ json: { currentRevision: card.descriptionRevision, revisions: [{ revision: 1, description: DESCRIPTION, createdAt: card.createdAt, author: { label: 'You' }, sessions: [{ sessionId: 'session_test', kind: 'launch', status: 'recorded', createdAt: card.createdAt }] }] } });
         const payloads = {
             '/api/v1/context': { isInGit: true, rootPath: 'C:/board-fixture', launchDirectory: 'C:/board-fixture' },
             '/api/v1/settings': {},
@@ -183,30 +181,62 @@ test('board context settings persist default and per-type choices and preserve a
     await expect(page.getByLabel('Default message', { exact: true })).toHaveValue('Keep my draft');
 });
 
-test('lane automation selects an existing job, persists and can be removed', async ({ page }) => {
+test('lane automations select multiple jobs, persist, remove one and clear all', async ({ page }) => {
     await openBoard(page);
-    let saved = { jobId: null, revision: 0 };
+    let saved = { jobIds: [], revision: 0 };
     await page.route('**/api/v1/board/columns/col_ready/automation', async route => {
         if (route.request().method() === 'PUT') {
             const body = route.request().postDataJSON();
             expect(body.expectedRevision).toBe(saved.revision);
-            saved = { jobId: body.jobId, revision: saved.revision + 1 };
+            saved = { jobIds: body.jobIds, revision: saved.revision + 1 };
         }
-        return route.fulfill({ json: { ...saved, jobs: [{ id: 12, name: 'Run review', enabled: true }, { id: 13, name: 'Paused', enabled: false }] } });
+        return route.fulfill({ json: { ...saved, jobs: [{ id: 12, name: 'Run review', enabled: true }, { id: 13, name: 'Paused', enabled: false }, { id: 14, name: 'Run checks', enabled: true }] } });
     });
     await page.getByRole('button', { name: 'Settings for Ready', exact: true }).click();
     await expect(page.getByText(/stays for 60 seconds/)).toBeVisible();
-    await page.getByLabel('Automation on entry', { exact: true }).selectOption('12');
-    await expect(page.locator('#board-lane-automation option[value="13"]')).toBeDisabled();
-    await page.getByRole('button', { name: 'Save automation', exact: true }).click();
-    await expect.poll(() => saved).toEqual({ jobId: 12, revision: 1 });
-    await page.screenshot({ path: '../.codex-test-artifacts/vb16-lane.png' });
+    await page.getByRole('checkbox', { name: 'Run review', exact: true }).check();
+    await page.getByRole('checkbox', { name: 'Run checks', exact: true }).check();
+    await expect(page.getByRole('checkbox', { name: 'Paused (disabled)', exact: true })).toBeDisabled();
+    await page.getByRole('button', { name: 'Save automations', exact: true }).click();
+    await expect.poll(() => saved).toEqual({ jobIds: [12, 14], revision: 1 });
+    await page.screenshot({ path: '../.codex-test-artifacts/vb22-lane.png' });
     await page.locator('#modal-container [data-action="close-modal"]').first().click();
     await page.getByRole('button', { name: 'Settings for Ready', exact: true }).click();
-    await expect(page.getByLabel('Automation on entry', { exact: true })).toHaveValue('12');
-    await page.getByLabel('Automation on entry', { exact: true }).selectOption('');
-    await page.getByRole('button', { name: 'Save automation', exact: true }).click();
-    await expect.poll(() => saved).toEqual({ jobId: null, revision: 2 });
+    await expect(page.getByRole('checkbox', { name: 'Run review', exact: true })).toBeChecked();
+    await expect(page.getByRole('checkbox', { name: 'Run checks', exact: true })).toBeChecked();
+    await page.getByRole('checkbox', { name: 'Run review', exact: true }).uncheck();
+    await page.getByRole('button', { name: 'Save automations', exact: true }).click();
+    await expect.poll(() => saved).toEqual({ jobIds: [14], revision: 2 });
+    await page.getByRole('checkbox', { name: 'Run checks', exact: true }).uncheck();
+    await page.getByRole('button', { name: 'Save automations', exact: true }).click();
+    await expect.poll(() => saved).toEqual({ jobIds: [], revision: 3 });
+});
+
+test('lane automation conflicts preserve selections and unavailable jobs can be removed', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openBoard(page);
+    let payload;
+    await page.route('**/api/v1/board/columns/col_ready/automation', route => {
+        if (route.request().method() === 'PUT') {
+            payload = route.request().postDataJSON();
+            return route.fulfill({ status: 409, json: { error: 'Lane automation changed while you were editing.' } });
+        }
+        return route.fulfill({ json: { jobIds: [12, 13, 99], revision: 7, jobs: [
+            { id: 12, name: '<img src=x onerror="window.__laneXss=1"> Review', enabled: true },
+            { id: 13, name: 'Paused', enabled: false }, { id: 14, name: 'Checks', enabled: true }
+        ] } });
+    });
+    await page.getByRole('button', { name: 'Settings for Ready', exact: true }).click();
+    await page.getByRole('checkbox', { name: 'Paused (disabled)', exact: true }).uncheck();
+    await page.getByRole('checkbox', { name: 'Unavailable Automation (99) (disabled)', exact: true }).uncheck();
+    await page.getByRole('checkbox', { name: 'Checks', exact: true }).check();
+    await page.getByRole('button', { name: 'Save automations', exact: true }).click();
+    await expect(page.getByText('Lane automation changed while you were editing.', { exact: true })).toBeVisible();
+    expect(payload).toEqual({ jobIds: [12, 14], expectedRevision: 7 });
+    await expect(page.getByRole('checkbox', { name: 'Checks', exact: true })).toBeChecked();
+    await expect(page.getByRole('checkbox', { name: 'Paused (disabled)', exact: true })).not.toBeChecked();
+    expect(await page.evaluate(() => window.__laneXss)).toBeUndefined();
+    await page.screenshot({ path: '../.codex-test-artifacts/vb22-lane-narrow.png' });
 });
 
 test('Chat with agent saves first, sends discussion intent and focuses the returned tab', async ({ page }) => {
@@ -327,7 +357,29 @@ test('work and discussion actions remain reachable on a narrow screen', async ({
     await page.screenshot({ path: '../.codex-test-artifacts/vb16-chat-narrow.png' });
 });
 
-test('a description edit saves without touching the running agent, and history identifies the session', async ({ page }) => {
+test('attention flags persist, paint a red card with a flag, and can be cleared', async ({ page }, testInfo) => {
+    const requests = await openBoard(page);
+    await page.locator('[data-card-id="card_test"]').click();
+    await expect(page.locator('[data-board-history-details]')).toHaveCount(0);
+    await page.getByLabel('Needs your attention', { exact: true }).check();
+    await page.locator('[data-board-save-card]').click();
+    const card = page.locator('.board-card[data-card-id="card_test"]');
+    await expect(card).toHaveClass(/is-flagged/);
+    await expect(card.locator('.fa-flag')).toBeVisible();
+    await expect(card).toHaveCSS('border-top-color', 'rgb(239, 68, 68)');
+    expect(requests.some(request => request.method === 'PUT' && request.body?.flagged === true)).toBeTruthy();
+    await page.screenshot({ path: testInfo.outputPath('flagged-board.png') });
+    await card.click();
+    await expect(page.getByLabel('Needs your attention', { exact: true })).toBeChecked();
+    await expect(page.getByLabel('Blocked', { exact: true })).not.toBeChecked();
+    await page.getByLabel('Needs your attention', { exact: true }).uncheck();
+    await page.locator('[data-board-save-card]').click();
+    await expect(card).not.toHaveClass(/is-flagged/);
+    await expect(card.locator('.fa-flag')).toHaveCount(0);
+    expect(requests.some(request => request.path.endsWith('/history'))).toBeFalsy();
+});
+
+test('a description edit saves without touching the running agent or keeping history', async ({ page }) => {
     const requests = await openBoard(page, { active: true });
     await page.getByText('Description images', { exact: true }).click();
     await page.getByRole('button', { name: 'Edit description' }).click();
@@ -340,10 +392,6 @@ test('a description edit saves without touching the running agent, and history i
     expect(requests.filter(request => request.path.endsWith('/notify'))).toHaveLength(0);
 
     await page.getByText('Description images', { exact: true }).click();
-    await page.locator('[data-board-history-details] > summary').click();
-    await page.locator('.board-history-revision > summary').click();
-    await expect(page.locator('[data-board-history]')).toContainText('Codex session · launch');
-    await expect(page.locator('[data-board-history]')).toContainText('Repro screenshot');
 });
 
 test('new cards queue files until Save and do not launch', async ({ page }) => {

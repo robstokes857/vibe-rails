@@ -103,10 +103,10 @@ test('the card editor has a collapsed Agent notes rail that renders card.notes w
         source.indexOf('async openCardEditor'),
         source.indexOf('bindCardEditor(editor, card)')
     );
-    // Collapsed by default, sitting beside Description history, with a count badge.
+    // Collapsed by default, with a count badge.
     assert.match(open, /<details data-board-notes-details>/);
     assert.match(open, /data-board-count="notes"/);
-    assert.ok(open.indexOf('data-board-notes-details') < open.indexOf('data-board-history-details'));
+    assert.doesNotMatch(open, /data-board-history/);
     // Rendered on toggle, from the card response — no extra fetch — and escape-first.
     assert.match(source, /\[data-board-notes-details\]'\)\?\.addEventListener\('toggle'/);
     const render = source.slice(source.indexOf('renderNotesPanel(editor, card) {'), source.indexOf('renderCommentsPanel(editor, card) {'));

@@ -8,7 +8,7 @@
 // in the toast instead of a bare status line.
 //
 // Shapes (see VibeRails/DTOs/ResponseRecords.cs, "Kanban board"):
-//   column     { id, name, wipLimit, position, color }
+//   column     { id, name, position, color }
 //   card       { id, key 'VB-n', columnId, position, title, description, assignee, type, priority,
 //                points, tags[], blocked, commentCount, activeSessionId, activeTabId,
 //                createdAt, updatedAt }                      (board list = these summaries)
@@ -193,9 +193,6 @@ async function getCardAttachmentContentAsync(cardId, attachmentId, extra = {}) {
         { ...extra, responseType: 'blob' });
 }
 
-async function getCardDescriptionHistoryAsync(cardId, extra = {}) {
-    return call(`/cards/${enc(cardId)}/history`, 'GET', null, extra);
-}
 
 // ---------------------------------------------- commits
 
@@ -279,7 +276,6 @@ export const BoardApi = {
     addCardAttachmentAsync,
     deleteCardAttachmentAsync,
     getCardAttachmentContentAsync,
-    getCardDescriptionHistoryAsync,
     getCardCommitsAsync,
     addCardCommitAsync,
     removeCardCommitAsync,

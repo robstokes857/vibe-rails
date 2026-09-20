@@ -56,17 +56,13 @@ public sealed class BoardAttachmentTests : IDisposable
     }
 
     [Fact]
-    public async Task DeletingFileRetainsHistoryBytes_DeletingCardRemovesEverything()
+    public async Task DeletingFileRemovesItsBytes_AndCannotBeReadAgain()
     {
         var card = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "Files"), Ct);
         var attachment = (await _service.AddAttachmentAsync(_project, card.Id, Request("scope.txt", "first scope"u8.ToArray()), Ct))!;
         Assert.True(await _service.DeleteAttachmentAsync(_project, card.Id, attachment.Id, Ct));
         Assert.False(await _service.DeleteAttachmentAsync(_project, card.Id, attachment.Id, Ct));
         Assert.Empty((await _service.GetCardAsync(_project, card.Id, Ct))!.Attachments);
-        var history = (await _store.GetDescriptionHistoryAsync(_project, card.Id, Ct))!;
-        Assert.Contains(history.Revisions, revision => revision.Attachments.Any(file => file.Id == attachment.Id));
-        Assert.Equal("first scope", BoardService.ReadAttachmentText((await _service.GetAttachmentContentAsync(_project, card.Id, attachment.Id, Ct))!));
-        Assert.True(await _service.DeleteCardAsync(_project, card.Id, Ct));
         Assert.Null(await _service.GetAttachmentContentAsync(_project, card.Id, attachment.Id, Ct));
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(Ct);
@@ -117,24 +113,6 @@ public sealed class BoardAttachmentTests : IDisposable
         Assert.Throws<BoardValidationException>(() => BoardService.ReadAttachmentText(content));
         Assert.Throws<BoardValidationException>(() => BoardService.ReadAttachmentText(content, -1));
         Assert.Throws<BoardValidationException>(() => BoardService.ReadAttachmentText(content, 0, 100_001));
-    }
-
-    [Fact]
-    public async Task HistoryNamesFilesWithoutRepeatingTheirBytes()
-    {
-        var card = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "Files"), Ct);
-        var image = (await _service.AddAttachmentAsync(_project, card.Id,
-            Request("shot.png", new byte[] { 137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3 }), Ct))!;
-        // The card still carries the small inline preview…
-        Assert.StartsWith("data:image/png;base64,", image.Url);
-        Assert.StartsWith("data:image/png;base64,", Assert.Single((await _service.GetCardAsync(_project, card.Id, Ct))!.Attachments).Url);
-        await _service.UpdateCardAsync(_project, card.Id, new UpdateBoardCardRequest(Description: "now with a screenshot"), Ct);
-
-        // …but every revision that lists it returns the id only, never the bytes again.
-        var files = (await _store.GetDescriptionHistoryAsync(_project, card.Id, Ct))!.Revisions.SelectMany(r => r.Attachments).ToList();
-        Assert.NotEmpty(files);
-        Assert.All(files, file => Assert.Empty(file.Url));
-        Assert.All(files, file => Assert.Equal(image.Id, file.Id));
     }
 
     [Fact]

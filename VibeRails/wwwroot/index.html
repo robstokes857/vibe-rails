@@ -3383,10 +3383,6 @@
                     background: color-mix(in srgb, var(--color-primary, #3b82f6) 8%, var(--color-bg-surface, #1e1e1e));
                 }
 
-                .board-view .board-lane.is-over-wip .board-wip {
-                    color: var(--color-danger, #ef4444);
-                    background: color-mix(in srgb, var(--color-danger, #ef4444) 16%, transparent);
-                }
 
                 .board-view .board-lane-head {
                     display: flex;
@@ -3435,7 +3431,7 @@
                     white-space: nowrap;
                 }
 
-                .board-view .board-wip {
+                .board-view .board-card-count {
                     flex: none;
                     padding: 1px 7px;
                     border-radius: 999px;
@@ -3582,6 +3578,15 @@
                 @media (prefers-reduced-motion: reduce) {
                     .board-view .board-card.is-live { animation: none; }
                 }
+
+                .board-view .board-card.is-flagged {
+                    background: color-mix(in srgb, #ef4444 20%, var(--color-bg-elevated, #1e293b));
+                    border-color: #ef4444;
+                }
+                .board-view .board-card.is-flagged:hover {
+                    background: color-mix(in srgb, #ef4444 28%, var(--color-bg-elevated, #1e293b));
+                }
+                .board-view .board-attention-flag { color: #ef4444; margin-right: 0.25rem; }
 
                 .board-view .board-card-rail {
                     background: var(--color-primary, #3b82f6);
@@ -3933,7 +3938,7 @@
                     text-overflow: ellipsis;
                     white-space: nowrap;
                 }
-                .board-attachment-list, .board-history-list {
+                .board-attachment-list, .board-notes-list {
                     min-width: 0;
                     margin-bottom: 0.5rem;
                 }
@@ -3954,14 +3959,6 @@
                     object-fit: cover;
                     background: var(--color-bg-base, #121212);
                 }
-                .board-history-revision {
-                    margin: 0.6rem 0;
-                    font-size: 0.75rem;
-                    overflow-wrap: anywhere;
-                }
-                .board-history-revision summary, [data-board-history-details] > summary { cursor: pointer; }
-                .board-history-events { padding-left: 1rem; }
-                .board-history-events li { margin: 0.4rem 0; }
                 [data-board-launch-options]:empty { display: none; }
                 .board-side-section {
                     display: flex;

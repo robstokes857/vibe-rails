@@ -131,23 +131,6 @@ public sealed class BoardLaunchService(
                 {
                     Log.Warning("[Board] Session {SessionId} was already linked: {Message}", session.SessionId, ex.Message);
                 }
-                // The prompt was composed from this exact card snapshot before the asynchronous
-                // launch. Never associate whichever description happens to be current afterward.
-                //
-                // Bookkeeping, and deliberately kept off the failure path: the agent is already
-                // running and already linked to the card by this point, so a locked state.db or an
-                // aborted HTTP request must not reach the catch below, which deletes the tab and
-                // would terminate a perfectly healthy agent over a history row. CancellationToken
-                // .None for the same reason — a browser that navigated away must not skip it.
-                try
-                {
-                    await store.RecordDescriptionSessionAsync(projectPath, card.Id, card.DescriptionRevision,
-                        session.SessionId!, "launch", CancellationToken.None);
-                }
-                catch (Exception ex)
-                {
-                    Log.Warning(ex, "[Board] Started {Card} but could not record its launch revision", card.Key);
-                }
             }
             else
             {

@@ -29,7 +29,7 @@ public sealed class StoreSchemaAdoptionTests : IDisposable
 
         Assert.Equal(version, Scalar("PRAGMA schema_version;"));
         Assert.Equal(migrations, Scalar("SELECT COUNT(*) FROM SchemaMigrations;"));
-        Assert.Equal(6L, Scalar("SELECT COUNT(*) FROM SchemaMigrations WHERE Component='board';"));
+        Assert.Equal(9L, Scalar("SELECT COUNT(*) FROM SchemaMigrations WHERE Component='board';"));
         Assert.Equal(3L, Scalar("SELECT COUNT(*) FROM SchemaMigrations WHERE Component LIKE 'jobs%';"));
     }
 
@@ -53,7 +53,7 @@ public sealed class StoreSchemaAdoptionTests : IDisposable
     }
 
     [Fact]
-    public void LegacyBoardAdoptionPreservesCardsAttachmentsAndSeedsHistoryOnce()
+    public void LegacyBoardAdoptionPreservesCurrentCardsAndAttachmentsWithoutHistory()
     {
         // Create the old board layout, without a migration receipt or the newer history/assets.
         Execute("""
@@ -76,12 +76,10 @@ public sealed class StoreSchemaAdoptionTests : IDisposable
         Assert.Equal("Preserved requirements", Scalar("SELECT Description FROM BoardCards WHERE Id='card';"));
         Assert.Equal("data:image/png;base64,AA==", Scalar("SELECT DataUrl FROM BoardAttachments WHERE Id='asset';"));
         Assert.Equal(9L, Scalar("SELECT LastNumber FROM BoardCardSequences WHERE ProjectPath='project';"));
-        Assert.Equal(1L, Scalar("SELECT COUNT(*) FROM BoardDescriptionRevisions WHERE CardId='card';"));
-        Assert.Equal(1L, Scalar("SELECT COUNT(*) FROM BoardDescriptionRevisionAttachments WHERE AttachmentId='asset';"));
+        Assert.Equal(0L, Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name LIKE 'BoardDescription%';"));
         var version = Scalar("PRAGMA schema_version;");
         _ = new BoardStore(ConnectionString);
         Assert.Equal(version, Scalar("PRAGMA schema_version;"));
-        Assert.Equal(1L, Scalar("SELECT COUNT(*) FROM BoardDescriptionRevisions WHERE CardId='card';"));
         Assert.Null(Scalar("PRAGMA foreign_key_check;"));
     }
 

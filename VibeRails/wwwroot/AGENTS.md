@@ -55,7 +55,7 @@ base64 encoding. The resulting JSON is for
 
 Read the cross-layer [Board contributor guide](../Services/Board/AGENTS.md) and
 [architecture/review](../Services/Board/ARCHITECTURE.md) for API/storage contracts and open
-concurrency findings. In particular, description revisions do not protect all form fields,
+concurrency findings. Card saves intentionally accept the last write;
 filtered drag positions need full-lane semantics, and the current 12-file UI limit disagrees
 with the server's 40-current-attachment contract.
 
@@ -126,11 +126,12 @@ into a lane starts work by itself — noted in the controller header and `BoardL
 not built.
 
 Lane **Automations** are separate from that assignee-launch TODO. The lane settings modal
-selects one existing project Automation, with a separate **Save automation** action. The server
+selects any number of existing project Automations using checkboxes, with a separate **Save automations** action. The server
 waits 60 seconds after a card enters the lane; another move replaces the pending trigger. The
 browser owns no debounce timer. New cards count as lane entries; same-lane edits/reorders do
 not. Saved settings affect future entries and cancel pending entries for the lane. Disabled
-Automations and active-job overlap are skipped. The ordinary root Automation scheduler and
+Automations and active-job overlap are skipped independently for each selection. Clear all
+checkboxes to disable lane Automations; selected disabled/deleted jobs remain removable. The ordinary root Automation scheduler and
 native-terminal run lifecycle apply.
 
 The view uses the app's shared surfaces rather than its own: `app.showModal` (upgraded to
@@ -224,17 +225,16 @@ omit the base-14 fonts fall back to system faces. Read `assets/board/README.md` 
 upgrading or before adding a frontend library here: rendered Markdown costs a parser plus a
 sanitizer to re-earn what textContent gives for free.
 
-Description history stays in an expandable rail section, with immutable text snapshots and
-separate session launch/edit/read events. The editor sends its `expectedDescriptionRevision`;
-stale saves fail without discarding the typed text. Attachment changes also advance the context
-revision, so refresh that token only when the server description still matches the editor's
-original saved description. History lists each revision's files by id and name only — never their
-bytes — so opening the rail costs one small response however many screenshots the card carries,
-and the per-file buttons fetch content through the same authenticated route as the card. A read
-event can come from a session this card does not own (reads never link), so it renders with the
-short session id plus the note naming the card that agent is actually working.
+Cards have one current state: no History rail or expected-description token. Attachment changes
+do not require a revision refresh. Failed queued uploads retain the card ID and unfinished queue
+so Save retries only remaining files. Removing an attachment deletes its stored bytes.
 
-**Agent notes** (2026-09-17) are a second collapsed rail section above Description history. They
+**Needs your attention** is the `flagged` editor checkbox. A flagged tile is red with a small
+flag beside its key and an accessible attention label. `blocked` remains a separate field.
+Both the REST editor and MCP can set or clear the flag. Lane settings have no WIP option;
+lane headers show the full card count without warnings or limits.
+
+**Agent notes** (2026-09-17) are a collapsed rail section. They
 are the scratchpad agents write over MCP (`append_board_note`) to checkpoint findings while they
 work; the server keeps them out of `comments[]` and the comment count (`BoardComments.Kind`).
 The card response carries `notes[]`, so the section renders from the loaded card with the same

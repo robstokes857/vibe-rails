@@ -25,7 +25,6 @@ public sealed record BoardColumnRecord(
     string Id,
     string ProjectPath,
     string Name,
-    int? WipLimit,
     int Position,
     string Color,
     DateTime CreatedUtc,
@@ -53,11 +52,10 @@ public sealed record BoardCardRecord(
     int CommentCount,
     DateTime CreatedUtc,
     DateTime UpdatedUtc,
-    int DescriptionRevision = 1,
     BaseLlmOptions? BaseLlmOptions = null,
-    bool DescriptionChanged = false,
     string Type = BoardCardTypes.Default,
-    string BoardId = "")
+    string BoardId = "",
+    bool Flagged = false)
 {
     public string Key => BoardKeys.Format(Number);
 }
@@ -173,14 +171,15 @@ public sealed record NewBoardCard(
     IReadOnlyList<string> Tags,
     bool Blocked,
     BaseLlmOptions? BaseLlmOptions = null,
-    BoardAuthor? Author = null,
     string Type = BoardCardTypes.Default,
-    string? BoardId = null);
+    string? BoardId = null,
+    bool Flagged = false);
 
 /// <summary>Partial update. Null = leave untouched. <see cref="ClearAssignee"/> / <see cref="ClearPoints"/> express "set to null".</summary>
 public sealed record BoardCardPatch(
     string? Title = null,
     string? Description = null,
+    string? DescriptionAppend = null,
     string? Assignee = null,
     bool ClearAssignee = false,
     string? Priority = null,
@@ -189,12 +188,10 @@ public sealed record BoardCardPatch(
     IReadOnlyList<string>? Tags = null,
     bool? Blocked = null,
     string? ColumnId = null,
-    int? ExpectedDescriptionRevision = null,
     BaseLlmOptions? BaseLlmOptions = null,
     bool ClearBaseLlmOptions = false,
-    BoardAuthor? Author = null,
-    IReadOnlyList<string>? ActiveSessionIds = null,
-    string? Type = null);
+    string? Type = null,
+    bool? Flagged = null);
 
 public static class BoardKeys
 {
@@ -248,4 +245,9 @@ public static class BoardCardTypes
         Chore => "Chore / tech debt",
         _ => "Task"
     };
+}
+
+public static class BoardCardLimits
+{
+    public const int MaxDescriptionLength = 100_000;
 }

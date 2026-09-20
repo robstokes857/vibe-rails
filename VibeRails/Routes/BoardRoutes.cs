@@ -110,10 +110,6 @@ public static class BoardRoutes
             RunAsync(async () => OkOrNotFound(await board.UpdateCardAsync(Project(), card, request, cancellationToken), "Card")))
             .WithName("UpdateBoardCard");
 
-        app.MapGet("/api/v1/board/cards/{card}/history", (IBoardService board, string card, CancellationToken cancellationToken) =>
-            RunAsync(async () => OkOrNotFound(await board.GetDescriptionHistoryAsync(Project(), card, cancellationToken), "Card")))
-            .WithName("GetBoardCardDescriptionHistory");
-
         app.MapDelete("/api/v1/board/cards/{card}", (IBoardService board, string card, CancellationToken cancellationToken) =>
             RunAsync(async () => await board.DeleteCardAsync(Project(), card, cancellationToken)
                 ? Results.Ok(new OK("Card deleted"))

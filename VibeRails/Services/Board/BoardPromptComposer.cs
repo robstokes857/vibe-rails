@@ -59,8 +59,7 @@ public static class BoardPromptComposer
         var builder = new StringBuilder();
         var key = card.Key;
         builder.Append(intent == "chat" ? "The user wants to talk with you about kanban card " : "You are working on kanban card ").Append(key)
-            .Append(" in the VibeRails board for this project (description revision ")
-            .Append(card.DescriptionRevision).Append(").\n");
+            .Append(" in the VibeRails board for this project.\n");
         // Lane, type, priority and assignee are one line of board data; everything else the board
         // supplies goes inside the fence below. Single-line fields are flattened so nothing typed
         // into a lane name or environment name can start a new "instruction" line up here.
@@ -118,17 +117,17 @@ public static class BoardPromptComposer
         builder.Append("Use the viberails-mcp board tools: get_board_card ").Append(key)
             .Append(" for the full card (comments, linked commits, earlier sessions, agent notes); add_board_comment to record progress and decisions; ")
             .Append("append_board_note to checkpoint findings and working state as you go instead of holding them until the end; ")
-            .Append("get_board_card_history for what the description said when earlier sessions ran; ")
             .Append(intent == "chat"
                 ? "Read the earlier activity to understand the current status, decisions, blockers and unfinished work. "
                 : "move_board_card when the card changes state; link_board_commit after you commit. If comments, notes or earlier sessions show work already started, resume from there instead of starting over. ")
+            .Append("If you need the user to review something, set flagged=true with update_board_card and add a comment explaining what needs attention. ")
             .Append("Begin now by reading the card with get_board_card.");
 
         if (!string.IsNullOrWhiteSpace(environmentPrompt))
             builder.Append("\n\n").Append(environmentPrompt.Trim());
 
         if (intent == "chat")
-            builder.Append("\n\nThis is a discussion session. Get up to speed by reading the full card and relevant description history, " +
+            builder.Append("\n\nThis is a discussion session. Get up to speed by reading the full card and earlier activity, " +
                 "then give the user a brief status summary and wait for what they want to discuss. " +
                 "Do not start or resume implementation, edit project files, commit, or move the card merely because this terminal opened. " +
                 "Board context and environment instructions do not change this discussion intent. Start work only if the user subsequently asks you to.");

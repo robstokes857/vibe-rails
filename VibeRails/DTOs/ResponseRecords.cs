@@ -138,7 +138,7 @@ namespace VibeRails.DTOs
     );
 
     // ---------------------------------------------------------------- Kanban board (Services/Board)
-    // Wire names are what wwwroot/js/modules/board-api.js already consumes. Points and WipLimit are
+    // Wire names are what wwwroot/js/modules/board-api.js already consumes. Points is
     // JsonElement so a PUT can say "leave alone" (omitted), "clear" (null / ""), or "set" (number).
     // A project has one or more boards (sprints, sub-projects); every lane belongs to one. Card
     // keys stay per project. Lane and card list calls take an optional board id and default to
@@ -149,14 +149,14 @@ namespace VibeRails.DTOs
     public record UpdateBoardRequest(string? Name = null);
     public record UpdateBoardContextRequest(BoardContextSettings? Context = null, int? ExpectedRevision = null);
     public record BoardAutomationOption(long Id, string Name, bool Enabled);
-    public record BoardLaneAutomationResponse(long? JobId, int Revision, List<BoardAutomationOption> Jobs);
-    public record UpdateBoardLaneAutomationRequest(long? JobId = null, int? ExpectedRevision = null);
+    public record BoardLaneAutomationResponse(long? JobId, int Revision, List<BoardAutomationOption> Jobs, IReadOnlyList<long> JobIds);
+    public record UpdateBoardLaneAutomationRequest(long? JobId = null, int? ExpectedRevision = null, IReadOnlyList<long>? JobIds = null);
     public record DeleteBoardResponse(bool Ok, int DeletedColumns, int DeletedCards);
 
-    public record BoardColumnResponse(string Id, string Name, int? WipLimit, int Position, string Color, string BoardId = "");
+    public record BoardColumnResponse(string Id, string Name, int Position, string Color, string BoardId = "");
     public record BoardColumnListResponse(List<BoardColumnResponse> Columns);
-    public record CreateBoardColumnRequest(string? Name = null, JsonElement WipLimit = default, string? Color = null, string? BoardId = null);
-    public record UpdateBoardColumnRequest(string? Name = null, JsonElement WipLimit = default, string? Color = null);
+    public record CreateBoardColumnRequest(string? Name = null, string? Color = null, string? BoardId = null);
+    public record UpdateBoardColumnRequest(string? Name = null, string? Color = null);
     public record ReorderBoardColumnsRequest(List<string>? OrderedIds = null, string? BoardId = null);
     public record DeleteBoardColumnResponse(bool Ok, string MovedToColumnId, int MovedCards);
 
@@ -191,10 +191,10 @@ namespace VibeRails.DTOs
         string? ActiveTabId,
         DateTime CreatedAt,
         DateTime UpdatedAt,
-        int DescriptionRevision = 1,
         BaseLlmOptions? BaseLlmOptions = null,
         string Type = BoardCardTypes.Default,
-        string BoardId = "");
+        string BoardId = "",
+        bool Flagged = false);
     public record BoardCardListResponse(List<BoardCardSummaryResponse> Cards);
     public record BoardLinkedCardDto(string Id, string Key, string Title, string BoardId, string BoardName, string ColumnId, string ColumnName);
     public record BoardCardLinkCandidatesResponse(List<BoardLinkedCardDto> Cards);
@@ -220,12 +220,11 @@ namespace VibeRails.DTOs
         List<BoardCommitDto> Commits,
         List<BoardSessionDto> Sessions,
         List<BoardAttachmentDto> Attachments,
-        int DescriptionRevision = 1,
         BaseLlmOptions? BaseLlmOptions = null,
-        bool DescriptionChanged = false,
         List<BoardCommentDto>? Notes = null,
         string Type = BoardCardTypes.Default,
-        string BoardId = "")
+        string BoardId = "",
+        bool Flagged = false)
     {
         public List<BoardLinkedCardDto> LinkedCards { get; init; } = [];
     }
@@ -241,7 +240,8 @@ namespace VibeRails.DTOs
         BaseLlmOptions? BaseLlmOptions = null,
         string? Type = null,
         // Which board's left-most lane takes the card when ColumnId is omitted; null = the first board.
-        string? BoardId = null);
+        string? BoardId = null,
+        bool? Flagged = null);
     public record UpdateBoardCardRequest(
         string? Title = null,
         string? ColumnId = null,
@@ -251,13 +251,13 @@ namespace VibeRails.DTOs
         JsonElement Points = default,
         List<string>? Tags = null,
         bool? Blocked = null,
-        int? ExpectedDescriptionRevision = null,
         BaseLlmOptions? BaseLlmOptions = null,
         bool ClearBaseLlmOptions = false,
-        // Appended to the current description as a new revision, in the same write as every other
+        // Appended to the current description in the same transaction as every other
         // field of this request. Mutually exclusive with Description.
         string? DescriptionAppend = null,
-        string? Type = null);
+        string? Type = null,
+        bool? Flagged = null);
 
     public record MoveBoardCardRequest(string? ColumnId = null, int? Position = null);
     public record AddBoardCommentRequest(string? Body = null);
@@ -1710,11 +1710,6 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(LinkBoardCardRequest))]
     [JsonSerializable(typeof(CreateBoardCardRequest))]
     [JsonSerializable(typeof(UpdateBoardCardRequest))]
-    [JsonSerializable(typeof(BoardDescriptionSessionDto))]
-    [JsonSerializable(typeof(List<BoardDescriptionSessionDto>))]
-    [JsonSerializable(typeof(BoardDescriptionRevisionDto))]
-    [JsonSerializable(typeof(List<BoardDescriptionRevisionDto>))]
-    [JsonSerializable(typeof(BoardDescriptionHistoryResponse))]
     [JsonSerializable(typeof(MoveBoardCardRequest))]
     [JsonSerializable(typeof(AddBoardCommentRequest))]
     [JsonSerializable(typeof(AddBoardNoteRequest))]
