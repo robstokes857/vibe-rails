@@ -12,15 +12,22 @@ public sealed record SchemaMigrationReceipt(string Component, int Version, strin
 /// Applies each component migration once per database, including across independent vb processes.
 /// The schema changes and their completion record share one SQLite write transaction.
 ///
-/// Two guards protect a database that other builds share (see <see cref="SchemaUpgradePolicy"/>):
-/// a <see cref="MigrationKind.Breaking"/> migration never runs automatically against a database
-/// that existed before this process started, and a database stamped with a newer generation than
-/// this build understands is refused outright rather than written to.
+/// All pending migrations run automatically. Breaking changes to existing files receive a
+/// consistent backup under the same writer lock as the migration. Databases newer than this
+/// build understands are still refused to protect against incompatible downgrades.
 /// </summary>
 internal static class SqliteMigrationRunner
 {
+    // PRODUCT CONTRACT: Opening a new version must just work.
+    // NEVER gate schema initialization behind a CLI command, opt-in flag, acknowledgement,
+    // process-count check, or manual upgrade instructions. The former manual gate broke the
+    // Board in 1.10.16 and surfaced as a misleading CORS error during service resolution.
+    // Prefer additive schema changes: different app versions can run on the same machine.
+    // Feature removal means stopping current reads/writes; retain unused tables and columns.
+    // Unused schema is accepted debt. Destructive cleanup, historical-data conversion, and
+    // backfills require an explicit request; removing a feature alone is not such a request.
+    // Required schema setup is automatic; preserve older-version compatibility where possible.
     internal const int MigrationLockTimeoutSeconds = 60;
-    internal const string MigrateCommand = "vb --migrate";
 
     internal static bool Apply(SqliteConnection connection, string component, int version, MigrationKind kind,
         Action<SqliteConnection, SqliteTransaction> migration,
@@ -52,12 +59,10 @@ internal static class SqliteMigrationRunner
             // First contact with a file decides whether it pre-dates this process. It has to happen
             // before any migration creates tables, or a fresh file would look like an adopted one.
             var existing = SchemaUpgradePolicy.IsExistingDatabase(connection);
-            if (kind == MigrationKind.Breaking && existing)
-                GuardBreakingMigration(connection, component, version);
-
             Log.Information("[Database] Applying {Kind} migration {Component}/{Version} to {Database}; waiting up to {WaitSeconds}s for database locks.",
                 kind, component, version, connection.DataSource, lockTimeoutSeconds);
-            var applied = ApplyPending(connection, component, version, migration);
+            var applied = ApplyPending(connection, component, version, migration,
+                backup: kind == MigrationKind.Breaking && existing && SchemaUpgradePolicy.BackupBeforeBreaking);
             Log.Information("[Database] Migration {Component}/{Version} {Result} for {Database}.",
                 component, version, applied ? "completed" : "completed in another process", connection.DataSource);
             return applied;
@@ -66,7 +71,7 @@ internal static class SqliteMigrationRunner
         {
             throw new StorageException(
                 $"Database migration '{component}/{version}' could not obtain a database lock within {lockTimeoutSeconds} seconds for '{connection.DataSource}'. " +
-                "Close other VibeRails instances that use this database and retry.", true, ex);
+                "The database is busy; the upgrade will retry on the next initialization. No migration changes were committed.", true, ex);
         }
         catch (SqliteException ex)
         {
@@ -132,31 +137,8 @@ internal static class SqliteMigrationRunner
         return receipts;
     }
 
-    private static void GuardBreakingMigration(SqliteConnection connection, string component, int version)
-    {
-        var database = connection.DataSource;
-        if (!SchemaUpgradePolicy.BreakingMigrationsAllowed)
-            throw new StorageException(
-                $"Database migration '{component}/{version}' for '{database}' is a breaking schema change: VibeRails builds older than this one could not use the database afterwards, so it is never applied automatically. " +
-                $"To apply it, close every other VibeRails process (VS Code windows with the extension, agent MCP servers, the dashboard) and run `{MigrateCommand}` from a terminal; a backup is written beside the database first. Nothing has been changed.",
-                false, new InvalidOperationException("a breaking migration requires " + MigrateCommand));
-
-        var others = SchemaUpgradePolicy.OtherVibeRailsProcesses();
-        if (others.Count > 0)
-            throw new StorageException(
-                $"Database migration '{component}/{version}' for '{database}' is a breaking schema change and cannot run while other VibeRails processes have the database open (pids {string.Join(", ", others)}). " +
-                $"Close them and run `{MigrateCommand}` again. Nothing has been changed.",
-                false, new InvalidOperationException("other vb processes are running"));
-
-        if (!SchemaUpgradePolicy.BackupBeforeBreaking)
-            return;
-        var backup = SqliteDatabaseBackup.Create(connection, $"{component}-{version}");
-        Log.Information("[Database] Backed up {Database} to {Backup} before breaking migration {Component}/{Version}.",
-            database, backup, component, version);
-    }
-
     private static bool ApplyPending(SqliteConnection connection, string component, int version,
-        Action<SqliteConnection, SqliteTransaction> migration)
+        Action<SqliteConnection, SqliteTransaction> migration, bool backup)
     {
         // journal_mode cannot change inside a transaction. This is done only when there is work,
         // rather than on every connection or every ordinary process startup.
@@ -169,6 +151,23 @@ internal static class SqliteMigrationRunner
         // BEGIN IMMEDIATE serializes schema writers. Recheck after acquiring the lock:
         // another process may have completed this version while this connection waited.
         using var transaction = connection.BeginTransaction(deferred: false);
+        if (IsApplied(connection, transaction, component, version))
+        {
+            transaction.Commit();
+            return false;
+        }
+
+        if (backup)
+        {
+            // SQLite cannot back up a connection with an active write transaction. A separate
+            // reader sees the last committed state while our writer lock prevents any competing
+            // writer from changing it. Back up before even changing the migration ledger.
+            using var source = SqliteConnectionFactory.Open(connection.ConnectionString, readOnly: true);
+            var backupPath = SqliteDatabaseBackup.Create(source, $"{component}-{version}");
+            Log.Information("[Database] Backed up {Database} to {Backup} before migration {Component}/{Version}.",
+                connection.DataSource, backupPath, component, version);
+        }
+
         using (var create = connection.CreateCommand())
         {
             create.Transaction = transaction;
@@ -185,12 +184,6 @@ internal static class SqliteMigrationRunner
         // Which build applied each step. Without it a database cannot tell you which code
         // understands it -- the exact question that was unanswerable on 2026-09-16.
         SqliteSchema.AdoptStatement(connection, transaction, "ALTER TABLE SchemaMigrations ADD COLUMN AppliedBy TEXT");
-        if (IsApplied(connection, transaction, component, version))
-        {
-            transaction.Commit();
-            return false;
-        }
-
         migration(connection, transaction);
         using (var record = connection.CreateCommand())
         {

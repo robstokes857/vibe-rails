@@ -14,11 +14,6 @@ public sealed record SqliteStoragePaths(string StatePath, string? VectorPath = n
     internal string ProxyDatabasePath => ProxyPath ?? Path.Combine(Path.GetDirectoryName(StatePath) ?? ".", "proxy_exchanges.db");
 }
 
-/// <summary>One database's schema generation and migration ledger, as reported by <c>vb --migrate</c>.</summary>
-public sealed record SchemaDatabaseReport(string Path, long Generation, IReadOnlyList<SchemaMigrationReceipt> Receipts);
-
-public sealed record SchemaReport(IReadOnlyList<SchemaDatabaseReport> Databases);
-
 /// <summary>The application composition boundary for SQLite; consumers resolve storage interfaces.</summary>
 public static class SqliteStorage
 {
@@ -92,15 +87,11 @@ public static class SqliteStorage
 
     public static IJobStore CreateJobStore(string stateDatabasePath) => new JobStore(ConnectionString(stateDatabasePath));
 
-    /// <summary>Lets this process apply breaking migrations to existing databases. Only <c>vb --migrate</c> calls this.</summary>
-    public static void AllowBreakingMigrationsForThisProcess() => SchemaUpgradePolicy.AllowBreakingMigrationsForThisProcess();
-
     /// <summary>
-    /// Brings every schema this provider owns up to date in one place, so <c>vb --migrate</c> and
-    /// the schema snapshot test see exactly what the lazily initialised stores would produce over
-    /// time. Breaking steps still go through the same guard as at startup.
+    /// Brings every schema this provider owns up to date in one place. Schema snapshot tests use
+    /// the same automatic migrations, backups and transaction coordination as store initialization.
     /// </summary>
-    public static SchemaReport EnsureAllSchemas(SqliteStoragePaths paths, Microsoft.Extensions.Logging.ILogger? logger = null)
+    public static void EnsureAllSchemas(SqliteStoragePaths paths, Microsoft.Extensions.Logging.ILogger? logger = null)
     {
         var state = ConnectionString(paths.StatePath);
         StateDatabaseSchema.Ensure(state, logger);
@@ -115,19 +106,8 @@ public static class SqliteStorage
         using (var connection = SqliteConnectionFactory.Open(ConnectionString(paths.ProxyDatabasePath)))
             LlmExchangeLogStore.EnsureSchema(connection);
 
-        var databases = new List<SchemaDatabaseReport> { Describe(paths.StatePath), Describe(paths.ProxyDatabasePath) };
         if (paths.VectorPath is not null)
-        {
             BertVectorDatabase.Initialize(paths.VectorPath);
-            databases.Add(Describe(paths.VectorPath));
-        }
-        return new SchemaReport(databases);
-    }
-
-    private static SchemaDatabaseReport Describe(string path)
-    {
-        using var connection = SqliteConnectionFactory.Open(ConnectionString(path), readOnly: true);
-        return new SchemaDatabaseReport(path, SqliteMigrationRunner.ReadGeneration(connection), SqliteMigrationRunner.ReadReceipts(connection));
     }
 
     private static string StateConnectionString(IServiceProvider provider) =>

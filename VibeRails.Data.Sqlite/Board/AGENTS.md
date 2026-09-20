@@ -13,6 +13,11 @@ Preserve scoped transactional lookups, persistent per-project numbering, dense o
 current-state card/attachment writes, and atomic commit snapshots. Add a new migration for schema
 changes and update schema/compatibility tests. Use temporary databases for verification.
 
+For future feature removals, stop the current code's reads/writes and retain unused tables,
+columns, and data. Feature removal does not request destructive database cleanup; unused schema
+is accepted technical debt. The owner accepted the already-shipped `board/8` retirement below
+for that release only. It is not a precedent for dropping other retired storage.
+
 `board/6` adds revisioned board context, lane Automation settings and a durable debounced
 lane-entry queue. SQL card-insert/lane-change triggers write only to these new tables, so older
 card writers also participate. `DB/JobStore.Board.cs` consumes settled entries and snapshots
@@ -29,7 +34,7 @@ its normal Job snapshots; an older scheduler consuming the first queue cannot lo
 
 `board/8` is breaking: it drops the three description-history tables, purges soft-deleted
 attachments (content cascades), removes `DeletedUTC` and `WipLimit`, and stamps state generation 3.
-Existing databases require the backed-up, exclusive `vb --migrate` flow. Current descriptions,
+Existing databases upgrade automatically, with a backup and SQLite transaction coordination. Current descriptions,
 files, comments, notes, sessions, commits and automation settings survive. Old migration SQL
 remains in `BoardStore.LegacySchema.cs` only for upgrade sequencing, never runtime history.
 `board/9` adds `BoardCards.Flagged` (default false). It is separate from blocked and is returned

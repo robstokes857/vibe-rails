@@ -7,8 +7,11 @@ namespace Tests.DB;
 
 public sealed class SqliteMigrationRunnerTests : IDisposable
 {
-    private readonly string _path = Path.Combine(Path.GetTempPath(), $"viberails-migrations-{Guid.NewGuid():N}.db");
+    private readonly string _root = Path.Combine(Path.GetTempPath(), $"viberails-migrations-{Guid.NewGuid():N}");
+    private string _path => Path.Combine(_root, "state.db");
     private string ConnectionString => new SqliteConnectionStringBuilder { DataSource = _path, Pooling = false }.ToString();
+
+    public SqliteMigrationRunnerTests() => Directory.CreateDirectory(_root);
 
     [Fact]
     public void FailedMigrationRollsBackSchemaAndCompletionRecord()
@@ -149,7 +152,7 @@ public sealed class SqliteMigrationRunnerTests : IDisposable
         Assert.True(failure.IsTransient);
         Assert.Contains("blocked/7", failure.Message);
         Assert.Contains(_path, failure.Message);
-        Assert.Contains("Close other VibeRails instances", failure.Message);
+        Assert.Contains("upgrade will retry", failure.Message);
         Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(10));
         Assert.Equal(5, waiting.DefaultTimeout);
         using var check = waiting.CreateCommand();
@@ -163,54 +166,25 @@ public sealed class SqliteMigrationRunnerTests : IDisposable
     }
 
     [Fact]
-    public void BreakingMigrationOnAFileThisProcessCreatedNeedsNoApproval()
+    public void FreshDatabaseMigratesAutomaticallyWithoutABackup()
     {
-        // Nothing an older binary wrote can be in a file that did not exist a moment ago, so the
-        // guard would only make first-run installs and every test fixture fail for no protection.
-        using var deny = SchemaUpgradePolicy.Scope(allowBreaking: false, otherProcesses: [4242], backup: false);
+        using var policy = SchemaUpgradePolicy.Scope(backup: true);
         using var connection = SqliteConnectionFactory.Open(ConnectionString);
         Assert.True(SqliteMigrationRunner.Apply(connection, "fresh", 1, MigrationKind.Breaking,
             (db, tx) => Execute(db, tx, "CREATE TABLE Fresh(Id INTEGER);")));
+        Assert.Empty(BackupFiles());
     }
 
     [Fact]
-    public void BreakingMigrationOnAnExistingDatabaseIsRefusedUntilMigrateIsRequestedAndNothingElseIsRunning()
+    public void ExistingDatabaseMigratesAutomaticallyWhileAnotherConnectionRemainsOpen()
     {
         CreateExistingDatabase();
         using var connection = SqliteConnectionFactory.Open(ConnectionString);
-        var ran = false;
-
-        using (SchemaUpgradePolicy.Scope(allowBreaking: false, otherProcesses: [], backup: false))
-        {
-            var refused = Assert.Throws<StorageException>(() => SqliteMigrationRunner.Apply(
-                connection, "legacy", 2, MigrationKind.Breaking, (_, _) => ran = true));
-            Assert.False(refused.IsTransient);
-            Assert.Contains(SqliteMigrationRunner.MigrateCommand, refused.Message);
-            Assert.Contains("Nothing has been changed", refused.Message);
-        }
-
-        using (SchemaUpgradePolicy.Scope(allowBreaking: true, otherProcesses: [4242, 4243], backup: false))
-        {
-            var busy = Assert.Throws<StorageException>(() => SqliteMigrationRunner.Apply(
-                connection, "legacy", 2, MigrationKind.Breaking, (_, _) => ran = true));
-            Assert.Contains("4242, 4243", busy.Message);
-            Assert.Contains(SqliteMigrationRunner.MigrateCommand, busy.Message);
-        }
-
-        Assert.False(ran);
-        Assert.Equal(0L, Scalar(connection, "SELECT COUNT(*) FROM sqlite_schema WHERE name='SchemaMigrations';"));
-        Assert.Equal(1L, Scalar(connection, "SELECT COUNT(*) FROM sqlite_schema WHERE name='Legacy';"));
-
-        using (SchemaUpgradePolicy.Scope(allowBreaking: true, otherProcesses: [], backup: false))
-        {
-            Assert.True(SqliteMigrationRunner.Apply(connection, "legacy", 2, MigrationKind.Breaking, (db, tx) =>
-            {
-                ran = true;
-                Execute(db, tx, "DROP TABLE Legacy;");
-            }));
-        }
-        Assert.True(ran);
+        using var other = SqliteConnectionFactory.Open(ConnectionString);
+        Assert.True(SqliteMigrationRunner.Apply(connection, "legacy", 2, MigrationKind.Breaking,
+            (db, tx) => Execute(db, tx, "DROP TABLE Legacy;")));
         Assert.Equal(1L, Scalar(connection, "SELECT COUNT(*) FROM SchemaMigrations WHERE Component='legacy' AND Version=2;"));
+        Assert.Equal(0L, Scalar(other, "SELECT COUNT(*) FROM sqlite_schema WHERE name='Legacy';"));
     }
 
     [Fact]
@@ -218,7 +192,7 @@ public sealed class SqliteMigrationRunnerTests : IDisposable
     {
         CreateExistingDatabase();
         using var connection = SqliteConnectionFactory.Open(ConnectionString);
-        using var allow = SchemaUpgradePolicy.Scope(allowBreaking: true, otherProcesses: [], backup: true);
+        using var policy = SchemaUpgradePolicy.Scope(backup: true);
         Assert.True(SqliteMigrationRunner.Apply(connection, "legacy", 1, MigrationKind.Breaking,
             (db, tx) => Execute(db, tx, "DROP TABLE Legacy;")));
 
@@ -232,6 +206,80 @@ public sealed class SqliteMigrationRunnerTests : IDisposable
         // The copy is the rollback: it still holds the table the migration removed.
         Assert.Equal(1L, Scalar(copy, "SELECT COUNT(*) FROM sqlite_schema WHERE name='Legacy';"));
         Assert.Equal(0L, Scalar(connection, "SELECT COUNT(*) FROM sqlite_schema WHERE name='Legacy';"));
+    }
+
+    [Fact]
+    public async Task ConcurrentAutomaticUpgradesWaitForWriter_BackUpLatestCommit_AndApplyOnce()
+    {
+        CreateExistingDatabase();
+        using var policy = SchemaUpgradePolicy.Scope(backup: true);
+        using var writer = SqliteConnectionFactory.Open(ConnectionString);
+        SqliteConnectionFactory.EnsureWalMode(writer);
+        using var blocker = writer.BeginTransaction(deferred: false);
+        Execute(writer, blocker, "INSERT INTO Legacy VALUES(42);");
+        var applied = 0;
+        using var started = new CountdownEvent(2);
+        var workers = Enumerable.Range(0, 2).Select(_ => Task.Run(() =>
+        {
+            using var connection = SqliteConnectionFactory.Open(ConnectionString);
+            started.Signal();
+            return SqliteMigrationRunner.Apply(connection, "concurrent", 1, MigrationKind.Breaking, (db, tx) =>
+            {
+                Execute(db, tx, "DROP TABLE Legacy;");
+                Interlocked.Increment(ref applied);
+            });
+        })).ToArray();
+        try
+        {
+            Assert.True(started.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+            await Task.Delay(250, TestContext.Current.CancellationToken);
+            Assert.All(workers, worker => Assert.False(worker.IsCompleted));
+            Assert.Empty(BackupFiles());
+        }
+        finally
+        {
+            blocker.Commit();
+        }
+
+        Assert.Single(await Task.WhenAll(workers), result => result);
+        Assert.Equal(1, applied);
+        using var copy = SqliteConnectionFactory.Open($"Data Source={Assert.Single(BackupFiles())};Pooling=False", readOnly: true);
+        Assert.Equal(42L, Scalar(copy, "SELECT Id FROM Legacy;"));
+        Assert.Equal(1L, Scalar(writer, "SELECT COUNT(*) FROM SchemaMigrations WHERE Component='concurrent';"));
+    }
+
+    [Fact]
+    public void BackupFailureLeavesSchemaAndLedgerUnchanged()
+    {
+        CreateExistingDatabase();
+        using var policy = SchemaUpgradePolicy.Scope(backup: true);
+        File.WriteAllText(Path.Combine(_root, SqliteDatabaseBackup.BackupDirectoryName), "blocks the backup directory");
+        using var connection = SqliteConnectionFactory.Open(ConnectionString);
+        Assert.Throws<IOException>(() => SqliteMigrationRunner.Apply(connection, "legacy", 1, MigrationKind.Breaking,
+            (db, tx) => Execute(db, tx, "DROP TABLE Legacy;")));
+        Assert.Equal(1L, Scalar(connection, "SELECT COUNT(*) FROM sqlite_schema WHERE name='Legacy';"));
+        Assert.Equal(0L, Scalar(connection, "SELECT COUNT(*) FROM sqlite_schema WHERE name='SchemaMigrations';"));
+    }
+
+    [Fact]
+    public void FailedAutomaticUpgradeRollsBackAndRetriesWithoutOverwritingBackup()
+    {
+        CreateExistingDatabase();
+        using var policy = SchemaUpgradePolicy.Scope(backup: true);
+        using var connection = SqliteConnectionFactory.Open(ConnectionString);
+        Assert.Throws<InvalidOperationException>(() => SqliteMigrationRunner.Apply(connection, "legacy", 1, MigrationKind.Breaking,
+            (db, tx) =>
+            {
+                Execute(db, tx, "DROP TABLE Legacy;");
+                throw new InvalidOperationException("interrupted upgrade");
+            }));
+        var firstBackup = Assert.Single(BackupFiles());
+        Assert.Equal(1L, Scalar(connection, "SELECT COUNT(*) FROM sqlite_schema WHERE name='Legacy';"));
+        Assert.Equal(0L, Scalar(connection, "SELECT COUNT(*) FROM sqlite_schema WHERE name='SchemaMigrations';"));
+        Assert.True(SqliteMigrationRunner.Apply(connection, "legacy", 1, MigrationKind.Breaking,
+            (db, tx) => Execute(db, tx, "DROP TABLE Legacy;")));
+        Assert.Equal(2, BackupFiles().Count());
+        Assert.Contains(firstBackup, BackupFiles());
     }
 
     [Fact]
@@ -306,9 +354,6 @@ public sealed class SqliteMigrationRunnerTests : IDisposable
 
     public void Dispose()
     {
-        foreach (var path in new[] { _path, _path + "-wal", _path + "-shm" })
-            File.Delete(path);
-        foreach (var backup in BackupFiles())
-            File.Delete(backup);
+        Directory.Delete(_root, recursive: true);
     }
 }

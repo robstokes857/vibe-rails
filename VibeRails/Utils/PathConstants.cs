@@ -8,6 +8,10 @@ namespace VibeRails.Utils
     {
         public static string GetStateFilePath()
         {
+            // PRODUCT CONTRACT: Debug/F5 and released app runs share the normal state.db.
+            // Never add a debug/branch database or an "allow production data" flag here.
+            // Code must be safe for the running database; fix unsafe changes rather than
+            // hiding them behind a different runtime path. Disposable test fixtures are separate.
             return Path.Combine(GetInstallDirPath(), STATE_FILENAME);
         }
 

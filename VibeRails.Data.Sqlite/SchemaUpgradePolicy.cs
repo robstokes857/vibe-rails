@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Reflection;
 using Microsoft.Data.Sqlite;
 
@@ -17,46 +16,27 @@ internal enum MigrationKind
 
     /// <summary>
     /// Anything an older binary could misuse afterwards: dropping or renaming, re-pointing a virtual
-    /// table's content, changing a trigger or constraint it relies on, or deleting rows. Never runs
-    /// automatically against a database that existed before this process started.
+    /// table's content, changing a trigger or constraint it relies on, or deleting rows. Runs
+    /// automatically, with a backup before changing an existing database.
     /// </summary>
     Breaking
 }
 
 /// <summary>
-/// Decides whether a breaking migration may touch a database that already existed before this
-/// process started. Files this process created are never guarded: nothing in them was written by
-/// an older binary. The production rule is simple -- breaking migrations run only from
-/// <c>vb --migrate</c>, with no other vb process alive and a backup taken first -- and tests relax
-/// it per async scope so ordinary fixtures never trip it while the guard tests still can.
+/// Tracks whether a database needs a pre-upgrade backup and records migration provenance.
+/// Every pending migration runs automatically during normal store initialization. SQLite's
+/// writer transaction coordinates competing processes; neither user opt-in nor process counts
+/// decide whether a new version can open an existing database.
 /// </summary>
 internal static class SchemaUpgradePolicy
 {
-    internal const string MigrateEnvironmentVariable = "VIBE_RAILS_MIGRATE";
-    internal const string ProcessName = "vb";
-
-    private sealed record Overrides(bool? AllowBreaking, Func<IReadOnlyList<int>>? OtherProcesses, bool? Backup);
+    private sealed record Overrides(bool Backup);
 
     private static readonly AsyncLocal<Overrides?> _scoped = new();
     private static readonly object _gate = new();
     private static readonly HashSet<string> _seen = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> _createdByThisProcess = new(StringComparer.OrdinalIgnoreCase);
-    private static bool _allowBreaking;
-    private static Func<IReadOnlyList<int>> _otherProcesses = ProbeOtherVibeRailsProcesses;
     private static bool _backupBeforeBreaking = true;
-
-    /// <summary>Called by the <c>vb --migrate</c> host and nothing else in production.</summary>
-    internal static void AllowBreakingMigrationsForThisProcess()
-    {
-        lock (_gate)
-            _allowBreaking = true;
-    }
-
-    internal static bool BreakingMigrationsAllowed =>
-        _scoped.Value?.AllowBreaking
-        ?? (_allowBreaking || IsTruthy(Environment.GetEnvironmentVariable(MigrateEnvironmentVariable)));
-
-    internal static IReadOnlyList<int> OtherVibeRailsProcesses() => (_scoped.Value?.OtherProcesses ?? _otherProcesses)();
 
     internal static bool BackupBeforeBreaking => _scoped.Value?.Backup ?? _backupBeforeBreaking;
 
@@ -64,24 +44,21 @@ internal static class SchemaUpgradePolicy
     internal static string AppliedBy { get; } = DescribeThisBinary();
 
     /// <summary>
-    /// Process-wide defaults for the test assembly: fixtures that adopt a legacy schema on a temp
-    /// file must not need a --migrate flag, a process probe, or a backup. Guard tests opt back in
-    /// through <see cref="Scope"/>, which wins over these defaults inside its async flow.
+    /// Ordinary temporary fixtures skip backup I/O. Upgrade/backup tests enable it through
+    /// <see cref="Scope"/>. Migration eligibility is identical in tests and production.
     /// </summary>
     internal static void ConfigureForTests()
     {
         lock (_gate)
         {
-            _allowBreaking = true;
-            _otherProcesses = () => [];
             _backupBeforeBreaking = false;
         }
     }
 
-    internal static IDisposable Scope(bool? allowBreaking = null, IReadOnlyList<int>? otherProcesses = null, bool? backup = null)
+    internal static IDisposable Scope(bool backup)
     {
         var previous = _scoped.Value;
-        _scoped.Value = new Overrides(allowBreaking, otherProcesses is null ? null : () => otherProcesses, backup);
+        _scoped.Value = new Overrides(backup);
         return new ScopeRestore(previous);
     }
 
@@ -107,22 +84,6 @@ internal static class SchemaUpgradePolicy
         }
     }
 
-    private static IReadOnlyList<int> ProbeOtherVibeRailsProcesses()
-    {
-        var self = Environment.ProcessId;
-        var others = new List<int>();
-        foreach (var process in Process.GetProcessesByName(ProcessName))
-        {
-            using (process)
-            {
-                if (process.Id != self)
-                    others.Add(process.Id);
-            }
-        }
-        others.Sort();
-        return others;
-    }
-
     private static string DescribeThisBinary()
     {
         var entry = Assembly.GetEntryAssembly();
@@ -133,9 +94,6 @@ internal static class SchemaUpgradePolicy
         var configuration = entry?.GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration ?? "?";
         return $"{name} {version} ({configuration}) pid={Environment.ProcessId} host={Environment.MachineName}";
     }
-
-    private static bool IsTruthy(string? value) =>
-        value is not null && value.Trim().ToLowerInvariant() is "1" or "true" or "yes";
 
     private sealed class ScopeRestore(Overrides? previous) : IDisposable
     {

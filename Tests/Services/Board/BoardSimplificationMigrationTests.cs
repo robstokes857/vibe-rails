@@ -12,23 +12,24 @@ public sealed class BoardSimplificationMigrationTests : IDisposable
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Fact]
-    public async Task ExistingDatabaseRequiresExplicitMigration_AndPreservesHistoryUntilThen()
+    public async Task ExistingDatabaseOpensNormallyAndAppliesPendingBoardMigrations()
     {
         var connectionString = await LegacyDatabaseAsync();
-        using var policy = SchemaUpgradePolicy.Scope(allowBreaking: false);
-        var error = Assert.Throws<StorageException>(() => new BoardStore(connectionString));
-        Assert.Contains("board/8", error.Message);
-        Assert.Contains("vb --migrate", error.Message);
+        var store = new BoardStore(connectionString);
+        Assert.Single(await store.GetBoardsAsync(_root, Ct));
+        var card = (await store.GetCardDetailAsync(_root, "VB-1", Ct))!;
+        Assert.Equal("Current description", card.Card.Description);
+        Assert.False(card.Card.Flagged);
         using var db = SqliteConnectionFactory.Open(connectionString);
-        Assert.Equal(1L, Scalar(db, "SELECT COUNT(*) FROM BoardDescriptionRevisions;"));
-        Assert.Equal(2L, Scalar(db, "PRAGMA user_version;"));
+        Assert.Equal(3L, Scalar(db, "PRAGMA user_version;"));
+        Assert.Equal(2L, Scalar(db, "SELECT COUNT(*) FROM SchemaMigrations WHERE Component='board' AND Version IN (8,9);"));
     }
 
     [Fact]
     public async Task MigrationBacksUpOldState_DropsHistoryAndRemovedFiles_PreservesCurrentCardAndRails()
     {
         var connectionString = await LegacyDatabaseAsync();
-        using var policy = SchemaUpgradePolicy.Scope(allowBreaking: true, otherProcesses: [], backup: true);
+        using var policy = SchemaUpgradePolicy.Scope(backup: true);
         var store = new BoardStore(connectionString);
         var card = (await store.GetCardDetailAsync(_root, "VB-1", Ct))!;
         Assert.Equal("Current description", card.Card.Description);
