@@ -5,16 +5,19 @@ using VibeRails.DTOs;
 using VibeRails.Data.Sqlite;
 using VibeRails.Services;
 using VibeRails.Services.Jobs;
+using VibeRails.Services.Board;
 
 namespace VibeRails.DB;
 
 public sealed partial class JobStore : IJobStore
 {
     private readonly string _connectionString;
+    private readonly IBoardStore? _boards;
 
-    public JobStore(string connectionString)
+    public JobStore(string connectionString, IBoardStore? boards = null)
     {
         _connectionString = connectionString;
+        _boards = boards;
         EnsureSchema();
     }
 

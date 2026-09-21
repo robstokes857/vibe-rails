@@ -18,7 +18,10 @@ across UI, REST, MCP and storage. The root [AGENTS.md](../../../AGENTS.md),
 | Agent tools and project context | `Services/Mcp/Tools/BoardTool.cs`, `BoardProjectResolver.cs`; read [MCP instructions](../Mcp/AGENTS.md) |
 | Provider grants / child context | `Services/Terminal/Commands/BoardMcpAuthorization.cs`, OpenCode companion; read [terminal instructions](../Terminal/AGENTS.md) |
 
-Do not add SQL to routes/tools or create a second Board database. Keep validation in the shared
+Do not add SQL to routes/tools. Board persistence lives in `~/.vibe_rails/board.db`; legacy Board
+tables in `state.db` stay untouched and unused, without migration or synchronization. Keep every
+Board read/write behind `IBoardStore`, including pending Automation events, to preserve a single
+boundary for a future shared API-backed Board. Keep validation in the shared
 service and atomic persistence in the store so REST and MCP agree. Preserve source-generated
 JSON metadata in both host and storage contexts when DTOs change; do not introduce reflection
 serialization or tool discovery into the Native AOT path.
@@ -97,7 +100,7 @@ the header displays the full card count. Tests should use realistic asynchronous
 ## Storage changes
 
 Read [database migration instructions](../../../VibeRails.Data.Sqlite/DB/AGENTS.md).
-`board/1`–`board/9` already exist. `board/8` is a breaking retirement (state generation 3)
+`board/1`–`board/9` already exist. `board/8` is a breaking retirement (generation 3)
 that drops history tables, WIP limits and removed-file retention through an automatic, backed-up upgrade;
 `board/9` adds the current-state attention flag. Historical migration SQL stays immutable. Add the next numbered migration rather than editing applied SQL.
 Honor generation checks, automatic backups and transactional migration coordination. Users must
@@ -109,16 +112,18 @@ merely to read; use a deferred read snapshot if coherence requires a transaction
 policy belongs in the shared SQLite factory, not a Board-specific timeout/WAL workaround.
 
 Automated regression tests use temporary database fixtures and fake tab hosts, not the user's
-stored data. Running/debugging the application uses its normal `state.db`; do not introduce a
+stored data. Running/debugging uses the normal `state.db` and `board.db`; do not introduce a
 separate development database to conceal unsafe code. Live-provider launches and other real
 application actions are not required setup for unit tests.
 
 Board context and lane Automation settings still use their own expected revisions. Settings writes must remain project-scoped and reject stale revisions.
 Lane-entry triggers write one pending row per selected Automation and card in the move transaction.
 The first selection uses the board/6 tables; additional selections use the additive board/7 tables.
-Keep pending-event
-consumption atomic with normal Job run/action snapshot creation; never replace this with a
-browser timer or an in-memory queue. The existing leased root scheduler owns execution.
+The existing leased root scheduler reads pending events through `IBoardStore`, commits normal
+Job run/action snapshots in `state.db`, then acknowledges each exact event in `board.db`. The
+run TriggerKey deduplicates retries; acknowledgement must not delete a subsequent lane entry.
+The two commits are deliberately independent, with best-effort behavior for concurrent moves.
+Never replace the durable queue with a browser timer or an in-memory queue.
 
 ## Validation by change
 
@@ -130,6 +135,7 @@ browser timer or an in-memory queue. The existing leased root scheduler owns exe
 | Launch concurrency/prompt | `BoardLaunchConcurrencyTests`, `BoardPromptComposerTests`, launch cases in `BoardServiceTests` |
 | UI behavior | `Tests/wwwroot/js/board-*.test.mjs`; `UITests/tests/board-ux.spec.js` and `board-attachment-security.spec.js` |
 | Schema changes | `Tests/DB/SchemaSnapshotTests.cs`, `PreviousReleaseCompatibilityTests.cs`, migration/Board adoption tests |
+| Database separation / host composition | `Tests/DB/BoardDatabaseIsolationTests.cs`, split-file `BoardSettingsTests`, route and MCP Board tests |
 
 Common focused commands from repository root:
 

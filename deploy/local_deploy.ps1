@@ -38,11 +38,12 @@ function Assert-DeployPayload {
 
     $protectedNames = @("config.json", "envs", "history", "logs", "sandboxes")
     foreach ($entry in Get-ChildItem -LiteralPath $RootDir -Force) {
-        $isStateDatabase = $entry.Name.StartsWith("state.db", [StringComparison]::OrdinalIgnoreCase)
+        $isDatabase = $entry.Name.StartsWith("state.db", [StringComparison]::OrdinalIgnoreCase) -or
+            $entry.Name.StartsWith("board.db", [StringComparison]::OrdinalIgnoreCase)
         $isProtectedName = $protectedNames -icontains $entry.Name
         $isRuntimeModels = $entry.Name.Equals("models", [StringComparison]::OrdinalIgnoreCase) -and
             -not $entry.Name.Equals("Models", [StringComparison]::Ordinal)
-        if ($isStateDatabase -or $isProtectedName -or $isRuntimeModels) {
+        if ($isDatabase -or $isProtectedName -or $isRuntimeModels) {
             throw "Publish output contains protected user-data path '$($entry.Name)'. The installed application was not changed."
         }
     }

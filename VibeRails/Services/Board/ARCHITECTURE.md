@@ -1,5 +1,28 @@
 # Vibe Board architecture and review
 
+## Separate Board storage (2026-09-20)
+
+All active Board tables now live in `~/.vibe_rails/board.db`, for every project and every host
+(dashboard, stdio MCP, lane Automation scheduler, Debug). `SqliteStorage` owns the path and initialization.
+The owner requested a fresh start: legacy Board tables/data and migration receipts in `state.db`
+are left untouched and are no longer read or written. There is no import or synchronization.
+Old binaries still use their old data; they do not share Board updates with this version.
+
+Board-owned reads/writes, including pending lane events, stay behind `IBoardStore`. This is the
+boundary intended for a future shared API-backed implementation; no collaboration API is added
+in this change. Terminal history and local Automation definitions remain in `state.db`, with
+Board session links, settings, comments, notes, attachments and commit snapshots in `board.db`.
+
+Card moves still enqueue durable lane events within their Board transaction. The existing root
+scheduler reads due events via `IBoardStore`, commits Job run/action snapshots in `state.db`, then
+acknowledges the exact event in `board.db`. The existing unique TriggerKey deduplicates a retry
+after a failed acknowledgement, and an old acknowledgement cannot remove a later lane entry.
+No writer lock spans both files. Moves/settings edits racing an already-read event can still
+produce a run; this best-effort behavior is accepted. This supersedes the shared-database and
+cross-component transaction descriptions in the historical review and amendments below.
+Only scheduler compositions opt in to Board event consumption. Commit hooks and non-scheduling
+Automation hosts use `state.db` without resolving or initializing Board storage.
+
 ## VB-18 simplification and attention flag (2026-09-20)
 
 The owner requested one current card state and no WIP limits. This amendment supersedes
@@ -134,7 +157,7 @@ flowchart TD
     Launch --> Prompt[BoardPromptComposer]
     Launch --> Tabs[TerminalTabHostService / PTY child]
     Service --> Live[Root-local live session probe]
-    Store --> DB[(Shared state.db)]
+    Store --> DB[(board.db)]
 ```
 
 | Responsibility | Source of truth |
@@ -310,8 +333,8 @@ authorize unrelated tools on the same server.
 
 ## Database model and transaction boundaries
 
-Board data shares the user's global `state.db` with terminal history and other features. It is
-not stored in the checkout or a separate Board database. `BoardStore` owns component migrations
+Board data lives in the user's global `board.db`; terminal history and local Automations remain
+in `state.db`. Neither database is stored in the checkout. `BoardStore` owns component migrations
 and can initialize from stdio without constructing the main `Repository`.
 
 | Table | Identity / relation / purpose |

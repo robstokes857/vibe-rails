@@ -1,5 +1,10 @@
 using VibeRails.DTOs;
 namespace VibeRails.Services.Board;
+/// <summary>
+/// The persistence boundary for all Board state, including lane-entry events. Keep callers on
+/// this contract: a future shared, API-backed Board should not require local SQLite access.
+/// Session outcomes and Automation definitions remain host-local references, not Board-owned data.
+/// </summary>
 public partial interface IBoardStore
 {
     // Boards. A project always has at least one; every column belongs to exactly one. Methods

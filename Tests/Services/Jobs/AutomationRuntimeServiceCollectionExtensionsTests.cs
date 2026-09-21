@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using VibeRails.DB;
 using VibeRails.Services.Cli;
 using VibeRails.Services.Jobs;
 using VibeRails.Utils;
@@ -66,6 +67,19 @@ public sealed class AutomationRuntimeServiceCollectionExtensionsTests : IDisposa
             provider.GetRequiredService<IAutomationScriptService>());
         Assert.IsType<JobProcessLauncher>(
             provider.GetRequiredService<IJobProcessLauncher>());
+    }
+
+    [Fact]
+    public async Task NonSchedulingRuntime_DoesNotRequireAUsableBoardDatabase()
+    {
+        var boardPath = Path.Combine(_root, "board.db");
+        await File.WriteAllTextAsync(boardPath, "Damaged Board file", TestContext.Current.CancellationToken);
+        var services = new ServiceCollection();
+        services.AddAutomationRuntime(hostScheduler: false);
+        using var provider = services.BuildServiceProvider();
+        var jobs = provider.GetRequiredService<IJobStore>();
+        Assert.Equal(0, await jobs.CountEnabledJobsAsync(TestContext.Current.CancellationToken));
+        Assert.Equal("Damaged Board file", await File.ReadAllTextAsync(boardPath, TestContext.Current.CancellationToken));
     }
 
     public void Dispose()

@@ -32,6 +32,7 @@ public sealed class SchemaSnapshotTests
             var proxyPath = Path.Combine(directory, "proxy_exchanges.db");
             SqliteStorage.EnsureAllSchemas(new SqliteStoragePaths(statePath, null, proxyPath));
             AssertSnapshot(root, "state.sql", Dump(statePath));
+            AssertSnapshot(root, "board.sql", Dump(Path.Combine(directory, "board.db")));
             AssertSnapshot(root, "proxy_exchanges.sql", Dump(proxyPath));
         }
         finally

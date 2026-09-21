@@ -19,7 +19,8 @@ public static class AutomationRuntimeServiceCollectionExtensions
         this IServiceCollection services,
         bool hostScheduler)
     {
-        services.AddSqliteStateStorage(_ => new SqliteStoragePaths(ParserConfigs.GetStatePath()));
+        services.AddSqliteStateStorage(_ => new SqliteStoragePaths(ParserConfigs.GetStatePath()),
+            consumeBoardEvents: hostScheduler);
         services.TryAddSingleton<IJobExecutableResolver, JobExecutableResolver>();
         services.TryAddSingleton<IAutomationScriptService, AutomationScriptService>();
         services.TryAddSingleton<IJobProcessLauncher, JobProcessLauncher>();

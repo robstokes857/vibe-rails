@@ -12,6 +12,7 @@ public sealed partial class BoardSettingsTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "vb16-" + Guid.NewGuid().ToString("N"));
     private readonly string _connectionString;
+    private readonly string _stateConnectionString;
     private readonly BoardStore _boards;
     private readonly JobStore _jobs;
     private CancellationToken Ct => TestContext.Current.CancellationToken;
@@ -19,10 +20,11 @@ public sealed partial class BoardSettingsTests : IDisposable
     public BoardSettingsTests()
     {
         Directory.CreateDirectory(_root);
-        _connectionString = $"Data Source={Path.Combine(_root, "state.db")}";
-        _boards = new(_connectionString);
-        _jobs = new(_connectionString);
-        using var connection = new SqliteConnection(_connectionString);
+        _connectionString = $"Data Source={Path.Combine(_root, "board.db")}";
+        _stateConnectionString = $"Data Source={Path.Combine(_root, "state.db")}";
+        _boards = new(_connectionString, _stateConnectionString);
+        _jobs = new(_stateConnectionString, _boards);
+        using var connection = new SqliteConnection(_stateConnectionString);
         connection.Open();
         using var command = connection.CreateCommand();
         command.CommandText = SqlStrings.CreateEnvironmentsTable;
@@ -103,7 +105,7 @@ public sealed partial class BoardSettingsTests : IDisposable
         Assert.InRange(due, before + 59_999, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + 60_001);
         Assert.Empty(await Tick(due - 1));
         // Reopening independent stores models roots contending after the original writer exits.
-        var results = await Task.WhenAll(Tick(due, new JobStore(_connectionString)), Tick(due, new JobStore(_connectionString)));
+        var results = await Task.WhenAll(Tick(due, ReopenJobs()), Tick(due, ReopenJobs()));
         var runId = Assert.Single(results.SelectMany(x => x));
         var run = (await _jobs.GetRunAsync(runId, Ct))!;
         Assert.Equal(jobC.Id, run.JobId);
@@ -187,7 +189,7 @@ public sealed partial class BoardSettingsTests : IDisposable
                 """;
             await command.ExecuteNonQueryAsync(Ct);
         }
-        var upgraded = new BoardStore(_connectionString);
+        var upgraded = new BoardStore(_connectionString, _stateConnectionString);
         Assert.Equal(card.Description, (await upgraded.FindCardAsync(_root, card.Id, Ct))!.Description);
         Assert.Empty((await upgraded.GetContextSettingsAsync(_root, board, Ct))!.Context.DefaultMessage);
         Assert.Null((await upgraded.GetLaneAutomationAsync(_root, b, Ct))!.JobId);
@@ -224,9 +226,54 @@ public sealed partial class BoardSettingsTests : IDisposable
         Assert.Equal(2, (await Tick(await Due(card.Id))).Count);
     }
 
+    [Fact]
+    public async Task RunCommittedBeforeAcknowledgementFailure_IsNotDuplicatedOnRetryEvenAfterCompletion()
+    {
+        var (_, lane, _, _) = await Lanes();
+        var job = await Job();
+        await _boards.SaveLaneAutomationAsync(_root, lane, [job.Id], 0, Ct);
+        var card = await Card(lane);
+        var due = await Due(card.Id);
+        var unavailable = new Mock<IBoardStore>(MockBehavior.Strict);
+        unavailable.Setup(store => store.GetDueLaneAutomationsAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns<DateTime, CancellationToken>(_boards.GetDueLaneAutomationsAsync);
+        unavailable.Setup(store => store.AcknowledgeLaneAutomationAsync(It.IsAny<BoardLaneAutomationEvent>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new IOException("Board unavailable after local commit"));
+        await Assert.ThrowsAsync<IOException>(() => Tick(due, new JobStore(_stateConnectionString, unavailable.Object)));
+        var run = Assert.Single(await _jobs.GetRunsAsync(cancellationToken: Ct));
+        Assert.Single((await _jobs.GetRunAsync(run.Id, Ct))!.Actions!);
+        Assert.Equal(due, await Due(card.Id));
+        await _jobs.CompleteRunAsync(run.Id, JobRunStatus.Succeeded, 0, null, Ct);
+
+        Assert.Empty(await Tick(due + 1, ReopenJobs()));
+        Assert.Single(await _jobs.GetRunsAsync(cancellationToken: Ct));
+        Assert.Equal(0, await Due(card.Id));
+    }
+
+    [Fact]
+    public async Task AcknowledgingAnOlderEntry_DoesNotDeleteARepeatedEntryIntoTheSameLane()
+    {
+        var (_, lane, other, _) = await Lanes();
+        var job = await Job();
+        await _boards.SaveLaneAutomationAsync(_root, lane, [job.Id], 0, Ct);
+        var card = await Card(lane);
+        var now = DateTime.UtcNow.AddMinutes(2);
+        var first = Assert.Single(await _boards.GetDueLaneAutomationsAsync(now, Ct));
+        await _boards.MoveCardAsync(_root, card.Id, other, null, Ct);
+        await _boards.MoveCardAsync(_root, card.Id, lane, null, Ct);
+        await _boards.AcknowledgeLaneAutomationAsync(first, Ct);
+
+        var next = Assert.Single(await _boards.GetDueLaneAutomationsAsync(now, Ct));
+        Assert.NotEqual(first.EventKey, next.EventKey);
+        Assert.Single(await _jobs.EnqueueDueSchedulesAsync(now, Ct));
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearPool(new SqliteConnection(_connectionString));
+        SqliteConnection.ClearPool(new SqliteConnection(_stateConnectionString));
         try { Directory.Delete(_root, true); } catch (IOException) { }
     }
+
+    private JobStore ReopenJobs() => new(_stateConnectionString, new BoardStore(_connectionString, _stateConnectionString));
 }
