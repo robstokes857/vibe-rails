@@ -38,6 +38,8 @@ The modal has an extensible tab bar:
   ID filters; an upload's **View logs** opens the journal for that specific attempt.
 
 Both session sharing and the legacy full-database export record new attempts automatically.
+The full-database export uploads `state.db` and, when it exists, the `board.db` beside it as
+two separate compressed snapshots; the reported SHA-256 is the `state.db` upload's.
 `succeeded` means the upload completed; `failed`, `cancelled`, and `skipped` explain other
 outcomes. `uploaded` with a warning means the server accepted a session but its local
 confirmation could not be saved. An attempt left at `started` has no recorded final outcome

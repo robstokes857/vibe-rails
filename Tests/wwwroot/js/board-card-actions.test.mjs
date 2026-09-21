@@ -11,17 +11,19 @@ function harness() {
         '#board-card-title': { value: 'Edited title', focus() { titleFocused = true; } },
         '[data-board-composer="description"] [data-board-composer-input]': { value: 'Unsaved description' },
         '#board-card-lane': { value: 'build' },
-        '#board-card-assignee': { value: 'base:claude' },
+        '#board-card-assignee': { value: 'base:claude', focus() {} },
         '#board-card-priority': { value: 'high' },
         '#board-card-points': { value: '5' },
         '#board-card-tags': { value: 'bug, auth' },
         '[data-board-blocked]': { checked: true },
+        '[data-board-chat-agent]': { value: 'base:claude' },
+        '[data-board-chat]': { disabled: false },
         '[data-board-start-work]': { disabled: false }
     };
     const app = {
         async apiCall(url, method, body) {
             calls.push({ url, method, body });
-            return { tabId: 'tab-1', cardKey: 'VB-1', selection: 'base:claude' };
+            return { tabId: 'tab-1', cardKey: 'VB-1', selection: body?.selection || 'base:claude' };
         },
         showToast(...args) { toasts.push(args); },
         closeModal() { closed = true; }
@@ -159,6 +161,80 @@ for (const adopted of [true, false]) {
         if (!adopted) assert.deepEqual(actions[1], ['terminal-focus', { preferredTabId: 'tab-1', preferredSelection: 'base:claude' }]);
     });
 }
+
+for (const [assignee, selection] of [
+    ['base:claude', 'base:codex'],
+    ['base:claude', 'env:7:codex'],
+    ['', 'base:codex']
+]) {
+    test(`Chat launches ${selection} while preserving assignment ${assignee || '(unassigned)'}`, async () => {
+        const h = harness();
+        h.fields['#board-card-assignee'].value = assignee;
+        h.fields['[data-board-chat-agent]'].value = selection;
+        let metadata;
+        let navigation;
+        h.app.terminalController = { rememberTabLaunch: (_tab, value) => { metadata = value; } };
+        h.app.navigate = (_view, value) => { navigation = value; };
+
+        await h.controller.startWork(h.editor, h.card, 'chat');
+
+        assert.equal(h.calls[0].body.assignee, assignee);
+        assert.equal('selection' in h.calls[0].body, false);
+        assert.deepEqual(h.calls[1].body, { selection, intent: 'chat' });
+        assert.equal(metadata.selection, selection);
+        assert.equal(navigation.preferredSelection, selection);
+        assert.equal(h.fields['#board-card-assignee'].value, assignee);
+    });
+}
+
+test('Chat requires its own selection before saving, even when the card is assigned', async () => {
+    const h = harness();
+    let focused = false;
+    h.fields['[data-board-chat-agent]'] = { value: '', focus() { focused = true; } };
+
+    await h.controller.startWork(h.editor, h.card, 'chat');
+
+    assert.deepEqual(h.calls, []);
+    assert.equal(focused, true);
+    assert.deepEqual(h.toasts, [['Board', 'Choose an LLM beside Chat with.', 'warning']]);
+});
+
+test('Start work still uses the assignee when another chat target is selected', async () => {
+    const h = harness();
+    h.fields['[data-board-chat-agent]'].value = 'base:codex';
+    await h.controller.startWork(h.editor, h.card);
+    assert.deepEqual(h.calls[1].body, { selection: 'base:claude', intent: 'work' });
+
+    h.calls.length = 0;
+    h.fields['#board-card-assignee'].value = '';
+    h.fields['[data-board-start-work]'].disabled = false;
+    await h.controller.startWork(h.editor, h.card);
+    assert.deepEqual(h.calls, []);
+    assert.deepEqual(h.toasts.at(-1), ['Board', 'Assign an LLM to this card first.', 'warning']);
+});
+
+test('Chat waits for the save and keeps the selection captured at click time', async () => {
+    const h = harness();
+    const apiCall = h.app.apiCall;
+    let finishSave;
+    const saving = new Promise(resolve => { finishSave = resolve; });
+    h.app.apiCall = async (...args) => {
+        const result = await apiCall(...args);
+        if (args[1] === 'PUT') await saving;
+        return result;
+    };
+    h.fields['[data-board-chat-agent]'].value = 'base:codex';
+
+    const starting = h.controller.startWork(h.editor, h.card, 'chat');
+    assert.equal(h.calls.length, 1);
+    assert.equal(h.calls[0].method, 'PUT');
+    h.fields['[data-board-chat-agent]'].value = 'env:7:codex';
+    await h.controller.startWork(h.editor, h.card, 'chat');
+    assert.equal(h.calls.length, 1, 'another click cannot start a second launch');
+    finishSave();
+    await starting;
+    assert.deepEqual(h.calls[1].body, { selection: 'base:codex', intent: 'chat' });
+});
 
 test('Chat cannot start alongside an in-flight work launch or a running session', async () => {
     const h = harness();

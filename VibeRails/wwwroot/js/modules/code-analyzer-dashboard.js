@@ -469,6 +469,161 @@ function appendChip(documentRef, host, label, value) {
     host.append(chip);
 }
 
+function svgElement(documentRef, tagName, className = '') {
+    const node = typeof documentRef.createElementNS === 'function'
+        ? documentRef.createElementNS('http://www.w3.org/2000/svg', tagName)
+        : documentRef.createElement(tagName);
+    if (className) {
+        node.setAttribute?.('class', className);
+        // The lightweight DOM used by the browser-less renderer/tests has no SVG
+        // namespace, so keep its className discoverable too.
+        if (!node.namespaceURI) node.className = className;
+    }
+    return node;
+}
+
+function radarLabel(label) {
+    return String(label || '')
+        .replace(/\s+complexity$/i, '')
+        .replace(/^Lack of cohesion \(LCOM4\)$/i, 'Cohesion')
+        .replace(/^Maintainability index$/i, 'Maintainability')
+        .replace(/^Halstead difficulty$/i, 'Halstead')
+        .replace(/^Overall health$/i, 'Overall')
+        .replace(/^Scan coverage$/i, 'Coverage');
+}
+
+function buildRadarItems(model) {
+    const items = [];
+    const seen = new Set();
+    const add = (label, value, source = '') => {
+        const health = clampScore(value);
+        const key = String(label || '').toLowerCase();
+        if (!key || !Number.isFinite(health) || seen.has(key)) return;
+        seen.add(key);
+        items.push({ label: radarLabel(label), value: health, source });
+    };
+
+    // The scorecard is the most intentional signal: it is already the fixed set
+    // of quality dimensions chosen by MintLint for the scan overview.
+    for (const card of Array.isArray(model?.scorecard) ? model.scorecard : []) {
+        if (card?.measured !== false) {
+            const concern = clampScore(card?.averageConcern);
+            if (concern !== null) add(card.label, 100 - concern, 'scorecard');
+        }
+    }
+
+    // Older payloads may not carry a scorecard. Category cards are the next-best
+    // shape and still preserve the actual concern values returned by the API.
+    if (items.length < 3) {
+        for (const category of Array.isArray(model?.categories) ? model.categories : []) {
+            const concern = clampScore(category?.concern);
+            if (concern !== null) add(category.name, 100 - concern, 'category');
+        }
+    }
+
+    // Keep the graphic useful for small or sparse diffs without pretending that
+    // an unmeasured metric was healthy. These are explicitly derived anchors.
+    if (items.length < 3 && Number.isFinite(model?.health)) {
+        add('Overall health', model.health, 'derived');
+        const analyzed = Number(model.analyzedFileCount) || 0;
+        const skipped = Number(model.skippedFileCount) || 0;
+        const total = analyzed + skipped;
+        if (total > 0) add('Scan coverage', (analyzed / total) * 100, 'derived');
+    }
+
+    return items.slice(0, 8);
+}
+
+function radarPoint(cx, cy, radius, index, count, value = 100) {
+    const angle = -Math.PI / 2 + (Math.PI * 2 * index) / count;
+    const distance = radius * (clampScore(value) ?? 0) / 100;
+    return {
+        x: cx + Math.cos(angle) * distance,
+        y: cy + Math.sin(angle) * distance,
+        angle
+    };
+}
+
+function radarPoints(cx, cy, radius, count, value = 100) {
+    return Array.from({ length: count }, (_, index) => {
+        const point = radarPoint(cx, cy, radius, index, count, value);
+        return `${point.x.toFixed(2)},${point.y.toFixed(2)}`;
+    }).join(' ');
+}
+
+function renderCodeAnalyzerRadar(documentRef, model) {
+    const host = element(documentRef, 'div', 'code-analyzer-radar');
+    const heading = element(documentRef, 'div', 'code-analyzer-radar-heading');
+    const items = buildRadarItems(model);
+    heading.append(
+        element(documentRef, 'span', 'code-analyzer-radar-kicker', 'Quality profile'),
+        element(documentRef, 'span', 'code-analyzer-radar-count', `${items.length} signals`));
+    host.append(heading);
+
+    if (items.length < 3) {
+        host.append(element(documentRef, 'span', 'code-analyzer-radar-empty', 'Not enough signal to plot a profile'));
+        return host;
+    }
+
+    const viewBox = { width: 300, height: 194, cx: 150, cy: 100, radius: 68 };
+    const svg = svgElement(documentRef, 'svg');
+    svg.setAttribute('viewBox', `0 0 ${viewBox.width} ${viewBox.height}`);
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', 'Animated radar chart of code quality health by signal');
+    svg.setAttribute('focusable', 'false');
+
+    const grid = svgElement(documentRef, 'g', 'code-analyzer-radar-grid');
+    for (const level of [0.25, 0.5, 0.75, 1]) {
+        const ring = svgElement(documentRef, 'polygon');
+        ring.setAttribute('points', radarPoints(viewBox.cx, viewBox.cy, viewBox.radius * level, items.length));
+        grid.append(ring);
+    }
+    const axes = svgElement(documentRef, 'g', 'code-analyzer-radar-axes');
+    const labels = svgElement(documentRef, 'g', 'code-analyzer-radar-labels');
+    items.forEach((item, index) => {
+        const outer = radarPoint(viewBox.cx, viewBox.cy, viewBox.radius, index, items.length);
+        const axis = svgElement(documentRef, 'line');
+        axis.setAttribute('x1', String(viewBox.cx));
+        axis.setAttribute('y1', String(viewBox.cy));
+        axis.setAttribute('x2', outer.x.toFixed(2));
+        axis.setAttribute('y2', outer.y.toFixed(2));
+        axes.append(axis);
+
+        const label = svgElement(documentRef, 'text');
+        const labelPoint = radarPoint(viewBox.cx, viewBox.cy, viewBox.radius + 18, index, items.length);
+        label.setAttribute('x', labelPoint.x.toFixed(2));
+        label.setAttribute('y', labelPoint.y.toFixed(2));
+        label.setAttribute('text-anchor', Math.abs(labelPoint.x - viewBox.cx) < 8
+            ? 'middle'
+            : labelPoint.x < viewBox.cx ? 'end' : 'start');
+        label.textContent = item.label;
+        labels.append(label);
+    });
+
+    const dataPoints = items.map((item, index) => radarPoint(
+        viewBox.cx, viewBox.cy, viewBox.radius, index, items.length, item.value));
+    const pointString = dataPoints.map(point => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ');
+    const glow = svgElement(documentRef, 'polygon', 'code-analyzer-radar-glow');
+    glow.setAttribute('points', pointString);
+    const data = svgElement(documentRef, 'polygon', 'code-analyzer-radar-data');
+    data.setAttribute('points', pointString);
+    const nodes = svgElement(documentRef, 'g', 'code-analyzer-radar-nodes');
+    dataPoints.forEach(point => {
+        const node = svgElement(documentRef, 'circle');
+        node.setAttribute('cx', point.x.toFixed(2));
+        node.setAttribute('cy', point.y.toFixed(2));
+        node.setAttribute('r', '3');
+        nodes.append(node);
+    });
+    const center = svgElement(documentRef, 'circle', 'code-analyzer-radar-center');
+    center.setAttribute('cx', String(viewBox.cx));
+    center.setAttribute('cy', String(viewBox.cy));
+    center.setAttribute('r', '2.5');
+    svg.append(grid, axes, glow, data, nodes, center, labels);
+    host.append(svg);
+    return host;
+}
+
 /**
  * Renders the compact Code quality summary shown on the Validation screen — the
  * survivor of the old Overview tab. One row: score ring, grade, verdict, counts,
@@ -517,6 +672,7 @@ export function renderCodeAnalyzerBrief(host, response, documentRef = globalThis
         [model.warningCount, model.warningCount === 1 ? 'warning' : 'warnings', 'warning'],
         [model.healthyFileCount, 'healthy', 'success']
     ];
+    if (model.skippedFileCount > 0) statDefinitions.push([model.skippedFileCount, 'skipped', 'neutral']);
     if (model.ignoredFileCount > 0) statDefinitions.push([model.ignoredFileCount, 'ignored', 'neutral']);
     for (const [value, label, tone] of statDefinitions) {
         const stat = element(documentRef, 'span', 'code-analyzer-brief-stat');
@@ -562,6 +718,11 @@ export function renderCodeAnalyzerBrief(host, response, documentRef = globalThis
         open.addEventListener?.('click', () => onOpenDetails());
         brief.append(open);
     }
+
+    // Keep this after the existing action so the compact card's DOM contract stays
+    // compatible with older embedded hosts, while CSS places the chart as the visual
+    // anchor on the right side of the result.
+    brief.append(renderCodeAnalyzerRadar(documentRef, model));
 
     host.replaceChildren?.(brief);
     host.hidden = false;

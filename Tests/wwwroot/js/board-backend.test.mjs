@@ -60,7 +60,7 @@ test('the assignee is the app-wide LLM picker, not a list of people', () => {
 test('Start work launches through the server without changing the current view', () => {
     const source = readFileSync(controllerPath, 'utf8');
     assert.match(source, /data-board-start-work/);
-    assert.match(source, /BoardApi\.launchBoardCardAsync\(card\.id, \{ selection: payload\.assignee, intent \}\)/);
+    assert.match(source, /BoardApi\.launchBoardCardAsync\(card\.id, \{ selection, intent \}\)/);
     assert.match(source, /rememberTabLaunch\?\.\(tabId, \{[\s\S]*taskKey: CARD_TASK_KEY\(card\.id\)/,
         'the tab is tagged with the board-card:<id> task key');
     const start = source.slice(source.indexOf('async startWork('), source.indexOf('async deleteCurrentCard('));

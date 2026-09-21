@@ -36,7 +36,7 @@ public sealed partial class BoardSettingsTests
         var foreign = await Job("Foreign", _root + "-other");
         var saved = await _boards.SaveLaneAutomationAsync(_root, a, [second.Id, first.Id], 0, Ct);
         Assert.Equal(new[] { second.Id, first.Id }, saved!.JobIds);
-        Assert.Equal(saved.JobIds, (await new BoardStore(_connectionString).GetLaneAutomationAsync(_root, a, Ct))!.JobIds);
+        Assert.Equal(saved.JobIds, (await new BoardStore(_connectionString, _stateConnectionString).GetLaneAutomationAsync(_root, a, Ct))!.JobIds);
         var card = await Card(a);
         var due = await Due(card.Id);
         foreach (var invalid in new long[][] { [first.Id, foreign.Id], [first.Id, first.Id], [first.Id, 0], [first.Id, 99999] })

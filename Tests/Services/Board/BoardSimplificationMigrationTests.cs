@@ -15,7 +15,7 @@ public sealed class BoardSimplificationMigrationTests : IDisposable
     public async Task ExistingDatabaseOpensNormallyAndAppliesPendingBoardMigrations()
     {
         var connectionString = await LegacyDatabaseAsync();
-        var store = new BoardStore(connectionString);
+        var store = new BoardStore(connectionString, connectionString);
         Assert.Single(await store.GetBoardsAsync(_root, Ct));
         var card = (await store.GetCardDetailAsync(_root, "VB-1", Ct))!;
         Assert.Equal("Current description", card.Card.Description);
@@ -30,7 +30,7 @@ public sealed class BoardSimplificationMigrationTests : IDisposable
     {
         var connectionString = await LegacyDatabaseAsync();
         using var policy = SchemaUpgradePolicy.Scope(backup: true);
-        var store = new BoardStore(connectionString);
+        var store = new BoardStore(connectionString, connectionString);
         var card = (await store.GetCardDetailAsync(_root, "VB-1", Ct))!;
         Assert.Equal("Current description", card.Card.Description);
         Assert.False(card.Card.Flagged);
@@ -50,7 +50,7 @@ public sealed class BoardSimplificationMigrationTests : IDisposable
         Assert.Equal(3L, Scalar(db, "PRAGMA user_version;"));
         Assert.Throws<StorageException>(() => SqliteMigrationRunner.RequireGenerationAtMost(db, 2, "state.db"));
         var schema = Scalar(db, "PRAGMA schema_version;");
-        _ = new BoardStore(connectionString);
+        _ = new BoardStore(connectionString, connectionString);
         Assert.Equal(schema, Scalar(db, "PRAGMA schema_version;"));
         var backup = Assert.Single(Directory.GetFiles(Path.Combine(_root, "backups"), "*", SearchOption.AllDirectories));
         using var saved = SqliteConnectionFactory.Open(ConnectionString(backup));
@@ -62,7 +62,7 @@ public sealed class BoardSimplificationMigrationTests : IDisposable
     {
         Directory.CreateDirectory(_root);
         var seed = ConnectionString(Path.Combine(_root, "seed.db"));
-        var store = new BoardStore(seed);
+        var store = new BoardStore(seed, seed);
         await store.EnsureDefaultColumnsAsync(_root, Ct);
         var card = await store.CreateCardAsync(_root, new(null, "Preserved card", "Current description", null, "medium", null, [], false), Ct);
         await store.AddCommentAsync(_root, card.Id, BoardAuthor.User(), "Comment", Ct);

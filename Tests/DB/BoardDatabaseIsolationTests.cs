@@ -96,7 +96,7 @@ public sealed class BoardDatabaseIsolationTests : IDisposable
     public async Task EveryHostUsesBoardDb_AndLeavesLegacyTablesAndPendingEventsUntouched()
     {
         // Model an older install that still has Board tables and a due event in state.db.
-        var legacy = new BoardStore(StateConnectionString);
+        var legacy = new BoardStore(StateConnectionString, StateConnectionString);
         var legacyJobs = new JobStore(StateConnectionString, legacy);
         using var state = SqliteConnectionFactory.Open(StateConnectionString);
         Execute(state, SqlStrings.CreateEnvironmentsTable);

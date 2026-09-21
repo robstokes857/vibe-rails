@@ -30,10 +30,16 @@ public sealed partial class BoardStore : IBoardStore
     private readonly string _connectionString;
     private readonly string _stateConnectionString;
 
-    public BoardStore(string connectionString, string? stateConnectionString = null)
+    /// <param name="connectionString">board.db: every Board-owned table.</param>
+    /// <param name="stateConnectionString">
+    /// state.db: Jobs and Sessions lookups only. Required rather than defaulted so a host that
+    /// forgets it fails to compile instead of failing at runtime with "no such table: Jobs".
+    /// A test that models the pre-split single-file layout passes the same string twice.
+    /// </param>
+    public BoardStore(string connectionString, string stateConnectionString)
     {
         _connectionString = connectionString;
-        _stateConnectionString = stateConnectionString ?? connectionString;
+        _stateConnectionString = stateConnectionString;
         EnsureSchema();
     }
 

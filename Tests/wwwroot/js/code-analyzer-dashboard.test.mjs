@@ -456,6 +456,10 @@ test('code analyzer brief summarizes the scan for the Rules hub door card', () =
     const categories = brief.children[3];
     assert.equal(categories.children[0].children[1].textContent, 'Complexity');
     assert.equal(brief.children[4].children[0].textContent, 'View metrics');
+    const radar = brief.children[5];
+    assert.equal(radar.className, 'code-analyzer-radar');
+    assert.equal(radar.children[0].children[0].textContent, 'Quality profile');
+    assert.equal(radar.children[1].tagName, 'svg');
 
     brief.children[4].fire('click');
     assert.equal(opened, 1);

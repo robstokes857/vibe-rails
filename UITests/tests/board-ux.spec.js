@@ -80,14 +80,18 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
             return route.fulfill({ json: attachment });
         }
         if (path.endsWith('/attachments/att_uploaded/content')) return route.fulfill({ contentType: 'application/octet-stream', body: contents.get('att_uploaded') });
-        if (path.endsWith('/launch')) return route.fulfill({ json: { tabId: 'board_background', cardKey: card.key, selection: card.assignee } });
+        if (path.endsWith('/launch')) return route.fulfill({ json: {
+            tabId: 'board_background', cardKey: card.key, selection: route.request().postDataJSON().selection || card.assignee
+        } });
         const payloads = {
             '/api/v1/context': { isInGit: true, rootPath: 'C:/board-fixture', launchDirectory: 'C:/board-fixture' },
             '/api/v1/settings': {},
-            '/api/v1/environments': { environments: [] },
+            '/api/v1/environments': { environments: [{ id: 7, name: 'Card review', cli: 'claude' }] },
             '/api/v1/llm-picker/preferences': { items: [
                 { key: 'base:codex', kind: 'base', group: 'Base CLIs', label: 'Codex', cli: 'codex', enabled: true, order: 0 },
-                { key: 'base:claude', kind: 'base', group: 'Base CLIs', label: 'Claude', cli: 'claude', enabled: true, order: 1 }
+                { key: 'base:claude', kind: 'base', group: 'Base CLIs', label: 'Claude', cli: 'claude', enabled: true, order: 1 },
+                { key: 'env:7:claude', kind: 'environment', group: 'Custom Environments', label: 'Card review (claude)',
+                    cli: 'claude', environmentId: 7, enabled: true, order: 2 }
             ] },
             '/api/v1/board/boards': { boards: [{ id: 'brd_main', name: 'Main', position: 0, cardCount: 1,
                 columns: [{ id: 'col_ready', name: 'Ready', position: 0, color: '#3b82f6', boardId: 'brd_main' }] },
@@ -239,20 +243,65 @@ test('lane automation conflicts preserve selections and unavailable jobs can be 
     await page.screenshot({ path: '../.codex-test-artifacts/vb22-lane-narrow.png' });
 });
 
-test('Chat with agent saves first, sends discussion intent and focuses the returned tab', async ({ page }) => {
+test('Chat defaults to the assignee, saves first and focuses the returned tab', async ({ page }) => {
     const requests = await openBoard(page, { assignee: 'base:codex' });
     await page.evaluate(() => {
         window.__chatTabs = [];
         window.app.terminalController.adoptLaunchedTab = async id => { window.__chatTabs.push(id); return true; };
     });
     await page.getByText('Description images', { exact: true }).click();
+    await expect(page.locator('[data-board-chat-agent]')).toHaveValue('base:codex');
     await page.locator('#board-card-title').fill('Discuss this card');
-    await page.getByRole('button', { name: 'Chat with agent', exact: true }).click();
+    await page.getByRole('button', { name: 'Chat with:', exact: true }).click();
     await expect.poll(() => page.evaluate(() => window.__chatTabs)).toEqual(['board_background']);
     const writes = requests.filter(item => item.method === 'PUT' || item.path.endsWith('/launch'));
     expect(writes[0].body.title).toBe('Discuss this card');
     expect(writes[1].body).toEqual({ selection: 'base:codex', intent: 'chat' });
     await expect(page.locator('[data-board-card-editor]')).toHaveCount(0);
+});
+
+for (const [assignee, selection] of [
+    ['base:codex', 'base:claude'],
+    ['base:codex', 'env:7:claude'],
+    [null, 'env:7:claude']
+]) {
+    test(`Chat can select ${selection} without changing ${assignee || 'an unassigned card'}`, async ({ page }, testInfo) => {
+        const requests = await openBoard(page, { assignee });
+        await page.evaluate(() => {
+            window.__chatTabs = [];
+            window.app.terminalController.adoptLaunchedTab = async id => { window.__chatTabs.push(id); return true; };
+        });
+        await page.getByText('Description images', { exact: true }).click();
+        await expect(page.locator('[data-board-chat-agent]')).toHaveValue(assignee || 'base:codex');
+        await page.locator('.board-chat-controls .ts-control').click();
+        await page.locator(`.ts-dropdown:visible [data-value="${selection}"]`).click();
+        await expect(page.locator('[data-board-chat-agent]')).toHaveValue(selection);
+        await expect(page.locator('#board-card-assignee')).toHaveValue(assignee || '');
+        await page.screenshot({ path: testInfo.outputPath('board-chat-picker.png') });
+        await page.getByRole('button', { name: 'Chat with:', exact: true }).click();
+        await expect.poll(() => page.evaluate(() => window.__chatTabs)).toEqual(['board_background']);
+
+        const writes = requests.filter(item => item.method === 'PUT' || item.path.endsWith('/launch'));
+        expect(writes[0].body.assignee).toBe(assignee || '');
+        expect(writes[1].body).toEqual({ selection, intent: 'chat' });
+        await expect(page.locator('[data-board-card-editor]')).toHaveCount(0);
+    });
+}
+
+test('closing and reopening the card disposes the chat picker and resets its default', async ({ page }) => {
+    await openBoard(page, { assignee: 'base:codex' });
+    for (let attempt = 0; attempt < 2; attempt++) {
+        await page.getByText('Description images', { exact: true }).click();
+        await expect(page.locator('[data-board-chat-agent]')).toHaveValue('base:codex');
+        await page.locator('.board-chat-controls .ts-control').click();
+        await page.locator('.ts-dropdown:visible [data-value="base:claude"]').click();
+        await page.locator('.board-chat-controls .ts-control').click();
+        await expect(page.locator('.ts-dropdown:visible')).toHaveCount(1);
+        await page.locator('#modal-container [data-action="close-modal"]').first().click();
+        await expect(page.locator('.ts-dropdown:visible')).toHaveCount(0);
+        expect(await page.evaluate(() => Array.from(window.app.llmPickerController.mountedPickers)
+            .filter(record => record.selectEl.matches('[data-board-chat-agent], #board-card-assignee')).length)).toBe(0);
+    }
 });
 
 test('description previews newly uploaded images and new cards start in edit mode', async ({ page }) => {
@@ -319,7 +368,7 @@ test('a running agent disables Start work while keeping Save and the session ava
     await openBoard(page, { active: true });
     await page.getByText('Description images', { exact: true }).click();
     await expect(page.getByRole('button', { name: 'Agent running', exact: true })).toBeDisabled();
-    await expect(page.getByRole('button', { name: 'Chat with agent', exact: true })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Chat with:', exact: true })).toBeDisabled();
     await expect(page.locator('[data-board-save-card]')).toBeEnabled();
     await expect(page.locator('[data-board-open-session="session_test"]')).toBeEnabled();
 });
@@ -342,11 +391,11 @@ test('Start work preserves the board and stores model and effort', async ({ page
     await expect(page.locator('[data-board-launch-effort]')).toHaveValue('high');
 });
 
-test('work and discussion actions remain reachable on a narrow screen', async ({ page }) => {
+test('work and discussion actions remain reachable on a narrow screen', async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openBoard(page, { assignee: 'base:codex' });
     await page.getByText('Description images', { exact: true }).click();
-    for (const name of ['Chat with agent', 'Start work', 'Save']) {
+    for (const name of ['Chat with:', 'Start work', 'Save']) {
         const button = page.locator('.board-editor-actions-main').getByRole('button', { name, exact: true });
         await expect(button).toBeVisible();
         const bounds = await button.boundingBox();
@@ -354,7 +403,16 @@ test('work and discussion actions remain reachable on a narrow screen', async ({
         expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
         expect(bounds.y + bounds.height).toBeLessThanOrEqual(844);
     }
-    await page.screenshot({ path: '../.codex-test-artifacts/vb16-chat-narrow.png' });
+    await page.screenshot({ path: testInfo.outputPath('board-chat-narrow-closed.png') });
+    await page.locator('.board-chat-controls .ts-control').click();
+    const dropdown = page.locator('.ts-dropdown:visible');
+    await expect(dropdown.locator('[data-value="env:7:claude"]')).toBeVisible();
+    const bounds = await dropdown.boundingBox();
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
+    expect(bounds.y).toBeGreaterThanOrEqual(0);
+    expect(bounds.y + bounds.height).toBeLessThanOrEqual(844);
+    await page.screenshot({ path: testInfo.outputPath('board-chat-narrow.png') });
 });
 
 test('attention flags persist, paint a red card with a flag, and can be cleared', async ({ page }, testInfo) => {

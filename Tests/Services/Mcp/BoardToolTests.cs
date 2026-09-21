@@ -223,7 +223,7 @@ public sealed class BoardToolTests : IDisposable
         Assert.Contains("needs your attention", await _tool.UpdateBoardCard("VB-1", flagged: true, cancellationToken: Ct));
         Assert.Contains("FLAGGED: needs your attention", await _tool.GetBoardCard("VB-1", cancellationToken: Ct));
         Assert.Contains("FLAGGED: needs your attention", await _tool.ListBoardCards(cancellationToken: Ct));
-        var saved = (await new BoardStore(_connectionString).FindCardAsync(_project, "VB-1", Ct))!;
+        var saved = (await new BoardStore(_connectionString, _stateConnectionString).FindCardAsync(_project, "VB-1", Ct))!;
         Assert.True(saved.Flagged);
         Assert.False(saved.Blocked);
         Assert.Equal("Keep this text", saved.Description);

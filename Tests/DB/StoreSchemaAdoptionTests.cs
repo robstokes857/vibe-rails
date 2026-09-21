@@ -16,14 +16,14 @@ public sealed class StoreSchemaAdoptionTests : IDisposable
     public void ReopeningBoardAndJobsDoesNotWriteTheSchemaAgain()
     {
         StateDatabaseSchema.Ensure(ConnectionString);
-        _ = new BoardStore(ConnectionString);
+        _ = new BoardStore(ConnectionString, ConnectionString);
         _ = new JobStore(ConnectionString);
         var version = Scalar("PRAGMA schema_version;");
         var migrations = Scalar("SELECT COUNT(*) FROM SchemaMigrations;");
 
         for (var i = 0; i < 3; i++)
         {
-            _ = new BoardStore(ConnectionString);
+            _ = new BoardStore(ConnectionString, ConnectionString);
             _ = new JobStore(ConnectionString);
         }
 
@@ -72,13 +72,13 @@ public sealed class StoreSchemaAdoptionTests : IDisposable
             INSERT INTO BoardAttachments VALUES('asset','card','old.png','image/png',1,'data:image/png;base64,AA==','2026-01-01');
             """);
 
-        _ = new BoardStore(ConnectionString);
+        _ = new BoardStore(ConnectionString, ConnectionString);
         Assert.Equal("Preserved requirements", Scalar("SELECT Description FROM BoardCards WHERE Id='card';"));
         Assert.Equal("data:image/png;base64,AA==", Scalar("SELECT DataUrl FROM BoardAttachments WHERE Id='asset';"));
         Assert.Equal(9L, Scalar("SELECT LastNumber FROM BoardCardSequences WHERE ProjectPath='project';"));
         Assert.Equal(0L, Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name LIKE 'BoardDescription%';"));
         var version = Scalar("PRAGMA schema_version;");
-        _ = new BoardStore(ConnectionString);
+        _ = new BoardStore(ConnectionString, ConnectionString);
         Assert.Equal(version, Scalar("PRAGMA schema_version;"));
         Assert.Null(Scalar("PRAGMA foreign_key_check;"));
     }
@@ -87,7 +87,7 @@ public sealed class StoreSchemaAdoptionTests : IDisposable
     public void FailedBoardAdoptionRollsBackWithoutWritingReceiptOrLosingLegacyRows()
     {
         Execute("CREATE TABLE BoardCards(Id TEXT PRIMARY KEY,Title TEXT); INSERT INTO BoardCards VALUES('kept','source row');");
-        var failure = Assert.Throws<StorageException>(() => new BoardStore(ConnectionString));
+        var failure = Assert.Throws<StorageException>(() => new BoardStore(ConnectionString, ConnectionString));
         Assert.IsType<SqliteException>(failure.InnerException);
         Assert.Equal("source row", Scalar("SELECT Title FROM BoardCards WHERE Id='kept';"));
         Assert.Equal(0L, Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name IN ('SchemaMigrations','BoardColumns');"));

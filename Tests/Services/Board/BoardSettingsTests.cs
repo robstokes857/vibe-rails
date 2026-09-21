@@ -75,7 +75,7 @@ public sealed partial class BoardSettingsTests : IDisposable
         var saved = await service.SaveContextSettingsAsync(_root, board, new(context, 0), Ct);
         Assert.Equal("default message", saved!.Context.DefaultMessage);
         Assert.Equal(1, saved.Revision);
-        Assert.Equal(saved.Context.DefaultMessage, (await new BoardStore(_connectionString).GetContextSettingsAsync(_root, board, Ct))!.Context.DefaultMessage);
+        Assert.Equal(saved.Context.DefaultMessage, (await new BoardStore(_connectionString, _stateConnectionString).GetContextSettingsAsync(_root, board, Ct))!.Context.DefaultMessage);
         Assert.Empty((await service.GetContextSettingsAsync(_root, other.Id, Ct))!.Context.DefaultMessage);
         Assert.Null(await service.GetContextSettingsAsync(_root + "-foreign", board, Ct));
         Assert.Null(await service.SaveContextSettingsAsync(_root + "-foreign", board, new(context, 0), Ct));
@@ -239,7 +239,8 @@ public sealed partial class BoardSettingsTests : IDisposable
             .Returns<DateTime, CancellationToken>(_boards.GetDueLaneAutomationsAsync);
         unavailable.Setup(store => store.AcknowledgeLaneAutomationAsync(It.IsAny<BoardLaneAutomationEvent>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("Board unavailable after local commit"));
-        await Assert.ThrowsAsync<IOException>(() => Tick(due, new JobStore(_stateConnectionString, unavailable.Object)));
+        // The acknowledgement failure is logged and the cycle continues; the run is already committed.
+        Assert.Single(await Tick(due, new JobStore(_stateConnectionString, unavailable.Object)));
         var run = Assert.Single(await _jobs.GetRunsAsync(cancellationToken: Ct));
         Assert.Single((await _jobs.GetRunAsync(run.Id, Ct))!.Actions!);
         Assert.Equal(due, await Due(card.Id));
@@ -266,6 +267,47 @@ public sealed partial class BoardSettingsTests : IDisposable
         var next = Assert.Single(await _boards.GetDueLaneAutomationsAsync(now, Ct));
         Assert.NotEqual(first.EventKey, next.EventKey);
         Assert.Single(await _jobs.EnqueueDueSchedulesAsync(now, Ct));
+    }
+
+    [Fact]
+    public async Task BoardReadFailure_IsLoggedAndScheduledRunsStillEnqueue()
+    {
+        // board.db locked, damaged or newer must not veto the schedule loop that follows the drain.
+        var job = await _jobs.CreateJobAsync(new("Nightly", _root, LLM.NotSet, null, "", null, true,
+            [new(JobTriggerKind.Schedule, JobScheduleKind.Interval, 5)], Actions:
+            [new(null, JobActionKind.Script, ScriptPath: "check.py", ScriptRuntime: JobScriptRuntime.Python, ApprovedHash: "pinned")]), Ct);
+        var unavailable = new Mock<IBoardStore>(MockBehavior.Strict);
+        unavailable.Setup(store => store.GetDueLaneAutomationsAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new IOException("board.db is locked"));
+
+        var runId = Assert.Single(await new JobStore(_stateConnectionString, unavailable.Object)
+            .EnqueueDueSchedulesAsync(DateTime.UtcNow.AddMinutes(10), Ct));
+        Assert.Equal(job.Id, (await _jobs.GetRunAsync(runId, Ct))!.JobId);
+    }
+
+    [Fact]
+    public async Task AcknowledgementFailureOnOneEntry_DoesNotStarveTheEntriesAfterIt()
+    {
+        var (_, a, b, _) = await Lanes();
+        var first = await Job("First");
+        var second = await Job("Second");
+        await _boards.SaveLaneAutomationAsync(_root, a, [first.Id], 0, Ct);
+        await _boards.SaveLaneAutomationAsync(_root, b, [second.Id], 0, Ct);
+        var cardA = await Card(a);
+        var cardB = await Card(b);
+        var due = Math.Max(await Due(cardA.Id), await Due(cardB.Id));
+        var flaky = new Mock<IBoardStore>(MockBehavior.Strict);
+        flaky.Setup(store => store.GetDueLaneAutomationsAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns<DateTime, CancellationToken>(_boards.GetDueLaneAutomationsAsync);
+        flaky.Setup(store => store.AcknowledgeLaneAutomationAsync(It.Is<BoardLaneAutomationEvent>(e => e.JobId == first.Id), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new IOException("Poison entry"));
+        flaky.Setup(store => store.AcknowledgeLaneAutomationAsync(It.Is<BoardLaneAutomationEvent>(e => e.JobId != first.Id), It.IsAny<CancellationToken>()))
+            .Returns<BoardLaneAutomationEvent, CancellationToken>(_boards.AcknowledgeLaneAutomationAsync);
+
+        Assert.Equal(2, (await Tick(due, new JobStore(_stateConnectionString, flaky.Object))).Count);
+        Assert.Equal(2, (await _jobs.GetRunsAsync(cancellationToken: Ct)).Count);
+        Assert.NotEqual(0, await Due(cardA.Id)); // Still pending: the next cycle retries it.
+        Assert.Equal(0, await Due(cardB.Id));    // Acknowledged despite the earlier failure.
     }
 
     public void Dispose()

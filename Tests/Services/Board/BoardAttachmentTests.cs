@@ -22,7 +22,7 @@ public sealed class BoardAttachmentTests : IDisposable
         Directory.CreateDirectory(_directory);
         _project = Path.Combine(_directory, "project");
         _connectionString = $"Data Source={Path.Combine(_directory, "board.db")};Pooling=False";
-        _store = new BoardStore(_connectionString);
+        _store = new BoardStore(_connectionString, _connectionString);
         var live = new Mock<IBoardLiveSessionProbe>();
         live.Setup(x => x.GetLiveSessionsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Dictionary<string, string>());
