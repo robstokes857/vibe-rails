@@ -131,6 +131,28 @@ public sealed class CliLoopEnvironmentScopeTests
             Times.Never);
     }
 
+    [Fact]
+    public async Task BoardCardContext_ReachesTheSinglePromptResolutionPass()
+    {
+        var here = Path.Combine(Path.GetTempPath(), "cliloop-here");
+        var (services, placeholders) = BuildServices(Environment("board-worker", here));
+        PromptPlaceholderContext? captured = null;
+        placeholders
+            .Setup(item => item.ResolveAsync(
+                It.IsAny<string>(), It.IsAny<PromptPlaceholderContext>(), It.IsAny<CancellationToken>()))
+            .Callback<string?, PromptPlaceholderContext, CancellationToken>((_, context, _) => captured = context)
+            .ThrowsAsync(new ReachedThePromptStage());
+
+        await Assert.ThrowsAsync<ReachedThePromptStage>(() =>
+            CliLoop.RunTerminalWithWebAsync(
+                Args("board-worker", here),
+                services,
+                boardCardKey: "VB-23",
+                cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Equal("VB-23", captured?.BoardCardKey);
+    }
+
     private static ParsedArgs Args(string environmentName, string workDir) => new()
     {
         IsLMBootstrap = true,

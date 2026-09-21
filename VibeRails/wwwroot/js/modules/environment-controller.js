@@ -2120,7 +2120,8 @@ export class EnvironmentController {
                     <small class="form-text text-muted">
                         Sent to <span data-initial-message-cli>${cliName}</span> as your first chat message the moment the session starts — exactly as if you typed it.
                         <code>{{name}}</code> asks you for a value at launch (<code>{{name default=&quot;…&quot;}}</code> pre-fills it);
-                        <code>{{datetime}}</code>, <code>{{date}}</code>, <code>{{time}}</code>, <code>{{git_branch}}</code> and <code>{{env_name}}</code> fill in automatically.
+                        <code>{{datetime}}</code>, <code>{{date}}</code>, <code>{{time}}</code>, <code>{{git_branch}}</code> and <code>{{env_name}}</code> fill in automatically;
+                        <code>{{board_card}}</code> is the triggering card number for Board lane Automations (empty for other launches).
                     </small>
                 </div>`;
     }

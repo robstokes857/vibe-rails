@@ -14,6 +14,40 @@ namespace Tests.Services.Jobs;
 public sealed class JobRunnerWorkflowTests
 {
     [Fact]
+    public void BoardCardKey_ComesOnlyFromAValidBoardLaneTrigger()
+    {
+        var run = Run([]);
+
+        Assert.Equal(
+            "VB-23",
+            JobRunner.GetBoardCardKey(run with
+            {
+                TriggerKind = JobTriggerKind.BoardLane,
+                TriggerKey = "board-lane:VB-23:review:event-1"
+            }));
+        Assert.Null(JobRunner.GetBoardCardKey(run with
+        {
+            TriggerKind = JobTriggerKind.Manual,
+            TriggerKey = "board-lane:VB-23:review:event-1"
+        }));
+        Assert.Null(JobRunner.GetBoardCardKey(run with
+        {
+            TriggerKind = JobTriggerKind.BoardLane,
+            TriggerKey = "board-lane:not-a-card:review:event-1"
+        }));
+        Assert.Null(JobRunner.GetBoardCardKey(run with
+        {
+            TriggerKind = JobTriggerKind.BoardLane,
+            TriggerKey = "board-lane:VB-+23:review:event-1"
+        }));
+        Assert.Null(JobRunner.GetBoardCardKey(run with
+        {
+            TriggerKind = JobTriggerKind.Manual,
+            TriggerKey = "retry:original-run:event-1"
+        }));
+    }
+
+    [Fact]
     public async Task RunAsync_ExecutesScriptActionsInPositionOrderAndPersistsTheirOutput()
     {
         var first = ScriptAction("first", position: 0, "scripts/first.py");

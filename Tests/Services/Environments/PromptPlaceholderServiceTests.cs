@@ -61,6 +61,32 @@ public class PromptPlaceholderServiceTests
     }
 
     [Fact]
+    public async Task BoardCard_ResolvesFromALaneAutomationContext()
+    {
+        var (service, _, _) = BuildService();
+
+        Assert.Equal(
+            "Review VB-23",
+            await service.ResolveAsync(
+                "Review {{board_card}}",
+                Context(boardCardKey: "VB-23"),
+                TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task BoardCard_IsEmptyWithoutALaneAutomationContext()
+    {
+        var (service, _, _) = BuildService();
+
+        Assert.Equal(
+            "Review ",
+            await service.ResolveAsync(
+                "Review {{board_card}}",
+                Context(boardCardKey: null),
+                TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task DefaultArgument_IsIgnoredOnBuiltins()
     {
         var (service, _, _) = BuildService();
@@ -332,6 +358,19 @@ public class PromptPlaceholderServiceTests
     }
 
     [Fact]
+    public async Task BoardCardOutput_IsNeverReScannedForPlaceholders()
+    {
+        var (service, _, _) = BuildService();
+
+        var resolved = await service.ResolveAsync(
+            "card is {{board_card}}",
+            Context(boardCardKey: "{{date}}"),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("card is {{date}}", resolved);
+    }
+
+    [Fact]
     public async Task StepTimeout_IsPassedToTheRun()
     {
         var (service, repository, cli) = BuildService();
@@ -348,8 +387,10 @@ public class PromptPlaceholderServiceTests
 
     // ---------------------------------------------------------------------------------------
 
-    private static PromptPlaceholderContext Context(string? environmentName = "review") =>
-        new(WorkDir, EnvironmentId, environmentName);
+    private static PromptPlaceholderContext Context(
+        string? environmentName = "review",
+        string? boardCardKey = null) =>
+        new(WorkDir, EnvironmentId, environmentName, boardCardKey);
 
     private static EnvironmentStep NewStep(string name, string command) => new()
     {

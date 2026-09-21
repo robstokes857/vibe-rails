@@ -16090,7 +16090,7 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
 /* Why a run ended, under its status pill. Clamped because ErrorMessage carries whole
    sentences and an unbounded cell would set the width of the entire table; the full
    text stays reachable through the title attribute. */
-.job-run-detail { display: block; max-width: 22ch; margin-top: 0.25rem; overflow: hidden; color: var(--color-text-muted); font-size: 0.75rem; text-overflow: ellipsis; white-space: nowrap; }
+.job-run-status-detail { display: block; max-width: 22ch; margin-top: 0.25rem; overflow: hidden; color: var(--color-text-muted); font-size: 0.75rem; text-overflow: ellipsis; white-space: nowrap; }
 /* The name opens the recording, so it has to read as a link and not as bold text. */
 .job-run-link {
     padding: 0;

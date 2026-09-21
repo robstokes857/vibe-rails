@@ -18,7 +18,8 @@ namespace VibeRails.Services.Environments;
 public sealed record PromptPlaceholderContext(
     string WorkingDirectory,
     int? EnvironmentId = null,
-    string? EnvironmentName = null);
+    string? EnvironmentName = null,
+    string? BoardCardKey = null);
 
 /// <summary>
 /// Thrown when a prompt is too long to hand to a CLI. Callers turn this into a user-facing error
@@ -69,8 +70,9 @@ public interface IPromptPlaceholderService
 /// re-scanned — an environment named <c>{{date}}</c>, a branch named <c>{{step:&lt;id&gt;}}</c>, or a
 /// step that prints a token all reach the CLI literally:
 ///
-///   1. Built-ins — {{datetime}}, {{date}}, {{time}}, {{env_name}}, {{git_branch}} — matched
-///      case-insensitively with any default= argument ignored (a built-in always has a value).
+///   1. Built-ins — {{datetime}}, {{date}}, {{time}}, {{env_name}}, {{git_branch}},
+///      {{board_card}} — matched case-insensitively with any default= argument ignored. The Board
+///      card key is present only for an Automation launched by a Board lane event.
 ///      Unknown names pass through untouched: they are the user-prompted variables the frontend
 ///      fill-values modal owns, and on headless paths they ship literally, as they always have.
 ///   2. {{step:&lt;guid&gt;}} — runs the referenced step hidden and captured (the same
@@ -191,6 +193,7 @@ public sealed partial class PromptPlaceholderService : IPromptPlaceholderService
                 "time" => now.ToString("HH:mm", CultureInfo.InvariantCulture),
                 "env_name" => context.EnvironmentName ?? "",
                 "git_branch" => gitBranch ?? "(no git branch)",
+                "board_card" => context.BoardCardKey ?? "",
                 // User-prompted variables are someone else's to handle — and so is {{step}} with
                 // an argument that is not an id. Leave the token exactly as written.
                 _ => match.Value

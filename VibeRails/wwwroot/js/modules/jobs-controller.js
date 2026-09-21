@@ -520,9 +520,9 @@ export class JobController {
         const openTitle = `View this automation's ${total} ${total === 1 ? 'run' : 'runs'}`;
         return `<tr>
             <td><button class="job-run-link" type="button" data-job-action="view-history" data-job-id="${jobId}" title="${openTitle}">${safeName}</button><small>${this.escape(getLlmName(Number(summary.lastLlm)))}${summary.lastEnvironmentName ? ` · ${this.escape(summary.lastEnvironmentName)}` : ''}</small></td>
-            <td><span class="job-run-status" data-tone="${status.tone}">${status.label}</span>${detail ? `<small class="job-run-detail" title="${this.escape(detail)}">${this.escape(detail)}</small>` : ''}</td>
+            <td><span class="job-run-status" data-tone="${status.tone}">${status.label}</span>${detail ? `<small class="job-run-status-detail" title="${this.escape(detail)}">${this.escape(detail)}</small>` : ''}</td>
             <td title="${this.escape(summary.lastQueuedUtc)}">${this.escape(this.relativeTime(summary.lastQueuedUtc))}</td>
-            <td><span class="jobs-run-count">${total}</span>${activeRuns > 0 ? `<small class="job-run-detail">${activeRuns} active</small>` : ''}</td>
+            <td><span class="jobs-run-count">${total}</span>${activeRuns > 0 ? `<small class="job-run-status-detail">${activeRuns} active</small>` : ''}</td>
             <td class="text-end jobs-run-actions">
                 <button class="btn btn-sm btn-outline-secondary job-icon-action" type="button" data-job-action="view-history" data-job-id="${jobId}" title="${openTitle}" aria-label="${openTitle}"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i></button>
             </td>
@@ -786,7 +786,7 @@ export class JobController {
         const selected = this.historySelection.has(run.id);
         return `<tr>
             <td class="job-history-check"><input type="checkbox" class="form-check-input" data-run-select="${runId}"${selected ? ' checked' : ''}${active ? ' disabled title="A run that is still going cannot be removed"' : ''} aria-label="Select this run"></td>
-            <td><span class="job-run-status" data-tone="${status.tone}">${status.label}</span>${detail ? `<small class="job-run-detail" title="${this.escape(detail)}">${this.escape(detail)}</small>` : ''}</td>
+            <td><span class="job-run-status" data-tone="${status.tone}">${status.label}</span>${detail ? `<small class="job-run-status-detail" title="${this.escape(detail)}">${this.escape(detail)}</small>` : ''}</td>
             <td>${trigger}</td>
             <td title="${this.escape(run.queuedUtc)}">${this.escape(this.relativeTime(run.queuedUtc))}</td>
             <td${this.durationTitle(run)}>${this.escape(this.runDuration(run))}</td>

@@ -72,6 +72,7 @@ public static class JobRunner
         string? error = null;
         var exitCode = 0;
         var actions = run.Actions?.OrderBy(action => action.Position).ToList() ?? [];
+        var boardCardKey = GetBoardCardKey(run);
         var workspaceRoot = string.IsNullOrWhiteSpace(parsedArgs.WorkDir)
             ? run.ProjectPath
             : Path.GetFullPath(parsedArgs.WorkDir);
@@ -91,6 +92,7 @@ public static class JobRunner
                     action: null,
                     automationConsumer,
                     shutdownState,
+                    boardCardKey,
                     isLastAction: true);
                 status = legacy.RunStatus;
                 exitCode = legacy.ExitCode;
@@ -131,6 +133,7 @@ public static class JobRunner
                                 action,
                                 automationConsumer,
                                 shutdownState,
+                                boardCardKey,
                                 isLastAction: index == actions.Count - 1),
                             _ => ActionOutcome.Failed($"Action {index + 1} has an unknown kind.")
                         };
@@ -305,6 +308,7 @@ public static class JobRunner
         JobRunActionRecord? action,
         IAutomationConsumer automationConsumer,
         JobRunShutdownState shutdownState,
+        string? boardCardKey,
         bool isLastAction)
     {
         if (!parsedArgs.IsLMBootstrap)
@@ -325,6 +329,7 @@ public static class JobRunner
                 parsedArgs,
                 services,
                 jobRunId: runId,
+                boardCardKey: boardCardKey,
                 onSessionCreated: sessionId =>
                 {
                     Log.Information(
@@ -375,6 +380,44 @@ public static class JobRunner
         return workerExitCode == 0
             ? ActionOutcome.Succeeded
             : ActionOutcome.Failed($"Worker exited with code {workerExitCode}.", workerExitCode);
+    }
+
+    /// <summary>
+    /// Board lane events persist the originating card in their immutable trigger key. Keep the
+    /// extraction gated by TriggerKind so a manual retry of that run cannot inherit stale Board
+    /// context merely because its action snapshot came from a lane-triggered run.
+    /// </summary>
+    internal static string? GetBoardCardKey(JobRunRecord run)
+    {
+        const string prefix = "board-lane:";
+        if (run.TriggerKind != JobTriggerKind.BoardLane
+            || !run.TriggerKey.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var remainder = run.TriggerKey.AsSpan(prefix.Length);
+        var separator = remainder.IndexOf(':');
+        if (separator <= 0)
+            return null;
+
+        var cardKey = remainder[..separator];
+        if (!cardKey.StartsWith("VB-", StringComparison.Ordinal))
+            return null;
+
+        var numberText = cardKey[3..];
+        foreach (var character in numberText)
+        {
+            if (character is < '0' or > '9')
+                return null;
+        }
+
+        if (!int.TryParse(numberText, out var cardNumber) || cardNumber <= 0)
+        {
+            return null;
+        }
+
+        return $"VB-{cardNumber}";
     }
 
     private static string DescribeAction(JobRunActionRecord action) => action.Kind switch
