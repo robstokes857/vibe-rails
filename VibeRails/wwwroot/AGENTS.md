@@ -172,6 +172,12 @@ Opening a linked card checks for unsaved fields, description or comment text fir
 leaves the draft intact. Link mutations never save or reload the surrounding form. New cards
 must be saved before links can be added. Dispose the rail on modal close/replacement and unload.
 
+**Shared sessions (VB-25)**: the same session ID may appear on several cards in one project.
+Agents use `attach_board_session`; users can paste the same ID into each Sessions rail. Each card
+uses its returned `activeSessionId`/`activeTabId` for the live dot and running-agent controls.
+Both rails open the same terminal/replay; unlink removes only that card's entry. Linked-card
+relationships do not automatically share sessions or commits. Refresh to see MCP attachments.
+
 Descriptions open as rendered text (including attached images), with an Edit/Preview toggle
 in the composer toolbar. Empty descriptions start in edit mode. The textarea remains the source
 for Save and Start work in either mode; preview uses the same attachment-aware renderer as comments.

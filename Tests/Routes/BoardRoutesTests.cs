@@ -557,6 +557,34 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         Assert.False(list.RootElement.GetProperty("cards")[0].GetProperty("flagged").GetBoolean());
     }
 
+    [Fact]
+    public async Task SessionLinks_CanShareOneSession_AndRemainScopedToEachCard()
+    {
+        const string id = "11111111-1111-4111-8111-111111111111";
+        foreach (var title in new[] { "A", "B" })
+        {
+            using var created = await PostJsonAsync("/api/v1/board/cards", new { title });
+            created.EnsureSuccessStatusCode();
+        }
+        foreach (var key in new[] { "VB-1", "VB-2" })
+        {
+            using var linked = await PostJsonAsync($"/api/v1/board/cards/{key}/sessions", new { id, displayName = "Shared work" });
+            linked.EnsureSuccessStatusCode();
+            using var detail = await GetJsonAsync($"/api/v1/board/cards/{key}");
+            Assert.Equal(id, Assert.Single(detail.RootElement.GetProperty("sessions").EnumerateArray()).GetProperty("id").GetString());
+        }
+        using var duplicate = await PostJsonAsync("/api/v1/board/cards/VB-2/sessions", new { id });
+        Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
+        using var renamed = await SendJsonAsync(HttpMethod.Put, $"/api/v1/board/cards/VB-2/sessions/{id}", new { displayName = "Second card" });
+        renamed.EnsureSuccessStatusCode();
+        using var original = await GetJsonAsync("/api/v1/board/cards/VB-1");
+        Assert.Equal("Shared work", original.RootElement.GetProperty("sessions")[0].GetProperty("displayName").GetString());
+        using var removed = await SendAsync(HttpMethod.Delete, $"/api/v1/board/cards/VB-2/sessions/{id}", "test-session", "test-tab");
+        removed.EnsureSuccessStatusCode();
+        using var remaining = await GetJsonAsync("/api/v1/board/cards/VB-1");
+        Assert.Single(remaining.RootElement.GetProperty("sessions").EnumerateArray());
+    }
+
     private async Task<JsonDocument> GetJsonAsync(string path)
     {
         using var response = await SendAsync(HttpMethod.Get, path, "test-session", "test-tab");

@@ -217,6 +217,58 @@ public sealed class BoardToolTests : IDisposable
     }
 
     [Fact]
+    public async Task AttachCurrentSession_IsExplicitIdempotent_AndKeepsTheOriginalDefault()
+    {
+        await _tool.CreateBoardCard("A", cancellationToken: Ct);
+        await _tool.CreateBoardCard("B", cancellationToken: Ct);
+        Assert.StartsWith("FAIL: this terminal has no VibeRails session", await _tool.AttachBoardSession("VB-2", Ct));
+        _resolver.CurrentSessionId = "11111111-1111-4111-8111-111111111111";
+        await _store.LinkSessionAsync(_project, "VB-1", _resolver.CurrentSessionId, "tab-1", "base:codex", "codex", "Codex", BoardSessionRecord.LaunchOrigin, Ct);
+
+        // Browsing, comments, notes and commit references alone do not attach a second card.
+        await _tool.GetBoardCard("VB-2", cancellationToken: Ct);
+        await _tool.AddBoardComment("Related work", "VB-2", Ct);
+        await _tool.AppendBoardNote("Investigation", "VB-2", Ct);
+        await _tool.LinkBoardCommit("abc1234", "VB-2", Ct);
+        Assert.Empty((await _store.GetCardDetailAsync(_project, "VB-2", Ct))!.Sessions);
+
+        Assert.StartsWith("FAIL: pass the card key", await _tool.AttachBoardSession(" ", Ct));
+        Assert.StartsWith("FAIL: card not found", await _tool.AttachBoardSession("VB-999", Ct));
+        var attempts = await Task.WhenAll(Enumerable.Range(0, 6).Select(_ =>
+            Task.Run(() => _tool.AttachBoardSession("VB-2", Ct), Ct)));
+        Assert.All(attempts, result => Assert.StartsWith("Attached session 11111111-1111-4111-8111-111111111111 to VB-2", result));
+        var attached = Assert.Single((await _store.GetCardDetailAsync(_project, "VB-2", Ct))!.Sessions);
+        Assert.Equal("tab-1", attached.TabId);
+        Assert.Equal("base:codex", attached.Selection);
+        Assert.StartsWith("VB-1: A", await _tool.GetBoardCard(cancellationToken: Ct));
+
+        // A shared commit is explicitly saved to both cards, with independently readable snapshots.
+        await _tool.LinkBoardCommit("abc1234", cancellationToken: Ct);
+        foreach (var key in new[] { "VB-1", "VB-2" })
+        {
+            Assert.Single((await _service.GetCardAsync(_project, key, Ct))!.Commits);
+            Assert.NotNull(await _service.GetCommitDiffAsync(_project, key, "abc1234", Ct));
+        }
+    }
+
+    [Fact]
+    public async Task AttachCurrentSession_CannotCrossProjects_AndCanEstablishTheFirstLink()
+    {
+        await _tool.CreateBoardCard("A", cancellationToken: Ct);
+        var other = Path.Combine(_root, "other");
+        var foreign = await _service.CreateCardAsync(other, new CreateBoardCardRequest(Title: "Foreign"), Ct);
+        _resolver.CurrentSessionId = "22222222-2222-4222-8222-222222222222";
+        await _store.LinkSessionAsync(other, foreign.Id, "22222222-2222-4222-8222-222222222222", null, "", "codex", "Codex", BoardSessionRecord.LaunchOrigin, Ct);
+        Assert.StartsWith("FAIL: That session is linked to a card in another project", await _tool.AttachBoardSession("VB-1", Ct));
+        Assert.StartsWith("FAIL: card not found", await _tool.AttachBoardSession(foreign.Id, Ct));
+        Assert.Empty((await _store.GetCardDetailAsync(_project, "VB-1", Ct))!.Sessions);
+
+        _resolver.CurrentSessionId = "33333333-3333-4333-8333-333333333333";
+        Assert.StartsWith("Attached session 33333333-3333-4333-8333-333333333333 to VB-1", await _tool.AttachBoardSession("VB-1", Ct));
+        Assert.StartsWith("VB-1: A", await _tool.GetBoardCard(cancellationToken: Ct));
+    }
+
+    [Fact]
     public async Task AttentionFlag_RoundTripsThroughMcp_WithoutChangingBlockedOrDescription()
     {
         await _tool.CreateBoardCard("Review decision", "Keep this text", cancellationToken: Ct);

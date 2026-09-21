@@ -29,6 +29,63 @@ public sealed class BoardStoreTests : IDisposable
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Fact]
+    public async Task AdditionalSessions_PreserveDefault_AndSurvivePrimaryDeletion()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        await _store.EnsureDefaultColumnsAsync(_otherProject, Ct);
+        var first = await _store.CreateCardAsync(_project, NewCard("A"), Ct);
+        var board = await _store.CreateBoardAsync(_project, "Second board", Ct);
+        var second = await _store.CreateCardAsync(_project, NewCard("B") with { BoardId = board.Id }, Ct);
+        var third = await _store.CreateCardAsync(_project, NewCard("C"), Ct);
+        var foreign = await _store.CreateCardAsync(_otherProject, NewCard("Foreign"), Ct);
+        foreach (var card in new[] { first, second })
+            await _store.LinkSessionAsync(_project, card.Id, "sess-shared", "tab-1", "base:codex", "codex", "Codex", BoardSessionRecord.McpOrigin, Ct);
+        await Assert.ThrowsAsync<BoardConflictException>(() => _store.LinkSessionAsync(_otherProject, foreign.Id, "sess-shared", null, "", "", "", BoardSessionRecord.ManualOrigin, Ct));
+        Assert.False(await _store.UnlinkSessionAsync(_otherProject, second.Id, "sess-shared", Ct));
+        Assert.Null(await _store.RenameSessionAsync(_otherProject, second.Id, "sess-shared", "Wrong project", Ct));
+        Assert.Equal(first.Id, (await _store.FindSessionLinkAsync("sess-shared", Ct))!.CardId);
+
+        Assert.True(await _store.DeleteCardAsync(_project, first.Id, Ct));
+        var reopened = new BoardStore(_connectionString, _connectionString);
+        Assert.Equal(second.Id, (await reopened.FindSessionLinkAsync("sess-shared", Ct))!.CardId);
+        await reopened.LinkSessionAsync(_project, third.Id, "sess-shared", "tab-1", "", "codex", "Codex", BoardSessionRecord.McpOrigin, Ct);
+        Assert.Equal(second.Id, (await reopened.FindSessionLinkAsync("sess-shared", Ct))!.CardId);
+        Assert.True(await reopened.UnlinkSessionAsync(_project, second.Id, "sess-shared", Ct));
+        Assert.Equal(third.Id, (await reopened.FindSessionLinkAsync("sess-shared", Ct))!.CardId);
+        Assert.Equal("Codex", (await reopened.FindSessionAuthorAsync("sess-shared", Ct))!.Label);
+        Assert.True(await reopened.DeleteCardAsync(_project, third.Id, Ct));
+        Assert.Null(await reopened.FindSessionLinkAsync("sess-shared", Ct));
+    }
+
+    [Fact]
+    public async Task AdditionalSessionMigration_IsAutomatic_AndLegacyWritesStillWork()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var first = await _store.CreateCardAsync(_project, NewCard("A"), Ct);
+        var second = await _store.CreateCardAsync(_project, NewCard("B"), Ct);
+        await _store.LinkSessionAsync(_project, first.Id, "sess-old", null, "base:codex", "codex", "Codex", BoardSessionRecord.LaunchOrigin, Ct);
+        await using var legacy = new SqliteConnection(_connectionString);
+        await legacy.OpenAsync(Ct);
+        await using var command = legacy.CreateCommand();
+        // Model board/9 in this disposable fixture; the old table and its data remain in place.
+        command.CommandText = "DROP TABLE BoardAdditionalCardSessions; DELETE FROM SchemaMigrations WHERE Component = 'board' AND Version = 10;";
+        await command.ExecuteNonQueryAsync(Ct);
+        var upgraded = new BoardStore(_connectionString, _connectionString);
+        await upgraded.LinkSessionAsync(_project, second.Id, "sess-old", null, "base:codex", "codex", "Codex", BoardSessionRecord.McpOrigin, Ct);
+        command.CommandText = "SELECT CardId FROM BoardCardSessions WHERE SessionId = 'sess-old';";
+        Assert.Equal(first.Id, await command.ExecuteScalarAsync(Ct));
+        // An older open connection can still rename/unlink/relink its original-format row.
+        command.CommandText = "UPDATE BoardCardSessions SET DisplayName = 'Legacy name' WHERE SessionId = 'sess-old';";
+        await command.ExecuteNonQueryAsync(Ct);
+        Assert.Equal("Legacy name", Assert.Single((await upgraded.GetCardDetailAsync(_project, first.Id, Ct))!.Sessions).DisplayName);
+        command.CommandText = "DELETE FROM BoardCardSessions WHERE SessionId = 'sess-old'; INSERT INTO BoardCardSessions SELECT SessionId, CardId, TabId, Selection, Cli, DisplayName, Origin, CreatedUTC FROM BoardAdditionalCardSessions;";
+        await command.ExecuteNonQueryAsync(Ct);
+        Assert.Single((await upgraded.GetCardDetailAsync(_project, second.Id, Ct))!.Sessions);
+        Assert.True(await upgraded.UnlinkSessionAsync(_project, second.Id, "sess-old", Ct));
+        Assert.Null(await upgraded.FindSessionLinkAsync("sess-old", Ct));
+    }
+
+    [Fact]
     public async Task DefaultLanes_AreSeededOnce_PerProject()
     {
         Assert.True(await _store.EnsureDefaultColumnsAsync(_project, Ct));

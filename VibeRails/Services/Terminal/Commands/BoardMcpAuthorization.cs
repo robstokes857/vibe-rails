@@ -24,6 +24,7 @@ public static class BoardMcpAuthorization
         "add_board_comment",
         "append_board_note",
         "add_board_attachment",
+        "attach_board_session",
         "link_board_commit"
     ]);
 

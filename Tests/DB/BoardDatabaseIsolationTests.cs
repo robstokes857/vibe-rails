@@ -137,7 +137,7 @@ public sealed class BoardDatabaseIsolationTests : IDisposable
         Assert.Equal(stateVersion, Scalar(state, "PRAGMA data_version;"));
         Assert.Equal("Keep in state", Scalar(state, "SELECT Title FROM BoardCards;"));
         Assert.Equal(1L, Scalar(state, "SELECT COUNT(*) FROM BoardPendingAutomations;"));
-        Assert.Equal(8L, Scalar(state, "SELECT COUNT(*) FROM SchemaMigrations WHERE Component='board';"));
+        Assert.Equal(9L, Scalar(state, "SELECT COUNT(*) FROM SchemaMigrations WHERE Component='board';"));
         using var boardDb = OpenBoard();
         Assert.Equal(0L, Scalar(boardDb, "SELECT COUNT(*) FROM sqlite_schema WHERE name IN ('Jobs','Sessions','ChatSummary');"));
         Assert.Null(Scalar(boardDb, "PRAGMA foreign_key_check;"));

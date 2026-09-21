@@ -121,6 +121,7 @@ public static class BoardPromptComposer
                 ? "Read the earlier activity to understand the current status, decisions, blockers and unfinished work. "
                 : "move_board_card when the card changes state; link_board_commit after you commit. If comments, notes or earlier sessions show work already started, resume from there instead of starting over. ")
             .Append("If you need the user to review something, set flagged=true with update_board_card and add a comment explaining what needs attention. ")
+            .Append("If you also work on another card, use attach_board_session with its card key to share this session and its running status. The original card remains the default; pass card explicitly for other cards, and link each relevant commit to each card. ")
             .Append("Begin now by reading the card with get_board_card.");
 
         if (!string.IsNullOrWhiteSpace(environmentPrompt))

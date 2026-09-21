@@ -463,6 +463,35 @@ public sealed class BoardTool(
         }
     }
 
+    [McpServerTool, Description("Attach this terminal's current session to another kanban card when working on multiple cards. Requires a VibeRails session; no session id argument. Safe to repeat. Preserves existing attachments and the original default card. Each attached card shows this session and its live status when available. Does not move cards or copy commits: use move_board_card and call link_board_commit with each relevant card explicitly.")]
+    public async Task<string> AttachBoardSession(
+        [Description("Card key like VB-12 (or the card id) to attach the current session to.")] string card,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (projects.CurrentSessionId is not { } sessionId)
+                return "FAIL: this terminal has no VibeRails session. Start a VibeRails terminal to attach its session to a card.";
+            if (string.IsNullOrWhiteSpace(card))
+                return "FAIL: pass the card key to attach, e.g. card=\"VB-12\".";
+            var target = await ResolveCardAsync(card, cancellationToken);
+            if (target.Error is not null)
+                return target.Error;
+            var tabId = Environment.GetEnvironmentVariable(LocalToolApiContext.CurrentTabIdVariable);
+            var attached = await service.AttachSessionAsync(target.Project, target.CardId!, sessionId,
+                string.IsNullOrWhiteSpace(tabId) ? null : tabId.Trim(), cancellationToken);
+            return attached is null
+                ? $"FAIL: card not found: {card}"
+                : $"Attached session {attached.Id} to {target.CardKey}. Existing card attachments and the default card are unchanged. Link relevant commits with link_board_commit(card=\"{target.CardKey}\", sha=\"...\").";
+        }
+        catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
+        catch (BoardConflictException ex) { return "FAIL: " + ex.Message; }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return Fail("attach the session", ex);
+        }
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private sealed record CardTarget(string Project, string? CardId, string? CardKey, string? Error);
@@ -536,9 +565,8 @@ public sealed class BoardTool(
     }
 
     /// <summary>
-    /// A VibeRails-launched session that <em>writes to</em> a card it is not yet linked to gets
-    /// linked (origin "mcp"), so "pick up VB-12" from any VibeRails tab shows in the card's
-    /// Sessions rail. Reads never call this — see GetBoardCard / ReadBoardAttachment.
+    /// An entirely unlinked VibeRails session gets its first link when it writes to a card.
+    /// Additional cards require AttachBoardSession. Reads never call this.
     /// </summary>
     private async Task AutoLinkSessionAsync(string project, string cardId, CancellationToken cancellationToken)
     {
