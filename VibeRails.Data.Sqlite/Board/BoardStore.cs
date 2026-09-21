@@ -912,7 +912,7 @@ public sealed partial class BoardStore : IBoardStore
         return card is null ? [] : await ReadCommitsAsync(connection, card.Id, cancellationToken);
     }
 
-    public async Task<BoardCommitRecord?> AddCommitAsync(string projectPath, string cardId, string sha, string author, string message, DateTime committedUtc, SandboxDiffResponse snapshot, CancellationToken cancellationToken = default)
+    public async Task<BoardCommitRecord?> AddCommitAsync(string projectPath, string cardId, string sha, string author, string message, DateTime committedUtc, SandboxDiffResponse snapshot, CancellationToken cancellationToken = default, string? sessionId = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         var snapshotJson = JsonSerializer.Serialize(snapshot, StorageJsonSerializerContext.Default.SandboxDiffResponse);
@@ -923,19 +923,30 @@ public sealed partial class BoardStore : IBoardStore
         if (card is null)
             return null;
 
-        var duplicate = await ScalarLongAsync(connection, transaction,
-            "SELECT COUNT(*) FROM BoardCommits WHERE CardId = $card AND Sha = $sha",
-            ("$card", card.Id), cancellationToken, ("$sha", (object)sha));
-        if (duplicate > 0)
-            throw new BoardConflictException($"{sha[..Math.Min(7, sha.Length)]} is already on this card.");
+        // Membership is read under the same writer transaction as every link/snapshot. A
+        // concurrent attach either precedes this entire operation or follows it.
+        var targets = await ReadCommitTargetCardsAsync(connection, transaction, project, card.Id, sessionId, cancellationToken);
+        var linkedUtc = DateTime.UtcNow;
+        foreach (var target in targets)
+            await WriteCommitAsync(connection, transaction,
+                new BoardCommitRecord(target, sha, author, message, committedUtc, linkedUtc), snapshotJson,
+                allowExisting: !string.IsNullOrWhiteSpace(sessionId), cancellationToken);
+        var record = (await ReadCommitsAsync(connection, card.Id, cancellationToken, transaction)).Single(c => c.Sha == sha);
+        await transaction.CommitAsync(cancellationToken);
+        return record;
+    }
 
-        var record = new BoardCommitRecord(card.Id, sha, author, message, committedUtc, DateTime.UtcNow);
+    private static async Task WriteCommitAsync(SqliteConnection connection, SqliteTransaction transaction,
+        BoardCommitRecord record, string snapshotJson, bool allowExisting, CancellationToken cancellationToken)
+    {
+        bool inserted;
         await using (var insert = connection.CreateCommand())
         {
             insert.Transaction = transaction;
             insert.CommandText = """
                 INSERT INTO BoardCommits (CardId, Sha, Author, Message, CommittedUTC, LinkedUTC)
-                VALUES ($card, $sha, $author, $message, $committed, $linked);
+                VALUES ($card, $sha, $author, $message, $committed, $linked)
+                ON CONFLICT(CardId, Sha) DO NOTHING;
                 """;
             insert.Parameters.AddWithValue("$card", record.CardId);
             insert.Parameters.AddWithValue("$sha", record.Sha);
@@ -943,20 +954,22 @@ public sealed partial class BoardStore : IBoardStore
             insert.Parameters.AddWithValue("$message", record.Message);
             insert.Parameters.AddWithValue("$committed", ToDb(record.CommittedUtc));
             insert.Parameters.AddWithValue("$linked", ToDb(record.LinkedUtc));
-            await insert.ExecuteNonQueryAsync(cancellationToken);
+            inserted = await insert.ExecuteNonQueryAsync(cancellationToken) > 0;
         }
+        if (!inserted && !allowExisting)
+            throw new BoardConflictException($"{record.ShortSha} is already on this card.");
+        bool captured;
         await using (var capture = connection.CreateCommand())
         {
             capture.Transaction = transaction;
-            capture.CommandText = "INSERT INTO BoardCommitSnapshots (CardId, Sha, SnapshotJson) VALUES ($card, $sha, $snapshot);";
+            capture.CommandText = "INSERT INTO BoardCommitSnapshots (CardId, Sha, SnapshotJson) VALUES ($card, $sha, $snapshot) ON CONFLICT(CardId, Sha) DO NOTHING;";
             capture.Parameters.AddWithValue("$card", record.CardId);
             capture.Parameters.AddWithValue("$sha", record.Sha);
             capture.Parameters.AddWithValue("$snapshot", snapshotJson);
-            await capture.ExecuteNonQueryAsync(cancellationToken);
+            captured = await capture.ExecuteNonQueryAsync(cancellationToken) > 0;
         }
-        await TouchCardAsync(connection, transaction, card.Id, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-        return record;
+        if (inserted || captured)
+            await TouchCardAsync(connection, transaction, record.CardId, cancellationToken);
     }
 
     public async Task<SandboxDiffResponse?> GetCommitSnapshotAsync(string projectPath, string cardId, string sha, CancellationToken cancellationToken = default)
@@ -1209,9 +1222,10 @@ public sealed partial class BoardStore : IBoardStore
         return attachments;
     }
 
-    private static async Task<IReadOnlyList<BoardCommitRecord>> ReadCommitsAsync(SqliteConnection connection, string cardId, CancellationToken cancellationToken)
+    private static async Task<IReadOnlyList<BoardCommitRecord>> ReadCommitsAsync(SqliteConnection connection, string cardId, CancellationToken cancellationToken, SqliteTransaction? transaction = null)
     {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = "SELECT CardId, Sha, Author, Message, CommittedUTC, LinkedUTC FROM BoardCommits WHERE CardId = $card ORDER BY CommittedUTC DESC, Sha;";
         command.Parameters.AddWithValue("$card", cardId);
         var commits = new List<BoardCommitRecord>();

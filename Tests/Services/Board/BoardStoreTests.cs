@@ -376,6 +376,60 @@ public sealed class BoardStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task SessionCommitSharing_IsProjectScoped_AndPreservesExistingSnapshots()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        await _store.EnsureDefaultColumnsAsync(_otherProject, Ct);
+        var first = await _store.CreateCardAsync(_project, NewCard("A"), Ct);
+        var second = await _store.CreateCardAsync(_project, NewCard("B"), Ct);
+        var outside = await _store.CreateCardAsync(_otherProject, NewCard("Foreign"), Ct);
+        await _store.LinkSessionAsync(_project, first.Id, "shared", null, "", "codex", "Codex", BoardSessionRecord.McpOrigin, Ct);
+        await _store.LinkSessionAsync(_project, second.Id, "shared", null, "", "codex", "Codex", BoardSessionRecord.McpOrigin, Ct);
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(Ct);
+        await using var legacy = connection.CreateCommand();
+        // Even inconsistent links written outside the service must not fan out across projects.
+        legacy.CommandText = "INSERT INTO BoardAdditionalCardSessions SELECT SessionId, $foreign, TabId, Selection, Cli, DisplayName, Origin, CreatedUTC FROM BoardCardSessions WHERE SessionId = 'shared';";
+        legacy.Parameters.AddWithValue("$foreign", outside.Id);
+        await legacy.ExecuteNonQueryAsync(Ct);
+        const string sha = "89abcdef0123456789abcdef0123456789abcdef";
+        var original = await _store.AddCommitAsync(_project, second.Id, sha, "Rob", "Fix", DateTime.UtcNow, Snapshot(), Ct);
+        await _store.AddCommitAsync(_project, second.Id, sha, "Rob", "Fix", DateTime.UtcNow, new SandboxDiffResponse([], 0), Ct, sessionId: "shared");
+        Assert.Single(await _store.GetCommitsAsync(_project, first.Id, Ct));
+        Assert.Equal(original, Assert.Single(await _store.GetCommitsAsync(_project, second.Id, Ct)));
+        Assert.Equal(Snapshot().Files, (await _store.GetCommitSnapshotAsync(_project, second.Id, sha, Ct))!.Files);
+        Assert.Empty(await _store.GetCommitsAsync(_otherProject, outside.Id, Ct));
+    }
+
+    [Fact]
+    public async Task SessionCommitSharing_SnapshotFailureRollsBackEveryCard()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var first = await _store.CreateCardAsync(_project, NewCard("A"), Ct);
+        var second = await _store.CreateCardAsync(_project, NewCard("B"), Ct);
+        foreach (var card in new[] { first, second })
+            await _store.LinkSessionAsync(_project, card.Id, "shared", null, "", "codex", "Codex", BoardSessionRecord.McpOrigin, Ct);
+        var before = (await _store.GetCardsAsync(_project, Ct)).ToDictionary(c => c.Id, c => c.UpdatedUtc);
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(Ct);
+        await using var trigger = connection.CreateCommand();
+        trigger.CommandText = $"""
+            CREATE TRIGGER FailSecondSnapshot BEFORE INSERT ON BoardCommitSnapshots
+            WHEN NEW.CardId = '{second.Id}'
+            BEGIN SELECT RAISE(ABORT, 'snapshot failure'); END;
+            """;
+        await trigger.ExecuteNonQueryAsync(Ct);
+        const string sha = "89abcdef0123456789abcdef0123456789abcdef";
+        await Assert.ThrowsAsync<SqliteException>(() => _store.AddCommitAsync(_project, first.Id, sha, "Rob", "Fix", DateTime.UtcNow, Snapshot(), Ct, sessionId: "shared"));
+        foreach (var card in new[] { first, second })
+        {
+            Assert.Empty(await _store.GetCommitsAsync(_project, card.Id, Ct));
+            Assert.Null(await _store.GetCommitSnapshotAsync(_project, card.Id, sha, Ct));
+            Assert.Equal(before[card.Id], (await _store.FindCardAsync(_project, card.Id, Ct))!.UpdatedUtc);
+        }
+    }
+
+    [Fact]
     public async Task SnapshotWriteFailure_RollsBackTheCommitLink()
     {
         await _store.EnsureDefaultColumnsAsync(_project, Ct);

@@ -177,6 +177,8 @@ Agents use `attach_board_session`; users can paste the same ID into each Session
 uses its returned `activeSessionId`/`activeTabId` for the live dot and running-agent controls.
 Both rails open the same terminal/replay; unlink removes only that card's entry. Linked-card
 relationships do not automatically share sessions or commits. Refresh to see MCP attachments.
+Once the session is attached, one agent `link_board_commit` call shares the snapshot with all
+its attached cards; the frontend reads the ordinary commit lists and needs no extra request.
 
 Descriptions open as rendered text (including attached images), with an Edit/Preview toggle
 in the composer toolbar. Empty descriptions start in edit mode. The textarea remains the source

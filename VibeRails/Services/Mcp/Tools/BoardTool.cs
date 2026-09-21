@@ -437,7 +437,7 @@ public sealed class BoardTool(
         }
     }
 
-    [McpServerTool, Description("Save a git commit's changed-code snapshot from this terminal's checkout on a kanban card. The snapshot remains viewable after the checkout is deleted. Call it after you commit; capture must succeed before the commit is linked. Omit the card to link to the card this terminal was launched for.")]
+    [McpServerTool, Description("Save a git commit's changed-code snapshot from this terminal's checkout. One call links it to the target card AND every card attached to this session in the project. Safe to repeat from a session; existing links are kept. The snapshot remains viewable after the checkout is deleted. Call after committing; capture must succeed before any links are saved. Omit card to use the original session card as the target.")]
     public async Task<string> LinkBoardCommit(
         [Description("Commit sha (7-40 hex characters) from this terminal's checkout.")] string sha,
         [Description("Card key like VB-12 (or the card id). Optional when this terminal was launched for a card.")] string? card = null,
@@ -449,11 +449,12 @@ public sealed class BoardTool(
             if (target.Error is not null)
                 return target.Error;
             var commit = await service.LinkCommitAsync(target.Project, target.CardId!, sha, cancellationToken,
-                gitWorkingDirectory: projects.GitWorkingDirectory);
+                gitWorkingDirectory: projects.GitWorkingDirectory, sessionId: projects.CurrentSessionId);
             if (commit is null)
                 return $"FAIL: card not found: {card}";
             await AutoLinkSessionAsync(target.Project, target.CardId!, cancellationToken);
-            return $"Linked {commit.ShortSha} \"{commit.Message}\" to {target.CardKey}.";
+            return $"Linked {commit.ShortSha} \"{commit.Message}\" to {target.CardKey}."
+                + (projects.CurrentSessionId is null ? string.Empty : " Also linked to every card attached to this session in this project.");
         }
         catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
         catch (BoardConflictException ex) { return "FAIL: " + ex.Message; }
@@ -463,7 +464,7 @@ public sealed class BoardTool(
         }
     }
 
-    [McpServerTool, Description("Attach this terminal's current session to another kanban card when working on multiple cards. Requires a VibeRails session; no session id argument. Safe to repeat. Preserves existing attachments and the original default card. Each attached card shows this session and its live status when available. Does not move cards or copy commits: use move_board_card and call link_board_commit with each relevant card explicitly.")]
+    [McpServerTool, Description("Attach this terminal's current session to another kanban card when working on multiple cards. Requires a VibeRails session; no session id argument. Safe to repeat. Preserves existing attachments and the original default card. Each attached card shows this session and its live status when available. Future link_board_commit calls automatically link the commit to every attached card. Does not move cards or copy earlier commits.")]
     public async Task<string> AttachBoardSession(
         [Description("Card key like VB-12 (or the card id) to attach the current session to.")] string card,
         CancellationToken cancellationToken = default)
@@ -482,7 +483,7 @@ public sealed class BoardTool(
                 string.IsNullOrWhiteSpace(tabId) ? null : tabId.Trim(), cancellationToken);
             return attached is null
                 ? $"FAIL: card not found: {card}"
-                : $"Attached session {attached.Id} to {target.CardKey}. Existing card attachments and the default card are unchanged. Link relevant commits with link_board_commit(card=\"{target.CardKey}\", sha=\"...\").";
+                : $"Attached session {attached.Id} to {target.CardKey}. Existing card attachments and the default card are unchanged. Call link_board_commit once per commit to link it to every attached card.";
         }
         catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
         catch (BoardConflictException ex) { return "FAIL: " + ex.Message; }

@@ -242,13 +242,46 @@ public sealed class BoardToolTests : IDisposable
         Assert.Equal("base:codex", attached.Selection);
         Assert.StartsWith("VB-1: A", await _tool.GetBoardCard(cancellationToken: Ct));
 
-        // A shared commit is explicitly saved to both cards, with independently readable snapshots.
+        // A repeat from the original card is safe even when the commit is already linked.
         await _tool.LinkBoardCommit("abc1234", cancellationToken: Ct);
         foreach (var key in new[] { "VB-1", "VB-2" })
         {
             Assert.Single((await _service.GetCardAsync(_project, key, Ct))!.Commits);
             Assert.NotNull(await _service.GetCommitDiffAsync(_project, key, "abc1234", Ct));
         }
+    }
+
+    [Fact]
+    public async Task LinkCommit_OneCallSharesWithEveryAttachedCard_AndCanBeRepeatedFromAnyCard()
+    {
+        var first = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "A"), Ct);
+        var board = await _service.CreateBoardAsync(_project, new CreateBoardRequest("Other board"), Ct);
+        var second = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "B", BoardId: board.Id), Ct);
+        var third = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "C"), Ct);
+        var unrelated = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "Unrelated"), Ct);
+        _resolver.CurrentSessionId = "11111111-1111-4111-8111-111111111111";
+        foreach (var card in new[] { first, second, third })
+            Assert.StartsWith("Attached session", await _tool.AttachBoardSession(card.Key, Ct));
+
+        var result = await _tool.LinkBoardCommit("abc1234", second.Key, Ct);
+        Assert.Contains("Also linked to every card attached to this session", result);
+        foreach (var card in new[] { first, second, third })
+        {
+            var detail = (await _service.GetCardAsync(_project, card.Id, Ct))!;
+            Assert.Equal("abc1234", Assert.Single(detail.Commits).ShortSha);
+            Assert.NotNull(await _service.GetCommitDiffAsync(_project, card.Id, "abc1234", Ct));
+        }
+        Assert.Empty((await _service.GetCardAsync(_project, unrelated.Id, Ct))!.Commits);
+        var before = Assert.Single(await _store.GetCommitsAsync(_project, first.Id, Ct));
+        foreach (var key in new[] { first.Key, second.Key, third.Key })
+            Assert.StartsWith("Linked abc1234", await _tool.LinkBoardCommit("abc1234", key, Ct));
+        Assert.Equal(before, Assert.Single(await _store.GetCommitsAsync(_project, first.Id, Ct)));
+
+        // An explicit target need not be attached, but the session's cards still get the commit.
+        Assert.StartsWith("Linked 01d1234", await _tool.LinkBoardCommit("01d1234", unrelated.Key, Ct));
+        foreach (var card in new[] { first, second, third, unrelated })
+            Assert.Contains((await _service.GetCardAsync(_project, card.Id, Ct))!.Commits, c => c.ShortSha == "01d1234");
+        Assert.Empty((await _service.GetCardAsync(_project, unrelated.Id, Ct))!.Sessions);
     }
 
     [Fact]

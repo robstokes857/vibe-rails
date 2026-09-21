@@ -14,9 +14,13 @@ probe. Opening either Sessions entry opens the same terminal/replay. Rename/unli
 to that card's link, and ending the session clears live status for every attached card. Root-local
 status/launch exclusion limitations (F3/F6) remain. Refresh the Board to see MCP attachments.
 
-Commits remain explicit per-card links: call `link_board_commit` with each relevant card and SHA.
-The same SHA can have a durable code snapshot on both cards. Attaching never copies earlier
-commits or comments. The Sessions rail also accepts the same session ID on multiple cards.
+Call `link_board_commit` once per commit: it automatically links the captured snapshot to the
+target card and every card attached to the calling session in the same project, across boards.
+Membership and all link/snapshot writes share one transaction; a failure rolls back the whole
+operation. Repeated session calls preserve existing links/snapshots and fill missing ones.
+Git capture runs once before the transaction. Attaching never copies earlier commits or comments;
+calling `link_board_commit` again can share an earlier SHA with a newly attached card. There is
+no new unlink/edit tool. The Sessions rail also accepts the same session ID on multiple cards.
 
 Additive `board/10` stores extra links in `BoardAdditionalCardSessions` with a composite
 `(SessionId, CardId)` key. The original table, schema generation and data remain unchanged;

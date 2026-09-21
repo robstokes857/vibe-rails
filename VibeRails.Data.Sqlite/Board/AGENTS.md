@@ -61,3 +61,7 @@ preferring the primary row for a duplicate pair from an older writer. The origin
 the default, with oldest remaining attachment as fallback. Link validation runs inside the
 write transaction; rename/unlink scopes both card and session, and deleting a primary card does
 not cascade additional attachments. Old versions keep reading/writing the primary table.
+
+Session commit linking reads this membership inside the commit-write transaction and writes the
+snapshot to the target and all same-project attachments atomically. One failed write rolls back
+every new link. Repeats leave existing metadata/snapshots unchanged and fill missing links.

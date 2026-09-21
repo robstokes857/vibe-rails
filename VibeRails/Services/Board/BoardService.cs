@@ -42,7 +42,7 @@ public partial interface IBoardService
     Task<bool> DeleteAttachmentAsync(string projectPath, string idOrKey, string attachmentId, CancellationToken cancellationToken = default);
 
     Task<List<BoardCommitDto>?> GetCommitsAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
-    Task<BoardCommitDto?> LinkCommitAsync(string projectPath, string idOrKey, string sha, CancellationToken cancellationToken = default, string? gitWorkingDirectory = null);
+    Task<BoardCommitDto?> LinkCommitAsync(string projectPath, string idOrKey, string sha, CancellationToken cancellationToken = default, string? gitWorkingDirectory = null, string? sessionId = null);
     Task<bool> UnlinkCommitAsync(string projectPath, string idOrKey, string sha, CancellationToken cancellationToken = default);
     Task<SandboxDiffResponse?> GetCommitDiffAsync(string projectPath, string idOrKey, string sha, CancellationToken cancellationToken = default);
 
@@ -411,7 +411,7 @@ public sealed partial class BoardService(
         return list.Select(ToDto).ToList();
     }
 
-    public async Task<BoardCommitDto?> LinkCommitAsync(string projectPath, string idOrKey, string sha, CancellationToken cancellationToken = default, string? gitWorkingDirectory = null)
+    public async Task<BoardCommitDto?> LinkCommitAsync(string projectPath, string idOrKey, string sha, CancellationToken cancellationToken = default, string? gitWorkingDirectory = null, string? sessionId = null)
     {
         var existing = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
         if (existing is null)
@@ -424,7 +424,7 @@ public sealed partial class BoardService(
         var snapshot = new SandboxDiffResponse(
             diff.Files.Select(f => new SandboxDiffFileResponse(f.FileName, f.Language, f.OriginalContent, f.ModifiedContent)).ToList(),
             diff.TotalChanges);
-        var record = await store.AddCommitAsync(projectPath, existing.Id, info.Sha, info.Author, info.Message, info.CommittedUtc, snapshot, cancellationToken);
+        var record = await store.AddCommitAsync(projectPath, existing.Id, info.Sha, info.Author, info.Message, info.CommittedUtc, snapshot, cancellationToken, sessionId);
         return record is null ? null : ToDto(record);
     }
 

@@ -1,7 +1,29 @@
+using Microsoft.Data.Sqlite;
+
 namespace VibeRails.Services.Board;
 
 public sealed partial class BoardStore
 {
+    private static async Task<HashSet<string>> ReadCommitTargetCardsAsync(SqliteConnection connection,
+        SqliteTransaction transaction, string project, string cardId, string? sessionId, CancellationToken cancellationToken)
+    {
+        var targets = new HashSet<string>(StringComparer.Ordinal) { cardId };
+        if (string.IsNullOrWhiteSpace(sessionId))
+            return targets;
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = $"""
+            SELECT s.CardId FROM {AllSessionsSql} s JOIN BoardCards c ON c.Id = s.CardId
+            WHERE s.SessionId = $session AND c.ProjectPath = $project{ProjectPathCollation};
+            """;
+        command.Parameters.AddWithValue("$session", sessionId);
+        command.Parameters.AddWithValue("$project", project);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            targets.Add(reader.GetString(0));
+        return targets;
+    }
+
     // Older versions still read/write the original table. If one recreates a primary link
     // already present in the additional table, expose that pair only once, preferring primary.
     private const string AllSessionsSql = """

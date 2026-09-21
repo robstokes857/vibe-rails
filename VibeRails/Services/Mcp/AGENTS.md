@@ -68,8 +68,8 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 | `append_board_note` | `BoardTool.AppendBoardNote` | Append an entry to the card's **agent notes** — the scratchpad for checkpointing findings and working state as the agent goes. Same limits and attribution as a comment; never part of the comment stream or count. Returns the note id. |
 | `get_board_notes` | `BoardTool.GetBoardNotes` | All notes on a card, oldest first (`get_board_card` shows only the most recent ~3,000 characters); optional `since`. |
 | `add_board_attachment` | `BoardTool.AddBoardAttachment` | Attach an agent-written `*.md` / `*.txt` file (UTF-8 text, ≤ 500,000 characters). |
-| `link_board_commit` | `BoardTool.LinkBoardCommit` | Capture a commit from the terminal's checkout and atomically save its sha, metadata and changed-code snapshot on the card. |
-| `attach_board_session` | `BoardTool.AttachBoardSession` | Explicitly attach the current VibeRails session to another card in the same project. Idempotent; preserves the original default. No session-id argument, card move, or commit fanout. |
+| `link_board_commit` | `BoardTool.LinkBoardCommit` | Capture a commit once from the terminal's checkout and atomically link its snapshot to the target and every card attached to the calling session in the project. Repeat session calls preserve existing links/snapshots. Without a session, links only the target. |
+| `attach_board_session` | `BoardTool.AttachBoardSession` | Explicitly attach the current VibeRails session to another card in the same project. Idempotent; preserves the original default. Future commit-link calls share with all attachments. No session-id argument or card move. |
 > The wire names are what tool callers use. Calling `SearchHistory` (PascalCase) returns "Unknown tool".
 
 ### Kanban board tools (`BoardTool`)
@@ -148,7 +148,8 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
   `PromptPlaceholderService.MaxResolvedPromptChars`. `get_board_card` is read-only and never
   links a browsing session. Writes still auto-link an entirely unlinked session; additional cards
   require `attach_board_session`. The primary card remains the omitted-card default; removing it
-  falls back to the oldest remaining attachment. Link commits to each relevant card explicitly.
+  falls back to the oldest remaining attachment. Call `link_board_commit` once per commit to
+  share it with every card currently attached to the session, even when a target card is explicit.
   Description edits retain no prior state and never interrupt the TUI.
 - **Board launch authorization (2026-09-14)**: Start work sets the typed, false-by-default
   `AuthorizeBoardTools` marker for that session and explicitly authorizes the Board workflow in

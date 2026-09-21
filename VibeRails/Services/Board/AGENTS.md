@@ -52,6 +52,9 @@ serialization or tool discovery into the Native AOT path.
 - Commit viewing reads durable snapshots, never the current checkout. Capture from the caller's
   actual checkout, not automatically the source board directory. Reject capture failure before
   creating a link; preserve bounds, truncation markers and unique-prefix handling.
+  A session's `link_board_commit` call shares that captured snapshot with the explicit target
+  and all attached cards in the project. Resolve membership and write all pairs atomically;
+  repeat calls preserve existing links and snapshots. No new unlink/edit MCP tool is exposed.
 - Explicit Save/Create never starts an agent. Start work saves first, retains normal workspace
   resolution, grants only Board tools, links the session, and stays on the Board. Opening a
   terminal is a Sessions action or **Chat with:**, whose independent shared LLM/environment

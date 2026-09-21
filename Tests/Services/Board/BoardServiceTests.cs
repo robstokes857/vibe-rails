@@ -218,15 +218,19 @@ public sealed class BoardServiceTests : IDisposable
         var created = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "A"), Ct);
         const string sha = "abc1234abc1234abc1234abc1234abc1234abc12";
         var clone = Path.Combine(_root, "clone");
+        var second = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "B"), Ct);
+        foreach (var card in new[] { created, second })
+            await _store.LinkSessionAsync(_project, card.Id, "capture-session", null, "", "codex", "Codex", BoardSessionRecord.McpOrigin, Ct);
         _commits.Setup(c => c.DescribeAsync(clone, "abc1234", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new BoardCommitInfo(sha, "Rob", "Fix", DateTime.UtcNow));
         _commits.Setup(c => c.GetDiffAsync(clone, sha, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new BoardValidationException("Could not capture the file."));
 
         await Assert.ThrowsAsync<BoardValidationException>(() =>
-            _service.LinkCommitAsync(_project, created.Key, "abc1234", Ct, gitWorkingDirectory: clone));
+            _service.LinkCommitAsync(_project, created.Key, "abc1234", Ct, gitWorkingDirectory: clone, sessionId: "capture-session"));
 
         Assert.Empty((await _service.GetCardAsync(_project, created.Id, Ct))!.Commits);
+        Assert.Empty((await _service.GetCardAsync(_project, second.Id, Ct))!.Commits);
     }
 
     [Fact]
