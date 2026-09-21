@@ -120,7 +120,7 @@ public sealed class BoardCommitServiceTests : IDisposable
         await File.WriteAllTextAsync(Path.Combine(clone, "code.cs"), "unsaved working-tree edits\n", Ct);
 
         var connectionString = $"Data Source={Path.Combine(_root, "board.db")};Pooling=False";
-        var store = new BoardStore(connectionString);
+        var store = new BoardStore(connectionString, connectionString);
         var board = new BoardService(store, _service, new NullBoardLiveSessionProbe());
         await board.GetColumnsAsync(_root, Ct);
         var card = await board.CreateCardAsync(_root, new CreateBoardCardRequest(Title: "Fix code"), Ct);
@@ -134,7 +134,7 @@ public sealed class BoardCommitServiceTests : IDisposable
         DeleteDirectory(clone);
 
         // A new dashboard/store instance reads saved code; any call to git is a test failure.
-        var reopened = new BoardService(new BoardStore(connectionString), new Mock<IBoardCommitService>(MockBehavior.Strict).Object, new NullBoardLiveSessionProbe());
+        var reopened = new BoardService(new BoardStore(connectionString, connectionString), new Mock<IBoardCommitService>(MockBehavior.Strict).Object, new NullBoardLiveSessionProbe());
         var snapshot = await reopened.GetCommitDiffAsync(_root, card.Id, sha, Ct);
         var file = Assert.Single(snapshot!.Files);
         Assert.Equal(("code.cs", "old code\n", "new code\n"), (file.FileName, file.OriginalContent, file.ModifiedContent));

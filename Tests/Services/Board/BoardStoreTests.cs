@@ -23,7 +23,7 @@ public sealed class BoardStoreTests : IDisposable
         _project = Path.Combine(_root, "project-a");
         _otherProject = Path.Combine(_root, "project-b");
         _connectionString = $"Data Source={Path.Combine(_root, "state.db")};Mode=ReadWriteCreate;Cache=Shared";
-        _store = new BoardStore(_connectionString);
+        _store = new BoardStore(_connectionString, _connectionString);
     }
 
     private CancellationToken Ct => TestContext.Current.CancellationToken;
@@ -83,7 +83,7 @@ public sealed class BoardStoreTests : IDisposable
             await legacy.ExecuteNonQueryAsync(Ct);
         }
 
-        var migrated = new BoardStore(_connectionString);
+        var migrated = new BoardStore(_connectionString, _connectionString);
         Assert.Equal(BoardCardTypes.Task, (await migrated.FindCardAsync(_project, existing.Id, Ct))!.Type);
     }
 
@@ -129,14 +129,14 @@ public sealed class BoardStoreTests : IDisposable
         var second = await _store.CreateCardAsync(_project, NewCard("Second"), Ct);
         Assert.True(await _store.DeleteCardAsync(_project, second.Id, Ct));
 
-        var reopened = new BoardStore(_connectionString);
+        var reopened = new BoardStore(_connectionString, _connectionString);
         var third = await reopened.CreateCardAsync(_project, NewCard("Third"), Ct);
         Assert.Equal("VB-3", third.Key);
         Assert.True(await reopened.DeleteCardAsync(_project, first.Id, Ct));
         Assert.True(await reopened.DeleteCardAsync(_project, third.Id, Ct));
         Assert.Empty(await reopened.GetCardsAsync(_project, Ct));
 
-        var afterEmpty = new BoardStore(_connectionString);
+        var afterEmpty = new BoardStore(_connectionString, _connectionString);
         Assert.Equal("VB-4", (await afterEmpty.CreateCardAsync(_project, NewCard("Fourth"), Ct)).Key);
         Assert.Null(await afterEmpty.FindCardAsync(_project, "VB-1", Ct));
         Assert.Null(await afterEmpty.FindCardAsync(_project, "VB-2", Ct));
@@ -158,10 +158,10 @@ public sealed class BoardStoreTests : IDisposable
             await legacy.ExecuteNonQueryAsync(Ct);
         }
 
-        var migrated = new BoardStore(_connectionString);
+        var migrated = new BoardStore(_connectionString, _connectionString);
         Assert.Equal("VB-42", (await migrated.FindCardAsync(_project, existing.Id, Ct))!.Key);
         Assert.True(await migrated.DeleteCardAsync(_project, existing.Id, Ct));
-        var reopened = new BoardStore(_connectionString);
+        var reopened = new BoardStore(_connectionString, _connectionString);
         Assert.Equal("VB-43", (await reopened.CreateCardAsync(_project, NewCard("Next"), Ct)).Key);
     }
 
@@ -169,7 +169,7 @@ public sealed class BoardStoreTests : IDisposable
     public async Task Keys_AllocateAtomically_AcrossStoreInstances()
     {
         await _store.EnsureDefaultColumnsAsync(_project, Ct);
-        var otherStore = new BoardStore(_connectionString);
+        var otherStore = new BoardStore(_connectionString, _connectionString);
         var cancellationToken = Ct;
         var cards = await Task.WhenAll(Enumerable.Range(0, 12).Select(index => Task.Run(() =>
             (index % 2 == 0 ? _store : otherStore).CreateCardAsync(_project, NewCard($"Card {index}"), cancellationToken),
@@ -288,7 +288,7 @@ public sealed class BoardStoreTests : IDisposable
         const string sha = "89abcdef0123456789abcdef0123456789abcdef";
         Assert.NotNull(await _store.AddCommitAsync(_project, card.Id, sha, "Rob", "Fix it", DateTime.UtcNow, Snapshot(), Ct));
         await Assert.ThrowsAsync<BoardConflictException>(() => _store.AddCommitAsync(_project, card.Id, sha, "Rob", "Fix it", DateTime.UtcNow, new SandboxDiffResponse([], 0), Ct));
-        var reopened = new BoardStore(_connectionString);
+        var reopened = new BoardStore(_connectionString, _connectionString);
         var saved = await reopened.GetCommitSnapshotAsync(_project, card.Id, sha, Ct);
         Assert.Equal(Snapshot().Files, saved!.Files);
         Assert.Equal(1, saved.TotalChanges);
@@ -416,7 +416,7 @@ public sealed class BoardStoreTests : IDisposable
             await setup.ExecuteNonQueryAsync(Ct);
         }
 
-        var store = new BoardStore(connectionString);
+        var store = new BoardStore(connectionString, connectionString);
         var detail = (await store.GetCardDetailAsync(_project, "VB-1", Ct))!;
         Assert.Equal("written before Kind existed", Assert.Single(detail.Comments).Body);
         Assert.Equal(BoardCommentKinds.Comment, detail.Comments[0].Kind);
@@ -507,7 +507,7 @@ public sealed class BoardStoreTests : IDisposable
             await legacy.ExecuteNonQueryAsync(Ct);
         }
 
-        var reopened = new BoardStore(_connectionString);
+        var reopened = new BoardStore(_connectionString, _connectionString);
         var board = Assert.Single(await reopened.GetBoardsAsync(_project, Ct));
         Assert.Equal(BoardStore.DefaultBoardName, board.Name);
         Assert.StartsWith("brd_", board.Id);
@@ -531,7 +531,7 @@ public sealed class BoardStoreTests : IDisposable
         await _store.LinkCardAsync(_project, second.Key, first.Id, Ct);
         await _store.LinkCardAsync(_project, first.Id, second.Key, Ct);
 
-        var reopened = new BoardStore(_connectionString);
+        var reopened = new BoardStore(_connectionString, _connectionString);
         Assert.Equal(second.Id, Assert.Single((await reopened.GetCardDetailAsync(_project, first.Id, Ct))!.LinkedCards).Id);
         Assert.Equal(first.Id, Assert.Single((await reopened.GetCardDetailAsync(_project, second.Id, Ct))!.LinkedCards).Id);
         Assert.Empty((await reopened.GetCardLinkCandidatesAsync(_project, first.Id, "", Ct))!);
@@ -609,7 +609,7 @@ public sealed class BoardStoreTests : IDisposable
             command.CommandText = "DROP TABLE BoardCardLinks; DELETE FROM SchemaMigrations WHERE Component='board' AND Version=5;";
             await command.ExecuteNonQueryAsync(Ct);
         }
-        var upgraded = new BoardStore(_connectionString);
+        var upgraded = new BoardStore(_connectionString, _connectionString);
         var second = await upgraded.CreateCardAsync(_project, NewCard("New"), Ct);
         await upgraded.LinkCardAsync(_project, first.Id, second.Id, Ct);
         Assert.Equal("Existing", (await upgraded.GetCardDetailAsync(_project, first.Id, Ct))!.Card.Title);

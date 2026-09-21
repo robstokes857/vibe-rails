@@ -24,7 +24,7 @@ public sealed class BoardCurrentStateTests : IDisposable
         Directory.CreateDirectory(_root);
         _project = Path.Combine(_root, "project");
         _connectionString = $"Data Source={Path.Combine(_root, "state.db")};Mode=ReadWriteCreate;Cache=Shared";
-        _store = new BoardStore(_connectionString);
+        _store = new BoardStore(_connectionString, _connectionString);
         _service = new BoardService(_store, Mock.Of<IBoardCommitService>(), _live);
     }
 
@@ -62,7 +62,7 @@ public sealed class BoardCurrentStateTests : IDisposable
         var card = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "Model", Assignee: "base:codex",
             BaseLlmOptions: new BaseLlmOptions("gpt-5.5", "max", "plan")), Ct);
         Assert.Equal("xhigh", card.BaseLlmOptions!.Effort);
-        Assert.Equal("", (await new BoardStore(_connectionString).FindCardAsync(_project, card.Id, Ct))!.BaseLlmOptions!.Mode);
+        Assert.Equal("", (await new BoardStore(_connectionString, _connectionString).FindCardAsync(_project, card.Id, Ct))!.BaseLlmOptions!.Mode);
         var updated = await _service.UpdateCardAsync(_project, card.Id, new UpdateBoardCardRequest(Assignee: "env:7:codex"), Ct);
         Assert.Null(updated!.BaseLlmOptions);
     }
@@ -73,7 +73,7 @@ public sealed class BoardCurrentStateTests : IDisposable
         var card = await CreateAsync();
         await _service.UpdateCardAsync(_project, card.Id, new UpdateBoardCardRequest(Description: "second"), Ct);
         await _service.UpdateCardAsync(_project, card.Id, new UpdateBoardCardRequest(Description: "last write"), Ct);
-        Assert.Equal("last write", (await new BoardStore(_connectionString).FindCardAsync(_project, card.Id, Ct))!.Description);
+        Assert.Equal("last write", (await new BoardStore(_connectionString, _connectionString).FindCardAsync(_project, card.Id, Ct))!.Description);
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(Ct);
         await using var command = connection.CreateCommand();

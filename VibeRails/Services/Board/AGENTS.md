@@ -51,9 +51,11 @@ serialization or tool discovery into the Native AOT path.
   creating a link; preserve bounds, truncation markers and unique-prefix handling.
 - Explicit Save/Create never starts an agent. Start work saves first, retains normal workspace
   resolution, grants only Board tools, links the session, and stays on the Board. Opening a
-  terminal is a Sessions action or **Chat with agent**, which saves first and launches with
-  discussion intent, then focuses the returned terminal. Lane Automations are independent
-  existing Jobs, queued after a 60-second settling period; automatic assignee launch is still a TODO.
+  terminal is a Sessions action or **Chat with:**, whose independent shared LLM/environment
+  picker defaults to the assignee. Chat saves first, sends the selected launch override without
+  reassigning the card, and launches with discussion intent, then focuses the returned terminal.
+  Lane Automations are independent existing Jobs, queued after a 60-second settling period;
+  automatic assignee launch is still a TODO.
 - Current launch exclusion is root-local (F3). Do not assert cross-process mutual exclusion from
   a static dictionary or confuse a removable session-display link with execution ownership.
 - Saving a card never sends terminal input. Do not reintroduce the removed notification/TUI

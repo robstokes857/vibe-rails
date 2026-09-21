@@ -1197,7 +1197,8 @@ public sealed partial class JobStore : IJobStore
         JobTriggerKind kind,
         string triggerKey,
         bool requireEnabled,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? expectedProjectPath = null)
     {
         var runId = Guid.NewGuid().ToString("N");
         await using var command = connection.CreateCommand();
@@ -1215,7 +1216,11 @@ public sealed partial class JobStore : IJobStore
         //
         // Evaluated inside the caller's transaction, so two concurrent enqueues of the same job
         // cannot both see "no active run" and both insert.
-        command.CommandText = """
+        //
+        // $projectPath is an optional extra gate for events that carry their own project (Board
+        // lane moves): the job must still belong to that project, otherwise the event is consumed
+        // without a run. NULL means the caller has no project to check.
+        command.CommandText = $"""
             INSERT OR IGNORE INTO JobRuns
                 (Id, JobId, TriggerKind, TriggerKey, Status, JobName, ProjectPath, Llm,
                  EnvironmentId, EnvironmentName, TimeoutMinutes, QueuedUTC, LaunchMinimized)
@@ -1225,6 +1230,7 @@ public sealed partial class JobStore : IJobStore
             FROM Jobs j
             LEFT JOIN Environments e ON e.Id = j.EnvironmentId
             WHERE j.Id = $jobId AND ($requireEnabled = 0 OR j.Enabled = 1) AND j.DeletedUTC IS NULL
+              AND ($projectPath IS NULL OR j.ProjectPath = $projectPath{ProjectPathCollation})
               AND EXISTS (SELECT 1 FROM JobActions configured WHERE configured.JobId = j.Id)
               AND NOT EXISTS (
                   SELECT 1 FROM JobRuns active
@@ -1232,6 +1238,7 @@ public sealed partial class JobStore : IJobStore
             """;
         command.Parameters.AddWithValue("$runId", runId);
         command.Parameters.AddWithValue("$jobId", jobId);
+        command.Parameters.AddWithValue("$projectPath", expectedProjectPath is null ? DBNull.Value : expectedProjectPath);
         command.Parameters.AddWithValue("$triggerKind", (int)kind);
         command.Parameters.AddWithValue("$triggerKey", triggerKey);
         command.Parameters.AddWithValue("$queued", (int)JobRunStatus.Queued);

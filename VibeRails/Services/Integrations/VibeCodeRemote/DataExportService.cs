@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using VibeRails.Data.Abstractions;
+using VibeRails.Data.Sqlite;
 using Serilog;
 using VibeRails.Services.Diagnostics;
 using VibeRails.Utils;
@@ -13,14 +14,17 @@ using VibeRails.Utils;
 namespace VibeRails.Services.Integrations.VibeCodeRemote;
 
 /// <summary>
-/// Creates a consistent snapshot of state.db, Brotli-compresses and hashes the snapshot,
-/// and streams the compressed bytes to the configured remote endpoint.
+/// Creates consistent snapshots of state.db and, when it exists, the board.db beside it,
+/// Brotli-compresses and hashes each snapshot, and streams the compressed bytes to the
+/// configured remote endpoint as one upload per database. The reported hash is state.db's.
 /// </summary>
 public sealed class DataExportService : IDataExportService
 {
     internal const string ExportUrlSettingKey = "VibeRails:ExportUrl";
     internal const string SnapshotFileName = "copy_state.db";
     internal const string CompressedFileName = "copy_state.db.br";
+    internal const string BoardSnapshotFileName = "copy_board.db";
+    internal const string BoardCompressedFileName = "copy_board.db.br";
     internal const string LockFileName = ".data-export.lock";
 
     // Anything larger than one block goes through the resumable chunked protocol: a shared host
@@ -241,41 +245,53 @@ public sealed class DataExportService : IDataExportService
             temporaryDirectory = _temporaryDirectoryFactory();
             PrivateFilePermissions.EnsureDirectory(temporaryDirectory);
 
-            var insufficientSpace = DescribeInsufficientSpace(statePath, temporaryDirectory);
+            // board.db has lived beside state.db since the Board split. It is optional because an
+            // install that never opened the Board has no file yet. Each database stays its own
+            // Brotli-compressed SQLite upload, which is what the server already accepts; nothing
+            // here reads or copies the legacy Board tables still present in state.db.
+            var databases = new List<ExportDatabase>
+            {
+                new(statePath, SnapshotFileName, CompressedFileName)
+            };
+            var boardPath = new SqliteStoragePaths(statePath).BoardDatabasePath;
+            if (File.Exists(boardPath))
+                databases.Add(new(boardPath, BoardSnapshotFileName, BoardCompressedFileName));
+
+            var insufficientSpace = DescribeInsufficientSpace(databases, temporaryDirectory);
             if (insufficientSpace is not null)
             {
                 Log.Warning("[DataExport] {Detail}", insufficientSpace);
                 return new DataExportResult(DataExportStatus.Failed, Detail: insufficientSpace);
             }
 
-            var snapshotPath = Path.Combine(temporaryDirectory, SnapshotFileName);
-            var compressedPath = Path.Combine(temporaryDirectory, CompressedFileName);
-
-            _progress.SetStage(DataExportStage.Snapshot, TryGetFileLength(statePath));
-            await CreateSnapshotWithProgressAsync(statePath, snapshotPath, cancellationToken);
-            cancellationToken.ThrowIfCancellationRequested();
-
-            _progress.SetStage(DataExportStage.Compressing, TryGetFileLength(snapshotPath));
-            await CompressSnapshotAsync(snapshotPath, compressedPath, cancellationToken);
-
-            var compressedLength = TryGetFileLength(compressedPath);
-            _progress.SetStage(DataExportStage.Hashing, compressedLength);
-            var sha256 = await ComputeSha256Async(compressedPath, cancellationToken);
             var computerName = ComputerNameFormatter.Normalize(_computerNameFactory());
             if (string.IsNullOrWhiteSpace(computerName))
                 computerName = "unknown-computer";
 
-            DeleteSnapshotFilesBestEffort(snapshotPath);
+            // Prepare every snapshot before uploading any, so a database that cannot be read
+            // leaves nothing half-shipped on the server.
+            var prepared = new List<PreparedExport>(databases.Count);
+            foreach (var database in databases)
+                prepared.Add(await PrepareExportAsync(database, temporaryDirectory, cancellationToken));
 
-            _progress.SetStage(DataExportStage.Uploading, compressedLength);
-            return await SendCompressedExportAsync(
-                exportUri,
-                apiKey,
-                computerName,
-                sha256,
-                compressedPath,
-                compressedLength,
-                cancellationToken);
+            DataExportResult? stateResult = null;
+            foreach (var export in prepared)
+            {
+                _progress.SetStage(DataExportStage.Uploading, export.CompressedLength);
+                var result = await SendCompressedExportAsync(
+                    exportUri,
+                    apiKey,
+                    computerName,
+                    export.Sha256,
+                    export.CompressedPath,
+                    export.CompressedLength,
+                    export.FileName,
+                    cancellationToken);
+                if (result.Status != DataExportStatus.Success)
+                    return result;
+                stateResult ??= result;
+            }
+            return stateResult!;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -287,14 +303,14 @@ public sealed class DataExportService : IDataExportService
             // obvious fix. Reporting it as a generic preparation failure sends people diffing code.
             Log.Error(
                 exception,
-                "[DataExport] Storage refused to snapshot the state database. Transient={Transient}",
+                "[DataExport] Storage refused to snapshot a database. Transient={Transient}",
                 exception.IsTransient);
             return new DataExportResult(
                 DataExportStatus.Failed,
                 Detail: exception.IsTransient
-                    ? "The state database is locked by another program. Close any SQLite browser "
-                      + "or leftover vb process and try again."
-                    : "SQLite could not read the state database.");
+                    ? "The state or board database is locked by another program. Close any SQLite "
+                      + "browser or leftover vb process and try again."
+                    : "SQLite could not read the state or board database.");
         }
         catch (Exception exception)
         {
@@ -331,6 +347,39 @@ public sealed class DataExportService : IDataExportService
                 }
             }
         }
+    }
+
+    /// <summary>One database the export ships and the temp file names it uses on the way.</summary>
+    private sealed record ExportDatabase(string FilePath, string SnapshotFileName, string CompressedFileName);
+
+    /// <summary>A compressed, hashed snapshot that is ready to upload.</summary>
+    private sealed record PreparedExport(string CompressedPath, long CompressedLength, string Sha256, string FileName);
+
+    /// <summary>
+    /// Snapshot, compress and hash one database, then drop the uncompressed snapshot so only the
+    /// compressed copy waits for upload.
+    /// </summary>
+    private async Task<PreparedExport> PrepareExportAsync(
+        ExportDatabase database,
+        string temporaryDirectory,
+        CancellationToken cancellationToken)
+    {
+        var snapshotPath = Path.Combine(temporaryDirectory, database.SnapshotFileName);
+        var compressedPath = Path.Combine(temporaryDirectory, database.CompressedFileName);
+
+        _progress.SetStage(DataExportStage.Snapshot, TryGetFileLength(database.FilePath));
+        await CreateSnapshotWithProgressAsync(database.FilePath, snapshotPath, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        _progress.SetStage(DataExportStage.Compressing, TryGetFileLength(snapshotPath));
+        await CompressSnapshotAsync(snapshotPath, compressedPath, cancellationToken);
+
+        var compressedLength = TryGetFileLength(compressedPath);
+        _progress.SetStage(DataExportStage.Hashing, compressedLength);
+        var sha256 = await ComputeSha256Async(compressedPath, cancellationToken);
+
+        DeleteSnapshotFilesBestEffort(snapshotPath);
+        return new PreparedExport(compressedPath, compressedLength, sha256, database.CompressedFileName);
     }
 
     /// <summary>
@@ -383,11 +432,11 @@ public sealed class DataExportService : IDataExportService
     /// one. Returns null when there is room — or when free space can't be determined (UNC paths
     /// and some mounts throw), because an unreadable volume must not block a viable export.
     /// </summary>
-    private static string? DescribeInsufficientSpace(string statePath, string temporaryDirectory)
+    private static string? DescribeInsufficientSpace(IReadOnlyList<ExportDatabase> databases, string temporaryDirectory)
     {
         try
         {
-            var required = new FileInfo(statePath).Length * 2L;
+            var required = databases.Sum(database => new FileInfo(database.FilePath).Length) * 2L;
             var root = Path.GetPathRoot(Path.GetFullPath(temporaryDirectory));
             if (string.IsNullOrWhiteSpace(root))
                 return null;
@@ -501,6 +550,7 @@ public sealed class DataExportService : IDataExportService
         string sha256,
         string compressedPath,
         long compressedLength,
+        string fileName,
         CancellationToken cancellationToken)
     {
         if (compressedLength > ChunkedUploadThresholdBytes)
@@ -527,6 +577,7 @@ public sealed class DataExportService : IDataExportService
             sha256,
             compressedPath,
             compressedLength,
+            fileName,
             cancellationToken);
     }
 
@@ -537,6 +588,7 @@ public sealed class DataExportService : IDataExportService
         string sha256,
         string compressedPath,
         long compressedLength,
+        string fileName,
         CancellationToken cancellationToken)
     {
         try
@@ -553,7 +605,7 @@ public sealed class DataExportService : IDataExportService
             content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
             content.Headers.ContentDisposition = new ContentDispositionHeaderValue("attachment")
             {
-                FileName = $"\"{CompressedFileName}\""
+                FileName = $"\"{fileName}\""
             };
 
             // Must be set by hand. StreamContent only derives Content-Length from a seekable
@@ -1449,13 +1501,9 @@ public sealed class DataExportService : IDataExportService
 
     private void DeleteSnapshotFilesBestEffort(string snapshotPath)
     {
-        foreach (var (path, fileName) in new[]
-                 {
-                     (snapshotPath, SnapshotFileName),
-                     (snapshotPath + "-wal", SnapshotFileName + "-wal"),
-                     (snapshotPath + "-shm", SnapshotFileName + "-shm")
-                 })
+        foreach (var path in new[] { snapshotPath, snapshotPath + "-wal", snapshotPath + "-shm" })
         {
+            var fileName = Path.GetFileName(path);
             try
             {
                 // File.Delete already no-ops on a missing file; no Exists guard needed.
@@ -1485,7 +1533,11 @@ public sealed class DataExportService : IDataExportService
                      SnapshotFileName,
                      SnapshotFileName + "-wal",
                      SnapshotFileName + "-shm",
-                     CompressedFileName
+                     CompressedFileName,
+                     BoardSnapshotFileName,
+                     BoardSnapshotFileName + "-wal",
+                     BoardSnapshotFileName + "-shm",
+                     BoardCompressedFileName
                  })
         {
             try

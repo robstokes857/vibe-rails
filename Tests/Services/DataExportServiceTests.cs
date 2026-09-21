@@ -378,6 +378,73 @@ public sealed class DataExportServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ExportAsync_BoardDatabaseBesideState_UploadsBothSnapshotsAndReportsStateHash()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var statePath = await CreateSimpleStateDatabaseAsync();
+        var boardPath = Path.Combine(Path.GetDirectoryName(statePath)!, "board.db");
+        await CreateProbeDatabaseAsync(boardPath, "board row");
+        ParserConfigs.SetApiKey(ConfiguredApiKey);
+        ParserConfigs.SetStatePath(statePath);
+        var handler = new CapturingHandler(HttpStatusCode.OK, _exportTempRoot);
+        using var httpClient = new HttpClient(handler);
+        var service = CreateService(httpClient, ValidExportUrl);
+
+        var result = await service.ExportAsync(cancellationToken);
+
+        Assert.Equal(DataExportStatus.Success, result.Status);
+        Assert.Equal(2, handler.RequestCount);
+        Assert.Equal(
+            [DataExportService.CompressedFileName, DataExportService.BoardCompressedFileName],
+            handler.Requests.Select(request => request.FileName?.Trim('"') ?? "").ToArray());
+        var stateHash = Convert.ToHexStringLower(SHA256.HashData(handler.Requests[0].Body!));
+        Assert.Equal(stateHash, handler.Requests[0].ContentSha256);
+        Assert.Equal(stateHash, result.Sha256);
+        var boardHash = Convert.ToHexStringLower(SHA256.HashData(handler.Requests[1].Body!));
+        Assert.Equal(boardHash, handler.Requests[1].ContentSha256);
+        Assert.NotEqual(stateHash, boardHash);
+
+        var exportedBoardPath = Path.Combine(_testRoot, "exported-board.db");
+        await DecompressToFileAsync(handler.Requests[1].Body!, exportedBoardPath, cancellationToken);
+        await using var exported = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = exportedBoardPath,
+            Mode = SqliteOpenMode.ReadOnly,
+            Pooling = false
+        }.ToString());
+        await exported.OpenAsync(cancellationToken);
+        Assert.Equal("ok", await ExecuteScalarAsync<string>(exported, "PRAGMA integrity_check;", cancellationToken));
+        Assert.Equal(
+            "board row",
+            await ExecuteScalarAsync<string>(exported, "SELECT Value FROM ExportProbe WHERE Id = 1;", cancellationToken));
+        AssertExportTempRootIsEmpty();
+    }
+
+    [Fact]
+    public async Task ExportAsync_CorruptBoardDatabase_FailsBeforeAnyUploadAndCleansArtifacts()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var statePath = await CreateSimpleStateDatabaseAsync();
+        await File.WriteAllTextAsync(
+            Path.Combine(Path.GetDirectoryName(statePath)!, "board.db"),
+            "this is not a SQLite database",
+            cancellationToken);
+        ParserConfigs.SetApiKey(ConfiguredApiKey);
+        ParserConfigs.SetStatePath(statePath);
+        var handler = new CapturingHandler(HttpStatusCode.OK, _exportTempRoot);
+        using var httpClient = new HttpClient(handler);
+        var service = CreateService(httpClient, ValidExportUrl);
+
+        var result = await service.ExportAsync(cancellationToken);
+
+        // Every snapshot is prepared before the first upload, so a bad board.db ships nothing.
+        Assert.Equal(DataExportStatus.Failed, result.Status);
+        Assert.Equal(0, handler.RequestCount);
+        Assert.Equal(1, Volatile.Read(ref _temporaryDirectoryCount));
+        AssertExportTempRootIsEmpty();
+    }
+
+    [Fact]
     public async Task ExportAsync_CorruptStateDatabase_ReturnsFailedAndCleansSnapshotArtifacts()
     {
         var statePath = NewStatePath();
@@ -513,20 +580,26 @@ public sealed class DataExportServiceTests : IDisposable
     private async Task<string> CreateSimpleStateDatabaseAsync()
     {
         var statePath = NewStatePath();
+        await CreateProbeDatabaseAsync(statePath, "simple row");
+        return statePath;
+    }
+
+    private static async Task CreateProbeDatabaseAsync(string path, string value)
+    {
         var connectionString = new SqliteConnectionStringBuilder
         {
-            DataSource = statePath,
+            DataSource = path,
             Mode = SqliteOpenMode.ReadWriteCreate,
             Pooling = false
         }.ToString();
         await using var connection = new SqliteConnection(connectionString);
         await connection.OpenAsync(TestContext.Current.CancellationToken);
-        await ExecuteNonQueryAsync(
-            connection,
+        await using var command = connection.CreateCommand();
+        command.CommandText =
             "CREATE TABLE ExportProbe (Id INTEGER PRIMARY KEY, Value TEXT NOT NULL);"
-            + "INSERT INTO ExportProbe (Id, Value) VALUES (1, 'simple row');",
-            TestContext.Current.CancellationToken);
-        return statePath;
+            + "INSERT INTO ExportProbe (Id, Value) VALUES (1, $value);";
+        command.Parameters.AddWithValue("$value", value);
+        await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
     }
 
     private static async Task<SqliteConnection> CreateLiveWalDatabaseAsync(string statePath)
@@ -633,6 +706,7 @@ public sealed class DataExportServiceTests : IDisposable
         public string[] ContentEncodings { get; private set; } = [];
         public string[] FileNamesObservedDuringSend { get; private set; } = [];
         public byte[]? Body { get; private set; }
+        public List<CapturedRequest> Requests { get; } = [];
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -656,6 +730,7 @@ public sealed class DataExportServiceTests : IDisposable
             Body = request.Content is null
                 ? null
                 : await request.Content.ReadAsByteArrayAsync(cancellationToken);
+            Requests.Add(new CapturedRequest(FileName, ContentSha256, Body));
 
             var response = new HttpResponseMessage(statusCode);
             if (responseBody is not null)
@@ -673,6 +748,8 @@ public sealed class DataExportServiceTests : IDisposable
                 ? values.SingleOrDefault()
                 : null;
     }
+
+    private sealed record CapturedRequest(string? FileName, string? ContentSha256, byte[]? Body);
 
     private sealed class ThrowingHandler(Exception exception) : HttpMessageHandler
     {

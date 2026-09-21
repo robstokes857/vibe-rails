@@ -542,7 +542,14 @@
                     </header>
 
                     <div class="project-health-quality-placeholder" data-code-analyzer-empty aria-live="polite">
-                        <span aria-hidden="true"><i class="fa-solid fa-chart-line"></i></span>
+                        <span class="quality-loading-orbit" aria-hidden="true">
+                            <svg viewBox="0 0 80 80" focusable="false">
+                                <circle class="quality-loading-orbit-ring" cx="40" cy="40" r="29"></circle>
+                                <polygon class="quality-loading-orbit-grid" points="40,11 67,31 57,62 23,62 13,31"></polygon>
+                                <polygon class="quality-loading-orbit-data" points="40,18 58,34 51,53 29,57 22,31"></polygon>
+                                <circle class="quality-loading-orbit-core" cx="40" cy="40" r="3"></circle>
+                            </svg>
+                        </span>
                         <div>
                             <strong>Preparing your score…</strong>
                             <p>Scanning changed source files for maintainability risks.</p>
@@ -4545,6 +4552,45 @@
                     flex-wrap: wrap;
                     justify-content: flex-end;
                     gap: 0.5rem;
+                    min-width: 0;
+                }
+
+                .board-chat-controls {
+                    flex: 0 1 auto;
+                    flex-wrap: nowrap;
+                }
+
+                .board-chat-controls > .btn {
+                    flex: 0 0 auto;
+                }
+
+                .board-chat-controls .project-health-fix-picker {
+                    flex: 1 1 180px;
+                    min-width: 0;
+                }
+
+                @media (max-width: 520px) {
+                    .board-card-editor > .board-editor-actions {
+                        display: grid;
+                        grid-template-columns: auto 1fr auto;
+                    }
+
+                    .board-card-editor .board-editor-actions-main {
+                        display: contents;
+                    }
+
+                    .board-chat-controls {
+                        grid-column: 1 / -1;
+                        grid-row: 1;
+                    }
+
+                    .board-card-editor [data-board-start-work] {
+                        justify-self: end;
+                    }
+
+                    .board-card-editor [data-board-save-card] {
+                        grid-column: 3;
+                    }
                 }
 
                 /* Assignee = the LLM picker (Tom Select) plus an unassign button. */

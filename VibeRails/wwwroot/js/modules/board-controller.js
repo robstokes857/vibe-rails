@@ -77,8 +77,9 @@ export class BoardController {
         // navigation: the diff one owns a Monaco editor and two models.
         this.diffModal = null;
         this.sessionLayer = null;
-        // Disposer for the LLM picker mounted in the card editor's Assignee field.
+        // Shared LLM pickers for assignment and the independent discussion target.
         this.assigneePickerDispose = null;
+        this.chatPickerDispose = null;
         this.launchOptionsDispose = null;
         this.cardLinksDispose = null;
         this._openCardGeneration = 0;
@@ -130,18 +131,20 @@ export class BoardController {
         this.destroySortables();
         this.closeDiffModal();
         this.closeSessionModal();
-        this.disposeAssigneePicker();
+        this.disposeCardPickers();
         this.cardLinksDispose?.();
         this.cardLinksDispose = null;
         disposeBoardAttachmentPreview();
         this.root = null;
     }
 
-    disposeAssigneePicker() {
+    disposeCardPickers() {
         try { this.launchOptionsDispose?.(); } catch { /* already torn down */ }
         this.launchOptionsDispose = null;
         try { this.assigneePickerDispose?.(); } catch { /* already torn down */ }
         this.assigneePickerDispose = null;
+        try { this.chatPickerDispose?.(); } catch { /* already torn down */ }
+        this.chatPickerDispose = null;
     }
 
     setBusy(busy) {
@@ -972,10 +975,16 @@ export class BoardController {
                             <i class="fa-solid fa-trash" aria-hidden="true"></i> Delete
                         </button>` : '<span></span>'}
                         <span class="board-editor-actions-main">
-                            ${card ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-board-chat
-                                title="Open a terminal to discuss this card with the assigned LLM">
-                                <i class="fa-solid fa-comments" aria-hidden="true"></i> Chat with agent
-                            </button>` : ''}
+                            ${card ? `<span class="project-health-fix-controls board-chat-controls" role="group" aria-label="Chat about this card">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" data-board-chat
+                                    title="Open a terminal to discuss this card with the selected LLM">
+                                    <i class="fa-solid fa-comments" aria-hidden="true"></i> Chat with:
+                                </button>
+                                <label class="project-health-fix-picker">
+                                    <span class="visually-hidden">Agent for card discussion</span>
+                                    <select class="form-select" data-board-chat-agent aria-label="Agent for card discussion"></select>
+                                </label>
+                            </span>` : ''}
                             ${card ? `<button type="button" class="btn btn-sm btn-outline-success" data-board-start-work
                                 title="Start the assigned LLM in the background with this card as its first message">
                                 <i class="fa-solid fa-play" aria-hidden="true"></i> <span data-board-start-work-label>Start work</span>
@@ -985,7 +994,7 @@ export class BoardController {
                     </div>
             </div>
         `, { onClose: () => {
-            this.disposeAssigneePicker();
+            this.disposeCardPickers();
             this.cardLinksDispose?.();
             this.cardLinksDispose = null;
             disposeBoardAttachmentPreview();
@@ -1069,9 +1078,9 @@ export class BoardController {
 
         // The Assignee field is the app-wide LLM picker ('sandbox' context: saved
         // environments plus the bare CLIs, never a shell, never a Worker).
+        this.disposeCardPickers();
         const assigneeSelect = editor.querySelector('#board-card-assignee');
         if (assigneeSelect) {
-            this.disposeAssigneePicker();
             this.assigneePickerDispose = mountLlmPicker(this.app, assigneeSelect, {
                 context: 'sandbox',
                 placeholder: 'Unassigned',
@@ -1089,6 +1098,16 @@ export class BoardController {
             editor.querySelector('[data-board-clear-assignee]')?.addEventListener('click', () => {
                 setLlmPickerValue(this.app, assigneeSelect, '');
                 renderOptions({}, '');
+            });
+        }
+
+        // Chat can use any launch target without changing the card's assignment.
+        const chatSelect = editor.querySelector('[data-board-chat-agent]');
+        if (chatSelect) {
+            this.chatPickerDispose = mountLlmPicker(this.app, chatSelect, {
+                context: 'sandbox',
+                placeholder: 'Select an agent…',
+                selectedValue: card.assignee || getEnabledLlmItems(this.app, 'sandbox')[0]?.key || ''
             });
         }
 
@@ -1827,7 +1846,7 @@ export class BoardController {
         const chat = editor.querySelector('[data-board-chat]');
         if (chat) {
             chat.disabled = this.hasRunningSession(card);
-            chat.title = chat.disabled ? 'An agent is already running. Open it from Sessions.' : 'Open a terminal to discuss this card with the assigned LLM';
+            chat.title = chat.disabled ? 'An agent is already running. Open it from Sessions.' : 'Open a terminal to discuss this card with the selected LLM';
         }
         const button = editor.querySelector('[data-board-start-work]');
         if (!button) return;
@@ -1851,9 +1870,12 @@ export class BoardController {
         if (button?.disabled) return;
         const payload = this.readCardForm(editor);
         if (!this.validateCardTitle(editor, payload)) return;
-        if (!payload.assignee) {
-            this.app.showToast('Board', 'Assign an LLM to this card first.', 'warning');
-            editor.querySelector('#board-card-assignee')?.tomselect?.focus?.();
+        const selection = intent === 'chat' ? editor.querySelector('[data-board-chat-agent]')?.value : payload.assignee;
+        if (!selection) {
+            this.app.showToast('Board', intent === 'chat' ? 'Choose an LLM beside Chat with.' : 'Assign an LLM to this card first.', 'warning');
+            const select = editor.querySelector(intent === 'chat' ? '[data-board-chat-agent]' : '#board-card-assignee');
+            if (select?.tomselect) select.tomselect.focus();
+            else select?.focus();
             return;
         }
         if (button) button.disabled = true;
@@ -1865,13 +1887,13 @@ export class BoardController {
                 this.app.showToast('Board', 'An agent is already running on this card. Open it from Sessions.', 'info');
                 return;
             }
-            const result = await BoardApi.launchBoardCardAsync(card.id, { selection: payload.assignee, intent });
+            const result = await BoardApi.launchBoardCardAsync(card.id, { selection, intent });
             const tabId = String(result?.tabId || '').trim();
             if (!tabId) throw new Error('The launch did not return a terminal tab.');
 
-            const info = this.assigneeInfo(result.selection || payload.assignee);
+            const info = this.assigneeInfo(result.selection || selection);
             this.app.terminalController?.rememberTabLaunch?.(tabId, {
-                selection: result.selection || payload.assignee,
+                selection: result.selection || selection,
                 label: `${result.cardKey || card.key} · ${payload.title || card.title}`,
                 title: `${result.cardKey || card.key} · ${payload.title || card.title}`,
                 taskKey: CARD_TASK_KEY(card.id),
@@ -1882,7 +1904,7 @@ export class BoardController {
                 if (editor.isConnected !== false) {
                     this.app.closeModal();
                     if (!(await this.app.terminalController?.adoptLaunchedTab?.(tabId))) {
-                        this.app.navigate?.('terminal-focus', { preferredTabId: tabId, preferredSelection: result.selection || payload.assignee });
+                        this.app.navigate?.('terminal-focus', { preferredTabId: tabId, preferredSelection: result.selection || selection });
                     }
                 }
                 return;

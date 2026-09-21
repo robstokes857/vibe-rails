@@ -24,7 +24,7 @@ public sealed class BoardServiceTests : IDisposable
         Directory.CreateDirectory(_root);
         _project = Path.Combine(_root, "project");
         _connectionString = $"Data Source={Path.Combine(_root, "state.db")};Mode=ReadWriteCreate;Cache=Shared";
-        _store = new BoardStore(_connectionString);
+        _store = new BoardStore(_connectionString, _connectionString);
         _service = new BoardService(_store, _commits.Object, _live);
     }
 
@@ -215,7 +215,7 @@ public sealed class BoardServiceTests : IDisposable
         command.Parameters.AddWithValue("$card", card.Id);
         command.Parameters.AddWithValue("$date", DateTime.UtcNow.ToString("O"));
         await command.ExecuteNonQueryAsync(Ct);
-        _ = new BoardStore(_connectionString); // Opening an old database adds the snapshot table.
+        _ = new BoardStore(_connectionString, _connectionString); // Opening an old database adds the snapshot table.
 
         var error = await Assert.ThrowsAsync<BoardValidationException>(() =>
             _service.GetCommitDiffAsync(_project, card.Id, "abc1234", Ct));

@@ -21,7 +21,7 @@ public sealed class BoardLaunchConcurrencyTests : IDisposable
     {
         Directory.CreateDirectory(_root);
         _connectionString = $"Data Source={Path.Combine(_root, "state.db")};Mode=ReadWriteCreate;Cache=Shared";
-        _store = new BoardStore(_connectionString);
+        _store = new BoardStore(_connectionString, _connectionString);
         _tabs.SetupGet(t => t.MaxTabs).Returns(8);
         _tabs.Setup(t => t.ListTabsAsync(It.IsAny<CancellationToken>())).ReturnsAsync([]);
         _tabs.Setup(t => t.CreateTabAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new TerminalTabStatusResponse("tab-1", DateTime.UtcNow, false));

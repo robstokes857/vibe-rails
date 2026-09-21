@@ -11,6 +11,24 @@ public sealed partial class BoardStore
         await using var transaction = connection.BeginTransaction(deferred: true);
         var entries = new List<BoardLaneAutomationEvent>();
         var now = new DateTimeOffset(nowUtc).ToUnixTimeMilliseconds();
+
+        // The scheduler polls this every few seconds and the queue is almost always empty, so the
+        // common case must be one indexed probe rather than two three-way joins.
+        await using (var any = connection.CreateCommand())
+        {
+            any.Transaction = transaction;
+            any.CommandText = """
+                SELECT EXISTS(SELECT 1 FROM BoardPendingAutomations WHERE DueUnixMs <= $now)
+                    OR EXISTS(SELECT 1 FROM BoardPendingAdditionalAutomations WHERE DueUnixMs <= $now);
+                """;
+            any.Parameters.AddWithValue("$now", now);
+            if (Convert.ToInt64(await any.ExecuteScalarAsync(cancellationToken)) == 0)
+            {
+                await transaction.CommitAsync(cancellationToken);
+                return entries;
+            }
+        }
+
         foreach (var additional in new[] { false, true })
         {
             var pending = additional ? "BoardPendingAdditionalAutomations" : "BoardPendingAutomations";

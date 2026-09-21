@@ -96,12 +96,16 @@ filter lists the keys present on the board. **Start work** (`startWork`) saves t
 the board without adopting/focusing the terminal or navigating away. Creating or saving a
 card never immediately launches an agent (a lane Automation can queue after its delay). Sessions
 opens a linked terminal. The
-**Chat with agent** action saves the card and uses the same launch route with `intent: 'chat'`,
+**Chat with:** action uses the same shared LLM/environment picker and connected control styling
+as Project health's **Fix rules with:**. It defaults to the card's assignee (or the first enabled
+target for an unassigned card); its selection is independent of the saved assignment. It saves
+the card and uses the same launch route with the selected target and `intent: 'chat'`,
 then adopts/focuses the returned tab (or navigates to `terminal-focus`). The prompt asks for a
 status/history review and discussion, waiting for the user before implementation. Both launch
 actions share the in-flight guard and are disabled for a known running session. The
-server composes the LLM's first message from the card and prepends it to the environment's
+server composes the LLM's first message from the card and prepends it to the selected environment's
 Initial Message (`Services/Board/BoardPromptComposer.cs`), then links the session to the card.
+Both card pickers are disposed on modal replacement/close and Board unload.
 Task-key namespace: `board-card:<cardId>` (keep it distinct from `python-script*:`).
 
 Every card also has one canonical work type: `task` (the neutral default and legacy backfill),
