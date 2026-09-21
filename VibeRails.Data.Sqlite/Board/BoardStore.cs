@@ -25,11 +25,15 @@ namespace VibeRails.Services.Board;
 /// </summary>
 public sealed partial class BoardStore : IBoardStore
 {
+    // Independent of state.db from the split onward; historical board/8 stamps generation 3.
+    internal const int Generation = 3;
     private readonly string _connectionString;
+    private readonly string _stateConnectionString;
 
-    public BoardStore(string connectionString)
+    public BoardStore(string connectionString, string? stateConnectionString = null)
     {
         _connectionString = connectionString;
+        _stateConnectionString = stateConnectionString ?? connectionString;
         EnsureSchema();
     }
 
@@ -593,8 +597,8 @@ public sealed partial class BoardStore : IBoardStore
     /// <summary>Reads the agent identity without constructing the dashboard's Repository in stdio hosts.</summary>
     public async Task<BoardAuthor?> FindSessionAuthorAsync(string sessionId, CancellationToken cancellationToken = default)
     {
-        await using var connection = await OpenAsync(cancellationToken);
-        // Board-only databases (including a fresh stdio host) may not yet have Sessions.
+        await using var connection = await OpenStateAsync(cancellationToken);
+        // Terminal history stays in state.db; a fresh stdio host may not yet have Sessions.
         var hasSessions = await ScalarLongAsync(connection, null,
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = $table",
             ("$table", "Sessions"), cancellationToken) > 0;
@@ -617,7 +621,8 @@ public sealed partial class BoardStore : IBoardStore
         }
 
         // Retain attribution even if old terminal history has been pruned.
-        await using var linked = connection.CreateCommand();
+        await using var boardConnection = await OpenAsync(cancellationToken);
+        await using var linked = boardConnection.CreateCommand();
         linked.CommandText = "SELECT DisplayName, Cli FROM BoardCardSessions WHERE SessionId = $session LIMIT 1;";
         linked.Parameters.AddWithValue("$session", sessionId);
         await using var linkedReader = await linked.ExecuteReaderAsync(cancellationToken);
@@ -687,7 +692,7 @@ public sealed partial class BoardStore : IBoardStore
     /// </summary>
     public async Task<BoardSessionOutcomeRecord?> FindSessionOutcomeAsync(string sessionId, CancellationToken cancellationToken = default)
     {
-        await using var connection = await OpenAsync(cancellationToken);
+        await using var connection = await OpenStateAsync(cancellationToken);
         var tables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         await using (var probe = connection.CreateCommand())
         {
@@ -1340,10 +1345,16 @@ public sealed partial class BoardStore : IBoardStore
     private Task<SqliteConnection> OpenAsync(CancellationToken cancellationToken)
         => SqliteConnectionFactory.OpenAsync(_connectionString, cancellationToken);
 
+    // Only external references (terminal history and Automation definitions) use state.db.
+    // Every Board-owned read/write, including session links and pending events, uses OpenAsync.
+    private Task<SqliteConnection> OpenStateAsync(CancellationToken cancellationToken)
+        => SqliteConnectionFactory.OpenAsync(_stateConnectionString, cancellationToken);
+
     private void EnsureSchema()
     {
         using var connection = SqliteConnectionFactory.Open(_connectionString);
-        SqliteMigrationRunner.RequireGenerationAtMost(connection, StateDatabaseSchema.Generation, "state.db");
+        SqliteConnectionFactory.EnsureWalMode(connection);
+        SqliteMigrationRunner.RequireGenerationAtMost(connection, Generation, "board.db");
         SqliteMigrationRunner.Apply(connection, "board", 1, MigrationKind.Additive, (db, transaction) =>
         {
             SqliteSchema.Execute(db, transaction, SchemaSql);

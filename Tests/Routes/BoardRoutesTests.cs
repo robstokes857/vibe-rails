@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using VibeRails.Auth;
 using VibeRails.DB;
+using VibeRails.Data.Sqlite;
 using VibeRails.DTOs;
 using VibeRails.Middleware;
 using VibeRails.Routes;
@@ -64,8 +65,8 @@ public sealed class BoardRoutesTests : IAsyncLifetime
             .ReturnsAsync(new BoardCommitInfo("abc1234abc1234abc1234abc1234abc1234abc12", "Rob", "Fix", DateTime.UtcNow));
         commits.Setup(c => c.GetDiffAsync(It.IsAny<string>(), "abc1234abc1234abc1234abc1234abc1234abc12", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new BoardCommitDiff([new BoardCommitDiffFile("a.cs", "csharp", "old", "new")], 1));
-        builder.Services.AddSingleton<IBoardStore>(new BoardStore(_connectionString));
-        builder.Services.AddSingleton<IJobStore>(new JobStore(_connectionString));
+        builder.Services.AddSqliteBoardStorage(_ => Path.Combine(_root, "state.db"));
+        builder.Services.AddSqliteJobStorage(_ => Path.Combine(_root, "state.db"));
         builder.Services.AddScoped<BoardAutomationService>();
         builder.Services.AddSingleton(commits.Object);
         builder.Services.AddSingleton<IBoardLiveSessionProbe, NullBoardLiveSessionProbe>();
@@ -87,6 +88,8 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         await _app.DisposeAsync();
         ParserConfigs.SetGitState(_originalRootPath, _originalIsInGit);
         SqliteConnection.ClearPool(new SqliteConnection(_connectionString));
+        SqliteConnection.ClearPool(new SqliteConnection(new SqliteConnectionStringBuilder
+            { DataSource = Path.Combine(_root, "board.db"), Mode = SqliteOpenMode.ReadWriteCreate, Cache = SqliteCacheMode.Private }.ToString()));
         try { Directory.Delete(_root, recursive: true); } catch (IOException) { }
     }
 

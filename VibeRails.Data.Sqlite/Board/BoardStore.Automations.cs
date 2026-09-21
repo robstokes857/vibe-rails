@@ -23,10 +23,12 @@ public sealed partial class BoardStore
         if (current is null) return null;
         if (current.Revision != expectedRevision)
             throw new BoardConflictException("Lane automation changed while you were editing. Reopen the lane to load the latest version.");
+        // Jobs are local Automation definitions in state.db. Only read them here; the scheduler
+        // validates them again when it queues the run, since the two stores commit independently.
+        await using var state = selected.Length > 0 ? await OpenStateAsync(cancellationToken) : null;
         foreach (var jobId in selected)
         {
-            await using var validate = connection.CreateCommand();
-            validate.Transaction = transaction;
+            await using var validate = state!.CreateCommand();
             validate.CommandText = $"SELECT COUNT(*) FROM Jobs WHERE Id = $job AND ProjectPath = $project{ProjectPathCollation} AND DeletedUTC IS NULL AND Enabled = 1;";
             validate.Parameters.AddWithValue("$job", jobId);
             validate.Parameters.AddWithValue("$project", project);

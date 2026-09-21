@@ -413,7 +413,10 @@ All CLI sessions are logged with full terminal output:
 Launch from the Web Terminal or an environment action, then navigate to Sessions and select a session to view terminal output.
 
 **Database Storage:**
-- Global: `~/.vibe_rails/state.db` (single shared database; no per-project database)
+- Application state, Automations and terminal history: `~/.vibe_rails/state.db` (all projects)
+- Board state and pending lane Automation events: `~/.vibe_rails/board.db` (all projects)
+
+Legacy Board tables in `state.db` remain untouched and unused; they are not migrated or synchronized.
 
 ### MCP Integration
 
@@ -452,7 +455,8 @@ var result = await service.CallToolAsync("search_history", new Dictionary<string
 **Global Configuration:**
 ```
 ~/.vibe_rails/
-├── state.db                # SQLite database (single shared DB)
+├── state.db                # Application state, Automations and terminal history
+├── board.db                # Board state and pending lane Automation events
 ├── settings.json           # Application settings
 └── envs/                   # Environment configurations
 ```

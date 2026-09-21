@@ -15,6 +15,7 @@ public sealed class BoardToolTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), $"viberails-board-tool-{Guid.NewGuid():N}");
     private readonly string _connectionString;
+    private readonly string _stateConnectionString;
     private readonly string _project;
     private readonly BoardStore _store;
     private readonly BoardService _service;
@@ -25,8 +26,9 @@ public sealed class BoardToolTests : IDisposable
     {
         Directory.CreateDirectory(_root);
         _project = BoardStore.NormalizeProjectPath(Path.Combine(_root, "project"));
-        _connectionString = $"Data Source={Path.Combine(_root, "state.db")};Mode=ReadWriteCreate;Cache=Shared";
-        _store = new BoardStore(_connectionString);
+        _connectionString = $"Data Source={Path.Combine(_root, "board.db")};Pooling=False";
+        _stateConnectionString = $"Data Source={Path.Combine(_root, "state.db")};Pooling=False";
+        _store = new BoardStore(_connectionString, _stateConnectionString);
         var commits = new Mock<IBoardCommitService>(MockBehavior.Strict);
         commits.Setup(c => c.DescribeAsync(_project, "abc1234", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new BoardCommitInfo("abc1234abc1234abc1234abc1234abc1234abc12", "Rob", "Fix the race", DateTime.UtcNow));
@@ -149,7 +151,7 @@ public sealed class BoardToolTests : IDisposable
     {
         await _tool.CreateBoardCard("A", cancellationToken: Ct);
         _resolver.CurrentSessionId = "sess-unlinked";
-        await using (var connection = new SqliteConnection(_connectionString))
+        await using (var connection = new SqliteConnection(_stateConnectionString))
         {
             await connection.OpenAsync(Ct);
             await using var insert = connection.CreateCommand();
@@ -318,7 +320,7 @@ public sealed class BoardToolTests : IDisposable
     {
         await _tool.CreateBoardCard("A", cancellationToken: Ct);
         var sessionId = "9a3e5d6a-d28d-421a-9979-e5be4232e916";
-        await using (var connection = new SqliteConnection(_connectionString))
+        await using (var connection = new SqliteConnection(_stateConnectionString))
         {
             await connection.OpenAsync(Ct);
             await using var insert = connection.CreateCommand();

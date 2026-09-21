@@ -10,6 +10,9 @@ project, including the migration runner and stores outside `DB/` and `Board/`.
 - Debug/F5/application runs use the normal `~/.vibe_rails/state.db`. Do not introduce a separate
   development database, build/branch-specific paths, or a flag permitting access to the normal
   database. Fix code that is unsafe for the running database instead of redirecting it elsewhere.
+- Board-owned state uses `~/.vibe_rails/board.db` in every configuration. The old Board tables
+  in `state.db` are retained but unused: no import, cleanup or synchronization. Keep Board access
+  behind `IBoardStore` so future shared API storage can replace this implementation.
 - Removing a feature means retiring its current code paths. Leave unused tables and columns,
   and their stored data, in place. Feature removal alone is not permission to drop or purge them.
 - Unused schema is accepted technical debt. Do not add cleanup, historical-data conversion,

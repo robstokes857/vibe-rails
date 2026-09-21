@@ -2,36 +2,6 @@
 -- Regenerate: set VIBE_RAILS_UPDATE_SCHEMA_SNAPSHOT=1, then: dotnet test Tests --filter SchemaSnapshotTests
 -- Every diff in this file is a table change and needs the owner's sign-off (vibe-data/docs/db-migration-policy.md).
 
--- index IX_BoardAttachments_Card
-CREATE INDEX IX_BoardAttachments_Card ON BoardAttachments(CardId);
-
--- index IX_BoardCardLinks_LinkedCard
-CREATE INDEX IX_BoardCardLinks_LinkedCard ON BoardCardLinks(LinkedCardId);
-
--- index IX_BoardCardSessions_Card
-CREATE INDEX IX_BoardCardSessions_Card ON BoardCardSessions(CardId);
-
--- index IX_BoardCards_Column
-CREATE INDEX IX_BoardCards_Column ON BoardCards(ColumnId, Position);
-
--- index IX_BoardColumns_Board
-CREATE INDEX IX_BoardColumns_Board ON BoardColumns(BoardId, Position);
-
--- index IX_BoardColumns_Project
-CREATE INDEX IX_BoardColumns_Project ON BoardColumns(ProjectPath, Position);
-
--- index IX_BoardComments_Card
-CREATE INDEX IX_BoardComments_Card ON BoardComments(CardId, CreatedUTC);
-
--- index IX_BoardPendingAdditionalAutomations_Due
-CREATE INDEX IX_BoardPendingAdditionalAutomations_Due ON BoardPendingAdditionalAutomations(DueUnixMs);
-
--- index IX_BoardPendingAutomations_Due
-CREATE INDEX IX_BoardPendingAutomations_Due ON BoardPendingAutomations(DueUnixMs);
-
--- index IX_Boards_Project
-CREATE INDEX IX_Boards_Project ON Boards(ProjectPath, Position);
-
 -- index idx_agent_metadata_path
 CREATE INDEX idx_agent_metadata_path ON AgentMetadata(Path);
 
@@ -122,57 +92,6 @@ CREATE INDEX idx_user_inputs_unembedded ON UserInputs(Id) WHERE BertEmbeddedUTC 
 -- table AgentMetadata
 CREATE TABLE AgentMetadata ( Id INTEGER PRIMARY KEY AUTOINCREMENT, Path TEXT NOT NULL UNIQUE, CustomName TEXT NOT NULL );
 
--- table BoardAttachmentContents
-CREATE TABLE BoardAttachmentContents ( AttachmentId TEXT PRIMARY KEY REFERENCES BoardAttachments(Id) ON DELETE CASCADE, Content BLOB NOT NULL );
-
--- table BoardAttachments
-CREATE TABLE BoardAttachments ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, Name TEXT NOT NULL, MimeType TEXT NOT NULL, Bytes INTEGER NOT NULL, DataUrl TEXT NOT NULL, CreatedUTC TEXT NOT NULL );
-
--- table BoardCardLinks
-CREATE TABLE BoardCardLinks ( CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, LinkedCardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, PRIMARY KEY (CardId, LinkedCardId), CHECK (CardId < LinkedCardId) );
-
--- table BoardCardOptions
-CREATE TABLE BoardCardOptions ( CardId TEXT PRIMARY KEY REFERENCES BoardCards(Id) ON DELETE CASCADE, OptionsJson TEXT NOT NULL );
-
--- table BoardCardSequences
-CREATE TABLE BoardCardSequences ( ProjectPath TEXT PRIMARY KEY COLLATE NOCASE, LastNumber INTEGER NOT NULL );
-
--- table BoardCardSessions
-CREATE TABLE BoardCardSessions ( SessionId TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, TabId TEXT NULL, Selection TEXT NOT NULL, Cli TEXT NOT NULL, DisplayName TEXT NOT NULL, Origin TEXT NOT NULL, CreatedUTC TEXT NOT NULL );
-
--- table BoardCards
-CREATE TABLE BoardCards ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Number INTEGER NOT NULL, ColumnId TEXT NOT NULL REFERENCES BoardColumns(Id), Position INTEGER NOT NULL, Title TEXT NOT NULL, Description TEXT NOT NULL DEFAULT '', Assignee TEXT NULL, Priority TEXT NOT NULL DEFAULT 'medium', Type TEXT NOT NULL DEFAULT 'task', Points INTEGER NULL, Tags TEXT NOT NULL DEFAULT '[]', Blocked INTEGER NOT NULL DEFAULT 0, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, Flagged INTEGER NOT NULL DEFAULT 0, UNIQUE(ProjectPath, Number) );
-
--- table BoardColumns
-CREATE TABLE BoardColumns ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Name TEXT NOT NULL, Position INTEGER NOT NULL, Color TEXT NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, BoardId TEXT NULL );
-
--- table BoardComments
-CREATE TABLE BoardComments ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, AuthorKind TEXT NOT NULL, AuthorLabel TEXT NOT NULL, AuthorCli TEXT NULL, SessionId TEXT NULL, Body TEXT NOT NULL, CreatedUTC TEXT NOT NULL, Kind TEXT NOT NULL DEFAULT 'comment' );
-
--- table BoardCommitSnapshots
-CREATE TABLE BoardCommitSnapshots ( CardId TEXT NOT NULL, Sha TEXT NOT NULL, SnapshotJson TEXT NOT NULL, PRIMARY KEY (CardId, Sha), FOREIGN KEY (CardId, Sha) REFERENCES BoardCommits(CardId, Sha) ON DELETE CASCADE );
-
--- table BoardCommits
-CREATE TABLE BoardCommits ( CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, Sha TEXT NOT NULL, Author TEXT NOT NULL, Message TEXT NOT NULL, CommittedUTC TEXT NOT NULL, LinkedUTC TEXT NOT NULL, PRIMARY KEY (CardId, Sha) );
-
--- table BoardContextSettings
-CREATE TABLE BoardContextSettings ( BoardId TEXT PRIMARY KEY REFERENCES Boards(Id) ON DELETE CASCADE, ContextJson TEXT NOT NULL, Revision INTEGER NOT NULL );
-
--- table BoardLaneAdditionalAutomations
-CREATE TABLE BoardLaneAdditionalAutomations ( ColumnId TEXT NOT NULL REFERENCES BoardLaneAutomations(ColumnId) ON DELETE CASCADE, JobId INTEGER NOT NULL, Position INTEGER NOT NULL, PRIMARY KEY (ColumnId, JobId) );
-
--- table BoardLaneAutomations
-CREATE TABLE BoardLaneAutomations ( ColumnId TEXT PRIMARY KEY REFERENCES BoardColumns(Id) ON DELETE CASCADE, JobId INTEGER NULL, Revision INTEGER NOT NULL );
-
--- table BoardPendingAdditionalAutomations
-CREATE TABLE BoardPendingAdditionalAutomations ( CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, ColumnId TEXT NOT NULL, JobId INTEGER NOT NULL, EventKey TEXT NOT NULL, DueUnixMs INTEGER NOT NULL, PRIMARY KEY (CardId, JobId), FOREIGN KEY (ColumnId, JobId) REFERENCES BoardLaneAdditionalAutomations(ColumnId, JobId) ON DELETE CASCADE );
-
--- table BoardPendingAutomations
-CREATE TABLE BoardPendingAutomations ( CardId TEXT PRIMARY KEY REFERENCES BoardCards(Id) ON DELETE CASCADE, ColumnId TEXT NOT NULL REFERENCES BoardColumns(Id) ON DELETE CASCADE, JobId INTEGER NOT NULL, EventKey TEXT NOT NULL, DueUnixMs INTEGER NOT NULL );
-
--- table Boards
-CREATE TABLE Boards ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Name TEXT NOT NULL, Position INTEGER NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL );
-
 -- table ChatSummary
 CREATE TABLE ChatSummary ( Id INTEGER PRIMARY KEY AUTOINCREMENT, SessionId TEXT NOT NULL UNIQUE, SummaryText TEXT NOT NULL DEFAULT '', Date TEXT NOT NULL );
 
@@ -262,21 +181,6 @@ CREATE TABLE sessionOutPut ( Id INTEGER PRIMARY KEY AUTOINCREMENT, SessionId TEX
 
 -- table sqlite_sequence
 CREATE TABLE sqlite_sequence(name,seq);
-
--- trigger BoardCards_AdditionalLaneAutomation_Insert
-CREATE TRIGGER BoardCards_AdditionalLaneAutomation_Insert AFTER INSERT ON BoardCards BEGIN INSERT INTO BoardPendingAdditionalAutomations (CardId, ColumnId, JobId, EventKey, DueUnixMs) SELECT NEW.Id, NEW.ColumnId, a.JobId, lower(hex(randomblob(16))), CAST(unixepoch('subsec') * 1000 AS INTEGER) + 60000 FROM BoardLaneAdditionalAutomations a WHERE a.ColumnId = NEW.ColumnId; END;
-
--- trigger BoardCards_AdditionalLaneAutomation_Move
-CREATE TRIGGER BoardCards_AdditionalLaneAutomation_Move AFTER UPDATE OF ColumnId ON BoardCards WHEN OLD.ColumnId <> NEW.ColumnId BEGIN DELETE FROM BoardPendingAdditionalAutomations WHERE CardId = NEW.Id; INSERT INTO BoardPendingAdditionalAutomations (CardId, ColumnId, JobId, EventKey, DueUnixMs) SELECT NEW.Id, NEW.ColumnId, a.JobId, lower(hex(randomblob(16))), CAST(unixepoch('subsec') * 1000 AS INTEGER) + 60000 FROM BoardLaneAdditionalAutomations a WHERE a.ColumnId = NEW.ColumnId; END;
-
--- trigger BoardCards_LaneAutomation_Insert
-CREATE TRIGGER BoardCards_LaneAutomation_Insert AFTER INSERT ON BoardCards BEGIN INSERT INTO BoardPendingAutomations (CardId, ColumnId, JobId, EventKey, DueUnixMs) SELECT NEW.Id, NEW.ColumnId, a.JobId, lower(hex(randomblob(16))), CAST(unixepoch('subsec') * 1000 AS INTEGER) + 60000 FROM BoardLaneAutomations a WHERE a.ColumnId = NEW.ColumnId AND a.JobId IS NOT NULL; END;
-
--- trigger BoardCards_LaneAutomation_Move
-CREATE TRIGGER BoardCards_LaneAutomation_Move AFTER UPDATE OF ColumnId ON BoardCards WHEN OLD.ColumnId <> NEW.ColumnId BEGIN DELETE FROM BoardPendingAutomations WHERE CardId = NEW.Id; INSERT INTO BoardPendingAutomations (CardId, ColumnId, JobId, EventKey, DueUnixMs) SELECT NEW.Id, NEW.ColumnId, a.JobId, lower(hex(randomblob(16))), CAST(unixepoch('subsec') * 1000 AS INTEGER) + 60000 FROM BoardLaneAutomations a WHERE a.ColumnId = NEW.ColumnId AND a.JobId IS NOT NULL; END;
-
--- trigger BoardLaneAutomations_ClearAdditional
-CREATE TRIGGER BoardLaneAutomations_ClearAdditional AFTER UPDATE ON BoardLaneAutomations BEGIN DELETE FROM BoardLaneAdditionalAutomations WHERE ColumnId = NEW.ColumnId; END;
 
 -- trigger Sessions_LinkJobRunSession
 CREATE TRIGGER Sessions_LinkJobRunSession AFTER INSERT ON Sessions WHEN NEW.JobRunId IS NOT NULL BEGIN UPDATE JobRuns SET SessionId = NEW.Id WHERE Id = NEW.JobRunId AND DeletedUTC IS NULL; SELECT RAISE(ABORT, 'The Job run for this terminal session no longer exists.') WHERE changes() <> 1; END;

@@ -12,6 +12,7 @@ namespace VibeRails.Data.Sqlite;
 public sealed record SqliteStoragePaths(string StatePath, string? VectorPath = null, string? ProxyPath = null)
 {
     internal string ProxyDatabasePath => ProxyPath ?? Path.Combine(Path.GetDirectoryName(StatePath) ?? ".", "proxy_exchanges.db");
+    public string BoardDatabasePath => Path.Combine(Path.GetDirectoryName(StatePath) ?? ".", "board.db");
 }
 
 /// <summary>The application composition boundary for SQLite; consumers resolve storage interfaces.</summary>
@@ -36,9 +37,13 @@ public static class SqliteStorage
     }
 
     public static IServiceCollection AddSqliteStateStorage(this IServiceCollection services,
-        Func<IServiceProvider, SqliteStoragePaths> pathsFactory)
+        Func<IServiceProvider, SqliteStoragePaths> pathsFactory, bool consumeBoardEvents = false)
     {
         services.TryAddSingleton(pathsFactory);
+        // Resolve this opt-in when the JobStore is constructed, not when its factory is registered.
+        // The full host can register state storage before the scheduler composition runs.
+        if (consumeBoardEvents)
+            services.TryAddSingleton<BoardAutomationEventSource>(sp => new(sp.GetRequiredService<IBoardStore>()));
         // The logger is not optional in practice: this reader degrades to coverage "unavailable"
         // on a lock or read error, and without the logger that degradation is completely silent.
         services.TryAddSingleton<IProxyExchangeArchiveReader>(sp => new SqliteProxyExchangeArchiveReader(
@@ -54,8 +59,8 @@ public static class SqliteStorage
         services.TryAddScoped<IMetadataStore>(sp => sp.GetRequiredService<IRepository>());
         services.TryAddScoped<IChatSummaryStore>(sp => sp.GetRequiredService<IRepository>());
         services.TryAddScoped<IEmbeddingProgressStore>(sp => sp.GetRequiredService<IRepository>());
-        services.TryAddSingleton<IJobStore>(sp => new JobStore(StateConnectionString(sp)));
-        services.TryAddSingleton<IBoardStore>(sp => new BoardStore(StateConnectionString(sp)));
+        services.TryAddSingleton<IBoardStore>(sp => CreateBoardStore(sp.GetRequiredService<SqliteStoragePaths>().StatePath));
+        services.TryAddSingleton<IJobStore>(sp => new JobStore(StateConnectionString(sp), sp.GetService<BoardAutomationEventSource>()?.Store));
         services.TryAddSingleton<ITokenSavingsStore>(sp => new TokenSavingsStore(StateConnectionString(sp)));
         services.TryAddSingleton<ICodeAnalyzerIgnoreStore>(sp => new CodeAnalyzerIgnoreStore(StateConnectionString(sp)));
         services.TryAddSingleton<ILlmExchangeLogStore>(sp => new LlmExchangeLogStore(ConnectionString(
@@ -74,18 +79,30 @@ public static class SqliteStorage
     public static IServiceCollection AddSqliteBoardStorage(this IServiceCollection services,
         Func<IServiceProvider, string> statePathFactory)
     {
-        services.TryAddSingleton<IBoardStore>(sp => new BoardStore(ConnectionString(statePathFactory(sp))));
+        services.TryAddSingleton<IBoardStore>(sp => CreateBoardStore(statePathFactory(sp)));
         return services;
     }
 
     public static IServiceCollection AddSqliteJobStorage(this IServiceCollection services,
         Func<IServiceProvider, string> statePathFactory)
     {
-        services.TryAddSingleton<IJobStore>(sp => CreateJobStore(statePathFactory(sp)));
+        services.TryAddSingleton<IJobStore>(sp => new JobStore(ConnectionString(statePathFactory(sp)), sp.GetService<BoardAutomationEventSource>()?.Store));
         return services;
     }
 
-    public static IJobStore CreateJobStore(string stateDatabasePath) => new JobStore(ConnectionString(stateDatabasePath));
+    // Commit hooks only enqueue local Jobs. Board health/schema must never gate this path.
+    public static IJobStore CreateJobStore(string stateDatabasePath) =>
+        new JobStore(ConnectionString(stateDatabasePath));
+
+    private sealed record BoardAutomationEventSource(IBoardStore Store);
+
+    /// <summary>
+    /// Uses the same board.db for dashboard, stdio MCP and the lane Automation scheduler. Legacy Board tables
+    /// in state.db are deliberately left untouched and are never copied, read or written here.
+    /// </summary>
+    public static IBoardStore CreateBoardStore(string stateDatabasePath) =>
+        new BoardStore(ConnectionString(new SqliteStoragePaths(stateDatabasePath).BoardDatabasePath),
+            ConnectionString(stateDatabasePath));
 
     /// <summary>
     /// Brings every schema this provider owns up to date in one place. Schema snapshot tests use
@@ -96,7 +113,7 @@ public static class SqliteStorage
         var state = ConnectionString(paths.StatePath);
         StateDatabaseSchema.Ensure(state, logger);
         _ = new JobStore(state);
-        _ = new BoardStore(state);
+        _ = CreateBoardStore(paths.StatePath);
         using (var connection = SqliteConnectionFactory.Open(state))
         {
             TokenSavingsStore.EnsureSchema(connection);

@@ -65,7 +65,7 @@ public sealed partial class BoardSettingsTests
         await _boards.UpdateCardAsync(_root, card.Id, new(Title: "Still here"), Ct);
         Assert.Equal(due, await Due(card.Id));
         Assert.Empty(await Tick(due - 1));
-        var roots = await Task.WhenAll(Tick(due, new JobStore(_connectionString)), Tick(due, new JobStore(_connectionString)));
+        var roots = await Task.WhenAll(Tick(due, ReopenJobs()), Tick(due, ReopenJobs()));
         var runs = await Task.WhenAll(roots.SelectMany(ids => ids).Select(id => _jobs.GetRunAsync(id, Ct)));
         Assert.Equal(new[] { first.Id, third.Id }, runs.Select(run => run!.JobId).Order());
         Assert.All(runs, run => { Assert.Equal(JobTriggerKind.BoardLane, run!.TriggerKind); Assert.Single(run.Actions!); });
@@ -156,7 +156,7 @@ public sealed partial class BoardSettingsTests
         var card = await Card(a);
         var due = await Due(card.Id);
         await RemoveBoard7();
-        var upgraded = new BoardStore(_connectionString);
+        var upgraded = new BoardStore(_connectionString, _stateConnectionString);
         var setting = (await upgraded.GetLaneAutomationAsync(_root, a, Ct))!;
         Assert.Equal(new[] { first.Id }, setting.JobIds);
         Assert.Equal(1, setting.Revision);

@@ -25,6 +25,10 @@ copy to make unsafe code seem acceptable. If a change cannot safely use the runn
 fix the change; an alternate runtime database is not the solution. Automated tests may still
 use disposable fixtures; that does not authorize a separate database for application debugging.
 
+Board state lives in `~/.vibe_rails/board.db` in all configurations, including Debug. This is a
+component split, not a development database. Legacy Board tables in `state.db` remain untouched;
+the current application does not read, write, migrate or synchronize them.
+
 **Removing a feature does not authorize deleting its stored data, tables, or columns.** Stop
 reading and writing the retired fields/tables in the current code and leave them in place.
 Unused schema is acceptable technical debt; do not prioritize its cleanup over requested work.
@@ -366,10 +370,13 @@ See [VibeRails/Services/Mcp/AGENTS.md](VibeRails/Services/Mcp/AGENTS.md) for the
 For Board UI, API, SQLite, launch and MCP work, start with the
 [Board contributor guide](VibeRails/Services/Board/AGENTS.md) and
 [architecture and VB-18 review](VibeRails/Services/Board/ARCHITECTURE.md).
-The Board uses the shared `state.db`; its contracts live in `VibeRails.Data.Abstractions/Board`
+The Board uses `~/.vibe_rails/board.db`; its contracts live in `VibeRails.Data.Abstractions/Board`
 and its store/migrations in `VibeRails.Data.Sqlite/Board`. REST and MCP share `BoardService`.
 The review records open concurrency and workflow findings; documentation is not evidence that
 those findings have been fixed.
+Keep all Board persistence behind `IBoardStore`, including pending lane Automation events, so a
+future shared API-backed store can replace local storage. Local Jobs and terminal history remain
+in `state.db`; queuing an Automation run and acknowledging its Board event are separate commits.
 
 ### Services Layer
 
@@ -574,7 +581,8 @@ tools (security review 2026-07-02).
 - Indexes on frequently queried columns (`StartedUTC`, `LastUsedUTC`, `ProjectPath`, etc.)
 
 **Database Location**:
-- Global: `~/.vibe_rails/state.db` (single shared database; no per-project database)
+- Global application state: `~/.vibe_rails/state.db` (no per-project database)
+- Board state: `~/.vibe_rails/board.db` (all projects; legacy Board tables in `state.db` are unused)
 
 Follow the [database change policy](#database-change-policy) above. Normal startup applies
 pending schema changes automatically, with backups for breaking steps and SQLite transaction
@@ -748,7 +756,8 @@ Different LLM CLI environments implement `IBaseLlmCliEnvironment` with specific 
 ### Application Configuration
 ```
 ~/.vibe_rails/                    # Global config directory
-├── state.db                        # SQLite database (single shared DB, no per-project database)
+├── state.db                        # Application state, Automations and terminal history (all projects)
+├── board.db                        # Board state and pending lane Automation events (all projects)
 ├── config.json                     # Application settings
 ├── history/                        # CLI command history
 ├── envs/                           # Environment configurations

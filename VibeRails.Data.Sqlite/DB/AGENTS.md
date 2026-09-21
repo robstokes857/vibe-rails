@@ -35,6 +35,10 @@ workaround. Code must be safe for the running database. If it is not, fix the im
 instead of redirecting the app to an alternate database or copy. Disposable databases belong
 in automated tests, not in the application's debug/runtime path policy.
 
+Board persistence is a separate production component at `~/.vibe_rails/board.db`, also used by
+Debug and stdio MCP. It starts fresh. Legacy Board tables in `state.db` are retained and unused;
+the current application does not import, update, delete or synchronize their contents.
+
 **Prefer additive schema changes and preserve compatibility with older versions where possible:
 different versions can run on the same machine.** Removing a feature normally means stopping
 reads/writes to its old tables, leaving those tables and their data in place. Do not drop tables
@@ -62,12 +66,13 @@ rolls back and can retry on the next initialization. Retry backups never overwri
 Do not replace transaction coordination with process enumeration or user intervention.
 
 Board migration `board/8` retires description history, WIP limits and removed-file retention
-(state generation 3); `board/9` adds the current attention flag. Both apply automatically.
+(generation 3); `board/9` adds the current attention flag. Both apply automatically in `board.db`.
+The former shared-file Board migration receipts remain in `state.db` and are not applied there again.
 The owner accepted this already-shipped cleanup as an exception; it is not the template for
 future feature removals. Retire future code paths while retaining unused schema by default.
 
 Each database file carries a **generation** in `PRAGMA user_version`, bumped only by breaking
-changes (`StateDatabaseSchema.Generation`, `LlmExchangeLogStore.Generation`,
+changes (`StateDatabaseSchema.Generation`, `BoardStore.Generation`, `LlmExchangeLogStore.Generation`,
 `BertVectorDatabase.Generation`). Every schema entry point first calls
 `RequireGenerationAtMost`: a build refuses a file newer than it understands instead of writing to
 it. The shipped 1.10.10 binary predates the gate and reads `user_version < 1` as "rebuild the FTS
@@ -794,6 +799,12 @@ review findings.
 Owned by `VibeRails.Data.Sqlite/Board/BoardStore.cs` (singleton, own connection string, `EnsureSchema()` in its
 constructor — the JobStore pattern), **not** by `Repository.InitStatements`. That is what lets the
 stdio MCP host (`vb mcp`) construct the store without running the dashboard's migration pass.
+All active Board tables are in `board.db`, beside `state.db`. All hosts resolve the same path
+through `SqliteStorage`; the old tables in `state.db` are never used or migrated. `IBoardStore`
+also owns pending-event reads/acknowledgements so a future shared API can replace local storage.
+Automation definitions/run snapshots and terminal history remain in `state.db`; these are
+references, not copied Board data. Queueing a run commits before acknowledging the Board event,
+with its unique TriggerKey preventing duplicate retries. There is no cross-file transaction.
 Board/lane/card rows carry `ProjectPath`; dependent rows inherit scope through their card.
 Project lookups are normalised, NOCASE on Windows/macOS, and the project path never comes from
 a request — `BoardProjectResolver` derives
@@ -860,7 +871,7 @@ BoardCommitSnapshots (CardId, Sha → BoardCommits CASCADE, SnapshotJson, PK(Car
 
 ### Automated Jobs Tables
 
-Created by `JobStore.cs` (`JobStore.SchemaSql`), **not** `SqlStrings` — but they live in the same
+Created by `JobStore.cs` (`JobStore.SchemaSql`), **not** `SqlStrings` — they live in
 `state.db` and are initialized on first use by `JobStore`. These power the Automated Jobs feature
 (scheduled/triggered ordered workflows).
 
