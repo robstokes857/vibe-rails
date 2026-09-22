@@ -48,12 +48,12 @@ public sealed class BoardCurrentStateTests : IDisposable
         var launcher = new BoardLaunchService(_store, Mock.Of<IRepository>(), _tabs.Object);
         await launcher.LaunchAsync(_project, card.Id, null, Ct);
         Assert.Contains("original", captured!.InitialPrompt);
-        Assert.Equal("VB-1 · Ship", captured.Title);
+        Assert.Equal("PROJ-1 · Ship", captured.Title);
         // Codex has no startup mode, so the stored "plan" is dropped rather than reaching the CLI.
         Assert.Equal("", captured.BaseLlmOptions!.Mode);
         Assert.True(captured.AuthorizeBoardTools);
         Assert.Equal("edited during startup", (await _store.FindCardAsync(_project, card.Id, Ct))!.Description);
-        Assert.Equal("VB-1 · Ship", Assert.Single((await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Sessions).DisplayName);
+        Assert.Equal("PROJ-1 · Ship", Assert.Single((await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Sessions).DisplayName);
     }
 
     [Fact]

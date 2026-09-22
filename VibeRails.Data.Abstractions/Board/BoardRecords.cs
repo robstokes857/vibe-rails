@@ -10,8 +10,8 @@ public sealed class BoardConflictException(string message) : Exception(message);
 
 /// <summary>
 /// One board of a project: a named set of lanes (a sprint, a sub-project, a release). Every
-/// project has at least one; card keys (<c>VB-n</c>) stay unique per project, never per board, so
-/// a key names the same card whichever board it sits on.
+/// project has at least one; card keys (<c>VR-n</c>, see <see cref="BoardKeys"/>) stay unique per
+/// project, never per board, so a key names the same card whichever board it sits on.
 /// </summary>
 public sealed record BoardRecord(
     string Id,
@@ -55,9 +55,10 @@ public sealed record BoardCardRecord(
     BaseLlmOptions? BaseLlmOptions = null,
     string Type = BoardCardTypes.Default,
     string BoardId = "",
-    bool Flagged = false)
+    bool Flagged = false,
+    string KeyPrefix = BoardKeys.LegacyPrefix)
 {
-    public string Key => BoardKeys.Format(Number);
+    public string Key => BoardKeys.Format(KeyPrefix, Number);
 }
 
 public sealed record BoardCardDetailRecord(
@@ -73,9 +74,10 @@ public sealed record BoardCardDetailRecord(
 
 /// <summary>A lightweight, current description of a related card, including its board and lane.</summary>
 public sealed record BoardLinkedCardRecord(
-    string Id, int Number, string Title, string BoardId, string BoardName, string ColumnId, string ColumnName)
+    string Id, int Number, string Title, string BoardId, string BoardName, string ColumnId, string ColumnName,
+    string KeyPrefix = BoardKeys.LegacyPrefix)
 {
-    public string Key => BoardKeys.Format(Number);
+    public string Key => BoardKeys.Format(KeyPrefix, Number);
 }
 
 /// <summary>
@@ -193,23 +195,124 @@ public sealed record BoardCardPatch(
     string? Type = null,
     bool? Flagged = null);
 
+/// <summary>
+/// A card key is <c>PREFIX-n</c>: the project's prefix and the card's number within the project.
+/// Every project used to display <see cref="LegacyPrefix"/>, which made VB-1 mean a different card
+/// in every repository. A project now takes its prefix from its folder name when its first card is
+/// numbered (the store owns that assignment) and keeps it for good; projects that had cards before
+/// prefixes existed keep VB, so no existing key ever changes.
+/// </summary>
 public static class BoardKeys
 {
-    public const string Prefix = "VB-";
+    /// <summary>The prefix every card displayed before projects had their own, and what a card
+    /// still displays while its project has no prefix row (its first card was numbered by an
+    /// older binary). Never derived for a new project, so it keeps that one meaning.</summary>
+    public const string LegacyPrefix = "VB";
 
-    public static string Format(int number) => Prefix + number.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    public const int MinPrefixLength = 2;
+    public const int MaxPrefixLength = 4;
 
-    /// <summary>True when <paramref name="value"/> looks like a card key (<c>VB-12</c>, case-insensitive).</summary>
-    public static bool TryParse(string? value, out int number)
+    private const string RandomLetters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+    public static string Format(string prefix, int number) =>
+        prefix + "-" + number.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// True when <paramref name="value"/> looks like a card key: letters and digits, a dash, then a
+    /// positive number (<c>VB-12</c>, <c>vr-3</c>, case-insensitive). The prefix comes back
+    /// upper-cased; whether it names the caller's project is the store's decision, not the parser's.
+    /// </summary>
+    public static bool TryParse(string? value, out string prefix, out int number)
     {
+        prefix = "";
         number = 0;
         var trimmed = value?.Trim();
-        if (string.IsNullOrEmpty(trimmed) || trimmed.Length <= Prefix.Length)
+        if (string.IsNullOrEmpty(trimmed))
             return false;
-        if (!trimmed.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase))
+        var dash = trimmed.IndexOf('-');
+        if (dash < 1 || dash > 8 || dash == trimmed.Length - 1)
             return false;
-        return int.TryParse(trimmed.AsSpan(Prefix.Length), System.Globalization.NumberStyles.None,
-            System.Globalization.CultureInfo.InvariantCulture, out number) && number > 0;
+        var head = trimmed.AsSpan(0, dash);
+        if (!char.IsAsciiLetter(head[0]))
+            return false;
+        foreach (var c in head)
+        {
+            if (!char.IsAsciiLetterOrDigit(c))
+                return false;
+        }
+        if (!int.TryParse(trimmed.AsSpan(dash + 1), System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out number) || number <= 0)
+        {
+            number = 0;
+            return false;
+        }
+        prefix = head.ToString().ToUpperInvariant();
+        return true;
+    }
+
+    public static bool TryParse(string? value, out int number) => TryParse(value, out _, out number);
+
+    /// <summary>
+    /// The prefixes a project would like, best first, from its folder name: the initials of the
+    /// name's words (split on <c>-</c>, <c>_</c>, <c>.</c>, spaces and camelCase), then the name's
+    /// first letters. Each is two to four upper-case ASCII letters; <see cref="LegacyPrefix"/> is
+    /// never offered. Empty when the name has fewer than two usable letters, so the caller falls
+    /// back to <see cref="RandomPrefix"/>. Accented letters count by their base letter.
+    /// </summary>
+    public static IReadOnlyList<string> DerivePrefixCandidates(string projectPath)
+    {
+        var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(projectPath.Trim()));
+        var words = SplitWords(name);
+        var candidates = new List<string>(2);
+        AddCandidate(candidates, string.Concat(words.Select(word => word[0])));
+        AddCandidate(candidates, string.Concat(words));
+        return candidates;
+    }
+
+    /// <summary>Four random upper-case letters, for a name no candidate could serve.</summary>
+    public static string RandomPrefix() =>
+        new(Random.Shared.GetItems<char>(RandomLetters, MaxPrefixLength));
+
+    private static void AddCandidate(List<string> candidates, string letters)
+    {
+        if (letters.Length < MinPrefixLength)
+            return;
+        var candidate = letters.Length > MaxPrefixLength ? letters[..MaxPrefixLength] : letters;
+        if (candidate != LegacyPrefix && !candidates.Contains(candidate))
+            candidates.Add(candidate);
+    }
+
+    /// <summary>The name's words as their upper-case ASCII letters; digits separate nothing but are not letters.</summary>
+    private static List<string> SplitWords(string name)
+    {
+        var words = new List<string>();
+        var current = new System.Text.StringBuilder();
+        var previous = '\0';
+        foreach (var raw in name.Normalize(System.Text.NormalizationForm.FormD))
+        {
+            if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(raw) == System.Globalization.UnicodeCategory.NonSpacingMark)
+                continue;
+            if (!char.IsAsciiLetterOrDigit(raw))
+            {
+                Flush();
+                previous = '\0';
+                continue;
+            }
+            if (char.IsAsciiLetterUpper(raw) && (char.IsAsciiLetterLower(previous) || char.IsAsciiDigit(previous)))
+                Flush();
+            if (char.IsAsciiLetter(raw))
+                current.Append(char.ToUpperInvariant(raw));
+            previous = raw;
+        }
+        Flush();
+        return words;
+
+        void Flush()
+        {
+            if (current.Length > 0)
+                words.Add(current.ToString());
+            current.Clear();
+        }
     }
 }
 

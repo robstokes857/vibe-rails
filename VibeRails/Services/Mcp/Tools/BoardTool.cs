@@ -18,8 +18,9 @@ namespace VibeRails.Services.Mcp.Tools;
 /// these tools spawn is <c>git</c> with a validated sha (see BoardCommitService). Failures come
 /// back as readable <c>FAIL:</c> sentences (house style); exception detail goes to the file log.
 ///
-/// Card arguments accept a key (<c>VB-12</c>) or an id. When omitted, the card this terminal was
-/// launched for is used (the session id VibeRails stamps into the environment).
+/// Card arguments accept a key (<c>VB-12</c>; the prefix is the project's, see BoardKeys) or an
+/// id. When omitted, the card this terminal was launched for is used (the session id VibeRails
+/// stamps into the environment).
 /// </summary>
 [McpServerToolType]
 public sealed class BoardTool(
@@ -33,7 +34,7 @@ public sealed class BoardTool(
     private const string BoardArgumentHelp =
         "Board name or id (see list_boards). Optional: defaults to the board of the card this terminal was launched for, else the project's first board.";
 
-    [McpServerTool, Description("List this project's kanban boards (a project can have several: sprints, sub-projects) with their ids, lanes and card counts. Card keys like VB-12 are unique across the whole project, so a key never needs a board.")]
+    [McpServerTool, Description("List this project's kanban boards (a project can have several: sprints, sub-projects) with their ids, lanes and card counts. Card keys (the project's prefix and a number, like VB-12) are unique across the whole project, so a key never needs a board.")]
     public async Task<string> ListBoards(CancellationToken cancellationToken = default)
     {
         try

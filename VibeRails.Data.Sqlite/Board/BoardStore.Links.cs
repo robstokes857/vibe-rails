@@ -15,11 +15,13 @@ public sealed partial class BoardStore
         CREATE INDEX IF NOT EXISTS IX_BoardCardLinks_LinkedCard ON BoardCardLinks(LinkedCardId);
         """;
 
-    private const string LinkedCardSelect = """
-        SELECT c.Id, c.Number, c.Title, b.Id, b.Name, k.Id, k.Name
+    // A property because the prefix join interpolates ProjectPathCollation (see CardSequenceReseedSql).
+    private static string LinkedCardSelect => $"""
+        SELECT c.Id, c.Number, c.Title, b.Id, b.Name, k.Id, k.Name, {CardPrefixSql}
         FROM BoardCards c
         JOIN BoardColumns k ON k.Id = c.ColumnId
         JOIN Boards b ON b.Id = k.BoardId
+        {CardPrefixJoinSql}
         """;
 
     public async Task<IReadOnlyList<BoardLinkedCardRecord>?> GetCardLinkCandidatesAsync(
@@ -34,12 +36,12 @@ public sealed partial class BoardStore
         command.CommandText = LinkedCardSelect + $"""
 
             WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.Id <> $card
-              AND (instr(lower(c.Title), lower($query)) > 0 OR instr(lower('VB-' || c.Number), lower($query)) > 0)
+              AND (instr(lower(c.Title), lower($query)) > 0 OR instr(lower({CardPrefixSql} || '-' || c.Number), lower($query)) > 0)
               AND NOT EXISTS (
                 SELECT 1 FROM BoardCardLinks l
                 WHERE (l.CardId = $card AND l.LinkedCardId = c.Id)
                    OR (l.LinkedCardId = $card AND l.CardId = c.Id))
-            ORDER BY (lower('VB-' || c.Number) = lower($query)) DESC, c.Number DESC
+            ORDER BY (lower({CardPrefixSql} || '-' || c.Number) = lower($query)) DESC, c.Number DESC
             LIMIT 50;
             """;
         command.Parameters.AddWithValue("$project", project);
@@ -129,7 +131,7 @@ public sealed partial class BoardStore
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
             cards.Add(new BoardLinkedCardRecord(reader.GetString(0), reader.GetInt32(1), reader.GetString(2),
-                reader.GetString(3), reader.GetString(4), reader.GetString(5), reader.GetString(6)));
+                reader.GetString(3), reader.GetString(4), reader.GetString(5), reader.GetString(6), KeyPrefix: reader.GetString(7)));
         return cards;
     }
 }

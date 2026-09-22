@@ -113,7 +113,9 @@ Every card also has one canonical work type: `task` (the neutral default and leg
 lives in `BoardCardTypes`; the editor, tile chip, toolbar filter, REST responses, MCP tools, and
 launch prompt all use those same storage values rather than deriving type from tags.
 
-Card headings, launch session names, and remembered terminal labels use `VB-n · Card title`.
+Card headings, launch session names, and remembered terminal labels use `KEY · Card title`, where
+`KEY` is the server's `card.key` (`VB-n` for existing projects, the project's own prefix such as
+`VR-n` for projects that got their first card after 1.10.19). Never rebuild a key from `'VB-'`.
 Base assignees show `board-launch-options.js` controls for model, effort, and start mode;
 saved environments keep their own configuration. The pinned model catalog is shared with
 Environments through `llm-model-catalog.js`. Choices persist on the card and reach the backend

@@ -5,7 +5,7 @@ Read the cross-layer [Board contributor guide](../../VibeRails/Services/Board/AG
 [database migration policy](../DB/AGENTS.md), before changing this component.
 
 This directory owns `IBoardStore`'s SQLite implementation in `~/.vibe_rails/board.db`, including
-component migrations `board/1`–`board/10`. The historical `VibeRails.Services.Board` namespace
+component migrations `board/1`–`board/11`. The historical `VibeRails.Services.Board` namespace
 does not move this code back into the application project. Keep DTO/contracts in
 `VibeRails.Data.Abstractions/Board`; keep Git, live terminal state and UI policy in the host.
 
@@ -61,6 +61,17 @@ preferring the primary row for a duplicate pair from an older writer. The origin
 the default, with oldest remaining attachment as fallback. Link validation runs inside the
 write transaction; rename/unlink scopes both card and session, and deleting a primary card does
 not cascade additional attachments. Old versions keep reading/writing the primary table.
+
+`board/11` adds `BoardProjectKeys(ProjectPath, Prefix, CreatedUTC)`: the prefix a project's card
+keys display (`BoardStore.ProjectKeys.cs`). The migration seeds `VB` for every project present in
+`BoardCardSequences` or `BoardCards`, so upgrading rewrites no key. `CreateCardAsync` assigns a
+missing prefix inside the same write transaction, before the number: `VB` when the project already
+numbers cards (an older binary numbered them and shows `VB-n`), otherwise the first of the
+folder-name candidates from `BoardKeys.DerivePrefixCandidates`, then random letters, that no other
+project's row uses. Card reads `LEFT JOIN` the table and `COALESCE` to `VB`; the lane-automation
+TriggerKey and link-candidate search build the key the same way. Key lookups match the number
+plus either the project's prefix or the `VB` alias. A prefix is never updated or deleted by the
+current code; there is no override, and old versions ignore the table entirely.
 
 Session commit linking reads this membership inside the commit-write transaction and writes the
 snapshot to the target and all same-project attachments atomically. One failed write rolls back

@@ -32,6 +32,9 @@ CREATE INDEX IX_BoardPendingAdditionalAutomations_Due ON BoardPendingAdditionalA
 -- index IX_BoardPendingAutomations_Due
 CREATE INDEX IX_BoardPendingAutomations_Due ON BoardPendingAutomations(DueUnixMs);
 
+-- index IX_BoardProjectKeys_Prefix
+CREATE INDEX IX_BoardProjectKeys_Prefix ON BoardProjectKeys(Prefix);
+
 -- index IX_Boards_Project
 CREATE INDEX IX_Boards_Project ON Boards(ProjectPath, Position);
 
@@ -85,6 +88,9 @@ CREATE TABLE BoardPendingAdditionalAutomations ( CardId TEXT NOT NULL REFERENCES
 
 -- table BoardPendingAutomations
 CREATE TABLE BoardPendingAutomations ( CardId TEXT PRIMARY KEY REFERENCES BoardCards(Id) ON DELETE CASCADE, ColumnId TEXT NOT NULL REFERENCES BoardColumns(Id) ON DELETE CASCADE, JobId INTEGER NOT NULL, EventKey TEXT NOT NULL, DueUnixMs INTEGER NOT NULL );
+
+-- table BoardProjectKeys
+CREATE TABLE BoardProjectKeys ( ProjectPath TEXT PRIMARY KEY COLLATE NOCASE, Prefix TEXT NOT NULL, CreatedUTC TEXT NOT NULL );
 
 -- table Boards
 CREATE TABLE Boards ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Name TEXT NOT NULL, Position INTEGER NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL );

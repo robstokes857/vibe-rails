@@ -238,23 +238,6 @@ public sealed class BoardSelectionTests
     }
 }
 
-public sealed class BoardKeysTests
-{
-    [Theory]
-    [InlineData("VB-12", true, 12)]
-    [InlineData("vb-1", true, 1)]
-    [InlineData(" VB-7 ", true, 7)]
-    [InlineData("VB-0", false, 0)]
-    [InlineData("VB-", false, 0)]
-    [InlineData("card_abc", false, 0)]
-    [InlineData("KBB-12", false, 0)]
-    public void TryParse(string input, bool expected, int number)
-    {
-        Assert.Equal(expected, BoardKeys.TryParse(input, out var parsed));
-        if (expected) Assert.Equal(number, parsed);
-    }
-}
-
 /// <summary>Project resolution order: dashboard root path → launching session → git root → cwd.</summary>
 [Collection("ProcessEnvIsolation")] // mutates ParserConfigs.SetGitState and a process env var
 public sealed class BoardProjectResolverTests : IDisposable

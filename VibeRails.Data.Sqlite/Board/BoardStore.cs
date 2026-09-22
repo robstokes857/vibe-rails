@@ -399,6 +399,9 @@ public sealed partial class BoardStore : IBoardStore
                 ?? throw new BoardValidationException($"Lane not found: {card.ColumnId}");
         }
 
+        // The project's first card fixes its key prefix, in this same transaction, before the
+        // number exists: a prefix chosen while cards already exist would have to be VB.
+        var prefix = await EnsureProjectKeyPrefixAsync(connection, transaction, project, cancellationToken);
         // Keep the high-water mark independently of card rows, so deleting even
         // the last card cannot make an old key available again. Allocation and
         // insertion share the transaction across dashboard and MCP processes.
@@ -446,7 +449,7 @@ public sealed partial class BoardStore : IBoardStore
         await transaction.CommitAsync(cancellationToken);
 
         return new BoardCardRecord(id, project, number, column.Id, position, card.Title, card.Description,
-            card.Assignee, card.Priority, card.Points, card.Tags, card.Blocked, 0, now, now, card.BaseLlmOptions, Type: card.Type, BoardId: column.BoardId, Flagged: card.Flagged);
+            card.Assignee, card.Priority, card.Points, card.Tags, card.Blocked, 0, now, now, card.BaseLlmOptions, Type: card.Type, BoardId: column.BoardId, Flagged: card.Flagged, KeyPrefix: prefix);
     }
 
     public async Task<BoardCardRecord?> UpdateCardAsync(string projectPath, string cardId, BoardCardPatch patch, CancellationToken cancellationToken = default)
@@ -1019,14 +1022,17 @@ public sealed partial class BoardStore : IBoardStore
     private const string BoardSelectSql =
         "SELECT Id, ProjectPath, Name, Position, CreatedUTC, UpdatedUTC FROM Boards";
 
-    private const string CardSelectSql = """
+    // A property because the prefix join interpolates ProjectPathCollation (see CardSequenceReseedSql).
+    private static string CardSelectSql => $"""
         SELECT c.Id, c.ProjectPath, c.Number, c.ColumnId, c.Position, c.Title, c.Description, c.Assignee, c.Priority,
                c.Points, c.Tags, c.Blocked, c.CreatedUTC, c.UpdatedUTC,
                (SELECT COUNT(*) FROM BoardComments m WHERE m.CardId = c.Id AND m.Kind = 'comment') AS CommentCount,
                (SELECT o.OptionsJson FROM BoardCardOptions o WHERE o.CardId = c.Id),
                c.Type,
-               (SELECT k.BoardId FROM BoardColumns k WHERE k.Id = c.ColumnId), c.Flagged
+               (SELECT k.BoardId FROM BoardColumns k WHERE k.Id = c.ColumnId), c.Flagged,
+               {CardPrefixSql}
         FROM BoardCards c
+        {CardPrefixJoinSql}
         """;
 
     private const string SessionSelectSql =
@@ -1120,10 +1126,13 @@ public sealed partial class BoardStore : IBoardStore
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        if (BoardKeys.TryParse(idOrKey, out var number))
+        if (BoardKeys.TryParse(idOrKey, out var prefix, out var number))
         {
-            command.CommandText = CardSelectSql + $" WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.Number = $number LIMIT 1;";
+            // The project's own prefix, or the VB an older binary shows for the same number. Another
+            // project's prefix is not found rather than silently resolved to this project's number.
+            command.CommandText = CardSelectSql + $" WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.Number = $number AND ($prefix = '{BoardKeys.LegacyPrefix}' OR $prefix = {CardPrefixSql}) LIMIT 1;";
             command.Parameters.AddWithValue("$number", number);
+            command.Parameters.AddWithValue("$prefix", prefix);
         }
         else
         {
@@ -1154,7 +1163,8 @@ public sealed partial class BoardStore : IBoardStore
         reader.IsDBNull(15) ? null : JsonSerializer.Deserialize(reader.GetString(15), StorageJsonSerializerContext.Default.BaseLlmOptions),
         Type: reader.GetString(16),
         BoardId: reader.IsDBNull(17) ? string.Empty : reader.GetString(17),
-        Flagged: reader.GetInt32(18) != 0);
+        Flagged: reader.GetInt32(18) != 0,
+        KeyPrefix: reader.GetString(19));
 
     private static async Task<IReadOnlyList<BoardCommentRecord>> ReadCommentsAsync(SqliteConnection connection, string cardId, string kind, CancellationToken cancellationToken)
     {
@@ -1440,6 +1450,9 @@ public sealed partial class BoardStore : IBoardStore
             SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardCards ADD COLUMN Flagged INTEGER NOT NULL DEFAULT 0"));
         SqliteMigrationRunner.Apply(connection, "board", 10, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, AdditionalCardSessionsSchemaSql));
+        // board/11: per-project card key prefixes; existing projects are seeded with VB (see
+        // BoardStore.ProjectKeys.cs), so no key changes on upgrade.
+        SqliteMigrationRunner.Apply(connection, "board", 11, MigrationKind.Additive, ApplyProjectKeysMigration);
         ReconcileDerivedRows(connection);
     }
 
