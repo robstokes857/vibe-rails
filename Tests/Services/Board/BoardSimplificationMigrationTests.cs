@@ -20,9 +20,13 @@ public sealed class BoardSimplificationMigrationTests : IDisposable
         var card = (await store.GetCardDetailAsync(_root, "VB-1", Ct))!;
         Assert.Equal("Current description", card.Card.Description);
         Assert.False(card.Card.Flagged);
+        // board/11: a project that already numbered cards keeps VB, so its keys do not change.
+        Assert.Equal("VB-1", card.Card.Key);
         using var db = SqliteConnectionFactory.Open(connectionString);
         Assert.Equal(3L, Scalar(db, "PRAGMA user_version;"));
         Assert.Equal(2L, Scalar(db, "SELECT COUNT(*) FROM SchemaMigrations WHERE Component='board' AND Version IN (8,9);"));
+        Assert.Equal(1L, Scalar(db, "SELECT COUNT(*) FROM SchemaMigrations WHERE Component='board' AND Version = 11;"));
+        Assert.Equal("VB", Scalar(db, "SELECT Prefix FROM BoardProjectKeys;"));
     }
 
     [Fact]
@@ -86,6 +90,7 @@ public sealed class BoardSimplificationMigrationTests : IDisposable
             INSERT INTO BoardAttachmentContents VALUES('current',CAST('current' AS BLOB)),('removed',CAST('removed' AS BLOB));
             INSERT INTO BoardDescriptionRevisionAttachments VALUES($card,'removed');
             DELETE FROM SchemaMigrations WHERE Component='board' AND Version>=8;
+            DROP TABLE IF EXISTS BoardProjectKeys;
             PRAGMA user_version=2;
             """;
         command.Parameters.AddWithValue("$card", card.Id);

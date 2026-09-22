@@ -92,7 +92,7 @@ public sealed class BoardServiceTests : IDisposable
         Assert.Equal(BoardCardTypes.ResearchSpike, created.Type);
         Assert.Equal(5, created.Points);
         Assert.Equal(["auth", "bug"], created.Tags);
-        Assert.Equal("VB-1", created.Key);
+        Assert.Equal("PROJ-1", created.Key);
         Assert.Empty(created.Comments);
         Assert.Empty(created.Sessions);
     }
@@ -125,7 +125,7 @@ public sealed class BoardServiceTests : IDisposable
 
         await Assert.ThrowsAsync<BoardValidationException>(() =>
             _service.UpdateCardAsync(_project, created.Id, new UpdateBoardCardRequest(Title: ""), Ct));
-        Assert.Null(await _service.UpdateCardAsync(_project, "VB-999", new UpdateBoardCardRequest(Title: "x"), Ct));
+        Assert.Null(await _service.UpdateCardAsync(_project, "PROJ-999", new UpdateBoardCardRequest(Title: "x"), Ct));
 
         var typed = await _service.UpdateCardAsync(_project, created.Id, new UpdateBoardCardRequest(Type: "chore/tech debt"), Ct);
         Assert.Equal(BoardCardTypes.Chore, typed!.Type);
@@ -264,7 +264,7 @@ public sealed class BoardServiceTests : IDisposable
         await _service.GetColumnsAsync(_project, Ct);
         var created = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "A"), Ct);
         const string sessionId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
-        var linked = await _service.LinkSessionAsync(_project, created.Id, sessionId, "stored-tab", "base:claude", "claude", "Claude · VB-1", BoardSessionRecord.LaunchOrigin, Ct);
+        var linked = await _service.LinkSessionAsync(_project, created.Id, sessionId, "stored-tab", "base:claude", "claude", "Claude · PROJ-1", BoardSessionRecord.LaunchOrigin, Ct);
         Assert.False(linked!.Active);
         Assert.Equal(sessionId, linked.Id);
 
@@ -279,7 +279,7 @@ public sealed class BoardServiceTests : IDisposable
         Assert.True(session.Active);
         Assert.Equal("live-tab", session.TabId);
 
-        var comment = await _service.AddCommentAsync(_project, created.Key, BoardAuthor.Agent("Claude · VB-1", "claude", sessionId), " done ", Ct);
+        var comment = await _service.AddCommentAsync(_project, created.Key, BoardAuthor.Agent("Claude · PROJ-1", "claude", sessionId), " done ", Ct);
         Assert.Equal("agent", comment!.Author.Kind);
         Assert.Equal("done", comment.Body);
         await Assert.ThrowsAsync<BoardValidationException>(() => _service.AddCommentAsync(_project, created.Key, BoardAuthor.User(), "  ", Ct));

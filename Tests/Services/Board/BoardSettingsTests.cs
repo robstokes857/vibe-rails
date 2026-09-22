@@ -110,7 +110,7 @@ public sealed partial class BoardSettingsTests : IDisposable
         var run = (await _jobs.GetRunAsync(runId, Ct))!;
         Assert.Equal(jobC.Id, run.JobId);
         Assert.Equal(JobTriggerKind.BoardLane, run.TriggerKind);
-        Assert.StartsWith("board-lane:VB-1:", run.TriggerKey);
+        Assert.StartsWith($"board-lane:{card.Key}:", run.TriggerKey);
         Assert.Single(run.Actions!);
         Assert.Empty(await Tick(due + 100_000));
     }

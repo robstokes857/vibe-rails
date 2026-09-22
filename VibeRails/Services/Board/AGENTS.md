@@ -29,8 +29,12 @@ serialization or tool discovery into the Native AOT path.
 ## Invariants to preserve
 
 - Derive project identity server-side. Scope **both ends** of a move, link, lookup, attachment or
-  commit operation. A board/lane/card ID is not proof of access. `VB-n` is unique per project,
-  across boards; its high-water sequence must survive card/board deletion.
+  commit operation. A board/lane/card ID is not proof of access. A card key (`VB-n`, `VR-n`) is
+  unique per project, across boards; its high-water sequence must survive card/board deletion.
+  The prefix is the project's, fixed by its first card (`BoardProjectKeys`, see
+  [ARCHITECTURE.md](ARCHITECTURE.md#identity-ownership-and-state)) and never rewritten; existing
+  projects keep `VB`. Keys are computed on read from `Number` and that prefix; do not store
+  them, and never build a key from a literal `'VB-'` in SQL or JS — use `card.key`/`Key`.
 - A card's board comes from its lane. Names are display values and can be duplicated. Prefer IDs
   for mutations; when resolving names, reject ambiguity. Current lane resolution still needs F5.
 - Keep number allocation, lane renumbering, card writes, attachment membership,
@@ -113,10 +117,12 @@ the header displays the full card count. Tests should use realistic asynchronous
 ## Storage changes
 
 Read [database migration instructions](../../../VibeRails.Data.Sqlite/DB/AGENTS.md).
-`board/1`–`board/10` already exist. `board/8` is a breaking retirement (generation 3)
+`board/1`–`board/11` already exist. `board/8` is a breaking retirement (generation 3)
 that drops history tables, WIP limits and removed-file retention through an automatic, backed-up upgrade;
 `board/9` adds the current-state attention flag. `board/10` adds `BoardAdditionalCardSessions`,
 leaving primary links in `BoardCardSessions` and reading both through the store without a backfill.
+`board/11` adds `BoardProjectKeys` (per-project card key prefix), seeded with `VB` for every
+project that already numbers cards so that no existing key changes.
 Historical migration SQL stays immutable. Add the next numbered migration rather than editing applied SQL.
 Honor generation checks, automatic backups and transactional migration coordination. Users must
 never need a special command or manual preparation to use a new version. Prefer additive changes

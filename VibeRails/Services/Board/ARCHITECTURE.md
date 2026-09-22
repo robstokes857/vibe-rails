@@ -220,6 +220,18 @@ its lane. Card numbers are unique **per project**, including across its boards. 
 display key, not a globally unique identifier; generated `card_*` IDs identify rows globally.
 Board, lane, attachment, comment and note IDs use type prefixes and 12 hexadecimal characters.
 
+The key's prefix belongs to the project (VB-32, 2026-09-22). `BoardProjectKeys` (`board/11`)
+stores one prefix per project, assigned inside the transaction that numbers the project's first
+card: the initials of the project folder's name (split on `-`, `_`, `.`, spaces and camelCase),
+else the name's first letters, else four random letters, always two to four upper-case letters
+and never one another project in `board.db` already displays. Projects that numbered cards
+before `board/11` are seeded with `VB`; a project whose first card an older binary numbers also
+gets `VB`, because that binary shows every card as `VB-n`. A prefix never changes, so no key that
+was read, committed or linked is rewritten. Keys are still computed on read
+(`COALESCE(BoardProjectKeys.Prefix, 'VB')`); the number is what the row stores. Lookups accept
+the project's own prefix or the legacy `VB` alias for the same number, and treat another
+project's prefix as not found rather than resolving it by number.
+
 The default board is `Main`. New boards start with Backlog, Ready, Build, Review, Done; users
 can rename, remove or reorder lanes. The four lanes on VB-18's own board are configuration,
 not a hard-coded state machine. WIP limits are advisory UI feedback, not database or API gates.

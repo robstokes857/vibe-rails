@@ -37,10 +37,11 @@ public sealed partial class BoardStore
             query.Transaction = transaction;
             query.CommandText = $"""
                 SELECT p.CardId, p.JobId, p.EventKey, c.ProjectPath,
-                    'board-lane:VB-' || c.Number || ':' || p.ColumnId || ':' || p.EventKey,
+                    'board-lane:' || {CardPrefixSql} || '-' || c.Number || ':' || p.ColumnId || ':' || p.EventKey,
                     c.ColumnId = p.ColumnId AND a.JobId = p.JobId
                 FROM {pending} p
                 JOIN BoardCards c ON c.Id = p.CardId
+                {CardPrefixJoinSql}
                 LEFT JOIN {settings} a ON a.ColumnId = p.ColumnId AND a.JobId = p.JobId
                 WHERE p.DueUnixMs <= $now ORDER BY p.DueUnixMs, p.CardId, p.JobId LIMIT 100;
                 """;
