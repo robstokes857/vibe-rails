@@ -11,6 +11,19 @@ re-hashed in the target repository before the Automation is created (disabled). 
 becomes **213 mapped surfaces**, **201 under `/api/v1`**; `Tests/Routes/JobRoutesTests.cs` pins the
 root-only mapping and the AOT JSON binding.
 
+Full route/authentication reconciliation (2026-09-22): **211 mapped surfaces**, including
+**199 under `/api/v1`** and **37 Board routes**, in the current working tree. The active
+inventory matches the code in both directions; no endpoint needed adding or removal. Corrected
+the stale Kanban subsection heading from 38 routes to 37 after the description-history route's
+2026-09-20 removal. The only session-authentication exceptions remain exact `GET /health`,
+global `OPTIONS`, and exact `GET /auth/bootstrap?code={one-time-code}&redirect={local-path}`.
+Every other endpoint requires the session credential; `/api/v1`, MCP, WebSocket upgrades, and
+enabled proxy operations retain their documented additional tab-token checks. The mandatory
+listener searches found only the approved main Kestrel host, non-serving port probe, and
+test-only hosts. No insecure endpoint or additional production listener was found, so no
+`SECURITY_ERROR.md` was created. The targeted authentication, proxy, MCP, diagnostics,
+signing-key, and Board route suite passed **114 tests** with no failures or skips.
+
 VB-25 session attachment amendment (2026-09-21): `attach_board_session` adds one explicitly
 granted Board tool (14 total) on the existing HTTP and stdio transports. The only caller argument
 is a card key/id; session identity comes from launch context and project identity from the
@@ -639,6 +652,8 @@ No local endpoint is anonymous and no production listener was added.
 
 ### Jobs (15)
 
+- `GET /api/v1/jobs/catalog` — mapped only by an active root-backend process.
+- `POST /api/v1/jobs/import` — mapped only by an active root-backend process.
 - `GET /api/v1/jobs`
 - `POST /api/v1/jobs`
 - `GET /api/v1/jobs/{id:long}`
@@ -652,8 +667,6 @@ No local endpoint is anonymous and no production listener was added.
 - `DELETE /api/v1/jobs/runs/{runId}`
 - `POST /api/v1/jobs/runs/{runId}/cancel`
 - `POST /api/v1/jobs/runs/{runId}/retry`
-- `GET /api/v1/jobs/catalog` — mapped only by an active root-backend process.
-- `POST /api/v1/jobs/import` — mapped only by an active root-backend process.
 
 ### VibeRails Demon lifecycle — REMOVED 2026-09-13
 
@@ -719,7 +732,7 @@ transcript text out of messages and exception text; do not rely on the Logs view
 hidden. `Tests/Routes/InternalToolsRoutesTests.cs` pins the two-credential requirement, the
 whitelist rejection of path-like sources, and the absence of mutating verbs.
 
-### Kanban board (38; active root backend only)
+### Kanban board (37; active root backend only)
 
 All mapped by `BoardRoutes.Map` under `if (isActiveRootBackend)`; every path contains `/api/`,
 so both credentials are enforced by the middleware with no route-level registration. The
