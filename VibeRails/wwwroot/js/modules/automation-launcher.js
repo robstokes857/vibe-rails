@@ -371,6 +371,22 @@ export class AutomationNavLauncher {
                                     <h6>Automations</h6>
                                     <div data-automation-nav-group></div>
                                 </div>
+                                <div class="llm-picker-modal-section automation-nav-add">
+                                    <h6>Add automations</h6>
+                                    <p class="text-muted small mb-2">Anything you add on the Automation page shows up in this list.</p>
+                                    <div class="automation-nav-add-actions">
+                                        <button type="button" class="btn btn-sm btn-outline-secondary"
+                                                data-automation-nav-action="import-repository"
+                                                title="Copy an automation from another repository on this machine">
+                                            <i class="fa-solid fa-code-branch me-1" aria-hidden="true"></i>Import from repository…
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary"
+                                                data-automation-nav-action="new-automation"
+                                                title="Create a new automation for this repository">
+                                            <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>New automation…
+                                        </button>
+                                    </div>
+                                </div>
                                 <div class="alert alert-danger mt-3 mb-0 d-none" role="alert"
                                      data-automation-nav-error></div>
                             </div>
@@ -484,6 +500,19 @@ export class AutomationNavLauncher {
             .forEach((button) => button.addEventListener('click', () => this._closeCustomizationModal()));
         state.layer.querySelector('[data-automation-nav-action="reset"]')
             ?.addEventListener('click', () => void this._resetPreferences());
+        // Both hand off to the Automation page: this modal is a nested layer over
+        // #modal-container, so it cannot host the picker or the editor itself. The page opens
+        // the requested surface from the navigation data once it has loaded.
+        state.layer.querySelector('[data-automation-nav-action="import-repository"]')
+            ?.addEventListener('click', () => {
+                this._closeCustomizationModal({ restoreFocus: false });
+                this.app.navigate('jobs', { importFromRepository: true });
+            });
+        state.layer.querySelector('[data-automation-nav-action="new-automation"]')
+            ?.addEventListener('click', () => {
+                this._closeCustomizationModal({ restoreFocus: false });
+                this.app.navigate('jobs', { newJob: true });
+            });
         state.layer.querySelector('[data-automation-nav-form]')
             ?.addEventListener('submit', (event) => {
                 event.preventDefault();

@@ -429,6 +429,17 @@ the confirmation shows Worker arguments/instructions and script paths, creates t
 disabled, and lets the backend resolve and pin the local repository bytes. Do not accept a hash
 from the recipe as local approval.
 
+Import from repository (VB-31) is the same review modal fed from `GET /api/v1/jobs/catalog` instead of a
+file: `openImportFromRepository` renders the catalog picker (grouped by repository, searchable, with
+Worker reused/copied, scripts-to-copy, folder-missing and cannot-import badges), and
+`confirmImportRecipe(recipe, { importSource })` adds the source path, a name field for the copied
+Worker (only when no visible Worker matches by name and CLI) and the fate of each script. Apply goes
+through `applyRepositoryImport` -> `POST /api/v1/jobs/import`; the server copies missing scripts,
+reuses or clones the Worker and creates the Automation disabled, so the browser never creates the
+environment itself on this path. A 409 (Worker name taken) stays in the modal. The header groups
+Import from repository, Import recipe and New automation in `.jobs-page-actions`; the nav
+launcher customize modal hands off with `app.navigate('jobs', { importFromRepository: true })`.
+
 Card/run-detail styles use the `job-action-*`, `job-script-*`, and `job-run-action-*` prefixes and
 must keep explicit `var(--token, #fallback)` colors in every theme scope.
 

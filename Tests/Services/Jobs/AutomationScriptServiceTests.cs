@@ -323,6 +323,74 @@ public sealed class AutomationScriptServiceTests : IDisposable
         Assert.Contains("symbolic link or reparse point", error.Message);
     }
 
+    // ----- Cross-repository copy (VB-31) -----
+
+    [Fact]
+    public async Task CopyScriptAsync_CopiesTheBytesToTheSameRelativePathAndNeverOverwrites()
+    {
+        WriteScript("scripts/tools/check.py", "print('source')\n");
+        var target = Path.Combine(_workspace, "scripts", "tools", "check.py");
+
+        var copied = await Service().CopyScriptAsync(
+            _root, _workspace, "scripts/tools/check.py", JobScriptRuntime.Python,
+            TestContext.Current.CancellationToken);
+
+        Assert.True(copied);
+        Assert.Equal("print('source')\n", await File.ReadAllTextAsync(target, TestContext.Current.CancellationToken));
+
+        // A second copy is a no-op, and an edited target copy is left exactly as it is.
+        await File.WriteAllTextAsync(target, "print('edited here')\n", TestContext.Current.CancellationToken);
+        var again = await Service().CopyScriptAsync(
+            _root, _workspace, "scripts/tools/check.py", JobScriptRuntime.Python,
+            TestContext.Current.CancellationToken);
+
+        Assert.False(again);
+        Assert.Equal("print('edited here')\n", await File.ReadAllTextAsync(target, TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
+    [InlineData("../outside.py", "must stay inside")]
+    [InlineData("scripts/check.ps1", "require a .py")]
+    [InlineData("scripts/nowhere.py", "not found")]
+    public async Task CopyScriptAsync_RejectsEscapesWrongExtensionsAndMissingSources(string path, string message)
+    {
+        WriteScript("scripts/check.ps1", "Write-Host 1\n");
+        WriteFile(Path.Combine(Path.GetDirectoryName(_root)!, "outside.py"), "print('outside')\n");
+
+        var error = await Assert.ThrowsAsync<AutomationScriptValidationException>(() =>
+            Service().CopyScriptAsync(_root, _workspace, path, JobScriptRuntime.Python, TestContext.Current.CancellationToken));
+
+        Assert.Contains(message, error.Message);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(_workspace));
+    }
+
+    [Fact]
+    public async Task CopyScriptAsync_RejectsARootedPathEvenWhenItPointsInsideTheSourceRepository()
+    {
+        var rooted = WriteScript("scripts/check.py", "print(1)\n");
+
+        var error = await Assert.ThrowsAsync<AutomationScriptValidationException>(() =>
+            Service().CopyScriptAsync(_root, _workspace, rooted, JobScriptRuntime.Python, TestContext.Current.CancellationToken));
+
+        Assert.Contains("relative to the repository", error.Message);
+    }
+
+    [Fact]
+    public void ScriptExists_AnswersWithoutThrowing()
+    {
+        WriteScript("scripts/check.py", "print(1)\n");
+        WriteFile(Path.Combine(Path.GetDirectoryName(_root)!, "outside.py"), "print('outside')\n");
+
+        var service = Service();
+        Assert.True(service.ScriptExists(_root, "scripts/check.py"));
+        Assert.True(service.ScriptExists(_root, @"scripts\check.py"));
+        Assert.False(service.ScriptExists(_root, "scripts/missing.py"));
+        Assert.False(service.ScriptExists(_root, "../outside.py"));
+        Assert.False(service.ScriptExists(_root, "scripts"));
+        Assert.False(service.ScriptExists(_root, null));
+        Assert.False(service.ScriptExists(Path.Combine(_root, "does-not-exist"), "scripts/check.py"));
+    }
+
     private AutomationScriptService Service() => new(_resolver.Object);
 
     private JobActionRequest ScriptAction(

@@ -177,6 +177,9 @@ namespace VibeRails
                     "[Jobs] Automation scheduler NOT registered: VIBERAILS_TEST_FAKE_CLI=1 marks this as a UI-test host");
             }
             serviceCollection.AddScoped<IJobService, JobService>();
+            // Cross-repository Automation import (root dashboard only; the routes are gated, the
+            // registration is harmless elsewhere). Scoped for the same IRepository reason as above.
+            serviceCollection.AddScoped<IAutomationImportService, AutomationImportService>();
             serviceCollection.AddScoped<IAgentTerminalToolService, AgentTerminalToolService>();
             serviceCollection.AddScoped<ILlmPickerPreferenceService, LlmPickerPreferenceService>();
             serviceCollection.AddScoped<IAutomationNavPreferenceService, AutomationNavPreferenceService>();

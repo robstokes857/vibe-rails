@@ -8,8 +8,36 @@ namespace VibeRails.Routes;
 
 public static class JobRoutes
 {
-    public static void Map(WebApplication app, string launchDirectory)
+    public static void Map(WebApplication app, string launchDirectory, bool isActiveRootBackend = true)
     {
+        // Cross-repository import reads other repositories' Automations and Workers out of
+        // state.db and writes files into this working tree, so it is a root dashboard capability
+        // like python-scripts/import and is not exposed from a terminal-tab child backend.
+        // Registered ahead of /{id:long} only to keep the literal segments visibly grouped.
+        if (isActiveRootBackend)
+        {
+            app.MapGet("/api/v1/jobs/catalog", async (
+                IAutomationImportService service,
+                CancellationToken cancellationToken) =>
+                await ExecuteAsync(async () =>
+                {
+                    var projectPath = await ResolveCurrentRepositoryAsync(launchDirectory, cancellationToken);
+                    return await service.GetCatalogAsync(projectPath, cancellationToken);
+                }))
+                .WithName("GetJobImportCatalog");
+
+            app.MapPost("/api/v1/jobs/import", async (
+                IAutomationImportService service,
+                AutomationImportRequest request,
+                CancellationToken cancellationToken) =>
+                await ExecuteAsync(async () =>
+                {
+                    var projectPath = await ResolveCurrentRepositoryAsync(launchDirectory, cancellationToken);
+                    return await service.ImportAsync(projectPath, request, cancellationToken);
+                }))
+                .WithName("ImportJobFromRepository");
+        }
+
         app.MapGet("/api/v1/jobs", (
             IJobService service,
             string? projectPath,

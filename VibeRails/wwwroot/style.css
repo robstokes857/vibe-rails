@@ -14571,14 +14571,18 @@ body.git-guard-focus-active #app-content {
 
 .jobs-page-header > div:first-child { min-width: 0; }
 
-/* Header actions hold one row. Without nowrap the description grows until the
-   two buttons wrap into a stack, which reads as a mistake rather than a layout. */
+/* Header actions hold one row: the two import routes and New automation sit together, ways
+   of adding an automation read as one group. Without nowrap the description grows until the
+   buttons wrap into a stack, which reads as a mistake rather than a layout. */
 .jobs-page-actions {
     display: flex;
     flex: 0 0 auto;
     gap: 0.5rem;
     flex-wrap: nowrap;
     align-items: center;
+}
+.jobs-page-actions .btn {
+    white-space: nowrap;
 }
 
 .jobs-view .btn { font-weight: 600; }
@@ -15320,6 +15324,7 @@ body.git-guard-focus-active #app-content {
 /* Editing is a focused page state: keep the header for orientation, and hide the
    list/history until the form is saved or cancelled. */
 .jobs-view[data-editor-open="true"] .jobs-page-header > .btn,
+.jobs-view[data-editor-open="true"] .jobs-page-actions,
 .jobs-view[data-editor-open="true"] .jobs-section-heading,
 .jobs-view[data-editor-open="true"] .jobs-grid,
 .jobs-view[data-editor-open="true"] .jobs-history-panel {
@@ -16100,6 +16105,172 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
     border-radius: 0.5rem;
 }
 
+/* Import from another repository: the source line in the review modal, the copied Worker's
+   name field, and the catalog picker (repositories as groups, automations as rows). */
+.job-recipe-source {
+    color: var(--color-text-muted, #8a8f98);
+    font-size: 0.8rem;
+    overflow-wrap: anywhere;
+}
+.job-import-worker-name {
+    margin: 0.25rem 0 1rem;
+}
+.job-import-picker {
+    display: grid;
+    gap: 0.85rem;
+}
+.job-import-search {
+    position: relative;
+}
+.job-import-search > i {
+    position: absolute;
+    top: 50%;
+    left: 0.85rem;
+    transform: translateY(-50%);
+    color: var(--color-text-muted, #8a8f98);
+    pointer-events: none;
+}
+.job-import-search .form-control {
+    padding-left: 2.3rem;
+}
+.job-import-groups {
+    display: grid;
+    gap: 0.9rem;
+    max-height: 60vh;
+    overflow: auto;
+}
+.job-import-group {
+    overflow: hidden;
+    border: 1px solid var(--color-border, #2a2f3a);
+    border-radius: 10px;
+    background-color: var(--color-bg-base, #121212);
+}
+.job-import-group-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    padding: 0.6rem 0.85rem;
+    border-bottom: 1px solid var(--color-border, #2a2f3a);
+    background-color: var(--color-bg-elevated, #1c1f26);
+    color: var(--color-text, #e6e6e6);
+    font-size: 0.85rem;
+}
+.job-import-group-header > i {
+    color: var(--color-accent, #6c8cff);
+}
+.job-import-group-name {
+    font-weight: 600;
+    white-space: nowrap;
+}
+.job-import-group-path {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--color-text-muted, #8a8f98);
+    font-size: 0.75rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.job-import-list {
+    display: grid;
+}
+.job-import-entry {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    width: 100%;
+    padding: 0.7rem 0.85rem;
+    border: 0;
+    border-top: 1px solid var(--color-border, #2a2f3a);
+    background-color: transparent;
+    color: var(--color-text, #e6e6e6);
+    text-align: left;
+    cursor: pointer;
+}
+.job-import-entry:first-child {
+    border-top: 0;
+}
+.job-import-entry:hover:not(:disabled),
+.job-import-entry:focus-visible {
+    background-color: var(--color-bg-surface-hover, #232733);
+    outline: none;
+}
+.job-import-entry:focus-visible {
+    box-shadow: inset 0 0 0 2px var(--color-accent, #6c8cff);
+}
+.job-import-entry:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+.job-import-entry-main {
+    display: grid;
+    gap: 0.2rem;
+    min-width: 0;
+}
+.job-import-entry-name {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+.job-import-entry-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem 0.8rem;
+    color: var(--color-text-muted, #8a8f98);
+    font-size: 0.78rem;
+}
+.job-import-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+}
+.job-import-entry-flags {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--color-text-muted, #8a8f98);
+}
+.job-import-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.15rem 0.55rem;
+    border: 1px solid var(--color-border, #2a2f3a);
+    border-radius: 999px;
+    background-color: var(--color-bg-elevated, #1c1f26);
+    color: var(--color-text-muted, #8a8f98);
+    font-size: 0.72rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.job-import-badge.is-info {
+    border-color: var(--color-accent, #6c8cff);
+    color: var(--color-accent, #6c8cff);
+}
+.job-import-badge.is-warning {
+    border-color: var(--color-warning, #f0b64f);
+    color: var(--color-warning, #f0b64f);
+}
+.job-import-badge.is-danger {
+    border-color: var(--color-danger, #ff6b6b);
+    color: var(--color-danger, #ff6b6b);
+}
+.job-import-empty {
+    padding: 1.5rem 1rem;
+    border: 1px dashed var(--color-border, #2a2f3a);
+    border-radius: 10px;
+    color: var(--color-text-muted, #8a8f98);
+    text-align: center;
+}
+@media (max-width: 720px) {
+    .job-import-entry { align-items: flex-start; flex-direction: column; }
+    .job-import-entry-flags { flex-wrap: wrap; }
+    .job-import-group-path { display: none; }
+}
+
 .jobs-history-panel {
     margin-top: 1rem;
     border: 1px solid var(--color-border);
@@ -16498,7 +16669,8 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
 
 @media (max-width: 720px) {
     .jobs-page-header { align-items: stretch; flex-direction: column; }
-    .jobs-page-header .btn { width: 100%; }
+    .jobs-page-actions { flex-wrap: wrap; }
+    .jobs-page-actions .btn { flex: 1 1 10rem; }
     .jobs-panel { padding: 0.75rem; }
     .jobs-section-heading { align-items: flex-start; flex-wrap: wrap; }
     .job-inline-form { padding: 1rem; }
@@ -17687,6 +17859,18 @@ html.sidebar-collapsed .app-sidebar .app-subnav-split .app-subnav-link {
     padding: 6px;
     border-top: 1px solid var(--color-border, #334155);
     background: var(--color-bg-surface, #1e1e1e);
+}
+
+/* Customize modal: the "Add automations" row hands off to the Automation page (import from
+   another repository, or a new automation) — the modal itself is a nested layer and cannot
+   host either surface. */
+.automation-nav-add .automation-nav-add-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+.automation-nav-add p {
+    color: var(--color-text-muted, #94a3b8);
 }
 
 .automation-launch-footer-btn {

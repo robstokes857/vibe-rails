@@ -1,5 +1,16 @@
 # API authentication coverage
 
+VB-31 cross-repository Automation import amendment (2026-09-22): two authenticated routes added under
+`/api/v1/jobs`, `GET /api/v1/jobs/catalog` and `POST /api/v1/jobs/import`, both mapped only by an
+active root backend (`JobRoutes.Map(app, launchDirectory, isActiveRootBackend)`) like the Python-script
+import route, because they read other repositories' Automations and Workers out of state.db and write
+script files into the current working tree. Both credentials apply through the existing `/api/v1`
+middleware; no new listener, credential rule or exception. Script copies are repository-relative only,
+contained on both sides, refuse links/reparse points, never overwrite an existing target file, and are
+re-hashed in the target repository before the Automation is created (disabled). The active inventory
+becomes **213 mapped surfaces**, **201 under `/api/v1`**; `Tests/Routes/JobRoutesTests.cs` pins the
+root-only mapping and the AOT JSON binding.
+
 VB-25 session attachment amendment (2026-09-21): `attach_board_session` adds one explicitly
 granted Board tool (14 total) on the existing HTTP and stdio transports. The only caller argument
 is a card key/id; session identity comes from launch context and project identity from the
@@ -626,7 +637,7 @@ No local endpoint is anonymous and no production listener was added.
 - `POST /api/v1/code-analyzer/ignores/bulk`
 - `DELETE /api/v1/code-analyzer/ignores`
 
-### Jobs (13)
+### Jobs (15)
 
 - `GET /api/v1/jobs`
 - `POST /api/v1/jobs`
@@ -641,6 +652,8 @@ No local endpoint is anonymous and no production listener was added.
 - `DELETE /api/v1/jobs/runs/{runId}`
 - `POST /api/v1/jobs/runs/{runId}/cancel`
 - `POST /api/v1/jobs/runs/{runId}/retry`
+- `GET /api/v1/jobs/catalog` — mapped only by an active root-backend process.
+- `POST /api/v1/jobs/import` — mapped only by an active root-backend process.
 
 ### VibeRails Demon lifecycle — REMOVED 2026-09-13
 

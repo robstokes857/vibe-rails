@@ -1981,3 +1981,257 @@ test('recipe export reads Grok --effort and --reasoning-effort as effort', () =>
     assert.equal(controller.extractArg('-m grok-4.6 --reasoning-effort high', flags), 'high');
     assert.equal(controller.extractArg('--reasoning-effort=max', flags), 'max');
 });
+
+// ----- Import from another repository (VB-31) -----
+
+function importCatalogFixture() {
+    const worker = (overrides = {}) => ({
+        sourceEnvironmentId: 7,
+        name: 'Nightly',
+        llm: 2,
+        cli: 'Claude',
+        customArgs: '--model opus',
+        prompt: 'Review the diff',
+        workspaceMode: 0,
+        steps: [],
+        reusableEnvironmentId: null,
+        reusableEnvironmentName: null,
+        suggestedCloneName: 'Nightly - repo',
+        ...overrides
+    });
+    const script = (scriptPath, existsInTargetRepository, existsInSourceRepository) => ({
+        kind: 1, scriptPath, scriptRuntime: 0, arguments: ['--strict'], workingDirectory: null, timeoutSeconds: null,
+        existsInTargetRepository, existsInSourceRepository
+    });
+    const workerAction = { kind: 0, arguments: [], existsInTargetRepository: false, existsInSourceRepository: false };
+    return [
+        {
+            projectPath: 'C:\\src\\other',
+            displayName: 'Other project',
+            directoryExists: true,
+            automations: [
+                {
+                    sourceJobId: 42, name: 'Nightly review', projectPath: 'C:\\src\\other', projectDisplayName: 'Other project',
+                    projectDirectoryExists: true, enabled: true, updatedUtc: '2026-09-22T00:00:00Z',
+                    worker: worker(),
+                    actions: [script('scripts/a.py', false, true), script('scripts/b.py', false, true), script('scripts/c.py', true, true), workerAction],
+                    timeoutMinutes: 45, launchMinimized: false,
+                    triggers: [{ kind: 0, scheduleKind: 1, localTime: '02:00', daysOfWeekMask: 0 }],
+                    canImport: true, blocker: null
+                },
+                {
+                    sourceJobId: 43, name: 'Script-only checks', projectPath: 'C:\\src\\other', projectDisplayName: 'Other project',
+                    projectDirectoryExists: true, enabled: false, updatedUtc: '2026-09-22T00:00:00Z',
+                    worker: null,
+                    actions: [script('scripts/missing.py', false, false)],
+                    timeoutMinutes: null, launchMinimized: false, triggers: [],
+                    canImport: false, blocker: 'Script not found in either repository: scripts/missing.py'
+                }
+            ]
+        },
+        {
+            projectPath: 'D:\\gone\\repo',
+            displayName: 'Gone project',
+            directoryExists: false,
+            automations: [
+                {
+                    sourceJobId: 44, name: 'Reused worker', projectPath: 'D:\\gone\\repo', projectDisplayName: 'Gone project',
+                    projectDirectoryExists: false, enabled: true, updatedUtc: '2026-09-22T00:00:00Z',
+                    worker: worker({ name: '<b>Bot</b>', reusableEnvironmentId: 3, reusableEnvironmentName: 'bot' }),
+                    actions: [workerAction],
+                    timeoutMinutes: null, launchMinimized: true, triggers: [],
+                    canImport: true, blocker: null
+                }
+            ]
+        }
+    ];
+}
+
+function stubDocument(t, overrides = {}) {
+    const originalDocument = globalThis.document;
+    t.after(() => { globalThis.document = originalDocument; });
+    globalThis.document = { getElementById() { return null; }, querySelector() { return null; }, ...overrides };
+}
+
+test('Automation page header groups the three ways to add an automation', () => {
+    const controller = new JobController(createApp());
+    const html = controller.renderPage();
+
+    assert.match(html, /<div class="jobs-page-actions"[^>]*>[\s\S]*?data-job-action="import-from-repository"[\s\S]*?data-job-action="import-recipe"[\s\S]*?data-job-action="new"[\s\S]*?<\/div>\s*<\/header>/);
+    assert.equal(html.match(/data-job-action="import-recipe"/g).length, 1);
+    assert.ok(html.indexOf('data-job-action="import-recipe"') < html.indexOf('jobs-section-heading'), 'Import recipe moved out of the section heading');
+    const heading = html.slice(html.indexOf('jobs-section-heading'), html.indexOf('data-job-editor'));
+    assert.doesNotMatch(heading, /<button/);
+
+    const source = readFileSync(modulePath, 'utf8');
+    assert.match(source, /if \(action === 'import-from-repository'\) return this\.openImportFromRepository\(\);/);
+    // The nav launcher's customize modal navigates here to open the picker.
+    assert.match(source, /if \(data\?\.importFromRepository\) \{\s*void this\.openImportFromRepository\(\);/);
+});
+
+test('The catalog picker groups automations by repository and explains what an import will do', async (t) => {
+    stubDocument(t);
+    const app = createApp();
+    app.data = { configs: { rootPath: 'C:\\src\\repo' }, isInGit: true };
+    const catalog = importCatalogFixture();
+    app.apiCall = async (url) => {
+        app.calls.push({ url });
+        return { currentProjectPath: 'C:\\src\\repo', projects: catalog };
+    };
+    const modals = [];
+    app.showModal = (title, html) => modals.push({ title, html });
+    const controller = new JobController(app);
+
+    await controller.openImportFromRepository();
+
+    assert.deepEqual(app.calls, [{ url: '/api/v1/jobs/catalog' }]);
+    assert.equal(modals.length, 1);
+    assert.equal(modals[0].title, 'Import from another repository');
+    const html = modals[0].html;
+    assert.match(html, /into <strong>repo<\/strong>/);
+    assert.match(html, /job-import-group-name">Other project</);
+    assert.match(html, /job-import-group-path" title="C:\\src\\other"/);
+    assert.match(html, /Gone project[\s\S]*?Folder missing/);
+    assert.match(html, /data-job-import-source="42"[^>]*title="Import Nightly review"/);
+    assert.match(html, /Nightly · Claude · opus/);
+    assert.match(html, /Worker copied[\s\S]*?2 scripts to copy/);
+    assert.match(html, /data-job-import-source="43"[^>]*disabled[^>]*title="Script not found in either repository: scripts\/missing\.py"/);
+    assert.match(html, /Cannot import/);
+    assert.match(html, /Script-only/);
+    assert.match(html, /Worker reused/);
+    assert.match(html, /&lt;b&gt;Bot&lt;\/b&gt;/);
+    assert.doesNotMatch(html, /<b>Bot<\/b>/);
+
+    // Search matches names, Workers, scripts and repositories; nothing hides the empty state.
+    assert.match(controller.renderImportGroups(catalog, 'reused'), /Reused worker/);
+    assert.doesNotMatch(controller.renderImportGroups(catalog, 'reused'), /Nightly review/);
+    assert.match(controller.renderImportGroups(catalog, 'missing.py'), /Script-only checks/);
+    assert.match(controller.renderImportGroups(catalog, 'gone project'), /Reused worker/);
+    assert.match(controller.renderImportGroups(catalog, 'zzz'), /Nothing matches that search/);
+    assert.match(controller.renderImportGroups([], ''), /No other repository on this machine has an automation yet/);
+    assert.equal(controller.findImportEntry('44')?.name, 'Reused worker');
+    assert.equal(controller.findImportEntry(99), null);
+});
+
+test('Reviewing a catalog entry shows the source, names the copied Worker and states the fate of each script', (t) => {
+    stubDocument(t);
+    const app = createApp();
+    const modals = [];
+    app.showModal = (title, html) => modals.push({ title, html });
+    const controller = new JobController(app);
+    const [other, gone] = importCatalogFixture();
+
+    const entry = other.automations[0];
+    controller.confirmImportRecipe(controller.recipeFromCatalogEntry(entry), { importSource: entry });
+    assert.equal(modals[0].title, 'Import from another repository');
+    let html = modals[0].html;
+    assert.match(html, /Copy <strong>Nightly review<\/strong> from <strong>Other project<\/strong>/);
+    assert.match(html, /job-recipe-source[^>]*title="C:\\src\\other"/);
+    assert.match(html, /copied into this repository under the name below/);
+    assert.match(html, /id="recipe-worker-name"[^>]*value="Nightly - repo"/);
+    assert.match(html, /copied with its steps and initial message/);
+    assert.match(html, /2 scripts are copied into this working tree/);
+    assert.match(html, /1\. Python  scripts\/a\.py  — will be copied from the source repository/);
+    assert.match(html, /3\. Python  scripts\/c\.py  — already in this repository/);
+    assert.match(html, /--model opus/);
+    assert.match(html, /Review the diff/);
+    assert.match(html, /id="recipe-reviewed"/);
+    assert.match(html, /data-recipe-error/);
+    assert.doesNotMatch(html, /id="recipe-add-env"|id="recipe-add-job"/);
+
+    const reused = gone.automations[0];
+    controller.confirmImportRecipe(controller.recipeFromCatalogEntry(reused), { importSource: reused });
+    html = modals[1].html;
+    assert.match(html, /already exists — will be reused/);
+    assert.match(html, /&lt;b&gt;Bot&lt;\/b&gt;/);
+    assert.doesNotMatch(html, /id="recipe-worker-name"/);
+
+    const blocked = other.automations[1];
+    controller.confirmImportRecipe(controller.recipeFromCatalogEntry(blocked), { importSource: blocked });
+    html = modals[2].html;
+    assert.match(html, /scripts\/missing\.py  — MISSING in both repositories/);
+    assert.match(html, /Worker: none \(script-only\)/);
+
+    // The file-based path is untouched: same modal, same checkboxes, same title.
+    controller.environments = [];
+    controller.confirmImportRecipe({ name: 'File recipe', llm: 'Claude', cli: 'claude', customArgs: '', prompt: 'x', triggers: [] });
+    assert.equal(modals[3].title, 'Import recipe');
+    assert.match(modals[3].html, /id="recipe-add-env"[\s\S]*id="recipe-add-job"/);
+});
+
+test('Applying a catalog import posts the source id and the Worker name, then reports what happened', async () => {
+    const app = createApp();
+    app.apiCall = async (url, method, body, requestOptions) => {
+        app.calls.push({ url, method, body, requestOptions });
+        return { job: { id: 9 }, workerOutcome: 'created', workerName: 'Nightly - repo', copiedScripts: ['scripts/a.py'], createdDirectories: [] };
+    };
+    let closed = 0;
+    app.closeModal = () => { closed += 1; };
+    const toasts = [];
+    app.showToast = (title, message, tone) => toasts.push({ title, message, tone });
+    const controller = new JobController(app);
+    let refreshed = 0;
+    controller.refreshAll = async () => { refreshed += 1; };
+    const [other, gone] = importCatalogFixture();
+
+    await controller.applyRepositoryImport(other.automations[0], { workerName: '  Nightly - repo  ', button: null });
+
+    assert.equal(app.calls.length, 1);
+    assert.equal(app.calls[0].url, '/api/v1/jobs/import');
+    assert.equal(app.calls[0].method, 'POST');
+    assert.deepEqual(app.calls[0].body, { sourceJobId: 42, workerName: 'Nightly - repo' });
+    assert.equal(app.calls[0].requestOptions.preferErrorResponseMessage, true);
+    assert.equal(closed, 1);
+    assert.equal(refreshed, 1);
+    assert.equal(toasts[0].title, 'Automation imported');
+    assert.match(toasts[0].message, /Added disabled for review/);
+    assert.match(toasts[0].message, /Worker copied as “Nightly - repo”/);
+    assert.match(toasts[0].message, /1 script copied/);
+
+    // A reused Worker never sends a name — the server ignores it anyway.
+    await controller.applyRepositoryImport(gone.automations[0], { workerName: 'whatever', button: null });
+    assert.deepEqual(app.calls[1].body, { sourceJobId: 44 });
+});
+
+test('A rejected catalog import stays in the modal so the Worker name can be fixed', async (t) => {
+    const alertElement = { textContent: '', hidden: true, classList: { remove(name) { if (name === 'd-none') alertElement.hidden = false; } } };
+    stubDocument(t, { querySelector(selector) { return selector === '[data-recipe-error]' ? alertElement : null; } });
+    const app = createApp();
+    app.apiCall = async () => { throw new Error("An environment named 'Nightly - repo' already exists. Choose a different Worker name."); };
+    let closed = 0;
+    app.closeModal = () => { closed += 1; };
+    const errors = [];
+    app.showError = (message) => errors.push(message);
+    const controller = new JobController(app);
+    const [other] = importCatalogFixture();
+
+    await controller.applyRepositoryImport(other.automations[0], { workerName: 'Nightly - repo', button: null });
+
+    assert.equal(closed, 0);
+    assert.deepEqual(errors, []);
+    assert.equal(alertElement.hidden, false);
+    assert.match(alertElement.textContent, /Choose a different Worker name/);
+
+    // A blank name is refused before any request goes out.
+    app.calls.length = 0;
+    app.apiCall = async (...args) => { app.calls.push(args); return {}; };
+    await controller.applyRepositoryImport(other.automations[0], { workerName: '   ', button: null });
+    assert.equal(app.calls.length, 0);
+    assert.match(alertElement.textContent, /Give the copied Worker a name/);
+});
+
+test('import picker CSS keeps a fallback on every colour token', () => {
+    const css = readFileSync(stylePath, 'utf8');
+    const start = css.indexOf('/* Import from another repository: the source line');
+    const end = css.indexOf('.job-import-empty', start);
+    assert.ok(start > 0 && end > start, 'expected the import picker CSS block');
+    const block = css.slice(start, end);
+    assert.match(block, /\.job-import-entry:disabled/);
+    assert.match(block, /\.job-import-badge\.is-danger/);
+    for (const match of block.matchAll(/var\((--color-[a-z-]+)([^)]*)\)/g)) {
+        assert.ok(match[2].includes(','), `${match[1]} is used without a fallback: ${match[0]}`);
+    }
+    // Editing hides the header actions like it hides the list; small screens wrap them.
+    assert.match(css, /\.jobs-view\[data-editor-open="true"\] \.jobs-page-actions,/);
+    assert.match(css, /\.jobs-page-actions \{ flex-wrap: wrap; \}/);
+});

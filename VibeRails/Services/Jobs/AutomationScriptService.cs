@@ -18,6 +18,26 @@ public interface IAutomationScriptService
         CancellationToken cancellationToken = default);
 
     string? GetRuntimeUnavailableMessage(JobScriptRuntime runtime);
+
+    /// <summary>
+    /// True when <paramref name="scriptPath"/> resolves to a regular file inside
+    /// <paramref name="projectRoot"/> under the same rules <see cref="NormalizeAsync"/> applies
+    /// (containment, no links, size). Never throws: a bad path is simply "not there".
+    /// </summary>
+    bool ScriptExists(string projectRoot, string? scriptPath);
+
+    /// <summary>
+    /// Copies a repository-relative script from one repository to the same relative path in
+    /// another, creating parent directories as needed. Returns false, and writes nothing, when
+    /// the target already has a file or directory at that path — an existing copy is never
+    /// overwritten. Both ends are validated like any other script path.
+    /// </summary>
+    Task<bool> CopyScriptAsync(
+        string sourceRoot,
+        string targetRoot,
+        string scriptPath,
+        JobScriptRuntime runtime,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed record PreparedAutomationScript(
@@ -184,6 +204,83 @@ public sealed class AutomationScriptService(IJobExecutableResolver executableRes
             JobScriptRuntime.Python => "Python 3 is required to run this script but was not found.",
             _ => "The selected script runtime is not available."
         };
+    }
+
+    public bool ScriptExists(string projectRoot, string? scriptPath)
+    {
+        try
+        {
+            ResolveRegularFile(projectRoot, scriptPath, "Script");
+            return true;
+        }
+        catch (AutomationScriptValidationException)
+        {
+            return false;
+        }
+    }
+
+    public async Task<bool> CopyScriptAsync(
+        string sourceRoot,
+        string targetRoot,
+        string scriptPath,
+        JobScriptRuntime runtime,
+        CancellationToken cancellationToken = default)
+    {
+        var targetRootPath = NormalizeRoot(targetRoot);
+        var raw = (scriptPath ?? string.Empty).Trim();
+        if (raw.Length == 0)
+            throw new AutomationScriptValidationException("Script path is required.");
+        // Stored paths are repository-relative by construction; a rooted one would name a file
+        // outside both repositories, which is exactly what a copy must never touch.
+        if (Path.IsPathRooted(raw) || IsNetworkOrDevicePath(raw))
+            throw new AutomationScriptValidationException("Script paths must be relative to the repository.");
+
+        string targetPath;
+        try
+        {
+            targetPath = Path.GetFullPath(Path.Combine(targetRootPath, FromPortablePath(raw)));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            throw new AutomationScriptValidationException("Script path is invalid.");
+        }
+
+        RequireContained(targetRootPath, targetPath, "Script");
+        RequireNoLinkedComponents(targetRootPath, targetPath, "Script");
+        ValidateRuntimeExtension(runtime, targetPath);
+        if (File.Exists(targetPath) || Directory.Exists(targetPath))
+            return false;
+
+        var source = ResolveRegularFile(sourceRoot, raw, "Source script");
+        ValidateRuntimeExtension(runtime, source.FullPath);
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+            await using var input = new FileStream(
+                source.FullPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                bufferSize: 64 * 1024,
+                options: FileOptions.Asynchronous | FileOptions.SequentialScan);
+            // CreateNew: a file that appeared between the existence check and here is kept, not
+            // clobbered — the import then fails loudly instead of silently replacing someone's work.
+            await using var output = new FileStream(
+                targetPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 64 * 1024,
+                options: FileOptions.Asynchronous);
+            await input.CopyToAsync(output, cancellationToken);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new AutomationScriptValidationException($"Script '{raw}' could not be copied: {ex.Message}");
+        }
+
+        return true;
     }
 
     /// <summary>

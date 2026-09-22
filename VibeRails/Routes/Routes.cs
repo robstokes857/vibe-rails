@@ -24,7 +24,7 @@ public static class RouteExtensions
         LlmPickerRoutes.Map(app);
         AutomationNavRoutes.Map(app);
         PythonScriptRoutes.Map(app, isActiveRootBackend);
-        JobRoutes.Map(app, launchDirectory);
+        JobRoutes.Map(app, launchDirectory, isActiveRootBackend);
         CliLaunchRoutes.Map(app, launchDirectory);
         SessionRoutes.Map(app);
         ChatHistoryRoutes.Map(app);

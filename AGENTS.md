@@ -663,6 +663,7 @@ coordination; see the [database reference](VibeRails.Data.Sqlite/DB/AGENTS.md).
 - `POST /api/v1/jobs/{id}/run` - Queue Run now through the same native-terminal scheduler as every trigger
 - `GET /api/v1/jobs/runs`, `GET /api/v1/jobs/runs/{runId}` - Run history and per-action detail
 - `POST /api/v1/jobs/runs/{runId}/cancel` | `/retry` - Cancel an active run or retry its immutable snapshot
+- `GET /api/v1/jobs/catalog`, `POST /api/v1/jobs/import` - Root backend only. List every non-deleted Automation that belongs to another repository on this machine (grouped by repository, with its Worker, per-script found/missing flags and a suggested Worker name), and copy one into the current repository: missing scripts are copied from the source repository (existing files are never overwritten), the Worker is reused when one with the same name and CLI is visible here or cloned under a new name (steps copied, `{{step:id}}` tokens remapped), and the Automation is created disabled. One-way copy; nothing links the two afterwards
 
 **MCP Integration**:
 - `GET /api/v1/mcp/status` - MCP server status

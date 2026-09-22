@@ -373,3 +373,48 @@ test('launcher CSS keeps a fallback on every colour token', () => {
         assert.ok(match[2].includes(','), `${match[1]} is used without a fallback: ${match[0]}`);
     }
 });
+
+test('the customize modal offers Import from repository and New automation, and hands both off to the Automation page', (t) => {
+    const source = readFileSync(modulePath, 'utf8');
+    assert.match(source, /<h6>Add automations<\/h6>/);
+    assert.match(source, /data-automation-nav-action="import-repository"/);
+    assert.match(source, /data-automation-nav-action="new-automation"/);
+
+    // The modal is a nested layer over #modal-container, so it cannot host the picker or the
+    // editor itself: each button closes the modal and navigates with the request attached.
+    const originalDocument = globalThis.document;
+    t.after(() => { globalThis.document = originalDocument; });
+    globalThis.document = { addEventListener() {}, removeEventListener() {} };
+
+    const app = createApp();
+    app.navigate = (view, data) => { app.navigations.push({ view, data }); return true; };
+    const launcher = new AutomationNavLauncher(app);
+    const buttons = {};
+    const button = (action) => {
+        buttons[action] ??= { handlers: {}, addEventListener(type, handler) { this.handlers[type] = handler; } };
+        return buttons[action];
+    };
+    let removed = 0;
+    const layer = {
+        querySelector(selector) {
+            const match = /data-automation-nav-action="([a-z-]+)"/.exec(selector);
+            return match ? button(match[1]) : null;
+        },
+        querySelectorAll() { return []; },
+        remove() { removed += 1; }
+    };
+    const state = { layer, items: [], underlying: [], disposed: false, keydownHandler: null, observer: null, pending: false };
+    launcher.modalState = state;
+    launcher._bindModalActions();
+
+    buttons['import-repository'].handlers.click();
+    assert.deepEqual(app.navigations, [{ view: 'jobs', data: { importFromRepository: true } }]);
+    assert.equal(state.disposed, true);
+    assert.equal(removed, 1);
+    assert.equal(launcher.modalState, null);
+
+    launcher.modalState = { ...state, disposed: false };
+    launcher._bindModalActions();
+    buttons['new-automation'].handlers.click();
+    assert.deepEqual(app.navigations[1], { view: 'jobs', data: { newJob: true } });
+});

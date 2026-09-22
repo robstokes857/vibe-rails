@@ -1600,6 +1600,17 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(DeleteJobRunsRequest))]
     [JsonSerializable(typeof(DeleteJobRunsResponse))]
     [JsonSerializable(typeof(JobActionResponse))]
+    // Cross-repository Automation import (GET /api/v1/jobs/catalog, POST /api/v1/jobs/import)
+    [JsonSerializable(typeof(AutomationImportCatalogResponse))]
+    [JsonSerializable(typeof(AutomationImportProjectGroup))]
+    [JsonSerializable(typeof(List<AutomationImportProjectGroup>))]
+    [JsonSerializable(typeof(AutomationImportCatalogEntry))]
+    [JsonSerializable(typeof(List<AutomationImportCatalogEntry>))]
+    [JsonSerializable(typeof(AutomationImportWorker))]
+    [JsonSerializable(typeof(AutomationImportAction))]
+    [JsonSerializable(typeof(List<AutomationImportAction>))]
+    [JsonSerializable(typeof(AutomationImportRequest))]
+    [JsonSerializable(typeof(AutomationImportResponse))]
     // Codex Settings DTOs
     [JsonSerializable(typeof(CodexSettingsDto))]
     // Claude Settings DTOs

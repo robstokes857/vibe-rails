@@ -144,6 +144,11 @@ export class JobController {
         if (data?.newJob) {
             this.openEditor(null, Number(data.triggerKind));
         }
+        // The nav launcher's customize modal hands off here: it cannot host the picker itself
+        // (it is a nested layer over #modal-container), so it navigates and asks us to open it.
+        if (data?.importFromRepository) {
+            void this.openImportFromRepository();
+        }
         this.pollTimer = window.setInterval(() => {
             if (this.app.currentView !== 'jobs') return;
             this.refreshRuns({ quiet: true });
@@ -217,9 +222,19 @@ export class JobController {
                         <h1 class="jobs-page-title">Automation</h1>
                         <p>Create and manage agent runs for this repository.</p>
                     </div>
-                    <button class="btn btn-primary" type="button" data-job-action="new">
-                        <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>New automation
-                    </button>
+                    <div class="jobs-page-actions" role="group" aria-label="Add an automation">
+                        <button class="btn btn-outline-secondary" type="button" data-job-action="import-from-repository"
+                                title="Copy an automation from another repository on this machine">
+                            <i class="fa-solid fa-code-branch me-1" aria-hidden="true"></i>Import from repository
+                        </button>
+                        <button class="btn btn-outline-secondary" type="button" data-job-action="import-recipe"
+                                title="Import a .recipe.md file exported from VibeRails">
+                            <i class="fa-solid fa-file-import me-1" aria-hidden="true"></i>Import recipe
+                        </button>
+                        <button class="btn btn-primary" type="button" data-job-action="new">
+                            <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>New automation
+                        </button>
+                    </div>
                 </header>
 
                 <section class="jobs-section jobs-panel" aria-labelledby="jobs-list-title">
@@ -231,9 +246,6 @@ export class JobController {
                             </div>
                             <p>Run, edit, pause, or remove an automation from one place.</p>
                         </div>
-                        <button class="btn btn-sm btn-outline-secondary" type="button" data-job-action="import-recipe">
-                            <i class="fa-solid fa-file-import me-1" aria-hidden="true"></i>Import recipe
-                        </button>
                     </div>
                     <div class="job-inline-editor" data-job-editor hidden></div>
                     <div class="jobs-grid" data-jobs-list>
@@ -282,6 +294,7 @@ export class JobController {
             if (action === 'delete') return this.deleteJob(jobId);
             if (action === 'export-recipe') return this.exportRecipe(jobId);
             if (action === 'import-recipe') return this.importRecipe();
+            if (action === 'import-from-repository') return this.openImportFromRepository();
             if (action === 'view-run' && runId) return this.openRun(runId);
             if (action === 'view-history' && Number.isFinite(jobId)) return this.openRunHistory(jobId);
             if (action === 'cancel-run' && runId) return this.cancelRun(runId, actionElement);
@@ -1929,6 +1942,223 @@ viberails-recipe -->
         input.click();
     }
 
+    // ----- Import from another repository on this machine (VB-31) -----
+    // The catalog is built server-side because GET /api/v1/environments is project-filtered, so
+    // the browser can never see another repository's Worker. The import runs server-side too:
+    // POST /api/v1/jobs/import copies scripts this repository lacks, reuses or clones the Worker
+    // (steps included, {{step:id}} tokens remapped), and creates the Automation disabled. This is
+    // therefore a picker that feeds the same review modal a recipe file goes through.
+
+    async openImportFromRepository() {
+        let catalog;
+        try {
+            catalog = await this.app.apiCall('/api/v1/jobs/catalog', 'GET', null,
+                { showLoading: false, preferErrorResponseMessage: true });
+        } catch (error) {
+            this.app.showError(error?.message || 'Could not list the automations on this machine.');
+            return;
+        }
+        this.importCatalog = Array.isArray(catalog?.projects) ? catalog.projects : [];
+        this.app.showModal('Import from another repository', this.renderImportPicker(this.importCatalog, ''));
+        this.bindImportPicker();
+    }
+
+    renderImportPicker(projects, query) {
+        const repository = this.currentProjectPath().split(/[\\/]/).filter(Boolean).pop() || 'this repository';
+        return `
+            <div class="job-import-picker">
+                <p class="text-muted small mb-0">
+                    Copy an automation from another repository on this machine into <strong>${this.escape(repository)}</strong>.
+                    Its Worker comes along, and scripts this repository lacks are copied from the source.
+                    The copy is independent: later changes in either repository do not affect the other.
+                </p>
+                <div class="job-import-search">
+                    <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                    <input type="search" class="form-control" id="job-import-search" autocomplete="off"
+                           placeholder="Search automations, Workers, scripts or repositories"
+                           aria-label="Search automations" value="${this.escape(query)}">
+                </div>
+                <div class="job-import-groups" data-job-import-groups>${this.renderImportGroups(projects, query)}</div>
+            </div>`;
+    }
+
+    renderImportGroups(projects, query) {
+        const needle = String(query || '').trim().toLowerCase();
+        const matches = entry => !needle || this.importSearchText(entry).includes(needle);
+        const groups = (projects || [])
+            .map(group => ({ ...group, automations: (group.automations || []).filter(matches) }))
+            .filter(group => group.automations.length > 0);
+        if (groups.length === 0) {
+            return `<div class="job-import-empty">${(projects || []).length === 0
+                ? 'No other repository on this machine has an automation yet.'
+                : 'Nothing matches that search.'}</div>`;
+        }
+        return groups.map(group => `
+            <section class="job-import-group">
+                <header class="job-import-group-header">
+                    <i class="fa-solid ${group.directoryExists === false ? 'fa-folder' : 'fa-folder-open'}" aria-hidden="true"></i>
+                    <span class="job-import-group-name">${this.escape(group.displayName || group.projectPath)}</span>
+                    <span class="job-import-group-path" title="${this.escape(group.projectPath)}">${this.escape(group.projectPath)}</span>
+                    ${group.directoryExists === false
+                        ? '<span class="job-import-badge is-warning" title="The repository folder no longer exists, so scripts cannot be copied from it">Folder missing</span>'
+                        : ''}
+                </header>
+                <div class="job-import-list">${group.automations.map(entry => this.renderImportEntry(entry)).join('')}</div>
+            </section>`).join('');
+    }
+
+    renderImportEntry(entry) {
+        const worker = entry.worker || null;
+        const actions = Array.isArray(entry.actions) ? entry.actions : [];
+        const scripts = actions.filter(action => Number(action.kind) === JOB_ACTION.SCRIPT);
+        const toCopy = scripts.filter(action => !action.existsInTargetRepository && action.existsInSourceRepository).length;
+        const model = worker ? this.extractArg(worker.customArgs, ['--model', '-m']) : '';
+        const when = (entry.triggers || []).length
+            ? (entry.triggers || []).map(t => this.formatTrigger(t)).join(', ')
+            : 'On demand';
+        const blocked = entry.canImport === false;
+        const flags = [];
+        if (worker) {
+            flags.push(worker.reusableEnvironmentId != null
+                ? '<span class="job-import-badge" title="A Worker with this name and CLI already exists here and will be reused">Worker reused</span>'
+                : '<span class="job-import-badge is-info" title="The Worker is copied into this repository under a new name">Worker copied</span>');
+        }
+        if (toCopy > 0) {
+            flags.push(`<span class="job-import-badge is-info">${toCopy} ${toCopy === 1 ? 'script' : 'scripts'} to copy</span>`);
+        }
+        if (blocked) {
+            flags.push(`<span class="job-import-badge is-danger" title="${this.escape(entry.blocker || '')}">Cannot import</span>`);
+        }
+        return `
+            <button type="button" class="job-import-entry${blocked ? ' is-blocked' : ''}"
+                    data-job-import-source="${this.escape(String(entry.sourceJobId))}" ${blocked ? 'disabled' : ''}
+                    title="${this.escape(blocked ? (entry.blocker || 'This automation cannot be imported.') : `Import ${entry.name}`)}">
+                <span class="job-import-entry-main">
+                    <span class="job-import-entry-name">${this.escape(entry.name)}</span>
+                    <span class="job-import-entry-meta">
+                        ${worker
+                            ? `<span class="job-import-chip"><i class="fa-solid fa-robot" aria-hidden="true"></i>${this.escape(worker.name)} · ${this.escape(getLlmName(Number(worker.llm)))}${model ? ` · ${this.escape(model)}` : ''}</span>`
+                            : '<span class="job-import-chip"><i class="fa-solid fa-scroll" aria-hidden="true"></i>Script-only</span>'}
+                        ${scripts.length ? `<span class="job-import-chip"><i class="fa-solid fa-file-code" aria-hidden="true"></i>${scripts.length} ${scripts.length === 1 ? 'script' : 'scripts'}</span>` : ''}
+                        <span class="job-import-chip"><i class="fa-solid fa-clock" aria-hidden="true"></i>${this.escape(when)}</span>
+                    </span>
+                </span>
+                <span class="job-import-entry-flags">
+                    ${flags.join('')}
+                    <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+                </span>
+            </button>`;
+    }
+
+    importSearchText(entry) {
+        return [
+            entry.name,
+            entry.projectDisplayName,
+            entry.projectPath,
+            entry.worker?.name,
+            ...((entry.actions || []).map(action => action.scriptPath))
+        ].filter(Boolean).join(' ').toLowerCase();
+    }
+
+    bindImportPicker() {
+        const container = typeof document !== 'undefined' ? document.querySelector?.('.job-import-picker') : null;
+        if (!container) return;
+        const search = container.querySelector('#job-import-search');
+        const groups = container.querySelector('[data-job-import-groups]');
+        search?.addEventListener('input', () => {
+            if (groups) groups.innerHTML = this.renderImportGroups(this.importCatalog, search.value);
+        });
+        container.addEventListener('click', event => {
+            const button = event.target.closest?.('[data-job-import-source]');
+            if (!button || button.disabled) return;
+            const entry = this.findImportEntry(button.dataset.jobImportSource);
+            if (entry) this.confirmImportRecipe(this.recipeFromCatalogEntry(entry), { importSource: entry });
+        });
+        search?.focus?.();
+    }
+
+    findImportEntry(sourceJobId) {
+        const id = Number(sourceJobId);
+        for (const group of this.importCatalog || []) {
+            const entry = (group.automations || []).find(item => Number(item.sourceJobId) === id);
+            if (entry) return entry;
+        }
+        return null;
+    }
+
+    /** The catalog entry in the shape the recipe review modal already understands. */
+    recipeFromCatalogEntry(entry) {
+        const worker = entry.worker || null;
+        return {
+            recipeVersion: 'V2',
+            name: entry.name,
+            worker: worker ? {
+                name: worker.name,
+                llm: getLlmName(Number(worker.llm)),
+                cli: worker.cli,
+                model: this.extractArg(worker.customArgs, ['--model', '-m']) || '',
+                effort: this.extractArg(worker.customArgs, ['--effort', '--reasoning-effort']) || this.extractConfig(worker.customArgs, 'model_reasoning_effort') || '',
+                customArgs: worker.customArgs || '',
+                prompt: worker.prompt || '',
+                workspaceMode: Number(worker.workspaceMode) || 0
+            } : null,
+            actions: (entry.actions || []).map(action => Number(action.kind) === JOB_ACTION.WORKER
+                ? { kind: JOB_ACTION.WORKER }
+                : {
+                    kind: JOB_ACTION.SCRIPT,
+                    scriptPath: action.scriptPath,
+                    scriptRuntime: Number(action.scriptRuntime),
+                    arguments: [...(action.arguments || [])],
+                    workingDirectory: action.workingDirectory || null,
+                    timeoutSeconds: action.timeoutSeconds ?? null
+                }),
+            timeoutMinutes: entry.timeoutMinutes ?? null,
+            launchMinimized: entry.launchMinimized === true,
+            triggers: Array.isArray(entry.triggers) ? entry.triggers : []
+        };
+    }
+
+    async applyRepositoryImport(entry, { workerName, button }) {
+        return this.withBusy(button, 'Importing…', async () => {
+            const body = { sourceJobId: Number(entry.sourceJobId) };
+            if (entry.worker && entry.worker.reusableEnvironmentId == null) {
+                const name = String(workerName ?? entry.worker.suggestedCloneName ?? '').trim();
+                if (!name) {
+                    this.showImportError('Give the copied Worker a name.');
+                    return;
+                }
+                body.workerName = name;
+            }
+            let response;
+            try {
+                response = await this.app.apiCall('/api/v1/jobs/import', 'POST', body,
+                    { showLoading: false, preferErrorResponseMessage: true });
+            } catch (error) {
+                // Shown inside the modal so a taken Worker name (409) can be corrected in place.
+                this.showImportError(error?.message || 'The import failed.');
+                return;
+            }
+            this.app.closeModal();
+            const copied = Array.isArray(response?.copiedScripts) ? response.copiedScripts.length : 0;
+            const parts = ['Added disabled for review.'];
+            if (response?.workerOutcome === 'created') parts.push(`Worker copied as “${response.workerName}”.`);
+            else if (response?.workerOutcome === 'reused') parts.push(`Reusing Worker “${response.workerName}”.`);
+            if (copied > 0) parts.push(`${copied} ${copied === 1 ? 'script' : 'scripts'} copied into this repository.`);
+            this.app.showToast('Automation imported', parts.join(' '), 'success');
+            await this.refreshAll({ quiet: true });
+        });
+    }
+
+    showImportError(message) {
+        const alert = typeof document !== 'undefined' ? document.querySelector?.('[data-recipe-error]') : null;
+        if (!alert) {
+            this.app.showError(message);
+            return;
+        }
+        alert.textContent = message;
+        alert.classList.remove('d-none');
+    }
+
     parseRecipe(text) {
         const match = /<!--\s*viberails-recipe\s*([\s\S]*?)\s*viberails-recipe\s*-->/.exec(text || '');
         if (!match) return null;
@@ -1980,13 +2210,23 @@ viberails-recipe -->
         };
     }
 
-    confirmImportRecipe(recipe) {
+    /**
+     * The review step for both import paths. A recipe file applies through applyRecipe (two
+     * client calls). A catalog entry (`importSource`) applies through applyRepositoryImport, where
+     * the server decides Worker reuse vs clone — the modal only adds the clone's name and shows,
+     * per script, whether the file is already here, will be copied, or is missing everywhere.
+     */
+    confirmImportRecipe(recipe, { importSource = null } = {}) {
         recipe = this.normalizeRecipe(recipe);
         const worker = recipe.worker;
         const cli = String(worker?.cli || '').toLowerCase();
-        const existingEnv = worker
-            ? (this.environments || []).find(env => (env.name || '').toLowerCase() === String(worker.name).toLowerCase() && (env.cli || '').toLowerCase() === cli)
-            : null;
+        const existingEnv = importSource
+            ? (worker && importSource.worker?.reusableEnvironmentId != null
+                ? { id: importSource.worker.reusableEnvironmentId, name: importSource.worker.reusableEnvironmentName || worker.name }
+                : null)
+            : worker
+                ? (this.environments || []).find(env => (env.name || '').toLowerCase() === String(worker.name).toLowerCase() && (env.cli || '').toLowerCase() === cli)
+                : null;
         const whenText = (recipe.triggers || []).length
             ? (recipe.triggers || []).map(t => this.formatTrigger(t)).join(', ')
             : 'On demand only';
@@ -1996,23 +2236,48 @@ viberails-recipe -->
         const prompt = String(worker?.prompt || '');
         const scripts = (recipe.actions || []).filter(action => Number(action.kind) === JOB_ACTION.SCRIPT);
         const hasReviewableContent = customArgs.trim().length > 0 || prompt.trim().length > 0 || scripts.length > 0;
-        this.app.showModal('Import recipe', `
+        const sourceScripts = importSource
+            ? (importSource.actions || []).filter(action => Number(action.kind) === JOB_ACTION.SCRIPT)
+            : [];
+        const scriptFate = index => {
+            const source = sourceScripts[index];
+            if (!source) return '';
+            if (source.existsInTargetRepository) return '  — already in this repository';
+            if (source.existsInSourceRepository) return '  — will be copied from the source repository';
+            return '  — MISSING in both repositories';
+        };
+        const copyCount = sourceScripts.filter(action => !action.existsInTargetRepository && action.existsInSourceRepository).length;
+        const cloneWorker = Boolean(importSource && worker && !existingEnv);
+        const sourceLabel = importSource ? (importSource.projectDisplayName || importSource.projectPath || 'another repository') : '';
+        this.app.showModal(importSource ? 'Import from another repository' : 'Import recipe', `
             <div class="job-recipe-import">
-                <p>Import <strong>${this.escape(recipe.name)}</strong> into this repository?</p>
+                ${importSource
+                    ? `<p>Copy <strong>${this.escape(recipe.name)}</strong> from <strong>${this.escape(sourceLabel)}</strong> into this repository?</p>
+                       <div class="job-recipe-source mb-2" title="${this.escape(importSource.projectPath || '')}"><i class="fa-solid fa-folder-open me-1" aria-hidden="true"></i>${this.escape(importSource.projectPath || '')}</div>`
+                    : `<p>Import <strong>${this.escape(recipe.name)}</strong> into this repository?</p>`}
                 <ul class="text-muted small">
                     <li>Workflow: <strong>${recipe.actions.length} ${recipe.actions.length === 1 ? 'action' : 'actions'}</strong></li>
-                    ${worker ? `<li>Worker: <strong>${this.escape(worker.name)}</strong>${worker.model ? ` · ${this.escape(worker.model)}` : ''}${existingEnv ? ' <em>(already exists — will be reused)</em>' : ''}</li>` : '<li>Worker: none (script-only)</li>'}
+                    ${worker ? `<li>Worker: <strong>${this.escape(worker.name)}</strong>${worker.model ? ` · ${this.escape(worker.model)}` : ''}${existingEnv ? ' <em>(already exists — will be reused)</em>' : cloneWorker ? ' <em>(copied into this repository under the name below)</em>' : ''}</li>` : '<li>Worker: none (script-only)</li>'}
                     ${scripts.length ? `<li>Scripts: ${scripts.map(action => this.escape(action.scriptPath || '(missing path)')).join(' → ')}</li>` : ''}
                     <li>Runs: ${this.escape(whenText)} · ${recipe.timeoutMinutes ? `${this.escape(String(recipe.timeoutMinutes))} min limit` : 'no time limit'}</li>
                 </ul>
                 <div class="alert alert-warning small" role="alert">
                     <strong>Review the workflow before importing.</strong>
                     ${worker ? 'Worker arguments can change approval or sandbox permissions, and its initial message becomes instructions to the agent. ' : ''}
-                    ${scripts.length ? 'Script paths refer to files in this local repository. VibeRails verifies and hash-pins their current contents during import; the automation starts disabled. ' : ''}
+                    ${scripts.length && !importSource ? 'Script paths refer to files in this local repository. VibeRails verifies and hash-pins their current contents during import; the automation starts disabled. ' : ''}
+                    ${scripts.length && importSource ? `${copyCount > 0 ? `${copyCount} ${copyCount === 1 ? 'script is' : 'scripts are'} copied into this working tree from the source repository; existing files here are never overwritten. ` : 'Every script already exists in this repository and is used as it is here. '}VibeRails hash-pins the copies in this repository; the automation starts disabled. ` : ''}
                     ${worker ? (existingEnv
-                        ? 'A matching Worker already exists, so the recipe will reuse it without overwriting its settings.'
-                        : 'The new Worker will import the fields shown below exactly.') : ''}
+                        ? 'A matching Worker already exists, so it will be reused without overwriting its settings.'
+                        : cloneWorker
+                            ? 'The Worker is copied with its steps and initial message; the copy is independent of the original.'
+                            : 'The new Worker will import the fields shown below exactly.') : ''}
                 </div>
+                ${cloneWorker ? `<div class="job-import-worker-name">
+                    <label class="form-label mb-1" for="recipe-worker-name">Name for the copied Worker</label>
+                    <input class="form-control" id="recipe-worker-name" maxlength="64" autocomplete="off"
+                           value="${this.escape(importSource.worker?.suggestedCloneName || worker.name)}">
+                    <div class="form-text">Worker names are unique across VibeRails because each one owns a config directory. Letters, digits, spaces, underscores and hyphens.</div>
+                </div>` : ''}
                 <div class="job-recipe-review">
                     ${worker ? `<div>
                         <div class="form-label mb-1">Custom arguments</div>
@@ -2022,13 +2287,14 @@ viberails-recipe -->
                         <div class="form-label mb-1">Initial message</div>
                         <pre class="job-recipe-review-value" data-recipe-prompt>${this.escape(prompt || '(none)')}</pre>
                     </div>` : ''}
-                    ${scripts.length ? `<div><div class="form-label mb-1">Repository scripts</div><pre class="job-recipe-review-value" data-recipe-scripts>${scripts.map((action, index) => `${index + 1}. ${SCRIPT_RUNTIME_META[action.scriptRuntime]?.label || 'Unknown runtime'}  ${action.scriptPath || '(missing path)'}`).map(line => this.escape(line)).join('\n')}</pre></div>` : ''}
+                    ${scripts.length ? `<div><div class="form-label mb-1">Repository scripts</div><pre class="job-recipe-review-value" data-recipe-scripts>${scripts.map((action, index) => `${index + 1}. ${SCRIPT_RUNTIME_META[action.scriptRuntime]?.label || 'Unknown runtime'}  ${action.scriptPath || '(missing path)'}${scriptFate(index)}`).map(line => this.escape(line)).join('\n')}</pre></div>` : ''}
                 </div>
-                ${worker ? `<label class="form-check"><input class="form-check-input" type="checkbox" id="recipe-add-env" ${existingEnv ? '' : 'checked'} ${existingEnv ? 'disabled' : ''}><span class="form-check-label">Add the Worker</span></label>` : ''}
-                <label class="form-check"><input class="form-check-input" type="checkbox" id="recipe-add-job" checked><span class="form-check-label">Add the automation (created disabled)</span></label>
+                ${worker && !importSource ? `<label class="form-check"><input class="form-check-input" type="checkbox" id="recipe-add-env" ${existingEnv ? '' : 'checked'} ${existingEnv ? 'disabled' : ''}><span class="form-check-label">Add the Worker</span></label>` : ''}
+                ${importSource ? '' : '<label class="form-check"><input class="form-check-input" type="checkbox" id="recipe-add-job" checked><span class="form-check-label">Add the automation (created disabled)</span></label>'}
                 ${hasReviewableContent
                     ? '<label class="form-check mt-2"><input class="form-check-input" type="checkbox" id="recipe-reviewed"><span class="form-check-label">I have reviewed the Worker settings and repository script actions above</span></label>'
                     : ''}
+                <div class="alert alert-danger small mt-3 mb-0 d-none" role="alert" data-recipe-error></div>
                 <div class="d-flex justify-content-end gap-2 mt-3">
                     <button class="btn btn-outline-secondary" type="button" data-action="close-modal">Cancel</button>
                     <button class="btn btn-primary" type="button" id="recipe-import-confirm" ${hasReviewableContent ? 'disabled' : ''}>Import</button>
@@ -2038,7 +2304,8 @@ viberails-recipe -->
         // approval prompts and its initial message is instructions the agent will follow. Showing
         // them is not the same as having read them, so when there is anything to read the Import
         // button stays disabled until the user says they did. Recipes carrying neither field have
-        // nothing to review and are not made to click through a meaningless attestation.
+        // nothing to review and are not made to click through a meaningless attestation. The same
+        // applies to another repository's automation: it was written for that repository.
         const reviewed = document.getElementById('recipe-reviewed');
         const confirmButton = document.getElementById('recipe-import-confirm');
         reviewed?.addEventListener('change', () => {
@@ -2046,6 +2313,11 @@ viberails-recipe -->
         });
         confirmButton?.addEventListener('click', async event => {
             if (hasReviewableContent && !reviewed?.checked) return;
+            if (importSource) {
+                const workerName = document.getElementById('recipe-worker-name')?.value;
+                await this.applyRepositoryImport(importSource, { workerName, button: event.currentTarget });
+                return;
+            }
             const addEnv = document.getElementById('recipe-add-env')?.checked && !existingEnv;
             const addJob = document.getElementById('recipe-add-job')?.checked;
             await this.applyRecipe(recipe, { addEnv, addJob, existingEnv, button: event.currentTarget });
