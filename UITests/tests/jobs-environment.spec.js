@@ -75,7 +75,7 @@ function createFixtureState() {
         ['glm-5.3', 'GLM 5.3'],
         ['deepseek-v4-pro', 'DeepSeek V4 Pro'],
         ['kimi-k3', 'Kimi K3'],
-        ['grok-4.6', 'Grok 4.6'],
+        ['grok', 'Grok'],
         ['antigravity', 'Antigravity'],
         ['copilot', 'Copilot'],
         ['shell', 'Terminal']

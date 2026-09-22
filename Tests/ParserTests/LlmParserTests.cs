@@ -42,9 +42,9 @@ public class LlmParserTests
     }
 
     [Fact]
-    public void Parse_ReturnsGrok46_ForGrok46String()
+    public void Parse_ReturnsGrok46_ForGrokString()
     {
-        var result = _parser.Parse("grok-4.6");
+        var result = _parser.Parse("grok");
 
         Assert.Equal(LLM.Grok46, result);
     }
@@ -85,9 +85,11 @@ public class LlmParserTests
     }
 
     [Theory]
+    [InlineData("GROK")]
+    [InlineData("Grok")]
+    [InlineData(" grok ")]
+    [InlineData("grok-4.6")]
     [InlineData("GROK-4.6")]
-    [InlineData("Grok-4.6")]
-    [InlineData(" grok-4.6 ")]
     public void Parse_HandlesGrok46CaseInsensitiveAndWhitespace(string input)
     {
         var result = _parser.Parse(input);
@@ -141,9 +143,8 @@ public class LlmParserTests
     [Fact]
     public void Normalize_ReturnsWireFormat_ForGrok46()
     {
-        var result = _parser.Normalize("grok-4.6");
-
-        Assert.Equal("grok-4.6", result);
+        Assert.Equal("grok", _parser.Normalize("grok"));
+        Assert.Equal("grok", _parser.Normalize("grok-4.6"));
     }
 
     [Fact]
@@ -204,7 +205,7 @@ public class LlmParserTests
 
     [Theory]
     [InlineData(LLM.Glm52, "glm-5.2")]
-    [InlineData(LLM.Grok46, "grok-4.6")]
+    [InlineData(LLM.Grok46, "grok")]
     [InlineData(LLM.Glm53, "glm-5.3")]
     [InlineData(LLM.DeepSeekV4Pro, "deepseek-v4-pro")]
     [InlineData(LLM.KimiK3, "kimi-k3")]

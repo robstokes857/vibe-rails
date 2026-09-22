@@ -491,7 +491,6 @@ export class EnvironmentController {
                 cliSettings.initialMessage = env.customPrompt;
             }
             this.mergeGrokSettingsFromCustomArgs(cliSettings, env.customArgs || '');
-            cliSettings.model = 'grok-4.6';
         }
         if (this.isOpencodeBackedCli(cliLower)) {
             if (env.customPrompt) {
@@ -862,7 +861,7 @@ export class EnvironmentController {
     // GLM 5.2, GLM 5.3, DeepSeek V4 Pro, and Kimi K3 are OpenCode-backed pseudo-CLIs: they launch
     // `opencode` with a pinned --model flag. They share the OpenCode settings form, env handling,
     // and arg builder, so most call sites route through this helper instead of checking
-    // === 'opencode'. Native Grok 4.6 is NOT OpenCode-backed — use isNativeGrokCli.
+    // === 'opencode'. Native Grok is NOT OpenCode-backed — use isNativeGrokCli.
     isOpencodeBackedCli(cli) {
         const cliLower = (cli || '').toLowerCase();
         return cliLower === 'opencode'
@@ -873,7 +872,8 @@ export class EnvironmentController {
     }
 
     isNativeGrokCli(cli) {
-        return (cli || '').toLowerCase() === 'grok-4.6';
+        const value = (cli || '').toLowerCase();
+        return value === 'grok' || value === 'grok-4.6';
     }
 
     // Returns the pinned provider/model ID for a pseudo-CLI, or null for plain OpenCode
@@ -1459,23 +1459,26 @@ export class EnvironmentController {
         return settings;
     }
 
+    renderGrokModelOptions(selectedModel) {
+        return renderLlmModelOptions('grok', selectedModel);
+    }
+
     normalizeGrokEffort(effort) {
         return (effort || '').trim().toLowerCase();
     }
 
     renderGrokEffortOptions(selectedEffort) {
         const selected = this.normalizeGrokEffort(selectedEffort);
-        // Canonical Grok levels from `grok --help` / `--reasoning-effort` (alias `--effort`).
-        // Per-model menu ids (e.g. `deep`) are not pinned — they survive as `(custom)`.
+        // Grok `--effort` / `--reasoning-effort` (live grok 1.0.40, grok-4.6):
+        // `use one of: xhigh, high, medium, low`. none/minimal/max are rejected.
+        // Unknown saved values still round-trip as `(custom)`. Both pinned models
+        // share this list.
         const options = [
             ['', 'Default'],
-            ['none', 'None'],
-            ['minimal', 'Minimal'],
             ['low', 'Low'],
             ['medium', 'Medium'],
             ['high', 'High'],
-            ['xhigh', 'XHigh'],
-            ['max', 'Max']
+            ['xhigh', 'XHigh']
         ];
         const known = new Set(options.map(([value]) => value));
         const rendered = options.map(([value, label]) =>
@@ -1491,8 +1494,9 @@ export class EnvironmentController {
 
     buildGrokCustomArgs(settings) {
         const s = settings || {};
-        const args = ['-m', 'grok-4.6'];
+        const args = [];
 
+        this.pushStringArg(args, '-m', (s.model || '').trim());
         this.pushStringArg(args, '--effort', this.normalizeGrokEffort(s.effort));
 
         if (s.yoloMode) {
@@ -1520,11 +1524,20 @@ export class EnvironmentController {
             }
 
             if (arg === '-m' || arg === '--model') {
-                if (next) i++;
+                if (next) {
+                    settings.model = next.trim();
+                    i++;
+                }
                 continue;
             }
 
-            if (arg.startsWith('-m=') || arg.startsWith('--model=')) {
+            if (arg.startsWith('-m=')) {
+                settings.model = arg.slice('-m='.length).trim();
+                continue;
+            }
+
+            if (arg.startsWith('--model=')) {
+                settings.model = arg.slice('--model='.length).trim();
                 continue;
             }
 
@@ -1761,6 +1774,7 @@ export class EnvironmentController {
         if (this.isNativeGrokCli(cliLower)) {
             return {
                 initialMessage,
+                model: (document.getElementById('grok-model')?.value || '').trim(),
                 effort: this.normalizeGrokEffort(document.getElementById('grok-effort').value),
                 yoloMode: document.getElementById('grok-yolo').checked,
                 additionalArgs: document.getElementById('grok-additional-args').value
@@ -1925,11 +1939,13 @@ export class EnvironmentController {
             const effort = this.normalizeGrokEffort(s.effort);
             return `
                 <hr class="my-4">
-                <h6 class="text-muted mb-3">Grok 4.6 CLI Settings</h6>
+                <h6 class="text-muted mb-3">Grok CLI Settings</h6>
                 <div class="mb-3">
                     <label class="form-label">Model</label>
-                    <input type="text" class="form-control" id="grok-model" value="grok-4.6" disabled>
-                    <small class="form-text text-muted">Pinned to <code>grok-4.6</code> — launched as <code>-m grok-4.6</code>. OpenCode still offers <code>xai/grok-4.6</code> in its own model list.</small>
+                    <select class="form-select" id="grok-model">
+                        ${this.renderGrokModelOptions(s.model || '')}
+                    </select>
+                    <small class="form-text text-muted">Passed as <code>-m</code>. Leave blank for Grok's default. OpenCode still offers <code>xai/grok-4.6</code> in its own model list.</small>
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Effort</label>
@@ -2090,7 +2106,7 @@ export class EnvironmentController {
         if (cliLower === 'glm-5.3') return 'GLM 5.3';
         if (cliLower === 'deepseek-v4-pro') return 'DeepSeek V4 Pro';
         if (cliLower === 'kimi-k3') return 'Kimi K3';
-        if (cliLower === 'grok-4.6') return 'Grok 4.6';
+        if (cliLower === 'grok' || cliLower === 'grok-4.6') return 'Grok';
         if (cliLower === 'opencode') return 'OpenCode';
         return 'the CLI';
     }

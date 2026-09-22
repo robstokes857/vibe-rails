@@ -1,8 +1,7 @@
 // @ts-check
 //
-// Playwright specs for the native Grok 4.6 environment creation form.
-// Verifies the Effort dropdown (TUI thinking / `--effort`) is a first-class
-// control with the canonical Grok levels.
+// Playwright specs for the native Grok environment creation form.
+// Verifies the model dropdown (grok-4.7 / grok-4.6) and the Effort dropdown.
 
 const { test, expect } = require('./fixtures');
 
@@ -17,11 +16,11 @@ async function openGrokEnvironmentForm(page) {
     await page.locator('[data-action="create-environment"]').click();
     await expect(page.locator('#env-form')).toBeVisible({ timeout: 5_000 });
 
-    await page.locator('#env-cli').selectOption('grok-4.6');
+    await page.locator('#env-cli').selectOption('grok');
     await page.waitForSelector('#grok-effort', { timeout: 5_000 });
 }
 
-test.describe('Grok 4.6 environment form – Effort field', () => {
+test.describe('Grok environment form – model and effort', () => {
     test('effort field is a <select> with the canonical thinking levels', async ({ page }) => {
         await openGrokEnvironmentForm(page);
 
@@ -36,13 +35,10 @@ test.describe('Grok 4.6 environment form – Effort field', () => {
 
         expect(values).toEqual([
             '',
-            'none',
-            'minimal',
             'low',
             'medium',
             'high',
             'xhigh',
-            'max',
         ]);
     });
 
@@ -56,13 +52,20 @@ test.describe('Grok 4.6 environment form – Effort field', () => {
         await expect(effortSelect).toHaveValue('xhigh');
     });
 
-    test('model stays pinned and yolo / additional-args remain present', async ({ page }) => {
+    test('model is a select of grok-4.7 then grok-4.6, and yolo / additional-args remain', async ({ page }) => {
         await openGrokEnvironmentForm(page);
 
         const modelField = page.locator('#grok-model');
         await expect(modelField).toBeVisible();
-        await expect(modelField).toBeDisabled();
-        await expect(modelField).toHaveValue('grok-4.6');
+        await expect(modelField).toBeEnabled();
+
+        const values = await page.locator('#grok-model option').evaluateAll(options =>
+            options.map(option => option.value));
+        expect(values).toEqual(['', 'grok-4.7', 'grok-4.6']);
+        await expect(modelField).toHaveValue('');
+
+        await modelField.selectOption('grok-4.7');
+        await expect(modelField).toHaveValue('grok-4.7');
 
         await expect(page.locator('#grok-yolo')).toBeVisible();
         await expect(page.locator('#grok-additional-args')).toBeVisible();

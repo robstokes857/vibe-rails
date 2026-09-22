@@ -9,10 +9,12 @@ import {
 const PASTE_START = '\x1b[200~';
 const PASTE_END = '\x1b[201~';
 
-test('only native grok-4.6 is gated', () => {
+test('native grok and the retired grok-4.6 wire name are gated', () => {
+    assert.equal(isNativeGrokCli('grok'), true);
+    assert.equal(isNativeGrokCli('GROK'), true);
     assert.equal(isNativeGrokCli('grok-4.6'), true);
     assert.equal(isNativeGrokCli('GROK-4.6'), true);
-    assert.equal(isNativeGrokCli(' grok-4.6 '), false);
+    assert.equal(isNativeGrokCli(' grok '), false);
     assert.equal(isNativeGrokCli('opencode'), false);
     assert.equal(isNativeGrokCli('claude'), false);
     assert.equal(isNativeGrokCli('codex'), false);
@@ -22,7 +24,7 @@ test('only native grok-4.6 is gated', () => {
     assert.equal(isNativeGrokCli('xai/grok-4.6'), false);
     assert.equal(isNativeGrokCli(''), false);
     assert.equal(isNativeGrokCli(undefined), false);
-    assert.equal(NATIVE_GROK_CLI, 'grok-4.6');
+    assert.equal(NATIVE_GROK_CLI, 'grok');
 });
 
 test('empty input stays empty', () => {

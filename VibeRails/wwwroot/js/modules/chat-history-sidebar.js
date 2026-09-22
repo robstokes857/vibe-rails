@@ -1,5 +1,6 @@
 import {
     buildLlmSelectionOptions,
+    canonicalLlmCli,
     parseLlmSelection,
     formatRelativeTime,
     escapeHtml
@@ -1375,7 +1376,7 @@ export class ChatHistorySidebar {
                 return false;
             }
 
-            if (this.llmFilters.size > 0 && !this.llmFilters.has((item?.cli || '').toLowerCase())) {
+            if (this.llmFilters.size > 0 && !this.llmFilters.has(canonicalLlmCli(item?.cli))) {
                 return false;
             }
 
@@ -1445,7 +1446,7 @@ export class ChatHistorySidebar {
     _getLlmFilterOptions() {
         return [
             { value: 'reset', label: 'Reset', logoHtml: '<i class="fa-solid fa-rotate-left"></i>' },
-            ...['claude', 'codex', 'opencode', 'glm-5.2', 'glm-5.3', 'deepseek-v4-pro', 'kimi-k3', 'grok-4.6', 'antigravity', 'copilot'].map((cli) => {
+            ...['claude', 'codex', 'opencode', 'glm-5.2', 'glm-5.3', 'deepseek-v4-pro', 'kimi-k3', 'grok', 'antigravity', 'copilot'].map((cli) => {
                 const brand = this.app.getCliBrand(cli);
                 return {
                     value: cli,

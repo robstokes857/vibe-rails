@@ -27,7 +27,7 @@
 //   - app.showToast for success/failure, never a bespoke toast stack
 //   - Font Awesome icons and the --color-* theme tokens
 
-import { escapeHtml, confirmDialog, parseLlmSelection, getCliBrand } from './utils.js';
+import { escapeHtml, confirmDialog, parseLlmSelection, getCliBrand, canonicalLlmSelection } from './utils.js';
 import { mountLlmPicker, setLlmPickerValue, getEnabledLlmItems } from './pickers/llm-picker.js';
 import { BoardApi } from './board-api.js';
 import { boardContextSection, laneAutomationSection, mountBoardContext, mountLaneAutomation } from './board-settings.js';
@@ -223,7 +223,7 @@ export class BoardController {
     // (which knows environment names), then from the raw key; the avatar is the
     // CLI's brand mark, the closest thing an LLM has to a face.
     assigneeInfo(selection) {
-        const key = String(selection || '').trim();
+        const key = canonicalLlmSelection(selection);
         if (!key) return null;
         let item = null;
         try {
@@ -268,7 +268,7 @@ export class BoardController {
             const haystack = [card.key, card.title, card.description, type.value, type.label, ...(card.tags || [])].join(' ').toLowerCase();
             if (!haystack.includes(query)) return false;
         }
-        if (filters.assignee && card.assignee !== filters.assignee) return false;
+        if (filters.assignee && canonicalLlmSelection(card.assignee) !== canonicalLlmSelection(filters.assignee)) return false;
         if (filters.type && cardType(card.type).value !== filters.type) return false;
         if (filters.priority && card.priority !== filters.priority) return false;
         if (filters.tag && !(card.tags || []).includes(filters.tag)) return false;

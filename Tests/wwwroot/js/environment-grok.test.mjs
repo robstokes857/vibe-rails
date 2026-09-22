@@ -18,27 +18,40 @@ function createController() {
     });
 }
 
-const CANONICAL_EFFORTS = ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+const CANONICAL_EFFORTS = ['', 'low', 'medium', 'high', 'xhigh'];
 
-test('buildGrokCustomArgs pins the model and omits effort when unset', () => {
-    const args = createController().buildGrokCustomArgs({});
-    assert.equal(args, '-m grok-4.6');
+function optionValues(html, id) {
+    const start = html.indexOf(`id="${id}"`);
+    const slice = html.slice(start, html.indexOf('</select>', start));
+    return [...slice.matchAll(/<option value="([^"]*)"/g)].map(match => match[1]);
+}
+
+test('Grok model dropdown lists 4.7 then 4.6 and omits -m when left default', () => {
+    const html = createController().buildCliSettingsHtml('grok', {});
+    assert.deepEqual(optionValues(html, 'grok-model'), ['', 'grok-4.7', 'grok-4.6']);
+    assert.equal(createController().buildGrokCustomArgs({}), '');
+    assert.equal(createController().buildGrokCustomArgs({ model: 'grok-4.7' }), '-m grok-4.7');
+    assert.equal(createController().buildGrokCustomArgs({ model: 'grok-4.6' }), '-m grok-4.6');
 });
 
 test('buildGrokCustomArgs emits --effort and --yolo', () => {
     const args = createController().buildGrokCustomArgs({
+        model: 'grok-4.6',
         effort: 'XHigh',
         yoloMode: true
     });
     assert.equal(args, '-m grok-4.6 --effort xhigh --yolo');
 });
 
-test('mergeGrokSettingsFromCustomArgs reads --effort and --reasoning-effort forms', () => {
+test('mergeGrokSettingsFromCustomArgs reads the model and both effort forms', () => {
     const controller = createController();
 
+    const saved = controller.mergeGrokSettingsFromCustomArgs({}, '-m grok-4.6 --effort xhigh');
+    assert.equal(saved.model, 'grok-4.6');
+    assert.equal(saved.effort, 'xhigh');
     assert.equal(
-        controller.mergeGrokSettingsFromCustomArgs({}, '-m grok-4.6 --effort xhigh').effort,
-        'xhigh'
+        controller.mergeGrokSettingsFromCustomArgs({}, '--model=grok-4.7').model,
+        'grok-4.7'
     );
     assert.equal(
         controller.mergeGrokSettingsFromCustomArgs({}, '--effort=high').effort,
@@ -49,8 +62,8 @@ test('mergeGrokSettingsFromCustomArgs reads --effort and --reasoning-effort form
         'medium'
     );
     assert.equal(
-        controller.mergeGrokSettingsFromCustomArgs({}, '--reasoning-effort=max').effort,
-        'max'
+        controller.mergeGrokSettingsFromCustomArgs({}, '--reasoning-effort=low').effort,
+        'low'
     );
 });
 
@@ -78,9 +91,8 @@ test('merge then build rewrites --reasoning-effort to --effort', () => {
 });
 
 test('Grok effort dropdown lists the canonical thinking levels', () => {
-    const html = createController().buildCliSettingsHtml('grok-4.6', {});
-    const values = [...html.matchAll(/<option value="([^"]*)"/g)].map(match => match[1]);
-    assert.deepEqual(values, CANONICAL_EFFORTS);
+    const html = createController().buildCliSettingsHtml('grok', {});
+    assert.deepEqual(optionValues(html, 'grok-effort'), CANONICAL_EFFORTS);
     assert.match(html, /id="grok-effort"/);
     assert.match(html, /--reasoning-effort/);
 });
@@ -88,7 +100,16 @@ test('Grok effort dropdown lists the canonical thinking levels', () => {
 test('unknown Grok effort values round-trip as a custom option', () => {
     const html = createController().buildCliSettingsHtml('grok-4.6', { effort: 'Deep' });
     assert.match(html, /value="deep" selected>deep \(custom\)/);
-    assert.equal(createController().buildGrokCustomArgs({ effort: 'Deep' }), '-m grok-4.6 --effort deep');
+    assert.equal(createController().buildGrokCustomArgs({ effort: 'Deep' }), '--effort deep');
+});
+
+test('retired none/max Grok effort values render as custom, not pinned', () => {
+    const noneHtml = createController().buildCliSettingsHtml('grok-4.6', { effort: 'none' });
+    const maxHtml = createController().buildCliSettingsHtml('grok-4.6', { effort: 'max' });
+    assert.match(noneHtml, /value="none" selected>none \(custom\)/);
+    assert.match(maxHtml, /value="max" selected>max \(custom\)/);
+    assert.equal((noneHtml.match(/value="none"/g) || []).length, 1);
+    assert.equal((maxHtml.match(/value="max"/g) || []).length, 1);
 });
 
 test('mergeGrokSettingsFromCustomArgs still drops leftover OpenCode flags', () => {

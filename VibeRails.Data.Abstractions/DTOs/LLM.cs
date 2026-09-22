@@ -25,8 +25,10 @@ namespace VibeRails.Services
         Glm52,
 
         // Native Grok Build CLI. Binary is `grok` (not the lowercased enum `grok46`).
-        // LlmParser still special-cases the wire name "grok-4.6". Do not route this
-        // through OpenCode.
+        // The member name is historical: the stored integer stays 8. The wire name is
+        // "grok"; LlmParser still accepts the retired wire name "grok-4.6". Model
+        // (grok-4.7 / grok-4.6) is a launch argument, not a separate CLI. Do not route
+        // this through OpenCode.
         Grok46,
         Glm53,
 

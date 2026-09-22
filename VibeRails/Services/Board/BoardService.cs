@@ -542,7 +542,7 @@ public sealed partial class BoardService(
     }
 
     internal static BoardCardSummaryResponse ToSummary(BoardCardRecord card, string? activeSessionId, string? activeTabId) => new(
-        card.Id, card.Key, card.ColumnId, card.Position, card.Title, card.Description, card.Assignee, card.Priority,
+        card.Id, card.Key, card.ColumnId, card.Position, card.Title, card.Description, PresentAssignee(card.Assignee), card.Priority,
         card.Points, card.Tags.ToList(), card.Blocked, card.CommentCount, activeSessionId, activeTabId, card.CreatedUtc, card.UpdatedUtc,
         card.BaseLlmOptions, card.Type, card.BoardId, card.Flagged);
 
@@ -677,6 +677,13 @@ public sealed partial class BoardService(
             throw new BoardValidationException($"Points must be one of: {string.Join(", ", AllowedPoints)}.");
         return parsed;
     }
+
+    // Saved assignees from before the Grok wire name was "grok" still parse. Present the
+    // current key so a card assigned to base:grok-4.6 lines up with the picker.
+    internal static string? PresentAssignee(string? assignee) =>
+        BoardSelection.TryParse(assignee, out var selection) && selection is not null
+            ? selection.Key
+            : assignee;
 
     internal static string? NormalizeAssignee(string? value)
     {

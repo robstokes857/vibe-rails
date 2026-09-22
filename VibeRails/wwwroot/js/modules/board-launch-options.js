@@ -3,7 +3,7 @@ import { renderLlmModelOptions } from './llm-model-catalog.js';
 
 const pinnedModels = Object.freeze({
     'glm-5.2': 'zai/glm-5.2', 'glm-5.3': 'zai-coding-plan/glm-5.3',
-    'deepseek-v4-pro': 'deepseek/deepseek-v4-pro', 'kimi-k3': 'moonshotai/kimi-k3', 'grok-4.6': 'grok-4.6'
+    'deepseek-v4-pro': 'deepseek/deepseek-v4-pro', 'kimi-k3': 'moonshotai/kimi-k3'
 });
 const openCodeClis = ['opencode', 'glm-5.2', 'glm-5.3', 'deepseek-v4-pro', 'kimi-k3'];
 const efforts = Object.freeze({
@@ -11,11 +11,13 @@ const efforts = Object.freeze({
     codex: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
     antigravity: ['low', 'medium', 'high'],
     copilot: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
-    'grok-4.6': ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+    grok: ['low', 'medium', 'high', 'xhigh']
 });
 
 function baseCli(selection) {
-    return typeof selection === 'string' && selection.startsWith('base:') ? selection.slice(5).toLowerCase() : null;
+    if (typeof selection !== 'string' || !selection.startsWith('base:')) return null;
+    const cli = selection.slice(5).toLowerCase();
+    return cli === 'grok-4.6' ? 'grok' : cli;
 }
 
 export function normalizeBoardLaunchOptions(selection, options = {}) {

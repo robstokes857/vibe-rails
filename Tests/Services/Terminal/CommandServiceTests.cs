@@ -451,7 +451,7 @@ public partial class CommandServiceTests : IDisposable
 
         var prepared = await service.PrepareSessionAsync(LLM.Grok46, envName: null, extraArgs: null);
 
-        Assert.Equal("grok --model=grok-4.6", prepared.LaunchCommand);
+        Assert.Equal("grok", prepared.LaunchCommand);
         Assert.Equal("grok", prepared.Executable);
     }
 
@@ -465,7 +465,8 @@ public partial class CommandServiceTests : IDisposable
 
         Assert.DoesNotContain("--prompt=", prepared.LaunchCommand);
         Assert.DoesNotContain(" -p ", prepared.LaunchCommand);
-        Assert.StartsWith("grok --model=grok-4.6 ", prepared.LaunchCommand);
+        Assert.StartsWith("grok ", prepared.LaunchCommand);
+        Assert.DoesNotContain("--model", prepared.LaunchCommand);
         Assert.Contains("hello world", prepared.LaunchCommand);
         Assert.Equal("hello world", prepared.Argv?[^1]);
     }
@@ -536,6 +537,19 @@ public partial class CommandServiceTests : IDisposable
         Assert.Equal(
             1,
             prepared.LaunchCommand.Split(' ').Count(tok => tok.StartsWith("-m") || tok.StartsWith("--model")));
+    }
+
+    [Fact]
+    public async Task PrepareSession_Grok46_KeepsACallerSelectedModel()
+    {
+        var service = CreateService();
+
+        var prepared = await service.PrepareSessionAsync(
+            LLM.Grok46,
+            envName: null,
+            extraArgs: ["--model", "grok-4.7"]);
+
+        Assert.Equal("grok --model grok-4.7", prepared.LaunchCommand);
     }
 
     [Fact]

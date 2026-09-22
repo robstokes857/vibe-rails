@@ -24,7 +24,7 @@ test('base selections expose provider options; saved environments keep their set
 
 test('model lists come from the exact same catalog as the environment editor', () => {
     const controller = new EnvironmentController({});
-    for (const [cli, method] of [['codex', 'renderCodexModelOptions'], ['claude', 'renderClaudeModelOptions'], ['copilot', 'renderCopilotModelOptions'], ['antigravity', 'renderAntigravityModelOptions'], ['opencode', 'renderOpencodeModelOptions']]) {
+    for (const [cli, method] of [['codex', 'renderCodexModelOptions'], ['claude', 'renderClaudeModelOptions'], ['copilot', 'renderCopilotModelOptions'], ['antigravity', 'renderAntigravityModelOptions'], ['opencode', 'renderOpencodeModelOptions'], ['grok', 'renderGrokModelOptions']]) {
         assert.equal(controller[method](''), renderLlmModelOptions(cli));
         for (const [model] of LLM_MODEL_OPTIONS[cli]) assert.ok(renderBoardLaunchOptions(`base:${cli}`).includes(`value="${model}"`), `${cli}: ${model}`);
     }
@@ -39,6 +39,24 @@ test('OpenCode-backed providers display fixed models and omit unsupported effort
         assert.match(html, /value="build"/);
         assert.equal(normalizeBoardLaunchOptions(`base:${cli}`, { model: 'wrong', effort: 'high' }).model, '');
     }
+});
+
+test('Grok model is selectable and effort is low/medium/high/xhigh', () => {
+    const html = renderBoardLaunchOptions('base:grok');
+    assert.match(html, /data-board-launch-model/);
+    assert.match(html, /value="grok-4.7"/);
+    assert.match(html, /value="grok-4.6"/);
+    assert.doesNotMatch(html, /Fixed model/);
+    assert.match(html, /value="low"/);
+    assert.match(html, /value="xhigh"/);
+    assert.doesNotMatch(html, /value="none"/);
+    assert.doesNotMatch(html, /value="minimal"/);
+    assert.doesNotMatch(html, /value="max"/);
+    assert.equal(normalizeBoardLaunchOptions('base:grok', { model: 'grok-4.7', effort: 'xhigh' }).model, 'grok-4.7');
+    assert.equal(normalizeBoardLaunchOptions('base:grok', { effort: 'xhigh' }).effort, 'xhigh');
+    assert.equal(normalizeBoardLaunchOptions('base:grok', { effort: 'none' }).effort, '');
+    assert.match(renderBoardLaunchOptions('base:grok-4.6'), /value="grok-4.7"/);
+    assert.equal(normalizeBoardLaunchOptions('base:grok-4.6', { effort: 'high' }).effort, 'high');
 });
 
 test('Codex max effort normalizes when selecting gpt-5.5', () => {

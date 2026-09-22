@@ -381,7 +381,7 @@ paused via the `pause_token_saver` / `resume_token_saver` MCP tools.
 ## Terminal Environment Integration
 
 The terminal dropdown shows two groups:
-- **Base CLIs**: Claude, Codex, GLM 5.2, GLM 5.3, DeepSeek V4 Pro, Kimi K3, Grok 4.6, OpenCode, Copilot, Antigravity (each shown as "(default)") — resolved to its executable server-side (Antigravity → `agy`)
+- **Base CLIs**: Claude, Codex, GLM 5.2, GLM 5.3, DeepSeek V4 Pro, Kimi K3, Grok, OpenCode, Copilot, Antigravity (each shown as "(default)") — resolved to its executable server-side (Antigravity → `agy`, Grok → `grok`). Grok's model (`grok-4.7` or `grok-4.6`) is chosen on the environment or Board launch, not by a separate CLI entry.
 - **Custom Environments**: User-created environments — spawned directly via the tab start endpoint
 
 ## Terminal auto-reconnect

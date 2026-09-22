@@ -46,11 +46,12 @@ public static class LlmProxyGrokConfig
     public const string UserConfigFileName = "config.toml";
     public const string DefaultHomeDirectoryName = ".grok";
 
-    // grok-4.6 is the pinned tab model, grok-build the default-route model, and grok-4.5 the
-    // default fork_secondary_model — a fork's calls ride the same proxy and 401 without the
-    // mapping. env_http_headers is per-model only (a global [models] mapping is ignored —
-    // verified against grok 1.0.5), so every model VibeRails expects to see must be listed.
-    public static readonly string[] HeaderMappedModels = ["grok-4.6", "grok-build", "grok-4.5"];
+    // grok-4.7 and grok-4.6 are the pinned Grok models, grok-build the default-route model,
+    // and grok-4.5 the default fork_secondary_model — a fork's calls ride the same proxy and
+    // 401 without the mapping. env_http_headers is per-model only (a global [models] mapping
+    // is ignored — verified against grok 1.0.5), so every model VibeRails expects to see
+    // must be listed.
+    public static readonly string[] HeaderMappedModels = ["grok-4.7", "grok-4.6", "grok-build", "grok-4.5"];
 
     public static string BuildEnvHttpHeadersInlineTable() =>
         "{ " +

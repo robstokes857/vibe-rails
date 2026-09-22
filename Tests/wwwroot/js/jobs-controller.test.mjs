@@ -98,7 +98,7 @@ test('Automation maps every non-shell Environment CLI to the shared LLM enum val
         ['copilot', 4],
         ['opencode', 6],
         ['glm-5.2', 7],
-        ['grok-4.6', 8],
+        ['grok', 8],
         ['glm-5.3', 9],
         ['deepseek-v4-pro', 10],
         ['kimi-k3', 11]
@@ -108,6 +108,7 @@ test('Automation maps every non-shell Environment CLI to the shared LLM enum val
         assert.equal(getJobLlmForCli(cli), llm);
         assert.equal(getJobCliForLlm(llm), cli);
     }
+    assert.equal(getJobLlmForCli('grok-4.6'), 8);
     assert.equal(getJobLlmForCli('shell'), null);
     assert.equal(getJobCliForLlm(5), null);
 });
@@ -216,7 +217,7 @@ test('Automation rows display every supported Environment provider', () => {
     };
     const providers = [
         [1, 'Codex'], [2, 'Claude'], [3, 'Antigravity'], [4, 'Copilot'],
-        [6, 'OpenCode'], [7, 'GLM 5.2'], [8, 'Grok 4.6'], [9, 'GLM 5.3']
+        [6, 'OpenCode'], [7, 'GLM 5.2'], [8, 'Grok'], [9, 'GLM 5.3']
     ];
     controller.environments = providers.map(([llm, name], index) => ({
         id: index + 1,
@@ -237,7 +238,7 @@ test('Automation rows display every supported Environment provider', () => {
 
     controller.renderJobs();
 
-    for (const name of ['Codex', 'Claude', 'Antigravity', 'Copilot', 'OpenCode', 'GLM 5.2', 'Grok 4.6', 'GLM 5.3']) {
+    for (const name of ['Codex', 'Claude', 'Antigravity', 'Copilot', 'OpenCode', 'GLM 5.2', 'Grok', 'GLM 5.3']) {
         assert.match(list.innerHTML, new RegExp(`>${name}<`));
     }
 });
