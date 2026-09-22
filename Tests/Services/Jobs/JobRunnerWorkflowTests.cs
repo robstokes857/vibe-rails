@@ -14,7 +14,7 @@ namespace Tests.Services.Jobs;
 public sealed class JobRunnerWorkflowTests
 {
     [Fact]
-    public void BoardCardKey_ComesOnlyFromAValidBoardLaneTrigger()
+    public void BoardCardKey_IsOpaqueAndComesOnlyFromABoardLaneTrigger()
     {
         var run = Run([]);
 
@@ -25,20 +25,27 @@ public sealed class JobRunnerWorkflowTests
                 TriggerKind = JobTriggerKind.BoardLane,
                 TriggerKey = "board-lane:VB-23:review:event-1"
             }));
+        Assert.Equal(
+            "xyz-90909-jkjhfdk",
+            JobRunner.GetBoardCardKey(run with
+            {
+                TriggerKind = JobTriggerKind.BoardLane,
+                TriggerKey = "board-lane:xyz-90909-jkjhfdk:review:event-1"
+            }));
         Assert.Null(JobRunner.GetBoardCardKey(run with
         {
             TriggerKind = JobTriggerKind.Manual,
-            TriggerKey = "board-lane:VB-23:review:event-1"
+            TriggerKey = "board-lane:xyz-90909-jkjhfdk:review:event-1"
         }));
         Assert.Null(JobRunner.GetBoardCardKey(run with
         {
             TriggerKind = JobTriggerKind.BoardLane,
-            TriggerKey = "board-lane:not-a-card:review:event-1"
+            TriggerKey = "board-lane::review:event-1"
         }));
         Assert.Null(JobRunner.GetBoardCardKey(run with
         {
             TriggerKind = JobTriggerKind.BoardLane,
-            TriggerKey = "board-lane:VB-+23:review:event-1"
+            TriggerKey = "board-lane:xyz-90909-jkjhfdk"
         }));
         Assert.Null(JobRunner.GetBoardCardKey(run with
         {

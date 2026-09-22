@@ -401,23 +401,9 @@ public static class JobRunner
         if (separator <= 0)
             return null;
 
-        var cardKey = remainder[..separator];
-        if (!cardKey.StartsWith("VB-", StringComparison.Ordinal))
-            return null;
-
-        var numberText = cardKey[3..];
-        foreach (var character in numberText)
-        {
-            if (character is < '0' or > '9')
-                return null;
-        }
-
-        if (!int.TryParse(numberText, out var cardNumber) || cardNumber <= 0)
-        {
-            return null;
-        }
-
-        return $"VB-{cardNumber}";
+        // The Board owns the display-key format. The run context only owns this envelope, so keep
+        // the embedded key opaque and allow a future format change without breaking placeholders.
+        return remainder[..separator].ToString();
     }
 
     private static string DescribeAction(JobRunActionRecord action) => action.Kind switch
