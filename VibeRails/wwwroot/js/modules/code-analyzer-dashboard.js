@@ -608,11 +608,12 @@ function renderCodeAnalyzerRadar(documentRef, model) {
     const data = svgElement(documentRef, 'polygon', 'code-analyzer-radar-data');
     data.setAttribute('points', pointString);
     const nodes = svgElement(documentRef, 'g', 'code-analyzer-radar-nodes');
-    dataPoints.forEach(point => {
+    dataPoints.forEach((point, index) => {
         const node = svgElement(documentRef, 'circle');
         node.setAttribute('cx', point.x.toFixed(2));
         node.setAttribute('cy', point.y.toFixed(2));
         node.setAttribute('r', '3');
+        node.style?.setProperty?.('--radar-node-delay', `${index * 70}ms`);
         nodes.append(node);
     });
     const center = svgElement(documentRef, 'circle', 'code-analyzer-radar-center');
@@ -622,6 +623,29 @@ function renderCodeAnalyzerRadar(documentRef, model) {
     svg.append(grid, axes, glow, data, nodes, center, labels);
     host.append(svg);
     return host;
+}
+
+function animateCodeAnalyzerNumbers(entries, ring, ringTarget) {
+    const requestFrame = globalThis.requestAnimationFrame;
+    if (typeof requestFrame !== 'function' || !entries.length) return;
+
+    const clock = typeof globalThis.performance?.now === 'function'
+        ? () => globalThis.performance.now()
+        : () => Date.now();
+    const start = clock();
+    const duration = 1050;
+    for (const entry of entries) entry.node.textContent = entry.format(0);
+    if (Number.isFinite(ringTarget)) setStyleProperty(ring, '--score', '0');
+
+    const tick = timestamp => {
+        const progress = Math.min(1, Math.max(0, (timestamp - start) / duration));
+        // Ease out so the values feel like a scan settling into a measured result.
+        const eased = 1 - Math.pow(1 - progress, 3);
+        for (const entry of entries) entry.node.textContent = entry.format(entry.target * eased);
+        if (Number.isFinite(ringTarget)) setStyleProperty(ring, '--score', String(ringTarget * eased));
+        if (progress < 1) requestFrame(tick);
+    };
+    requestFrame(tick);
 }
 
 /**
@@ -639,6 +663,7 @@ export function renderCodeAnalyzerBrief(host, response, documentRef = globalThis
 
     const model = buildCodeAnalyzerDashboardModel(response);
     const onOpenDetails = typeof options.onOpenDetails === 'function' ? options.onOpenDetails : null;
+    const animatedNumbers = [];
 
     const brief = element(documentRef, 'article', 'code-analyzer-brief');
     setTone(brief, model.tone);
@@ -646,7 +671,15 @@ export function renderCodeAnalyzerBrief(host, response, documentRef = globalThis
     const ring = element(documentRef, 'div', 'code-analyzer-brief-ring');
     setStyleProperty(ring, '--score', String(model.health || 0));
     const ringCenter = element(documentRef, 'div', 'code-analyzer-brief-ring-center');
-    ringCenter.append(element(documentRef, 'strong', '', formatScore(model.health)));
+    const scoreValue = element(documentRef, 'strong', '', formatScore(model.health));
+    if (Number.isFinite(model.health)) {
+        animatedNumbers.push({
+            node: scoreValue,
+            target: model.health,
+            format: value => Number.isInteger(model.health) ? String(Math.round(value)) : value.toFixed(1)
+        });
+    }
+    ringCenter.append(scoreValue);
     ringCenter.title = 'Quality score out of 100 — higher is healthier';
     ring.append(ringCenter);
     brief.append(ring);
@@ -677,7 +710,15 @@ export function renderCodeAnalyzerBrief(host, response, documentRef = globalThis
     for (const [value, label, tone] of statDefinitions) {
         const stat = element(documentRef, 'span', 'code-analyzer-brief-stat');
         setTone(stat, value > 0 ? tone : 'neutral');
-        stat.append(element(documentRef, 'strong', '', value), element(documentRef, 'span', '', label));
+        const statValue = element(documentRef, 'strong', '', value);
+        if (Number.isFinite(Number(value))) {
+            animatedNumbers.push({
+                node: statValue,
+                target: Number(value),
+                format: animatedValue => String(Math.round(animatedValue))
+            });
+        }
+        stat.append(statValue, element(documentRef, 'span', '', label));
         stats.append(stat);
     }
     brief.append(stats);
@@ -725,6 +766,7 @@ export function renderCodeAnalyzerBrief(host, response, documentRef = globalThis
     brief.append(renderCodeAnalyzerRadar(documentRef, model));
 
     host.replaceChildren?.(brief);
+    animateCodeAnalyzerNumbers(animatedNumbers, ring, model.health);
     host.hidden = false;
     return true;
 }

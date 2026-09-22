@@ -12320,6 +12320,7 @@ body.vb-rules-workspace-active .rules-dashboard-host {
    grade and action remain in the DOM, while the profile chart becomes the anchor
    that explains the score at a glance. */
 .code-analyzer-brief {
+    position: relative;
     display: grid;
     grid-template-columns: auto minmax(160px, 1fr) minmax(215px, 0.9fr);
     grid-template-areas:
@@ -12328,8 +12329,25 @@ body.vb-rules-workspace-active .rules-dashboard-host {
         "categories categories open";
     align-items: center;
     min-height: 172px;
+    overflow: hidden;
     animation: code-analyzer-brief-reveal 0.58s cubic-bezier(.2, .8, .25, 1) both;
 }
+
+.code-analyzer-brief::after {
+    position: absolute;
+    z-index: 0;
+    top: 0;
+    bottom: 0;
+    left: -35%;
+    width: 28%;
+    background: linear-gradient(105deg, transparent, color-mix(in srgb, var(--analyzer-tone) 12%, transparent), transparent);
+    content: '';
+    pointer-events: none;
+    transform: skewX(-18deg);
+    animation: code-analyzer-brief-sweep 1.25s ease-out 0.12s both;
+}
+
+.code-analyzer-brief > * { position: relative; z-index: 1; }
 
 .code-analyzer-brief-ring {
     grid-area: ring;
@@ -12342,7 +12360,40 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     grid-area: open;
     justify-self: end;
     margin-left: 0;
+    animation: code-analyzer-brief-control-in 0.45s ease-out 0.62s both;
 }
+
+.code-analyzer-brief-headline .code-analyzer-rating-badge {
+    width: 58px;
+    height: 58px;
+    flex: 0 0 auto;
+    border-radius: 16px;
+    font-size: 1.9rem;
+    line-height: 1;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--analyzer-tone) 12%, transparent),
+        0 0 24px color-mix(in srgb, var(--analyzer-tone) 18%, transparent);
+    animation: code-analyzer-grade-pop 0.72s cubic-bezier(.2, .9, .25, 1) 0.18s both;
+}
+
+.code-analyzer-brief-copy h3 { font-size: 1.08rem; }
+
+.code-analyzer-brief-stat {
+    animation: code-analyzer-stat-in 0.42s cubic-bezier(.2, .8, .25, 1) both;
+}
+
+.code-analyzer-brief-stat:nth-child(1) { animation-delay: 0.28s; }
+.code-analyzer-brief-stat:nth-child(2) { animation-delay: 0.36s; }
+.code-analyzer-brief-stat:nth-child(3) { animation-delay: 0.44s; }
+.code-analyzer-brief-stat:nth-child(4) { animation-delay: 0.52s; }
+.code-analyzer-brief-stat:nth-child(5) { animation-delay: 0.60s; }
+
+.code-analyzer-brief-category {
+    animation: code-analyzer-category-in 0.42s cubic-bezier(.2, .8, .25, 1) both;
+}
+
+.code-analyzer-brief-category:nth-child(1) { animation-delay: 0.38s; }
+.code-analyzer-brief-category:nth-child(2) { animation-delay: 0.46s; }
+.code-analyzer-brief-category:nth-child(3) { animation-delay: 0.54s; }
 
 .code-analyzer-radar {
     position: relative;
@@ -12441,6 +12492,7 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     transform-box: fill-box;
     transform-origin: center;
     animation: code-analyzer-radar-node-in 0.45s cubic-bezier(.2, .8, .25, 1) both;
+    animation-delay: var(--radar-node-delay, 0ms);
 }
 
 .code-analyzer-radar-center {
@@ -12463,6 +12515,33 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 @keyframes code-analyzer-ring-reveal {
     from { opacity: 0; transform: scale(0.72) rotate(-18deg); }
     to { opacity: 1; transform: scale(1) rotate(0); }
+}
+
+@keyframes code-analyzer-grade-pop {
+    from { opacity: 0; transform: scale(0.45) rotate(-12deg); }
+    68% { opacity: 1; transform: scale(1.08) rotate(2deg); }
+    to { opacity: 1; transform: scale(1) rotate(0); }
+}
+
+@keyframes code-analyzer-stat-in {
+    from { opacity: 0; transform: translateY(7px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes code-analyzer-category-in {
+    from { opacity: 0; transform: translateX(-8px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes code-analyzer-brief-control-in {
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes code-analyzer-brief-sweep {
+    from { left: -35%; opacity: 0; }
+    20% { opacity: 1; }
+    to { left: 125%; opacity: 0; }
 }
 
 @keyframes code-analyzer-radar-reveal {
@@ -19617,7 +19696,12 @@ body.performance-mode .brand-text-sm {
 
 @media (prefers-reduced-motion: reduce) {
     .code-analyzer-brief,
+    .code-analyzer-brief::after,
     .code-analyzer-brief-ring,
+    .code-analyzer-brief-headline .code-analyzer-rating-badge,
+    .code-analyzer-brief-stat,
+    .code-analyzer-brief-category,
+    .code-analyzer-brief-open,
     .code-analyzer-radar-glow,
     .code-analyzer-radar-data,
     .code-analyzer-radar-nodes circle,
