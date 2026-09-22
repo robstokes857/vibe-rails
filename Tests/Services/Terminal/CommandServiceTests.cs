@@ -838,7 +838,8 @@ public partial class CommandServiceTests : IDisposable
         bool grokLlmProxyEnabled = false,
         string grokLlmProxyMode = CodexLlmProxySettings.ModeSubscription,
         string codexLlmProxyMode = CodexLlmProxySettings.ModeSubscription,
-        ILlmProxySessionState? sessionState = null)
+        ILlmProxySessionState? sessionState = null,
+        Action<Mock<IFileService>>? configureFiles = null)
     {
         var fileService = new Mock<IFileService>();
         fileService.Setup(x => x.GetUserProfilePath()).Returns(Path.Combine(Path.GetTempPath(), "viberails-grok-tests"));
@@ -855,6 +856,7 @@ public partial class CommandServiceTests : IDisposable
         fileService
             .Setup(x => x.ReadAllTextAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(string.Empty);
+        configureFiles?.Invoke(fileService);
         var envService = new LlmCliEnvironmentService(
             new ClaudeLlmCliEnvironment(fileService.Object),
             new CodexLlmCliEnvironment(fileService.Object),

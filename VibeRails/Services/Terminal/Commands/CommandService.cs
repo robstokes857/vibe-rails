@@ -142,6 +142,8 @@ public class CommandService : ICommandService
         // concurrent settings save and the launch hits the disk once, not once per field.
         var proxySettings = _llmProxySettings.GetSettings();
         var launchArgs = BuildLaunchArgs(llm, extraArgs, proxySettings, sessionId);
+        if (llm == LLM.Codex && !string.IsNullOrEmpty(envName))
+            launchArgs = await SkipMissingCodexDesktopBridgeAsync(envName, launchArgs);
         if (llm == LLM.Codex && !string.IsNullOrWhiteSpace(sessionId))
         {
             // Codex filters its stdio server environment. Forward identity by NAME
@@ -322,6 +324,60 @@ public class CommandService : ICommandService
             OpenCodeProxyActive: openCodeProxyActive || grokProxyActive,
             Executable: cli,
             Argv: directArgv);
+    }
+
+    private async Task<string[]> SkipMissingCodexDesktopBridgeAsync(string envName, string[] launchArgs)
+    {
+        // A selected profile or explicit server override may replace the copied command.
+        // Let Codex resolve those instead of guessing the effective configuration here.
+        if (HasCodexDesktopBridgeOverride(launchArgs))
+            return launchArgs;
+
+        var codexHome = _envService.GetEnvironmentVariables(envName, LLM.Codex)["CODEX_HOME"];
+        var path = Path.Combine(codexHome, "config.toml");
+        try
+        {
+            if (!_fileService.FileExists(path))
+                return launchArgs;
+
+            var content = await _fileService.ReadAllTextAsync(path, CancellationToken.None);
+            var command = CodexLlmCliEnvironment.GetOptionalDesktopNodeReplCommand(content);
+            if (command is null || _fileService.FileExists(command))
+                return launchArgs;
+
+            Log.Information("[Codex] Skipping the missing desktop node_repl runtime for environment {EnvironmentName}", envName);
+            // Launch-local, shared by shell and direct argv (Automation) launches. Do not
+            // rewrite the copied config or interfere with the desktop app's global config.
+            return ["--config", "mcp_servers.node_repl.enabled=false", .. launchArgs];
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Log.Warning(ex, "[Codex] Could not inspect the copied desktop MCP config for {EnvironmentName}", envName);
+            return launchArgs;
+        }
+    }
+
+    private static bool HasCodexDesktopBridgeOverride(string[] args)
+    {
+        for (var i = 0; i < args.Length && args[i] != "--"; i++)
+        {
+            var arg = args[i];
+            if (arg == "--profile" || arg.StartsWith("--profile=", StringComparison.Ordinal)
+                || arg.StartsWith("-p", StringComparison.Ordinal))
+                return true;
+
+            string? config = null;
+            if ((arg == "-c" || arg == "--config") && i + 1 < args.Length)
+                config = args[++i];
+            else if (arg.StartsWith("--config=", StringComparison.Ordinal))
+                config = arg[9..];
+            else if (arg.StartsWith("-c", StringComparison.Ordinal) && arg.Length > 2)
+                config = arg[2..].TrimStart('=');
+
+            if (config?.TrimStart().StartsWith("mcp_servers.node_repl", StringComparison.Ordinal) == true)
+                return true;
+        }
+        return false;
     }
 
     /// <summary>

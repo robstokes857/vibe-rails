@@ -62,6 +62,12 @@ IBaseLlmCliLauncher (Interface)
 - **Executable**: `codex`
 - **Config Env Var**: `CODEX_HOME`
 - **Config Path**: `{envBasePath}/{envName}/codex`
+- Custom environments copy the user's Codex config. If that copy contains the Windows
+  desktop app's optional `node_repl` bridge and its versioned executable has been removed,
+  `CommandService` disables only that server for the launched session using
+  `--config mcp_servers.node_repl.enabled=false`. This covers Automation and interactive
+  launches without rewriting either config. Working runtimes, required/custom servers,
+  explicit server overrides and selected profiles retain their normal behavior.
 
 ### AntigravityLlmCliLauncher
 - **Executable**: `agy` (note: the binary name differs from the product/enum name "Antigravity"; the in-app PTY maps it in `CommandService.PrepareSessionAsync`)
