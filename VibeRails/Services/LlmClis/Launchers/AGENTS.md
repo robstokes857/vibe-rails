@@ -17,8 +17,8 @@ All launchers build commands using the unified `--env` flag:
 Only `--env` is supported for environment bootstrap mode. `ILlmParser.Parse()` does steps 1–2
 and returns `LLM.NotSet` for anything else; the caller (`CliLoop.RunTerminalWithWebAsync`) then
 performs step 3:
-1. The special-case strings `"glm-5.2"` / `"grok-4.6"` / `"glm-5.3"` / `"deepseek-v4-pro"` / `"kimi-k3"` (can't be a C# enum name) →
-   GLM 5.2 / GLM 5.3 / DeepSeek V4 Pro / Kimi K3 are OpenCode-backed pseudo-CLI base launches; `"grok-4.6"` is the native Grok Build CLI
+1. The special-case strings `"glm-5.2"` / `"grok"` / `"glm-5.3"` / `"deepseek-v4-pro"` / `"kimi-k3"` (can't be a C# enum name) →
+   GLM 5.2 / GLM 5.3 / DeepSeek V4 Pro / Kimi K3 are OpenCode-backed pseudo-CLI base launches; `"grok"` is the native Grok Build CLI (`"grok-4.6"` still parses as that same CLI)
 2. If it matches an LLM enum name (claude/codex/antigravity/copilot/shell/opencode, case-insensitive)
    → base CLI launch
 3. Otherwise → custom environment name, looked up in DB via `FindEnvironmentByNameAsync()`
@@ -45,7 +45,7 @@ IBaseLlmCliLauncher (Interface)
 > **Pseudo-CLIs:** `LLM.Glm52`, `LLM.Glm53`, `LLM.DeepSeekV4Pro`, and `LLM.KimiK3` (OpenCode launched with a pinned `--model` flag)
 > reuse `IOpencodeLlmCliLauncher`. Their binary is `opencode` (mapped in
 > `CommandService.PrepareSessionAsync`), and the model arg is injected server-side. `LLM.Grok46`
-> is the native Grok Build CLI (`GrokLlmCliLauncher`, binary `grok`, pin `-m`/`--model=grok-4.6`).
+> is the native Grok Build CLI (`GrokLlmCliLauncher`, binary `grok`). Its model is selectable (`-m grok-4.7` / `-m grok-4.6`); a bare launch omits the flag.
 > `LLM.Shell` is a plain shell terminal with no launcher (handled specially in
 > `CommandService.PrepareSessionAsync`). Native Grok attaches the existing `/llm/xai` Token Saver
 > route via `GROK_CLI_CHAT_PROXY_BASE_URL` + `env_http_headers` (not a second listener, not
@@ -74,7 +74,7 @@ IBaseLlmCliLauncher (Interface)
 - **Config Env Var**: none — launch-flag-only. Do **not** set `GROK_HOME` (that isolates `auth.json`).
 - **Proxy**: `GROK_CLI_CHAT_PROXY_BASE_URL` + `GROK_MODELS_BASE_URL` → `{apiBase}/llm/xai/v1`.
   Session/tab headers via `env_http_headers` in `~/.grok/config.toml` (names only).
-- **YOLO**: `--yolo`. **Model pin**: `--model=grok-4.6`. **Initial prompt**: trailing positional
+- **YOLO**: `--yolo`. **Model**: `-m` / `--model` when chosen (`grok-4.7`, `grok-4.6`, or omitted for Grok's default). **Initial prompt**: trailing positional
   (never `-p`, which is headless). **MCP**: `grok mcp remove` + `grok mcp add --scope user`.
 
 ### OpencodeLlmCliLauncher

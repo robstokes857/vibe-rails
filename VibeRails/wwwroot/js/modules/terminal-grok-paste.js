@@ -1,10 +1,11 @@
-export const NATIVE_GROK_CLI = 'grok-4.6';
+export const NATIVE_GROK_CLI = 'grok';
 
 const PASTE_START = '\x1b[200~';
 const PASTE_END = '\x1b[201~';
 
 export function isNativeGrokCli(cli) {
-    return (cli || '').toLowerCase() === NATIVE_GROK_CLI;
+    const value = (cli || '').toLowerCase();
+    return value === NATIVE_GROK_CLI || value === 'grok-4.6';
 }
 
 function stripEmbeddedPasteMarkers(text) {

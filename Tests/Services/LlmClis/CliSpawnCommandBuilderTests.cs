@@ -217,7 +217,7 @@ public class CliSpawnCommandBuilderTests
     [Theory]
     [InlineData(LLM.OpenCode, "opencode")]
     [InlineData(LLM.Glm52, "glm-5.2")]
-    [InlineData(LLM.Grok46, "grok-4.6")]
+    [InlineData(LLM.Grok46, "grok")]
     [InlineData(LLM.Glm53, "glm-5.3")]
     [InlineData(LLM.DeepSeekV4Pro, "deepseek-v4-pro")]
     [InlineData(LLM.KimiK3, "kimi-k3")]

@@ -132,7 +132,6 @@ public class CommandService : ICommandService
             extraArgs = llm switch
             {
                 LLM.Glm52 => WithPinnedModel(extraArgs, "zai/glm-5.2"),
-                LLM.Grok46 => WithPinnedModel(extraArgs, "grok-4.6"),
                 LLM.Glm53 => WithPinnedModel(extraArgs, "zai-coding-plan/glm-5.3"),
                 LLM.DeepSeekV4Pro => WithPinnedModel(extraArgs, "deepseek/deepseek-v4-pro"),
                 LLM.KimiK3 => WithPinnedModel(extraArgs, "moonshotai/kimi-k3"),

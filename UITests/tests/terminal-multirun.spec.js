@@ -142,7 +142,7 @@ test.describe('terminal-multirun', () => {
                 'base:glm-5.3',
                 'base:deepseek-v4-pro',
                 'base:kimi-k3',
-                'base:grok-4.6',
+                'base:grok',
                 'base:opencode',
                 'base:copilot',
                 'base:antigravity'

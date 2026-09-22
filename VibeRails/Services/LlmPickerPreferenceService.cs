@@ -32,7 +32,7 @@ public sealed class LlmPickerPreferenceService(IRepository repository) : ILlmPic
         new("glm-5.3", "GLM 5.3"),
         new("deepseek-v4-pro", "DeepSeek V4 Pro"),
         new("kimi-k3", "Kimi K3"),
-        new("grok-4.6", "Grok 4.6"),
+        new("grok", "Grok"),
         new("opencode", "OpenCode"),
         new("copilot", "Copilot"),
         new("antigravity", "Antigravity"),
@@ -149,7 +149,7 @@ public sealed class LlmPickerPreferenceService(IRepository repository) : ILlmPic
             .ToList();
 
         var disabledBaseKeys = document?.Version == DocumentVersion
-            ? document.DisabledBaseKeys.ToHashSet(StringComparer.Ordinal)
+            ? document.DisabledBaseKeys.Select(CanonicalizeSavedKey).ToHashSet(StringComparer.Ordinal)
             : [];
         baseCatalog = ApplySavedOrder(
             baseCatalog,
@@ -183,7 +183,8 @@ public sealed class LlmPickerPreferenceService(IRepository repository) : ILlmPic
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var key in savedOrder)
         {
-            if (seen.Add(key) && byKey.TryGetValue(key, out var item))
+            var canonical = CanonicalizeSavedKey(key);
+            if (seen.Add(canonical) && byKey.TryGetValue(canonical, out var item))
             {
                 ordered.Add(item);
             }
@@ -335,6 +336,23 @@ public sealed class LlmPickerPreferenceService(IRepository repository) : ILlmPic
 
     private static string ToPickerCli(LLM llm) =>
         LlmParser.ToWireName(llm).ToLowerInvariant();
+
+    // The Grok CLI used to be stored as grok-4.6. Saved order and hidden keys from that
+    // wire name still refer to the same catalog row.
+    private static string CanonicalizeSavedKey(string key)
+    {
+        if (key.Equals("base:grok-4.6", StringComparison.OrdinalIgnoreCase))
+            return "base:grok";
+
+        const string suffix = ":grok-4.6";
+        if (key.StartsWith("env:", StringComparison.OrdinalIgnoreCase)
+            && key.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Concat(key.AsSpan(0, key.Length - suffix.Length), ":grok");
+        }
+
+        return key;
+    }
 
     private sealed record BasePickerItem(string Cli, string Label);
 }

@@ -31,6 +31,7 @@ public sealed class EnvironmentRoutesNameCollisionTests
     [InlineData("  claude  ")]  // the name is trimmed before it is stored, so it has to be trimmed before it is checked
     [InlineData("3")]           // Enum.TryParse accepts the underlying numbers, so digits shadow a CLI too
     [InlineData("kimi-k3")]     // no dot, so the character rules pass it and the CLI check below is what refuses it
+    [InlineData("grok")]
     public async Task CreateEnvironment_RefusesANameThatResolvesToACli(string name)
     {
         var (app, repository) = await StartAppAsync();

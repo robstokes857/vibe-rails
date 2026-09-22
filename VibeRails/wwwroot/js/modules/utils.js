@@ -7,7 +7,7 @@ export function getLlmName(llmEnum) {
         4: 'Copilot',
         6: 'OpenCode',
         7: 'GLM 5.2',
-        8: 'Grok 4.6',
+        8: 'Grok',
         9: 'GLM 5.3',
         10: 'DeepSeek V4 Pro',
         11: 'Kimi K3'
@@ -46,8 +46,28 @@ export function formatRelativeTime(dateString) {
     return date.toLocaleDateString();
 }
 
+export function canonicalLlmCli(cli) {
+    const value = (cli || '').toString().trim().toLowerCase();
+    return value === 'grok-4.6' ? 'grok' : value;
+}
+
+// Saved picker keys from when Grok's wire name was grok-4.6. Other keys keep their
+// spelling; only that retired CLI id is rewritten.
+export function canonicalLlmSelection(selection) {
+    const value = (selection || '').toString().trim();
+    if (!value) return '';
+    const lower = value.toLowerCase();
+    if (lower.startsWith('base:')) return `base:${canonicalLlmCli(value.slice(5))}`;
+    if (lower.startsWith('env:')) {
+        const parts = value.split(':');
+        if (parts.length >= 3) return `env:${parts[1]}:${canonicalLlmCli(parts.slice(2).join(':'))}`;
+    }
+    if (lower === 'grok-4.6') return 'grok';
+    return value;
+}
+
 export function getCliBrand(cli) {
-    const key = (cli || '').toLowerCase();
+    const key = canonicalLlmCli(cli);
     const isLightSurface = typeof document !== 'undefined'
         && (document.body?.classList.contains('vscode-light')
             || document.body?.classList.contains('vscode-high-contrast-light'));
@@ -140,8 +160,8 @@ export function getCliBrand(cli) {
             className: 'badge-cli-kimi',
             accentColor: isLightSurface ? '#000000' : '#ffffff'
         },
-        'grok-4.6': {
-            label: 'Grok 4.6',
+        grok: {
+            label: 'Grok',
             logo: getAssetPath('assets/img/grok.svg'),
             className: 'badge-cli-grok',
             // Cool off-white so the mark reads on the dark tab strip without
@@ -167,7 +187,7 @@ export const BASE_LLM_CHOICES = Object.freeze([
     { cli: 'glm-5.3', label: 'GLM 5.3' },
     { cli: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
     { cli: 'kimi-k3', label: 'Kimi K3' },
-    { cli: 'grok-4.6', label: 'Grok 4.6' },
+    { cli: 'grok', label: 'Grok' },
     { cli: 'opencode', label: 'OpenCode' },
     { cli: 'copilot', label: 'Copilot' },
     { cli: 'antigravity', label: 'Antigravity' }
@@ -674,7 +694,7 @@ function positionTomSelectDropdown(ts) {
 }
 
 export function parseLlmSelection(selection, environments = []) {
-    const value = (selection || '').toString().trim();
+    const value = canonicalLlmSelection(selection);
     if (!value) {
         return {
             kind: null,
@@ -687,7 +707,7 @@ export function parseLlmSelection(selection, environments = []) {
     }
 
     if (value.startsWith('base:')) {
-        const cli = normalizeCliValue(value.slice(5));
+        const cli = canonicalLlmCli(value.slice(5));
         const baseCli = [...BASE_LLM_CHOICES, SHELL_LLM_CHOICE].find((item) => item.cli === cli);
         return {
             kind: 'base',
@@ -702,7 +722,7 @@ export function parseLlmSelection(selection, environments = []) {
     if (value.startsWith('env:')) {
         const parts = value.split(':');
         const envId = Number.parseInt(parts[1], 10);
-        const cli = normalizeCliValue(parts.slice(2).join(':'));
+        const cli = canonicalLlmCli(parts.slice(2).join(':'));
         const environment = (Array.isArray(environments) ? environments : []).find((item) =>
             Number.parseInt(item?.id, 10) === envId
         );

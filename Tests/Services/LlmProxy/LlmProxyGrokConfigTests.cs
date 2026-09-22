@@ -136,7 +136,14 @@ public sealed class LlmProxyGrokConfigTests
 
         var merged = LlmProxyGrokConfig.MergeEnvHttpHeaders(grokNormalized);
 
-        Assert.Equal(grokNormalized, merged);
+        // Existing mapped models stay as grok wrote them. grok-4.7 was not in this file, so
+        // the merge adds it once; a second pass must not append it again.
+        Assert.Contains("[model.\"grok-4.6\".env_http_headers]", merged);
+        Assert.Contains("[model.grok-build.env_http_headers]", merged);
+        Assert.Contains("[model.\"grok-4.5\".env_http_headers]", merged);
+        Assert.True(LlmProxyGrokConfig.ContainsMappedEnvHttpHeaders(merged, "grok-4.7"));
+        Assert.Equal(1, CountOccurrences(merged, "[model.\"grok-4.7\"]"));
+        Assert.Equal(merged, LlmProxyGrokConfig.MergeEnvHttpHeaders(merged));
     }
 
     [Fact]

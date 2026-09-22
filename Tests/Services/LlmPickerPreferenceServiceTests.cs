@@ -24,7 +24,7 @@ public sealed class LlmPickerPreferenceServiceTests
 
         Assert.Equal(
             ["base:claude", "base:codex", "base:glm-5.2", "base:glm-5.3", "base:deepseek-v4-pro",
-             "base:kimi-k3", "base:grok-4.6", "base:opencode", "base:copilot", "base:antigravity", "base:shell"],
+             "base:kimi-k3", "base:grok", "base:opencode", "base:copilot", "base:antigravity", "base:shell"],
             response.Items.Where(item => item.Kind == "base").Select(item => item.Key));
         Assert.True(response.Items.Single(item => item.Key == "env:10:claude").Enabled);
         Assert.False(response.Items.Single(item => item.Key == "env:11:codex").Enabled);
@@ -108,11 +108,34 @@ public sealed class LlmPickerPreferenceServiceTests
         Assert.Equal("base:glm-5.3", response.Items[3].Key);
         Assert.Equal("base:deepseek-v4-pro", response.Items[4].Key);
         Assert.Equal("base:kimi-k3", response.Items[5].Key);
-        Assert.Equal("base:grok-4.6", response.Items[6].Key);
+        Assert.Equal("base:grok", response.Items[6].Key);
         Assert.DoesNotContain(response.Items, item => item.Key.Contains("999", StringComparison.Ordinal));
         Assert.Equal(
             ["env:30:claude", "env:31:opencode"],
             response.Items.Where(item => item.Kind == "environment").Select(item => item.Key));
+    }
+
+    [Fact]
+    public async Task GetAsync_MapsRetiredGrokWireNameOntoGrok()
+    {
+        var document = new LlmPickerPreferenceDocument(
+            1,
+            ["base:grok-4.6", "base:claude"],
+            ["env:12:grok-4.6"],
+            ["base:grok-4.6"]);
+        var json = JsonSerializer.Serialize(
+            document,
+            AppJsonSerializerContext.Default.LlmPickerPreferenceDocument);
+        var service = new LlmPickerPreferenceService(
+            NewRepository([Environment(12, "Review", LLM.Grok46)], json).Object);
+
+        var response = await service.GetAsync(TestContext.Current.CancellationToken);
+
+        var grok = response.Items.Single(item => item.Key == "base:grok");
+        Assert.Equal(0, grok.Order);
+        Assert.False(grok.Enabled);
+        Assert.Equal("Grok", grok.Label);
+        Assert.Equal("env:12:grok", response.Items.Single(item => item.Kind == "environment").Key);
     }
 
     [Theory]

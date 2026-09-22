@@ -5,7 +5,8 @@ import {
     escapeHtml,
     getCliBrand,
     isConfirmDialogOpen,
-    populateLlmSelectionItemsSelect
+    populateLlmSelectionItemsSelect,
+    canonicalLlmSelection
 } from './utils.js';
 
 const PREFERENCES_ENDPOINT = '/api/v1/llm-picker/preferences';
@@ -194,9 +195,9 @@ export class LlmPickerController {
     _renderPicker(record, { useConfiguredSelection = false } = {}) {
         const { selectEl, configuration } = record;
         const previousTomSelect = selectEl.tomselect;
-        const selectedValue = useConfiguredSelection
+        const selectedValue = canonicalLlmSelection(useConfiguredSelection
             ? String(configuration.selectedValue || '')
-            : String(previousTomSelect?.getValue?.() || selectEl.value || '');
+            : String(previousTomSelect?.getValue?.() || selectEl.value || ''));
         const searchValue = previousTomSelect?.control_input?.value || '';
         const wasOpen = Boolean(previousTomSelect?.isOpen);
         const optionItems = this._buildOptionItems(configuration, selectedValue);

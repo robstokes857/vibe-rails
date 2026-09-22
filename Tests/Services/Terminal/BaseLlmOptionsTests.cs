@@ -47,8 +47,26 @@ public sealed class BaseLlmOptionsTests
     [InlineData(LLM.Codex, "model\u001b[201~", "", "")]
     [InlineData(LLM.Glm53, "zai/glm-5.3", "", "")]
     [InlineData(LLM.Claude, "", "ultra", "")]
+    [InlineData(LLM.Grok46, "", "none", "")]
+    [InlineData(LLM.Grok46, "", "minimal", "")]
+    [InlineData(LLM.Grok46, "", "max", "")]
     [InlineData(LLM.OpenCode, "", "high", "")]
     [InlineData(LLM.Shell, "", "", "plan")]
     public void InvalidOptionsAreRejected(LLM cli, string model, string effort, string mode) =>
         Assert.Throws<ArgumentException>(() => BaseLlmOptionsBuilder.Normalize(cli, new(model, effort, mode)));
+
+    [Fact]
+    public void Grok46EffortIsLowMediumHighXhigh()
+    {
+        Assert.Equal(["--effort", "low"], BaseLlmOptionsBuilder.BuildArguments(LLM.Grok46, new(Effort: "low")));
+        Assert.Equal(["--effort", "xhigh"], BaseLlmOptionsBuilder.BuildArguments(LLM.Grok46, new(Effort: "xhigh")));
+    }
+
+    [Fact]
+    public void GrokModelIsSelectable()
+    {
+        Assert.Equal(["--model", "grok-4.7"], BaseLlmOptionsBuilder.BuildArguments(LLM.Grok46, new(Model: "grok-4.7")));
+        Assert.Equal(["--model", "grok-4.6"], BaseLlmOptionsBuilder.BuildArguments(LLM.Grok46, new(Model: "grok-4.6")));
+        Assert.Empty(BaseLlmOptionsBuilder.BuildArguments(LLM.Grok46, new(Model: "")));
+    }
 }

@@ -18,7 +18,7 @@
 - **Rule Enforcement** - Define and enforce coding standards like test coverage, cyclomatic complexity, logging practices, and more. LLMs fix their errors before code can be pushed or before the tech debt get astronomical.
 - **Token Savings** - Learn your codebase and how you describe it, providing LLMs with smart file hints to reduce token usage and costs
 - **Rule Files (`vc.rules.md`)** - Create and manage VibeRails rule files that gate every commit with WARN/COMMIT/STOP enforcement
-- **Web Terminal** - Launch CLIs directly in the browser with xterm.js. Select base CLIs (Claude, Codex, Antigravity, Copilot, OpenCode, GLM 5.2, Grok 4.6) or custom environments from a visual dropdown with optgroups
+- **Web Terminal** - Launch CLIs directly in the browser with xterm.js. Select base CLIs (Claude, Codex, Antigravity, Copilot, OpenCode, GLM 5.2, Grok) or custom environments from a visual dropdown with optgroups
 - **Automations** - Ordered workflows of repository `.py`, `.ps1`, and `.sh` scripts plus at most one optional Worker, on a schedule or a commit trigger. They run while VibeRails is open.
 
 ---

@@ -199,7 +199,7 @@ test.describe('terminal-multitab', () => {
 
     test('Grok paste is always bracketed and CRLF-normalized even when ?2004 is off', async ({ page }) => {
         await navigateToRules(page);
-        await launchWebTerminal(page, 'grok-4.6');
+        await launchWebTerminal(page, 'grok');
 
         const tabId = /** @type {string} */ (
             await page.locator(selectors.tabItems).first().getAttribute('data-tab-id')
@@ -235,7 +235,7 @@ test.describe('terminal-multitab', () => {
             };
         }, tabId);
 
-        expect((grokPaste.cli || '').toLowerCase()).toBe('grok-4.6');
+        expect((grokPaste.cli || '').toLowerCase()).toBe('grok');
         expect(grokPaste.bracketedPasteEnabled).toBe(false);
         expect(grokPaste.oversizedAccepted).toBe(false);
         expect(grokPaste.payloads).toEqual(['\x1b[200~‣ line one\nline two\x1b[201~']);

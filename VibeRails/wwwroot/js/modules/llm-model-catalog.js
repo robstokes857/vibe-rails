@@ -83,6 +83,11 @@ export const LLM_MODEL_OPTIONS = Object.freeze({
         ['moonshotai/kimi-k3', 'moonshotai/kimi-k3'],
         ['xai/grok-4.6', 'xai/grok-4.6'],
         ['opencode/gpt-5.1-codex', 'opencode/gpt-5.1-codex (Zen)'],
+    ],
+    'grok': [
+        ['', 'Default (Grok recommended)'],
+        ['grok-4.7', 'grok-4.7'],
+        ['grok-4.6', 'grok-4.6']
     ]
 });
 

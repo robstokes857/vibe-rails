@@ -234,7 +234,7 @@ public sealed class BoardSelectionTests
     public void Format_RoundTrips()
     {
         Assert.Equal("env:3:claude", BoardSelection.Format(LLM.Claude, 3));
-        Assert.Equal("base:grok-4.6", BoardSelection.Format(LLM.Grok46, null));
+        Assert.Equal("base:grok", BoardSelection.Format(LLM.Grok46, null));
     }
 }
 

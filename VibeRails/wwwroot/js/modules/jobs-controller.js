@@ -32,7 +32,9 @@ const LLM_BY_CLI = Object.freeze({
     'glm-5.3': LLM.GLM_53,
     'deepseek-v4-pro': LLM.DEEPSEEK_V4_PRO,
     'kimi-k3': LLM.KIMI_K3,
-    'grok-4.6': LLM.GROK_46
+    // grok-4.6 is the retired wire name. grok must stay last so CLI_BY_LLM emits it.
+    'grok-4.6': LLM.GROK_46,
+    grok: LLM.GROK_46
 });
 
 const CLI_BY_LLM = Object.freeze(Object.fromEntries(

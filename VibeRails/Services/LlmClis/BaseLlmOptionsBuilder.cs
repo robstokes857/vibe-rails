@@ -31,7 +31,8 @@ public static partial class BaseLlmOptionsBuilder
             LLM.Claude => ["low", "medium", "high", "xhigh", "max"],
             LLM.Codex => ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
             LLM.Antigravity => ["low", "medium", "high"],
-            LLM.Copilot or LLM.Grok46 => ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+            LLM.Copilot => ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+            LLM.Grok46 => ["low", "medium", "high", "xhigh"],
             _ => []
         };
         if (effort.Length > 0 && !efforts.Contains(effort)) throw new ArgumentException("Unsupported effort for this CLI.");
@@ -74,7 +75,7 @@ public static partial class BaseLlmOptionsBuilder
     {
         LLM.Glm52 => "zai/glm-5.2", LLM.Glm53 => "zai-coding-plan/glm-5.3",
         LLM.DeepSeekV4Pro => "deepseek/deepseek-v4-pro", LLM.KimiK3 => "moonshotai/kimi-k3",
-        LLM.Grok46 => "grok-4.6", _ => null
+        _ => null
     };
 
     [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9._/: ()\-]*$")]
