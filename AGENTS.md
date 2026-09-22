@@ -18,6 +18,13 @@ migration command, opt-in flag, manual backup, or closing other VibeRails instan
 Prefer additive changes and preserve older-version compatibility where possible, because
 different versions can run on the same machine.
 
+**Only breaking database changes require separate owner sign-off.** Compatible additive changes
+such as new tables, nullable columns or indexes do not require sign-off or a Board attention flag.
+Keep schema snapshots and relevant compatibility tests current. Breaking changes that remove or
+rewrite stored data, or invalidate older versions' read/write assumptions, require owner review
+before proceeding unless that exact change is already explicitly authorized. This is a contributor
+review requirement, not an acknowledgement or manual step during application startup.
+
 **Debugging uses the normal application state database, `~/.vibe_rails/state.db`.** Do not
 reintroduce a separate debug/development database, a build- or branch-dependent data directory,
 or a permission flag to let Debug builds use the normal database. Do not redirect the app to a
@@ -39,6 +46,18 @@ it is not a precedent for future feature removals.
 For implementation details, read [SQLite instructions](VibeRails.Data.Sqlite/AGENTS.md) and the
 [database reference](VibeRails.Data.Sqlite/DB/AGENTS.md). This policy supersedes contradictory
 historical migration plans or runbooks.
+
+## Board attention flags
+
+Reserve `flagged=true` for important unresolved issues that require the owner's decision or
+intervention: a breaking database change awaiting authorization, a confirmed security or data-loss
+problem, or a consequential blocker the agent cannot resolve within the authorized scope.
+Explain the concrete issue and the decision or action needed in a card comment.
+
+Routine progress, completion, moving to Review, opening a PR, and compatible additive schema
+changes do not warrant an attention flag. Use comments and the normal review workflow for those.
+Clear an agent-set flag once its reason is resolved; do not clear a flag with another unresolved
+reason. An already-authorized change does not need another approval or flag for the same decision.
 
 ## Terminology Note
 

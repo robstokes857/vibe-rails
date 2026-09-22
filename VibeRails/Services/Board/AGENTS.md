@@ -48,7 +48,12 @@ serialization or tool discovery into the Native AOT path.
   readable. Database backups can retain older data; removal is not secure erasure.
 - `Flagged` means **Needs your attention**, independently of `Blocked`. The editor saves it;
   the tile paints red with a flag icon. Agents set/clear `flagged` through `update_board_card`
-  and explain the requested review in a comment. Omitted patch fields leave the flag unchanged.
+  following the root [attention policy](../../../AGENTS.md#board-attention-flags). Reserve it for
+  important unresolved owner decisions or intervention, such as an unauthorized breaking database
+  change or a confirmed security/data-loss problem; explain the issue and requested action in a
+  comment. Routine PR review, completion and compatible additive schema changes do not warrant
+  a flag. Clear an agent-set flag when its reason is resolved and no other reason remains.
+  Omitted patch fields leave the flag unchanged.
 - Commit viewing reads durable snapshots, never the current checkout. Capture from the caller's
   actual checkout, not automatically the source board directory. Reject capture failure before
   creating a link; preserve bounds, truncation markers and unique-prefix handling.

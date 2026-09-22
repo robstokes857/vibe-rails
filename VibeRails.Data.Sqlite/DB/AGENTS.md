@@ -81,7 +81,14 @@ table", so generations stay at or above 1.
 `SchemaMigrations.AppliedBy` records which binary (name, version, configuration, pid, host)
 applied each step. `SqliteStorage.EnsureAllSchemas` brings every store current in one call for
 `Tests/DB/SchemaSnapshotTests.cs`. That test pins the schema of
-every table to `docs/schema/*.sql`; a table change is a diff there and needs the owner's sign-off.
+every table to `docs/schema/*.sql`; keep those snapshots current for every schema change.
+Only breaking database changes require separate owner sign-off, unless the exact change is
+already explicitly authorized. Compatible additive changes (including new tables, nullable
+columns and indexes) do not require sign-off or a Board attention flag. A snapshot diff alone
+is not a reason to request approval. Follow the root [database change policy](../../AGENTS.md#database-change-policy)
+and [Board attention policy](../../AGENTS.md#board-attention-flags); flag only an important
+unresolved issue requiring the owner's decision or intervention. Review happens during development,
+never as a manual acknowledgement or upgrade gate at application startup.
 Use the existing compatibility fixtures when changing a schema or write contract so concurrently
 running versions keep working where possible. Prefer retaining unused tables and columns over
 forcing an incompatible cleanup. Never require database administration to use an update.
