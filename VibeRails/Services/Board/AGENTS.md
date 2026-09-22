@@ -35,8 +35,11 @@ serialization or tool discovery into the Native AOT path.
   for mutations; when resolving names, reject ambiguity. Current lane resolution still needs F5.
 - Keep number allocation, lane renumbering, card writes, attachment membership,
   and commit link/snapshot atomic. Perform slow Git/process work outside write transactions.
-- A session links to at most one card. Reads never claim ownership; writes may auto-link an
-  unlinked session. Unknown session status is not ended (F6).
+- A session may attach to multiple cards within one project. Reads never attach; ordinary writes
+  only auto-link an entirely unlinked session. `attach_board_session(card)` explicitly adds another
+  attachment. Keep the original link as the omitted-card default, falling back to the oldest
+  remaining attachment if removed. Rename/unlink acts on one card/session pair. Unknown session
+  status is not ended (F6); live indicators still depend on the root-local probe.
 - Cards keep one current state. Replacements accept the last write; no description revision,
   expected-description token, history rail, history MCP tool or launch/read revision events.
   Description append runs against the current text inside the same write transaction as the
@@ -49,6 +52,9 @@ serialization or tool discovery into the Native AOT path.
 - Commit viewing reads durable snapshots, never the current checkout. Capture from the caller's
   actual checkout, not automatically the source board directory. Reject capture failure before
   creating a link; preserve bounds, truncation markers and unique-prefix handling.
+  A session's `link_board_commit` call shares that captured snapshot with the explicit target
+  and all attached cards in the project. Resolve membership and write all pairs atomically;
+  repeat calls preserve existing links and snapshots. No new unlink/edit MCP tool is exposed.
 - Explicit Save/Create never starts an agent. Start work saves first, retains normal workspace
   resolution, grants only Board tools, links the session, and stays on the Board. Opening a
   terminal is a Sessions action or **Chat with:**, whose independent shared LLM/environment
@@ -102,9 +108,11 @@ the header displays the full card count. Tests should use realistic asynchronous
 ## Storage changes
 
 Read [database migration instructions](../../../VibeRails.Data.Sqlite/DB/AGENTS.md).
-`board/1`–`board/9` already exist. `board/8` is a breaking retirement (generation 3)
+`board/1`–`board/10` already exist. `board/8` is a breaking retirement (generation 3)
 that drops history tables, WIP limits and removed-file retention through an automatic, backed-up upgrade;
-`board/9` adds the current-state attention flag. Historical migration SQL stays immutable. Add the next numbered migration rather than editing applied SQL.
+`board/9` adds the current-state attention flag. `board/10` adds `BoardAdditionalCardSessions`,
+leaving primary links in `BoardCardSessions` and reading both through the store without a backfill.
+Historical migration SQL stays immutable. Add the next numbered migration rather than editing applied SQL.
 Honor generation checks, automatic backups and transactional migration coordination. Users must
 never need a special command or manual preparation to use a new version. Prefer additive changes
 for concurrently running versions; retire a feature by stopping reads/writes, retaining its tables.

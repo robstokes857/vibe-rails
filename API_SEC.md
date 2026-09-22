@@ -1,5 +1,18 @@
 # API authentication coverage
 
+VB-25 session attachment amendment (2026-09-21): `attach_board_session` adds one explicitly
+granted Board tool (14 total) on the existing HTTP and stdio transports. The only caller argument
+is a card key/id; session identity comes from launch context and project identity from the
+existing resolver. Store writes reject links to another project within the same transaction.
+The existing session REST routes now allow the same session on multiple cards in one project;
+rename/unlink still scopes each pair. No route, listener, credential or middleware is added.
+The existing commit-link tool now shares a captured commit with the caller's attached cards,
+scoped to the resolved project and committed atomically. The session is supplied by launch
+context, never a tool argument; no new unlink/edit capability or grant is added.
+Route enumeration and both mandatory listener searches were repeated: production matches are
+the existing main Kestrel host and non-serving port probe; other matches are test hosts, with no
+cross-runtime matches. This is a scoped change review, not a new full authentication audit.
+
 Board simplification amendment (2026-09-20): removed the description-history GET route and
 MCP history tool. The active inventory is **211 mapped surfaces**, **199 under `/api/v1`**,
 including **37 Board routes**. Card create/update/list/detail now include a boolean `flagged`

@@ -68,7 +68,8 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 | `append_board_note` | `BoardTool.AppendBoardNote` | Append an entry to the card's **agent notes** — the scratchpad for checkpointing findings and working state as the agent goes. Same limits and attribution as a comment; never part of the comment stream or count. Returns the note id. |
 | `get_board_notes` | `BoardTool.GetBoardNotes` | All notes on a card, oldest first (`get_board_card` shows only the most recent ~3,000 characters); optional `since`. |
 | `add_board_attachment` | `BoardTool.AddBoardAttachment` | Attach an agent-written `*.md` / `*.txt` file (UTF-8 text, ≤ 500,000 characters). |
-| `link_board_commit` | `BoardTool.LinkBoardCommit` | Capture a commit from the terminal's checkout and atomically save its sha, metadata and changed-code snapshot on the card. |
+| `link_board_commit` | `BoardTool.LinkBoardCommit` | Capture a commit once from the terminal's checkout and atomically link its snapshot to the target and every card attached to the calling session in the project. Repeat session calls preserve existing links/snapshots. Without a session, links only the target. |
+| `attach_board_session` | `BoardTool.AttachBoardSession` | Explicitly attach the current VibeRails session to another card in the same project. Idempotent; preserves the original default. Future commit-link calls share with all attachments. No session-id argument or card move. |
 > The wire names are what tool callers use. Calling `SearchHistory` (PascalCase) returns "Unknown tool".
 
 ### Kanban board tools (`BoardTool`)
@@ -101,8 +102,9 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
   instruction to use the board ID from `list_boards`. Exact IDs take precedence and remain scoped
   to the current project.
 - **Card default**: every `card` argument accepts a key (`VB-12`) or an id; omitted, it means the
-  card the session was launched for. A VibeRails session that touches a card it is not yet linked
-  to gets linked with origin `mcp`, so the card's Sessions rail shows it.
+  card the session was launched for (or its oldest remaining attachment if that link is removed).
+  Writes auto-link an entirely unlinked VibeRails session with origin `mcp`. To attach additional
+  cards, explicitly call `attach_board_session`; it requires a card argument and retains the default.
 - **Attribution**: `add_board_comment` resolves the launching `Sessions` row's environment name
   or CLI, falling back to its board session link, else "Agent". This works on the first comment
   before auto-linking. Generic historical labels with a session id are resolved on read; comments
@@ -144,12 +146,15 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
   excerpt is up to 4,000 characters, shrinking to a 1,500 floor when the environment's own
   Initial Message is long, because the whole prompt is one CLI argument under
   `PromptPlaceholderService.MaxResolvedPromptChars`. `get_board_card` is read-only and never
-  links a browsing session. Writes still auto-link an unlinked session; one session links to one
-  card. Description edits retain no prior state and never interrupt the TUI.
+  links a browsing session. Writes still auto-link an entirely unlinked session; additional cards
+  require `attach_board_session`. The primary card remains the omitted-card default; removing it
+  falls back to the oldest remaining attachment. Call `link_board_commit` once per commit to
+  share it with every card currently attached to the session, even when a target card is explicit.
+  Description edits retain no prior state and never interrupt the TUI.
 - **Board launch authorization (2026-09-14)**: Start work sets the typed, false-by-default
   `AuthorizeBoardTools` marker for that session and explicitly authorizes the Board workflow in
   the prompt for every provider. `Terminal/Commands/BoardMcpAuthorization.cs` grants only the
-  thirteen Board tools for that session through an explicit `ToolNames` allowlist. No server
+  fourteen Board tools for that session through an explicit `ToolNames` allowlist. No server
   wildcard or unrelated MCP tool is authorized. Tests pin both the reviewed allowlist and exact
   provider grants.
   Antigravity receives only the prompt because its only native switch is a global bypass. See

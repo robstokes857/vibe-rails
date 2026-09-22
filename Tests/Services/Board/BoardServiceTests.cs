@@ -31,6 +31,38 @@ public sealed class BoardServiceTests : IDisposable
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Fact]
+    public async Task AttachedCards_ShareLiveStatus_AndUnlinkIndependently()
+    {
+        var first = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "A"), Ct);
+        var second = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "B"), Ct);
+        await _service.LinkSessionAsync(_project, first.Id, "44444444-4444-4444-8444-444444444444", "tab-shared", "base:codex", "codex", "Codex", BoardSessionRecord.LaunchOrigin, Ct);
+        await _service.AttachSessionAsync(_project, second.Id, "44444444-4444-4444-8444-444444444444", null, Ct);
+        _live.Sessions["44444444-4444-4444-8444-444444444444"] = "tab-shared";
+
+        Assert.All((await _service.GetCardsAsync(_project, Ct)).Cards, card =>
+        {
+            Assert.Equal("44444444-4444-4444-8444-444444444444", card.ActiveSessionId);
+            Assert.Equal("tab-shared", card.ActiveTabId);
+        });
+        foreach (var card in new[] { first, second })
+        {
+            var detail = (await _service.GetCardAsync(_project, card.Id, Ct))!;
+            Assert.True(Assert.Single(detail.Sessions).Active);
+            Assert.Equal("tab-shared", detail.ActiveTabId);
+        }
+        _live.Sessions.Clear();
+        Assert.All((await _service.GetCardsAsync(_project, Ct)).Cards, card => Assert.Null(card.ActiveSessionId));
+        Assert.False(Assert.Single((await _service.GetSessionsAsync(_project, second.Id, Ct))!).Active);
+
+        await _service.RenameSessionAsync(_project, second.Id, "44444444-4444-4444-8444-444444444444", "Second card work", Ct);
+        Assert.Equal("Codex", Assert.Single((await _service.GetSessionsAsync(_project, first.Id, Ct))!).DisplayName);
+        Assert.Equal("Second card work", Assert.Single((await _service.GetSessionsAsync(_project, second.Id, Ct))!).DisplayName);
+        Assert.True(await _service.UnlinkSessionAsync(_project, second.Id, "44444444-4444-4444-8444-444444444444", Ct));
+        Assert.Single((await _service.GetSessionsAsync(_project, first.Id, Ct))!);
+        Assert.Empty((await _service.GetSessionsAsync(_project, second.Id, Ct))!);
+    }
+
+    [Fact]
     public async Task GetColumns_SeedsDefaults_AndCreateCardValidates()
     {
         var columns = await _service.GetColumnsAsync(_project, Ct);
@@ -186,15 +218,19 @@ public sealed class BoardServiceTests : IDisposable
         var created = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "A"), Ct);
         const string sha = "abc1234abc1234abc1234abc1234abc1234abc12";
         var clone = Path.Combine(_root, "clone");
+        var second = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "B"), Ct);
+        foreach (var card in new[] { created, second })
+            await _store.LinkSessionAsync(_project, card.Id, "capture-session", null, "", "codex", "Codex", BoardSessionRecord.McpOrigin, Ct);
         _commits.Setup(c => c.DescribeAsync(clone, "abc1234", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new BoardCommitInfo(sha, "Rob", "Fix", DateTime.UtcNow));
         _commits.Setup(c => c.GetDiffAsync(clone, sha, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new BoardValidationException("Could not capture the file."));
 
         await Assert.ThrowsAsync<BoardValidationException>(() =>
-            _service.LinkCommitAsync(_project, created.Key, "abc1234", Ct, gitWorkingDirectory: clone));
+            _service.LinkCommitAsync(_project, created.Key, "abc1234", Ct, gitWorkingDirectory: clone, sessionId: "capture-session"));
 
         Assert.Empty((await _service.GetCardAsync(_project, created.Id, Ct))!.Commits);
+        Assert.Empty((await _service.GetCardAsync(_project, second.Id, Ct))!.Commits);
     }
 
     [Fact]

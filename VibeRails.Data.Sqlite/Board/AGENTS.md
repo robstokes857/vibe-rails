@@ -5,7 +5,7 @@ Read the cross-layer [Board contributor guide](../../VibeRails/Services/Board/AG
 [database migration policy](../DB/AGENTS.md), before changing this component.
 
 This directory owns `IBoardStore`'s SQLite implementation in `~/.vibe_rails/board.db`, including
-component migrations `board/1`–`board/9`. The historical `VibeRails.Services.Board` namespace
+component migrations `board/1`–`board/10`. The historical `VibeRails.Services.Board` namespace
 does not move this code back into the application project. Keep DTO/contracts in
 `VibeRails.Data.Abstractions/Board`; keep Git, live terminal state and UI policy in the host.
 
@@ -54,3 +54,14 @@ remains in `BoardStore.LegacySchema.cs` only for upgrade sequencing, never runti
 `board/9` adds `BoardCards.Flagged` (default false). It is separate from blocked and is returned
 in list/detail responses. Replacements accept the last write; append uses the transaction's
 current text and validates the combined length before changing any fields.
+
+`board/10` adds `BoardAdditionalCardSessions` for multiple cards per session within one project.
+Keep primary rows in `BoardCardSessions`; do not convert/backfill them. Reads union both tables,
+preferring the primary row for a duplicate pair from an older writer. The original link stays
+the default, with oldest remaining attachment as fallback. Link validation runs inside the
+write transaction; rename/unlink scopes both card and session, and deleting a primary card does
+not cascade additional attachments. Old versions keep reading/writing the primary table.
+
+Session commit linking reads this membership inside the commit-write transaction and writes the
+snapshot to the target and all same-project attachments atomically. One failed write rolls back
+every new link. Repeats leave existing metadata/snapshots unchanged and fill missing links.

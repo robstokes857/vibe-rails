@@ -150,7 +150,7 @@ public partial class CommandServiceTests
             "list_boards", "list_board_columns", "list_board_cards", "get_board_card",
             "get_board_notes", "read_board_attachment",
             "create_board_card", "update_board_card", "move_board_card", "add_board_comment",
-            "append_board_note", "add_board_attachment", "link_board_commit"
+            "append_board_note", "add_board_attachment", "attach_board_session", "link_board_commit"
         ];
 
         Assert.Equal(expected.Order(), BoardMcpAuthorization.ToolNames.Order());

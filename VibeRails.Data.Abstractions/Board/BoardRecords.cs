@@ -134,7 +134,7 @@ public sealed record BoardSessionRecord(
     public const string ManualOrigin = "manual";
 }
 
-/// <summary>Where a session id points: the card it is linked to and that card's project.</summary>
+/// <summary>A session's default card link and that card's project; other attachments may also exist.</summary>
 public sealed record BoardSessionLink(string SessionId, string CardId, string ProjectPath);
 
 public sealed record BoardAttachmentRecord(

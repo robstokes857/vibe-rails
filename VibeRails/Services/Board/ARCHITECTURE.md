@@ -1,5 +1,38 @@
 # Vibe Board architecture and review
 
+## VB-25: one session working multiple cards (2026-09-21)
+
+An agent calls `attach_board_session(card: "VB-24")` to add its current VibeRails session to
+another card in the same project, including across boards. The tool requires an explicit card
+and derives session identity from launch context; it cannot select another session. Repeated
+calls are idempotent. Reading or commenting on another card does not attach it. The original
+card remains the default for omitted arguments; after its link is removed, the oldest remaining
+attachment becomes the default. Card lanes and assignees stay independent.
+
+Each card lists the same session and receives its existing live indicator from the owning root's
+probe. Opening either Sessions entry opens the same terminal/replay. Rename/unlink applies only
+to that card's link, and ending the session clears live status for every attached card. Root-local
+status/launch exclusion limitations (F3/F6) remain. Refresh the Board to see MCP attachments.
+
+Call `link_board_commit` once per commit: it automatically links the captured snapshot to the
+target card and every card attached to the calling session in the same project, across boards.
+Membership and all link/snapshot writes share one transaction; a failure rolls back the whole
+operation. Repeated session calls preserve existing links/snapshots and fill missing ones.
+Git capture runs once before the transaction. Attaching never copies earlier commits or comments;
+calling `link_board_commit` again can share an earlier SHA with a newly attached card. There is
+no new unlink/edit tool. The Sessions rail also accepts the same session ID on multiple cards.
+
+Additive `board/10` stores extra links in `BoardAdditionalCardSessions` with a composite
+`(SessionId, CardId)` key. The original table, schema generation and data remain unchanged;
+older writers can still use the primary table. No backfill or conversion runs. Store reads
+combine both tables, prefer the primary row if a legacy writer recreates the same pair, and
+scope new links to the same project inside the write transaction. Removing the original link
+or card preserves other attachments. Older versions display only primary links.
+
+The Board has 14 MCP tools/grants; REST paths are unchanged. `BoardTool` is registered on both
+transports. Only the explicit Board allowlist gains the new tool; listener and auth rules are unchanged.
+This amendment supersedes the one-card session restriction in the historical review below.
+
 ## Separate Board storage (2026-09-20)
 
 All active Board tables now live in `~/.vibe_rails/board.db`, for every project and every host

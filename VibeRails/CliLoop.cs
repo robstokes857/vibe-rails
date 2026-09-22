@@ -53,6 +53,7 @@ public static class CliLoop
         ParsedArgs parsedArgs,
         IServiceProvider services,
         string? jobRunId = null,
+        string? boardCardKey = null,
         Action<string>? onSessionCreated = null,
         CancellationToken cancellationToken = default)
     {
@@ -149,7 +150,11 @@ public static class CliLoop
             var promptPlaceholders = scopedServices.GetRequiredService<IPromptPlaceholderService>();
             initialPrompt = await promptPlaceholders.ResolveAsync(
                 environment.CustomPrompt,
-                new PromptPlaceholderContext(workingDirectory, environment.Id, environment.CustomName),
+                new PromptPlaceholderContext(
+                    workingDirectory,
+                    environment.Id,
+                    environment.CustomName,
+                    boardCardKey),
                 cancellationToken);
         }
 

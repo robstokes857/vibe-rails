@@ -6,11 +6,12 @@ const DEFAULT_PATTERN = /\bdefault\s*=\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])
 
 // Reserved names that never become fill-in fields. Mirrors PromptPlaceholderService in the
 // backend, which owns the authoritative resolution pass at launch. datetime/date/time/env_name
-// resolve here too (for the preview and the submitted text); git_branch and step need the server
-// (a git call / a shell run), so their tokens are deliberately left literal for it.
+// resolve here too (for the preview and the submitted text); git_branch, board_card and step need
+// the server (a git call / run context / a shell run), so their tokens are deliberately left
+// literal for it.
 // "step" is on this list because {{step:<id>}} parses under TOKEN_PATTERN as name "step" with
 // ":<id>" falling into the argument capture.
-const BUILTIN_TOKEN_NAMES = Object.freeze(['datetime', 'date', 'time', 'git_branch', 'env_name']);
+const BUILTIN_TOKEN_NAMES = Object.freeze(['datetime', 'date', 'time', 'git_branch', 'env_name', 'board_card']);
 const STEP_ID_PATTERN = /step\s*:\s*([0-9a-fA-F-]+)/i;
 
 function lower(value) {
@@ -36,7 +37,8 @@ function formatLocalTime(now) {
 
 /**
  * Client-side value for a built-in token, or null for the ones only the server can resolve
- * (git_branch, step) — null means "leave the token literal and let the launch pass finish it".
+ * (git_branch, board_card, step) — null means "leave the token literal and let the launch pass
+ * finish it".
  */
 function builtinTokenValue(name, context = {}, now = new Date()) {
     switch (lower(name)) {
@@ -202,6 +204,9 @@ function reservedTokenPreview(token, context = {}) {
     }
     if (lower(token.name) === 'git_branch') {
         return '(current git branch)';
+    }
+    if (lower(token.name) === 'board_card') {
+        return '(triggering Vibe Board card)';
     }
     return builtinTokenValue(token.name, context) ?? token.token;
 }

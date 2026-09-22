@@ -1108,6 +1108,8 @@ test('A run row explains why it ended instead of showing a bare status word', ()
         errorMessage: 'The terminal running this Automation is no longer open.'
     });
     assert.match(interrupted, /no longer open/);
+    assert.match(interrupted, /job-run-status-detail/);
+    assert.doesNotMatch(interrupted, /class="job-run-detail"/);
 
     // A non-zero exit is the only detail available when the CLI failed silently.
     const failed = controller.renderHistoryRow({ ...base, status: 3, errorMessage: null, exitCode: 1 });
@@ -1122,6 +1124,16 @@ test('A run row explains why it ended instead of showing a bare status word', ()
     const nasty = controller.renderHistoryRow({ ...base, status: 3, errorMessage: '<img src=x>' });
     assert.match(nasty, /&lt;img src=x&gt;/);
     assert.doesNotMatch(nasty, /<img src=x>/);
+});
+
+test('Compact run status text cannot constrain the full run-detail modal', () => {
+    const source = readFileSync(modulePath, 'utf8');
+    const styles = readFileSync(stylePath, 'utf8');
+
+    assert.match(source, /class="job-run-status-detail"/);
+    assert.match(source, /class="job-run-detail"/);
+    assert.match(styles, /\.job-run-status-detail\s*\{[^}]*max-width:\s*22ch/);
+    assert.doesNotMatch(styles, /\.job-run-detail\s*\{[^}]*max-width:\s*22ch/);
 });
 
 test('An interrupted run reports its duration as approximate', () => {
@@ -1561,6 +1573,15 @@ test('Environment UI groups robot-marked Workers below regular Environments', ()
     assert.ok(workersHeading < workerRow);
     assert.match(html, /environment-list-group is-workers/);
     assert.match(html, /env-worker-badge/);
+});
+
+test('Environment Initial Message help documents the Board lane card placeholder', () => {
+    const controller = createEnvironmentControllerForForm();
+    const html = controller.renderInitialMessageField('codex', '');
+
+    assert.match(html, /\{\{board_card\}\}/);
+    assert.match(html, /Board lane Automations/);
+    assert.match(html, /empty for other launches/);
 });
 
 test('Recipe import confirmation discloses and escapes executable Environment content', (t) => {

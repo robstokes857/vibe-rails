@@ -4,8 +4,11 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol.Client;
+using Moq;
 using VibeRails.DTOs;
 using VibeRails.Services.BertV2;
+using VibeRails.Services.Board;
+using VibeRails.Services.Terminal;
 using VibeRails.Services.Mcp;
 using VibeRails.Services.Mcp.HostShell;
 using VibeRails.Services.Mcp.Tools;
@@ -53,6 +56,10 @@ public class McpServerHttpTests : IAsyncLifetime
         builder.Services.AddScoped<SessionSearchTool>();
         builder.Services.AddHttpClient(TokenSaverTool.HttpClientName);
         builder.Services.AddScoped<TokenSaverTool>();
+        builder.Services.AddSingleton(Mock.Of<IBoardService>());
+        builder.Services.AddSingleton(Mock.Of<IBoardProjectResolver>());
+        builder.Services.AddSingleton(Mock.Of<IBoardStore>());
+        builder.Services.AddScoped<BoardTool>();
 
         builder.Services
             .AddMcpServer(options =>
@@ -62,7 +69,8 @@ public class McpServerHttpTests : IAsyncLifetime
             .WithHttpTransport()
             .WithTools<RulesTool>()
             .WithTools<SessionSearchTool>()
-            .WithTools<TokenSaverTool>();
+            .WithTools<TokenSaverTool>()
+            .WithTools<BoardTool>();
 
         _app = builder.Build();
         _app.MapMcp("/mcp");
@@ -99,11 +107,19 @@ public class McpServerHttpTests : IAsyncLifetime
         var tools = await client.GetAvailableToolsAsync(TestContext.Current.CancellationToken);
         var names = tools.Select(t => t.Name).ToHashSet();
 
-        foreach (var expected in ExpectedTools)
+        foreach (var expected in ExpectedTools.Concat(BoardMcpAuthorization.ToolNames))
         {
             Assert.Contains(expected, names);
         }
-        Assert.Equal(ExpectedTools.Length, names.Count);
+        Assert.Equal(ExpectedTools.Length + BoardMcpAuthorization.ToolNames.Count, names.Count);
+    }
+
+    [Fact]
+    public async Task AttachBoardSession_RequiresLaunchingSessionContext()
+    {
+        await using var client = await ConnectAsync(TestContext.Current.CancellationToken);
+        var result = await client.CallToolAsync("attach_board_session", new Dictionary<string, object?> { ["card"] = "VB-2" }, TestContext.Current.CancellationToken);
+        Assert.Contains("FAIL: this terminal has no VibeRails session", result.Text);
     }
 
     [Fact]

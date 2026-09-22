@@ -2,6 +2,9 @@
 -- Regenerate: set VIBE_RAILS_UPDATE_SCHEMA_SNAPSHOT=1, then: dotnet test Tests --filter SchemaSnapshotTests
 -- Every diff in this file is a table change and needs the owner's sign-off (vibe-data/docs/db-migration-policy.md).
 
+-- index IX_BoardAdditionalCardSessions_Card
+CREATE INDEX IX_BoardAdditionalCardSessions_Card ON BoardAdditionalCardSessions(CardId);
+
 -- index IX_BoardAttachments_Card
 CREATE INDEX IX_BoardAttachments_Card ON BoardAttachments(CardId);
 
@@ -31,6 +34,9 @@ CREATE INDEX IX_BoardPendingAutomations_Due ON BoardPendingAutomations(DueUnixMs
 
 -- index IX_Boards_Project
 CREATE INDEX IX_Boards_Project ON Boards(ProjectPath, Position);
+
+-- table BoardAdditionalCardSessions
+CREATE TABLE BoardAdditionalCardSessions ( SessionId TEXT NOT NULL, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, TabId TEXT NULL, Selection TEXT NOT NULL, Cli TEXT NOT NULL, DisplayName TEXT NOT NULL, Origin TEXT NOT NULL, CreatedUTC TEXT NOT NULL, PRIMARY KEY (SessionId, CardId) );
 
 -- table BoardAttachmentContents
 CREATE TABLE BoardAttachmentContents ( AttachmentId TEXT PRIMARY KEY REFERENCES BoardAttachments(Id) ON DELETE CASCADE, Content BLOB NOT NULL );

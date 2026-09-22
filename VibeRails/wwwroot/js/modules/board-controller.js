@@ -949,6 +949,7 @@ export class BoardController {
                             Sessions <span class="board-count" data-board-count="sessions">${card?.sessions?.length || 0}</span>
                         </h3>
                         <div class="board-side-list" data-board-sessions></div>
+                        <p class="board-side-empty">Link the same session to every card it is working on.</p>
                         ${card ? `
                         <form class="board-side-form" data-board-add-session>
                             <input type="text" class="form-control form-control-sm" name="displayName"

@@ -629,7 +629,7 @@ public sealed partial class BoardStore : IBoardStore
         // Retain attribution even if old terminal history has been pruned.
         await using var boardConnection = await OpenAsync(cancellationToken);
         await using var linked = boardConnection.CreateCommand();
-        linked.CommandText = "SELECT DisplayName, Cli FROM BoardCardSessions WHERE SessionId = $session LIMIT 1;";
+        linked.CommandText = $"SELECT DisplayName, Cli FROM {AllSessionsSql} WHERE SessionId = $session ORDER BY LinkOrder, CreatedUTC, CardId LIMIT 1;";
         linked.Parameters.AddWithValue("$session", sessionId);
         await using var linkedReader = await linked.ExecuteReaderAsync(cancellationToken);
         if (await linkedReader.ReadAsync(cancellationToken))
@@ -751,21 +751,32 @@ public sealed partial class BoardStore : IBoardStore
         if (card is null)
             return null;
 
-        var existingCard = await ScalarStringAsync(connection, transaction,
-            "SELECT CardId FROM BoardCardSessions WHERE SessionId = $session", ("$session", sessionId), cancellationToken);
-        if (existingCard is not null)
+        var hasLinks = false;
+        await using (var existing = connection.CreateCommand())
         {
-            throw new BoardConflictException(existingCard == card.Id
-                ? "That session is already on this card."
-                : "That session is already linked to another card.");
+            existing.Transaction = transaction;
+            existing.CommandText = $"SELECT s.CardId, c.ProjectPath FROM {AllSessionsSql} s JOIN BoardCards c ON c.Id = s.CardId WHERE s.SessionId = $session;";
+            existing.Parameters.AddWithValue("$session", sessionId);
+            await using var reader = await existing.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                hasLinks = true;
+                if (!string.Equals(reader.GetString(1), project, BoardPaths.ProjectPathComparison))
+                    throw new BoardConflictException("That session is linked to a card in another project.");
+                if (reader.GetString(0) == card.Id)
+                    throw new BoardConflictException("That session is already on this card.");
+            }
         }
 
         var record = new BoardSessionRecord(sessionId, card.Id, tabId, selection, cli, displayName, origin, DateTime.UtcNow);
         await using (var insert = connection.CreateCommand())
         {
             insert.Transaction = transaction;
-            insert.CommandText = """
-                INSERT INTO BoardCardSessions (SessionId, CardId, TabId, Selection, Cli, DisplayName, Origin, CreatedUTC)
+            // Keep the original link in the legacy table. Additional links do not replace it,
+            // and survive its removal; no data rewrite or historical backfill is needed.
+            var table = hasLinks ? "BoardAdditionalCardSessions" : "BoardCardSessions";
+            insert.CommandText = $"""
+                INSERT INTO {table} (SessionId, CardId, TabId, Selection, Cli, DisplayName, Origin, CreatedUTC)
                 VALUES ($session, $card, $tab, $selection, $cli, $name, $origin, $created);
                 """;
             insert.Parameters.AddWithValue("$session", record.SessionId);
@@ -794,7 +805,10 @@ public sealed partial class BoardStore : IBoardStore
         await using (var update = connection.CreateCommand())
         {
             update.Transaction = transaction;
-            update.CommandText = "UPDATE BoardCardSessions SET DisplayName = $name WHERE SessionId = $session AND CardId = $card;";
+            update.CommandText = """
+                UPDATE BoardCardSessions SET DisplayName = $name WHERE SessionId = $session AND CardId = $card;
+                UPDATE BoardAdditionalCardSessions SET DisplayName = $name WHERE SessionId = $session AND CardId = $card;
+                """;
             update.Parameters.AddWithValue("$name", displayName);
             update.Parameters.AddWithValue("$session", sessionId);
             update.Parameters.AddWithValue("$card", card.Id);
@@ -817,7 +831,10 @@ public sealed partial class BoardStore : IBoardStore
         await using (var delete = connection.CreateCommand())
         {
             delete.Transaction = transaction;
-            delete.CommandText = "DELETE FROM BoardCardSessions WHERE SessionId = $session AND CardId = $card;";
+            delete.CommandText = """
+                DELETE FROM BoardCardSessions WHERE SessionId = $session AND CardId = $card;
+                DELETE FROM BoardAdditionalCardSessions WHERE SessionId = $session AND CardId = $card;
+                """;
             delete.Parameters.AddWithValue("$session", sessionId);
             delete.Parameters.AddWithValue("$card", card.Id);
             removed = await delete.ExecuteNonQueryAsync(cancellationToken) > 0;
@@ -832,10 +849,10 @@ public sealed partial class BoardStore : IBoardStore
     {
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
-        command.CommandText = """
+        command.CommandText = $"""
             SELECT s.SessionId, s.CardId, c.ProjectPath
-            FROM BoardCardSessions s JOIN BoardCards c ON c.Id = s.CardId
-            WHERE s.SessionId = $session LIMIT 1;
+            FROM {AllSessionsSql} s JOIN BoardCards c ON c.Id = s.CardId
+            WHERE s.SessionId = $session ORDER BY s.LinkOrder, s.CreatedUTC, s.CardId LIMIT 1;
             """;
         command.Parameters.AddWithValue("$session", sessionId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -895,7 +912,7 @@ public sealed partial class BoardStore : IBoardStore
         return card is null ? [] : await ReadCommitsAsync(connection, card.Id, cancellationToken);
     }
 
-    public async Task<BoardCommitRecord?> AddCommitAsync(string projectPath, string cardId, string sha, string author, string message, DateTime committedUtc, SandboxDiffResponse snapshot, CancellationToken cancellationToken = default)
+    public async Task<BoardCommitRecord?> AddCommitAsync(string projectPath, string cardId, string sha, string author, string message, DateTime committedUtc, SandboxDiffResponse snapshot, CancellationToken cancellationToken = default, string? sessionId = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         var snapshotJson = JsonSerializer.Serialize(snapshot, StorageJsonSerializerContext.Default.SandboxDiffResponse);
@@ -906,19 +923,30 @@ public sealed partial class BoardStore : IBoardStore
         if (card is null)
             return null;
 
-        var duplicate = await ScalarLongAsync(connection, transaction,
-            "SELECT COUNT(*) FROM BoardCommits WHERE CardId = $card AND Sha = $sha",
-            ("$card", card.Id), cancellationToken, ("$sha", (object)sha));
-        if (duplicate > 0)
-            throw new BoardConflictException($"{sha[..Math.Min(7, sha.Length)]} is already on this card.");
+        // Membership is read under the same writer transaction as every link/snapshot. A
+        // concurrent attach either precedes this entire operation or follows it.
+        var targets = await ReadCommitTargetCardsAsync(connection, transaction, project, card.Id, sessionId, cancellationToken);
+        var linkedUtc = DateTime.UtcNow;
+        foreach (var target in targets)
+            await WriteCommitAsync(connection, transaction,
+                new BoardCommitRecord(target, sha, author, message, committedUtc, linkedUtc), snapshotJson,
+                allowExisting: !string.IsNullOrWhiteSpace(sessionId), cancellationToken);
+        var record = (await ReadCommitsAsync(connection, card.Id, cancellationToken, transaction)).Single(c => c.Sha == sha);
+        await transaction.CommitAsync(cancellationToken);
+        return record;
+    }
 
-        var record = new BoardCommitRecord(card.Id, sha, author, message, committedUtc, DateTime.UtcNow);
+    private static async Task WriteCommitAsync(SqliteConnection connection, SqliteTransaction transaction,
+        BoardCommitRecord record, string snapshotJson, bool allowExisting, CancellationToken cancellationToken)
+    {
+        bool inserted;
         await using (var insert = connection.CreateCommand())
         {
             insert.Transaction = transaction;
             insert.CommandText = """
                 INSERT INTO BoardCommits (CardId, Sha, Author, Message, CommittedUTC, LinkedUTC)
-                VALUES ($card, $sha, $author, $message, $committed, $linked);
+                VALUES ($card, $sha, $author, $message, $committed, $linked)
+                ON CONFLICT(CardId, Sha) DO NOTHING;
                 """;
             insert.Parameters.AddWithValue("$card", record.CardId);
             insert.Parameters.AddWithValue("$sha", record.Sha);
@@ -926,20 +954,22 @@ public sealed partial class BoardStore : IBoardStore
             insert.Parameters.AddWithValue("$message", record.Message);
             insert.Parameters.AddWithValue("$committed", ToDb(record.CommittedUtc));
             insert.Parameters.AddWithValue("$linked", ToDb(record.LinkedUtc));
-            await insert.ExecuteNonQueryAsync(cancellationToken);
+            inserted = await insert.ExecuteNonQueryAsync(cancellationToken) > 0;
         }
+        if (!inserted && !allowExisting)
+            throw new BoardConflictException($"{record.ShortSha} is already on this card.");
+        bool captured;
         await using (var capture = connection.CreateCommand())
         {
             capture.Transaction = transaction;
-            capture.CommandText = "INSERT INTO BoardCommitSnapshots (CardId, Sha, SnapshotJson) VALUES ($card, $sha, $snapshot);";
+            capture.CommandText = "INSERT INTO BoardCommitSnapshots (CardId, Sha, SnapshotJson) VALUES ($card, $sha, $snapshot) ON CONFLICT(CardId, Sha) DO NOTHING;";
             capture.Parameters.AddWithValue("$card", record.CardId);
             capture.Parameters.AddWithValue("$sha", record.Sha);
             capture.Parameters.AddWithValue("$snapshot", snapshotJson);
-            await capture.ExecuteNonQueryAsync(cancellationToken);
+            captured = await capture.ExecuteNonQueryAsync(cancellationToken) > 0;
         }
-        await TouchCardAsync(connection, transaction, card.Id, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-        return record;
+        if (inserted || captured)
+            await TouchCardAsync(connection, transaction, record.CardId, cancellationToken);
     }
 
     public async Task<SandboxDiffResponse?> GetCommitSnapshotAsync(string projectPath, string cardId, string sha, CancellationToken cancellationToken = default)
@@ -1000,7 +1030,7 @@ public sealed partial class BoardStore : IBoardStore
         """;
 
     private const string SessionSelectSql =
-        "SELECT s.SessionId, s.CardId, s.TabId, s.Selection, s.Cli, s.DisplayName, s.Origin, s.CreatedUTC FROM BoardCardSessions s";
+        "SELECT s.SessionId, s.CardId, s.TabId, s.Selection, s.Cli, s.DisplayName, s.Origin, s.CreatedUTC FROM " + AllSessionsSql + " s";
 
     private static async Task<IReadOnlyList<BoardColumnRecord>> ReadColumnsAsync(SqliteConnection connection, SqliteTransaction? transaction, string project, string boardId, CancellationToken cancellationToken)
     {
@@ -1192,9 +1222,10 @@ public sealed partial class BoardStore : IBoardStore
         return attachments;
     }
 
-    private static async Task<IReadOnlyList<BoardCommitRecord>> ReadCommitsAsync(SqliteConnection connection, string cardId, CancellationToken cancellationToken)
+    private static async Task<IReadOnlyList<BoardCommitRecord>> ReadCommitsAsync(SqliteConnection connection, string cardId, CancellationToken cancellationToken, SqliteTransaction? transaction = null)
     {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = "SELECT CardId, Sha, Author, Message, CommittedUTC, LinkedUTC FROM BoardCommits WHERE CardId = $card ORDER BY CommittedUTC DESC, Sha;";
         command.Parameters.AddWithValue("$card", cardId);
         var commits = new List<BoardCommitRecord>();
@@ -1407,6 +1438,8 @@ public sealed partial class BoardStore : IBoardStore
         });
         SqliteMigrationRunner.Apply(connection, "board", 9, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardCards ADD COLUMN Flagged INTEGER NOT NULL DEFAULT 0"));
+        SqliteMigrationRunner.Apply(connection, "board", 10, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, AdditionalCardSessionsSchemaSql));
         ReconcileDerivedRows(connection);
     }
 
