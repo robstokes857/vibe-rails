@@ -122,6 +122,28 @@ namespace VibeRails.Services.LlmClis
             return Path.Combine(envDirectory, GetConfigSubdirectory(), "config.toml");
         }
 
+        // The desktop app writes this versioned Windows runtime and its native bridge into
+        // ~/.codex/config.toml. Copies in our environments can outlive the app runtime.
+        // Recognize only that generated entry; a user-owned/required MCP server must retain
+        // its normal startup behavior, even when its command is unavailable.
+        internal static string? GetOptionalDesktopNodeReplCommand(string content)
+        {
+            const string section = "mcp_servers.node_repl";
+            if (GetTomlSectionBoolValue(content, section, "enabled") == false
+                || GetTomlSectionBoolValue(content, section, "required") == true)
+                return null;
+
+            var command = GetTomlSectionValue(content, section, "command");
+            var normalized = command?.Replace('\\', '/');
+            if (normalized is null
+                || !normalized.Contains("/OpenAI/Codex/runtimes/cua_node/", StringComparison.OrdinalIgnoreCase)
+                || !normalized.EndsWith("/bin/node_repl.exe", StringComparison.OrdinalIgnoreCase)
+                || string.IsNullOrWhiteSpace(GetTomlSectionValue(content, section + ".env", "SKY_CUA_NATIVE_PIPE")))
+                return null;
+
+            return command;
+        }
+
         private static bool IsFastModeEnabled(string content)
         {
             var serviceTier = GetRootTomlValue(content, "service_tier");
