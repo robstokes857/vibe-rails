@@ -32,7 +32,7 @@ public sealed class BoardCurrentStateTests : IDisposable
     public async Task LaunchUsesTheReadCardSnapshot_WithoutRewritingLaterEdits()
     {
         var card = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "Ship", Description: "original", Assignee: "base:codex",
-            BaseLlmOptions: new BaseLlmOptions("gpt-6", "high", "plan")), Ct);
+            BaseLlmOptions: new BaseLlmOptions("gpt-6", "high", "plan", Yolo: true)), Ct);
         var session = Guid.NewGuid().ToString();
         _tabs.SetupGet(t => t.MaxTabs).Returns(8);
         _tabs.Setup(t => t.ListTabsAsync(It.IsAny<CancellationToken>())).ReturnsAsync([]);
@@ -51,6 +51,7 @@ public sealed class BoardCurrentStateTests : IDisposable
         Assert.Equal("PROJ-1 · Ship", captured.Title);
         // Codex has no startup mode, so the stored "plan" is dropped rather than reaching the CLI.
         Assert.Equal("", captured.BaseLlmOptions!.Mode);
+        Assert.True(captured.BaseLlmOptions.Yolo);
         Assert.True(captured.AuthorizeBoardTools);
         Assert.Equal("edited during startup", (await _store.FindCardAsync(_project, card.Id, Ct))!.Description);
         Assert.Equal("PROJ-1 · Ship", Assert.Single((await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Sessions).DisplayName);
@@ -60,9 +61,11 @@ public sealed class BoardCurrentStateTests : IDisposable
     public async Task BaseOptions_RoundTrip_AndClearWhenAssigneeChanges()
     {
         var card = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "Model", Assignee: "base:codex",
-            BaseLlmOptions: new BaseLlmOptions("gpt-5.5", "max", "plan")), Ct);
+            BaseLlmOptions: new BaseLlmOptions("gpt-5.5", "max", "plan", Yolo: true)), Ct);
         Assert.Equal("xhigh", card.BaseLlmOptions!.Effort);
-        Assert.Equal("", (await new BoardStore(_connectionString, _connectionString).FindCardAsync(_project, card.Id, Ct))!.BaseLlmOptions!.Mode);
+        var stored = (await new BoardStore(_connectionString, _connectionString).FindCardAsync(_project, card.Id, Ct))!.BaseLlmOptions!;
+        Assert.Equal("", stored.Mode);
+        Assert.True(stored.Yolo);
         var updated = await _service.UpdateCardAsync(_project, card.Id, new UpdateBoardCardRequest(Assignee: "env:7:codex"), Ct);
         Assert.Null(updated!.BaseLlmOptions);
     }

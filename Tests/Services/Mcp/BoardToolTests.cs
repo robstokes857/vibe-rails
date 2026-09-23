@@ -749,6 +749,10 @@ public sealed class BoardToolTests : IDisposable
 
         var preview = await _tool.MoveBoardCard("PROJ-1", "review", preview: true, cancellationToken: Ct);
         Assert.StartsWith("Preview: PROJ-1 stays in Backlog; moving it to Review would do the following.\nWould queue: " + ReviewDetail + ".\nWould queue: " + OpenPrDetail + ".\nEntries would start about 60 seconds", preview);
+
+        var skippedPreview = await _tool.MoveBoardCard("PROJ-1", "review", skipAutomations: true, preview: true, cancellationToken: Ct);
+        Assert.Equal("Preview: PROJ-1 stays in Backlog; moving it to Review would do the following.\n"
+            + "Would skip lane automations at the caller's request: \"Automated code review\", \"Open PR\". A comment would record the skip on PROJ-1.", skippedPreview);
         Assert.Contains("Lane: Backlog", await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct));
         Assert.Empty((await _service.GetPendingLaneAutomationsAsync(_project, "PROJ-1", Ct))!);
         Assert.Empty((await _service.GetCardAsync(_project, "PROJ-1", Ct))!.Comments);

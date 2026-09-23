@@ -195,6 +195,16 @@ public static class BoardPromptComposer
     }
 
     /// <summary>Single-line board fields: everything <see cref="Sanitize"/> does, with newlines and tabs collapsed to spaces.</summary>
+    /// <summary>A lane name plus its on-entry Automations, each sanitized like any other board text.</summary>
+    private static string LaneLabel(LaunchContext context, string name, int index)
+    {
+        var label = SanitizeLine(name, 80);
+        var automations = context.LaneAutomationNames is { } all && index < all.Count ? all[index] : null;
+        if (automations is not { Count: > 0 })
+            return label;
+        return $"{label} (on entry: {string.Join(", ", automations.Select(automation => "\"" + SanitizeLine(automation, 60) + "\""))})";
+    }
+
     internal static string SanitizeLine(string? value, int maxChars)
     {
         var text = StripControls(value ?? string.Empty, keepNewlines: false);
@@ -208,16 +218,6 @@ public static class BoardPromptComposer
         var builder = new StringBuilder(text.Length);
         foreach (var c in text)
         {
-    /// <summary>A lane name plus its on-entry Automations, each sanitized like any other board text.</summary>
-    private static string LaneLabel(LaunchContext context, string name, int index)
-    {
-        var label = SanitizeLine(name, 80);
-        var automations = context.LaneAutomationNames is { } all && index < all.Count ? all[index] : null;
-        if (automations is not { Count: > 0 })
-            return label;
-        return $"{label} (on entry: {string.Join(", ", automations.Select(automation => "\"" + SanitizeLine(automation, 60) + "\""))})";
-    }
-
             if (c == '\n')
                 builder.Append(keepNewlines ? '\n' : ' ');
             else if (c == '\t' || c == '\r')
@@ -231,7 +231,7 @@ public static class BoardPromptComposer
     }
 
     // U+200E/F marks, U+202A–202E embeddings/overrides, U+2066–2069 isolates.
-    private static bool IsBidiControl(char c) =>
+    internal static bool IsBidiControl(char c) =>
         c is '‎' or '‏' or (>= '‪' and <= '‮') or (>= '⁦' and <= '⁩');
 
     private static string FirstLine(string text)

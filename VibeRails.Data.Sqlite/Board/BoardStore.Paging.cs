@@ -1,4 +1,6 @@
 using Microsoft.Data.Sqlite;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace VibeRails.Services.Board;
 
@@ -60,6 +62,14 @@ public sealed partial class BoardStore
             var count = counts.GetValueOrDefault(column.Id);
             var offset = query.ColumnId is null ? 0 : query.Offset;
             var limit = query.ColumnId is not null || IsCompletedLane(column.Name) ? query.PageSize : -1;
+            var continuationToken = limit < 0 ? null : await ReadContinuationTokenAsync(connection, transaction,
+                project, board, column.Id, filter, query, cancellationToken);
+            var restartRequired = offset > 0 && query.ContinuationToken is not null
+                && !string.Equals(query.ContinuationToken, continuationToken, StringComparison.Ordinal);
+            // A changed ordering invalidates the offset. Return the new first page as a safe
+            // fallback for older clients; current clients see RestartRequired and refresh all
+            // lane/card metadata before continuing with the new token.
+            var effectiveOffset = restartRequired ? 0 : offset;
             var before = cards.Count;
             await using var command = connection.CreateCommand();
             command.Transaction = transaction;
@@ -76,12 +86,13 @@ public sealed partial class BoardStore
             AddPageParameters(command, project, board, query);
             command.Parameters.AddWithValue("$column", column.Id);
             command.Parameters.AddWithValue("$limit", limit);
-            command.Parameters.AddWithValue("$offset", offset);
+            command.Parameters.AddWithValue("$offset", effectiveOffset);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
                 cards.Add(ReadCard(reader));
-            var next = Math.Min(count.Filtered, (long)offset + cards.Count - before);
-            lanes.Add(new(column.Id, count.Total, count.Filtered, (int)next, next < count.Filtered));
+            var next = Math.Min(count.Filtered, (long)effectiveOffset + cards.Count - before);
+            lanes.Add(new(column.Id, count.Total, count.Filtered, (int)next, next < count.Filtered,
+                continuationToken, restartRequired));
         }
 
         var assignees = await ReadPageChoicesAsync(connection, transaction, project, board,
@@ -102,6 +113,31 @@ public sealed partial class BoardStore
         command.Parameters.AddWithValue("$type", query.Type ?? "");
         command.Parameters.AddWithValue("$priority", query.Priority ?? "");
         command.Parameters.AddWithValue("$tag", query.Tag ?? "");
+    }
+
+    private static async Task<string> ReadContinuationTokenAsync(SqliteConnection connection, SqliteTransaction transaction,
+        string project, string board, string columnId, string filter, BoardCardPageQuery query,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = $"""
+            SELECT c.Id FROM BoardCards c
+            {CardPrefixJoinSql}
+            WHERE c.ProjectPath = $project{ProjectPathCollation}
+              AND c.ColumnId = $column AND {filter}
+            ORDER BY c.Position, c.Number;
+            """;
+        AddPageParameters(command, project, board, query);
+        command.Parameters.AddWithValue("$column", columnId);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            hash.AppendData(Encoding.UTF8.GetBytes(reader.GetString(0)));
+            hash.AppendData([0]);
+        }
+        return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
     }
 
     private static async Task<IReadOnlyList<string>> ReadPageChoicesAsync(SqliteConnection connection, SqliteTransaction transaction,

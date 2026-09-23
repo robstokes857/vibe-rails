@@ -115,8 +115,9 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
 - **Capability boundary**: read / append / move / link only — there is deliberately no delete
   tool. The one upload path, `add_board_attachment`, accepts Markdown/TXT text only (MIME from
   the extension, strict UTF-8, ≤ 500,000 characters); binaries still come from the dashboard.
-  Attachment reads return untrusted task data, never execute it; PDF, images and other binary
-  files are opened in the board viewer. The only process spawned is `git` with a regex-validated
+  Attachment reads return untrusted task data, never execute it; raster images through 5 MiB and
+  bounded Markdown/TXT are returned by MCP, while larger images, PDFs and other binaries stay in
+  the Board viewer. The only process spawned is `git` with a regex-validated
   hex sha via an argument list (`Services/Git/GitCli.cs`). Failures return `FAIL: …` sentences;
   detail goes to the file log. A `database is locked` failure (SQLite 5/6, or a transient
   `StorageException`) says so explicitly and tells the agent to retry — `Fail()` in `BoardTool`
@@ -157,11 +158,13 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
   fourteen Board tools for that session through an explicit `ToolNames` allowlist. No server
   wildcard or unrelated MCP tool is authorized. Tests pin both the reviewed allowlist and exact
   provider grants.
-  Antigravity receives only the prompt because its only native switch is a global bypass. See
+  Antigravity receives only the narrow authorization prompt because its native switch is a global
+  bypass. See
   [Terminal launch authorization](../Terminal/AGENTS.md#board-launch-options-and-input-sequences-2026-09-14).
-  This is the requested Board-specific exception to the Environments editor's YOLO-only policy,
-  not a granular permission editor or a global policy change. No physical CLI config is rewritten;
-  selected provider modes and managed policies can still restrict calls. Validation used CLI help,
+  The exact Board grants remain the default. The card's separate, default-off YOLO checkbox can
+  explicitly add the selected base provider's global bypass/auto-approve launch flag; saved
+  environments keep their own arguments. Neither path rewrites physical CLI config, and selected
+  provider modes or managed policies can still restrict calls. Validation used CLI help,
   documentation and regression tests; no live provider session or deployment was performed.
 
 Python script MCP tools, the signing-help tool, and their configuration UI/routes were removed
@@ -325,7 +328,13 @@ avoid `WithToolsFromAssembly()` (reflection scan) — it is the AOT-unsafe varia
 
 Agents use `get_board_card` for attachment IDs, then `read_board_attachment`. The existing tool
 returns MCP `CallToolResult` with a text metadata block plus an image block for signature-detected
-PNG/JPEG/GIF/WebP. Markdown/TXT retain their bounded text format; tool failures set `IsError`.
+PNG/JPEG/GIF/WebP up to `BoardTool.MaxMcpImageBytes` (5 MiB). It first reads scoped metadata and
+uses the signature-derived MIME stored at upload to reject an oversized image before materializing
+its BLOB; the failure reports the actual and allowed sizes and directs the agent to the Board viewer.
+The bytes are re-sniffed after loading, and a second content-length check protects against inconsistent
+legacy/corrupt metadata before MCP serialization. This is a transfer limit only: human
+uploads and Board-viewer access retain the unlimited-byte policy. Markdown/TXT retain their bounded
+text format; tool failures set `IsError`.
 Only current attachments on the resolved card/project are readable. SVG, PDFs and arbitrary binary
 files are not returned as images; the Board viewer remains their existing access path. This adds no
 new tool name, grant, database path, SQL operation or filesystem export. The launch prompt and card

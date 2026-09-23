@@ -162,6 +162,34 @@ public sealed class BoardAttachmentTests : IDisposable
     }
 
     [Fact]
+    public async Task McpRejectsOversizedImageFromMetadataWithoutReadingItsContent()
+    {
+        const string project = "image-limit-project";
+        var card = new BoardCardRecord("card-image", project, 1, "lane", 0, "Large image", "", null,
+            "medium", null, [], false, 0, DateTime.UtcNow, DateTime.UtcNow);
+        var metadata = new BoardAttachmentMetadata("att-large", card.Id, "large.png", "image/png",
+            BoardTool.MaxMcpImageBytes + 1L, DateTime.UtcNow);
+        var service = new Mock<IBoardService>(MockBehavior.Strict);
+        service.Setup(x => x.FindCardAsync(project, card.Id, It.IsAny<CancellationToken>())).ReturnsAsync(card);
+        service.Setup(x => x.FindAttachmentAsync(project, card.Id, metadata.Id, It.IsAny<CancellationToken>())).ReturnsAsync(metadata);
+        var resolver = new Mock<IBoardProjectResolver>(MockBehavior.Strict);
+        resolver.Setup(x => x.ResolveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(project);
+        var tool = new BoardTool(service.Object, resolver.Object, Mock.Of<IBoardStore>());
+
+        var result = await tool.ReadBoardAttachment(metadata.Id, card.Id, cancellationToken: Ct);
+
+        Assert.True(result.IsError);
+        Assert.Empty(result.Content.OfType<ImageContentBlock>());
+        var text = AttachmentText(result);
+        Assert.Contains($"{BoardTool.MaxMcpImageBytes + 1L} bytes", text);
+        Assert.Contains($"{BoardTool.MaxMcpImageBytes} bytes (5 MiB)", text);
+        Assert.Contains("Board viewer", text);
+        Assert.Contains("stored attachment is unchanged", text);
+        service.Verify(x => x.GetAttachmentContentAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task McpDoesNotTreatSvgOrMimeSpoofedBytesAsImages()
     {
         var card = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "Spoofed"), Ct);

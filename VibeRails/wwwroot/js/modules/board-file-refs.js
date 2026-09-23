@@ -246,13 +246,23 @@ export function bindFileReferencePopup(input, { app, host = input?.parentElement
             if (popup) close();
             return;
         }
-        const opening = !popup;
+        const changed = !token || token.start !== next.start || token.query !== next.query || token.quoted !== next.quoted;
         token = next;
         open();
-        if (opening) {
+        if (changed) {
+            // Invalidate at the keystroke, not when the debounce expires. Otherwise an older
+            // request can complete in this window and make its rows selectable for the new token.
+            generation++;
+            fetchAbort?.abort();
+            fetchAbort = null;
             items = [];
             activeIndex = 0;
             truncated = false;
+            status = 'loading';
+        } else {
+            // A caret click can re-evaluate the same token; keep its rows and in-flight request.
+            render();
+            return;
         }
         render();
         clearTimeout(timer);

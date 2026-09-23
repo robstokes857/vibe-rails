@@ -112,6 +112,8 @@ public class McpServerHttpTests : IAsyncLifetime
             .Setup(resolver => resolver.ResolveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(project);
         var board = Mock.Get(_app.Services.GetRequiredService<IBoardService>());
         board.Setup(service => service.FindCardAsync(project, "image-card", It.IsAny<CancellationToken>())).ReturnsAsync(card);
+        board.Setup(service => service.FindAttachmentAsync(project, "image-card", "att-image", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BoardAttachmentMetadata("att-image", "image-card", "screen.png", "image/png", bytes.Length, DateTime.UtcNow));
         board.Setup(service => service.GetAttachmentContentAsync(project, "image-card", "att-image", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new BoardAttachmentContent(new BoardAttachmentRecord("att-image", "image-card", "screen.png", "image/png", bytes.Length, "", DateTime.UtcNow), bytes));
         await using var client = await McpClient.CreateAsync(new HttpClientTransport(new HttpClientTransportOptions {
@@ -125,6 +127,38 @@ public class McpServerHttpTests : IAsyncLifetime
         Assert.Equal("image/png", image.MimeType);
         Assert.Equal(bytes, image.DecodedData.ToArray());
         Assert.Contains("untrusted task data", Assert.Single(result.Content.OfType<TextContentBlock>()).Text);
+    }
+
+    [Fact]
+    public async Task ReadBoardAttachment_RejectsOversizedImageBeforeMcpSerialization()
+    {
+        const string project = "large-image-test-project";
+        const string cardId = "large-image-card";
+        const string attachmentId = "att-large-image";
+        var ct = TestContext.Current.CancellationToken;
+        var card = new BoardCardRecord(cardId, project, 1, "lane", 0, "Large image", "", null,
+            "medium", null, [], false, 0, DateTime.UtcNow, DateTime.UtcNow);
+        var board = Mock.Get(_app.Services.GetRequiredService<IBoardService>());
+        Mock.Get(_app.Services.GetRequiredService<IBoardProjectResolver>())
+            .Setup(resolver => resolver.ResolveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(project);
+        board.Setup(service => service.FindCardAsync(project, cardId, It.IsAny<CancellationToken>())).ReturnsAsync(card);
+        board.Setup(service => service.FindAttachmentAsync(project, cardId, attachmentId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BoardAttachmentMetadata(attachmentId, cardId, "large.webp", "image/webp",
+                BoardTool.MaxMcpImageBytes + 1L, DateTime.UtcNow));
+        await using var client = await McpClient.CreateAsync(new HttpClientTransport(new HttpClientTransportOptions {
+            Endpoint = _endpoint, TransportMode = HttpTransportMode.StreamableHttp
+        }), cancellationToken: ct);
+
+        var result = await client.CallToolAsync("read_board_attachment", new Dictionary<string, object?> {
+            ["attachmentId"] = attachmentId, ["card"] = cardId
+        }, cancellationToken: ct);
+
+        Assert.True(result.IsError);
+        Assert.Empty(result.Content.OfType<ImageContentBlock>());
+        Assert.Contains("5 MiB", Assert.Single(result.Content.OfType<TextContentBlock>()).Text);
+        Assert.Contains("Board viewer", Assert.Single(result.Content.OfType<TextContentBlock>()).Text);
+        board.Verify(service => service.GetAttachmentContentAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

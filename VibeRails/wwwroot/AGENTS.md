@@ -70,9 +70,11 @@ Completed lanes (names containing Done, Complete or Ship) initially fetch 30 car
 `GET /api/v1/board/cards?pageSize=30`. Scroll near the lane bottom to load another batch, or use
 Load more. Other lanes load normally. The server applies filters to the entire board and returns
 full lane counts, statistics and assignee/tag choices even for unloaded cards. Refresh/filter
-changes reset paging; aborted or stale pages cannot repaint another board, and append deduplicates
-card IDs after concurrent activity. Drag ordering is disabled while filters are active. Board-only
-viewport sizing and non-shrinking cards keep scrolling inside each lane.
+changes reset paging. Each continuation sends the lane's opaque ordering token; activity that
+changes the filtered order marks the offset stale and triggers a full refresh before paging resumes,
+so a promoted unloaded card cannot be skipped. Aborted or stale pages cannot repaint another board,
+and append still deduplicates card IDs. Drag ordering is disabled while filters are active.
+Board-only viewport sizing and non-shrinking cards keep scrolling inside each lane.
 
 New cards and ordinary card activity rise to the top of the current lane. Explicit drag positions
 remain authoritative. This ordering is persisted, including comments, notes, session links/renames,
@@ -129,8 +131,9 @@ launch prompt all use those same storage values rather than deriving type from t
 Card headings, launch session names, and remembered terminal labels use `KEY · Card title`, where
 `KEY` is the server's `card.key` (`VB-n` for existing projects, the project's own prefix such as
 `VR-n` for projects that got their first card after 1.10.19). Never rebuild a key from `'VB-'`.
-Base assignees show `board-launch-options.js` controls for model, effort, and start mode;
-saved environments keep their own configuration. The pinned model catalog is shared with
+Base assignees show `board-launch-options.js` controls for model, effort, start mode, and an
+explicit warning-styled YOLO toggle; saved environments keep their own configuration. The pinned
+model catalog is shared with
 Environments through `llm-model-catalog.js`. Choices persist on the card and reach the backend
 as typed `baseLlmOptions`, never browser-built CLI argument strings. Changing/unassigning the
 provider clears those controls. Picker mount is asynchronous: initialize controls using the
@@ -215,9 +218,6 @@ that interpolates unescaped user text would break the whole security story. The 
 pinned in `Tests/wwwroot/js/board-text.test.mjs` — the CSP sets `script-src 'unsafe-inline'` with
 no nonce, so an injected handler *would* run; this renderer is the only thing standing in the way.
 
-Layout rules worth keeping: `pre.board-code` uses `white-space: pre` + `overflow-x: auto`, and
-every ancestor carries `min-width: 0` (including `grid-template-columns: 28px minmax(0, 1fr)` on
-`.board-comment`). Without that chain a wide stack trace widens the whole dialog. Long comment
 **The `@` typeahead** (`board-file-refs.js`) is bound to every composer textarea from
 `bindComposer` — description, comment and the new-card description alike. Typing `@` opens a list
 under the caret (a hidden mirror div measures the caret; measured synchronously, same rule as
@@ -232,6 +232,9 @@ unsaved-edit tracking see the change. Its disposers live in `composerDisposers` 
 by `disposeComposers()` on close/replacement — deliberately **not** in `disposeCardPickers()`, which
 `bindCardEditor` re-runs after the composers are wired and would kill the popups before they opened.
 
+Layout rules worth keeping: `pre.board-code` uses `white-space: pre` + `overflow-x: auto`, and
+every ancestor carries `min-width: 0` (including `grid-template-columns: 28px minmax(0, 1fr)` on
+`.board-comment`). Without that chain a wide stack trace widens the whole dialog. Long comment
 bodies clamp with a Show more expander, and the clamp class must be applied **before** measuring
 overflow — an unclamped body always reports `scrollHeight === clientHeight`, so measuring first
 detects nothing.

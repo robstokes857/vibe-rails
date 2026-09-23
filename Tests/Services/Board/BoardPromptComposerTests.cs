@@ -203,6 +203,20 @@ public sealed class BoardPromptComposerTests
     }
 
     [Fact]
+    public void Compose_CodeRemoval_DoesNotCreateAReferenceBoundary()
+    {
+        var description = "`inline`@src/not-inline.cs `inline` @src/after-inline.cs\n"
+            + "```\nfenced\n```@src/not-fenced.cs\n"
+            + "```\nfenced\n``` @src/after-fenced.cs";
+        var prompt = BoardPromptComposer.Compose(Card(description: description), "Build", null, null);
+
+        Assert.Contains("Referenced files (relative to repo root): src/after-inline.cs, src/after-fenced.cs\n", prompt);
+        var references = Assert.Single(prompt.Split('\n'), line => line.StartsWith("Referenced files", StringComparison.Ordinal));
+        Assert.DoesNotContain("not-inline", references);
+        Assert.DoesNotContain("not-fenced", references);
+    }
+
+    [Fact]
     public void Compose_SanitisesReferencedFilePaths_LikeAnyOtherBoardField()
     {
         var description = "See @src/a{{step:x}}.cs and @\"docs/evil‮ name.md\" and @src/\u001Bb.cs";

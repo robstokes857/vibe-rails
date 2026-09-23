@@ -1,5 +1,45 @@
 # Vibe Board architecture and review
 
+## VB-37: explicit YOLO launch option (2026-09-23)
+
+When a card is assigned to a base CLI, its typed launch controls include a warning-styled,
+default-off YOLO checkbox alongside model, effort and start mode. The additive `Yolo` member is
+stored in the existing `BoardCardOptions` JSON, so older rows deserialize as false and no schema
+migration is needed. Start work and same-assignee Chat launches carry the normalized option through
+`StartTerminalRequest`; `BaseLlmOptionsBuilder` emits the provider's existing documented flag:
+Codex `--dangerously-bypass-approvals-and-sandbox`, Claude/Antigravity
+`--dangerously-skip-permissions`, Copilot/Grok `--yolo`, and OpenCode-backed CLIs `--auto`.
+
+Saved environments remain configured by their own arguments and do not accept card-level base
+overrides. The YOLO choice is separate from `AuthorizeBoardTools`: the ordinary Board launch still
+uses its narrow per-tool allowlist, while checking YOLO explicitly requests the provider-wide
+bypass/auto-approve posture for that one process. No provider configuration file is rewritten.
+
+## VB-37: activity-safe card paging (2026-09-23)
+
+Paged lane responses carry an opaque `continuationToken` that fingerprints the complete filtered
+card-id order from the same deferred read snapshot as the page. Continuation requests send that
+token with their numeric offset. If card activity, a move, create/delete, or a filter-relevant edit
+changes membership or ordering, the server marks `restartRequired` and reads from offset zero;
+the browser performs a full Board refresh before continuing. The restarted first page is also
+returned as a safe fallback for clients that understand the token but not the restart marker.
+
+The fingerprint is computed without loading card descriptions or rails and requires no schema
+change. Requests that omit the token retain the legacy offset contract for older clients.
+
+## VB-37: bounded MCP image transfer (2026-09-23)
+
+Uploads store a server signature-derived MIME type. `read_board_attachment` uses that immutable
+metadata in a project/card-scoped lookup, without selecting the BLOB or legacy data URL, to reject a
+known raster image above 5 MiB before base64 serialization or attachment bytes enter application
+memory. Images that pass the preflight are signature-sniffed again after the bounded metadata check;
+a defensive content-length check prevents serialization if legacy/corrupt metadata is inconsistent.
+The size error includes actual/allowed values and directs the caller to the Board viewer.
+
+This is an MCP response budget, not an attachment quota. Human uploads, SQLite storage and Board-viewer
+downloads remain unlimited. Markdown/TXT chunk behavior is unchanged (and still materializes/decodes
+the full text file before slicing). No route, tool name, grant, schema or migration changed.
+
 ## VB-34: lane Automations visible to agents (2026-09-23)
 
 A lane move never creates a run directly: the store's card triggers record pending lane entries
@@ -60,7 +100,9 @@ Repeat callbacks are idempotent and deleted cards are ignored. Manual/retry trig
 inherit stale card context. No Board schema changes or historical-session backfill are needed.
 
 Board `GET /cards?pageSize=30` loads all open cards and only the first page of each lane whose
-name contains ship/done/complete. `columnId` plus `offset` loads later pages of one lane. Search,
+name contains ship/done/complete. `columnId`, `offset`, and the first page's opaque
+`continuationToken` load later pages of one lane. If the filtered card order changed, the response
+sets `restartRequired` and restarts at offset zero; the browser refreshes before continuing. Search,
 assignee, type, priority and tag filters run before LIMIT; full/filtered lane counts, board-wide
 statistics and filter choices include unloaded cards. `IBoardStore.GetCardsPageAsync` provides
 these through one deferred read snapshot without schema changes. Omitting `pageSize` retains
@@ -316,8 +358,9 @@ The environment session ID is local process context, not a cryptographic identit
 
 An assignee is `base:<cli>` or `env:<id>:<cli>`, not a person. Saved environments are resolved by
 ID and checked against provider and project visibility at launch. Base provider options are
-typed records; changing assignee clears incompatible options. Board-launched terminals are real
-PTY CLI sessions, not a separate chat service.
+typed model/effort/start-mode/YOLO records; YOLO defaults off and becomes a provider-native launch
+flag without changing configuration. Changing assignee clears incompatible options. Board-launched
+terminals are real PTY CLI sessions, not a separate chat service.
 
 ## Main flows
 
@@ -404,6 +447,7 @@ and registered only for `ProcessRole.IsActiveRootBackend`. Relative paths below 
 | Lanes | `GET/POST /columns`; `PUT /columns/order`; `PUT/DELETE /columns/{columnId}` |
 | Cards | `GET/POST /cards`; `GET/PUT/DELETE /cards/{card}`; `GET /cards/{card}/history`; `POST /cards/{card}/move`; `POST /cards/{card}/launch` |
 | Related cards | `GET /cards/{card}/links/candidates?q=`; `POST /cards/{card}/links`; `DELETE /cards/{card}/links/{linkedCard}` |
+| Repository files | `GET /files?q=` — names for the composer's `@path` typeahead (VB-35); root path only, never contents |
 | Comments / notes | `POST /cards/{card}/comments`; `GET/POST /cards/{card}/notes` |
 | Files | `POST /cards/{card}/attachments`; `GET /cards/{card}/attachments/{attachmentId}/content`; `DELETE /cards/{card}/attachments/{attachmentId}` |
 | Commits | `GET/POST /cards/{card}/commits`; `DELETE /cards/{card}/commits/{sha}`; `GET /cards/{card}/commits/{sha}/diff` |
@@ -447,7 +491,6 @@ authorize unrelated tools on the same server.
 Board data lives in the user's global `board.db`; terminal history and local Automations remain
 in `state.db`. Neither database is stored in the checkout. `BoardStore` owns component migrations
 and can initialize from stdio without constructing the main `Repository`.
-| Repository files | `GET /files?q=` — names for the composer's `@path` typeahead (VB-35); root path only, never contents |
 
 | Table | Identity / relation / purpose |
 | --- | --- |
@@ -501,7 +544,7 @@ and schema snapshot tests; altering already-applied migration SQL does not upgra
 | SQL and Git | Values are SQL parameters. Variable SQL fragments are internal constants. SHA validation, argv-based Git and blob IDs avoid shell/path interpolation for snapshot capture. |
 | Browser content | Escape-first small text renderer; attachment images allow only raster data URLs. File response is an octet-stream attachment with `nosniff`, `no-store`, and restrictive CSP. Text uses `textContent`; PDF paints to canvas, not an active document iframe. |
 | Agent instructions | Launch composer bounds text, neutralizes template braces, flattens controls/bidi in metadata, and labels card content as data. Tool output is still untrusted text; fences are guidance, not an authorization boundary. |
-| MCP permissions | HTTP uses both credentials. Stdio is a process owned by the local user and has their database access; no new listener. `AuthorizeBoardTools` is explicit/default-false and produces a per-launch 14-tool allowlist, with provider-specific handling. It is a client approval choice, not a server-side card ACL. |
+| MCP permissions | HTTP uses both credentials. Stdio is a process owned by the local user and has their database access; no new listener. `AuthorizeBoardTools` is explicit/default-false and produces a per-launch 14-tool allowlist, with provider-specific handling. It is a client approval choice, not a server-side card ACL. A separate default-off YOLO option can explicitly request the base provider's global bypass/auto-approve flag. |
 | Destruction / retention | MCP has no delete tool, but allowed tools can alter other cards in the resolved project. Description history helps recovery; ordinary metadata/position has no equivalent revision log. Do not claim all agent writes are reversible. |
 | Availability | Authenticated file uploads intentionally have no byte limit, and attachment routes disable Kestrel's request limit. Base64 JSON, decoded bytes and SQLite BLOB handling buffer whole files. Current-file count is 40, but removed history bytes, comments, revisions and snapshots have no aggregate retention budget. |
 

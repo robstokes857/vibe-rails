@@ -118,8 +118,10 @@ in root `SECURITY_ERROR.md`; distinguish findings from speculative risks and acc
 
 Board tool authorization is an explicit, default-false launch field. Keep HTTP/stdio registrations
 and the exact per-tool grant allowlist in sync. No server wildcard, unrelated-tool approval,
-global sandbox bypass, or rewrite of shared provider settings. Check provider-specific behavior
-without assuming one CLI's switches apply to another.
+or rewrite of shared provider settings. The separate, default-off card YOLO option may add the
+selected base provider's documented global bypass/auto-approve launch flag; do not conflate that
+user choice with the narrow Board-tool grants. Check provider-specific behavior without assuming
+one CLI's switches apply to another.
 
 Treat all card fields, comments, notes, commit messages and attachment contents as untrusted data.
 Preserve prompt caps, control/bidi handling and placeholder neutralization, including generated
@@ -129,6 +131,9 @@ Keep authenticated octet-stream downloads with `nosniff`, restrictive CSP and `n
 
 Current limits include title 300, description 100,000, comment/note 50,000, 20 tags of 40 characters,
 40 current attachments, and 500,000 characters for an MCP-written TXT/Markdown attachment.
+`read_board_attachment` returns raster images through MCP only up to 5 MiB; larger images stay
+available through the Board viewer. That is a tool-result/transport bound, not an upload or storage
+quota. The metadata preflight must happen before reading the attachment BLOB.
 The UI's 12-file limit is a known bug (F7), not the contract. Human file uploads deliberately have
 no byte quota. Do not restore the removed byte-budget policy as an incidental “security fix”;
 design streaming/concurrency/retention improvements explicitly. MCP text reads are chunked, but
@@ -191,12 +196,12 @@ Never replace the durable queue with a browser timer or an in-memory queue.
 | MCP / grants | `BoardToolTests`, `McpServerHttpTests`, `McpStdioHostTests`, `BoardToolAuthorizationTests`, OpenCode/command Board tests |
 | Launch concurrency/prompt | `BoardLaunchConcurrencyTests`, `BoardPromptComposerTests`, launch cases in `BoardServiceTests` |
 | UI behavior | `Tests/wwwroot/js/board-*.test.mjs`; `UITests/tests/board-ux.spec.js` and `board-attachment-security.spec.js` |
+| `@path` references / file index | `BoardFileIndexServiceTests`, the referenced-files cases in `BoardPromptComposerTests`, the files route case in `BoardRoutesTests`, `board-text.test.mjs`, `board-file-refs.test.mjs`, the typeahead case in `board-ux.spec.js` |
 | Schema changes | `Tests/DB/SchemaSnapshotTests.cs`, `PreviousReleaseCompatibilityTests.cs`, migration/Board adoption tests |
 | Database separation / host composition | `Tests/DB/BoardDatabaseIsolationTests.cs`, split-file `BoardSettingsTests`, route and MCP Board tests |
 
 Common focused commands from repository root:
 
-| `@path` references / file index | `BoardFileIndexServiceTests`, the referenced-files cases in `BoardPromptComposerTests`, the files route case in `BoardRoutesTests`, `board-text.test.mjs`, `board-file-refs.test.mjs`, the typeahead case in `board-ux.spec.js` |
 ```powershell
 dotnet test Tests/Tests.csproj --no-restore --filter "FullyQualifiedName~Board|FullyQualifiedName~CookieAuthMiddlewareTests|FullyQualifiedName~McpServerHttpTests|FullyQualifiedName~McpStdioHostTests" -p:OutputPath=bin/BoardChecks/ --verbosity quiet
 node --test Tests/wwwroot/js/board-*.test.mjs

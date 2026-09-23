@@ -650,13 +650,17 @@ export class BoardController {
         if (button) { button.disabled = true; button.textContent = 'Loading…'; }
         try {
             const response = await BoardApi.getBoardCardPageAsync(boardId, this.state.filters, {
-                columnId, offset: lane.nextOffset, signal: request.signal
+                columnId, offset: lane.nextOffset, continuationToken: lane.continuationToken, signal: request.signal
             });
             if (!isCurrent()) return;
+            const next = response.lanes?.find(item => item.columnId === columnId);
+            if (next?.restartRequired) {
+                await this.refresh();
+                return;
+            }
             const cards = new Map(this.state.cards.map(card => [card.id, card]));
             for (const card of response.cards || []) cards.set(card.id, card);
             this.state.cards = [...cards.values()];
-            const next = response.lanes?.find(item => item.columnId === columnId);
             if (next) Object.assign(lane, next);
             else lane.hasMore = false;
         } catch (error) {
@@ -1099,11 +1103,11 @@ export class BoardController {
             </div>
         `, { onClose: () => {
             this.disposeCardPickers();
+            this.disposeComposers();
             this.cardLinksDispose?.();
             this.cardLinksDispose = null;
             disposeBoardAttachmentPreview();
         } });
-            this.disposeComposers();
 
         if (generation !== this._openCardGeneration) return;
 
@@ -1340,13 +1344,13 @@ export class BoardController {
             try { input.setSelectionRange(end, end); } catch { /* not a text control */ }
         });
         input.addEventListener('input', autoGrow);
+        // `@` opens the repository file typeahead (board-file-refs.js). It only ever edits
+        // this textarea's value and is torn down with the other pickers when the editor closes.
+        this.composerDisposers.push(bindFileReferencePopup(input, { app: this.app, host: composer }));
         // Sized now rather than on the next frame: an occluded page never gets one,
         // and the description box would open at its one-line default.
         autoGrow();
         setPreview(Boolean(input.value.trim()));
-        // `@` opens the repository file typeahead (board-file-refs.js). It only ever edits
-        // this textarea's value and is torn down with the other pickers when the editor closes.
-        this.composerDisposers.push(bindFileReferencePopup(input, { app: this.app, host: composer }));
 
         const submit = () => {
             if (!onSubmit) return;
