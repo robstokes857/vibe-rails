@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol.Client;
+using ModelContextProtocol.Protocol;
 using Moq;
 using VibeRails.DTOs;
 using VibeRails.Services.BertV2;
@@ -98,6 +99,32 @@ public class McpServerHttpTests : IAsyncLifetime
             ownsHttpClient: false);
 
         return await McpClientService.ConnectAsync(transport, cancellationToken: ct);
+    }
+
+    [Fact]
+    public async Task ReadBoardAttachment_ReturnsImageContentOverMcpWithoutFileOrDatabasePaths()
+    {
+        const string project = "image-test-project";
+        var ct = TestContext.Current.CancellationToken;
+        var bytes = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=");
+        var card = new BoardCardRecord("image-card", project, 1, "lane", 0, "Image", "", null, "medium", null, [], false, 0, DateTime.UtcNow, DateTime.UtcNow);
+        Mock.Get(_app.Services.GetRequiredService<IBoardProjectResolver>())
+            .Setup(resolver => resolver.ResolveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(project);
+        var board = Mock.Get(_app.Services.GetRequiredService<IBoardService>());
+        board.Setup(service => service.FindCardAsync(project, "image-card", It.IsAny<CancellationToken>())).ReturnsAsync(card);
+        board.Setup(service => service.GetAttachmentContentAsync(project, "image-card", "att-image", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BoardAttachmentContent(new BoardAttachmentRecord("att-image", "image-card", "screen.png", "image/png", bytes.Length, "", DateTime.UtcNow), bytes));
+        await using var client = await McpClient.CreateAsync(new HttpClientTransport(new HttpClientTransportOptions {
+            Endpoint = _endpoint, TransportMode = HttpTransportMode.StreamableHttp
+        }), cancellationToken: ct);
+        var result = await client.CallToolAsync("read_board_attachment", new Dictionary<string, object?> {
+            ["attachmentId"] = "att-image", ["card"] = "image-card"
+        }, cancellationToken: ct);
+        Assert.False(result.IsError == true);
+        var image = Assert.Single(result.Content.OfType<ImageContentBlock>());
+        Assert.Equal("image/png", image.MimeType);
+        Assert.Equal(bytes, image.DecodedData.ToArray());
+        Assert.Contains("untrusted task data", Assert.Single(result.Content.OfType<TextContentBlock>()).Text);
     }
 
     [Fact]

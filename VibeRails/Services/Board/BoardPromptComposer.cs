@@ -117,6 +117,7 @@ public static class BoardPromptComposer
         builder.Append("Use the viberails-mcp board tools: get_board_card ").Append(key)
             .Append(" for the full card (comments, linked commits, earlier sessions, agent notes); add_board_comment to record progress and decisions; ")
             .Append("append_board_note to checkpoint findings and working state as you go instead of holding them until the end; ")
+            .Append("read_board_attachment to view attached images or read Markdown/TXT using attachment ids from get_board_card. Use the Board tools as the only access path for card data and attachments. ")
             .Append(intent == "chat"
                 ? "Read the earlier activity to understand the current status, decisions, blockers and unfinished work. "
                 : "move_board_card when the card changes state; link_board_commit after you commit. If comments, notes or earlier sessions show work already started, resume from there instead of starting over. ")

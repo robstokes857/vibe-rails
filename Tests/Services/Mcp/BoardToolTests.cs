@@ -496,7 +496,7 @@ public sealed class BoardToolTests : IDisposable
         Assert.Contains("findings.md (text/markdown, 30 bytes)", card);
         var attachmentId = System.Text.RegularExpressions.Regex.Match(card, @"(att_[0-9a-f]{12}): findings\.md").Groups[1].Value;
         var text = await _tool.ReadBoardAttachment(attachmentId, "PROJ-1", cancellationToken: Ct);
-        Assert.EndsWith("# Findings\n\nThree candidates.\n", text);
+        Assert.EndsWith("# Findings\n\nThree candidates.\n", Assert.IsType<ModelContextProtocol.Protocol.TextContentBlock>(Assert.Single(text.Content)).Text);
 
     }
 
@@ -511,9 +511,11 @@ public sealed class BoardToolTests : IDisposable
         var tool = new BoardTool(busy.Object, _resolver, _store);
 
         var reply = await tool.AddBoardComment("hello", "PROJ-1", Ct);
-        Assert.StartsWith("FAIL: could not add the comment: the VibeRails database is busy", reply);
+        Assert.StartsWith("FAIL: could not add the comment: the Board is temporarily busy", reply);
         Assert.Contains("Nothing was saved. Retry the same call in a few seconds.", reply);
         Assert.DoesNotContain("See the VibeRails log", reply);
+        Assert.DoesNotContain("database", reply, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(".db", reply, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

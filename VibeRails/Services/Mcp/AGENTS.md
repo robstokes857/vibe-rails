@@ -60,7 +60,7 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 | `list_board_columns` | `BoardTool.ListBoardColumns` | Lanes of one board with card counts. `board` (name or id) optional: defaults to the board of the card this terminal was launched for, else the first board. |
 | `list_board_cards` | `BoardTool.ListBoardCards` | Cards on one board (key, lane, type, priority, title, assignee, comment count, session open); optional lane/assignee/type filters and the same optional `board`. Card keys are project-unique, so `get_board_card VB-n` never needs a board. |
 | `get_board_card` | `BoardTool.GetBoardCard` | One card in full: fields, the board's lane names, description, comments, linked commits, sessions (full session id, ended time/exit code, that session's last comment, its chat summary when one exists), the tail of the agent notes, attachment ids/names/types/sizes. `card` omitted = the card this terminal was launched for. `since` (ISO-8601) lists only activity at or after that time and counts the rest. Reading never links the session to the card. |
-| `read_board_attachment` | `BoardTool.ReadBoardAttachment` | Bounded UTF-8 Markdown/TXT attachment content; accepts attachment id, optional card, character offset and maximum length (40,000 default; 250,000 limit). Card/project scoped, current files only. |
+| `read_board_attachment` | `BoardTool.ReadBoardAttachment` | Current PNG/JPEG/GIF/WebP attachments as native MCP image content; UTF-8 Markdown/TXT as bounded text (40,000 default; 250,000 limit). Accepts attachment id and optional card; offset/maximum length apply to text. Reads remain card/project scoped with no caller-supplied path or direct SQL access. |
 | `create_board_card` | `BoardTool.CreateBoardCard` | New card (title, description, lane, type, priority, tags); optional `board` as above. |
 | `update_board_card` | `BoardTool.UpdateBoardCard` | Partial update, including `flagged=true` only for important unresolved owner decisions/intervention under the [attention policy](../../../AGENTS.md#board-attention-flags), or `false` once resolved (independent of `blocked`). Explain the issue and requested action in a comment; routine review and compatible additive schema changes do not warrant a flag. Description replacement accepts the last write; `descriptionAppend` appends to current text atomically with the other fields and cannot be combined with `description`. |
 | `move_board_card` | `BoardTool.MoveBoardCard` | Move a card to a lane (by name or id), optionally at a position. |
@@ -320,3 +320,14 @@ avoid `WithToolsFromAssembly()` (reflection scan) — it is the AOT-unsafe varia
 ---
 
 **Last checked**: 2026-09-09 by Claude (added BoardTool + stdio runtime-path init)
+
+### Reading card images
+
+Agents use `get_board_card` for attachment IDs, then `read_board_attachment`. The existing tool
+returns MCP `CallToolResult` with a text metadata block plus an image block for signature-detected
+PNG/JPEG/GIF/WebP. Markdown/TXT retain their bounded text format; tool failures set `IsError`.
+Only current attachments on the resolved card/project are readable. SVG, PDFs and arbitrary binary
+files are not returned as images; the Board viewer remains their existing access path. This adds no
+new tool name, grant, database path, SQL operation or filesystem export. The launch prompt and card
+attachment guidance explicitly require Board tools instead of direct database access. This is a
+supported workflow, not OS isolation: a local CLI with filesystem permission could still bypass it.

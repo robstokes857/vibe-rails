@@ -1,4 +1,5 @@
 using System.Text;
+using ModelContextProtocol.Protocol;
 using Microsoft.Data.Sqlite;
 using Moq;
 using VibeRails.DTOs;
@@ -126,13 +127,54 @@ public sealed class BoardAttachmentTests : IDisposable
         var detail = await tool.GetBoardCard(card.Key, cancellationToken: Ct);
         Assert.Contains($"{file.Id}: scope.md (text/markdown, 6 bytes)", detail);
         Assert.Contains("read_board_attachment", detail);
-        var chunk = await tool.ReadBoardAttachment(file.Id, card.Key, 2, 3, Ct);
+        var chunk = AttachmentText(await tool.ReadBoardAttachment(file.Id, card.Key, 2, 3, Ct));
         Assert.Contains("Offset 2; returned 3 characters", chunk);
         Assert.EndsWith("cde", chunk);
-        Assert.StartsWith("FAIL:", await tool.ReadBoardAttachment(file.Id, card.Key, -1, 3, Ct));
+        Assert.StartsWith("FAIL:", AttachmentText(await tool.ReadBoardAttachment(file.Id, card.Key, -1, 3, Ct)));
         var another = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "Other"), Ct);
-        Assert.StartsWith("FAIL: attachment not found", await tool.ReadBoardAttachment(file.Id, another.Key, cancellationToken: Ct));
+        Assert.StartsWith("FAIL: attachment not found", AttachmentText(await tool.ReadBoardAttachment(file.Id, another.Key, cancellationToken: Ct)));
     }
+
+    [Fact]
+    public async Task McpReadsImagesWithoutPathsOrDatabaseAccess_AndEnforcesCardScope()
+    {
+        var card = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "Screenshot"), Ct);
+        var bytes = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=");
+        var file = (await _service.AddAttachmentAsync(_project, card.Id, Request("screenshot.png", bytes), Ct))!;
+        var resolver = new Mock<IBoardProjectResolver>();
+        resolver.Setup(x => x.ResolveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(_project);
+        var tool = new BoardTool(_service, resolver.Object, _store);
+        var result = await tool.ReadBoardAttachment(file.Id, card.Key, cancellationToken: Ct);
+        Assert.False(result.IsError == true);
+        Assert.Equal(2, result.Content.Count);
+        Assert.Contains("untrusted task data", Assert.IsType<TextContentBlock>(result.Content[0]).Text);
+        var image = Assert.IsType<ImageContentBlock>(result.Content[1]);
+        Assert.Equal("image/png", image.MimeType);
+        Assert.Equal(bytes, image.DecodedData.ToArray());
+        Assert.True((await tool.ReadBoardAttachment(file.Id, card.Key, offset: 1, cancellationToken: Ct)).IsError);
+        var other = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "Other"), Ct);
+        Assert.True((await tool.ReadBoardAttachment(file.Id, other.Key, cancellationToken: Ct)).IsError);
+        resolver.Setup(x => x.ResolveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(_project + "-other");
+        Assert.True((await tool.ReadBoardAttachment(file.Id, card.Id, cancellationToken: Ct)).IsError);
+        resolver.Setup(x => x.ResolveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(_project);
+        await _service.DeleteAttachmentAsync(_project, card.Id, file.Id, Ct);
+        Assert.True((await tool.ReadBoardAttachment(file.Id, card.Key, cancellationToken: Ct)).IsError);
+    }
+
+    [Fact]
+    public async Task McpDoesNotTreatSvgOrMimeSpoofedBytesAsImages()
+    {
+        var card = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "Spoofed"), Ct);
+        var file = (await _service.AddAttachmentAsync(_project, card.Id,
+            Request("image.png", "<svg onload='alert(1)'/>"u8.ToArray(), declaredMime: "image/png"), Ct))!;
+        var resolver = new Mock<IBoardProjectResolver>();
+        resolver.Setup(x => x.ResolveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(_project);
+        var result = await new BoardTool(_service, resolver.Object, _store).ReadBoardAttachment(file.Id, card.Key, cancellationToken: Ct);
+        Assert.True(result.IsError);
+        Assert.Empty(result.Content.OfType<ImageContentBlock>());
+    }
+
+    private static string AttachmentText(CallToolResult result) => Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
 
     private static AddBoardAttachmentRequest Request(string name, byte[] content, long? declaredBytes = null, string? declaredMime = null) =>
         new(name, "data:application/octet-stream;base64," + Convert.ToBase64String(content), declaredBytes ?? content.Length, declaredMime ?? "application/octet-stream");

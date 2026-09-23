@@ -1,5 +1,33 @@
 # API authentication coverage
 
+VB-29 Board pagination amendment (2026-09-23): the existing authenticated, active-root
+`GET /api/v1/board/cards` accepts optional `pageSize`, `columnId`, `offset`, `q`, `assignee`,
+`type`, `priority` and `tag` query fields. Omitting `pageSize` retains the unpaged response.
+The server still derives the project, resolves the selected board within it, and rejects a
+lane outside that board. SQL parameters carry all filter values; page size is bounded to
+1–100 and offsets are nonnegative. Counts and filter choices are scoped to the same board,
+including unloaded cards. Page membership and metadata share a deferred read snapshot;
+only selected cards' full summaries are materialized. No route, credential exception,
+listener or MCP capability was added. Route enumeration (including grouped/constant paths,
+proxy mappings and the inherited event WebSocket) and both mandatory listener searches
+were repeated: only the approved main Kestrel host, non-serving port probe and test hosts
+matched; there were no cross-runtime listener matches. This is a scoped change review,
+not a new full authentication audit. Real SQLite and authenticated/AOT Board route tests
+cover page bounds, unloaded-card filtering, cross-project/board rejection, both credentials
+and compatibility with unpaged clients.
+
+VB-29 attachment-read amendment (2026-09-23): the existing `read_board_attachment`
+tool now returns MCP image content for byte-sniffed PNG/JPEG/GIF/WebP attachments,
+preserving the original bytes. Markdown/TXT retain their bounded text reads. Resolution
+still uses the current card/project and attachment id through `IBoardStore`; removed or
+foreign-card attachments are not readable. No path argument, SQL tool, temporary file
+export, new tool name/grant, route or listener is introduced. Image and text results remain
+untrusted task data, and unsupported binary types remain in the Board viewer. Tool help
+no longer claims retained historical attachments exist. Launch prompts explicitly direct
+agents to Board tools as the only access path for card data and attachments; storage details
+are absent from generated guidance and busy-error responses. HTTP retains
+both credentials; stdio retains the same local child-process boundary.
+
 VB-31 cross-repository Automation import amendment (2026-09-22): two authenticated routes added under
 `/api/v1/jobs`, `GET /api/v1/jobs/catalog` and `POST /api/v1/jobs/import`, both mapped only by an
 active root backend (`JobRoutes.Map(app, launchDirectory, isActiveRootBackend)`) like the Python-script
@@ -758,6 +786,10 @@ cannot read or write another project's board through this surface.
 - `GET /api/v1/board/cards`, `POST /api/v1/board/cards`, `GET /api/v1/board/cards/{card}`,
   `PUT /api/v1/board/cards/{card}`, `DELETE /api/v1/board/cards/{card}`,
   `POST /api/v1/board/cards/{card}/move` — cards (`{card}` is an id or a `VB-n` key).
+  The list optionally takes `pageSize=1..100`, `columnId`, `offset` and
+  `q`/`assignee`/`type`/`priority`/`tag`. Initial paged reads include all open cards and
+  one page per completed lane; a scoped `columnId` reads one lane page. Counts and
+  filter choices cover the selected board, and filters run before the page limit.
 - `GET /api/v1/board/cards/{card}/links/candidates?q=`,
   `POST /api/v1/board/cards/{card}/links`,
   `DELETE /api/v1/board/cards/{card}/links/{linkedCard}` — related cards. The POST body supplies
@@ -814,14 +846,14 @@ real TUI before it ships.
   `PUT /api/v1/board/cards/{card}/sessions/{sessionId}`,
   `DELETE /api/v1/board/cards/{card}/sessions/{sessionId}` — the card ↔ terminal-session links.
 
-MCP note: reads through these tools never link the calling session to the card (a session links to
-exactly one card, and linking on read let a browsing session claim a card it was not working); a
-cross-card read is recorded against the card that was read, annotated with the reader's own card
-key. Writes still link. The same board operations (minus any delete or terminal input) are exposed as `*_board_*` tools on
+MCP note: reads through these tools never link the calling session to a card. Writes auto-link
+an entirely unlinked session; `attach_board_session` explicitly adds another card within the
+same project. The same board operations (minus any delete or terminal input) are exposed as `*_board_*` tools on
 `/mcp` (both credentials) and on the stdio `vb mcp` host. The stdio host reads and writes
-`state.db` directly rather than calling this API, so a CLI in any terminal can work a card
-without a VibeRails tab; `read_board_attachment` adds bounded UTF-8 Markdown/TXT reads using
-card/project-scoped IDs, not paths. The host is a child process of the CLI over pipes and remains
+`board.db` through `IBoardStore` rather than calling this API, so a CLI in any terminal can work a card
+without a VibeRails tab. `read_board_attachment` returns bounded UTF-8 Markdown/TXT text or
+byte-sniffed PNG/JPEG/GIF/WebP MCP image content using current card/project-scoped IDs,
+never paths or direct SQL arguments. Removed attachments are unavailable. The host is a child process of the CLI over pipes and remains
 unauthenticated by design. `Tests/Routes/BoardRoutesTests.cs` pins the two-credential
 requirement and the launch composition; `Tests/Services/Mcp/BoardToolTests.cs` pins the tools.
 
