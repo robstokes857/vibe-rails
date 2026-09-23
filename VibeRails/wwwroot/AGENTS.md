@@ -436,7 +436,8 @@ Worker reused/copied, scripts-to-copy, folder-missing and cannot-import badges),
 Worker (only when no visible Worker matches by name and CLI) and the fate of each script. Apply goes
 through `applyRepositoryImport` -> `POST /api/v1/jobs/import`; the server copies missing scripts,
 reuses or clones the Worker and creates the Automation disabled, so the browser never creates the
-environment itself on this path. A 409 (Worker name taken) stays in the modal. The header groups
+environment itself on this path. The catalog is already de-duplicated server-side: a copy records
+its origin and is hidden while that origin exists (VB-33), so the picker needs no client filtering. A 409 (Worker name taken) stays in the modal. The header groups
 Import from repository, Import recipe and New automation in `.jobs-page-actions`; the nav
 launcher customize modal hands off with `app.navigate('jobs', { importFromRepository: true })`.
 

@@ -126,7 +126,8 @@ public sealed record JobResponse(
     DateTime? DeletedUtc,
     List<JobTriggerDto> Triggers,
     bool LaunchMinimized = false,
-    List<JobActionDto>? Actions = null);
+    List<JobActionDto>? Actions = null,
+    long? ImportedFromJobId = null);
 
 public sealed record JobListResponse(List<JobResponse> Jobs);
 
@@ -138,6 +139,8 @@ public sealed record JobTriggerRequest(
     int DaysOfWeekMask = 0,
     string? TimeZoneId = null);
 
+// ImportedFromJobId is set only by the cross-repository import (VB-31/VB-33): the id of the
+// root Automation this one was copied from. POST /api/v1/jobs discards a client-supplied value.
 public sealed record CreateJobRequest(
     string Name,
     string ProjectPath,
@@ -148,7 +151,8 @@ public sealed record CreateJobRequest(
     bool Enabled,
     List<JobTriggerRequest> Triggers,
     bool LaunchMinimized = false,
-    List<JobActionRequest>? Actions = null);
+    List<JobActionRequest>? Actions = null,
+    long? ImportedFromJobId = null);
 
 public sealed record UpdateJobRequest(
     string Name,
@@ -307,7 +311,8 @@ public sealed record JobDefinitionRecord(
     DateTime? DeletedUtc,
     IReadOnlyList<JobTriggerDto> Triggers,
     bool LaunchMinimized = false,
-    IReadOnlyList<JobActionRecord>? Actions = null);
+    IReadOnlyList<JobActionRecord>? Actions = null,
+    long? ImportedFromJobId = null);
 
 public sealed record JobActionRecord(
     string Id,

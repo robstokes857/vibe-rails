@@ -885,7 +885,10 @@ Created by `JobStore.cs` (`JobStore.SchemaSql`), **not** `SqlStrings` — they l
 (scheduled/triggered ordered workflows).
 
 **Jobs** — a scheduled/triggered automation definition. `EnvironmentId` remains a compatibility
-mirror of the workflow's optional Worker; `JobActions` is authoritative.
+mirror of the workflow's optional Worker; `JobActions` is authoritative. `ImportedFromJobId`
+(nullable, no foreign key; receipt `jobs-import-origin/1`) is set only by the cross-repository
+import and names the root Automation the row was copied from, so the import catalog can hide
+copies while their origin still exists (VB-33). An edit never changes it.
 
 ```sql
 CREATE TABLE IF NOT EXISTS Jobs (
@@ -899,6 +902,7 @@ CREATE TABLE IF NOT EXISTS Jobs (
     CreatedUTC      TEXT    NOT NULL,
     UpdatedUTC      TEXT    NOT NULL,
     DeletedUTC      TEXT,
+    ImportedFromJobId INTEGER,
     FOREIGN KEY (EnvironmentId) REFERENCES Environments(Id) ON DELETE SET NULL
 );
 ```

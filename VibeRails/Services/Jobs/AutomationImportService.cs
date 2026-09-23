@@ -27,7 +27,9 @@ public interface IAutomationImportService
 
 /// <summary>
 /// Cross-repository Automation import (VB-31). This is a copy, not a link: after the import the
-/// two Automations and, when cloned, the two Workers are unrelated rows. Nothing here bypasses
+/// two Automations and, when cloned, the two Workers are unrelated rows. The copy does remember
+/// the id of the root Automation it came from (<c>Jobs.ImportedFromJobId</c>), but only so the
+/// catalog can keep copies from being offered back to their source (VB-33). Nothing here bypasses
 /// the normal create paths — the Worker goes through <see cref="LlmCliEnvironmentService"/> so
 /// its config directory is seeded like any other, and the Automation goes through
 /// <see cref="IJobService.CreateJobAsync"/> so every script is re-resolved and hash-pinned
@@ -50,9 +52,9 @@ public sealed partial class AutomationImportService(
     {
         var currentRoot = NormalizeProjectPath(currentProjectPath);
         var jobs = await store.GetJobsAsync(projectPath: null, includeDeleted: false, cancellationToken);
-        var foreign = jobs
-            .Where(job => job.DeletedUtc is null && !ProjectPathComparer.Matches(job.ProjectPath, currentRoot))
-            .ToList();
+        var foreign = WithoutRedundantCopies(
+            jobs.Where(job => job.DeletedUtc is null && !ProjectPathComparer.Matches(job.ProjectPath, currentRoot)),
+            jobs);
         if (foreign.Count == 0)
             return new AutomationImportCatalogResponse(currentRoot, []);
 
@@ -219,7 +221,10 @@ public sealed partial class AutomationImportService(
                     action.ScriptRuntime,
                     action.Arguments.ToList(),
                     action.WorkingDirectory,
-                    action.TimeoutSeconds)).ToList());
+                    action.TimeoutSeconds)).ToList(),
+            // Always the root of the chain: importing a copy still points at the original, so
+            // every copy of one Automation shares one origin however it travelled.
+            ImportedFromJobId: job.ImportedFromJobId ?? job.Id);
 
         JobResponse created;
         try
@@ -245,6 +250,36 @@ public sealed partial class AutomationImportService(
     }
 
     // ----- Catalog helpers -----
+
+    /// <summary>
+    /// An imported Automation is an ordinary row in its target repository, so without this every
+    /// repository that imported "Nightly review" would offer it straight back to its source, once
+    /// per repository (VB-33). A copy is hidden while its origin is still a live Automation
+    /// anywhere on this machine: the origin is either the current repository (nothing to offer) or
+    /// listed under its own repository. Once the origin is gone the copies are the only thing left
+    /// to import from, so exactly one of them, the oldest, is offered per origin.
+    /// </summary>
+    private static List<JobDefinitionRecord> WithoutRedundantCopies(
+        IEnumerable<JobDefinitionRecord> foreign,
+        IReadOnlyList<JobDefinitionRecord> liveJobs)
+    {
+        var liveIds = liveJobs.Where(job => job.DeletedUtc is null).Select(job => job.Id).ToHashSet();
+        var offeredOrigins = new HashSet<long>();
+        var kept = new List<JobDefinitionRecord>();
+        foreach (var job in foreign.OrderBy(job => job.CreatedUtc).ThenBy(job => job.Id))
+        {
+            if (job.ImportedFromJobId is not long origin)
+            {
+                kept.Add(job);
+                continue;
+            }
+            if (liveIds.Contains(origin))
+                continue;
+            if (offeredOrigins.Add(origin))
+                kept.Add(job);
+        }
+        return kept;
+    }
 
     private AutomationImportCatalogEntry BuildEntry(
         JobDefinitionRecord job,

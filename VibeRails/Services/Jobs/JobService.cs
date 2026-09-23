@@ -543,7 +543,8 @@ public sealed class JobService(
         job.Id, job.Name, job.ProjectPath, job.Llm, job.EnvironmentId, job.EnvironmentName,
         job.Prompt, job.TimeoutMinutes, job.Enabled, job.CreatedUtc, job.UpdatedUtc, job.DeletedUtc,
         job.Triggers.ToList(), job.LaunchMinimized,
-        job.Actions?.Select(ToActionDto).ToList());
+        job.Actions?.Select(ToActionDto).ToList(),
+        job.ImportedFromJobId);
 
     private static JobRunResponse ToResponse(JobRunRecord run) => new(
         run.Id, run.JobId, run.JobName, run.TriggerKind, run.Status, run.ProjectPath, run.Llm,

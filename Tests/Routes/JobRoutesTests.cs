@@ -24,6 +24,7 @@ public sealed class JobRoutesTests : IDisposable
 
     private readonly string _repoRoot;
     private readonly Mock<IAutomationImportService> _importService = new();
+    private readonly Mock<IJobService> _jobService = new();
 
     public JobRoutesTests()
     {
@@ -162,6 +163,40 @@ public sealed class JobRoutesTests : IDisposable
         });
     }
 
+    [Fact]
+    public async Task CreateJobDropsAClientSuppliedImportOrigin()
+    {
+        // Only ImportAsync may mark an Automation as a copy; a hand-built create that claims an
+        // origin would make the catalog hide a real Automation.
+        CreateJobRequest? received = null;
+        _jobService
+            .Setup(service => service.CreateJobAsync(It.IsAny<CreateJobRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((CreateJobRequest request, CancellationToken _) =>
+            {
+                received = request;
+                return new JobResponse(
+                    1, request.Name, request.ProjectPath, LLM.NotSet, null, null, string.Empty, null, false,
+                    DateTime.UtcNow, DateTime.UtcNow, null, [], false, null, request.ImportedFromJobId);
+            });
+
+        await WithHostAsync(async baseUri =>
+        {
+            var body = new CreateJobRequest(
+                "Checks", @"C:\elsewhere", LLM.NotSet, null, string.Empty, null, false, [],
+                Actions: [new JobActionRequest(null, JobActionKind.Script, null, "scripts/check.py", JobScriptRuntime.Python)],
+                ImportedFromJobId: 9);
+            using var response = await SharedClient.PostAsync(
+                new Uri(baseUri, "/api/v1/jobs"),
+                JsonContent.Create(body, AppJsonSerializerContext.Default.CreateJobRequest),
+                TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        });
+
+        Assert.NotNull(received);
+        Assert.Null(received!.ImportedFromJobId);
+        Assert.Equal("Checks", received.Name);
+    }
+
     private static Task<HttpResponseMessage> PostAsync(Uri baseUri, string path, AutomationImportRequest body) =>
         SharedClient.PostAsync(
             new Uri(baseUri, path),
@@ -174,7 +209,7 @@ public sealed class JobRoutesTests : IDisposable
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Services.AddSingleton(_importService.Object);
-        builder.Services.AddSingleton(Mock.Of<IJobService>());
+        builder.Services.AddSingleton(_jobService.Object);
         builder.Services.ConfigureHttpJsonOptions(options =>
         {
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonSerializerContext.Default);

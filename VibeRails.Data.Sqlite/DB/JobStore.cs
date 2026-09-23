@@ -82,9 +82,11 @@ public sealed partial class JobStore : IJobStore
         command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO Jobs
-                (Name, ProjectPath, EnvironmentId, TimeoutMinutes, Enabled, CreatedUTC, UpdatedUTC, LaunchMinimized)
+                (Name, ProjectPath, EnvironmentId, TimeoutMinutes, Enabled, CreatedUTC, UpdatedUTC, LaunchMinimized,
+                 ImportedFromJobId)
             VALUES
-                ($name, $projectPath, $environmentId, $timeoutMinutes, $enabled, $now, $now, $launchMinimized)
+                ($name, $projectPath, $environmentId, $timeoutMinutes, $enabled, $now, $now, $launchMinimized,
+                 $importedFromJobId)
             RETURNING Id;
             """;
         BindJob(
@@ -96,6 +98,10 @@ public sealed partial class JobStore : IJobStore
             request.Enabled,
             request.LaunchMinimized,
             now);
+        // Provenance is written once at creation; UpdateJobAsync never touches it.
+        command.Parameters.AddWithValue(
+            "$importedFromJobId",
+            request.ImportedFromJobId is null ? DBNull.Value : request.ImportedFromJobId.Value);
         var id = Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
         await ReplaceTriggersAsync(connection, transaction, id, request.Triggers, now, cancellationToken);
         await ReplaceActionsAsync(
@@ -1541,7 +1547,8 @@ public sealed partial class JobStore : IJobStore
         ParseDb(reader.GetString(10)),
         reader.IsDBNull(11) ? null : ParseDb(reader.GetString(11)),
         [],
-        reader.GetInt32(12) != 0);
+        reader.GetInt32(12) != 0,
+        ImportedFromJobId: reader.IsDBNull(13) ? null : reader.GetInt64(13));
 
     private static async Task<IReadOnlyList<JobTriggerDto>> ReadTriggersAsync(SqliteConnection connection, long jobId, CancellationToken cancellationToken)
     {
@@ -1647,7 +1654,21 @@ public sealed partial class JobStore : IJobStore
         using var connection = SqliteConnectionFactory.Open(_connectionString);
         SqliteMigrationRunner.RequireGenerationAtMost(connection, StateDatabaseSchema.Generation, "state.db");
         SqliteMigrationRunner.Apply(connection, "jobs", 1, MigrationKind.Additive, AdoptSchema);
+        SqliteMigrationRunner.Apply(connection, "jobs-import-origin", 1, MigrationKind.Additive, AdoptImportOrigin);
         EnsureDependentSchema(connection);
+    }
+
+    private static void AdoptImportOrigin(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        // Jobs.ImportedFromJobId (VB-33): the root Automation a cross-repository import was copied
+        // from, so the import catalog can hide copies while their origin still exists. It has its
+        // own receipt because "jobs"/1 is already recorded on existing machines, so a column added
+        // to AdoptSchema's ALTER list would never run there. Fresh databases get the column from
+        // SchemaSql and this is a no-op. Nullable, no foreign key: the origin may live in another
+        // repository and may be gone; the copy stays valid either way.
+        if (SqliteSchema.HasColumn(connection, transaction, "Jobs", "ImportedFromJobId"))
+            return;
+        SqliteSchema.Execute(connection, transaction, "ALTER TABLE Jobs ADD COLUMN ImportedFromJobId INTEGER;");
     }
 
     private static void AdoptSchema(SqliteConnection connection, SqliteTransaction transaction)
@@ -1869,7 +1890,7 @@ public sealed partial class JobStore : IJobStore
     private const string JobSelectSql = """
         SELECT j.Id, j.Name, j.ProjectPath, e.LLM, j.EnvironmentId, e.CustomName,
                COALESCE(NULLIF(TRIM(e.CustomPrompt), ''), ''), j.TimeoutMinutes, j.Enabled,
-               j.CreatedUTC, j.UpdatedUTC, j.DeletedUTC, j.LaunchMinimized
+               j.CreatedUTC, j.UpdatedUTC, j.DeletedUTC, j.LaunchMinimized, j.ImportedFromJobId
         FROM Jobs j LEFT JOIN Environments e ON e.Id = j.EnvironmentId
         """;
 
@@ -1921,6 +1942,7 @@ public sealed partial class JobStore : IJobStore
             CreatedUTC TEXT NOT NULL,
             UpdatedUTC TEXT NOT NULL,
             DeletedUTC TEXT,
+            ImportedFromJobId INTEGER,
             FOREIGN KEY (EnvironmentId) REFERENCES Environments(Id) ON DELETE SET NULL
         );
 

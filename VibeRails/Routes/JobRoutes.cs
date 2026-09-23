@@ -59,7 +59,9 @@ public static class JobRoutes
             await ExecuteAsync(async () =>
             {
                 var projectPath = await ResolveCurrentRepositoryAsync(launchDirectory, cancellationToken);
-                return await service.CreateJobAsync(request with { ProjectPath = projectPath }, cancellationToken);
+                // Provenance is the import path's to set; a hand-built create is never a copy.
+                return await service.CreateJobAsync(
+                    request with { ProjectPath = projectPath, ImportedFromJobId = null }, cancellationToken);
             }))
             .WithName("CreateJob");
 

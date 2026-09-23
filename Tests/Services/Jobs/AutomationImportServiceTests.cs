@@ -260,7 +260,72 @@ public sealed class AutomationImportServiceTests : IDisposable
         Assert.Equal("Nightly", entry.Worker?.Name);
     }
 
+    [Fact]
+    public async Task GetCatalog_HidesCopiesWhoseOriginStillExists()
+    {
+        var otherRoot = Path.Combine(_parent, "other");
+        AddEnvironment(1, "Nightly", _sourceRoot);
+        // 10 lives here and was imported into two other repositories: offering those copies back
+        // is the VB-33 bug. 13 lives elsewhere and was imported into the source repository: the
+        // original is offered under its own repository, the copy is not offered a second time.
+        _jobs.Add(Job(10, "Nightly review", _targetRoot, WorkerAction(10, 1)));
+        _jobs.Add(Job(11, "Nightly review", _sourceRoot, WorkerAction(11, 1)) with { ImportedFromJobId = 10 });
+        _jobs.Add(Job(12, "Nightly review", otherRoot, WorkerAction(12, 1)) with { ImportedFromJobId = 10 });
+        _jobs.Add(Job(13, "Lint", otherRoot, WorkerAction(13, 1)));
+        _jobs.Add(Job(14, "Lint", _sourceRoot, WorkerAction(14, 1)) with { ImportedFromJobId = 13 });
+
+        var catalog = await Service().GetCatalogAsync(_targetRoot, TestContext.Current.CancellationToken);
+
+        var group = Assert.Single(catalog.Projects);
+        Assert.Equal(otherRoot, group.ProjectPath);
+        Assert.Equal(13L, Assert.Single(group.Automations).SourceJobId);
+    }
+
+    [Fact]
+    public async Task GetCatalog_OffersADeletedOriginsCopiesOnce()
+    {
+        var otherRoot = Path.Combine(_parent, "other");
+        AddEnvironment(1, "Nightly", _sourceRoot);
+        // The original (id 10) was deleted, so the store no longer returns it. Its copies are the
+        // only place the Automation survives, and the oldest one stands in for all of them.
+        var older = DateTime.UtcNow.AddDays(-2);
+        _jobs.Add(Job(11, "Nightly review", _sourceRoot, WorkerAction(11, 1))
+            with { ImportedFromJobId = 10, CreatedUtc = older.AddDays(1) });
+        _jobs.Add(Job(12, "Nightly review", otherRoot, WorkerAction(12, 1))
+            with { ImportedFromJobId = 10, CreatedUtc = older });
+        _jobs.Add(Job(13, "Nightly review", Path.Combine(_parent, "third"), WorkerAction(13, 1))
+            with { ImportedFromJobId = 10 });
+
+        var catalog = await Service().GetCatalogAsync(_targetRoot, TestContext.Current.CancellationToken);
+
+        var entry = Assert.Single(catalog.Projects.SelectMany(group => group.Automations));
+        Assert.Equal(12L, entry.SourceJobId);
+        Assert.True(entry.CanImport);
+    }
+
     // ----- Import -----
+
+    [Fact]
+    public async Task Import_RecordsTheSourceAsTheCopysOrigin()
+    {
+        WriteFile(_sourceRoot, "scripts/check.py", "print('source')");
+        _jobs.Add(Job(60, "Checks", _sourceRoot, ScriptAction(60, 0, "scripts/check.py")));
+
+        await Service().ImportAsync(_targetRoot, new AutomationImportRequest(60), TestContext.Current.CancellationToken);
+
+        Assert.Equal(60L, _createdRequest!.ImportedFromJobId);
+    }
+
+    [Fact]
+    public async Task Import_OfACopyPointsAtTheRootOriginNotTheCopy()
+    {
+        WriteFile(_sourceRoot, "scripts/check.py", "print('source')");
+        _jobs.Add(Job(61, "Checks", _sourceRoot, ScriptAction(61, 0, "scripts/check.py")) with { ImportedFromJobId = 5 });
+
+        await Service().ImportAsync(_targetRoot, new AutomationImportRequest(61), TestContext.Current.CancellationToken);
+
+        Assert.Equal(5L, _createdRequest!.ImportedFromJobId);
+    }
 
     [Fact]
     public async Task Import_CopiesMissingScriptsKeepsExistingOnesAndCreatesTheAutomationDisabled()
