@@ -1,5 +1,41 @@
 # Vibe Board architecture and review
 
+## VB-34: lane Automations visible to agents (2026-09-23)
+
+A lane move never creates a run directly: the store's card triggers record pending lane entries
+that the root scheduler drains about 60 seconds later, applying the enabled/deleted/project/
+actions/self-overlap gate in `JobStore.InsertRunAsync`. Agents driving the Board over MCP now see
+that on both sides of a move, as plain text built from the Automation's own definition (Worker
+name and CLI, the first line of its environment prompt, script names), not from a per-kind
+template.
+
+Planning surface: `get_board_card`, `list_boards` and the launch prompt annotate lanes as
+`Review (on entry: "Automated code review")`; `list_board_columns` adds one `on entry:` line per
+Automation with its summary, where its output lands (a Worker terminal run or script output on the
+card's Sessions rail) and, when the scheduler would consume the entry without a run, why (disabled,
+deleted, another repository, no actions, or a run already active). `get_board_card` also lists this
+card's entries that have not settled (`Pending lane automations:`), so "queued, not yet run" is
+distinguishable from "nothing configured". The card-session preamble and the `list_board_columns`
+footer carry the sequencing rule: link commits and post the summary before moving into such a
+lane, and move once.
+
+Confirmation surface: `move_board_card` keeps its historical first line and appends `Queued:` /
+`Skipped:` lines per Automation, `Cancelled pending:` for earlier unsettled entries the move
+replaced, otherwise `No lane automations.` or `Same lane; no lane automations triggered.`, plus a
+`get_board_card since=<move time>` hint for the run's session. There is no run id at move time,
+so settle-time conditions are stated rather than predicted as fact.
+
+`skipAutomations=true` (MCP) / `skipAutomations` (REST `POST /api/v1/board/cards/{card}/move`)
+moves the card and deletes the entries the move recorded inside the same store transaction
+(`IBoardStore.MoveCardAsync` overload). It is per call, never sticky; the result and a comment by
+the caller list what was bypassed. `preview=true` returns the report without moving. The dashboard
+does not offer the flag yet; the REST shape is ready for it.
+
+`IBoardStore.DescribeLaneAutomationsAsync` reads `Jobs`/`JobActions`/`JobRuns`/`Environments` in
+`state.db` for wording only and degrades to "definition unavailable" when those tables are absent
+(a stdio MCP host on a fresh install). The stdio host still registers no `IJobStore`, because
+`JobStore`'s constructor runs state migrations. No schema change.
+
 ## VB-29: activity ordering and Automation sessions (2026-09-23)
 
 New cards start at position zero in their selected lane (Backlog by default). Card field updates,
@@ -391,7 +427,7 @@ when a description is supplied. Options have an explicit clear flag.
 | --- | --- |
 | `list_boards`, `list_board_columns`, `list_board_cards` | Discovery/filtering; board ID or unambiguous name |
 | `get_board_card`, `get_board_card_history`, `get_board_notes`, `read_board_attachment` | Detail, revision provenance, scratchpad, paged UTF-8 TXT/Markdown reads |
-| `create_board_card`, `update_board_card`, `move_board_card` | Create/patch/move; omitted card defaults to launching session where supported |
+| `create_board_card`, `update_board_card`, `move_board_card` | Create/patch/move; omitted card defaults to launching session where supported. Move reports queued/skipped lane Automations and takes `skipAutomations` / `preview` (VB-34) |
 | `add_board_comment`, `append_board_note`, `add_board_attachment`, `link_board_commit` | Append attributed work, bounded text attachment, durable Git capture |
 
 MCP update exposes a subset of the REST fields and has no expected-description-revision

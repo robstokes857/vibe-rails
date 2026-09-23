@@ -558,7 +558,10 @@ public sealed partial class BoardStore : IBoardStore
         return true;
     }
 
-    public async Task<BoardCardRecord?> MoveCardAsync(string projectPath, string cardId, string columnId, int? position, CancellationToken cancellationToken = default)
+    public Task<BoardCardRecord?> MoveCardAsync(string projectPath, string cardId, string columnId, int? position, CancellationToken cancellationToken = default) =>
+        MoveCardAsync(projectPath, cardId, columnId, position, skipLaneAutomations: false, cancellationToken);
+
+    public async Task<BoardCardRecord?> MoveCardAsync(string projectPath, string cardId, string columnId, int? position, bool skipLaneAutomations, CancellationToken cancellationToken = default)
     {
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
@@ -587,6 +590,21 @@ public sealed partial class BoardStore : IBoardStore
             move.Parameters.AddWithValue("$updated", now);
             move.Parameters.AddWithValue("$id", existing.Id);
             await move.ExecuteNonQueryAsync(cancellationToken);
+        }
+        if (skipLaneAutomations && !sameColumn)
+        {
+            // The lane-entry triggers above have just replaced this card's pending entries with
+            // the destination lane's. Removing them here, in the same transaction, is the
+            // caller's explicit "move without firing" (VB-34); the settings and the move are
+            // untouched, and a later entry into the lane records fresh entries as usual.
+            await using var skip = connection.CreateCommand();
+            skip.Transaction = transaction;
+            skip.CommandText = """
+                DELETE FROM BoardPendingAutomations WHERE CardId = $id;
+                DELETE FROM BoardPendingAdditionalAutomations WHERE CardId = $id;
+                """;
+            skip.Parameters.AddWithValue("$id", existing.Id);
+            await skip.ExecuteNonQueryAsync(cancellationToken);
         }
         await WriteCardPositionsAsync(connection, transaction, targetIds, cancellationToken);
         if (!sameColumn)

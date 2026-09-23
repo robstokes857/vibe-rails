@@ -70,7 +70,10 @@ serialization or tool discovery into the Native AOT path.
   picker defaults to the assignee. Chat saves first, sends the selected launch override without
   reassigning the card, and launches with discussion intent, then focuses the returned terminal.
   Lane Automations are independent existing Jobs, queued after a 60-second settling period;
-  automatic assignee launch is still a TODO.
+  automatic assignee launch is still a TODO. Agents are told about them (VB-34): every lane list
+  annotates on-entry Automations from the Job definition, `move_board_card` appends what the
+  entry queued or skipped and why (never silent), and `skipAutomations` deletes the entries a
+  move recorded in that same transaction, recording the skip as a comment by the caller.
 - Current launch exclusion is root-local (F3). Do not assert cross-process mutual exclusion from
   a static dictionary or confuse a removable session-display link with execution ownership.
 - Saving a card never sends terminal input. Do not reintroduce the removed notification/TUI
@@ -148,7 +151,10 @@ separate development database to conceal unsafe code. Live-provider launches and
 application actions are not required setup for unit tests.
 
 Board context and lane Automation settings still use their own expected revisions. Settings writes must remain project-scoped and reject stale revisions.
-Lane-entry triggers write one pending row per selected Automation and card in the move transaction.
+Lane-entry triggers write one pending row per selected Automation and card in the move transaction;
+a caller-requested skip deletes those rows before that transaction commits.
+`DescribeLaneAutomationsAsync` reads Job definitions from `state.db` for wording only and must keep
+tolerating absent tables, because a stdio MCP host can open a state.db without Automations.
 The first selection uses the board/6 tables; additional selections use the additive board/7 tables.
 The existing leased root scheduler reads pending events through `IBoardStore`, commits normal
 Job run/action snapshots in `state.db`, then acknowledges each exact event in `board.db`. The

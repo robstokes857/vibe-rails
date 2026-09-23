@@ -275,7 +275,9 @@ namespace VibeRails.DTOs
         string? Type = null,
         bool? Flagged = null);
 
-    public record MoveBoardCardRequest(string? ColumnId = null, int? Position = null);
+    // SkipAutomations (VB-34): move without recording a lane entry for the destination lane's
+    // Automations. Per request, never sticky; the skip is recorded as a comment by the user.
+    public record MoveBoardCardRequest(string? ColumnId = null, int? Position = null, bool SkipAutomations = false);
     public record AddBoardCommentRequest(string? Body = null);
     public record AddBoardNoteRequest(string? Body = null);
     public record BoardNoteListResponse(List<BoardCommentDto> Notes);

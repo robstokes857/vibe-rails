@@ -95,6 +95,52 @@ public sealed class BoardRoutesTests : IAsyncLifetime
 
     [Fact]
     public async Task EveryBoardRoute_NeedsBothCredentials()
+    [Fact]
+    public async Task Move_WithSkipAutomations_RecordsTheSkip_AndQueuesNothing()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var boards = _app.Services.GetRequiredService<IBoardStore>();
+        var jobs = _app.Services.GetRequiredService<IJobStore>();
+        // Jobs join Environments (their Workers); this fixture's state.db has never held either.
+        await using (var state = new SqliteConnection(_connectionString))
+        {
+            await state.OpenAsync(ct);
+            await using var environments = state.CreateCommand();
+            environments.CommandText = SqlStrings.CreateEnvironmentsTable;
+            await environments.ExecuteNonQueryAsync(ct);
+        }
+        using var created = await PostJsonAsync("/api/v1/board/cards", new { title = "Spike", type = "research-spike" });
+        created.EnsureSuccessStatusCode();
+        using var createdDocument = await ReadJsonAsync(created);
+        var cardId = createdDocument.RootElement.GetProperty("id").GetString()!;
+        var columns = await boards.GetColumnsAsync(_project, ct);
+        var reviewId = columns.Single(c => c.Name == "Review").Id;
+        var buildId = columns.Single(c => c.Name == "Build").Id;
+        var job = await jobs.CreateJobAsync(new("Automated code review", _project, LLM.NotSet, null, "", null, true, [],
+            Actions: [new(null, JobActionKind.Script, ScriptPath: "check.py", ScriptRuntime: JobScriptRuntime.Python, ApprovedHash: "pinned")]), ct);
+        await boards.SaveLaneAutomationAsync(_project, reviewId, [job.Id], 0, ct);
+
+        // The same flag the MCP tool takes, so a manual drag can offer the choice later.
+        using var skipped = await PostJsonAsync($"/api/v1/board/cards/{cardId}/move", new { columnId = reviewId, skipAutomations = true });
+        skipped.EnsureSuccessStatusCode();
+        using var skippedDocument = await ReadJsonAsync(skipped);
+        Assert.Equal(reviewId, skippedDocument.RootElement.GetProperty("columnId").GetString());
+        Assert.Empty(await boards.GetPendingLaneAutomationsAsync(_project, cardId, ct));
+        var comment = Assert.Single(skippedDocument.RootElement.GetProperty("comments").EnumerateArray());
+        Assert.Equal("user", comment.GetProperty("author").GetProperty("kind").GetString());
+        Assert.Equal("Moved to Review; lane Automations skipped at the caller's request: \"Automated code review\".", comment.GetProperty("body").GetString());
+
+        // Without the flag the entry is recorded as before; the default is unchanged.
+        using var back = await PostJsonAsync($"/api/v1/board/cards/{cardId}/move", new { columnId = buildId });
+        back.EnsureSuccessStatusCode();
+        using var moved = await PostJsonAsync($"/api/v1/board/cards/{cardId}/move", new { columnId = reviewId });
+        moved.EnsureSuccessStatusCode();
+        var pending = Assert.Single(await boards.GetPendingLaneAutomationsAsync(_project, cardId, ct));
+        Assert.Equal(job.Id, pending.JobId);
+        Assert.Equal(reviewId, pending.ColumnId);
+        Assert.InRange(pending.DueUtc, DateTime.UtcNow.AddSeconds(50), DateTime.UtcNow.AddSeconds(70));
+    }
+
     {
         using var none = await SendAsync(HttpMethod.Get, "/api/v1/board/cards");
         Assert.Equal(HttpStatusCode.Unauthorized, none.StatusCode);

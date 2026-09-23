@@ -1,6 +1,8 @@
 using Microsoft.Data.Sqlite;
 using Moq;
+using VibeRails.DB;
 using VibeRails.DTOs;
+using VibeRails.Services;
 using VibeRails.Services.Board;
 using VibeRails.Services.Mcp.Tools;
 using Xunit;
@@ -18,6 +20,7 @@ public sealed class BoardToolTests : IDisposable
     private readonly string _stateConnectionString;
     private readonly string _project;
     private readonly BoardStore _store;
+    private readonly JobStore _jobs;
     private readonly BoardService _service;
     private readonly FakeResolver _resolver;
     private readonly BoardTool _tool;
@@ -29,6 +32,15 @@ public sealed class BoardToolTests : IDisposable
         _connectionString = $"Data Source={Path.Combine(_root, "board.db")};Pooling=False";
         _stateConnectionString = $"Data Source={Path.Combine(_root, "state.db")};Pooling=False";
         _store = new BoardStore(_connectionString, _stateConnectionString);
+        // Lane Automations are local Jobs in state.db; Workers are Environments rows there too.
+        using (var state = new SqliteConnection(_stateConnectionString))
+        {
+            state.Open();
+            using var environments = state.CreateCommand();
+            environments.CommandText = SqlStrings.CreateEnvironmentsTable;
+            environments.ExecuteNonQuery();
+        }
+        _jobs = new JobStore(_stateConnectionString, _store);
         var commits = new Mock<IBoardCommitService>(MockBehavior.Strict);
         commits.Setup(c => c.DescribeAsync(_project, "abc1234", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new BoardCommitInfo("abc1234abc1234abc1234abc1234abc1234abc12", "Rob", "Fix the race", DateTime.UtcNow));
@@ -85,7 +97,8 @@ public sealed class BoardToolTests : IDisposable
         Assert.Equal("Updated PROJ-1: Fix the race (critical, blocked)", await _tool.UpdateBoardCard("PROJ-1", points: 0, cancellationToken: Ct));
         Assert.Null((await _store.FindCardAsync(_project, "PROJ-1", Ct))!.Points);
 
-        Assert.Equal("Moved PROJ-1 to Review (position 0).", await _tool.MoveBoardCard("PROJ-1", "review", cancellationToken: Ct));
+        // The first line is the historical result; the lane-entry report follows it (VB-34).
+        Assert.Equal("Moved PROJ-1 to Review (position 0).\nNo lane automations.", await _tool.MoveBoardCard("PROJ-1", "review", cancellationToken: Ct));
         Assert.StartsWith("FAIL: Lane not found: Nowhere", await _tool.MoveBoardCard("PROJ-1", "Nowhere", cancellationToken: Ct));
 
         var comment = await _tool.AddBoardComment("Reproduced on two parallel saves.", "PROJ-1", Ct);
@@ -573,6 +586,178 @@ public sealed class BoardToolTests : IDisposable
         Assert.Equal("Created PROJ-2: Second", await _tool.CreateBoardCard("Second", board: second.Id, cancellationToken: Ct));
         Assert.Equal("First", Assert.Single((await _service.GetCardsAsync(_project, Ct, first.Id)).Cards).Title);
         Assert.Equal("Second", Assert.Single((await _service.GetCardsAsync(_project, Ct, second.Id)).Cards).Title);
+    }
+
+    // ------------------------------------------------------------------ VB-34: lane Automations
+
+    private const string ReviewDetail =
+        "\"Automated code review\" — Worker \"Reviewer\" (Claude): \"Review the linked commits and post findings as a comment.\" + 1 script (check.py); output: a Worker terminal run linked to the card's Sessions rail";
+    private const string OpenPrDetail =
+        "\"Open PR\" — 1 script (open_pr.py); output: script output recorded on the card's Sessions rail";
+
+    private static JobActionRequest Script(string path) =>
+        new(null, JobActionKind.Script, ScriptPath: path, ScriptRuntime: JobScriptRuntime.Python, ApprovedHash: "pinned");
+
+    private async Task<long> WorkerJobAsync(string name, string workerName, string prompt, string script)
+    {
+        await using var state = new SqliteConnection(_stateConnectionString);
+        await state.OpenAsync(Ct);
+        await using var insert = state.CreateCommand();
+        insert.CommandText = """
+            INSERT INTO Environments (CustomName, LLM, CustomPrompt, CreatedUTC, LastUsedUTC, AutomationWorker, ProjectPath)
+            VALUES ($name, $llm, $prompt, $now, $now, 1, $project);
+            SELECT last_insert_rowid();
+            """;
+        insert.Parameters.AddWithValue("$name", workerName);
+        insert.Parameters.AddWithValue("$llm", (int)LLM.Claude);
+        insert.Parameters.AddWithValue("$prompt", prompt);
+        insert.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("O"));
+        insert.Parameters.AddWithValue("$project", _project);
+        var environmentId = (int)(long)(await insert.ExecuteScalarAsync(Ct))!;
+        var job = await _jobs.CreateJobAsync(new(name, _project, LLM.Claude, environmentId, prompt, null, true, [],
+            Actions: [new(null, JobActionKind.Worker, environmentId), Script(script)]), Ct);
+        return job.Id;
+    }
+
+    private async Task<long> ScriptJobAsync(string name, string script) =>
+        (await _jobs.CreateJobAsync(new(name, _project, LLM.NotSet, null, "", null, true, [], Actions: [Script(script)]), Ct)).Id;
+
+    /// <summary>Review runs a Worker review and then a PR script on entry; the other lanes run nothing.</summary>
+    private async Task<(long Review, long OpenPr)> ReviewLaneAutomationsAsync()
+    {
+        var review = await WorkerJobAsync("Automated code review", "Reviewer",
+            "Review the linked commits and post findings as a comment.\nThe second prompt line is never shown.", "check.py");
+        var openPr = await ScriptJobAsync("Open PR", "open_pr.py");
+        var lane = (await _service.FindColumnAsync(_project, "Review", Ct))!;
+        await _store.SaveLaneAutomationAsync(_project, lane.Id, [review, openPr], 0, Ct);
+        return (review, openPr);
+    }
+
+    private Task<IReadOnlyList<string>> TickAsync() => _jobs.EnqueueDueSchedulesAsync(DateTime.UtcNow.AddMinutes(5), Ct);
+
+    [Fact]
+    public async Task LaneAutomations_AnnotateEveryLaneList_FromTheDefinition()
+    {
+        await ReviewLaneAutomationsAsync();
+        await _tool.CreateBoardCard("Fix the race", cancellationToken: Ct);
+
+        var lanes = await _tool.ListBoardColumns(cancellationToken: Ct);
+        Assert.Contains("- Review (id col_", lanes);
+        Assert.Contains("\n  on entry: " + ReviewDetail + "\n  on entry: " + OpenPrDetail + "\n", lanes);
+        Assert.Contains("Link commits and post your summary comment before moving a card into such a lane, and move it once.", lanes);
+        Assert.DoesNotContain("second prompt line", lanes);
+        Assert.Single(lanes.Split('\n'), line => line.StartsWith("Lanes with on-entry Automations", StringComparison.Ordinal));
+
+        var card = await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct);
+        Assert.Contains("\nLanes: Backlog → Ready → Build → Review (on entry: \"Automated code review\", \"Open PR\") → Done\n", card);
+        Assert.DoesNotContain("Pending lane automations", card);
+        Assert.Contains("lanes: Backlog → Ready → Build → Review (on entry: \"Automated code review\", \"Open PR\") → Done; current)", await _tool.ListBoards(Ct));
+
+        // A board without lane Automations reads exactly as before, guidance included.
+        await _store.SaveLaneAutomationAsync(_project, (await _service.FindColumnAsync(_project, "Review", Ct))!.Id, [], 1, Ct);
+        Assert.DoesNotContain("on entry", await _tool.ListBoardColumns(cancellationToken: Ct));
+        Assert.DoesNotContain("Lanes with on-entry Automations", await _tool.ListBoardColumns(cancellationToken: Ct));
+    }
+
+    [Fact]
+    public async Task Move_ReportsQueuedEntries_ShowsThemPending_AndCancelsThemOnLeaving()
+    {
+        var (review, openPr) = await ReviewLaneAutomationsAsync();
+        await _tool.CreateBoardCard("Fix the race", cancellationToken: Ct);
+
+        var moved = await _tool.MoveBoardCard("PROJ-1", "review", cancellationToken: Ct);
+        var lines = moved.Split('\n');
+        Assert.Equal("Moved PROJ-1 to Review (position 0).", lines[0]);
+        Assert.Equal("Queued: " + ReviewDetail + ".", lines[1]);
+        Assert.Equal("Queued: " + OpenPrDetail + ".", lines[2]);
+        Assert.Matches(@"^Entries start about 60 seconds after entry while a VibeRails dashboard is open; moving the card out of Review before then cancels them\. Poll get_board_card since=\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ for the run's session and anything it posts\.$", lines[3]);
+        Assert.Equal(4, lines.Length);
+
+        var card = await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct);
+        Assert.Contains("\nPending lane automations: ", card);
+        Assert.Contains("\"Automated code review\" (settles ", card);
+        Assert.Contains("\"Open PR\" (settles ", card);
+
+        // Leaving before the entries settle cancels them; the scheduler never sees them.
+        Assert.Equal("Moved PROJ-1 to Build (position 0).\nNo lane automations.\nCancelled pending: \"Automated code review\", \"Open PR\" (earlier lane entries of this card that had not settled).",
+            await _tool.MoveBoardCard("PROJ-1", "build", cancellationToken: Ct));
+        Assert.Empty(await TickAsync());
+        Assert.DoesNotContain("Pending lane automations", await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct));
+
+        // Entering again records fresh entries, which settle into one run of each Automation.
+        await _tool.MoveBoardCard("PROJ-1", "review", cancellationToken: Ct);
+        var runs = await TickAsync();
+        var jobIds = new List<long>();
+        foreach (var runId in runs) jobIds.Add((await _jobs.GetRunAsync(runId, Ct))!.JobId);
+        Assert.Equal(new[] { review, openPr }.Order(), jobIds.Order());
+        Assert.DoesNotContain("Pending lane automations", await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct));
+    }
+
+    [Fact]
+    public async Task Move_ReportsSkippedEntries_ForActiveRunsAndUnavailableAutomations()
+    {
+        var (review, openPr) = await ReviewLaneAutomationsAsync();
+        await _tool.CreateBoardCard("Fix the race", cancellationToken: Ct);
+        var active = await _jobs.EnqueueManualRunAsync(review, Ct);
+        var definition = (await _jobs.GetJobAsync(openPr, Ct))!;
+        await _jobs.UpdateJobAsync(openPr, new(definition.Name, _project, LLM.NotSet, null, "", null, false, [], Actions: [Script("open_pr.py")]), Ct);
+
+        var lanes = await _tool.ListBoardColumns(cancellationToken: Ct);
+        Assert.Contains($"  on entry: {ReviewDetail} — a run is already active (run {active}, queued); an entry settling while it runs is dropped\n", lanes);
+        Assert.Contains($"  on entry: {OpenPrDetail} — will not run: the Automation is disabled\n", lanes);
+
+        Assert.Equal("Moved PROJ-1 to Review (position 0).\n"
+            + $"Skipped: \"Automated code review\" — a run of this Automation is already active (run {active}, queued); the entry is dropped if that run is still active when it settles.\n"
+            + "Skipped: \"Open PR\" — the Automation is disabled.",
+            await _tool.MoveBoardCard("PROJ-1", "review", cancellationToken: Ct));
+        // The scheduler applies the same gates when the entries settle: nothing new is queued.
+        Assert.Empty(await TickAsync());
+    }
+
+    [Fact]
+    public async Task Move_WithSkipAutomations_QueuesNothing_AndRecordsTheSkipOnTheCard()
+    {
+        await ReviewLaneAutomationsAsync();
+        await _tool.CreateBoardCard("Spike", type: "research-spike", cancellationToken: Ct);
+
+        Assert.Equal("Moved PROJ-1 to Review (position 0).\nLane automations skipped at the caller's request: \"Automated code review\", \"Open PR\". Recorded as a comment on PROJ-1.",
+            await _tool.MoveBoardCard("PROJ-1", "review", skipAutomations: true, cancellationToken: Ct));
+        Assert.Empty((await _service.GetPendingLaneAutomationsAsync(_project, "PROJ-1", Ct))!);
+        Assert.Empty(await TickAsync());
+        Assert.Empty(await _jobs.GetQueuedRunsAsync(Ct));
+
+        var card = await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct);
+        Assert.Contains("Lane: Review", card);
+        Assert.Contains("Moved to Review; lane Automations skipped at the caller's request: \"Automated code review\", \"Open PR\".", card);
+        Assert.DoesNotContain("Pending lane automations", card);
+
+        // The skip is per call, never sticky: the next entry records its entries as usual.
+        await _tool.MoveBoardCard("PROJ-1", "build", cancellationToken: Ct);
+        Assert.StartsWith("Moved PROJ-1 to Review (position 0).\nQueued: ", await _tool.MoveBoardCard("PROJ-1", "review", cancellationToken: Ct));
+        Assert.Equal(2, (await _service.GetPendingLaneAutomationsAsync(_project, "PROJ-1", Ct))!.Count);
+        // A skip where nothing is configured has nothing to record.
+        Assert.Equal("Moved PROJ-1 to Done (position 0).\nNo lane automations.\nCancelled pending: \"Automated code review\", \"Open PR\" (earlier lane entries of this card that had not settled).",
+            await _tool.MoveBoardCard("PROJ-1", "done", skipAutomations: true, cancellationToken: Ct));
+        Assert.Single((await _service.GetCardAsync(_project, "PROJ-1", Ct))!.Comments);
+    }
+
+    [Fact]
+    public async Task Move_Preview_ReportsWithoutMoving_AndSameLaneSaysSo()
+    {
+        await ReviewLaneAutomationsAsync();
+        await _tool.CreateBoardCard("Fix the race", cancellationToken: Ct);
+
+        var preview = await _tool.MoveBoardCard("PROJ-1", "review", preview: true, cancellationToken: Ct);
+        Assert.StartsWith("Preview: PROJ-1 stays in Backlog; moving it to Review would do the following.\nWould queue: " + ReviewDetail + ".\nWould queue: " + OpenPrDetail + ".\nEntries would start about 60 seconds", preview);
+        Assert.Contains("Lane: Backlog", await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct));
+        Assert.Empty((await _service.GetPendingLaneAutomationsAsync(_project, "PROJ-1", Ct))!);
+        Assert.Empty((await _service.GetCardAsync(_project, "PROJ-1", Ct))!.Comments);
+
+        Assert.Equal("Preview: PROJ-1 stays in Backlog; moving it to Build would do the following.\nNo lane automations.",
+            await _tool.MoveBoardCard("PROJ-1", "build", preview: true, cancellationToken: Ct));
+        Assert.StartsWith("FAIL: Lane not found: Nowhere", await _tool.MoveBoardCard("PROJ-1", "Nowhere", preview: true, cancellationToken: Ct));
+        Assert.Equal("Moved PROJ-1 to Backlog (position 0).\nSame lane; no lane automations triggered.",
+            await _tool.MoveBoardCard("PROJ-1", "backlog", cancellationToken: Ct));
     }
 
     private sealed class FakeResolver(string project) : IBoardProjectResolver

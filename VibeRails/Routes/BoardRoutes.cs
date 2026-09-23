@@ -120,7 +120,8 @@ public static class BoardRoutes
             .WithName("DeleteBoardCard");
 
         app.MapPost("/api/v1/board/cards/{card}/move", (IBoardService board, string card, MoveBoardCardRequest request, CancellationToken cancellationToken) =>
-            RunAsync(async () => OkOrNotFound(await board.MoveCardAsync(Project(), card, request.ColumnId ?? string.Empty, request.Position, cancellationToken), "Card")))
+            RunAsync(async () => OkOrNotFound((await board.MoveCardAsync(Project(), card,
+                new BoardCardMoveRequest(request.ColumnId ?? string.Empty, request.Position, request.SkipAutomations, BoardAuthor.User()), cancellationToken))?.Card, "Card")))
             .WithName("MoveBoardCard");
 
         app.MapPost("/api/v1/board/cards/{card}/launch", (IBoardLaunchService launcher, string card, LaunchBoardCardRequest? request, CancellationToken cancellationToken) =>

@@ -64,6 +64,27 @@ public sealed class BoardPromptComposerTests
         Assert.EndsWith("Today {{datetime}}", prompt);
     }
 
+    [Fact]
+    public void Compose_AnnotatesLanesWithOnEntryAutomations_AndTellsTheAgentToSequenceMoves()
+    {
+        var context = new BoardPromptComposer.LaunchContext(["Backlog", "Review", "Done"], [], [],
+            LaneAutomationNames: [[], ["Automated code review", "Open PR‮"], []]);
+        var prompt = BoardPromptComposer.Compose(Card(), "Backlog", "x", null, context);
+        Assert.Contains("Lanes: Backlog → Review (on entry: \"Automated code review\", \"Open PR\") → Done\n", prompt);
+        Assert.Contains("Lanes may run Automations on entry", prompt);
+        Assert.Contains("move it once", prompt);
+        Assert.DoesNotContain('‮', prompt);
+
+        // A chat session is told what the lanes do but not to move anything.
+        var chat = BoardPromptComposer.Compose(Card(), "Backlog", "x", null, context, "chat");
+        Assert.Contains("Review (on entry: \"Automated code review\", \"Open PR\")", chat);
+        Assert.DoesNotContain("Lanes may run Automations on entry", chat);
+
+        // Lanes without Automations, or callers without the list, read exactly as before.
+        var plain = BoardPromptComposer.Compose(Card(), "Backlog", "x", null, new BoardPromptComposer.LaunchContext(["Backlog", "Review"], [], []));
+        Assert.Contains("Lanes: Backlog → Review\n", plain);
+    }
+
     private static BoardCardRecord Card(string title = "Fix refresh-token race", string description = "Two overlapping 401s…") =>
         new("card_1", "/p", 12, "col_build", 0, title, description, "env:7:codex", "high", 5, ["auth"], false, 2,
             DateTime.UtcNow, DateTime.UtcNow);

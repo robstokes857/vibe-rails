@@ -85,12 +85,16 @@ public sealed class BoardLaunchService(
         var detail = await store.GetCardDetailAsync(projectPath, card.Id, cancellationToken);
         // Lanes, linked commits and attachment names ride along so the agent does not spend its
         // first minutes discovering which lane names exist or which change "the big refactor" was.
+        // Lane Automations ride along too, so the agent can sequence its moves (VB-34).
+        var orderedColumns = columns.OrderBy(c => c.Position).ToList();
+        var laneAutomations = await BoardService.DescribeLaneAutomationsByLaneAsync(store, projectPath, orderedColumns.Select(c => c.Id).ToList(), cancellationToken);
         var context = new BoardPromptComposer.LaunchContext(
-            columns.OrderBy(c => c.Position).Select(c => c.Name).ToList(),
+            orderedColumns.Select(c => c.Name).ToList(),
             detail?.Commits ?? [],
             detail?.Attachments ?? [],
             boardName,
-            boardContext?.Context);
+            boardContext?.Context,
+            orderedColumns.Select(c => (IReadOnlyList<string>)laneAutomations[c.Id].Select(a => a.Name).ToList()).ToList());
         var prompt = BoardPromptComposer.Compose(card, column?.Name ?? "(no lane)", assigneeLabel, environment?.CustomPrompt, context, intent);
         var title = $"{card.Key} · {Truncate(card.Title, 60)}";
 
