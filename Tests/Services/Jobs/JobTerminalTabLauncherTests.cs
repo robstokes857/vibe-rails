@@ -36,7 +36,7 @@ public sealed class JobTerminalTabLauncherTests
         }
         StartTerminalRequest? request = null;
         TerminalInputRequest? input = null;
-        tabs.InSequence(sequence).Setup(service => service.CreateTabAsync(token))
+        tabs.InSequence(sequence).Setup(service => service.CreateAutomationTabAsync(run.Id, run.JobName, token))
             .ReturnsAsync(new TerminalTabStatusResponse("tab", DateTime.UtcNow, false));
         tabs.InSequence(sequence).Setup(service => service.StartSessionAsync("tab", It.IsAny<StartTerminalRequest>(), token))
             .Callback<string, StartTerminalRequest, CancellationToken>((_, value, _) => request = value)

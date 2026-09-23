@@ -60,7 +60,7 @@ public sealed class JobTerminalTabLauncher(
 
         var executable = Environment.ProcessPath
             ?? throw new InvalidOperationException("Unable to determine the VibeRails executable path.");
-        var tab = await tabs.CreateTabAsync(cancellationToken);
+        var tab = await tabs.CreateAutomationTabAsync(run.Id, run.JobName, cancellationToken);
         try
         {
             var session = await tabs.StartSessionAsync(tab.TabId,

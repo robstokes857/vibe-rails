@@ -3887,6 +3887,140 @@ code {
     cursor: not-allowed;
 }
 
+/* Automation terminals share the compact count control but have their own list. */
+#vb-terminal-panel .vb-terminal-tab-item.is-automation {
+    display: none;
+}
+
+#vb-terminal-panel .vb-terminal-automations-wrapper {
+    display: inline-flex;
+    flex-shrink: 0;
+}
+
+#vb-terminal-panel .vb-terminal-automations-wrapper[hidden] {
+    display: none;
+}
+
+#vb-terminal-panel #vb-terminal-automations-btn.is-active {
+    color: #a6e3a1;
+    border-color: rgba(166, 227, 161, 0.45);
+}
+
+.vb-terminal-automations-menu {
+    position: fixed;
+    z-index: 5000;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: #1e1e2e;
+    color: #cdd6f4;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 7px;
+    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5);
+    font-size: 0.86rem;
+}
+
+.vb-terminal-automations-menu[hidden] {
+    display: none;
+}
+
+.vb-terminal-automations-heading,
+.vb-terminal-automations-footer {
+    padding: 9px 12px;
+    color: #a6adc8;
+    font-size: 0.76rem;
+    flex-shrink: 0;
+}
+
+.vb-terminal-automations-heading {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    font-weight: 600;
+}
+
+.vb-terminal-automations-footer {
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.vb-terminal-automations-list {
+    max-height: 340px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    min-height: 0;
+}
+
+.vb-terminal-automation-row {
+    display: flex;
+    align-items: center;
+    padding: 3px 8px 3px 0;
+    gap: 4px;
+}
+
+.vb-terminal-automation-row:hover,
+.vb-terminal-automation-row.is-active {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.vb-terminal-automation-open {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    align-items: center;
+    gap: 12px;
+    padding: 7px 12px;
+    background: transparent;
+    color: inherit;
+    border: 0;
+    text-align: left;
+}
+
+.vb-terminal-automation-open > i {
+    color: #89b4fa;
+    flex-shrink: 0;
+}
+
+.vb-terminal-automation-main {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.vb-terminal-automation-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+}
+
+.vb-terminal-automation-detail {
+    color: #a6adc8;
+    font-size: 0.74rem;
+}
+
+.vb-terminal-automation-detail[data-status="running"] {
+    color: #a6e3a1;
+}
+
+.vb-terminal-automation-detail[data-status="unavailable"] {
+    color: #f9e2af;
+}
+
+.vb-terminal-automation-close {
+    flex-shrink: 0;
+    color: #f38ba8;
+    border: 1px solid rgba(243, 139, 168, 0.3);
+    border-radius: 4px;
+    background: transparent;
+    width: 29px;
+    height: 29px;
+}
+
+.vb-terminal-automation-open:focus-visible,
+.vb-terminal-automation-close:focus-visible {
+    outline: 2px solid #89b4fa;
+    outline-offset: -2px;
+}
+
 /* Undo (pending-close) button — lives in the right-side controls cluster */
 #vb-terminal-panel .vb-terminal-tab-undo-wrapper {
     position: relative;
@@ -4513,7 +4647,7 @@ body.vb-terminal-focus-active .vb-terminal-element .xterm-viewport {
     /* Hide the right-side controls cluster on narrow viewports, but keep
        the undo (pending-close) wrapper reachable — it's a recovery control,
        not a nice-to-have like zoom/refresh/settings. */
-    #vb-terminal-panel .vb-terminal-window-controls-right > *:not(.vb-terminal-tab-undo-wrapper) {
+    #vb-terminal-panel .vb-terminal-window-controls-right > *:not(.vb-terminal-tab-undo-wrapper):not(.vb-terminal-automations-wrapper) {
         display: none;
     }
 

@@ -863,7 +863,10 @@ namespace VibeRails.DTOs
         bool HasActiveSession,
         string? SessionId = null,
         string? Cli = null,
-        string? WorkingDirectory = null
+        string? WorkingDirectory = null,
+        string? JobRunId = null,
+        string? AutomationName = null,
+        bool StatusAvailable = true
     );
 
     public record TerminalTabListResponse(

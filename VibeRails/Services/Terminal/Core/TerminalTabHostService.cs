@@ -33,7 +33,8 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         string BootstrapUrl,
         string SessionToken,
         string TabToken,
-        DateTime CreatedUtc);
+        DateTime CreatedUtc,
+        AutomationTabState? Automation = null);
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILocalClientTracker _localClientTracker;
@@ -49,7 +50,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
     private readonly string _tabsOwnerId;
     private bool _tabsOwnerAcquired;
 
-    public int MaxTabs => 8;
+    public int MaxTabs => 100;
 
     public TerminalTabHostService(
         IHttpClientFactory httpClientFactory,
@@ -89,6 +90,14 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
 
     public async Task<TerminalTabStatusResponse> CreateTabAsync(CancellationToken cancellationToken = default)
         => await CreateTabCoreAsync(cancellationToken);
+
+    public Task<TerminalTabStatusResponse> CreateAutomationTabAsync(
+        string runId, string automationName, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(runId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(automationName);
+        return CreateTabCoreAsync(cancellationToken, new AutomationTabState(runId, automationName));
+    }
 
     /// <summary>
     /// Opens a plain shell tab and starts VibeRails' narrowly scoped interactive-script helper
@@ -161,7 +170,8 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         return $"{QuotePosix(executable)} {PythonScriptRunProcessHost.Flag} {QuotePosix(name)}";
     }
 
-    private async Task<TerminalTabStatusResponse> CreateTabCoreAsync(CancellationToken cancellationToken)
+    private async Task<TerminalTabStatusResponse> CreateTabCoreAsync(
+        CancellationToken cancellationToken, AutomationTabState? automation = null)
     {
         await _createGate.WaitAsync(cancellationToken);
         var gateHeld = true;
@@ -169,6 +179,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         TerminalChildProcess? child = null;
         try
         {
+            await ReclaimCompletedAutomationTabIfFullAsync(cancellationToken);
             lock (_lock)
             {
                 if (_tabs.Count >= MaxTabs)
@@ -177,7 +188,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                 }
             }
 
-            child = await SpawnChildAsync(cancellationToken);
+            child = (await SpawnChildAsync(cancellationToken)) with { Automation = automation };
 
             CancellationToken relayToken;
             lock (_lock)
@@ -213,6 +224,65 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         {
             if (gateHeld)
                 _createGate.Release();
+        }
+    }
+
+    private async Task ReclaimCompletedAutomationTabIfFullAsync(CancellationToken cancellationToken)
+    {
+        TerminalChildProcess[] candidates;
+        lock (_lock)
+        {
+            if (_tabs.Count < MaxTabs)
+                return;
+            candidates = _tabs.Values.Where(child => child.Automation is not null)
+                .OrderBy(child => child.CreatedUtc).ToArray();
+        }
+
+        if (candidates.Length == 0)
+            return;
+
+        // Creation holds _createGate, so one reclaimed slot is enough. Keep recent completed
+        // tabs for replay until capacity is actually needed; never evict ordinary terminals.
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var store = scope.ServiceProvider.GetRequiredService<IJobStore>();
+        var sessions = scope.ServiceProvider.GetRequiredService<ISessionStore>();
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+        // Probe concurrently so an unavailable oldest child cannot repeatedly starve healthy
+        // completed tabs behind it. Probes do not reserve hosts; only the selected one is closed.
+        var checkedVersions = await Task.WhenAll(candidates.Select(CheckCandidateAsync));
+        lock (_lock)
+        {
+            if (_tabs.Count < MaxTabs)
+                return;
+        }
+        for (var i = 0; i < candidates.Length; i++)
+        {
+            if (checkedVersions[i] is { } version && candidates[i].Automation!.TryReserveForReclamation(version))
+            {
+                await DeleteTabAsync(candidates[i].TabId, CancellationToken.None);
+                return;
+            }
+        }
+
+        async Task<long?> CheckCandidateAsync(TerminalChildProcess child)
+        {
+            using var candidateTimeout = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
+            candidateTimeout.CancelAfter(TimeSpan.FromSeconds(1));
+            try
+            {
+                return await child.Automation!.CheckReclamationAsync(store, sessions,
+                    token => GetTerminalStatusFromChildAsync(child, token), candidateTimeout.Token);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                return null;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Log.Warning(ex, "[TerminalTabs] Keeping Automation tab {TabId}; completion could not be confirmed", child.TabId);
+                return null;
+            }
         }
     }
 
@@ -270,19 +340,28 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         // Resolved here rather than in the browser: the frontend always sends the project root,
         // and an environment's workspace mode is server state. Doing the swap at this seam keeps
         // in-app tabs consistent with external launches without the client knowing about clones.
-        request = await ApplyWorkspaceAsync(request, cancellationToken);
-
-        return await SendTerminalStatusRequestAsync(
-            child,
-            HttpMethod.Post,
-            "/api/v1/terminal/start",
-            request,
-            cancellationToken,
-            // HttpClient's default 100 s would fail a tab start whose Environment Steps ran longer
-            // than that, even though the steps themselves succeeded. The real bound belongs to the
-            // work being waited on: each step carries its own TimeoutSeconds, and the browser's
-            // RequestAborted still cancels the whole thing.
-            timeout: System.Threading.Timeout.InfiniteTimeSpan);
+        child.Automation?.BeginSessionStart();
+        TerminalStatusResponse? session = null;
+        try
+        {
+            request = await ApplyWorkspaceAsync(request, cancellationToken);
+            session = await SendTerminalStatusRequestAsync(
+                child,
+                HttpMethod.Post,
+                "/api/v1/terminal/start",
+                request,
+                cancellationToken,
+                // HttpClient's default 100 s would fail a tab start whose Environment Steps ran longer
+                // than that, even though the steps themselves succeeded. The real bound belongs to the
+                // work being waited on: each step carries its own TimeoutSeconds, and the browser's
+                // RequestAborted still cancels the whole thing.
+                timeout: System.Threading.Timeout.InfiniteTimeSpan);
+            return session;
+        }
+        finally
+        {
+            child.Automation?.EndSessionStart(session);
+        }
     }
 
     /// <summary>
@@ -620,15 +699,19 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         }
 
         var hasActiveSession = status?.HasActiveSession ?? false;
-        var sessionId = status?.SessionId;
+        var lastSession = child.Automation?.LastSession;
+        var sessionId = status?.SessionId ?? lastSession?.SessionId;
 
         return new TerminalTabStatusResponse(
             child.TabId,
             child.CreatedUtc,
             hasActiveSession,
             sessionId,
-            status?.Cli,
-            status?.WorkingDirectory);
+            status?.Cli ?? lastSession?.Cli,
+            status?.WorkingDirectory ?? lastSession?.WorkingDirectory,
+            child.Automation?.RunId,
+            child.Automation?.Name,
+            StatusAvailable: status is not null);
     }
 
     private async Task<TerminalChildProcess> SpawnChildAsync(CancellationToken cancellationToken)

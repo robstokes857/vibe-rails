@@ -603,8 +603,15 @@ Automations choose **Native terminal** (the compatible default) or **Terminal ta
 The backend scheduler honors the snapshotted choice for every trigger and retry; `runNow` still
 just POSTs, toasts and refreshes history. Tab workflows run the ordinary `vb --job-run` child in a
 recorded shell tab, retaining Worker workspace/arguments and script ordering. History shows a
-copyable session ID and a full-workflow replay alongside individual Worker recordings. The separate signed Python-script workbench is the exception that can use a
-Web UI tab for its **Run in terminal…** flow (see below).
+copyable session ID and a full-workflow replay alongside individual Worker recordings.
+
+Automation terminals live in a separate **robot/count** menu beside recently closed terminals.
+The list retains running and recent completed hosts; live entries attach on selection, completed
+entries open replay. Restoring or receiving a launch event updates the menu without opening an
+xterm/socket per run or stealing focus. Server-owned `jobRunId` and `automationName` classify the
+entries across reloads; unavailable status must not be treated as completed. Ordinary close/undo
+keeps its independent two-minute grace window. The root's cap is 100; at capacity it may reclaim
+the oldest finished Automation host after the recording is finalized, preserving history.
 
 ### Flow: "Web UI" Button
 

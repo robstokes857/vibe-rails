@@ -8,6 +8,8 @@ import { mountLlmPicker, setLlmPickerValue } from './pickers/llm-picker.js';
 import { TabStatusController } from './terminal-tab-status.js';
 import { TerminalSettings, renderTerminalSettingsPanelHtml } from './terminal-settings.js';
 import { TerminalMenu } from './terminal-menu.js';
+import { TerminalAutomationMenu, isAutomationTab } from './terminal-automation-menu.js';
+import { showReplayModal } from './session-viewer.js';
 import { TerminalTab } from './terminal-tab.js';
 import {
     isAutoReconnectEnabled,
@@ -59,7 +61,7 @@ function cleanString(value) {
 // preserve, so it is the safe fallback when another tab cannot be created.
 export function shouldCreateFreshTab(options, activeTab, tabCount, maxTabs) {
     if (options?.forceNewTab !== true) return false;
-    const activeTabIsBlank = Boolean(activeTab && !activeTab.state?.hasActiveSession);
+    const activeTabIsBlank = Boolean(activeTab && !activeTab.state?.hasActiveSession && !isAutomationTab(activeTab.state));
     return !(tabCount >= maxTabs && activeTabIsBlank);
 }
 
@@ -73,15 +75,18 @@ function shorten(text, max = 26) {
     return `${text.slice(0, max - 1)}\u2026`;
 }
 
-class TerminalManager {
+export class TerminalManager {
     constructor(app, container, options = {}) {
         this.app = app;
         this.container = container;
         this.options = options;
         this._destroyed = false;
 
-        this.maxTabs = 8;
+        this.maxTabs = 100;
         this.tabs = new Map();
+        this.automationTabs = new Map();
+        this.automationMenu = new TerminalAutomationMenu(this);
+        this._automationRefresh = null;
         this.tabOrder = [];
         this.activeTabId = null;
         this.launchSelection = null;
@@ -190,6 +195,7 @@ class TerminalManager {
         this._undoCount = this.container.querySelector('#vb-terminal-tab-undo-count');
         this._undoSelectEl = this.container.querySelector('#vb-terminal-tab-undo-select');
         this._initUndoControl();
+        this.automationMenu.mount();
         this.tabPanels = this.container.querySelector('#vb-terminal-tab-panels');
         this.placeholder = this.container.querySelector('#terminal-placeholder');
         this.terminalContainer = this.container.querySelector('#terminal-container');
@@ -235,11 +241,14 @@ class TerminalManager {
             return;
         }
 
-        if (this.tabOrder.length === 0) {
+        const preferredTabId = this.options.preferredTabId || this.getActiveTabIdFromStorage();
+        if (preferredTabId && this.automationTabs.has(preferredTabId)
+            && this.automationTabs.get(preferredTabId).hasActiveSession) {
+            await this.openAutomationTab(preferredTabId);
+        } else if (this.tabOrder.length === 0) {
             const initialSelection = this.getInitialSelection();
-            await this.createAndActivateTab({ selection: initialSelection });
+            if (this.canCreateTab()) await this.createAndActivateTab({ selection: initialSelection });
         } else {
-            const preferredTabId = this.options.preferredTabId || this.getActiveTabIdFromStorage();
             const target = preferredTabId && this.tabs.has(preferredTabId)
                 ? preferredTabId
                 : this.tabOrder[0];
@@ -251,11 +260,11 @@ class TerminalManager {
                     this.applySelection(active, this.options.preferredSelection);
                 }
             }
-
-            // Navigation destroyed every socket; the line above reconnected only the
-            // active tab. Bring the rest back without a Connect click each.
-            this.scheduleBackgroundReconnect();
         }
+
+        // Navigation destroyed every socket. Restore ordinary background viewers
+        // even when the selected terminal belongs to the Automation list.
+        this.scheduleBackgroundReconnect();
 
         this.setupFocusLayoutHandling();
         this.updateFocusContainerHeight();
@@ -279,6 +288,8 @@ class TerminalManager {
         this.historySidebar?.destroy();
         this.historySidebar = null;
         this.toast?.dispose();
+        this.automationMenu.destroy();
+        this.automationTabs.clear();
         document.body.classList.remove('vb-terminal-active-session');
 
         // Fire-and-forget DELETE for any tabs still in pending-close so we don't leak
@@ -511,17 +522,21 @@ class TerminalManager {
         try {
             response = await this.app.apiCall('/api/v1/terminal/tabs', 'GET');
         } catch {
-            response = { tabs: [], maxTabs: 8 };
+            response = { tabs: [], maxTabs: 100 };
         }
 
         if (this._destroyed) {
             return;
         }
 
-        this.maxTabs = Number.isFinite(response?.maxTabs) ? response.maxTabs : 8;
+        this.maxTabs = Number.isFinite(response?.maxTabs) ? response.maxTabs : 100;
 
         const tabs = Array.isArray(response?.tabs) ? response.tabs : [];
         tabs.forEach((tabInfo) => {
+            if (isAutomationTab(tabInfo)) {
+                this.automationTabs.set(tabInfo.tabId, tabInfo);
+                return;
+            }
             const selection = this.getTabSelectionFromStorage(tabInfo.tabId) || DEFAULT_SELECTION;
             const title = this.getTabTitleFromStorage(tabInfo.tabId);
             const metadata = this.getTabMetaFromStorage(tabInfo.tabId);
@@ -540,6 +555,109 @@ class TerminalManager {
                 workingDirectory
             });
         });
+        this.automationMenu.refresh();
+    }
+
+    getTabCount() {
+        return new Set([...this.tabs.keys(), ...this.automationTabs.keys()]).size;
+    }
+
+    canCreateTab() {
+        // The server may reclaim an old finished Automation when full. A failed
+        // child-status read is never evidence that its process can be reclaimed.
+        return this.getTabCount() < this.maxTabs || [...this.automationTabs.values()].some(tab =>
+            tab.statusAvailable !== false && tab.hasActiveSession === false && !!tab.sessionId);
+    }
+
+    async refreshAutomationTabs() {
+        if (this._destroyed) return;
+        if (this._automationRefresh) return this._automationRefresh;
+        this._automationRefresh = (async () => {
+            try {
+                const response = await this.app.apiCall('/api/v1/terminal/tabs', 'GET', null, { showLoading: false });
+                if (this._destroyed || !Array.isArray(response?.tabs)) return;
+                const current = new Map(response.tabs.filter(isAutomationTab).map(tab => [tab.tabId, tab]));
+                if (Number.isFinite(response.maxTabs)) this.maxTabs = response.maxTabs;
+                for (const id of this.automationTabs.keys()) {
+                    if (!current.has(id)) this.removeAutomationTab(id);
+                }
+                this.automationTabs = current;
+                for (const info of current.values()) {
+                    const local = this.tabs.get(info.tabId);
+                    if (!local) continue;
+                    local.state.jobRunId = info.jobRunId;
+                    local.state.automationName = info.automationName;
+                    local.state.ui.item.hidden = true;
+                    local.state.ui.item.classList.add('is-automation');
+                    if (info.statusAvailable === false) continue;
+                    local.state.hasActiveSession = info.hasActiveSession;
+                    local.state.sessionId = info.sessionId;
+                    if (!info.hasActiveSession) local.instance.autoReconnect?.cancel();
+                }
+                this.automationMenu.refresh();
+                this.updateUi();
+            } catch { /* Preserve the last list during a transient disconnect. */ }
+        })().finally(() => { this._automationRefresh = null; });
+        return this._automationRefresh;
+    }
+
+    removeAutomationTab(tabId) {
+        this.automationTabs.delete(tabId);
+        const tab = this.tabs.get(tabId);
+        if (tab) {
+            this.settings?.unbindTab(tabId);
+            tab.instance.dispose();
+            tab.state.ui.item.remove();
+            tab.state.ui.panel.remove();
+            this.tabs.delete(tabId);
+            this.tabOrder = this.tabOrder.filter(id => id !== tabId);
+        }
+        if (this.activeTabId === tabId) {
+            this.activeTabId = null;
+            const next = this._nextVisibleTabId();
+            if (next) void this.activateTab(next, { connectIfNeeded: true });
+        }
+        this.clearTabSelection(tabId);
+        this.clearTabTitle(tabId);
+        this.clearTabMeta(tabId);
+    }
+
+    async openAutomationTab(tabId) {
+        await this.refreshAutomationTabs();
+        if (this._destroyed) return false;
+        const info = this.automationTabs.get(tabId);
+        if (!info) return false;
+        if (info.statusAvailable === false) {
+            this.app.showError('This Automation terminal is temporarily unavailable. Try again shortly.');
+            return false;
+        }
+        if (!info.hasActiveSession) {
+            if (info.sessionId) await showReplayModal(info.sessionId);
+            else this.app.showToast('Automation starting', 'The terminal will be ready shortly.', 'info');
+            return true;
+        }
+        if (!this.tabs.has(tabId)) this.addLocalTab(info, {
+            selection: 'base:shell', label: info.automationName || 'Automation',
+            title: `Automation: ${info.automationName || 'Workflow'}`
+        });
+        await this.activateTab(tabId, { connectIfNeeded: true });
+        this.focusActiveTerminalInput();
+        return true;
+    }
+
+    async closeAutomationTab(tabId) {
+        const info = this.automationTabs.get(tabId);
+        if (!info) return;
+        try {
+            await this.app.apiCall(`/api/v1/terminal/tabs/${encodeURIComponent(tabId)}`, 'DELETE');
+            if (this._destroyed) return;
+            if (info.hasActiveSession && info.sessionId) this._touchHistory(info.sessionId, { settleMs: 3000 });
+            this.removeAutomationTab(tabId);
+            this.automationMenu.refresh();
+            this.updateUi();
+        } catch (error) {
+            this.app.showError(`Failed to close Automation terminal: ${error.message}`);
+        }
     }
 
     addLocalTab(tabInfo, options = {}) {
@@ -562,6 +680,8 @@ class TerminalManager {
 
         const state = {
             id: tabInfo.tabId,
+            jobRunId: tabInfo.jobRunId ?? null,
+            automationName: tabInfo.automationName || null,
             selection,
             label: cleanString(options.label) || autoLabel,
             title: options.title || null,
@@ -588,6 +708,11 @@ class TerminalManager {
         const item = document.createElement('div');
         item.className = 'vb-terminal-tab-item';
         item.dataset.tabId = state.id;
+        if (isAutomationTab(state)) {
+            item.hidden = true;
+            item.classList.add('is-automation');
+            this.automationTabs.set(state.id, tabInfo);
+        }
 
         const button = document.createElement('button');
         button.type = 'button';
@@ -792,6 +917,9 @@ class TerminalManager {
             previous.state.ui.item.classList.remove('active');
             previous.state.ui.panel.style.display = 'none';
             previous.instance.setActive(false);
+            // Automation viewers are on-demand. Leave their processes running,
+            // but release the xterm/socket when another terminal is selected.
+            if (isAutomationTab(previous.state)) previous.instance.disconnect({ disposeTerminal: true });
         }
 
         this.activeTabId = target.state.id;
@@ -833,13 +961,14 @@ class TerminalManager {
             return null;
         }
 
-        if (this.tabOrder.length >= this.maxTabs) {
+        if (!this.canCreateTab()) {
             this.app.showError(`Maximum of ${this.maxTabs} terminal tabs reached.`);
             return null;
         }
 
         this.tabAdd && (this.tabAdd.disabled = true);
         try {
+            const mayReclaim = this.getTabCount() >= this.maxTabs;
             const tabInfo = await this.app.apiCall('/api/v1/terminal/tabs', 'POST');
             if (this._destroyed) {
                 try {
@@ -861,6 +990,7 @@ class TerminalManager {
             if (!tab) {
                 return null;
             }
+            if (mayReclaim) await this.refreshAutomationTabs();
             await this.activateTab(tab.state.id, { connectIfNeeded: false });
             this.updateUi();
             requestAnimationFrame(() => this.updateFocusContainerHeight());
@@ -877,6 +1007,7 @@ class TerminalManager {
     }
 
     async closeTab(tabId) {
+        if (this.automationTabs.has(tabId)) return this.closeAutomationTab(tabId);
         // Sessionless (blank/stopped) tabs are closeable too — otherwise + and Stop
         // leak un-dismissable tabs. _enterPendingClose handles the no-session case
         // (the DELETE 404s and falls through to local cleanup).
@@ -1010,7 +1141,7 @@ class TerminalManager {
     _nextVisibleTabId() {
         for (let i = this.tabOrder.length - 1; i >= 0; i--) {
             const id = this.tabOrder[i];
-            if (!this._pendingCloses.has(id)) {
+            if (!this._pendingCloses.has(id) && !this.automationTabs.has(id)) {
                 return id;
             }
         }
@@ -1213,7 +1344,7 @@ class TerminalManager {
 
         if (!tab) {
             tab = await this.createAndActivateTab({ selection: selection || null });
-        } else if (tab.state.hasActiveSession) {
+        } else if (tab.state.hasActiveSession || isAutomationTab(tab.state)) {
             tab = await this.createAndActivateTab({ selection: selection || tab.state.selection || null });
         } else if (selection) {
             this.applySelection(tab, selection);
@@ -1293,10 +1424,10 @@ class TerminalManager {
             const createFreshTab = shouldCreateFreshTab(
                 options,
                 activeTab,
-                this.tabOrder.length,
+                this.getTabCount(),
                 this.maxTabs);
             tab = createFreshTab ? null : activeTab;
-            if (!tab || tab.state.hasActiveSession) {
+            if (!tab || tab.state.hasActiveSession || isAutomationTab(tab.state)) {
                 tab = await this.createAndActivateTab({
                     selection,
                     title: requestedTitle,
@@ -1495,6 +1626,7 @@ class TerminalManager {
             .filter((id) => id !== this.activeTabId)
             .map((id) => this.tabs.get(id))
             .filter((tab) => tab?.state?.hasActiveSession === true
+                && !isAutomationTab(tab.state)
                 && !tab.instance.hasOpenSocket()
                 && tab.state.status !== 'connecting');
     }
@@ -1842,6 +1974,7 @@ class TerminalManager {
     }
 
     async focusTab(tabId, options = {}) {
+        if (this.automationTabs.has(tabId)) return this.openAutomationTab(tabId);
         const tab = this.tabs.get(tabId);
         if (!tab) return false;
 
@@ -2074,6 +2207,7 @@ class TerminalManager {
     }
 
     updateUi() {
+        this.automationMenu.refresh();
         const active = this.getActiveTab();
         const hasActiveSession = this.tabOrder.some((id) => this.tabs.get(id)?.state?.hasActiveSession === true);
         document.body.classList.toggle('vb-terminal-active-session', hasActiveSession);
@@ -2119,7 +2253,7 @@ class TerminalManager {
             this.editorBtn.classList.toggle('d-none', !active.state.hasActiveSession);
         }
 
-        if (active.state.hasActiveSession) {
+        if (active.state.hasActiveSession || (isAutomationTab(active.state) && active.instance.vibeTerminal)) {
             this.showTerminal();
         } else {
             this.showPlaceholder();
@@ -2133,7 +2267,9 @@ class TerminalManager {
 
     updateWindowTitleBar(state) {
         if (this.windowTitle) {
-            this.windowTitle.textContent = 'Terminals run safely in the background even if you navigate away.';
+            this.windowTitle.textContent = isAutomationTab(state)
+                ? `Automation: ${state.automationName || state.label}${state.hasActiveSession ? '' : ' · Finished'}`
+                : 'Terminals run safely in the background even if you navigate away.';
         }
 
         if (!this.windowSession || !this.windowSessionValue) {
@@ -2141,7 +2277,7 @@ class TerminalManager {
         }
 
         const sessionId = cleanString(state?.sessionId);
-        const showSession = state?.hasActiveSession === true && !!sessionId;
+        const showSession = (state?.hasActiveSession === true || isAutomationTab(state)) && !!sessionId;
         this.windowSession.classList.toggle('d-none', !showSession);
         this.windowSession.title = showSession ? `Active session ID: ${sessionId}` : '';
         this.windowSessionValue.textContent = showSession ? sessionId : '';
@@ -2197,7 +2333,7 @@ class TerminalManager {
 
     updateAddButtonState() {
         const active = this.getActiveTab();
-        const atLimit = this.tabOrder.length >= this.maxTabs;
+        const atLimit = !this.canCreateTab();
 
         if (this.tabAdd) {
             this.tabAdd.disabled = atLimit;
@@ -2207,7 +2343,7 @@ class TerminalManager {
         }
 
         if (this.startBtn) {
-            const canUseActiveBlankTab = !!active && !active.state.hasActiveSession;
+            const canUseActiveBlankTab = !!active && !active.state.hasActiveSession && !isAutomationTab(active.state);
             const disabled = atLimit && !canUseActiveBlankTab;
             this.startBtn.disabled = disabled;
             const title = disabled
@@ -2875,9 +3011,10 @@ export class TerminalController {
         }
         manager = this.manager;
         if (!manager || manager.isDestroyed() || !manager.container?.isConnected) return false;
+        if (manager.automationTabs?.has(id)) return focus ? manager.openAutomationTab(id) : true;
         if (!manager.tabs.has(id)) {
             // Backend-created tabs already have a real session by the time their launch
-            // endpoint returns. Read that authoritative state so the adopted TerminalTab
+            // endpoint returns. Read the list's authoritative tab metadata so the adopted TerminalTab
             // gets the CLI/session identity normally supplied by restoreTabs; without it,
             // CLI-specific input handling (Codex modified Enter, OpenCode wheel routing)
             // remains disabled until a page reload. If the status read races shutdown or
@@ -2885,7 +3022,7 @@ export class TerminalController {
             let status = null;
             try {
                 status = await this.app.apiCall(
-                    `/api/v1/terminal/tabs/${encodeURIComponent(id)}/status`,
+                    '/api/v1/terminal/tabs',
                     'GET',
                     null,
                     { showLoading: false }
@@ -2902,7 +3039,15 @@ export class TerminalController {
             const metadata = manager.getTabMetaFromStorage(id);
             const selection = manager.getTabSelectionFromStorage(id);
             const rememberedCli = manager.getSelectionMeta(selection)?.cli || null;
-            const authoritative = cleanString(status?.tabId) === id ? status : null;
+            // The individual /status endpoint reports a session only. Automation
+            // identity and retained finished recording IDs belong to the tab list.
+            const authoritative = Array.isArray(status?.tabs)
+                ? status.tabs.find(info => cleanString(info.tabId) === id) || null : null;
+            if (isAutomationTab(authoritative)) {
+                manager.automationTabs.set(id, authoritative);
+                manager.automationMenu.refresh();
+                return focus ? manager.openAutomationTab(id) : true;
+            }
             const tab = manager.addLocalTab({
                 tabId: id,
                 hasActiveSession: authoritative?.hasActiveSession !== false,
@@ -3013,8 +3158,9 @@ export class TerminalController {
                 workingDirectory: payload?.workingDirectory || null,
                 activate: false
             });
-            // Scheduled and Board-triggered runs add a tab without taking focus or navigating.
-            return this.adoptLaunchedTab(tabId, { focus: false }).catch(error => {
+            // Scheduled and Board-triggered runs update only the small Automation
+            // list. They never create a viewer, take focus, or navigate.
+            return this.manager?.refreshAutomationTabs().catch(error => {
                 console.warn('Could not display the Automation terminal tab:', error);
             });
         });
@@ -3104,6 +3250,7 @@ export class TerminalController {
 
         appEventClient.on('session_completed', (payload) => {
             touchHistory(payload);
+            void this.manager?.refreshAutomationTabs();
             const tab = findTab(payload);
             const cli = payload?.cli || 'Session';
             const exitCode = payload?.exitCode;
@@ -3324,6 +3471,12 @@ export class TerminalController {
                             </button>
                         </div>
                         <div class="vb-terminal-window-controls vb-terminal-window-controls-right">
+                            <div class="vb-terminal-automations-wrapper" id="vb-terminal-automations-wrapper" hidden>
+                                <button type="button" class="vb-terminal-tab-undo" id="vb-terminal-automations-btn" title="Automation terminals" aria-label="Automation terminals" aria-haspopup="dialog" aria-expanded="false" aria-controls="vb-terminal-automations-menu">
+                                    <span class="vb-undo-icon" aria-hidden="true"><i class="fa-solid fa-robot"></i></span>
+                                    <span class="vb-undo-count" id="vb-terminal-automations-count">0</span>
+                                </button>
+                            </div>
                             <div class="vb-terminal-tab-undo-wrapper" id="vb-terminal-tab-undo-wrapper" hidden>
                                 <button type="button" class="vb-terminal-tab-undo" id="vb-terminal-tab-undo-btn" title="Restore a recently closed terminal (terminals auto-close after ${PENDING_CLOSE_LABEL})" aria-label="Restore a recently closed terminal">
                                     <span class="vb-undo-icon" aria-hidden="true">

@@ -451,23 +451,29 @@ Flow:
 2. `RegisterExternalTerminal(...)` exposes same PTY to local web viewer endpoint
 3. on CLI exit: `UnregisterTerminalAsync()` closes local viewer socket if connected
 
-### 3) Automation (Job) run — always a native terminal window
+### 3) Automation (Job) run — native terminal or terminal tab
 Entry:
 - `POST /api/v1/jobs/{id}/run` (manual), `POST /api/v1/jobs/runs/{runId}/retry`, or a due trigger
 
 Flow:
 1. `JobService` enqueues the run and calls `IJobScheduler.Kick()`. It never claims the row itself.
 2. `JobSchedulerHostedService` (lease owner) drains the queue through `JobLaunchService`, which
-   claims each run and calls `IEnvironmentLaunchService.LaunchAsync` — the exact pipeline behind
-   the Environment screen's launch button, plus `--job-run <id>` and the optional `--max-runtime`.
-3. That opens a real OS terminal window running `vb --env … --job-run …`, which takes case (2)
-   above: `JobRunner` owns claim, timeout, cancellation, idle completion, session linking, and the
-   final history status, and `ConsoleOutputConsumer` renders the PTY into that window.
+   claims each run and honors its snapshotted launch preference. Native terminal remains the default.
+3. Native runs use `EnvironmentLaunchService` for a Worker or `IJobProcessLauncher` for a script-only
+   workflow. Terminal-tab runs use `JobTerminalTabLauncher` and a recorded shell wrapper around the
+   same `vb --job-run` process. Worker workspace resolution and argument quoting apply to both paths.
+4. `JobRunner` owns ordering, timeout, cancellation, idle completion, session links, and final
+   history status. The wrapper exits with the workflow; its recording covers the whole workflow.
 
-There is deliberately no Web-UI-hosted variant. An Automation is an Environment on a timer, so it
-runs where the user can see and drive it — in its own terminal window — and `MaxConcurrentJobTerminals`
-is what bounds how many can be open at once. `TerminalTabHostService` has no Automation entry point.
-Hosting an Automation in a tab has been built once and deliberately removed; do not re-add it.
+The root supports 100 terminal hosts. Automation hosts carry server-owned run/name metadata and
+appear in the robot/count menu, outside the ordinary tab strip. The browser restores metadata
+without attaching an xterm or WebSocket for each Automation; opening a running entry attaches it,
+and opening a finished entry replays its retained recording.
+
+At capacity, creation may reclaim the oldest finished Automation host. This requires a terminal
+JobRun state, a successful inactive child-status response, and a finalized recording. Starting or
+active sessions, ordinary tabs, unavailable status, and unfinished recordings cannot be reclaimed.
+Reclamation removes only the host; saved sessions, Job history, and Board links remain intact.
 
 ### 4) Interactive signed Python script
 
