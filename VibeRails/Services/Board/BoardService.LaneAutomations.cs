@@ -53,7 +53,7 @@ public partial interface IBoardService
     /// <summary>Moves a card and reports what the destination lane triggers. Same validation as the plain move.</summary>
     Task<BoardCardMoveResult?> MoveCardAsync(string projectPath, string idOrKey, BoardCardMoveRequest move, CancellationToken cancellationToken = default);
     /// <summary>The lane-entry report a move would produce, without moving.</summary>
-    Task<BoardLaneEntryReport?> PreviewMoveAsync(string projectPath, string idOrKey, string columnIdOrName, CancellationToken cancellationToken = default);
+    Task<BoardLaneEntryReport?> PreviewMoveAsync(string projectPath, string idOrKey, string columnIdOrName, bool skipLaneAutomations = false, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<BoardLaneAutomationInfo>> GetLaneAutomationsAsync(string projectPath, string columnId, CancellationToken cancellationToken = default);
     /// <summary>Lane Automations for several lanes with one definition read; every requested lane is a key.</summary>
     Task<IReadOnlyDictionary<string, IReadOnlyList<BoardLaneAutomationInfo>>> GetLaneAutomationsByLaneAsync(string projectPath, IReadOnlyList<string> columnIds, CancellationToken cancellationToken = default);
@@ -103,7 +103,8 @@ public sealed partial class BoardService
             : new BoardCardMoveResult(card, new BoardLaneEntryReport(column.Name, entering, move.SkipLaneAutomations, automations, cancelled, moved.UpdatedUtc));
     }
 
-    public async Task<BoardLaneEntryReport?> PreviewMoveAsync(string projectPath, string idOrKey, string columnIdOrName, CancellationToken cancellationToken = default)
+    public async Task<BoardLaneEntryReport?> PreviewMoveAsync(
+        string projectPath, string idOrKey, string columnIdOrName, bool skipLaneAutomations = false, CancellationToken cancellationToken = default)
     {
         var existing = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
         if (existing is null)
@@ -117,8 +118,8 @@ public sealed partial class BoardService
         var pending = entering
             ? await store.GetPendingLaneAutomationsAsync(projectPath, existing.Id, cancellationToken)
             : [];
-        var cancelled = await DescribeCancelledAsync(projectPath, pending, automations, cancellationToken);
-        return new BoardLaneEntryReport(column.Name, entering, false, automations, cancelled, DateTime.UtcNow);
+        var cancelled = await DescribeCancelledAsync(projectPath, pending, skipLaneAutomations ? [] : automations, cancellationToken);
+        return new BoardLaneEntryReport(column.Name, entering, skipLaneAutomations, automations, cancelled, DateTime.UtcNow);
     }
 
     public Task<IReadOnlyList<BoardLaneAutomationInfo>> GetLaneAutomationsAsync(string projectPath, string columnId, CancellationToken cancellationToken = default) =>
@@ -226,7 +227,7 @@ public sealed partial class BoardService
     internal static string QuotedNames(IEnumerable<BoardLaneAutomationInfo> automations) =>
         string.Join(", ", automations.Select(a => $"\"{a.Name}\""));
 
-    /// <summary>First line only, control characters removed, bounded. Definitions are user data too.</summary>
+    /// <summary>First line only, control and bidi characters removed, bounded. Definitions are user data too.</summary>
     internal static string OneLine(string? value, int maxChars)
     {
         var text = value ?? string.Empty;
@@ -234,7 +235,11 @@ public sealed partial class BoardService
         if (end >= 0) text = text[..end];
         var builder = new StringBuilder(text.Length);
         foreach (var character in text)
+        {
+            if (BoardPromptComposer.IsBidiControl(character))
+                continue;
             builder.Append(char.IsControl(character) ? ' ' : character);
+        }
         text = builder.ToString().Trim();
         while (text.Contains("  ", StringComparison.Ordinal))
             text = text.Replace("  ", " ", StringComparison.Ordinal);

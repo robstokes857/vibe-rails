@@ -32,6 +32,25 @@ public sealed class BaseLlmOptionsTests
         Assert.Null(BaseLlmOptionsBuilder.Normalize(LLM.Codex, new(Mode: "plan")));
     }
 
+    [Theory]
+    [InlineData(LLM.Codex, "--dangerously-bypass-approvals-and-sandbox")]
+    [InlineData(LLM.Claude, "--dangerously-skip-permissions")]
+    [InlineData(LLM.Antigravity, "--dangerously-skip-permissions")]
+    [InlineData(LLM.Copilot, "--yolo")]
+    [InlineData(LLM.Grok46, "--yolo")]
+    [InlineData(LLM.OpenCode, "--auto")]
+    [InlineData(LLM.Glm52, "--auto")]
+    [InlineData(LLM.Glm53, "--auto")]
+    [InlineData(LLM.DeepSeekV4Pro, "--auto")]
+    [InlineData(LLM.KimiK3, "--auto")]
+    public void YoloUsesTheProviderLaunchFlag(LLM cli, string flag)
+    {
+        var normalized = BaseLlmOptionsBuilder.Normalize(cli, new(Yolo: true));
+        Assert.NotNull(normalized);
+        Assert.True(normalized.Yolo);
+        Assert.Equal([flag], BaseLlmOptionsBuilder.BuildArguments(cli, normalized));
+    }
+
     [Fact]
     public void AntigravityModelRemainsOneArgument() =>
         Assert.Equal(["--model", "Gemini 3.5 Flash (Low)", "--effort", "low"],

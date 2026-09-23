@@ -95,9 +95,11 @@ public static class BoardRoutes
             .WithName("SaveBoardLaneAutomation");
 
         app.MapGet("/api/v1/board/cards", (IBoardService board, string? boardId, int? pageSize, string? columnId,
-            int? offset, string? q, string? assignee, string? type, string? priority, string? tag, CancellationToken cancellationToken) =>
+            int? offset, string? continuationToken, string? q, string? assignee, string? type, string? priority, string? tag,
+            CancellationToken cancellationToken) =>
             RunAsync(async () => Results.Ok(pageSize is int size
-                ? await board.GetCardsPageAsync(Project(), new BoardCardPageQuery(size, columnId, offset ?? 0, q, assignee, type, priority, tag), cancellationToken, boardId)
+                ? await board.GetCardsPageAsync(Project(), new BoardCardPageQuery(size, columnId, offset ?? 0,
+                    q, assignee, type, priority, tag, continuationToken), cancellationToken, boardId)
                 : await board.GetCardsAsync(Project(), cancellationToken, boardId))))
             .WithName("GetBoardCards");
 
@@ -128,8 +130,6 @@ public static class BoardRoutes
             RunAsync(async () => OkOrNotFound(await launcher.LaunchAsync(Project(), card, request?.Selection, cancellationToken, request?.Intent ?? "work"), "Card")))
             .WithName("LaunchBoardCard");
 
-        // ---------------------------------------------------------------- rails
-
         // ---------------------------------------------------------------- files
         //
         // Repo-wide file names for the composer's `@path` typeahead (VB-35): names only, never
@@ -139,6 +139,8 @@ public static class BoardRoutes
         app.MapGet("/api/v1/board/files", (IBoardFileIndexService files, string? q, CancellationToken cancellationToken) =>
             RunAsync(async () => Results.Ok(await files.SearchAsync(Project(), q, cancellationToken))))
             .WithName("SearchBoardFiles");
+
+        // ---------------------------------------------------------------- rails
 
         app.MapGet("/api/v1/board/cards/{card}/links/candidates", (IBoardService board, string card, string? q, CancellationToken cancellationToken) =>
             RunAsync(async () => OkOrNotFound(await board.GetCardLinkCandidatesAsync(Project(), card, q, cancellationToken), "Card")))

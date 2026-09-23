@@ -6,6 +6,8 @@ namespace VibeRails.Services.Board;
 
 public partial interface IBoardService
 {
+    /// <summary>Reads only scoped attachment metadata; it never materializes the stored BLOB.</summary>
+    Task<BoardAttachmentMetadata?> FindAttachmentAsync(string projectPath, string idOrKey, string attachmentId, CancellationToken cancellationToken = default);
     Task<BoardAttachmentContent?> GetAttachmentContentAsync(string projectPath, string idOrKey, string attachmentId, CancellationToken cancellationToken = default);
 }
 
@@ -24,6 +26,9 @@ public sealed partial class BoardService
 
     /// <summary>Default chunk for <c>read_board_attachment</c>; the hard cap is <see cref="MaxAttachmentTextCharacters"/>.</summary>
     public const int DefaultAttachmentReadCharacters = 40_000;
+
+    public Task<BoardAttachmentMetadata?> FindAttachmentAsync(string projectPath, string idOrKey, string attachmentId, CancellationToken cancellationToken = default) =>
+        store.FindAttachmentAsync(projectPath, idOrKey, attachmentId, cancellationToken);
 
     public Task<BoardAttachmentContent?> GetAttachmentContentAsync(string projectPath, string idOrKey, string attachmentId, CancellationToken cancellationToken = default) =>
         store.GetAttachmentContentAsync(projectPath, idOrKey, attachmentId, cancellationToken);

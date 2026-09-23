@@ -22,8 +22,11 @@ public static partial class BoardFileReferences
         if (string.IsNullOrWhiteSpace(text))
             return [];
 
-        // Inline code wins over a reference, and so does a fence: blank both out before matching.
-        var prose = InlineCodePattern().Replace(FencePattern().Replace(text, " "), " ");
+        // Inline code wins over a reference, and so does a fence. A non-whitespace placeholder
+        // preserves token boundaries: `code`@src/a.cs must not become " @src/a.cs" and start
+        // matching merely because the code span was removed.
+        const string omittedCode = "\uFFFC";
+        var prose = InlineCodePattern().Replace(FencePattern().Replace(text, omittedCode), omittedCode);
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var references = new List<string>();
         foreach (Match match in ReferencePattern().Matches(prose))

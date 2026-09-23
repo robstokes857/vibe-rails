@@ -9,8 +9,58 @@ import { pathToFileURL } from 'node:url';
 // extractor in BoardPromptComposer/BoardFileReferences.cs: whatever formatFileReference emits
 // has to render as a reference and reach the launch prompt.
 const moduleUrl = pathToFileURL(path.resolve('VibeRails/wwwroot/js/modules/board-file-refs.js')).href;
-const { formatFileReference, findFileReferenceToken, toProjectRelativePath, insertFileReference, MAX_QUERY_LENGTH } = await import(moduleUrl);
+const { bindFileReferencePopup, formatFileReference, findFileReferenceToken, toProjectRelativePath, insertFileReference, MAX_QUERY_LENGTH } = await import(moduleUrl);
+const { BoardApi } = await import(pathToFileURL(path.resolve('VibeRails/wwwroot/js/modules/board-api.js')).href);
 const { renderCommentHtml } = await import(pathToFileURL(path.resolve('VibeRails/wwwroot/js/modules/board-text.js')).href);
+
+class FakeElement {
+    constructor(tagName = 'div') {
+        this.tagName = tagName.toUpperCase();
+        this.style = {};
+        this.dataset = {};
+        this.children = [];
+        this.listeners = new Map();
+        this.offsetTop = 0;
+        this.offsetLeft = 0;
+        this.offsetWidth = 100;
+        this.clientWidth = 500;
+        this.scrollTop = 0;
+        this.innerHTML = '';
+        this.isConnected = true;
+    }
+
+    addEventListener(type, handler) {
+        const handlers = this.listeners.get(type) || [];
+        handlers.push(handler);
+        this.listeners.set(type, handlers);
+    }
+
+    fire(type, event = {}) {
+        for (const handler of this.listeners.get(type) || []) handler(event);
+    }
+
+    dispatchEvent(event) {
+        this.fire(event.type, event);
+        return true;
+    }
+
+    appendChild(child) {
+        child.parentElement = this;
+        this.children.push(child);
+        return child;
+    }
+
+    remove() {
+        if (this.parentElement) this.parentElement.children = this.parentElement.children.filter(child => child !== this);
+        this.isConnected = false;
+    }
+
+    setAttribute() {}
+    querySelector() { return null; }
+    scrollIntoView() {}
+}
+
+const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
 test('formatFileReference emits the bare form when the renderer would recognise it, else quotes', () => {
     assert.equal(formatFileReference('VibeRails/Services/Board/BoardService.cs'), '@VibeRails/Services/Board/BoardService.cs');
@@ -65,6 +115,68 @@ test('insertFileReference replaces the token, adds one separating space and park
     assert.deepEqual(insertFileReference('see @Boa', 4, 8, '@a/b.cs'), { value: 'see @a/b.cs ', caret: 12 });
     assert.deepEqual(insertFileReference('see @Boa then', 4, 8, '@a/b.cs'), { value: 'see @a/b.cs then', caret: 11 });
     assert.deepEqual(insertFileReference('@x\nmore', 0, 2, '@a.md'), { value: '@a.md\nmore', caret: 5 });
+});
+
+test('changing a token immediately invalidates its in-flight suggestions', async t => {
+    const originalDocument = globalThis.document;
+    const originalGetComputedStyle = globalThis.getComputedStyle;
+    const originalSearch = BoardApi.searchFilesAsync;
+    const body = new FakeElement('body');
+    globalThis.document = { body, createElement: tag => new FakeElement(tag) };
+    globalThis.getComputedStyle = () => ({
+        boxSizing: 'border-box', width: '300px', paddingTop: '0px', paddingRight: '0px',
+        paddingBottom: '0px', paddingLeft: '0px', borderTopWidth: '0px', borderRightWidth: '0px',
+        borderBottomWidth: '0px', borderLeftWidth: '0px', fontFamily: 'sans-serif', fontSize: '16px',
+        fontWeight: '400', fontStyle: 'normal', letterSpacing: 'normal', lineHeight: '20px',
+        textTransform: 'none', wordSpacing: 'normal', textIndent: '0px', tabSize: '4'
+    });
+
+    let resolveOld;
+    let oldSignal;
+    BoardApi.searchFilesAsync = (query, { signal }) => {
+        assert.equal(query, 'old');
+        oldSignal = signal;
+        return new Promise(resolve => { resolveOld = resolve; });
+    };
+
+    const host = new FakeElement();
+    const input = new FakeElement('textarea');
+    input.parentElement = host;
+    input.focus = () => {};
+    input.setSelectionRange = (start, end) => { input.selectionStart = start; input.selectionEnd = end; };
+    const dispose = bindFileReferencePopup(input, { host });
+    t.after(() => {
+        dispose();
+        BoardApi.searchFilesAsync = originalSearch;
+        if (originalDocument === undefined) delete globalThis.document;
+        else globalThis.document = originalDocument;
+        if (originalGetComputedStyle === undefined) delete globalThis.getComputedStyle;
+        else globalThis.getComputedStyle = originalGetComputedStyle;
+    });
+
+    input.value = '@old';
+    input.selectionStart = input.selectionEnd = input.value.length;
+    input.fire('input');
+    await delay(250); // let the old token's debounced request begin
+    assert.ok(resolveOld);
+
+    input.value = '@new';
+    input.selectionStart = input.selectionEnd = input.value.length;
+    input.fire('input');
+    assert.equal(oldSignal.aborted, true, 'the old request is aborted at the input event');
+
+    // Simulate a transport that resolves despite abort. Its rows must still fail the generation check.
+    resolveOld({ files: ['src/old-result.cs'], truncated: false });
+    await Promise.resolve();
+    await Promise.resolve();
+    const popup = host.children[0];
+    assert.doesNotMatch(popup.innerHTML, /old-result/);
+
+    input.fire('keydown', {
+        key: 'Enter', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false,
+        preventDefault() {}, stopPropagation() {}
+    });
+    assert.equal(input.value, '@new', 'Enter cannot insert a result from the previous query');
 });
 
 test('the controller binds the popup to every composer and disposes it only when the editor closes', () => {

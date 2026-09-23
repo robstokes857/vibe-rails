@@ -26,7 +26,12 @@ export function normalizeBoardLaunchOptions(selection, options = {}) {
     const model = pinnedModels[cli] ? '' : String(options?.model || '').trim();
     let effort = (efforts[cli] || []).includes(options?.effort) ? options.effort : '';
     if (cli === 'codex' && model.toLowerCase() === 'gpt-5.5' && effort === 'max') effort = 'xhigh';
-    return { model, effort, mode: startModes(cli).length ? String(options?.mode || '') : '' };
+    return {
+        model,
+        effort,
+        mode: startModes(cli).length ? String(options?.mode || '') : '',
+        yolo: options?.yolo === true
+    };
 }
 
 // Every startup mode here becomes a real CLI flag (--permission-mode / --mode / --agent).
@@ -53,6 +58,11 @@ export function renderBoardLaunchOptions(selection, options = {}) {
         <label class="form-label">Model</label>${modelHtml}
         ${efforts[cli] ? `<label class="form-label mt-2">Effort</label><select class="form-select form-select-sm" data-board-launch-effort aria-label="Effort">${optionTags(efforts[cli], values.effort)}</select>` : ''}
         ${modes.length ? `<label class="form-label mt-2">Start mode</label><select class="form-select form-select-sm" data-board-launch-mode aria-label="Start mode">${optionTags(modes, values.mode)}</select>` : ''}
+        <div class="form-check mt-2">
+            <input class="form-check-input" type="checkbox" id="board-launch-yolo" data-board-launch-yolo ${values.yolo ? 'checked' : ''}>
+            <label class="form-check-label" for="board-launch-yolo">YOLO mode</label>
+        </div>
+        <small class="form-text text-warning">Uses this CLI's unrestricted or auto-approve launch flag. Codex also disables its sandbox.</small>
     </div>`;
 }
 
@@ -60,7 +70,8 @@ export function readBoardLaunchOptions(container, selection) {
     return normalizeBoardLaunchOptions(selection, {
         model: container.querySelector('[data-board-launch-model]')?.value || '',
         effort: container.querySelector('[data-board-launch-effort]')?.value || '',
-        mode: container.querySelector('[data-board-launch-mode]')?.value || ''
+        mode: container.querySelector('[data-board-launch-mode]')?.value || '',
+        yolo: Boolean(container.querySelector('[data-board-launch-yolo]')?.checked)
     });
 }
 

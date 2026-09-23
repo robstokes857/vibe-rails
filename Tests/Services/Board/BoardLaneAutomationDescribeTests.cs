@@ -59,6 +59,13 @@ public sealed class BoardLaneAutomationDescribeTests
     public void Names_AndPrompts_AreOneBoundedLine()
     {
         Assert.Equal("Open PR", BoardService.OneLine("  Open \t\u0007PR \r\nsecond line", 80));
+        var bidi = BoardService.Describe(Definition(
+            name: "Auto\u202Emation",
+            worker: "Rev\u200Fiewer",
+            prompt: "Inspect\u2066 now\u2069",
+            scripts: ["scripts/che\u202Ack.py"]));
+        Assert.Equal("Automation", bidi.Name);
+        Assert.Equal("Worker \"Reviewer\" (Claude): \"Inspect now\" + 1 script (check.py)", bidi.Summary);
         Assert.Equal("", BoardService.OneLine(null, 10));
         var truncated = BoardService.OneLine(new string('x', 200), 20);
         Assert.Equal(20, truncated.Length);

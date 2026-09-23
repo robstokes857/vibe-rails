@@ -16,6 +16,8 @@ public sealed partial class BoardService
         var search = query.Q?.Trim();
         if (search?.Length > 300) throw new BoardValidationException("Search must be 300 characters or fewer.");
         if (query.Tag?.Length > 40) throw new BoardValidationException("Tag must be 40 characters or fewer.");
+        var continuationToken = query.ContinuationToken?.Trim();
+        if (continuationToken?.Length > 128) throw new BoardValidationException("Continuation token is invalid.");
         var page = await store.GetCardsPageAsync(projectPath, query with
         {
             PageSize = Math.Clamp(query.PageSize, 1, 100),
@@ -25,7 +27,8 @@ public sealed partial class BoardService
             Assignee = NormalizeAssignee(query.Assignee),
             Type = NormalizeCardType(query.Type),
             Priority = NormalizePriority(query.Priority),
-            Tag = query.Tag?.Trim()
+            Tag = query.Tag?.Trim(),
+            ContinuationToken = string.IsNullOrWhiteSpace(continuationToken) ? null : continuationToken
         }, cancellationToken, NormalizeBoardId(boardId));
         var response = await GetCardListResponseAsync(projectPath, page.Cards, cancellationToken);
         return response with

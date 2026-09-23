@@ -8,9 +8,17 @@ public sealed record BoardCardPageQuery(
     string? Assignee = null,
     string? Type = null,
     string? Priority = null,
-    string? Tag = null);
+    string? Tag = null,
+    string? ContinuationToken = null);
 
-public sealed record BoardCardLanePage(string ColumnId, int TotalCount, int FilteredCount, int NextOffset, bool HasMore);
+public sealed record BoardCardLanePage(
+    string ColumnId,
+    int TotalCount,
+    int FilteredCount,
+    int NextOffset,
+    bool HasMore,
+    string? ContinuationToken = null,
+    bool RestartRequired = false);
 
 public sealed record BoardCardPage(
     IReadOnlyList<BoardCardRecord> Cards,
@@ -26,7 +34,9 @@ public partial interface IBoardStore
 {
     /// <summary>
     /// With no column, reads all open cards and the first page of each completed lane.
-    /// Column requests page that lane. Counts and filter choices cover the entire board.
+    /// Column requests page that lane. Continuations echo the lane token; a changed filtered
+    /// order restarts at zero and sets <see cref="BoardCardLanePage.RestartRequired"/>.
+    /// Counts and filter choices cover the entire board.
     /// </summary>
     Task<BoardCardPage> GetCardsPageAsync(string projectPath, BoardCardPageQuery query,
         CancellationToken cancellationToken = default, string? boardId = null);

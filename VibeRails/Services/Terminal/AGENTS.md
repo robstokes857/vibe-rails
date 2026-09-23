@@ -38,7 +38,7 @@ The run and lane-triggering Board card reference the same session ID. No history
 
 ### Board launch options and input sequences (2026-09-14)
 
-`StartTerminalRequest.BaseLlmOptions` carries typed model/effort/start-mode choices only for
+`StartTerminalRequest.BaseLlmOptions` carries typed model/effort/start-mode/YOLO choices only for
 base CLIs. `BaseLlmOptionsBuilder` validates these at both board save/launch and the terminal
 child, producing discrete argv without changing physical CLI config. Saved environments
 keep their own arguments. Every startup mode the UI offers is a native CLI flag
@@ -47,7 +47,9 @@ startup mode**: `/plan` is a TUI command with no launch flag, and the handshake 
 it — wait for the composer, send `/plan`, paste the task, press Enter — was removed 2026-09-15.
 Session options are set at spawn time or not at all; nothing types into a running TUI. A mode
 stored on an older Codex card is dropped by `BaseLlmOptionsBuilder`, not rejected, so those cards
-still launch.
+still launch. YOLO is a separate, explicit card toggle translated into the provider's native
+launch flag (`--dangerously-bypass-approvals-and-sandbox`, `--dangerously-skip-permissions`,
+`--yolo`, or `--auto`); it defaults off and never rewrites a provider configuration file.
 
 Start work also sets `StartTerminalRequest.AuthorizeBoardTools` for base and saved-environment
 launches. It defaults to false everywhere else and travels through TerminalRoutes,
@@ -64,15 +66,16 @@ be reviewed individually before they enter this allowlist.
 | Copilot | Repeated `--allow-tool=viberails-mcp(<tool>)`; 1.0.71 permissions help. |
 | Grok | Repeated `--allow=MCPTool(viberails-mcp__<tool>)` per Board tool; 1.0.30 guide. |
 | OpenCode and GLM/DeepSeek/Kimi variants | `OPENCODE_PERMISSION` entries mapping exact `viberails-mcp_<tool>` names to `allow`; OpenCode 1.18.30. |
-| Antigravity | Prompt authorization only; its only native switch is the global `--dangerously-skip-permissions`, which a board launch does not add. |
+| Antigravity | Prompt authorization only; its only native switch is the global `--dangerously-skip-permissions`, which is added only when the user explicitly enables the card's separate YOLO option. |
 
 The OpenCode helper preserves unrelated inherited rules and proxy configuration, and
 conservatively skips grants covered by inherited `OPENCODE_PERMISSION` deny rules. Native
 configuration precedence still applies. Selected modes and managed provider
-policies can still restrict calls. This requested Board-specific launch exception leaves the
-Environments editor's YOLO-only policy intact: no new permission editor, global policy change,
-or physical CLI configuration write. Validation used help, documentation and regression tests;
-no live provider session or deployment was performed.
+policies can still restrict calls. These narrow Board-tool grants remain the default. A separate,
+default-off card YOLO checkbox explicitly selects the base provider's global bypass/auto-approve
+launch flag; saved environments keep their own arguments. Neither path is a granular permission
+editor or physical CLI configuration write. Validation used help, documentation and regression
+tests; no live provider session or deployment was performed.
 
 **Nothing writes into the terminal screen except the server's own bytes.** This cuts both ways and
 both halves are hard rules: never *strip or rewrite* the PTY byte stream (fix rendering at the

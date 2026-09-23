@@ -92,4 +92,24 @@ public sealed partial class BoardStore
         var bytes = reader.IsDBNull(7) ? BoardAttachmentData.DecodeDataUrl(record.DataUrl) : (byte[])reader.GetValue(7);
         return new BoardAttachmentContent(record, bytes);
     }
+
+    public async Task<BoardAttachmentMetadata?> FindAttachmentAsync(string projectPath, string idOrKey, string attachmentId, CancellationToken cancellationToken = default)
+    {
+        var project = NormalizeProjectPath(projectPath);
+        await using var connection = await OpenAsync(cancellationToken);
+        var card = await ReadCardAsync(connection, null, project, idOrKey, cancellationToken);
+        if (card is null) return null;
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT Id, CardId, Name, MimeType, Bytes, CreatedUTC
+            FROM BoardAttachments
+            WHERE CardId = $card AND Id = $attachment;
+            """;
+        command.Parameters.AddWithValue("$card", card.Id);
+        command.Parameters.AddWithValue("$attachment", attachmentId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken)) return null;
+        return new BoardAttachmentMetadata(reader.GetString(0), reader.GetString(1), reader.GetString(2),
+            reader.GetString(3), reader.GetInt64(4), ParseDb(reader.GetString(5)));
+    }
 }

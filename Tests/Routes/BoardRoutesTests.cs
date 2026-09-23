@@ -96,8 +96,6 @@ public sealed class BoardRoutesTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task EveryBoardRoute_NeedsBothCredentials()
-    [Fact]
     public async Task Move_WithSkipAutomations_RecordsTheSkip_AndQueuesNothing()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -143,6 +141,8 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         Assert.InRange(pending.DueUtc, DateTime.UtcNow.AddSeconds(50), DateTime.UtcNow.AddSeconds(70));
     }
 
+    [Fact]
+    public async Task EveryBoardRoute_NeedsBothCredentials()
     {
         using var none = await SendAsync(HttpMethod.Get, "/api/v1/board/cards");
         Assert.Equal(HttpStatusCode.Unauthorized, none.StatusCode);
@@ -219,6 +219,7 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         using var created = await PostJsonAsync("/api/v1/board/cards", new
         {
             columnId = backlogId, title = " Fix it ", description = "Body", assignee = "base:claude",
+            baseLlmOptions = new { model = "claude-opus-4-8", effort = "high", yolo = true },
             type = "bug", priority = "high", points = "5", tags = new[] { "auth" }, blocked = false
         });
         Assert.Equal(HttpStatusCode.OK, created.StatusCode);
@@ -228,6 +229,8 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         Assert.Equal("PROJ-1", card.GetProperty("key").GetString());
         Assert.Equal("Fix it", card.GetProperty("title").GetString());
         Assert.Equal("base:claude", card.GetProperty("assignee").GetString());
+        Assert.Equal("claude-opus-4-8", card.GetProperty("baseLlmOptions").GetProperty("model").GetString());
+        Assert.True(card.GetProperty("baseLlmOptions").GetProperty("yolo").GetBoolean());
         Assert.Equal("bug", card.GetProperty("type").GetString());
         Assert.Equal(5, card.GetProperty("points").GetInt32());
         Assert.Equal(0, card.GetProperty("commentCount").GetInt32());
@@ -444,9 +447,6 @@ public sealed class BoardRoutesTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task CardLinks_RoundTrip_ThroughTheJsonContext_WithValidationAndProjectScope()
-    {
-    [Fact]
     public async Task Files_ListsTheProjectRoot_ThroughTheJsonContext_RanksNamesFirst_AndCapsTheQuery()
     {
         // BoardRoutes.Map itself is only called for the active root backend (Routes.cs), the same
@@ -474,6 +474,9 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.BadRequest, tooLong.StatusCode);
     }
 
+    [Fact]
+    public async Task CardLinks_RoundTrip_ThroughTheJsonContext_WithValidationAndProjectScope()
+    {
         using var first = await PostJsonAsync("/api/v1/board/cards", new { title = "First" });
         first.EnsureSuccessStatusCode();
         using var second = await PostJsonAsync("/api/v1/board/cards", new { title = "Second" });
@@ -685,9 +688,12 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         var metadata = response.GetProperty("lanes").EnumerateArray().Single(lane => lane.GetProperty("columnId").GetString() == done.Id);
         Assert.Equal(2, metadata.GetProperty("nextOffset").GetInt32());
         Assert.True(metadata.GetProperty("hasMore").GetBoolean());
-        using var second = await GetJsonAsync($"/api/v1/board/cards?pageSize=2&columnId={done.Id}&offset=2");
+        var continuationToken = metadata.GetProperty("continuationToken").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(continuationToken));
+        using var second = await GetJsonAsync($"/api/v1/board/cards?pageSize=2&columnId={done.Id}&offset=2&continuationToken={Uri.EscapeDataString(continuationToken!)}");
         Assert.Equal(2, second.RootElement.GetProperty("cards").GetArrayLength());
         Assert.False(second.RootElement.GetProperty("lanes")[0].GetProperty("hasMore").GetBoolean());
+        Assert.False(second.RootElement.GetProperty("lanes")[0].GetProperty("restartRequired").GetBoolean());
         using var filter = await GetJsonAsync("/api/v1/board/cards?pageSize=2&q=Done%200&assignee=base:codex&type=task&priority=medium&tag=debug");
         Assert.Equal(1, filter.RootElement.GetProperty("cards").GetArrayLength());
         Assert.Equal(1, filter.RootElement.GetProperty("filteredCount").GetInt32());

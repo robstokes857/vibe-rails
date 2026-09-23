@@ -388,22 +388,25 @@ test('a running agent exposes Go to agent while keeping Save and the session ava
     expect(requests.filter(request => request.method === 'PUT' || request.path.endsWith('/launch'))).toHaveLength(0);
 });
 
-test('Start work preserves the board and stores model and effort', async ({ page }) => {
+test('Start work preserves the board and stores base launch options including YOLO', async ({ page }) => {
     const requests = await openBoard(page, { assignee: 'base:codex' });
     await page.getByText('Description images', { exact: true }).click();
     await expect(page.locator('.board-card-modal-dialog .modal-title')).toHaveText('VB-1 · Description images');
     await page.locator('[data-board-launch-model]').selectOption('gpt-6-astra');
     await page.locator('[data-board-launch-effort]').selectOption('high');
+    await expect(page.locator('[data-board-launch-yolo]')).not.toBeChecked();
+    await page.locator('[data-board-launch-yolo]').check();
     // Codex exposes no Start mode: its /plan is a TUI command, and nothing types into a TUI.
     await expect(page.locator('[data-board-launch-mode]')).toHaveCount(0);
     await page.locator('[data-board-start-work]').click();
     await expect(page.locator('[data-board-card-editor]')).toHaveCount(0);
     await expect(page.locator('#app-content [data-view="board"]')).toBeVisible();
     expect(requests.find(request => request.method === 'PUT' && request.path.endsWith('/card_test')).body.baseLlmOptions)
-        .toEqual({ model: 'gpt-6-astra', effort: 'high', mode: '' });
+        .toEqual({ model: 'gpt-6-astra', effort: 'high', mode: '', yolo: true });
     expect(requests.filter(request => request.path.endsWith('/launch'))).toHaveLength(1);
     await page.getByText('Description images', { exact: true }).click();
     await expect(page.locator('[data-board-launch-effort]')).toHaveValue('high');
+    await expect(page.locator('[data-board-launch-yolo]')).toBeChecked();
 });
 
 test('work and discussion actions remain reachable on a narrow screen', async ({ page }, testInfo) => {
@@ -467,9 +470,6 @@ test('a description edit saves without touching the running agent or keeping his
     await page.getByText('Description images', { exact: true }).click();
 });
 
-test('new cards queue files until Save and do not launch', async ({ page }) => {
-    const requests = await openBoard(page);
-    await page.getByRole('button', { name: 'New card', exact: true }).click();
 test('typing @ in a composer opens the file typeahead, the keyboard inserts a reference and Browse is always offered', async ({ page }) => {
     const requests = await openBoard(page);
     await page.getByText('Description images', { exact: true }).click();
@@ -510,6 +510,9 @@ test('typing @ in a composer opens the file typeahead, the keyboard inserts a re
     expect(requests.filter(request => request.path.startsWith('/api/v1/board/cards') && request.method !== 'GET')).toHaveLength(0);
 });
 
+test('new cards queue files until Save and do not launch', async ({ page }) => {
+    const requests = await openBoard(page);
+    await page.getByRole('button', { name: 'New card', exact: true }).click();
     await expect(page.locator('[data-board-card-links]')).toContainText('Save the card to link other cards.');
     await page.locator('#board-card-title').fill('File first');
     await page.locator('[data-board-files]').setInputFiles({ name: 'notes.zip', mimeType: 'application/zip', buffer: Buffer.from('archive') });

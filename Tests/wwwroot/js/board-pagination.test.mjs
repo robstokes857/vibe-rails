@@ -17,7 +17,8 @@ function harness() {
     controller.state.boardId = 'main';
     controller.state.cards = [{ id: 'a', columnId: 'done' }];
     controller.cardPage = {
-        lanes: [{ columnId: 'done', totalCount: 120, filteredCount: 120, nextOffset: 30, hasMore: true }],
+        lanes: [{ columnId: 'done', totalCount: 120, filteredCount: 120, nextOffset: 30, hasMore: true,
+            continuationToken: 'order-a' }],
         filteredCount: 120, blockedCount: 2, remainingPoints: 8,
         tags: ['tag-on-unloaded-card'], assignees: []
     };
@@ -34,14 +35,27 @@ test('scroll requests one page at a time, deduplicates activity, and advances se
     assert.equal(query.get('pageSize'), '30');
     assert.equal(query.get('columnId'), 'done');
     assert.equal(query.get('offset'), '30');
+    assert.equal(query.get('continuationToken'), 'order-a');
     requests[0].resolve({ cards: [{ id: 'a', title: 'updated' }, { id: 'b' }],
-        lanes: [{ columnId: 'done', nextOffset: 60, hasMore: false }] });
+        lanes: [{ columnId: 'done', nextOffset: 60, hasMore: false, continuationToken: 'order-a' }] });
     await pending;
     assert.deepEqual(controller.state.cards.map(card => card.id), ['a', 'b']);
     assert.equal(controller.state.cards[0].title, 'updated');
     assert.equal(controller.cardPage.lanes[0].nextOffset, 60);
     await controller.loadMoreCards('done');
     assert.equal(requests.length, 1);
+});
+
+test('an ordering change restarts paging instead of hiding a promoted card behind the offset', async () => {
+    const { controller, requests } = harness();
+    let refreshes = 0;
+    controller.refresh = async () => { refreshes += 1; };
+    const pending = controller.loadMoreCards('done');
+    requests[0].resolve({ cards: [{ id: 'promoted' }], lanes: [{ columnId: 'done', nextOffset: 30,
+        hasMore: true, continuationToken: 'order-b', restartRequired: true }] });
+    await pending;
+    assert.equal(refreshes, 1);
+    assert.deepEqual(controller.state.cards.map(card => card.id), ['a']);
 });
 
 test('a stale page cannot append to another board or a refreshed filter result', async () => {
