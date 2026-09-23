@@ -30,6 +30,7 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | [js/modules/board-api.js](js/modules/board-api.js) | Board data layer: a thin client over `/api/v1/board/*` (every call rides `app.apiCall`, so cookie + tab header apply). `BoardApi.attach(app)` once from the controller |
 | [js/modules/board-card-links.js](js/modules/board-card-links.js) | Linked cards rail: project-wide key/title search, immediate link/unlink, and navigation through the card editor's unsaved-edit guard |
 | [js/modules/board-text.js](js/modules/board-text.js) | Renders a comment/description body. **Escape-first**: the input is escaped before any transform, so no sanitizer is needed and none is present |
+| [js/modules/board-file-refs.js](js/modules/board-file-refs.js) | The composer's `@` typeahead over `GET /api/v1/board/files`: inserts `@path` / `@"path"` text, "Browse for a file…" fallback through the shared file explorer; pure helpers are node-tested |
 | [js/modules/diff-modal.js](js/modules/diff-modal.js) | Shared Monaco diff viewer as a nested modal layer. Used by Board commits and the sandbox "View Diff" |
 
 ## Settings signing keys
@@ -69,9 +70,11 @@ Completed lanes (names containing Done, Complete or Ship) initially fetch 30 car
 `GET /api/v1/board/cards?pageSize=30`. Scroll near the lane bottom to load another batch, or use
 Load more. Other lanes load normally. The server applies filters to the entire board and returns
 full lane counts, statistics and assignee/tag choices even for unloaded cards. Refresh/filter
-changes reset paging; aborted or stale pages cannot repaint another board, and append deduplicates
-card IDs after concurrent activity. Drag ordering is disabled while filters are active. Board-only
-viewport sizing and non-shrinking cards keep scrolling inside each lane.
+changes reset paging. Each continuation sends the lane's opaque ordering token; activity that
+changes the filtered order marks the offset stale and triggers a full refresh before paging resumes,
+so a promoted unloaded card cannot be skipped. Aborted or stale pages cannot repaint another board,
+and append still deduplicates card IDs. Drag ordering is disabled while filters are active.
+Board-only viewport sizing and non-shrinking cards keep scrolling inside each lane.
 
 New cards and ordinary card activity rise to the top of the current lane. Explicit drag positions
 remain authoritative. This ordering is persisted, including comments, notes, session links/renames,
@@ -128,8 +131,9 @@ launch prompt all use those same storage values rather than deriving type from t
 Card headings, launch session names, and remembered terminal labels use `KEY · Card title`, where
 `KEY` is the server's `card.key` (`VB-n` for existing projects, the project's own prefix such as
 `VR-n` for projects that got their first card after 1.10.19). Never rebuild a key from `'VB-'`.
-Base assignees show `board-launch-options.js` controls for model, effort, and start mode;
-saved environments keep their own configuration. The pinned model catalog is shared with
+Base assignees show `board-launch-options.js` controls for model, effort, start mode, and an
+explicit warning-styled YOLO toggle; saved environments keep their own configuration. The pinned
+model catalog is shared with
 Environments through `llm-model-catalog.js`. Choices persist on the card and reach the backend
 as typed `baseLlmOptions`, never browser-built CLI argument strings. Changing/unassigning the
 provider clears those controls. Picker mount is asynchronous: initialize controls using the
@@ -205,12 +209,28 @@ auto-grow routine can then make the textarea taller than its composer and its te
 Attachments section. `.board-editor-scroll` is the one viewport overflow owner.
 
 **Comment and description text is not Markdown.** `board-text.js` supports a deliberately tiny
-syntax: fenced code, inline code, `http(s)` autolinks and images. It escapes the entire input
+syntax: fenced code, inline code, `http(s)` autolinks, images and `@path` file references
+(`@relative/path` or `@"path with spaces"`, only at the start of the text or after whitespace, and a
+bare one needs a `/` or `.` so `@claude` stays prose — see the Board guide). It escapes the entire input
 *before* any transform runs, so raw HTML never enters the pipeline and every tag in the output is
 one the renderer wrote itself. That is why there is no sanitizer here, and why adding a transform
 that interpolates unescaped user text would break the whole security story. The invariants are
 pinned in `Tests/wwwroot/js/board-text.test.mjs` — the CSP sets `script-src 'unsafe-inline'` with
 no nonce, so an injected handler *would* run; this renderer is the only thing standing in the way.
+
+**The `@` typeahead** (`board-file-refs.js`) is bound to every composer textarea from
+`bindComposer` — description, comment and the new-card description alike. Typing `@` opens a list
+under the caret (a hidden mirror div measures the caret; measured synchronously, same rule as
+below); keystrokes filter it with a 200 ms debounce over `BoardApi.searchFilesAsync`, an
+AbortController and a generation counter so a stale response never paints. Up/Down move, Enter/Tab
+insert `@path` (or `@"path"` when the bare form would not render), Esc closes with `preventDefault`
+so the app-level Escape handler does not also close the card, and the last row is always "Browse
+for a file…", which opens `app.pickFileSystemEntry` at the project root and inserts the repo-relative
+path (the absolute path when the pick is outside the repo). The popup only ever rewrites the
+textarea's value and dispatches a bubbling `input` event, so auto-grow and the editor's
+unsaved-edit tracking see the change. Its disposers live in `composerDisposers` and are torn down
+by `disposeComposers()` on close/replacement — deliberately **not** in `disposeCardPickers()`, which
+`bindCardEditor` re-runs after the composers are wired and would kill the popups before they opened.
 
 Layout rules worth keeping: `pre.board-code` uses `white-space: pre` + `overflow-x: auto`, and
 every ancestor carries `min-width: 0` (including `grid-template-columns: 28px minmax(0, 1fr)` on

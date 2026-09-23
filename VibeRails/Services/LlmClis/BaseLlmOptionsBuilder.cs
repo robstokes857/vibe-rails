@@ -45,7 +45,9 @@ public static partial class BaseLlmOptionsBuilder
             _ => ["plan"]
         };
         if (mode.Length > 0 && !modes.Contains(mode)) throw new ArgumentException("Unsupported startup mode for this CLI.");
-        return model.Length + effort.Length + mode.Length == 0 ? null : new(model, effort, mode);
+        return model.Length + effort.Length + mode.Length == 0 && !options.Yolo
+            ? null
+            : new(model, effort, mode, options.Yolo);
     }
 
     public static string[] BuildArguments(LLM llm, BaseLlmOptions? options)
@@ -67,6 +69,17 @@ public static partial class BaseLlmOptionsBuilder
                 _ => "--agent"
             };
             args.AddRange([flag, value.Mode]);
+        }
+        if (value.Yolo)
+        {
+            args.Add(llm switch
+            {
+                LLM.Codex => "--dangerously-bypass-approvals-and-sandbox",
+                LLM.Claude or LLM.Antigravity => "--dangerously-skip-permissions",
+                LLM.Copilot or LLM.Grok46 => "--yolo",
+                LLM.OpenCode or LLM.Glm52 or LLM.Glm53 or LLM.DeepSeekV4Pro or LLM.KimiK3 => "--auto",
+                _ => throw new ArgumentException("This CLI has no YOLO mode.")
+            });
         }
         return args.ToArray();
     }

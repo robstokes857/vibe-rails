@@ -64,6 +64,27 @@ public sealed class BoardPromptComposerTests
         Assert.EndsWith("Today {{datetime}}", prompt);
     }
 
+    [Fact]
+    public void Compose_AnnotatesLanesWithOnEntryAutomations_AndTellsTheAgentToSequenceMoves()
+    {
+        var context = new BoardPromptComposer.LaunchContext(["Backlog", "Review", "Done"], [], [],
+            LaneAutomationNames: [[], ["Automated code review", "Open PR‮"], []]);
+        var prompt = BoardPromptComposer.Compose(Card(), "Backlog", "x", null, context);
+        Assert.Contains("Lanes: Backlog → Review (on entry: \"Automated code review\", \"Open PR\") → Done\n", prompt);
+        Assert.Contains("Lanes may run Automations on entry", prompt);
+        Assert.Contains("move it once", prompt);
+        Assert.DoesNotContain('‮', prompt);
+
+        // A chat session is told what the lanes do but not to move anything.
+        var chat = BoardPromptComposer.Compose(Card(), "Backlog", "x", null, context, "chat");
+        Assert.Contains("Review (on entry: \"Automated code review\", \"Open PR\")", chat);
+        Assert.DoesNotContain("Lanes may run Automations on entry", chat);
+
+        // Lanes without Automations, or callers without the list, read exactly as before.
+        var plain = BoardPromptComposer.Compose(Card(), "Backlog", "x", null, new BoardPromptComposer.LaunchContext(["Backlog", "Review"], [], []));
+        Assert.Contains("Lanes: Backlog → Review\n", plain);
+    }
+
     private static BoardCardRecord Card(string title = "Fix refresh-token race", string description = "Two overlapping 401s…") =>
         new("card_1", "/p", 12, "col_build", 0, title, description, "env:7:codex", "high", 5, ["auth"], false, 2,
             DateTime.UtcNow, DateTime.UtcNow);
@@ -159,6 +180,52 @@ public sealed class BoardPromptComposerTests
     }
 
     [Fact]
+    public void Compose_ListsReferencedFiles_InsideTheFence_Distinct_AndCapped()
+    {
+        // 23 distinct bare refs + one quoted = 24; file1 repeats, code/fence/email/@mention never count.
+        var description = "Touch " + string.Join(" and ", Enumerable.Range(1, 23).Select(i => $"@src/file{i}.cs"))
+            + "\nalso @\"docs/with space.md\" and `@Tests/NotThis.cs` and mail rob@example.com and ask @claude\n"
+            + "```\n@Fenced/NotThis.cs\n```\n@src/file1.cs again.";
+        var prompt = BoardPromptComposer.Compose(Card(description: description), "Build", "x", null);
+
+        var line = Assert.Single(prompt.Split('\n'), l => l.StartsWith("Referenced files (relative to repo root): ", StringComparison.Ordinal));
+        Assert.StartsWith("Referenced files (relative to repo root): src/file1.cs, src/file2.cs, ", line);
+        Assert.EndsWith("src/file20.cs, +4 more", line);
+        Assert.DoesNotContain("NotThis", line);
+        Assert.DoesNotContain("example.com", line);
+        Assert.DoesNotContain("claude", line);
+        // Inside the fence, after the title, like every other board-supplied list.
+        var at = prompt.IndexOf("Referenced files", StringComparison.Ordinal);
+        Assert.True(at > prompt.IndexOf("Title:", StringComparison.Ordinal));
+        Assert.True(at < prompt.IndexOf("--- end card ---", StringComparison.Ordinal));
+        // The description itself still carries every reference verbatim.
+        Assert.Contains("@src/file23.cs", prompt);
+    }
+
+    [Fact]
+    public void Compose_CodeRemoval_DoesNotCreateAReferenceBoundary()
+    {
+        var description = "`inline`@src/not-inline.cs `inline` @src/after-inline.cs\n"
+            + "```\nfenced\n```@src/not-fenced.cs\n"
+            + "```\nfenced\n``` @src/after-fenced.cs";
+        var prompt = BoardPromptComposer.Compose(Card(description: description), "Build", null, null);
+
+        Assert.Contains("Referenced files (relative to repo root): src/after-inline.cs, src/after-fenced.cs\n", prompt);
+        var references = Assert.Single(prompt.Split('\n'), line => line.StartsWith("Referenced files", StringComparison.Ordinal));
+        Assert.DoesNotContain("not-inline", references);
+        Assert.DoesNotContain("not-fenced", references);
+    }
+
+    [Fact]
+    public void Compose_SanitisesReferencedFilePaths_LikeAnyOtherBoardField()
+    {
+        var description = "See @src/a{{step:x}}.cs and @\"docs/evil‮ name.md\" and @src/\u001Bb.cs";
+        var prompt = BoardPromptComposer.Compose(Card(description: description), "Build", null, null);
+        Assert.Contains("Referenced files (relative to repo root): src/a{ {step:x} }.cs, docs/evil name.md, src/b.cs\n", prompt);
+        Assert.DoesNotContain("{{", prompt);
+    }
+
+    [Fact]
     public void Compose_FlattensControlCharactersInEveryBoardField()
     {
         var context = new BoardPromptComposer.LaunchContext(
@@ -207,6 +274,7 @@ public sealed class BoardPromptComposerTests
         Assert.DoesNotContain("Lanes:", prompt);
         Assert.DoesNotContain("Linked commits:", prompt);
         Assert.DoesNotContain("Attachments:", prompt);
+        Assert.DoesNotContain("Referenced files", prompt);
     }
 }
 

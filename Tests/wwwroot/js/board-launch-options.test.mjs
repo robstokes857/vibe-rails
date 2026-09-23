@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 
 const modules = path.resolve('VibeRails/wwwroot/js/modules');
-const { renderBoardLaunchOptions, normalizeBoardLaunchOptions, bindBoardLaunchOptions } = await import(pathToFileURL(path.join(modules, 'board-launch-options.js')));
+const { renderBoardLaunchOptions, normalizeBoardLaunchOptions, readBoardLaunchOptions, bindBoardLaunchOptions } = await import(pathToFileURL(path.join(modules, 'board-launch-options.js')));
 const { LLM_MODEL_OPTIONS, renderLlmModelOptions } = await import(pathToFileURL(path.join(modules, 'llm-model-catalog.js')));
 const { EnvironmentController } = await import(pathToFileURL(path.join(modules, 'environment-controller.js')));
 
@@ -20,6 +20,20 @@ test('base selections expose provider options; saved environments keep their set
     assert.equal(normalizeBoardLaunchOptions('base:codex', { mode: 'plan' }).mode, '');
     assert.match(renderBoardLaunchOptions('base:copilot'), /value="autopilot"/);
     assert.match(renderBoardLaunchOptions('base:antigravity'), /value="accept-edits"/);
+    for (const cli of ['claude', 'codex', 'antigravity', 'copilot', 'grok', 'opencode', 'glm-5.2', 'glm-5.3', 'deepseek-v4-pro', 'kimi-k3']) {
+        assert.match(renderBoardLaunchOptions(`base:${cli}`), /data-board-launch-yolo/);
+        assert.equal(normalizeBoardLaunchOptions(`base:${cli}`, { yolo: true }).yolo, true);
+    }
+    assert.match(renderBoardLaunchOptions('base:codex', { yolo: true }), /data-board-launch-yolo checked/);
+    assert.equal(normalizeBoardLaunchOptions('base:codex', { yolo: false }).yolo, false);
+    const values = new Map([
+        ['[data-board-launch-model]', { value: 'gpt-6-astra' }],
+        ['[data-board-launch-effort]', { value: 'high' }],
+        ['[data-board-launch-yolo]', { checked: true }]
+    ]);
+    assert.deepEqual(readBoardLaunchOptions({ querySelector: selector => values.get(selector) || null }, 'base:codex'), {
+        model: 'gpt-6-astra', effort: 'high', mode: '', yolo: true
+    });
 });
 
 test('model lists come from the exact same catalog as the environment editor', () => {

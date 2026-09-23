@@ -43,23 +43,66 @@ public sealed class BoardCardPagingTests : IDisposable
         Assert.Contains("oldest", first.Tags);
         Assert.Contains("base:claude", first.Assignees);
         var firstLane = Assert.Single(first.Lanes, lane => lane.ColumnId == done.Id);
-        Assert.Equal(new BoardCardLanePage(done.Id, 103, 103, 30, true), firstLane);
+        Assert.NotNull(firstLane.ContinuationToken);
+        Assert.Equal(new BoardCardLanePage(done.Id, 103, 103, 30, true, firstLane.ContinuationToken), firstLane);
         var allDone = first.Cards.Where(c => c.ColumnId == done.Id).Select(c => c.Id).ToList();
         var next = firstLane;
         while (next.HasMore)
         {
-            var page = await _store.GetCardsPageAsync(_project, new(30, done.Id, next.NextOffset), Ct);
+            var page = await _store.GetCardsPageAsync(_project,
+                new(30, done.Id, next.NextOffset, ContinuationToken: next.ContinuationToken), Ct);
             Assert.All(page.Cards, card => Assert.Equal(done.Id, card.ColumnId));
             Assert.InRange(page.Cards.Count, 1, 30);
             Assert.Equal(138, page.TotalCount);
             allDone.AddRange(page.Cards.Select(c => c.Id));
             next = Assert.Single(page.Lanes);
+            Assert.False(next.RestartRequired);
         }
         Assert.Equal(103, next.NextOffset);
         var legacy = await _store.GetCardsAsync(_project, Ct);
         Assert.Equal(138, legacy.Count);
         Assert.Equal(legacy.Where(c => c.ColumnId == done.Id).Select(c => c.Id), allDone);
         Assert.Equal(103, allDone.Distinct().Count());
+    }
+
+    [Fact]
+    public async Task ChangedActivityOrder_RestartsContinuationBeforeAnUnloadedCardCanBeOmitted()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var done = (await _store.GetColumnsAsync(_project, Ct)).First(c => c.Name == "Done");
+        for (var index = 0; index < 8; index++)
+            await _store.CreateCardAsync(_project, Card(done.Id, $"Done {index}"), Ct);
+
+        var first = await _store.GetCardsPageAsync(_project, new(3), Ct);
+        var firstLane = Assert.Single(first.Lanes, lane => lane.ColumnId == done.Id);
+        Assert.NotNull(firstLane.ContinuationToken);
+        var unloaded = (await _store.GetCardsAsync(_project, Ct))
+            .First(card => card.ColumnId == done.Id && first.Cards.All(loaded => loaded.Id != card.Id));
+
+        await _store.AddCommentAsync(_project, unloaded.Id, BoardAuthor.User(), "Promote this card", Ct);
+
+        var stale = await _store.GetCardsPageAsync(_project,
+            new(3, done.Id, firstLane.NextOffset, ContinuationToken: firstLane.ContinuationToken), Ct);
+        var restartedLane = Assert.Single(stale.Lanes);
+        Assert.True(restartedLane.RestartRequired);
+        Assert.NotEqual(firstLane.ContinuationToken, restartedLane.ContinuationToken);
+        Assert.Equal(unloaded.Id, stale.Cards[0].Id);
+        Assert.Equal(3, restartedLane.NextOffset);
+
+        var allIds = stale.Cards.Select(card => card.Id).ToList();
+        var continuation = restartedLane;
+        while (continuation.HasMore)
+        {
+            var page = await _store.GetCardsPageAsync(_project,
+                new(3, done.Id, continuation.NextOffset, ContinuationToken: continuation.ContinuationToken), Ct);
+            continuation = Assert.Single(page.Lanes);
+            Assert.False(continuation.RestartRequired);
+            allIds.AddRange(page.Cards.Select(card => card.Id));
+        }
+
+        Assert.Equal(8, allIds.Count);
+        Assert.Equal(8, allIds.Distinct().Count());
+        Assert.Contains(unloaded.Id, allIds);
     }
 
     [Fact]
@@ -84,7 +127,9 @@ public sealed class BoardCardPagingTests : IDisposable
         Assert.Equal(0, result.RemainingPoints);
         Assert.Equal(["debug", "open"], result.Tags);
         Assert.Equal(["base:claude", "base:codex"], result.Assignees);
-        Assert.Equal(new BoardCardLanePage(done.Id, 36, 1, 1, false), Assert.Single(result.Lanes, lane => lane.ColumnId == done.Id));
+        var filteredLane = Assert.Single(result.Lanes, lane => lane.ColumnId == done.Id);
+        Assert.NotNull(filteredLane.ContinuationToken);
+        Assert.Equal(new BoardCardLanePage(done.Id, 36, 1, 1, false, filteredLane.ContinuationToken), filteredLane);
         Assert.Empty((await _store.GetCardsPageAsync(_project, query with { Tag = "de" }, Ct)).Cards);
         var byKey = await _store.GetCardsPageAsync(_project, new(Q: needle.Key), Ct);
         Assert.Contains(byKey.Cards, card => card.Id == needle.Id);
@@ -142,7 +187,9 @@ public sealed class BoardCardPagingTests : IDisposable
         Assert.Equal(0, first.RemainingPoints);
         var end = await _store.GetCardsPageAsync(_project, new(30, lane.Id, int.MaxValue), Ct);
         Assert.Empty(end.Cards);
-        Assert.Equal(new BoardCardLanePage(lane.Id, 3, 3, 3, false), Assert.Single(end.Lanes));
+        var endLane = Assert.Single(end.Lanes);
+        Assert.NotNull(endLane.ContinuationToken);
+        Assert.Equal(new BoardCardLanePage(lane.Id, 3, 3, 3, false, endLane.ContinuationToken), endLane);
     }
 
     private static NewBoardCard Card(string laneId, string title) => new(laneId, title, "", null, "medium", null, [], false);

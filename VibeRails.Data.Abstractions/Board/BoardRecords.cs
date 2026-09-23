@@ -148,6 +148,15 @@ public sealed record BoardAttachmentRecord(
     string DataUrl,
     DateTime CreatedUtc);
 
+/// <summary>Attachment fields safe to inspect without materializing either the BLOB or legacy data URL.</summary>
+public sealed record BoardAttachmentMetadata(
+    string Id,
+    string CardId,
+    string Name,
+    string MimeType,
+    long Bytes,
+    DateTime CreatedUtc);
+
 public sealed record BoardCommitRecord(
     string CardId,
     string Sha,

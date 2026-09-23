@@ -310,19 +310,8 @@ public sealed partial class BoardService(
         return existing is not null && await store.DeleteCardAsync(projectPath, existing.Id, cancellationToken);
     }
 
-    public async Task<BoardCardResponse?> MoveCardAsync(string projectPath, string idOrKey, string columnIdOrName, int? position, CancellationToken cancellationToken = default)
-    {
-        var existing = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
-        if (existing is null)
-            return null;
-        // A lane name means a lane on the card's own board; an id can move it to another board.
-        var column = await FindColumnAsync(projectPath, columnIdOrName, cancellationToken, NormalizeBoardId(existing.BoardId))
-            ?? throw new BoardValidationException($"Lane not found: {columnIdOrName}");
-        if (position is < 0)
-            throw new BoardValidationException("Position cannot be negative.");
-        var moved = await store.MoveCardAsync(projectPath, existing.Id, column.Id, position, cancellationToken);
-        return moved is null ? null : await GetCardAsync(projectPath, moved.Id, cancellationToken);
-    }
+    public async Task<BoardCardResponse?> MoveCardAsync(string projectPath, string idOrKey, string columnIdOrName, int? position, CancellationToken cancellationToken = default) =>
+        (await MoveCardAsync(projectPath, idOrKey, new BoardCardMoveRequest(columnIdOrName, position), cancellationToken))?.Card;
 
     // ------------------------------------------------------------------ rails
 

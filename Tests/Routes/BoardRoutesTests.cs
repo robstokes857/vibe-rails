@@ -71,6 +71,8 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         builder.Services.AddSingleton(commits.Object);
         builder.Services.AddSingleton<IBoardLiveSessionProbe, NullBoardLiveSessionProbe>();
         builder.Services.AddScoped<IBoardService, BoardService>();
+        // The temp project is not a repository; pin the non-git walk so the test never depends on git.
+        builder.Services.AddSingleton<IBoardFileIndexService>(new BoardFileIndexService(TimeProvider.System, (_, _) => Task.FromResult<IReadOnlyList<string>?>(null)));
         builder.Services.AddSingleton(_tabHost.Object);
         builder.Services.AddSingleton(_repository.Object);
         builder.Services.AddScoped<IBoardLaunchService, BoardLaunchService>();
@@ -94,6 +96,52 @@ public sealed class BoardRoutesTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Move_WithSkipAutomations_RecordsTheSkip_AndQueuesNothing()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var boards = _app.Services.GetRequiredService<IBoardStore>();
+        var jobs = _app.Services.GetRequiredService<IJobStore>();
+        // Jobs join Environments (their Workers); this fixture's state.db has never held either.
+        await using (var state = new SqliteConnection(_connectionString))
+        {
+            await state.OpenAsync(ct);
+            await using var environments = state.CreateCommand();
+            environments.CommandText = SqlStrings.CreateEnvironmentsTable;
+            await environments.ExecuteNonQueryAsync(ct);
+        }
+        using var created = await PostJsonAsync("/api/v1/board/cards", new { title = "Spike", type = "research-spike" });
+        created.EnsureSuccessStatusCode();
+        using var createdDocument = await ReadJsonAsync(created);
+        var cardId = createdDocument.RootElement.GetProperty("id").GetString()!;
+        var columns = await boards.GetColumnsAsync(_project, ct);
+        var reviewId = columns.Single(c => c.Name == "Review").Id;
+        var buildId = columns.Single(c => c.Name == "Build").Id;
+        var job = await jobs.CreateJobAsync(new("Automated code review", _project, LLM.NotSet, null, "", null, true, [],
+            Actions: [new(null, JobActionKind.Script, ScriptPath: "check.py", ScriptRuntime: JobScriptRuntime.Python, ApprovedHash: "pinned")]), ct);
+        await boards.SaveLaneAutomationAsync(_project, reviewId, [job.Id], 0, ct);
+
+        // The same flag the MCP tool takes, so a manual drag can offer the choice later.
+        using var skipped = await PostJsonAsync($"/api/v1/board/cards/{cardId}/move", new { columnId = reviewId, skipAutomations = true });
+        skipped.EnsureSuccessStatusCode();
+        using var skippedDocument = await ReadJsonAsync(skipped);
+        Assert.Equal(reviewId, skippedDocument.RootElement.GetProperty("columnId").GetString());
+        Assert.Empty(await boards.GetPendingLaneAutomationsAsync(_project, cardId, ct));
+        var comment = Assert.Single(skippedDocument.RootElement.GetProperty("comments").EnumerateArray());
+        Assert.Equal("user", comment.GetProperty("author").GetProperty("kind").GetString());
+        Assert.Equal("Moved to Review; lane Automations skipped at the caller's request: \"Automated code review\".", comment.GetProperty("body").GetString());
+
+        // Without the flag the entry is recorded as before; the default is unchanged.
+        using var back = await PostJsonAsync($"/api/v1/board/cards/{cardId}/move", new { columnId = buildId });
+        back.EnsureSuccessStatusCode();
+        using var moved = await PostJsonAsync($"/api/v1/board/cards/{cardId}/move", new { columnId = reviewId });
+        moved.EnsureSuccessStatusCode();
+        var pending = Assert.Single(await boards.GetPendingLaneAutomationsAsync(_project, cardId, ct));
+        Assert.Equal(job.Id, pending.JobId);
+        Assert.Equal(reviewId, pending.ColumnId);
+        Assert.InRange(pending.DueUtc, DateTime.UtcNow.AddSeconds(50), DateTime.UtcNow.AddSeconds(70));
+    }
+
+    [Fact]
     public async Task EveryBoardRoute_NeedsBothCredentials()
     {
         using var none = await SendAsync(HttpMethod.Get, "/api/v1/board/cards");
@@ -112,6 +160,7 @@ public sealed class BoardRoutesTests : IAsyncLifetime
     [InlineData("GET", "/api/v1/board/cards/PROJ-1/links/candidates")]
     [InlineData("POST", "/api/v1/board/cards/PROJ-1/links")]
     [InlineData("DELETE", "/api/v1/board/cards/PROJ-1/links/PROJ-2")]
+    [InlineData("GET", "/api/v1/board/files?q=board")]
     public async Task NewBoardSurfaces_RequireSessionAndTab(string method, string path)
     {
         using var none = await SendAsync(new HttpMethod(method), path);
@@ -170,6 +219,7 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         using var created = await PostJsonAsync("/api/v1/board/cards", new
         {
             columnId = backlogId, title = " Fix it ", description = "Body", assignee = "base:claude",
+            baseLlmOptions = new { model = "claude-opus-4-8", effort = "high", yolo = true },
             type = "bug", priority = "high", points = "5", tags = new[] { "auth" }, blocked = false
         });
         Assert.Equal(HttpStatusCode.OK, created.StatusCode);
@@ -179,6 +229,8 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         Assert.Equal("PROJ-1", card.GetProperty("key").GetString());
         Assert.Equal("Fix it", card.GetProperty("title").GetString());
         Assert.Equal("base:claude", card.GetProperty("assignee").GetString());
+        Assert.Equal("claude-opus-4-8", card.GetProperty("baseLlmOptions").GetProperty("model").GetString());
+        Assert.True(card.GetProperty("baseLlmOptions").GetProperty("yolo").GetBoolean());
         Assert.Equal("bug", card.GetProperty("type").GetString());
         Assert.Equal(5, card.GetProperty("points").GetInt32());
         Assert.Equal(0, card.GetProperty("commentCount").GetInt32());
@@ -395,6 +447,34 @@ public sealed class BoardRoutesTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Files_ListsTheProjectRoot_ThroughTheJsonContext_RanksNamesFirst_AndCapsTheQuery()
+    {
+        // BoardRoutes.Map itself is only called for the active root backend (Routes.cs), the same
+        // gate as every other board route; nothing here can be reached from a terminal-tab child.
+        foreach (var relative in new[] { "src/BoardService.cs", "docs/board.md", "src/Board/Helpers.cs", "LICENSE", "bin/skip.dll", ".git/HEAD" })
+        {
+            var path = Path.Combine(_project, relative.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            await File.WriteAllTextAsync(path, relative, TestContext.Current.CancellationToken);
+        }
+
+        using var matched = await GetJsonAsync("/api/v1/board/files?q=board");
+        var files = matched.RootElement.GetProperty("files").EnumerateArray().Select(item => item.GetString()).ToList();
+        Assert.Equal(["docs/board.md", "src/BoardService.cs", "src/Board/Helpers.cs"], files);
+        Assert.False(matched.RootElement.GetProperty("truncated").GetBoolean());
+
+        using var everything = await GetJsonAsync("/api/v1/board/files");
+        var all = everything.RootElement.GetProperty("files").EnumerateArray().Select(item => item.GetString()).ToList();
+        Assert.Equal(["docs/board.md", "LICENSE", "src/Board/Helpers.cs", "src/BoardService.cs"], all);
+
+        using var empty = await GetJsonAsync("/api/v1/board/files?q=");
+        Assert.Equal(4, empty.RootElement.GetProperty("files").GetArrayLength());
+
+        using var tooLong = await SendAsync(HttpMethod.Get, "/api/v1/board/files?q=" + new string('x', BoardFileIndexService.MaxQueryLength + 1), "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.BadRequest, tooLong.StatusCode);
+    }
+
+    [Fact]
     public async Task CardLinks_RoundTrip_ThroughTheJsonContext_WithValidationAndProjectScope()
     {
         using var first = await PostJsonAsync("/api/v1/board/cards", new { title = "First" });
@@ -608,9 +688,12 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         var metadata = response.GetProperty("lanes").EnumerateArray().Single(lane => lane.GetProperty("columnId").GetString() == done.Id);
         Assert.Equal(2, metadata.GetProperty("nextOffset").GetInt32());
         Assert.True(metadata.GetProperty("hasMore").GetBoolean());
-        using var second = await GetJsonAsync($"/api/v1/board/cards?pageSize=2&columnId={done.Id}&offset=2");
+        var continuationToken = metadata.GetProperty("continuationToken").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(continuationToken));
+        using var second = await GetJsonAsync($"/api/v1/board/cards?pageSize=2&columnId={done.Id}&offset=2&continuationToken={Uri.EscapeDataString(continuationToken!)}");
         Assert.Equal(2, second.RootElement.GetProperty("cards").GetArrayLength());
         Assert.False(second.RootElement.GetProperty("lanes")[0].GetProperty("hasMore").GetBoolean());
+        Assert.False(second.RootElement.GetProperty("lanes")[0].GetProperty("restartRequired").GetBoolean());
         using var filter = await GetJsonAsync("/api/v1/board/cards?pageSize=2&q=Done%200&assignee=base:codex&type=task&priority=medium&tag=debug");
         Assert.Equal(1, filter.RootElement.GetProperty("cards").GetArrayLength());
         Assert.Equal(1, filter.RootElement.GetProperty("filteredCount").GetInt32());

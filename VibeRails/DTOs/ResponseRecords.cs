@@ -214,6 +214,8 @@ namespace VibeRails.DTOs
     }
     public record BoardLinkedCardDto(string Id, string Key, string Title, string BoardId, string BoardName, string ColumnId, string ColumnName);
     public record BoardCardLinkCandidatesResponse(List<BoardLinkedCardDto> Cards);
+    /// <summary>Repo-relative paths (forward slashes) for the composer's `@path` typeahead; <c>Truncated</c> when more matched than the cap.</summary>
+    public record BoardFileSearchResponse(List<string> Files, bool Truncated);
     public record LinkBoardCardRequest(string? Card = null);
     public record BoardCardResponse(
         string Id,
@@ -275,7 +277,9 @@ namespace VibeRails.DTOs
         string? Type = null,
         bool? Flagged = null);
 
-    public record MoveBoardCardRequest(string? ColumnId = null, int? Position = null);
+    // SkipAutomations (VB-34): move without recording a lane entry for the destination lane's
+    // Automations. Per request, never sticky; the skip is recorded as a comment by the user.
+    public record MoveBoardCardRequest(string? ColumnId = null, int? Position = null, bool SkipAutomations = false);
     public record AddBoardCommentRequest(string? Body = null);
     public record AddBoardNoteRequest(string? Body = null);
     public record BoardNoteListResponse(List<BoardCommentDto> Notes);
@@ -1740,6 +1744,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(BoardCardResponse))]
     [JsonSerializable(typeof(BoardLinkedCardDto))]
     [JsonSerializable(typeof(BoardCardLinkCandidatesResponse))]
+    [JsonSerializable(typeof(BoardFileSearchResponse))]
     [JsonSerializable(typeof(LinkBoardCardRequest))]
     [JsonSerializable(typeof(CreateBoardCardRequest))]
     [JsonSerializable(typeof(UpdateBoardCardRequest))]

@@ -30,6 +30,8 @@ public static class BoardPromptComposer
     public const int MaxTitleChars = 200;
     public const int MaxLinkedCommits = 10;
     public const int MaxListedAttachments = 20;
+    /// <summary>`@path` references pulled out of the description (VB-35); the description itself still carries them all.</summary>
+    public const int MaxReferencedFiles = 20;
     /// <summary>Prompt characters reserved for the generated part plus the environment template.</summary>
     private const int PromptBudget = 24_000;
 
@@ -39,7 +41,9 @@ public static class BoardPromptComposer
         IReadOnlyList<BoardCommitRecord> LinkedCommits,
         IReadOnlyList<BoardAttachmentRecord> Attachments,
         string? BoardName = null,
-        BoardContextSettings? Settings = null)
+        BoardContextSettings? Settings = null,
+        /// <summary>Per lane (same order as <see cref="LaneNames"/>): the names of the Automations that run when a card enters it.</summary>
+        IReadOnlyList<IReadOnlyList<string>>? LaneAutomationNames = null)
     {
         public static readonly LaunchContext Empty = new([], [], []);
     }
@@ -78,7 +82,7 @@ public static class BoardPromptComposer
         if (!string.IsNullOrWhiteSpace(context.BoardName))
             builder.Append("Board: ").Append(SanitizeLine(context.BoardName, 80)).Append('\n');
         if (context.LaneNames.Count > 0)
-            builder.Append("Lanes: ").Append(string.Join(" → ", context.LaneNames.Select(name => SanitizeLine(name, 80)))).Append('\n');
+            builder.Append("Lanes: ").Append(string.Join(" → ", context.LaneNames.Select((name, index) => LaneLabel(context, name, index)))).Append('\n');
         if (context.LinkedCommits.Count > 0)
         {
             builder.Append("Linked commits: ");
@@ -95,6 +99,17 @@ public static class BoardPromptComposer
                 .Select(attachment => attachment.Id + " " + SanitizeLine(attachment.Name, 80))));
             if (context.Attachments.Count > MaxListedAttachments)
                 builder.Append(", +").Append(context.Attachments.Count - MaxListedAttachments).Append(" more");
+            builder.Append('\n');
+        }
+        // Extracted from the full description, not the capped copy below, so a reference past
+        // the inline cap still reaches the agent. Paths are card text: one line, sanitised.
+        var referencedFiles = BoardFileReferences.Extract(card.Description);
+        if (referencedFiles.Count > 0)
+        {
+            builder.Append("Referenced files (relative to repo root): ");
+            builder.Append(string.Join(", ", referencedFiles.Take(MaxReferencedFiles).Select(path => SanitizeLine(path, 200))));
+            if (referencedFiles.Count > MaxReferencedFiles)
+                builder.Append(", +").Append(referencedFiles.Count - MaxReferencedFiles).Append(" more");
             builder.Append('\n');
         }
         var descriptionCap = DescriptionBudget(environmentPrompt, boardContext.Length);
@@ -120,7 +135,9 @@ public static class BoardPromptComposer
             .Append("read_board_attachment to view attached images or read Markdown/TXT using attachment ids from get_board_card. Use the Board tools as the only access path for card data and attachments. ")
             .Append(intent == "chat"
                 ? "Read the earlier activity to understand the current status, decisions, blockers and unfinished work. "
-                : "move_board_card when the card changes state; link_board_commit after you commit. If comments, notes or earlier sessions show work already started, resume from there instead of starting over. ")
+                : "move_board_card when the card changes state; link_board_commit after you commit. "
+                    + "Lanes may run Automations on entry (see the lane annotations above and in list_board_columns): link commits and post your summary comment before moving a card into such a lane, and move it once; move_board_card reports what the entry queued, and skipAutomations=true moves without running them when a run would be pointless. "
+                    + "If comments, notes or earlier sessions show work already started, resume from there instead of starting over. ")
             .Append("If you need the user to review something, set flagged=true with update_board_card and add a comment explaining what needs attention. ")
             .Append("If you also work on another card, use attach_board_session with its card key to share this session and its running status. The original card remains the default. Call link_board_commit once per commit; it automatically links the commit to every card attached to this session. ")
             .Append("Begin now by reading the card with get_board_card.");
@@ -178,6 +195,16 @@ public static class BoardPromptComposer
     }
 
     /// <summary>Single-line board fields: everything <see cref="Sanitize"/> does, with newlines and tabs collapsed to spaces.</summary>
+    /// <summary>A lane name plus its on-entry Automations, each sanitized like any other board text.</summary>
+    private static string LaneLabel(LaunchContext context, string name, int index)
+    {
+        var label = SanitizeLine(name, 80);
+        var automations = context.LaneAutomationNames is { } all && index < all.Count ? all[index] : null;
+        if (automations is not { Count: > 0 })
+            return label;
+        return $"{label} (on entry: {string.Join(", ", automations.Select(automation => "\"" + SanitizeLine(automation, 60) + "\""))})";
+    }
+
     internal static string SanitizeLine(string? value, int maxChars)
     {
         var text = StripControls(value ?? string.Empty, keepNewlines: false);
@@ -204,7 +231,7 @@ public static class BoardPromptComposer
     }
 
     // U+200E/F marks, U+202A–202E embeddings/overrides, U+2066–2069 isolates.
-    private static bool IsBidiControl(char c) =>
+    internal static bool IsBidiControl(char c) =>
         c is '‎' or '‏' or (>= '‪' and <= '‮') or (>= '⁦' and <= '⁩');
 
     private static string FirstLine(string text)

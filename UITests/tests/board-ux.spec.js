@@ -80,6 +80,13 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
             return route.fulfill({ json: attachment });
         }
         if (path.endsWith('/attachments/att_uploaded/content')) return route.fulfill({ contentType: 'application/octet-stream', body: contents.get('att_uploaded') });
+        if (path === '/api/v1/board/files') {
+            // The composer's @ typeahead: a tiny repo index, filtered like the server does.
+            const query = (url.searchParams.get('q') || '').toLowerCase();
+            const files = ['AGENTS.md', 'VibeRails/Services/Board/BoardService.cs', 'docs/with space.md', '<img src=x onerror="window.__fileXss=1">.md']
+                .filter(file => file.toLowerCase().includes(query));
+            return route.fulfill({ json: { files, truncated: false } });
+        }
         if (path.endsWith('/launch')) return route.fulfill({ json: {
             tabId: 'board_background', cardKey: card.key, selection: route.request().postDataJSON().selection || card.assignee
         } });
@@ -381,22 +388,25 @@ test('a running agent exposes Go to agent while keeping Save and the session ava
     expect(requests.filter(request => request.method === 'PUT' || request.path.endsWith('/launch'))).toHaveLength(0);
 });
 
-test('Start work preserves the board and stores model and effort', async ({ page }) => {
+test('Start work preserves the board and stores base launch options including YOLO', async ({ page }) => {
     const requests = await openBoard(page, { assignee: 'base:codex' });
     await page.getByText('Description images', { exact: true }).click();
     await expect(page.locator('.board-card-modal-dialog .modal-title')).toHaveText('VB-1 · Description images');
     await page.locator('[data-board-launch-model]').selectOption('gpt-6-astra');
     await page.locator('[data-board-launch-effort]').selectOption('high');
+    await expect(page.locator('[data-board-launch-yolo]')).not.toBeChecked();
+    await page.locator('[data-board-launch-yolo]').check();
     // Codex exposes no Start mode: its /plan is a TUI command, and nothing types into a TUI.
     await expect(page.locator('[data-board-launch-mode]')).toHaveCount(0);
     await page.locator('[data-board-start-work]').click();
     await expect(page.locator('[data-board-card-editor]')).toHaveCount(0);
     await expect(page.locator('#app-content [data-view="board"]')).toBeVisible();
     expect(requests.find(request => request.method === 'PUT' && request.path.endsWith('/card_test')).body.baseLlmOptions)
-        .toEqual({ model: 'gpt-6-astra', effort: 'high', mode: '' });
+        .toEqual({ model: 'gpt-6-astra', effort: 'high', mode: '', yolo: true });
     expect(requests.filter(request => request.path.endsWith('/launch'))).toHaveLength(1);
     await page.getByText('Description images', { exact: true }).click();
     await expect(page.locator('[data-board-launch-effort]')).toHaveValue('high');
+    await expect(page.locator('[data-board-launch-yolo]')).toBeChecked();
 });
 
 test('work and discussion actions remain reachable on a narrow screen', async ({ page }, testInfo) => {
@@ -458,6 +468,46 @@ test('a description edit saves without touching the running agent or keeping his
     expect(requests.filter(request => request.path.endsWith('/notify'))).toHaveLength(0);
 
     await page.getByText('Description images', { exact: true }).click();
+});
+
+test('typing @ in a composer opens the file typeahead, the keyboard inserts a reference and Browse is always offered', async ({ page }) => {
+    const requests = await openBoard(page);
+    await page.getByText('Description images', { exact: true }).click();
+    const input = page.locator('[data-board-composer="comment"] textarea');
+    const popup = page.locator('[data-board-composer="comment"] [data-board-file-popup]');
+    const fileRows = popup.locator('[data-board-file-row]:not([data-board-file-browse])');
+    await input.click();
+    await input.pressSequentially('see @Board');
+    await expect(popup).toBeVisible();
+    await expect(fileRows).toHaveCount(1);
+    await expect(popup.locator('[data-board-file-browse]')).toContainText('Browse for a file');
+    await expect(popup.locator('.is-active')).toContainText('BoardService.cs');
+    await input.press('Enter');
+    await expect(popup).toHaveCount(0);
+    await expect(input).toHaveValue('see @VibeRails/Services/Board/BoardService.cs ');
+
+    // A path with spaces is inserted quoted; Down reaches Browse, Up comes back, Tab inserts.
+    await input.pressSequentially('and @with');
+    await expect(fileRows).toHaveCount(1);
+    await input.press('ArrowDown');
+    await expect(popup.locator('.is-active')).toContainText('Browse for a file');
+    await input.press('ArrowUp');
+    await input.press('Tab');
+    await expect(input).toHaveValue('see @VibeRails/Services/Board/BoardService.cs and @"docs/with space.md" ');
+    await expect(input).toBeFocused();
+
+    // A bare @ lists everything. File names render as text: a hostile name is no element.
+    await input.pressSequentially('@');
+    await expect(fileRows).toHaveCount(4);
+    await expect(popup.locator('img')).toHaveCount(0);
+    expect(await page.evaluate(() => window.__fileXss)).toBeUndefined();
+    // Escape closes the popup and leaves the card open; typing a space ends the token.
+    await input.press('Escape');
+    await expect(popup).toHaveCount(0);
+    await expect(page.locator('[data-board-card-editor]')).toBeVisible();
+    await input.pressSequentially('x ');
+    await expect(popup).toHaveCount(0);
+    expect(requests.filter(request => request.path.startsWith('/api/v1/board/cards') && request.method !== 'GET')).toHaveLength(0);
 });
 
 test('new cards queue files until Save and do not launch', async ({ page }) => {

@@ -19,7 +19,8 @@
 //      URL in the text)
 //
 // The supported syntax is deliberately tiny — fenced code, inline code, images,
-// and http(s) autolinks. This is not Markdown and is not trying to become it.
+// `@path` file references and http(s) autolinks. This is not Markdown and is not
+// trying to become it.
 
 import { escapeHtml } from './utils.js';
 
@@ -35,7 +36,17 @@ const IMAGE_RE = /!\[([^\]\n]*)\]\(attachment:([A-Za-z0-9_-]+)\)/g;
 // Parse inline constructs together: a URL/backtick inside an image caption is
 // caption text, and image syntax/URLs inside inline code are code. Trailing URL
 // punctuation is excluded so "see https://x.com/a." does not swallow the period.
-const INLINE_TOKEN_RE = /`([^`\n\u0000]+)`|!\[([^\]\n\u0000]*)\]\(attachment:([A-Za-z0-9_-]+)\)|\bhttps?:\/\/[^\s<>"'`\u0000]+[^\s<>"'`.,;:!?)\]}\u0000]/g;
+//
+// `@path` file references (VB-35) sit right after inline code so `@x` stays code.
+// A reference starts the text or follows whitespace — an email or "@claude" in
+// the middle of a sentence is prose — and is either `@"a quoted path"` (already
+// escaped here, so the quotes read &quot;) or a bare run of non-space characters.
+// `&` is excluded from the bare run, so no escaped entity (&lt; &quot; &amp;) can
+// ever be part of a token: an `@<img onerror>` stays literal text. Like URLs, a
+// trailing period/comma/bracket stays outside the reference. A bare reference
+// must also contain a slash or a dot (see the callback), so it looks like a path.
+const INLINE_TOKEN_RE = /`([^`\n\u0000]+)`|(?<![^\s])@(?:&quot;([^\n\u0000]+?)&quot;|([^\s&`\u0000]*[^\s&`\u0000.,;:!?)\]}]))|!\[([^\]\n\u0000]*)\]\(attachment:([A-Za-z0-9_-]+)\)|\bhttps?:\/\/[^\s<>"'`\u0000]+[^\s<>"'`.,;:!?)\]}\u0000]/g;
+const BARE_FILE_REF_LOOKS_LIKE_A_PATH = /[./]/;
 const RASTER_DATA_URL_RE = /^data:image\/(?:png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=\s]+$/i;
 
 /** Strips control characters that would corrupt the sentinels or the display. */
@@ -81,8 +92,15 @@ export function renderCommentHtml(text, { attachments = [] } = {}) {
     work = work.replace(FENCE_RE, (_match, lang, body) => park(renderCodeBlock({ lang, body })));
 
     // 3. Only source text is tokenized; generated attributes never enter a regex.
-    work = work.replace(INLINE_TOKEN_RE, (match, code, alt, id) => {
+    work = work.replace(INLINE_TOKEN_RE, (match, code, quotedPath, barePath, alt, id) => {
         if (code !== undefined) return park(`<code class="board-inline-code">${code}</code>`);
+        if (quotedPath !== undefined || barePath !== undefined) {
+            // "@claude" or "@rob" mid-prose: no slash, no extension, not a file.
+            if (barePath !== undefined && !BARE_FILE_REF_LOOKS_LIKE_A_PATH.test(barePath)) return match;
+            // The whole token is source text that was escaped in step 1; no attribute
+            // is built from it (no href in v1), so nothing here can carry markup.
+            return park(`<code class="board-file-ref">${match}</code>`);
+        }
         if (id !== undefined) {
             const attachment = attachments.find(item => item.id === id);
             // The backend supplies raster data URLs only. Files with authenticated
@@ -105,6 +123,7 @@ export function renderCommentHtml(text, { attachments = [] } = {}) {
 /**
  * Plain-text preview for a card tile / list row: strips the little syntax we
  * support so a fenced block does not leak backticks into a one-line summary.
+ * `@path` references are left exactly as typed; they read fine in an excerpt.
  */
 export function toPlainPreview(text, maxLength = 140) {
     const flat = stripControlChars(text)

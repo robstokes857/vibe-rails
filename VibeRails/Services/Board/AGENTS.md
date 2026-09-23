@@ -11,6 +11,7 @@ across UI, REST, MCP and storage. The root [AGENTS.md](../../../AGENTS.md),
 | --- | --- |
 | Lanes, filters, editor and launches | `VibeRails/wwwroot/js/modules/board-controller.js`; read [frontend instructions](../../wwwroot/AGENTS.md) |
 | Text, uploads/previews, card links, base options | Adjacent `board-text`, `board-attachments`, `board-card-links`, `board-launch-options` modules |
+| `@path` file references (typeahead, rendering, prompt line) | `board-file-refs.js`, the `@` token in `board-text.js`, `BoardFileReferences.cs`, `BoardFileIndexService.cs` |
 | Browser requests / REST shape | `board-api.js`, `VibeRails/Routes/BoardRoutes.cs`, Board DTOs in `ResponseRecords.cs` |
 | Validation and orchestration | `BoardService.cs` and its partials in this directory |
 | SQL and migration | `VibeRails.Data.Sqlite/Board/BoardStore*.cs`, `BoardStore.Options.cs`; contracts in `VibeRails.Data.Abstractions/Board` |
@@ -70,7 +71,10 @@ serialization or tool discovery into the Native AOT path.
   picker defaults to the assignee. Chat saves first, sends the selected launch override without
   reassigning the card, and launches with discussion intent, then focuses the returned terminal.
   Lane Automations are independent existing Jobs, queued after a 60-second settling period;
-  automatic assignee launch is still a TODO.
+  automatic assignee launch is still a TODO. Agents are told about them (VB-34): every lane list
+  annotates on-entry Automations from the Job definition, `move_board_card` appends what the
+  entry queued or skipped and why (never silent), and `skipAutomations` deletes the entries a
+  move recorded in that same transaction, recording the skip as a comment by the caller.
 - Current launch exclusion is root-local (F3). Do not assert cross-process mutual exclusion from
   a static dictionary or confuse a removable session-display link with execution ownership.
 - Saving a card never sends terminal input. Do not reintroduce the removed notification/TUI
@@ -86,6 +90,25 @@ serialization or tool discovery into the Native AOT path.
   The run's immutable Board trigger and project scope determine the card; manual retries do not
   inherit the original trigger's Board context.
 
+## Card text syntax: `@path` file references
+
+Card descriptions and comments can name a repository file as `@relative/path/from/repo/root` or
+`@"path with spaces"` (VB-35). The text is the only storage: no link table, no unlink UI, no
+existence check, and agents already receive the description verbatim through `get_board_card`
+and the launch prompt. A reference counts only at the start of the text or after whitespace, never
+inside inline code or a fence, and a bare reference must contain a `/` or a `.` so an email or
+`@claude` in prose stays prose. Three places implement that rule and must stay in step:
+`board-text.js` renders the token as an inert `<code class="board-file-ref">` built from escaped
+text only (no href in v1); `BoardFileReferences.cs` extracts distinct references for the launch
+prompt's `Referenced files (relative to repo root):` line (inside the fence, cap 20, `SanitizeLine`
+each, `+N more`); and `formatFileReference` in `board-file-refs.js` decides whether the popup
+inserts the bare or the quoted form. `GET /api/v1/board/files?q=` (root-only, both credentials)
+backs the composer typeahead through `BoardFileIndexService`: `git ls-files --cached --others
+--exclude-standard` filtered to files that still exist, a bounded directory walk that skips
+`.git`/`bin`/`obj`/`node_modules` when git is unavailable, a ten-second in-memory cache, file-name
+hits before directory hits, 50 results, `q` at most 256 characters. Names only, never contents,
+never outside the dashboard's root path.
+
 ## Security and resource policy
 
 Read API_SEC before changing exposure/authentication/listeners. Board HTTP routes stay under
@@ -95,8 +118,10 @@ in root `SECURITY_ERROR.md`; distinguish findings from speculative risks and acc
 
 Board tool authorization is an explicit, default-false launch field. Keep HTTP/stdio registrations
 and the exact per-tool grant allowlist in sync. No server wildcard, unrelated-tool approval,
-global sandbox bypass, or rewrite of shared provider settings. Check provider-specific behavior
-without assuming one CLI's switches apply to another.
+or rewrite of shared provider settings. The separate, default-off card YOLO option may add the
+selected base provider's documented global bypass/auto-approve launch flag; do not conflate that
+user choice with the narrow Board-tool grants. Check provider-specific behavior without assuming
+one CLI's switches apply to another.
 
 Treat all card fields, comments, notes, commit messages and attachment contents as untrusted data.
 Preserve prompt caps, control/bidi handling and placeholder neutralization, including generated
@@ -106,6 +131,9 @@ Keep authenticated octet-stream downloads with `nosniff`, restrictive CSP and `n
 
 Current limits include title 300, description 100,000, comment/note 50,000, 20 tags of 40 characters,
 40 current attachments, and 500,000 characters for an MCP-written TXT/Markdown attachment.
+`read_board_attachment` returns raster images through MCP only up to 5 MiB; larger images stay
+available through the Board viewer. That is a tool-result/transport bound, not an upload or storage
+quota. The metadata preflight must happen before reading the attachment BLOB.
 The UI's 12-file limit is a known bug (F7), not the contract. Human file uploads deliberately have
 no byte quota. Do not restore the removed byte-budget policy as an incidental “security fix”;
 design streaming/concurrency/retention improvements explicitly. MCP text reads are chunked, but
@@ -148,7 +176,10 @@ separate development database to conceal unsafe code. Live-provider launches and
 application actions are not required setup for unit tests.
 
 Board context and lane Automation settings still use their own expected revisions. Settings writes must remain project-scoped and reject stale revisions.
-Lane-entry triggers write one pending row per selected Automation and card in the move transaction.
+Lane-entry triggers write one pending row per selected Automation and card in the move transaction;
+a caller-requested skip deletes those rows before that transaction commits.
+`DescribeLaneAutomationsAsync` reads Job definitions from `state.db` for wording only and must keep
+tolerating absent tables, because a stdio MCP host can open a state.db without Automations.
 The first selection uses the board/6 tables; additional selections use the additive board/7 tables.
 The existing leased root scheduler reads pending events through `IBoardStore`, commits normal
 Job run/action snapshots in `state.db`, then acknowledges each exact event in `board.db`. The
@@ -165,6 +196,7 @@ Never replace the durable queue with a browser timer or an in-memory queue.
 | MCP / grants | `BoardToolTests`, `McpServerHttpTests`, `McpStdioHostTests`, `BoardToolAuthorizationTests`, OpenCode/command Board tests |
 | Launch concurrency/prompt | `BoardLaunchConcurrencyTests`, `BoardPromptComposerTests`, launch cases in `BoardServiceTests` |
 | UI behavior | `Tests/wwwroot/js/board-*.test.mjs`; `UITests/tests/board-ux.spec.js` and `board-attachment-security.spec.js` |
+| `@path` references / file index | `BoardFileIndexServiceTests`, the referenced-files cases in `BoardPromptComposerTests`, the files route case in `BoardRoutesTests`, `board-text.test.mjs`, `board-file-refs.test.mjs`, the typeahead case in `board-ux.spec.js` |
 | Schema changes | `Tests/DB/SchemaSnapshotTests.cs`, `PreviousReleaseCompatibilityTests.cs`, migration/Board adoption tests |
 | Database separation / host composition | `Tests/DB/BoardDatabaseIsolationTests.cs`, split-file `BoardSettingsTests`, route and MCP Board tests |
 

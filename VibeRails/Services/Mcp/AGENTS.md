@@ -57,13 +57,13 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 | `resume_token_saver` | `TokenSaverTool.ResumeTokenSaver` | Restores token compression immediately, ending an active pause early. |
 | `get_token_saver_status` | `TokenSaverTool.GetTokenSaverStatus` | Reports whether compression is active and whether a pause window is open. |
 | `list_boards` | `BoardTool.ListBoards` | The project's boards (a project can hold several: sprints, sub-projects) with ids, lanes and card counts, and which one is current for this terminal. |
-| `list_board_columns` | `BoardTool.ListBoardColumns` | Lanes of one board with card counts. `board` (name or id) optional: defaults to the board of the card this terminal was launched for, else the first board. |
+| `list_board_columns` | `BoardTool.ListBoardColumns` | Lanes of one board with card counts and, per lane, an `on entry:` line for each Automation a card entry triggers (summary from the Job definition, where its output lands, and why it would not run: disabled, deleted, other repository, no actions, run already active), plus the sequencing guidance. `board` (name or id) optional: defaults to the board of the card this terminal was launched for, else the first board. |
 | `list_board_cards` | `BoardTool.ListBoardCards` | Cards on one board (key, lane, type, priority, title, assignee, comment count, session open); optional lane/assignee/type filters and the same optional `board`. Card keys are project-unique, so `get_board_card VB-n` never needs a board. |
-| `get_board_card` | `BoardTool.GetBoardCard` | One card in full: fields, the board's lane names, description, comments, linked commits, sessions (full session id, ended time/exit code, that session's last comment, its chat summary when one exists), the tail of the agent notes, attachment ids/names/types/sizes. `card` omitted = the card this terminal was launched for. `since` (ISO-8601) lists only activity at or after that time and counts the rest. Reading never links the session to the card. |
-| `read_board_attachment` | `BoardTool.ReadBoardAttachment` | Current PNG/JPEG/GIF/WebP attachments as native MCP image content; UTF-8 Markdown/TXT as bounded text (40,000 default; 250,000 limit). Accepts attachment id and optional card; offset/maximum length apply to text. Reads remain card/project scoped with no caller-supplied path or direct SQL access. |
+| `get_board_card` | `BoardTool.GetBoardCard` | One card in full: fields, the board's lane names (annotated `Lane (on entry: "Automation")`) and this card's not-yet-settled lane entries (`Pending lane automations:`), description, comments, linked commits, sessions (full session id, ended time/exit code, that session's last comment, its chat summary when one exists), the tail of the agent notes, attachment ids/names/types/sizes. `card` omitted = the card this terminal was launched for. `since` (ISO-8601) lists only activity at or after that time and counts the rest. Reading never links the session to the card. |
+| `read_board_attachment` | `BoardTool.ReadBoardAttachment` | Current PNG/JPEG/GIF/WebP attachments up to 5 MiB as native MCP image content; larger images remain in the Board viewer. UTF-8 Markdown/TXT is bounded text (40,000 default; 250,000 limit). Accepts attachment id and optional card; offset/maximum length apply to text. Reads remain card/project scoped with no caller-supplied path or direct SQL access. |
 | `create_board_card` | `BoardTool.CreateBoardCard` | New card (title, description, lane, type, priority, tags); optional `board` as above. |
 | `update_board_card` | `BoardTool.UpdateBoardCard` | Partial update, including `flagged=true` only for important unresolved owner decisions/intervention under the [attention policy](../../../AGENTS.md#board-attention-flags), or `false` once resolved (independent of `blocked`). Explain the issue and requested action in a comment; routine review and compatible additive schema changes do not warrant a flag. Description replacement accepts the last write; `descriptionAppend` appends to current text atomically with the other fields and cannot be combined with `description`. |
-| `move_board_card` | `BoardTool.MoveBoardCard` | Move a card to a lane (by name or id), optionally at a position. |
+| `move_board_card` | `BoardTool.MoveBoardCard` | Move a card to a lane (by name or id), optionally at a position. The unchanged first line is followed by the lane-entry report: `Queued:` / `Skipped:` per Automation (with the reason and any active run id), `Cancelled pending:` for replaced entries, or `No lane automations.` / `Same lane; …`. `skipAutomations=true` moves without recording the entries and comments the skip on the card; `preview=true` reports without moving (VB-34). |
 | `add_board_comment` | `BoardTool.AddBoardComment` | Append a comment, attributed to the launching session (or "Agent"). Returns the comment id. |
 | `append_board_note` | `BoardTool.AppendBoardNote` | Append an entry to the card's **agent notes** — the scratchpad for checkpointing findings and working state as the agent goes. Same limits and attribution as a comment; never part of the comment stream or count. Returns the note id. |
 | `get_board_notes` | `BoardTool.GetBoardNotes` | All notes on a card, oldest first (`get_board_card` shows only the most recent ~3,000 characters); optional `since`. |
@@ -115,8 +115,9 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
 - **Capability boundary**: read / append / move / link only — there is deliberately no delete
   tool. The one upload path, `add_board_attachment`, accepts Markdown/TXT text only (MIME from
   the extension, strict UTF-8, ≤ 500,000 characters); binaries still come from the dashboard.
-  Attachment reads return untrusted task data, never execute it; PDF, images and other binary
-  files are opened in the board viewer. The only process spawned is `git` with a regex-validated
+  Attachment reads return untrusted task data, never execute it; raster images through 5 MiB and
+  bounded Markdown/TXT are returned by MCP, while larger images, PDFs and other binaries stay in
+  the Board viewer. The only process spawned is `git` with a regex-validated
   hex sha via an argument list (`Services/Git/GitCli.cs`). Failures return `FAIL: …` sentences;
   detail goes to the file log. A `database is locked` failure (SQLite 5/6, or a transient
   `StorageException`) says so explicitly and tells the agent to retry — `Fail()` in `BoardTool`
@@ -157,11 +158,13 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
   fourteen Board tools for that session through an explicit `ToolNames` allowlist. No server
   wildcard or unrelated MCP tool is authorized. Tests pin both the reviewed allowlist and exact
   provider grants.
-  Antigravity receives only the prompt because its only native switch is a global bypass. See
+  Antigravity receives only the narrow authorization prompt because its native switch is a global
+  bypass. See
   [Terminal launch authorization](../Terminal/AGENTS.md#board-launch-options-and-input-sequences-2026-09-14).
-  This is the requested Board-specific exception to the Environments editor's YOLO-only policy,
-  not a granular permission editor or a global policy change. No physical CLI config is rewritten;
-  selected provider modes and managed policies can still restrict calls. Validation used CLI help,
+  The exact Board grants remain the default. The card's separate, default-off YOLO checkbox can
+  explicitly add the selected base provider's global bypass/auto-approve launch flag; saved
+  environments keep their own arguments. Neither path rewrites physical CLI config, and selected
+  provider modes or managed policies can still restrict calls. Validation used CLI help,
   documentation and regression tests; no live provider session or deployment was performed.
 
 Python script MCP tools, the signing-help tool, and their configuration UI/routes were removed
@@ -325,7 +328,13 @@ avoid `WithToolsFromAssembly()` (reflection scan) — it is the AOT-unsafe varia
 
 Agents use `get_board_card` for attachment IDs, then `read_board_attachment`. The existing tool
 returns MCP `CallToolResult` with a text metadata block plus an image block for signature-detected
-PNG/JPEG/GIF/WebP. Markdown/TXT retain their bounded text format; tool failures set `IsError`.
+PNG/JPEG/GIF/WebP up to `BoardTool.MaxMcpImageBytes` (5 MiB). It first reads scoped metadata and
+uses the signature-derived MIME stored at upload to reject an oversized image before materializing
+its BLOB; the failure reports the actual and allowed sizes and directs the agent to the Board viewer.
+The bytes are re-sniffed after loading, and a second content-length check protects against inconsistent
+legacy/corrupt metadata before MCP serialization. This is a transfer limit only: human
+uploads and Board-viewer access retain the unlimited-byte policy. Markdown/TXT retain their bounded
+text format; tool failures set `IsError`.
 Only current attachments on the resolved card/project are readable. SVG, PDFs and arbitrary binary
 files are not returned as images; the Board viewer remains their existing access path. This adds no
 new tool name, grant, database path, SQL operation or filesystem export. The launch prompt and card

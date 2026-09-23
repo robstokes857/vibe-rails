@@ -19,6 +19,7 @@
 //   session    { id, tabId, displayName, cli, selection, origin, createdAt, active }
 //   attachment { id, name, url (data: URL), mimeType, bytes, createdAt }
 //   commit     { sha, shortSha, author, message, committedAt, linkedAt }
+//   files      { files: ['repo/relative/path', …], truncated }   (searchFilesAsync, for `@path` refs)
 //
 //   board      { id, name, position, createdAt, cardCount, columns[] }
 //
@@ -112,7 +113,7 @@ async function getBoardCardsAsync(boardId = null) {
     return (response?.cards || []).sort((a, b) => a.position - b.position || a.key.localeCompare(b.key));
 }
 
-async function getBoardCardPageAsync(boardId, filters = {}, { columnId, offset = 0, signal } = {}) {
+async function getBoardCardPageAsync(boardId, filters = {}, { columnId, offset = 0, continuationToken, signal } = {}) {
     const params = new URLSearchParams({ pageSize: '30' });
     for (const [key, value] of Object.entries(filters)) {
         if (value) params.set(key, value);
@@ -120,6 +121,7 @@ async function getBoardCardPageAsync(boardId, filters = {}, { columnId, offset =
     if (columnId) {
         params.set('columnId', columnId);
         params.set('offset', String(offset));
+        if (continuationToken) params.set('continuationToken', continuationToken);
     }
     if (boardId) params.set('boardId', boardId);
     return call(`/cards?${params}`, 'GET', null, { signal });
@@ -160,6 +162,17 @@ async function getCardLinkCandidatesAsync(cardId, query = '', extra = {}) {
 
 async function linkCardAsync(cardId, linkedCardId) {
     return call(`/cards/${enc(cardId)}/links`, 'POST', { card: linkedCardId });
+}
+
+// ---------------------------------------------- repository files (the composer's @ typeahead)
+
+/** Repo-relative paths matching `query` (server-ranked, capped at 50) plus whether more matched. */
+async function searchFilesAsync(query = '', extra = {}) {
+    const response = await call(`/files?q=${enc(query)}`, 'GET', null, extra);
+    return {
+        files: Array.isArray(response?.files) ? response.files.filter(item => typeof item === 'string') : [],
+        truncated: Boolean(response?.truncated)
+    };
 }
 
 async function unlinkCardAsync(cardId, linkedCardId) {
@@ -284,6 +297,7 @@ export const BoardApi = {
     getCardLinkCandidatesAsync,
     linkCardAsync,
     unlinkCardAsync,
+    searchFilesAsync,
     addBoardCommentAsync,
     getCardNotesAsync,
     addCardNoteAsync,

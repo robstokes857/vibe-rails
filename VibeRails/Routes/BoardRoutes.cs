@@ -95,9 +95,11 @@ public static class BoardRoutes
             .WithName("SaveBoardLaneAutomation");
 
         app.MapGet("/api/v1/board/cards", (IBoardService board, string? boardId, int? pageSize, string? columnId,
-            int? offset, string? q, string? assignee, string? type, string? priority, string? tag, CancellationToken cancellationToken) =>
+            int? offset, string? continuationToken, string? q, string? assignee, string? type, string? priority, string? tag,
+            CancellationToken cancellationToken) =>
             RunAsync(async () => Results.Ok(pageSize is int size
-                ? await board.GetCardsPageAsync(Project(), new BoardCardPageQuery(size, columnId, offset ?? 0, q, assignee, type, priority, tag), cancellationToken, boardId)
+                ? await board.GetCardsPageAsync(Project(), new BoardCardPageQuery(size, columnId, offset ?? 0,
+                    q, assignee, type, priority, tag, continuationToken), cancellationToken, boardId)
                 : await board.GetCardsAsync(Project(), cancellationToken, boardId))))
             .WithName("GetBoardCards");
 
@@ -120,12 +122,23 @@ public static class BoardRoutes
             .WithName("DeleteBoardCard");
 
         app.MapPost("/api/v1/board/cards/{card}/move", (IBoardService board, string card, MoveBoardCardRequest request, CancellationToken cancellationToken) =>
-            RunAsync(async () => OkOrNotFound(await board.MoveCardAsync(Project(), card, request.ColumnId ?? string.Empty, request.Position, cancellationToken), "Card")))
+            RunAsync(async () => OkOrNotFound((await board.MoveCardAsync(Project(), card,
+                new BoardCardMoveRequest(request.ColumnId ?? string.Empty, request.Position, request.SkipAutomations, BoardAuthor.User()), cancellationToken))?.Card, "Card")))
             .WithName("MoveBoardCard");
 
         app.MapPost("/api/v1/board/cards/{card}/launch", (IBoardLaunchService launcher, string card, LaunchBoardCardRequest? request, CancellationToken cancellationToken) =>
             RunAsync(async () => OkOrNotFound(await launcher.LaunchAsync(Project(), card, request?.Selection, cancellationToken, request?.Intent ?? "work"), "Card")))
             .WithName("LaunchBoardCard");
+
+        // ---------------------------------------------------------------- files
+        //
+        // Repo-wide file names for the composer's `@path` typeahead (VB-35): names only, never
+        // contents, and only under the dashboard's root path. The text a user writes is the
+        // reference; nothing is stored here.
+
+        app.MapGet("/api/v1/board/files", (IBoardFileIndexService files, string? q, CancellationToken cancellationToken) =>
+            RunAsync(async () => Results.Ok(await files.SearchAsync(Project(), q, cancellationToken))))
+            .WithName("SearchBoardFiles");
 
         // ---------------------------------------------------------------- rails
 

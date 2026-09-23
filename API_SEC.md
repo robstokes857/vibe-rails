@@ -1,7 +1,7 @@
 # API authentication coverage
 
-Full route/authentication reconciliation (2026-09-23): **213 mapped surfaces**, including
-**201 under `/api/v1`** and **37 Board routes**, match the current working tree in both
+Full route/authentication reconciliation (2026-09-23): **214 mapped surfaces**, including
+**202 under `/api/v1`** and **38 Board routes**, match the current working tree in both
 directions. No endpoint needed adding or removal; corrected the stale totals in the
 terminology section. These are the current totals; dated amendments below retain their
 historical counts.
@@ -28,6 +28,25 @@ C:/source/vibe-rails/Tests/obj/ApiSecAuditArtifacts --verbosity quiet` with a
 `McpServerHttpTests`, `InternalToolsRoutesTests`, `SigningKeyRoutesTests`, `BoardRoutesTests`,
 and `JobRoutesTests`. This was source reconciliation plus targeted regression tests, not
 a live request sweep of every production endpoint.
+
+VB-37 MCP image-bound amendment (2026-09-23): the existing `read_board_attachment` tool now
+returns PNG/JPEG/GIF/WebP content only up to 5 MiB. A server-derived, project/card-scoped metadata
+read uses the signature-derived MIME stored at upload to reject larger images before selecting their
+BLOB or legacy data URL. The bytes are re-sniffed after loading, and a defensive byte-length check
+runs before MCP serialization for inconsistent legacy/corrupt metadata. The error reports the actual/allowed sizes and directs the
+caller to the authenticated Board viewer. This is only an MCP transfer budget: human uploads,
+stored attachment bytes and Board-viewer downloads remain unlimited. Markdown/TXT behavior is
+unchanged. No route, tool name, grant, listener, credential rule, schema or migration changed.
+
+VB-37 Board launch/paging amendment (2026-09-23): the existing authenticated card create/update
+payload can persist a default-false `baseLlmOptions.yolo` choice only for a base-CLI assignee.
+Start work translates it server-side to that provider's documented global bypass/auto-approve
+process flag; it does not rewrite provider configuration, and saved environments retain their own
+arguments. This is an explicit user-selected capability separate from the narrow, always-on Board
+tool allowlist. The existing paged card-list route also accepts an opaque `continuationToken`; if
+the filtered lane order changed since the preceding page, it returns `restartRequired` and a page
+from offset zero so the browser can refresh instead of silently omitting a promoted card. No route,
+listener, credential rule, middleware order, schema or migration changed.
 
 VB-29 Board pagination amendment (2026-09-23): the existing authenticated, active-root
 `GET /api/v1/board/cards` accepts optional `pageSize`, `columnId`, `offset`, `q`, `assignee`,
@@ -56,6 +75,17 @@ no longer claims retained historical attachments exist. Launch prompts explicitl
 agents to Board tools as the only access path for card data and attachments; storage details
 are absent from generated guidance and busy-error responses. HTTP retains
 both credentials; stdio retains the same local child-process boundary.
+
+VB-35 file-reference amendment (2026-09-23): one authenticated route added, `GET /api/v1/board/files?q=`,
+mapped with the other Board routes only by an active root backend and behind both credentials
+through the existing `/api/v1` middleware; no new listener, credential rule or exception. It returns
+repository-relative file **names** (never contents) from `git ls-files --cached --others
+--exclude-standard` under the dashboard's root path, or a bounded directory walk when git is
+unavailable, capped at 50 results with `q` at most 256 characters; nothing is stored. Card text may
+now carry `@path` references, which the renderer emits from escaped text with no href and the
+launch prompt lists inside the fenced card block after sanitising. The active inventory becomes
+**214 mapped surfaces**, **202 under `/api/v1`** and **38 Board routes**; `Tests/Routes/BoardRoutesTests.cs`
+pins the credential requirement and the AOT JSON binding.
 
 VB-31 cross-repository Automation import amendment (2026-09-22): two authenticated routes added under
 `/api/v1/jobs`, `GET /api/v1/jobs/catalog` and `POST /api/v1/jobs/import`, both mapped only by an
@@ -201,7 +231,8 @@ default-false `AuthorizeBoardTools` launch field, including when a saved environ
 selected. The authenticated terminal-start API forwards this explicit choice; card text,
 titles and environment names cannot enable it. `BoardMcpAuthorization` enumerates exactly
 fourteen Board tools (as of 2026-09-18), with no server wildcard, unrelated MCP tools, dynamic Python tools, global
-approval-policy change or sandbox bypass. Codex, Claude, Copilot and Grok receive per-tool
+approval-policy change or sandbox bypass from that authorization path. The later VB-37 YOLO
+choice is a separate, explicit base-CLI launch option. Codex, Claude, Copilot and Grok receive per-tool
 argv grants; OpenCode and its variants receive per-tool `OPENCODE_PERMISSION` entries.
 The latter retains unrelated inherited rules and conservatively skips matching inherited
 environment deny rules. Native CLI configuration precedence and managed policies still
@@ -789,7 +820,7 @@ transcript text out of messages and exception text; do not rely on the Logs view
 hidden. `Tests/Routes/InternalToolsRoutesTests.cs` pins the two-credential requirement, the
 whitelist rejection of path-like sources, and the absence of mutating verbs.
 
-### Kanban board (37; active root backend only)
+### Kanban board (38; active root backend only)
 
 All mapped by `BoardRoutes.Map` under `if (isActiveRootBackend)`; every path contains `/api/`,
 so both credentials are enforced by the middleware with no route-level registration. The
@@ -815,21 +846,28 @@ cannot read or write another project's board through this surface.
 - `GET /api/v1/board/cards`, `POST /api/v1/board/cards`, `GET /api/v1/board/cards/{card}`,
   `PUT /api/v1/board/cards/{card}`, `DELETE /api/v1/board/cards/{card}`,
   `POST /api/v1/board/cards/{card}/move` — cards (`{card}` is an id or a `VB-n` key).
-  The list optionally takes `pageSize=1..100`, `columnId`, `offset` and
+  The list optionally takes `pageSize=1..100`, `columnId`, `offset`, `continuationToken` and
   `q`/`assignee`/`type`/`priority`/`tag`. Initial paged reads include all open cards and
   one page per completed lane; a scoped `columnId` reads one lane page. Counts and
-  filter choices cover the selected board, and filters run before the page limit.
+  filter choices cover the selected board, and filters run before the page limit. A stale
+  continuation restarts at offset zero and marks `restartRequired`.
 - `GET /api/v1/board/cards/{card}/links/candidates?q=`,
   `POST /api/v1/board/cards/{card}/links`,
   `DELETE /api/v1/board/cards/{card}/links/{linkedCard}` — related cards. The POST body supplies
   `card` as an id or key. Both endpoints of a link must exist in the open project; foreign ids
   return 404. Reads include links in the ordinary full card response. Link rows cascade when
   either card is deleted, and linking does not launch a terminal or change a description.
+- `GET /api/v1/board/files?q=` — repository file names for the composer's `@path` typeahead
+  (VB-35). Root backend only, like every Board route; `q` is capped at 256 characters and the
+  answer at 50 repo-relative paths under the dashboard's root path. Names only, never contents,
+  nothing written.
 - `POST /api/v1/board/cards/{card}/launch` — "Start work": creates a terminal tab through the
   in-process tab host and starts the assigned LLM with the card prepended to the environment's
   Initial Message. Same capability class as `POST /api/v1/terminal/tabs/{tabId}/start`, which
   is why the tab credential matters here. The environment is resolved by id and must be
-  visible in the current project; there is no fallback by name.
+  visible in the current project; there is no fallback by name. Base-CLI cards may persist an
+  explicit, default-off YOLO choice that adds the provider's global bypass/auto-approve launch
+  flag. Saved environments keep their own launch arguments.
 **Terminal input reachable from the board.** The description-notification route
 (`POST /api/v1/board/cards/{card}/revisions/{revision:int}/notify`) was **removed 2026-09-15**:
 it forwarded two semantic Escapes, fixed text and Enter to an agent that was already working, and
@@ -881,7 +919,7 @@ same project. The same board operations (minus any delete or terminal input) are
 `/mcp` (both credentials) and on the stdio `vb mcp` host. The stdio host reads and writes
 `board.db` through `IBoardStore` rather than calling this API, so a CLI in any terminal can work a card
 without a VibeRails tab. `read_board_attachment` returns bounded UTF-8 Markdown/TXT text or
-byte-sniffed PNG/JPEG/GIF/WebP MCP image content using current card/project-scoped IDs,
+byte-sniffed PNG/JPEG/GIF/WebP MCP image content up to 5 MiB using current card/project-scoped IDs,
 never paths or direct SQL arguments. Removed attachments are unavailable. The host is a child process of the CLI over pipes and remains
 unauthenticated by design. `Tests/Routes/BoardRoutesTests.cs` pins the two-credential
 requirement and the launch composition; `Tests/Services/Mcp/BoardToolTests.cs` pins the tools.
