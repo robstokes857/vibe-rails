@@ -119,3 +119,26 @@ test('adoptLaunchedTab falls back to the remembered selection when status is una
     assert.equal(added[0].tabInfo.sessionId, null);
     assert.equal(added[0].tabInfo.hasActiveSession, true);
 });
+
+test('Automation terminal events add tabs without moving focus or navigating', async () => {
+    const { manager, added, focused } = createManager({ selection: 'base:shell', rememberedCli: 'shell' });
+    const controller = new TerminalController({
+        async apiCall() { return { tabId: 'automation', sessionId: 'workflow-session', cli: 'shell', hasActiveSession: true }; },
+        navigate() { assert.fail('scheduled work must not navigate'); }
+    });
+    controller.manager = manager;
+    const remembered = [];
+    controller.rememberTabLaunch = (...args) => remembered.push(args);
+    const handlers = new Map();
+    controller.bindSessionEvents({ on: (type, callback) => handlers.set(type, callback) });
+    await handlers.get('automation_terminal_started')({ tabId: 'automation', sessionId: 'workflow-session', jobName: 'Check scripts', workingDirectory: '/repo' });
+    assert.equal(added.length, 1);
+    assert.equal(added[0].tabInfo.sessionId, 'workflow-session');
+    assert.equal(remembered[0][1].title, 'Automation: Check scripts');
+    assert.equal(remembered[0][1].activate, false);
+    assert.deepEqual(focused, []);
+    // A duplicate event neither duplicates the tab nor steals focus.
+    await handlers.get('automation_terminal_started')({ tabId: 'automation', jobName: 'Check scripts' });
+    assert.equal(added.length, 1);
+    assert.deepEqual(focused, []);
+});

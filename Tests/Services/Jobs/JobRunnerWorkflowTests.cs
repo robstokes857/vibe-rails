@@ -3,6 +3,7 @@ using Moq;
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services;
+using VibeRails.Services.Board;
 using VibeRails.Services.Cli;
 using VibeRails.Services.Jobs;
 using VibeRails.Services.Terminal;
@@ -249,21 +250,111 @@ public sealed class JobRunnerWorkflowTests
             It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [Theory]
+    [InlineData(0, false, JobRunStatus.Succeeded, 0, false)]
+    [InlineData(9, false, JobRunStatus.Failed, 9, false)]
+    [InlineData(0, true, JobRunStatus.TimedOut, 2, false)]
+    [InlineData(0, false, JobRunStatus.Cancelled, 3, false)]
+    [InlineData(0, false, JobRunStatus.Succeeded, 0, true)]
+    public async Task NativeScripts_RecordReplayTiming_LinkBoardCard_AndEndWithActualOutcome(
+        int scriptExitCode, bool timedOut, JobRunStatus outcome, int sessionExitCode, bool finalWriteFails)
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"job-script-replay-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var stateConnection = $"Data Source={Path.Combine(root, "state.db")};Pooling=False";
+            var repository = new Repository(stateConnection);
+            var boards = new BoardStore($"Data Source={Path.Combine(root, "board.db")};Pooling=False", stateConnection);
+            var ct = TestContext.Current.CancellationToken;
+            await boards.EnsureDefaultColumnsAsync(root, ct);
+            var card = await boards.CreateCardAsync(root, new(null, "Run script", "", null, "medium", null, [], false), ct);
+            var action = ScriptAction("first", 0, "script.py");
+            var run = Run([action]) with { ProjectPath = root, TriggerKind = JobTriggerKind.BoardLane, TriggerKey = $"board-lane:{card.Key}:lane:event" };
+            var store = StoreFor(run);
+            store.Setup(candidate => candidate.StartRunActionAsync(run.Id, action.Id, CancellationToken.None)).ReturnsAsync(true);
+            store.Setup(candidate => candidate.CompleteRunActionAsync(run.Id, action.Id, It.IsAny<JobRunActionStatus>(), It.IsAny<int?>(),
+                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), CancellationToken.None)).Returns(Task.CompletedTask);
+            store.Setup(candidate => candidate.CompleteRunAsync(run.Id, It.IsAny<JobRunStatus>(), It.IsAny<int?>(), It.IsAny<string?>(), CancellationToken.None)).Returns(Task.CompletedTask);
+            store.Setup(candidate => candidate.CompleteIdleRunAsync(run.Id, CancellationToken.None)).ReturnsAsync(outcome);
+            if (finalWriteFails)
+                store.Setup(candidate => candidate.CompleteIdleRunAsync(run.Id, CancellationToken.None)).ThrowsAsync(new InvalidOperationException("Final run write failed"));
+            string? sessionId = null;
+            store.Setup(candidate => candidate.LinkRunTerminalSessionAsync(run.Id, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Callback<string, string, CancellationToken>((_, id, _) => sessionId = id).Returns(Task.CompletedTask);
+            var cli = new Mock<ICliWrapper>(MockBehavior.Strict);
+            cli.Setup(candidate => candidate.RunAsync(It.IsAny<CliRequest>(), It.IsAny<Func<CliOutputLine, ValueTask>>(), CancellationToken.None))
+                .Returns(async (CliRequest _, Func<CliOutputLine, ValueTask> emit, CancellationToken _) =>
+                {
+                    await emit(new(false, "real stdout", TimeSpan.FromMilliseconds(10)));
+                    await emit(new(true, "real stderr", TimeSpan.FromMilliseconds(70)));
+                    return new CliResult(scriptExitCode, timedOut, false, "real stdout", "real stderr", TimeSpan.FromMilliseconds(80), "test");
+                });
+            using var services = BuildServices(store, PreparedScripts(), cli, repository, boards);
+
+            var execution = JobRunner.RunAsync(new ParsedArgs { JobRunId = run.Id, WorkDir = root }, services);
+            if (finalWriteFails) await Assert.ThrowsAsync<InvalidOperationException>(() => execution);
+            else await execution;
+
+            Assert.NotNull(sessionId);
+            var session = await repository.GetSessionByIdAsync(sessionId, ct);
+            Assert.NotNull(session);
+            Assert.NotNull(session.EndedUTC);
+            Assert.Equal(sessionExitCode, session.ExitCode);
+            var logs = await repository.GetTerminalSessionLogsAsync(sessionId, ct);
+            var stdout = Assert.Single(logs, line => System.Text.Encoding.UTF8.GetString(line.Data) == "real stdout\r\n");
+            var stderr = Assert.Single(logs, line => System.Text.Encoding.UTF8.GetString(line.Data) == "real stderr\r\n");
+            Assert.Equal(TimeSpan.FromMilliseconds(60), stderr.TimestampUtc - stdout.TimestampUtc);
+            Assert.True(stderr.Sequence > stdout.Sequence);
+            var raw = await repository.GetSessionWithLogsAsync(sessionId, ct);
+            Assert.True(Assert.Single(raw!.Logs, line => line.Content == Convert.ToBase64String("real stderr\r\n"u8)).IsError);
+            Assert.False(Assert.Single(raw.Logs, line => line.Content == Convert.ToBase64String("real stdout\r\n"u8)).IsError);
+            Assert.Equal(sessionId, Assert.Single((await boards.GetCardDetailAsync(root, card.Id, ct))!.Sessions).SessionId);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task TerminalTabScripts_UseTheirExistingOuterRecording()
+    {
+        var action = ScriptAction("script", 0, "script.py");
+        var run = Run([action]) with { LaunchInTerminalTab = true, TerminalSessionId = "outer-session" };
+        var store = StoreFor(run);
+        store.Setup(candidate => candidate.StartRunActionAsync(run.Id, action.Id, CancellationToken.None)).ReturnsAsync(true);
+        store.Setup(candidate => candidate.CompleteRunActionAsync(run.Id, action.Id, It.IsAny<JobRunActionStatus>(), It.IsAny<int?>(),
+            It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), CancellationToken.None)).Returns(Task.CompletedTask);
+        store.Setup(candidate => candidate.CompleteIdleRunAsync(run.Id, CancellationToken.None)).ReturnsAsync(JobRunStatus.Succeeded);
+        var cli = new Mock<ICliWrapper>(MockBehavior.Strict);
+        cli.Setup(candidate => candidate.RunAsync(It.IsAny<CliRequest>(), It.IsAny<Func<CliOutputLine, ValueTask>>(), CancellationToken.None))
+            .ReturnsAsync(new CliResult(0, false, false, "output", "", TimeSpan.Zero, "test"));
+        var repository = new Mock<IRepository>(MockBehavior.Strict);
+        using var services = BuildServices(store, PreparedScripts(), cli, repository.Object);
+
+        Assert.Equal(0, await JobRunner.RunAsync(new ParsedArgs { JobRunId = run.Id, WorkDir = run.ProjectPath }, services));
+
+        repository.VerifyNoOtherCalls();
+        store.Verify(candidate => candidate.LinkRunTerminalSessionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     private static ServiceProvider BuildServices(
         Mock<IJobStore> store,
         Mock<IAutomationScriptService> scriptService,
-        Mock<ICliWrapper> cli)
+        Mock<ICliWrapper> cli,
+        IRepository? repository = null,
+        IBoardStore? boards = null)
     {
         var automationConsumer = new Mock<IAutomationConsumer>(MockBehavior.Strict);
         automationConsumer.SetupGet(candidate => candidate.IdleShutdownToken).Returns(CancellationToken.None);
         automationConsumer.SetupGet(candidate => candidate.IdleShutdownRequested).Returns(false);
 
-        return new ServiceCollection()
+        var services = new ServiceCollection()
             .AddSingleton(store.Object)
             .AddSingleton(scriptService.Object)
             .AddSingleton(cli.Object)
             .AddSingleton(automationConsumer.Object)
-            .BuildServiceProvider();
+            .AddSingleton(repository ?? Mock.Of<IRepository>());
+        if (boards is not null) services.AddSingleton(boards);
+        return services.BuildServiceProvider();
     }
 
     private static Mock<IJobStore> StoreFor(JobRunRecord run)
@@ -278,6 +369,8 @@ public sealed class JobRunnerWorkflowTests
         store
             .Setup(candidate => candidate.IsCancelRequestedAsync(run.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
+        store.Setup(candidate => candidate.LinkRunTerminalSessionAsync(run.Id, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
         return store;
     }
 

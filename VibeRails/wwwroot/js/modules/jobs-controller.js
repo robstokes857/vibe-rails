@@ -651,6 +651,7 @@ export class JobController {
                 this.app.closeModal();
                 return this.openRun(runId);
             }
+            if (action === 'copy-session') return this.copySessionId(element.dataset.sessionId);
             if (action === 'page') {
                 const nextPage = Number(element.dataset.historyPage);
                 if (!Number.isInteger(nextPage) || nextPage < 1 || nextPage === this.historyPage) return;
@@ -802,7 +803,9 @@ export class JobController {
         return `<tr>
             <td class="job-history-check"><input type="checkbox" class="form-check-input" data-run-select="${runId}"${selected ? ' checked' : ''}${active ? ' disabled title="A run that is still going cannot be removed"' : ''} aria-label="Select this run"></td>
             <td><span class="job-run-status" data-tone="${status.tone}">${status.label}</span>${detail ? `<small class="job-run-status-detail" title="${this.escape(detail)}">${this.escape(detail)}</small>` : ''}</td>
-            <td>${trigger}</td>
+            <td>${trigger}<small class="d-block mt-1">${run.terminalSessionId || run.sessionId
+                ? `<button class="btn btn-sm btn-link p-0 text-start" type="button" data-history-action="copy-session" data-session-id="${this.escape(run.terminalSessionId || run.sessionId)}" title="Copy session ID"><code>${this.escape(run.terminalSessionId || run.sessionId)}</code> <i class="fa-regular fa-copy" aria-hidden="true"></i></button>`
+                : '<span class="text-muted">No session recorded</span>'}</small></td>
             <td title="${this.escape(run.queuedUtc)}">${this.escape(this.relativeTime(run.queuedUtc))}</td>
             <td${this.durationTitle(run)}>${this.escape(this.runDuration(run))}</td>
             <td class="text-end jobs-run-actions">
@@ -812,6 +815,12 @@ export class JobController {
                 <button class="btn btn-sm btn-outline-secondary job-icon-action job-run-watch" type="button" data-history-action="watch" data-run-id="${runId}" title="${watchTitle}" aria-label="${watchTitle}"><i class="fa-solid fa-eye-slash" data-watch-idle aria-hidden="true"></i><i class="fa-solid fa-eye" data-watch-live aria-hidden="true"></i></button>
             </td>
         </tr>`;
+    }
+
+    async copySessionId(sessionId) {
+        if (!sessionId) return;
+        const copied = await this.app.copyTextToClipboard(sessionId);
+        this.app.showToast('Automation', copied ? 'Session ID copied.' : 'Could not copy session ID.', copied ? 'success' : 'warning');
     }
 
     // Why a run ended, drawn from fields the row previously dropped on the floor.
@@ -913,6 +922,7 @@ export class JobController {
                         <small>Leave blank to let the CLI finish on its own.</small>
                     </div>
                     <label class="job-option-toggle" for="job-enabled"><span><strong>Enabled</strong><small>Allow automatic runs</small></span><input class="job-switch-input" type="checkbox" id="job-enabled" ${source.enabled !== false ? 'checked' : ''}></label>
+                    <div class="job-timeout-option"><label class="form-label" for="job-launch-target">Open workflow in</label><select class="form-select" id="job-launch-target"><option value="native" ${source.launchInTerminalTab !== true ? 'selected' : ''}>Native terminal</option><option value="tab" ${source.launchInTerminalTab === true ? 'selected' : ''}>Terminal tab</option></select></div>
                     <label class="job-option-toggle" for="job-launch-minimized"><span><strong>Launch minimized</strong><small>Keep the run in the background</small></span><input class="job-switch-input" type="checkbox" id="job-launch-minimized" ${source.launchMinimized === true ? 'checked' : ''}></label>
                 </div>
 
@@ -950,6 +960,12 @@ export class JobController {
         afterCommitTrigger?.addEventListener('change', () => {
             if (afterCommitTrigger.checked && beforeCommitTrigger) beforeCommitTrigger.checked = false;
         });
+        const updateLaunchOptions = () => {
+            const minimized = form.querySelector('#job-launch-minimized');
+            if (minimized) minimized.disabled = form.querySelector('#job-launch-target')?.value === 'tab';
+        };
+        form?.querySelector('#job-launch-target')?.addEventListener('change', updateLaunchOptions);
+        updateLaunchOptions();
         form?.addEventListener('submit', event => this.saveJob(event, job));
         updateScheduleFields();
         this.updateEditorEnvironmentPreview();
@@ -1496,6 +1512,7 @@ export class JobController {
             enabled: form.querySelector('#job-enabled').checked,
             triggers,
             launchMinimized: form.querySelector('#job-launch-minimized')?.checked === true,
+            launchInTerminalTab: form.querySelector('#job-launch-target')?.value === 'tab',
             actions: normalizedActions
         };
     }
@@ -1522,10 +1539,9 @@ export class JobController {
     }
 
     /**
-     * Queue the automation and let the scheduler open its own terminal window, exactly as a
-     * scheduled or retried run does. An automation deliberately never runs inside a Web UI
-     * terminal tab, so there is no tab to focus or adopt here — the toast is the whole
-     * acknowledgement, and the run then reports itself through the run history below.
+     * Queue the automation through the scheduler, which honors the saved native/tab choice
+     * for manual, scheduled and retried runs. The toast acknowledges queuing; history and
+     * the Automation terminal event report the eventual launch without stealing focus.
      */
     async runNow(jobId, button) {
         return this.withBusy(button, 'Queuing…', async () => {
@@ -1575,6 +1591,7 @@ export class JobController {
             timeoutMinutes: job.timeoutMinutes,
             enabled: !job.enabled,
             launchMinimized: job.launchMinimized === true,
+            launchInTerminalTab: job.launchInTerminalTab === true,
             triggers: (job.triggers || []).map(({ kind, scheduleKind, intervalMinutes, localTime, daysOfWeekMask, timeZoneId }) => ({ kind, scheduleKind, intervalMinutes, localTime, daysOfWeekMask, timeZoneId }))
         };
         return this.withBusy(button, job.enabled ? 'Disabling…' : 'Enabling…', async () => {
@@ -1650,6 +1667,8 @@ export class JobController {
                             ? 'This run is starting — its recorded terminal will be ready to watch here shortly.'
                             : 'This run has no recorded terminal to watch.'}</p>
                 </div>
+                ${run?.terminalSessionId ? `<p class="mt-2"><button class="btn btn-sm btn-outline-secondary" type="button" data-run-action-session="${this.escape(run.terminalSessionId)}"><i class="fa-solid fa-play me-1" aria-hidden="true"></i>Replay workflow terminal</button></p>` : ''}
+                ${run?.terminalSessionId || run?.sessionId ? `<p class="small">Session: <code>${this.escape(run.terminalSessionId || run.sessionId)}</code> <button class="btn btn-sm btn-link p-0" type="button" data-copy-session="${this.escape(run.terminalSessionId || run.sessionId)}" aria-label="Copy session ID"><i class="fa-regular fa-copy" aria-hidden="true"></i></button></p>` : ''}
                 ${actions.length > 0 ? `<div class="job-run-actions-detail">${actions.map((action, index) => this.renderRunActionDetail(action, index)).join('')}</div>` : ''}
                 <div class="d-flex justify-content-end gap-2 mt-3">
                     ${active ? '<button class="btn btn-outline-danger" type="button" data-run-cancel>Stop run</button>' : '<button class="btn btn-outline-secondary" type="button" data-run-retry>Run again</button>'}
@@ -1657,6 +1676,7 @@ export class JobController {
                 </div>
             </div>`);
         const detail = document.querySelector('.job-run-detail');
+        detail?.querySelector('[data-copy-session]')?.addEventListener('click', event => this.copySessionId(event.currentTarget.dataset.copySession));
         detail?.querySelector('[data-run-cancel]')?.addEventListener('click', async event => {
             await this.cancelRun(runId, event.currentTarget);
             this.app.closeModal();
@@ -1874,6 +1894,7 @@ export class JobController {
                 }),
             timeoutMinutes: job.timeoutMinutes,
             launchMinimized: job.launchMinimized === true,
+            launchInTerminalTab: job.launchInTerminalTab === true,
             triggers
         };
 
@@ -2114,6 +2135,7 @@ viberails-recipe -->
                 }),
             timeoutMinutes: entry.timeoutMinutes ?? null,
             launchMinimized: entry.launchMinimized === true,
+            launchInTerminalTab: entry.launchInTerminalTab === true,
             triggers: Array.isArray(entry.triggers) ? entry.triggers : []
         };
     }
@@ -2206,6 +2228,7 @@ viberails-recipe -->
             actions: [{ kind: JOB_ACTION.WORKER }],
             timeoutMinutes: recipe?.timeoutMinutes ?? null,
             launchMinimized: recipe?.launchMinimized === true,
+            launchInTerminalTab: recipe?.launchInTerminalTab === true,
             triggers: Array.isArray(recipe?.triggers) ? recipe.triggers : []
         };
     }
@@ -2373,6 +2396,7 @@ viberails-recipe -->
                     timeoutMinutes: Number(recipe.timeoutMinutes) || null,
                     enabled: false,
                     launchMinimized: recipe.launchMinimized === true,
+                    launchInTerminalTab: recipe.launchInTerminalTab === true,
                     actions,
                     triggers: (recipe.triggers || []).filter(t => {
                         const kind = Number(t.kind);

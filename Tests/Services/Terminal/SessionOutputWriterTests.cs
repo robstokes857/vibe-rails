@@ -44,6 +44,26 @@ public sealed class SessionOutputWriterTests
     }
 
     [Fact]
+    public async Task ScriptLines_KeepTheirTimestampAndStderrFlag_InBatchedReplayFrames()
+    {
+        var (repository, batches) = CreateRepository();
+        var writer = new SessionOutputWriter(repository.Object);
+        writer.Initialize(SessionId);
+        var firstAt = new DateTime(2026, 9, 23, 0, 0, 0, DateTimeKind.Utc);
+        writer.EnqueueLine("output\r\n"u8.ToArray(), false, firstAt);
+        writer.EnqueueLine("error\r\n"u8.ToArray(), true, firstAt.AddSeconds(2));
+        await writer.DisposeAsync();
+
+        Assert.Single(batches);
+        var rows = Rows(batches);
+        Assert.Equal([false, true], rows.Where(row => row.Kind == TerminalOutputKind.Legacy).Select(row => row.IsError));
+        var frames = rows.Where(row => row.Kind == TerminalOutputKind.Enriched).ToList();
+        Assert.Equal([0, 1], frames.Select(row => row.Sequence));
+        Assert.Equal([firstAt, firstAt.AddSeconds(2)], frames.Select(row => row.TimestampUtc));
+        Assert.Equal(["output\r\n", "error\r\n"], frames.Select(row => System.Text.Encoding.UTF8.GetString(row.Data)));
+    }
+
+    [Fact]
     public async Task ChunksInOneBurstArePersistedInOneBatchInArrivalOrder()
     {
         var (repository, batches) = CreateRepository();

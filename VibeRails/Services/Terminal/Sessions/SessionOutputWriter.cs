@@ -80,6 +80,16 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
         _channel.Writer.TryWrite(new WriterMessage(WriterMessageKind.Data, payload));
     }
 
+    // Script runners already have complete lines and their arrival timestamps. Keep each as a
+    // replay frame while sharing the normal batching/retry policy with PTY session recordings.
+    internal void EnqueueLine(byte[] payload, bool isError, DateTime timestampUtc)
+    {
+        if (payload.Length == 0 || Volatile.Read(ref _disposed) == 1)
+            return;
+        _channel.Writer.TryWrite(new WriterMessage(WriterMessageKind.Line, payload,
+            IsError: isError, TimestampUtc: timestampUtc));
+    }
+
     public void NotifyResize(int cols, int rows)
     {
         if (Volatile.Read(ref _disposed) == 1)
@@ -130,6 +140,10 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
                             break;
                         case WriterMessageKind.Resize:
                             HandleResize(msg.NewCols, msg.NewRows, batch);
+                            break;
+                        case WriterMessageKind.Line:
+                            batch.Add(TerminalOutputWrite.Legacy(msg.Payload!, msg.IsError, msg.TimestampUtc));
+                            batch.Add(TerminalOutputWrite.Enriched(_sequence++, msg.Payload!, false, _cols, _rows, msg.TimestampUtc));
                             break;
                     }
                 }
@@ -485,7 +499,9 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
         WriterMessageKind Kind,
         byte[]? Payload,
         int NewCols = 0,
-        int NewRows = 0);
+        int NewRows = 0,
+        bool IsError = false,
+        DateTime TimestampUtc = default);
 
     private readonly record struct PrivateModeTransition(
         int Offset,
@@ -493,6 +509,6 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
         PrivateModeTransitionType Type,
         bool Enabled);
 
-    private enum WriterMessageKind { Data, Resize }
+    private enum WriterMessageKind { Data, Resize, Line }
     private enum PrivateModeTransitionType { AlternateScreen, SyncOutput }
 }

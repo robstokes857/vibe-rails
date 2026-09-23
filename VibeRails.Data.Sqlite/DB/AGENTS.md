@@ -1164,3 +1164,13 @@ ChatSummary               TokenSavings / CompressionCaptures
 ---
 
 *Last checked: 2026-09-17 by Codex (added BoardCards.Type and board/3 backfill)*
+
+
+### Automation terminal target (VB-29)
+
+`jobs-terminal-tabs/1` adds `Jobs.LaunchInTerminalTab` and its immutable run snapshot
+`JobRuns.LaunchInTerminalTab` (both default 0 for existing definitions and older writers), plus
+nullable `JobRuns.TerminalSessionId` for the full workflow shell recording. Worker action sessions
+and the existing `SessionId` trigger remain intact. Retry copies the original launch target; an
+older client omitting the target in an update preserves it. Setup runs automatically and leaves
+all existing rows and columns in place.

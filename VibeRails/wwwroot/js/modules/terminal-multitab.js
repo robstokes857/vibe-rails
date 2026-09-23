@@ -2850,7 +2850,7 @@ export class TerminalController {
                 notifyEnabled: false,
                 workingDirectory: cleanString(metadata.workingDirectory) || null
             }));
-            window.sessionStorage.setItem(ACTIVE_TAB_KEY, id);
+            if (metadata.activate !== false) window.sessionStorage.setItem(ACTIVE_TAB_KEY, id);
         } catch { /* sessionStorage is best-effort (private browsing / webview policies). */ }
     }
 
@@ -2861,7 +2861,7 @@ export class TerminalController {
      * just persisted. Returns false when no live panel is mounted — callers then
      * navigate to 'terminal-focus' exactly as before.
      */
-    async adoptLaunchedTab(tabId) {
+    async adoptLaunchedTab(tabId, { focus = true } = {}) {
         const id = cleanString(tabId);
         let manager = this.manager;
         if (!id || !manager || manager.isDestroyed() || !manager.container?.isConnected) return false;
@@ -2897,7 +2897,7 @@ export class TerminalController {
             // have populated the new manager while the request was in flight.
             manager = this.manager;
             if (!manager || manager.isDestroyed() || !manager.container?.isConnected) return false;
-            if (manager.tabs.has(id)) return manager.focusTab(id, { connectIfNeeded: true });
+            if (manager.tabs.has(id)) return focus ? manager.focusTab(id, { connectIfNeeded: true }) : true;
 
             const metadata = manager.getTabMetaFromStorage(id);
             const selection = manager.getTabSelectionFromStorage(id);
@@ -2919,8 +2919,9 @@ export class TerminalController {
                 workingDirectory: authoritative?.workingDirectory || metadata?.workingDirectory || null
             });
             if (!tab) return false;
+            if (!focus) tab.instance?.markAutoConnectDeferred?.();
         }
-        return manager.focusTab(id, { connectIfNeeded: true });
+        return focus ? manager.focusTab(id, { connectIfNeeded: true }) : true;
     }
 
     resetLayoutStateForNavigation() {
@@ -3002,6 +3003,21 @@ export class TerminalController {
      * Safe to call before the manager is created — handlers null-check this.manager.
      */
     bindSessionEvents(appEventClient) {
+        appEventClient.on('automation_terminal_started', payload => {
+            const tabId = cleanString(payload?.tabId);
+            if (!tabId) return;
+            this.rememberTabLaunch(tabId, {
+                selection: 'base:shell',
+                title: `Automation: ${payload?.jobName || 'Workflow'}`,
+                label: payload?.jobName || 'Automation',
+                workingDirectory: payload?.workingDirectory || null,
+                activate: false
+            });
+            // Scheduled and Board-triggered runs add a tab without taking focus or navigating.
+            return this.adoptLaunchedTab(tabId, { focus: false }).catch(error => {
+                console.warn('Could not display the Automation terminal tab:', error);
+            });
+        });
         const findTab = (payload) => {
             if (!this.manager) return null;
             // Fast path: use tabId injected by parent relay

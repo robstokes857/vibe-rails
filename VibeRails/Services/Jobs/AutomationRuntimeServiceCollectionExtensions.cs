@@ -41,6 +41,8 @@ public static class AutomationRuntimeServiceCollectionExtensions
         services.TryAddScoped<ILaunchLLMService, LaunchLLMService>();
         services.TryAddScoped<IEnvironmentLaunchService, EnvironmentLaunchService>();
         services.TryAddScoped<IJobLaunchService, JobLaunchService>();
+        if (hostScheduler)
+            services.TryAddScoped<IJobTerminalTabLauncher, JobTerminalTabLauncher>();
 
         services.TryAddSingleton<JobSchedulerHealth>();
         services.TryAddSingleton<JobSchedulerHostedService>();

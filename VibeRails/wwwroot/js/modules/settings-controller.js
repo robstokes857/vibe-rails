@@ -1,6 +1,7 @@
 import { showDataExportModal } from './data-export-modal.js';
 import { confirmDialog } from './utils.js';
 import { SettingsKeysPanel } from './settings-keys.js';
+import { getToastTheme, setToastTheme } from './toast-service.js';
 
 export class SettingsController {
     constructor(app) {
@@ -69,6 +70,14 @@ export class SettingsController {
             this._settingsRoot = root;
             this.app.bindAction(root, '[data-action="go-back"]', () => this.app.goBack());
             this._initSettingsTabs(root);
+            const toastTheme = root.querySelector('#setting-toast-theme');
+            if (toastTheme) {
+                toastTheme.value = getToastTheme();
+                toastTheme.addEventListener('change', () => {
+                    const theme = setToastTheme(toastTheme.value);
+                    this.app.showToast('Notifications', 'Your notification style is ready.', 'success', { theme });
+                });
+            }
 
             const projectIdentityCard = root.querySelector('[data-project-identity-card]');
             if (projectIdentityCard && this.app.data.isInGit) {

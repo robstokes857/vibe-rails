@@ -85,7 +85,12 @@ export class BoardController {
         this._openCardGeneration = 0;
         this._openCardAbort = null;
         this._refreshGeneration = 0;
+        this._cardPageGeneration = -1;
         this._loadedBoardId = null;
+        this._pageRequests = new Map();
+        this._filterTimer = null;
+        this._refreshAbort = null;
+        this.cardPage = null;
         BoardApi.attach(app);
         this.state = {
             boards: [],
@@ -122,6 +127,9 @@ export class BoardController {
     }
 
     unload() {
+        clearTimeout(this._filterTimer);
+        this.cancelPageRequests();
+        this._refreshAbort?.abort();
         this.boardSettingsDispose?.();
         this.boardSettingsDispose = null;
         this._refreshGeneration += 1;
@@ -276,11 +284,16 @@ export class BoardController {
     }
 
     filteredCards() {
+        // Paged responses are filtered against the complete board by the server,
+        // including cards that have never been loaded in this browser.
+        if (this.cardPage) return this.state.cards;
         return this.state.cards.filter(card => this.cardMatches(card));
     }
 
     // Distinct assignees present on the board, for the toolbar filter.
     allAssignees() {
+        if (this.cardPage?.assignees) return this.cardPage.assignees
+            .map(key => this.assigneeInfo(key)).filter(Boolean).sort((a, b) => a.label.localeCompare(b.label));
         const seen = new Map();
         this.state.cards.forEach(card => {
             const key = String(card.assignee || '');
@@ -292,6 +305,7 @@ export class BoardController {
     }
 
     allTags() {
+        if (this.cardPage?.tags) return this.cardPage.tags;
         const tags = new Set();
         this.state.cards.forEach(card => (card.tags || []).forEach(tag => tags.add(tag)));
         return [...tags].sort();
@@ -303,6 +317,11 @@ export class BoardController {
     }
 
     stats() {
+        if (this.cardPage) return {
+            cards: this.cardPage.filteredCount,
+            points: this.cardPage.remainingPoints,
+            blocked: this.cardPage.blockedCount
+        };
         const visible = this.filteredCards();
         const remaining = visible.filter(card => {
             const column = this.columnById(card.columnId);
@@ -349,7 +368,7 @@ export class BoardController {
         search?.addEventListener('input', () => {
             this.state.filters.q = search.value;
             this.persistFilters();
-            this.renderAll();
+            this.filtersChanged(true);
         });
 
         const bindSelect = (selector, key) => {
@@ -357,7 +376,7 @@ export class BoardController {
             select?.addEventListener('change', () => {
                 this.state.filters[key] = select.value;
                 this.persistFilters();
-                this.renderAll();
+                this.filtersChanged();
             });
         };
         bindSelect('[data-board-filter-assignee]', 'assignee');
@@ -539,7 +558,11 @@ export class BoardController {
                 const cards = visible
                     .filter(card => card.columnId === column.id)
                     .sort((a, b) => a.position - b.position);
-                const total = this.state.cards.filter(card => card.columnId === column.id).length;
+                const page = this.cardPage?.lanes?.find(lane => lane.columnId === column.id);
+                const total = page?.totalCount ?? this.state.cards.filter(card => card.columnId === column.id).length;
+                const more = page?.hasMore ? `<button type="button" class="btn btn-sm btn-outline-secondary board-load-more w-100"
+                    data-board-action="load-more" data-column-id="${escapeHtml(column.id)}"
+                    ${this._pageRequests.has(column.id) ? 'disabled' : ''}>${this._pageRequests.has(column.id) ? 'Loading…' : `Load more (${cards.length} of ${page.filteredCount})`}</button>` : '';
                 const list = cards.map(card => this.renderCard(card)).join('')
                     || `<p class="board-lane-empty">${escapeHtml(this.emptyLaneCopy(column, total > 0))}</p>`;
 
@@ -559,7 +582,7 @@ export class BoardController {
                                 <i class="fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>
                             </button>
                         </header>
-                        <div class="board-lane-list" data-column-id="${escapeHtml(column.id)}">${list}</div>
+                        <div class="board-lane-list" data-column-id="${escapeHtml(column.id)}">${list}${more}</div>
                         <div class="board-quick-add">
                             <input type="text" class="board-quick-add-input" data-quick-add="${escapeHtml(column.id)}"
                                 placeholder="Add a card" autocomplete="off"
@@ -573,6 +596,62 @@ export class BoardController {
         if (host) host.innerHTML = html;
         this.restoreScroll(scroll);
         this.bindDragAndDrop();
+        this.queryAll('.board-lane-list').forEach(list => {
+            list.addEventListener('scroll', () => {
+                if (list.scrollHeight - list.scrollTop - list.clientHeight < 240) {
+                    void this.loadMoreCards(list.dataset.columnId);
+                }
+            }, { passive: true });
+        });
+    }
+
+    cancelPageRequests() {
+        for (const request of this._pageRequests.values()) request.abort();
+        this._pageRequests.clear();
+    }
+
+    filtersChanged(debounce = false) {
+        clearTimeout(this._filterTimer);
+        // Invalidate both list and page requests immediately, before the debounce.
+        this._refreshGeneration += 1;
+        this._refreshAbort?.abort();
+        this.cancelPageRequests();
+        if (debounce) this._filterTimer = setTimeout(() => void this.refresh(), 200);
+        else void this.refresh();
+    }
+
+    async loadMoreCards(columnId) {
+        // A scroll can fire during a filter debounce or refresh. Its old offset
+        // belongs to the previous full result, even after old requests were aborted.
+        if (this._cardPageGeneration !== this._refreshGeneration) return;
+        const lane = this.cardPage?.lanes?.find(item => item.columnId === columnId);
+        if (!lane?.hasMore || this._pageRequests.has(columnId)) return;
+        const generation = this._refreshGeneration;
+        const root = this.root;
+        const boardId = this.state.boardId;
+        const request = new AbortController();
+        this._pageRequests.set(columnId, request);
+        const isCurrent = () => !request.signal.aborted && generation === this._refreshGeneration
+            && root === this.root && root?.isConnected && boardId === this.state.boardId;
+        const button = this.queryAll('[data-board-action="load-more"]').find(item => item.dataset.columnId === columnId);
+        if (button) { button.disabled = true; button.textContent = 'Loading…'; }
+        try {
+            const response = await BoardApi.getBoardCardPageAsync(boardId, this.state.filters, {
+                columnId, offset: lane.nextOffset, signal: request.signal
+            });
+            if (!isCurrent()) return;
+            const cards = new Map(this.state.cards.map(card => [card.id, card]));
+            for (const card of response.cards || []) cards.set(card.id, card);
+            this.state.cards = [...cards.values()];
+            const next = response.lanes?.find(item => item.columnId === columnId);
+            if (next) Object.assign(lane, next);
+            else lane.hasMore = false;
+        } catch (error) {
+            if (isCurrent()) this.app.showToast('Board', error?.message || 'Could not load more cards. Try again.', 'error');
+        } finally {
+            if (this._pageRequests.get(columnId) === request) this._pageRequests.delete(columnId);
+            if (isCurrent()) this.renderLanes();
+        }
     }
 
     captureScroll() {
@@ -617,6 +696,7 @@ export class BoardController {
         this.queryAll('.board-lane-list').forEach(list => {
             this.sortables.push(window.Sortable.create(list, {
                 group: 'board-cards',
+                disabled: this.hasActiveFilters(),
                 animation,
                 draggable: '.board-card',
                 ghostClass: 'is-ghost',
@@ -672,6 +752,10 @@ export class BoardController {
     }
 
     async refresh({ restoreSelection = false } = {}) {
+        clearTimeout(this._filterTimer);
+        this.cancelPageRequests();
+        this._refreshAbort?.abort();
+        const abort = this._refreshAbort = new AbortController();
         const generation = ++this._refreshGeneration;
         const root = this.root;
         const requestedBoardId = this.state.boardId;
@@ -682,6 +766,7 @@ export class BoardController {
             // The picker already names the new board. Old lanes must not remain actionable.
             this.state.columns = [];
             this.state.cards = [];
+            this.cardPage = null;
             this.renderAll();
         }
         try {
@@ -690,15 +775,17 @@ export class BoardController {
             // The selected board may have been deleted (here or from another tab).
             const boardId = !restoreSelection && boards.some(board => board.id === requestedBoardId)
                 ? requestedBoardId : this.pickBoardId(boards);
-            const [columns, cards] = await Promise.all([
+            const [columns, page] = await Promise.all([
                 BoardApi.getBoardColumnsAsync(boardId),
-                BoardApi.getBoardCardsAsync(boardId)
+                BoardApi.getBoardCardPageAsync(boardId, this.state.filters, { signal: abort.signal })
             ]);
             if (!isCurrent()) return;
             this.state.boards = boards;
             this.state.boardId = boardId;
             this.state.columns = columns;
-            this.state.cards = cards;
+            this.state.cards = page.cards || [];
+            this.cardPage = page.lanes ? page : null;
+            this._cardPageGeneration = generation;
             this._loadedBoardId = boardId;
             this.persistBoardSelection();
             this.renderAll();
@@ -725,7 +812,7 @@ export class BoardController {
             const next = trigger.dataset.tag;
             this.state.filters.tag = this.state.filters.tag === next ? '' : next;
             this.persistFilters();
-            this.renderAll();
+            this.filtersChanged();
             return;
         }
 
@@ -734,7 +821,7 @@ export class BoardController {
             const id = avatar.dataset.assigneeId;
             this.state.filters.assignee = this.state.filters.assignee === id ? '' : id;
             this.persistFilters();
-            this.renderAll();
+            this.filtersChanged();
             return;
         }
 
@@ -744,6 +831,9 @@ export class BoardController {
         }
 
         switch (action) {
+            case 'load-more':
+                void this.loadMoreCards(trigger.dataset.columnId);
+                break;
             case 'new-card':
                 this.openCardEditor(null);
                 break;
@@ -762,7 +852,7 @@ export class BoardController {
             case 'clear-filters':
                 this.state.filters = emptyFilters();
                 this.persistFilters();
-                this.renderAll();
+                this.filtersChanged();
                 break;
             default:
                 break;
@@ -1852,12 +1942,31 @@ export class BoardController {
         const button = editor.querySelector('[data-board-start-work]');
         if (!button) return;
         const running = this.hasRunningSession(card);
-        button.disabled = running;
+        button.disabled = Boolean(editor._boardStarting);
         button.title = running
-            ? 'An agent is already running on this card. Open it from Sessions.'
+            ? 'Go to the agent terminal for this card'
             : 'Start the assigned LLM in the background with this card as its first message';
         const label = button.querySelector?.('[data-board-start-work-label]');
-        if (label) label.textContent = running ? 'Agent running' : 'Start work';
+        if (label) label.textContent = running ? 'Go to agent' : 'Start work';
+        const icon = button.querySelector?.('i');
+        if (icon) icon.className = `fa-solid ${running ? 'fa-terminal' : 'fa-play'}`;
+    }
+
+    async goToAgent(editor, card) {
+        let session = card.sessions?.find(item => item.active && item.tabId);
+        if (!session && card.activeTabId) {
+            session = { id: card.activeSessionId, tabId: card.activeTabId, selection: card.assignee, displayName: card.title };
+        }
+        if (!session) {
+            const fresh = await BoardApi.getBoardCardAsync(card.id);
+            Object.assign(card, fresh);
+            this.renderSessionsPanel(editor, card);
+            session = card.sessions?.find(item => item.active && item.tabId);
+            if (!session && card.activeTabId)
+                session = { id: card.activeSessionId, tabId: card.activeTabId, selection: card.assignee, displayName: card.title };
+        }
+        if (session) await this.focusSessionTab(card, session);
+        else this.app.showToast('Board', 'The agent terminal is no longer available. You can replay its session from Sessions.', 'info');
     }
 
     async startWork(editor, card, intent = 'work') {
@@ -1865,6 +1974,10 @@ export class BoardController {
         if (editor._boardSaving || editor._boardUploading || editor._boardStarting) return;
         if (this.hasRunningSession(card)) {
             this.updateStartWorkButton(editor, card);
+            if (intent === 'work') {
+                try { await this.goToAgent(editor, card); }
+                catch (error) { this.app.showToast('Board', error?.message || 'Failed to open the agent terminal.', 'error'); }
+            }
             return;
         }
         const button = editor.querySelector(intent === 'chat' ? '[data-board-chat]' : '[data-board-start-work]');
@@ -1884,8 +1997,10 @@ export class BoardController {
         try {
             const saved = await BoardApi.updateBoardCardAsync(card.id, payload);
             if (this.hasRunningSession(saved)) {
+                Object.assign(card, saved);
+                editor._boardStarting = false;
                 this.updateStartWorkButton(editor, saved);
-                this.app.showToast('Board', 'An agent is already running on this card. Open it from Sessions.', 'info');
+                if (intent === 'work') await this.goToAgent(editor, card);
                 return;
             }
             const result = await BoardApi.launchBoardCardAsync(card.id, { selection, intent });

@@ -1,3 +1,5 @@
+import { SessionReplayPlayback } from './session-replay-playback.js';
+
 function createModal(title, onClose) {
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:9999;';
@@ -181,11 +183,13 @@ export async function showTranscriptModal(sessionId) {
  */
 export async function showReplayModal(sessionId, { seekToUtc = null } = {}) {
     let term = null;
-    let playbackTimer = null;
+    let playback = null;
+    let closed = false;
     let onWindowResize = null;
 
     const { body } = createModal(`Session Replay — ${sessionId}`, () => {
-        if (playbackTimer) clearTimeout(playbackTimer);
+        closed = true;
+        playback?.pause();
         if (onWindowResize) window.removeEventListener('resize', onWindowResize);
         term?.dispose();
     });
@@ -200,6 +204,7 @@ export async function showReplayModal(sessionId, { seekToUtc = null } = {}) {
     playBtn.style.cssText = 'background:#2d2d2d;border:1px solid #555;color:#ccc;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:14px;font-family:monospace;min-width:36px;';
 
     const speedSelect = document.createElement('select');
+    speedSelect.setAttribute('aria-label', 'Replay speed');
     speedSelect.style.cssText = 'background:#2d2d2d;border:1px solid #555;color:#ccc;padding:3px 6px;border-radius:4px;font-size:12px;font-family:monospace;';
     for (const [label, val] of [['1x', 1], ['2x', 2], ['5x', 5], ['10x', 10], ['Max', 0]]) {
         const opt = document.createElement('option');
@@ -287,6 +292,7 @@ export async function showReplayModal(sessionId, { seekToUtc = null } = {}) {
     let seekToMs = null; // offset into the recording to fast-forward to, when seekToUtc was given
     try {
         const json = await fetchJson(`/api/v1/chatHistory/${encodeURIComponent(sessionId)}/terminal-replay`);
+        if (closed) return;
         initialCols = json.initialCols || 120;
         initialRows = json.initialRows || 40;
         if (seekToUtc != null && json.startedUtc) {
@@ -340,6 +346,7 @@ export async function showReplayModal(sessionId, { seekToUtc = null } = {}) {
             chunkByteOffset += chunkBytes;
         }
     } catch (err) {
+        if (closed) return;
         term.write(`\r\nError: ${err.message}\r\n`);
         return;
     }
@@ -351,12 +358,10 @@ export async function showReplayModal(sessionId, { seekToUtc = null } = {}) {
 
     // Playback state
     let frameIndex = 0;
-    let playing = false;
     let nextResizeIdx = 0; // index into resizeEvents
     let nextAltIdx = 0;    // index into altScreenEvents
     let currentCols = initialCols;
     let currentRows = initialRows;
-    const maxIdleMs = 500;
 
     // Size the font once for the largest geometry seen during the recording so the
     // viewport never gets cropped. The visible grid still tracks the per-chunk dims
@@ -369,10 +374,6 @@ export async function showReplayModal(sessionId, { seekToUtc = null } = {}) {
         term.resize(currentCols, currentRows);
     };
     window.addEventListener('resize', onWindowResize);
-
-    function getSpeed() {
-        return Number.parseInt(speedSelect.value, 10);
-    }
 
     function updateDimensions(cols, rows) {
         currentCols = cols;
@@ -401,57 +402,27 @@ export async function showReplayModal(sessionId, { seekToUtc = null } = {}) {
         }
     }
 
-    function scheduleNext() {
-        if (!playing || frameIndex >= frames.length) {
-            if (frameIndex >= frames.length) {
-                playing = false;
-                playBtn.textContent = '\u21BB';
-                playBtn.title = 'Restart';
-            }
-            return;
-        }
-
-        const frame = frames[frameIndex];
-        const speed = getSpeed();
-
-        // Max speed — dump remaining frames immediately
-        if (speed === 0) {
-            while (frameIndex < frames.length) {
-                applyPendingResizes(frameIndex);
-                term.write(frames[frameIndex].data);
-                frameIndex++;
-            }
+    playback = new SessionReplayPlayback(frames, {
+        speed: Number(speedSelect.value),
+        onFrame(index) {
+            applyPendingResizes(index);
+            term.write(frames[index].data);
+        },
+        onProgress(index) {
+            frameIndex = index;
             updateProgress();
-            playing = false;
+        },
+        onFinish() {
             playBtn.textContent = '\u21BB';
             playBtn.title = 'Restart';
-            return;
         }
-
-        applyPendingResizes(frameIndex);
-        term.write(frame.data);
-        frameIndex++;
-        updateProgress();
-
-        if (frameIndex >= frames.length) {
-            playing = false;
-            playBtn.textContent = '\u21BB';
-            playBtn.title = 'Restart';
-            return;
-        }
-
-        // Delay to next frame — cap idle gaps, apply speed multiplier
-        const rawDelay = frames[frameIndex].delayMs - frame.delayMs;
-        const cappedDelay = Math.min(Math.max(rawDelay, 0), maxIdleMs);
-        const scaledDelay = Math.max(Math.round(cappedDelay / speed), 1);
-
-        playbackTimer = setTimeout(scheduleNext, scaledDelay);
-    }
+    });
 
     function play() {
         if (frameIndex >= frames.length) {
             // Restart
             frameIndex = 0;
+            playback.seek(0);
             nextResizeIdx = 0;
             nextAltIdx = 0;
             altBadge.style.display = 'none';
@@ -459,22 +430,21 @@ export async function showReplayModal(sessionId, { seekToUtc = null } = {}) {
             term.resize(initialCols, initialRows);
             updateDimensions(initialCols, initialRows);
         }
-        playing = true;
         playBtn.textContent = '\u23F8';
         playBtn.title = 'Pause';
-        scheduleNext();
+        playback.play();
     }
 
     function pause() {
-        playing = false;
-        if (playbackTimer) { clearTimeout(playbackTimer); playbackTimer = null; }
+        playback.pause();
         playBtn.textContent = '\u25B6';
         playBtn.title = 'Play';
     }
 
     playBtn.addEventListener('click', () => {
-        if (playing) pause(); else play();
+        if (playback.playing) pause(); else play();
     });
+    speedSelect.addEventListener('change', () => playback.setSpeed(Number(speedSelect.value)));
 
     // Auto-start — reset and size to recording dimensions. Font is already sized
     // for maxCols x maxRows above, so the visible grid here uses the recorded start.
@@ -498,8 +468,8 @@ export async function showReplayModal(sessionId, { seekToUtc = null } = {}) {
         toolbar.insertBefore(marker, progress);
         updateProgress();
     }
+    playback.seek(frameIndex);
     if (frameIndex >= frames.length) {
-        playing = false;
         playBtn.textContent = '\u21BB';
         playBtn.title = 'Restart';
         return;

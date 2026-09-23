@@ -127,7 +127,8 @@ public sealed record JobResponse(
     List<JobTriggerDto> Triggers,
     bool LaunchMinimized = false,
     List<JobActionDto>? Actions = null,
-    long? ImportedFromJobId = null);
+    long? ImportedFromJobId = null,
+    bool LaunchInTerminalTab = false);
 
 public sealed record JobListResponse(List<JobResponse> Jobs);
 
@@ -152,7 +153,8 @@ public sealed record CreateJobRequest(
     List<JobTriggerRequest> Triggers,
     bool LaunchMinimized = false,
     List<JobActionRequest>? Actions = null,
-    long? ImportedFromJobId = null);
+    long? ImportedFromJobId = null,
+    bool LaunchInTerminalTab = false);
 
 public sealed record UpdateJobRequest(
     string Name,
@@ -164,7 +166,8 @@ public sealed record UpdateJobRequest(
     bool Enabled,
     List<JobTriggerRequest> Triggers,
     bool LaunchMinimized = false,
-    List<JobActionRequest>? Actions = null);
+    List<JobActionRequest>? Actions = null,
+    bool? LaunchInTerminalTab = null);
 
 /// <summary>
 /// Client-supplied action shape. Script paths and working directories may arrive absolute from
@@ -197,7 +200,7 @@ public sealed record JobActionDto(
     int? TimeoutSeconds,
     string? ApprovedHash);
 
-// A Job run is a recorded native terminal session. SessionId links to the Sessions row (and its
+// A Job run has a recorded native or tab terminal session. SessionId links to the Sessions row (and its
 // SessionLogs / TerminalSessionLogs) so the Jobs UI can replay it with the same xterm player the
 // Chat History sidebar uses. The session is tagged with this run's id and hidden from Chat History
 // while the run is visible in Automation history. Soft-removing the run clears that session tag so
@@ -219,7 +222,8 @@ public sealed record JobRunResponse(
     int? ExitCode,
     string? ErrorMessage,
     bool CancelRequested,
-    List<JobRunActionDto>? Actions = null);
+    List<JobRunActionDto>? Actions = null,
+    string? TerminalSessionId = null);
 
 public sealed record JobRunActionDto(
     string Id,
@@ -312,7 +316,8 @@ public sealed record JobDefinitionRecord(
     IReadOnlyList<JobTriggerDto> Triggers,
     bool LaunchMinimized = false,
     IReadOnlyList<JobActionRecord>? Actions = null,
-    long? ImportedFromJobId = null);
+    long? ImportedFromJobId = null,
+    bool LaunchInTerminalTab = false);
 
 public sealed record JobActionRecord(
     string Id,
@@ -350,7 +355,9 @@ public sealed record JobRunRecord(
     bool CancelRequested,
     int? OwnerProcessId,
     bool LaunchMinimized = false,
-    IReadOnlyList<JobRunActionRecord>? Actions = null);
+    IReadOnlyList<JobRunActionRecord>? Actions = null,
+    bool LaunchInTerminalTab = false,
+    string? TerminalSessionId = null);
 
 public sealed record JobRunActionRecord(
     string Id,

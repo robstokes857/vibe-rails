@@ -265,7 +265,8 @@ test('New Automations derive repository, LLM, and prompt from the current Enviro
         ['#job-name', { value: 'OpenCode review' }],
         ['#job-timeout', { value: '30' }],
         ['#job-enabled', { checked: false }],
-        ['#job-launch-minimized', { checked: true }]
+        ['#job-launch-minimized', { checked: true }],
+        ['#job-launch-target', { value: 'tab' }]
     ]);
     const form = {
         querySelector(selector) { return controls.get(selector) || null; },
@@ -282,6 +283,7 @@ test('New Automations derive repository, LLM, and prompt from the current Enviro
     assert.equal(app.calls[0].body.environmentId, 42);
     assert.equal(app.calls[0].body.prompt, 'Perform the Environment-owned security review.');
     assert.equal(app.calls[0].body.launchMinimized, true);
+    assert.equal(app.calls[0].body.launchInTerminalTab, true);
     assert.deepEqual(app.calls[0].body.triggers, [{ kind: 2 }]);
 });
 
@@ -2234,4 +2236,18 @@ test('import picker CSS keeps a fallback on every colour token', () => {
     // Editing hides the header actions like it hides the list; small screens wrap them.
     assert.match(css, /\.jobs-view\[data-editor-open="true"\] \.jobs-page-actions,/);
     assert.match(css, /\.jobs-page-actions \{ flex-wrap: wrap; \}/);
+});
+
+
+test('Run history displays an escaped copyable session ID and copies the full value', async () => {
+    const app = createApp();
+    const copied = [];
+    app.copyTextToClipboard = async value => { copied.push(value); return true; };
+    const controller = new JobController(app);
+    const html = controller.renderHistoryRow({ id: 'run', status: 2, sessionId: 'worker', terminalSessionId: 'workflow"<session>' });
+    assert.match(html, /data-history-action="copy-session"/);
+    assert.match(html, /data-session-id="workflow&quot;/);
+    await controller.copySessionId('full-session-id');
+    assert.deepEqual(copied, ['full-session-id']);
+    assert.match(controller.renderHistoryRow({ id: 'run', status: 0 }), /No session recorded/);
 });

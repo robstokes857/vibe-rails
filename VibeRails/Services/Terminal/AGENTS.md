@@ -26,6 +26,16 @@ Remote relay server (other repo):
 
 ## Core Architecture
 
+### Native script Automation recordings (VB-29)
+
+`JobScriptSessionRecorder` creates a normal Shell session for a native script-only workflow;
+terminal-tab workflows already have an outer PTY recording and do not create another one.
+Script output uses `SessionOutputWriter.EnqueueLine` to preserve each stdout/stderr line's
+arrival timestamp in raw logs and replay frames. It uses the existing coalesced batch/retry
+policy, so scripts do not introduce one SQLite transaction per output line. The Jobs runner
+flushes and closes the recording with the actual outcome, including cancellation and timeout.
+The run and lane-triggering Board card reference the same session ID. No history backfill runs.
+
 ### Board launch options and input sequences (2026-09-14)
 
 `StartTerminalRequest.BaseLlmOptions` carries typed model/effort/start-mode choices only for

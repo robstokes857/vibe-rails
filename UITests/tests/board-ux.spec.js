@@ -18,7 +18,7 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
         attachments: [{ id: 'att_image', name: 'Screenshot.png', url: IMAGE }],
         comments: [{ id: 'comment_1', author: { kind: 'user', label: 'You' },
             body: '![Screenshot.png](attachment:att_image)', createdAt: '2026-09-11T06:00:00Z' }],
-        commits: [], sessions: [{ id: 'session_test', displayName: 'Codex session', cli: 'codex',
+        commits: [], sessions: [{ id: 'session_test', tabId: active ? 'agent_tab' : null, displayName: 'Codex session', cli: 'codex',
             active, createdAt: '2026-09-11T06:00:00Z' }]
     };
     const requests = [];
@@ -364,13 +364,21 @@ test('long new-card descriptions grow inside the composer instead of painting ov
     expect(layout.attachmentsTop).toBeGreaterThanOrEqual(layout.composerBottom);
 });
 
-test('a running agent disables Start work while keeping Save and the session available', async ({ page }) => {
-    await openBoard(page, { active: true });
+test('a running agent exposes Go to agent while keeping Save and the session available', async ({ page }) => {
+    const requests = await openBoard(page, { active: true });
+    await page.evaluate(() => {
+        window.__agentTabs = [];
+        window.app.terminalController.adoptLaunchedTab = async id => { window.__agentTabs.push(id); return true; };
+    });
     await page.getByText('Description images', { exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Agent running', exact: true })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Go to agent', exact: true })).toBeEnabled();
     await expect(page.getByRole('button', { name: 'Chat with:', exact: true })).toBeDisabled();
     await expect(page.locator('[data-board-save-card]')).toBeEnabled();
     await expect(page.locator('[data-board-open-session="session_test"]')).toBeEnabled();
+    await page.getByRole('button', { name: 'Go to agent', exact: true }).click();
+    await expect(page.locator('[data-board-card-editor]')).toHaveCount(0);
+    expect(await page.evaluate(() => window.__agentTabs)).toEqual(['agent_tab']);
+    expect(requests.filter(request => request.method === 'PUT' || request.path.endsWith('/launch'))).toHaveLength(0);
 });
 
 test('Start work preserves the board and stores model and effort', async ({ page }) => {

@@ -1,5 +1,35 @@
 # Vibe Board architecture and review
 
+## VB-29: activity ordering and Automation sessions (2026-09-23)
+
+New cards start at position zero in their selected lane (Backlog by default). Card field updates,
+comments, notes, files, session links, commit links and linked-card changes move the affected card
+to the top in the same store transaction. Other cards retain their relative ordering and activity
+timestamps. Positions stay dense. An explicit drag position is preserved until the next card
+update; moves without an explicit position enter at the top of the destination lane.
+
+The active-session action is **Go to agent**. It focuses the existing tab without saving the card
+or launching another agent. The same action handles a session discovered during Start work's
+save, so another window starting work does not leave a disabled dead end.
+
+`BoardAutomationSessionLinker` links lane-triggered Automation recordings to the originating
+card's ordinary Sessions rail. It uses the immutable `board-lane:<card-key>:<lane>:<event>` trigger
+and the run's source project, so workspace clones do not redirect the link. The native Worker
+callback links its recording; a terminal-tab workflow links its full shell recording and tab.
+Native script-only runs now create a normal Shell session before executing. Script stdout/stderr
+lines and their elapsed timestamps become batched raw logs and replay frames through
+`SessionOutputWriter`; normal, cancelled and timed-out exits complete that session with the
+workflow's actual outcome. The run and originating Board card share that recording's session ID.
+Repeat callbacks are idempotent and deleted cards are ignored. Manual/retry triggers do not
+inherit stale card context. No Board schema changes or historical-session backfill are needed.
+
+Board `GET /cards?pageSize=30` loads all open cards and only the first page of each lane whose
+name contains ship/done/complete. `columnId` plus `offset` loads later pages of one lane. Search,
+assignee, type, priority and tag filters run before LIMIT; full/filtered lane counts, board-wide
+statistics and filter choices include unloaded cards. `IBoardStore.GetCardsPageAsync` provides
+these through one deferred read snapshot without schema changes. Omitting `pageSize` retains
+the original unpaged response for older clients and MCP consumers.
+
 ## VB-25: one session working multiple cards (2026-09-21)
 
 An agent calls `attach_board_session(card: "VB-24")` to add its current VibeRails session to

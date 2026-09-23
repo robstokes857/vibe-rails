@@ -8863,23 +8863,57 @@ input.form-control:disabled {
     }
 }
 
-/* Toasts */
-/* Base title/body layout for EVERY app toast (toast-service.js injects these
-   spans into the library's message slot). Without an unscoped rule they render
-   as bare inline spans and concatenate: "ErrorName the automation first…".
-   The xrayOverlay rules below refine the terminal-toast variant only. */
+/* Compact application notifications. The library supplies stacking and timers;
+   appearance stays here so every theme shares the same spacing and typography. */
+.notAToastvr-dark,
+.notAToastvr-light,
+.notAToastvr-system {
+    --vr-toast-bg: #181d27;
+    --vr-toast-fg: #f1f5f9;
+    --vr-toast-muted: #aeb9c9;
+    --vr-toast-border: #343d4e;
+    background: var(--vr-toast-bg);
+    color: var(--vr-toast-fg);
+    border: 1px solid var(--vr-toast-border);
+    box-shadow: 0 6px 20px rgb(0 0 0 / 22%);
+    padding: 10px 12px !important;
+    gap: 10px !important;
+    align-items: flex-start !important;
+    width: fit-content;
+    max-width: min(360px, calc(100vw - 24px));
+    box-sizing: border-box;
+}
+
+.notAToastvr-light {
+    --vr-toast-bg: #ffffff;
+    --vr-toast-fg: #18202e;
+    --vr-toast-muted: #566174;
+    --vr-toast-border: #d9dfe8;
+}
+
+@media (prefers-color-scheme: light) {
+    .notAToastvr-system {
+        --vr-toast-bg: #ffffff;
+        --vr-toast-fg: #18202e;
+        --vr-toast-muted: #566174;
+        --vr-toast-border: #d9dfe8;
+    }
+}
+
 .vr-toast-title {
     display: block;
-    margin-bottom: 0.12rem;
-    font-weight: 700;
+    margin-bottom: 2px;
+    font-weight: 600;
+    line-height: 1.4;
 }
 
 .vr-toast-body {
     display: block;
-    line-height: 1.4;
+    color: var(--vr-toast-muted);
+    line-height: 1.45;
+    overflow-wrap: anywhere;
 }
 
-/* Compact toasts ("Ready", "Terminal is idle") stay one-liners. */
 .vr-toast-title.vr-toast-compact {
     display: inline;
     margin: 0 0.35rem 0 0;
@@ -8887,81 +8921,52 @@ input.form-control:disabled {
 
 .vr-toast-body.vr-toast-compact { display: inline; }
 
-.notAToasttoast-container.top-right {
-    top: calc(var(--navbar-height) + 0.9rem) !important;
-    right: 0.9rem !important;
+.notAToasttoast-container.top-right,
+.notAToasttoast-container.bottom-right {
+    right: 12px !important;
     left: auto !important;
     transform: none !important;
-    width: min(calc(100vw - 1.5rem), 34rem) !important;
-    gap: 0.7rem !important;
+    width: min(calc(100vw - 24px), 360px) !important;
+    gap: 8px !important;
     z-index: 1080 !important;
     align-items: flex-end !important;
 }
 
-.notAToasttoast-container.top-right>div {
-    width: 100%;
-    max-width: 100%;
+.notAToasttoast-container.top-right {
+    top: calc(var(--navbar-height) + 12px) !important;
 }
 
-/* The toast strip floats over the page's top-right action bars (the Python
-   workbench's Run/Sign row sits exactly there). Only the toast cards themselves
-   may take a click — the container must never swallow clicks aimed at the
-   buttons beneath it while a toast is up. */
-.notAToasttoast-container {
-    pointer-events: none !important;
-}
+/* Empty stack space must leave the page's controls clickable. */
+.notAToasttoast-container { pointer-events: none !important; }
+.notAToasttoast-container > div { pointer-events: auto; }
 
-.notAToasttoast-container > div {
-    pointer-events: auto;
-}
-
-.notAToastxrayOverlay {
-    box-shadow: 0 16px 40px rgba(2, 12, 27, 0.45), 0 0 0 1px rgba(148, 163, 184, 0.08) !important;
-    backdrop-filter: blur(18px) saturate(140%) !important;
-    -webkit-backdrop-filter: blur(18px) saturate(140%) !important;
-}
-
-.notAToastxrayOverlay .notAToastmessage {
-    display: flex;
-    flex-direction: column;
-    gap: 0.22rem;
-    max-width: none !important;
+.notAToasttoast-container .notAToastmessage {
     min-width: 0;
+    max-width: none !important;
+    overflow-wrap: anywhere;
 }
 
-.notAToastxrayOverlay .vr-toast-title {
-    display: block;
-    font-size: 0.78rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: rgba(229, 246, 255, 0.76);
+.notAToasttoast-container .notAToasticon {
+    flex: 0 0 18px;
+    width: 18px !important;
+    height: 18px !important;
+    margin: 1px 0 0 !important;
 }
 
-.notAToastxrayOverlay .vr-toast-title-only {
-    color: #eefbff;
+.notAToasttoast-container .notAToastclsBtn {
+    margin: 0 !important;
+    font-size: 12px !important;
+    line-height: 18px;
+    opacity: 0.75;
 }
 
-.notAToastxrayOverlay .vr-toast-body {
-    display: block;
-    font-size: 0.92rem;
-    line-height: 1.4;
-    color: #f8fdff;
-    letter-spacing: 0.01em;
-}
+.notAToasttoast-container .notAToastclsBtn:hover { opacity: 1; }
 
-.notAToastxrayOverlay .notAToasticon {
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06), 0 10px 18px rgba(15, 23, 42, 0.22);
-}
-
-.notAToastxrayOverlay .notAToastclsBtn {
-    opacity: 0.72;
-    transition: opacity 0.18s ease, transform 0.18s ease;
-}
-
-.notAToastxrayOverlay .notAToastclsBtn:hover {
-    opacity: 1;
-    transform: scale(1.08);
+@media (prefers-reduced-motion: reduce) {
+    .notAToasttoast-container > div,
+    .notAToasttoast-container .notAToasticon {
+        animation-duration: 1ms !important;
+    }
 }
 
 @media (max-width: 576px) {
@@ -8985,7 +8990,7 @@ input.form-control:disabled {
     .notAToasttoast-container.top-right {
         top: calc(var(--navbar-height) + 0.65rem) !important;
         right: 0.5rem !important;
-        width: calc(100vw - 1rem) !important;
+        width: min(calc(100vw - 1rem), 360px) !important;
     }
 }
 
@@ -10764,6 +10769,22 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     display: flex;
     flex: 1 1 auto;
     flex-direction: column;
+}
+
+/* A minimum height alone lets long lanes grow the entire page. Bound the Board
+   shell so each lane owns its scrollbar and can request the next page. */
+body.vb-rules-workspace-active.vb-board-active .app-main {
+    height: 100dvh;
+    min-height: 0;
+}
+
+html.nav-layout-top body.vb-rules-workspace-active.vb-board-active .app-main {
+    height: calc(100dvh - var(--navbar-height));
+}
+
+body.vb-board-active .main-container,
+body.vb-board-active #app-content {
+    min-height: 0;
 }
 
 .rules-dashboard-host {

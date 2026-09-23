@@ -412,9 +412,7 @@ public sealed partial class BoardStore : IBoardStore
             RETURNING LastNumber;
             """,
             ("$project", project), cancellationToken));
-        var position = (int)await ScalarLongAsync(connection, transaction,
-            "SELECT COUNT(*) FROM BoardCards WHERE ColumnId = $column",
-            ("$column", column.Id), cancellationToken);
+        const int position = 0;
         var id = NewId("card");
         var now = DateTime.UtcNow;
 
@@ -445,6 +443,7 @@ public sealed partial class BoardStore : IBoardStore
             insert.Parameters.AddWithValue("$updated", ToDb(now));
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
+        await PromoteCardAsync(connection, transaction, id, cancellationToken);
         await WriteBaseLlmOptionsAsync(connection, transaction, id, card.BaseLlmOptions, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
@@ -465,16 +464,13 @@ public sealed partial class BoardStore : IBoardStore
             && !string.Equals(patch.ColumnId.Trim(), existing.ColumnId, StringComparison.Ordinal);
         var columnId = existing.ColumnId;
         var boardId = existing.BoardId;
-        var position = existing.Position;
+        const int position = 0;
         if (moving)
         {
             var column = await ReadColumnAsync(connection, transaction, project, patch.ColumnId!.Trim(), cancellationToken)
                 ?? throw new BoardValidationException($"Lane not found: {patch.ColumnId}");
             columnId = column.Id;
             boardId = column.BoardId;
-            position = (int)await ScalarLongAsync(connection, transaction,
-                "SELECT COUNT(*) FROM BoardCards WHERE ColumnId = $column AND Id <> $id",
-                ("$column", columnId), cancellationToken, ("$id", (object)existing.Id));
         }
 
         // Append reads the current text while holding the same write transaction as the update.
@@ -535,10 +531,8 @@ public sealed partial class BoardStore : IBoardStore
         if (patch.ClearBaseLlmOptions || patch.BaseLlmOptions is not null)
             await WriteBaseLlmOptionsAsync(connection, transaction, updated.Id, updated.BaseLlmOptions, cancellationToken);
         if (moving)
-        {
             await RenumberColumnAsync(connection, transaction, existing.ColumnId, cancellationToken);
-            await RenumberColumnAsync(connection, transaction, columnId, cancellationToken);
-        }
+        await PromoteCardAsync(connection, transaction, updated.Id, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return updated;
     }
@@ -581,7 +575,7 @@ public sealed partial class BoardStore : IBoardStore
         var targetIds = sameColumn
             ? sourceIds
             : (await ReadColumnCardIdsAsync(connection, transaction, column.Id, cancellationToken)).Where(id => id != existing.Id).ToList();
-        var index = Math.Clamp(position ?? targetIds.Count, 0, targetIds.Count);
+        var index = Math.Clamp(position ?? 0, 0, targetIds.Count);
         targetIds.Insert(index, existing.Id);
 
         var now = ToDb(DateTime.UtcNow);
@@ -818,6 +812,7 @@ public sealed partial class BoardStore : IBoardStore
             if (await update.ExecuteNonQueryAsync(cancellationToken) == 0)
                 return null;
         }
+        await TouchCardAsync(connection, transaction, card.Id, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return (await ReadSessionsAsync(connection, card.Id, cancellationToken)).FirstOrDefault(s => s.SessionId == sessionId);
     }
@@ -1365,6 +1360,23 @@ public sealed partial class BoardStore : IBoardStore
         command.Parameters.AddWithValue("$updated", ToDb(DateTime.UtcNow));
         command.Parameters.AddWithValue("$id", cardId);
         await command.ExecuteNonQueryAsync(cancellationToken);
+        await PromoteCardAsync(connection, transaction, cardId, cancellationToken);
+    }
+
+    // Card activity belongs at the top, while explicit drag positions still use
+    // WriteCardPositionsAsync directly. Only the touched card's timestamp changes.
+    private static async Task PromoteCardAsync(SqliteConnection connection, SqliteTransaction transaction, string cardId, CancellationToken cancellationToken)
+    {
+        await using var column = connection.CreateCommand();
+        column.Transaction = transaction;
+        column.CommandText = "SELECT ColumnId FROM BoardCards WHERE Id = $id;";
+        column.Parameters.AddWithValue("$id", cardId);
+        if (await column.ExecuteScalarAsync(cancellationToken) is not string columnId)
+            return;
+        var ids = await ReadColumnCardIdsAsync(connection, transaction, columnId, cancellationToken);
+        ids.Remove(cardId);
+        ids.Insert(0, cardId);
+        await WriteCardPositionsAsync(connection, transaction, ids, cancellationToken);
     }
 
     private static async Task<long> ScalarLongAsync(SqliteConnection connection, SqliteTransaction? transaction, string sql, (string Name, object Value) parameter, CancellationToken cancellationToken, params (string Name, object Value)[] more)

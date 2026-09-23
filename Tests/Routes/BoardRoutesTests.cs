@@ -585,6 +585,44 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         Assert.Single(remaining.RootElement.GetProperty("sessions").EnumerateArray());
     }
 
+    [Fact]
+    public async Task CardPages_KeepAuthentication_AotMetadata_AndUnpagedCompatibility()
+    {
+        var store = _app.Services.GetRequiredService<IBoardStore>();
+        var ct = TestContext.Current.CancellationToken;
+        await store.EnsureDefaultColumnsAsync(_project, ct);
+        var done = (await store.GetColumnsAsync(_project, ct)).First(column => column.Name == "Done");
+        for (var index = 0; index < 4; index++)
+            await store.CreateCardAsync(_project, new NewBoardCard(done.Id, $"Done {index}", "", "base:codex", "medium", 5, ["debug"], index == 0), ct);
+        using var unauthorized = await SendAsync(HttpMethod.Get, "/api/v1/board/cards?pageSize=2", "test-session");
+        Assert.Equal(HttpStatusCode.Unauthorized, unauthorized.StatusCode);
+        using var initial = await GetJsonAsync("/api/v1/board/cards?pageSize=2");
+        var response = initial.RootElement;
+        Assert.Equal(2, response.GetProperty("cards").GetArrayLength());
+        Assert.Equal(4, response.GetProperty("totalCount").GetInt32());
+        Assert.Equal(4, response.GetProperty("filteredCount").GetInt32());
+        Assert.Equal(1, response.GetProperty("blockedCount").GetInt32());
+        Assert.Equal(0, response.GetProperty("remainingPoints").GetInt64());
+        Assert.Equal("base:codex", response.GetProperty("assignees")[0].GetString());
+        Assert.Equal("debug", response.GetProperty("tags")[0].GetString());
+        var metadata = response.GetProperty("lanes").EnumerateArray().Single(lane => lane.GetProperty("columnId").GetString() == done.Id);
+        Assert.Equal(2, metadata.GetProperty("nextOffset").GetInt32());
+        Assert.True(metadata.GetProperty("hasMore").GetBoolean());
+        using var second = await GetJsonAsync($"/api/v1/board/cards?pageSize=2&columnId={done.Id}&offset=2");
+        Assert.Equal(2, second.RootElement.GetProperty("cards").GetArrayLength());
+        Assert.False(second.RootElement.GetProperty("lanes")[0].GetProperty("hasMore").GetBoolean());
+        using var filter = await GetJsonAsync("/api/v1/board/cards?pageSize=2&q=Done%200&assignee=base:codex&type=task&priority=medium&tag=debug");
+        Assert.Equal(1, filter.RootElement.GetProperty("cards").GetArrayLength());
+        Assert.Equal(1, filter.RootElement.GetProperty("filteredCount").GetInt32());
+        using var legacy = await GetJsonAsync("/api/v1/board/cards");
+        Assert.Equal(4, legacy.RootElement.GetProperty("cards").GetArrayLength());
+        Assert.False(legacy.RootElement.TryGetProperty("lanes", out _));
+        using var invalid = await SendAsync(HttpMethod.Get, "/api/v1/board/cards?pageSize=30&columnId=foreign", "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        using var tooLong = await SendAsync(HttpMethod.Get, "/api/v1/board/cards?pageSize=30&q=" + new string('x', 301), "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.BadRequest, tooLong.StatusCode);
+    }
+
     private async Task<JsonDocument> GetJsonAsync(string path)
     {
         using var response = await SendAsync(HttpMethod.Get, path, "test-session", "test-tab");

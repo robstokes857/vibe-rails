@@ -14,7 +14,7 @@ public interface IJobLaunchService
 }
 
 /// <summary>
-/// Opens one real OS terminal window per queued Automation run. Script-only workflows launch the
+/// Opens one native terminal or in-app terminal tab per queued Automation run. Script-only workflows launch the
 /// VibeRails child directly; a workflow with a Worker uses the same Environment launch pipeline as
 /// the Environment screen so its arguments and workspace policy remain exact.
 ///
@@ -29,7 +29,8 @@ public interface IJobLaunchService
 public sealed class JobLaunchService(
     IJobStore store,
     IEnvironmentLaunchService environmentLaunchService,
-    IJobProcessLauncher processLauncher) : IJobLaunchService
+    IJobProcessLauncher processLauncher,
+    IJobTerminalTabLauncher? terminalTabLauncher = null) : IJobLaunchService
 {
     /// <summary>
     /// Ceiling on simultaneously open job terminals across the whole machine. The per-job overlap
@@ -95,7 +96,13 @@ public sealed class JobLaunchService(
         try
         {
             LaunchResult launch;
-            if (workers.Count == 1 || actions.Count == 0 && run.EnvironmentId is not null)
+            if (run.LaunchInTerminalTab)
+            {
+                launch = terminalTabLauncher is null
+                    ? new LaunchResult(false, "Terminal tabs are unavailable in this host.")
+                    : await terminalTabLauncher.LaunchAsync(run, cancellationToken);
+            }
+            else if (workers.Count == 1 || actions.Count == 0 && run.EnvironmentId is not null)
             {
                 // Worker workflows retain the exact Environment launch pipeline, including its
                 // persistent/per-run workspace resolution. Every repository script in the child

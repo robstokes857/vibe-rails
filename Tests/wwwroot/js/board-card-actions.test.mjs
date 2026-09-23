@@ -326,29 +326,56 @@ test('Start work keeps edits open and skips launch if saving fails', async () =>
     assert.deepEqual(h.toasts, [['Board', 'Save failed', 'error']]);
 });
 
-test('Start work is disabled for a running session and returns without saving or launching', async () => {
+test('Go to agent focuses a running session without saving or launching', async () => {
     const h = harness();
-    h.card.sessions = [{ id: 'running-session', active: true }];
+    const label = {};
+    h.fields['[data-board-start-work]'].querySelector = selector => selector === '[data-board-start-work-label]' ? label : null;
+    h.card.sessions = [{ id: 'running-session', tabId: 'live-tab', active: true }];
+    let focused;
+    h.app.terminalController = { async adoptLaunchedTab(tab) { focused = tab; return true; } };
     h.controller.updateStartWorkButton(h.editor, h.card);
-    assert.equal(h.fields['[data-board-start-work]'].disabled, true);
+    assert.equal(h.fields['[data-board-start-work]'].disabled, false);
+    assert.equal(label.textContent, 'Go to agent');
     await h.controller.startWork(h.editor, h.card);
     assert.deepEqual(h.calls, []);
-    assert.equal(h.closed, false);
+    assert.equal(focused, 'live-tab');
+    assert.equal(h.closed, true);
 
     h.card.sessions[0].active = false;
     h.controller.updateStartWorkButton(h.editor, h.card);
     assert.equal(h.fields['[data-board-start-work]'].disabled, false);
+    assert.equal(label.textContent, 'Start work');
 });
 
-test('Start work stops when saving reveals a session started from another window', async () => {
+test('Start work opens a session that started in another window while saving', async () => {
     const h = harness();
+    let navigation;
+    h.app.terminalController = {};
+    h.app.navigate = (view, data) => { navigation = { view, data }; };
     h.app.apiCall = async (url, method, body) => {
         h.calls.push({ url, method, body });
-        return { ...h.card, activeSessionId: 'running-session' };
+        return { ...h.card, activeSessionId: 'running-session', activeTabId: 'live-tab' };
     };
     await h.controller.startWork(h.editor, h.card);
     assert.equal(h.calls.length, 1);
     assert.equal(h.calls[0].method, 'PUT');
-    assert.equal(h.fields['[data-board-start-work]'].disabled, true);
-    assert.equal(h.closed, false);
+    assert.equal(h.fields['[data-board-start-work]'].disabled, false);
+    assert.equal(h.closed, true);
+    assert.equal(navigation.view, 'terminal-focus');
+    assert.equal(navigation.data.preferredTabId, 'live-tab');
+});
+
+test('Go to agent refreshes an incomplete active session and opens its tab', async () => {
+    const h = harness();
+    h.card.activeSessionId = 'running-session';
+    let focused;
+    h.app.terminalController = { async adoptLaunchedTab(tab) { focused = tab; return true; } };
+    h.app.apiCall = async (url, method, body) => {
+        h.calls.push({ url, method, body });
+        return { ...h.card, sessions: [{ id: 'running-session', tabId: 'live-tab', active: true }] };
+    };
+    await h.controller.startWork(h.editor, h.card);
+    assert.equal(h.calls.length, 1);
+    assert.equal(h.calls[0].method, 'GET');
+    assert.equal(focused, 'live-tab');
 });

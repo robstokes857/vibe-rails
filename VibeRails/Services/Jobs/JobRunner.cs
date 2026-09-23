@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 using VibeRails.DB;
 using VibeRails.DTOs;
+using VibeRails.Services.Board;
 using VibeRails.Services.Cli;
 using VibeRails.Services.Terminal;
 using VibeRails.Utils;
@@ -66,7 +67,7 @@ public static class JobRunner
         using var shutdown = new CancellationTokenSource();
         var shutdownState = new JobRunShutdownState();
         ArmSelfDeadline(store, runId, parsedArgs.MaxRuntimeMinutes, shutdownState);
-        var cancelWatcher = WatchForCancellationAsync(store, runId, shutdown.Token);
+        var cancelWatcher = WatchForCancellationAsync(store, runId, shutdownState, shutdown.Token);
 
         var status = JobRunStatus.Succeeded;
         string? error = null;
@@ -79,6 +80,9 @@ public static class JobRunner
 
         try
         {
+            if (!run.LaunchInTerminalTab && actions.Count > 0 && actions.All(action => action.Kind == JobActionKind.Script))
+                shutdownState.ScriptRecording = await JobScriptSessionRecorder.StartAsync(scope.ServiceProvider, store, run, workspaceRoot);
+
             // A pre-workflow snapshot can exist only on an older database whose migration could
             // not yet run. Preserve that one-Worker behavior rather than treating it as an empty
             // successful workflow.
@@ -89,6 +93,7 @@ public static class JobRunner
                     services,
                     store,
                     runId,
+                    run,
                     action: null,
                     automationConsumer,
                     shutdownState,
@@ -112,7 +117,9 @@ public static class JobRunner
                     }
 
                     Console.WriteLine();
-                    Console.WriteLine($"[VibeRails] Automation action {index + 1}/{actions.Count}: {DescribeAction(action)}");
+                    var actionHeading = $"[VibeRails] Automation action {index + 1}/{actions.Count}: {DescribeAction(action)}";
+                    Console.WriteLine(actionHeading);
+                    shutdownState.ScriptRecording?.WriteLine("\r\n" + actionHeading, false, DateTime.UtcNow);
 
                     ActionOutcome outcome;
                     try
@@ -124,12 +131,14 @@ public static class JobRunner
                                 scriptService,
                                 workspaceRoot,
                                 run.ProjectPath,
-                                action),
+                                action,
+                                shutdownState.ScriptRecording),
                             JobActionKind.Worker => await RunWorkerActionAsync(
                                 parsedArgs,
                                 services,
                                 store,
                                 runId,
+                                run,
                                 action,
                                 automationConsumer,
                                 shutdownState,
@@ -205,19 +214,30 @@ public static class JobRunner
             error = $"Automation exceeded its {parsedArgs.MaxRuntimeMinutes}-minute limit.";
         }
 
-        if (status == JobRunStatus.Succeeded)
+        try
         {
-            // Success goes through the store's cancel-aware completion so a Stop that lands after
-            // the cancel read above is recorded as Cancelled instead of being overwritten by a
-            // later Succeeded. If another terminal path (deadline, cancel watcher, reaper) already
-            // closed the run, its durable status comes back and decides the exit code.
-            status = await store.CompleteIdleRunAsync(runId, CancellationToken.None);
+            if (status == JobRunStatus.Succeeded)
+            {
+                // Success goes through the store's cancel-aware completion so a Stop that lands after
+                // the cancel read above is recorded as Cancelled instead of being overwritten by a
+                // later Succeeded. If another terminal path (deadline, cancel watcher, reaper) already
+                // closed the run, its durable status comes back and decides the exit code.
+                status = await store.CompleteIdleRunAsync(runId, CancellationToken.None);
+            }
+            else
+            {
+                await store.CompleteRunAsync(runId, status, exitCode, error, CancellationToken.None);
+            }
         }
-        else
+        finally
         {
-            await store.CompleteRunAsync(runId, status, exitCode, error, CancellationToken.None);
+            try
+            {
+                if (shutdownState.ScriptRecording is { } recording)
+                    await recording.CompleteAsync(status == JobRunStatus.Failed ? exitCode : ToExitCode(status), error);
+            }
+            finally { Volatile.Write(ref shutdownState.RunFinalized, 1); }
         }
-        Volatile.Write(ref shutdownState.RunFinalized, 1);
         return ToExitCode(status);
     }
 
@@ -226,7 +246,8 @@ public static class JobRunner
         IAutomationScriptService scriptService,
         string workspaceRoot,
         string projectRoot,
-        JobRunActionRecord action)
+        JobRunActionRecord action,
+        JobScriptSessionRecorder? recording)
     {
         PreparedAutomationScript prepared;
         try
@@ -241,6 +262,7 @@ public static class JobRunner
         var timeout = action.TimeoutSeconds is int seconds
             ? TimeSpan.FromSeconds(seconds)
             : Timeout.InfiniteTimeSpan;
+        var actionStartedUtc = DateTime.UtcNow;
         var result = await cli.RunAsync(
             new CliRequest(
                 prepared.Executable,
@@ -254,6 +276,7 @@ public static class JobRunner
                     Console.Error.WriteLine(line.Text);
                 else
                     Console.WriteLine(line.Text);
+                recording?.WriteLine(line.Text, line.IsError, actionStartedUtc + line.Elapsed);
                 return ValueTask.CompletedTask;
             },
             CancellationToken.None);
@@ -305,6 +328,7 @@ public static class JobRunner
         IServiceProvider services,
         IJobStore store,
         string runId,
+        JobRunRecord run,
         JobRunActionRecord? action,
         IAutomationConsumer automationConsumer,
         JobRunShutdownState shutdownState,
@@ -336,6 +360,19 @@ public static class JobRunner
                         "[Jobs] Run {RunId} is recording Worker terminal session {SessionId}",
                         runId,
                         sessionId);
+                    if (!run.LaunchInTerminalTab && boardCardKey is not null)
+                    {
+                        try
+                        {
+                            BoardAutomationSessionLinker.LinkAsync(
+                                    services.GetRequiredService<IBoardStore>(), run, sessionId)
+                                .WaitAsync(FinalWriteGrace).GetAwaiter().GetResult();
+                        }
+                        catch (Exception ex)
+                        {
+                            Log.Warning(ex, "[Jobs] Could not link Automation session {SessionId} to card {CardKey}", sessionId, boardCardKey);
+                        }
+                    }
                     if (action is null)
                         return;
 
@@ -564,7 +601,8 @@ public static class JobRunner
                 store,
                 runId,
                 JobRunStatus.TimedOut,
-                $"Automation exceeded its {maxRuntimeMinutes.Value}-minute limit.");
+                $"Automation exceeded its {maxRuntimeMinutes.Value}-minute limit.",
+                state.ScriptRecording);
 
             try { Log.CloseAndFlush(); } catch { }
 
@@ -588,7 +626,7 @@ public static class JobRunner
     /// Cooperative cancellation from the Jobs page. Unlike the deadline this goes through the store,
     /// so it is best-effort by nature — the deadline is the guarantee, this is the courtesy.
     /// </summary>
-    private static async Task WatchForCancellationAsync(IJobStore store, string runId, CancellationToken cancellationToken)
+    private static async Task WatchForCancellationAsync(IJobStore store, string runId, JobRunShutdownState state, CancellationToken cancellationToken)
     {
         try
         {
@@ -602,7 +640,7 @@ public static class JobRunner
 
                 // Same ordering rule as the deadline: record the outcome first, or the reaper will
                 // later see a dead process against a Running row and call it Interrupted.
-                RecordTerminalStatus(store, runId, JobRunStatus.Cancelled, CancelledMessage);
+                RecordTerminalStatus(store, runId, JobRunStatus.Cancelled, CancelledMessage, state.ScriptRecording);
 
                 try { Log.CloseAndFlush(); } catch { }
                 try { Process.GetCurrentProcess().Kill(entireProcessTree: true); }
@@ -629,7 +667,8 @@ public static class JobRunner
     /// not land the reaper still closes the run out — just as Interrupted rather than the real
     /// reason. And if it does land, the reaper's later write is a no-op for the same reason.
     /// </summary>
-    private static void RecordTerminalStatus(IJobStore store, string runId, JobRunStatus status, string? message)
+    private static void RecordTerminalStatus(IJobStore store, string runId, JobRunStatus status, string? message,
+        JobScriptSessionRecorder? recording = null)
     {
         try
         {
@@ -641,6 +680,11 @@ public static class JobRunner
         catch (Exception ex)
         {
             Log.Warning(ex, "[Jobs] Could not record {Status} for run {RunId} before killing it", status, runId);
+        }
+        if (recording is not null)
+        {
+            try { recording.CompleteAsync(ToExitCode(status), message).WaitAsync(FinalWriteGrace).GetAwaiter().GetResult(); }
+            catch (Exception ex) { Log.Warning(ex, "[Jobs] Could not close script recording for run {RunId}", runId); }
         }
     }
 
@@ -674,6 +718,7 @@ public static class JobRunner
 
     private sealed class JobRunShutdownState
     {
+        public JobScriptSessionRecorder? ScriptRecording;
         public int RunFinalized;
         public int OutcomeClaim;
         public int WorkerPhaseComplete;

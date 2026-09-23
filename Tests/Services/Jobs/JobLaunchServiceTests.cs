@@ -13,6 +13,38 @@ public sealed class JobLaunchServiceTests
 {
     private const string MissingProjectPath = @"C:\viberails-tests\does-not-exist";
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LaunchQueuedRunsAsync_TabPreferenceDispatchesTheEntireWorkflow(bool withWorker)
+    {
+        var run = Run(projectPath: ExistingProjectPath(),
+            actions: withWorker ? [ScriptAction("script", 0), WorkerAction("worker", 1, 7, "nightly", LLM.Claude)] : [ScriptAction("script", 0)])
+            with { LaunchInTerminalTab = true };
+        var store = LaunchableStore(run);
+        var native = new Mock<IEnvironmentLaunchService>(MockBehavior.Strict);
+        var process = UnusedProcessLauncher();
+        var tabs = new Mock<IJobTerminalTabLauncher>(MockBehavior.Strict);
+        tabs.Setup(service => service.LaunchAsync(run, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LaunchResult(true, "tab"));
+
+        Assert.Equal(1, await new JobLaunchService(store.Object, native.Object, process.Object, tabs.Object)
+            .LaunchQueuedRunsAsync(TestContext.Current.CancellationToken));
+        tabs.VerifyAll();
+        native.VerifyNoOtherCalls();
+        process.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public void TerminalTabCommand_TreatsEveryArgumentAsALiteralAndExitsTheWrapper()
+    {
+        var arguments = new[] { "--job-run", "quote' $(danger) `value` ; & |", "--", "a b" };
+        Assert.Equal("& 'C:/app''s/vb.exe' @('--job-run', 'quote'' $(danger) `value` ; & |', '--', 'a b'); exit $LASTEXITCODE",
+            JobTerminalTabLauncher.BuildRunCommand("C:/app's/vb.exe", arguments, windows: true));
+        Assert.Equal("exec '/app/vb' '--job-run' 'quote'\"'\"' $(danger) `value` ; & |' '--' 'a b'",
+            JobTerminalTabLauncher.BuildRunCommand("/app/vb", arguments, windows: false));
+    }
+
     [Fact]
     public void BuildVbArgs_OmitsTheDeadline_WhenNoTimeoutWasSet()
     {

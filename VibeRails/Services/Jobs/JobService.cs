@@ -103,9 +103,9 @@ public sealed class JobService(
             ?? throw JobServiceException.Conflict("The Automation could not be queued.");
 
         // Every Automation run - manual, retried or scheduled - is launched the same way: the
-        // scheduler claims the queued row and JobLaunchService opens a real OS terminal window for
-        // it. Kick only wakes that loop early; it deliberately does NOT reserve the run here, so
-        // there is exactly one launcher and one kind of window an Automation can run in.
+        // scheduler claims the queued row and JobLaunchService honors its snapshotted terminal
+        // target. Kick only wakes that loop early; it deliberately does NOT reserve the run here,
+        // so every trigger uses exactly one launcher.
         scheduler.Kick();
         return new JobActionResponse(true, "Automation queued.", runId);
     }
@@ -544,13 +544,13 @@ public sealed class JobService(
         job.Prompt, job.TimeoutMinutes, job.Enabled, job.CreatedUtc, job.UpdatedUtc, job.DeletedUtc,
         job.Triggers.ToList(), job.LaunchMinimized,
         job.Actions?.Select(ToActionDto).ToList(),
-        job.ImportedFromJobId);
+        job.ImportedFromJobId, job.LaunchInTerminalTab);
 
     private static JobRunResponse ToResponse(JobRunRecord run) => new(
         run.Id, run.JobId, run.JobName, run.TriggerKind, run.Status, run.ProjectPath, run.Llm,
         run.EnvironmentName, run.SessionId, run.TimeoutMinutes, run.QueuedUtc, run.StartedUtc,
         run.EndedUtc, run.ExitCode, run.ErrorMessage, run.CancelRequested,
-        run.Actions?.Select(ToRunActionDto).ToList());
+        run.Actions?.Select(ToRunActionDto).ToList(), run.TerminalSessionId);
 
     private static JobActionRequest ToRequest(JobActionRecord action) => new(
         action.Id,
