@@ -395,7 +395,7 @@ commit for diff/unlink.
 
 ## REST and MCP contracts
 
-All **34 Board HTTP mappings** are under `/api/v1/board`, behind both session and tab credentials,
+All **35 Board HTTP mappings** are under `/api/v1/board`, behind both session and tab credentials,
 and registered only for `ProcessRole.IsActiveRootBackend`. Relative paths below share that prefix.
 
 | Resource | Methods and paths |
@@ -447,6 +447,7 @@ authorize unrelated tools on the same server.
 Board data lives in the user's global `board.db`; terminal history and local Automations remain
 in `state.db`. Neither database is stored in the checkout. `BoardStore` owns component migrations
 and can initialize from stdio without constructing the main `Repository`.
+| Repository files | `GET /files?q=` — names for the composer's `@path` typeahead (VB-35); root path only, never contents |
 
 | Table | Identity / relation / purpose |
 | --- | --- |

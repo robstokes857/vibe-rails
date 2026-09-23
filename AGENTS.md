@@ -393,6 +393,9 @@ The Board uses `~/.vibe_rails/board.db`; its contracts live in `VibeRails.Data.A
 and its store/migrations in `VibeRails.Data.Sqlite/Board`. REST and MCP share `BoardService`.
 The review records open concurrency and workflow findings; documentation is not evidence that
 those findings have been fixed.
+Card text can reference repository files as `@path` (VB-35): the text is the only storage,
+`GET /api/v1/board/files?q=` (root-only) backs the composer's typeahead, and the launch prompt
+lists the references next to linked commits and attachments.
 Keep all Board persistence behind `IBoardStore`, including pending lane Automation events, so a
 future shared API-backed store can replace local storage. Local Jobs and terminal history remain
 in `state.db`; queuing an Automation run and acknowledging its Board event are separate commits.

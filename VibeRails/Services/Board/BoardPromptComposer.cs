@@ -30,6 +30,8 @@ public static class BoardPromptComposer
     public const int MaxTitleChars = 200;
     public const int MaxLinkedCommits = 10;
     public const int MaxListedAttachments = 20;
+    /// <summary>`@path` references pulled out of the description (VB-35); the description itself still carries them all.</summary>
+    public const int MaxReferencedFiles = 20;
     /// <summary>Prompt characters reserved for the generated part plus the environment template.</summary>
     private const int PromptBudget = 24_000;
 
@@ -97,6 +99,17 @@ public static class BoardPromptComposer
                 .Select(attachment => attachment.Id + " " + SanitizeLine(attachment.Name, 80))));
             if (context.Attachments.Count > MaxListedAttachments)
                 builder.Append(", +").Append(context.Attachments.Count - MaxListedAttachments).Append(" more");
+            builder.Append('\n');
+        }
+        // Extracted from the full description, not the capped copy below, so a reference past
+        // the inline cap still reaches the agent. Paths are card text: one line, sanitised.
+        var referencedFiles = BoardFileReferences.Extract(card.Description);
+        if (referencedFiles.Count > 0)
+        {
+            builder.Append("Referenced files (relative to repo root): ");
+            builder.Append(string.Join(", ", referencedFiles.Take(MaxReferencedFiles).Select(path => SanitizeLine(path, 200))));
+            if (referencedFiles.Count > MaxReferencedFiles)
+                builder.Append(", +").Append(referencedFiles.Count - MaxReferencedFiles).Append(" more");
             builder.Append('\n');
         }
         var descriptionCap = DescriptionBudget(environmentPrompt, boardContext.Length);

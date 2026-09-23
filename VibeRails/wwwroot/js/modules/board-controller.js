@@ -33,6 +33,7 @@ import { BoardApi } from './board-api.js';
 import { boardContextSection, laneAutomationSection, mountBoardContext, mountLaneAutomation } from './board-settings.js';
 import { renderCardLinksSection, bindCardLinks } from './board-card-links.js';
 import { renderCommentHtml, wrapSelectionAsCode, toPlainPreview } from './board-text.js';
+import { bindFileReferencePopup } from './board-file-refs.js';
 import { openDiffModal } from './diff-modal.js';
 import * as SessionDebug from './session-viewer.js';
 import { renderBoardLaunchOptions, readBoardLaunchOptions, bindBoardLaunchOptions } from './board-launch-options.js';
@@ -82,6 +83,8 @@ export class BoardController {
         this.chatPickerDispose = null;
         this.launchOptionsDispose = null;
         this.cardLinksDispose = null;
+        // One per bound composer (description, comment): the `@` file popups of the open editor.
+        this.composerDisposers = [];
         this._openCardGeneration = 0;
         this._openCardAbort = null;
         this._refreshGeneration = 0;
@@ -140,6 +143,7 @@ export class BoardController {
         this.closeDiffModal();
         this.closeSessionModal();
         this.disposeCardPickers();
+        this.disposeComposers();
         this.cardLinksDispose?.();
         this.cardLinksDispose = null;
         disposeBoardAttachmentPreview();
@@ -153,6 +157,15 @@ export class BoardController {
         this.assigneePickerDispose = null;
         try { this.chatPickerDispose?.(); } catch { /* already torn down */ }
         this.chatPickerDispose = null;
+    }
+
+    // Separate from disposeCardPickers(): bindCardEditor re-runs that one AFTER the composers
+    // are wired (to reset the assignee/chat pickers), which would tear the `@` popups down before
+    // they ever opened. Composers live exactly as long as the editor: close or replacement.
+    disposeComposers() {
+        for (const dispose of this.composerDisposers.splice(0)) {
+            try { dispose(); } catch { /* already torn down */ }
+        }
     }
 
     setBusy(busy) {
@@ -1090,6 +1103,7 @@ export class BoardController {
             this.cardLinksDispose = null;
             disposeBoardAttachmentPreview();
         } });
+            this.disposeComposers();
 
         if (generation !== this._openCardGeneration) return;
 
@@ -1330,6 +1344,9 @@ export class BoardController {
         // and the description box would open at its one-line default.
         autoGrow();
         setPreview(Boolean(input.value.trim()));
+        // `@` opens the repository file typeahead (board-file-refs.js). It only ever edits
+        // this textarea's value and is torn down with the other pickers when the editor closes.
+        this.composerDisposers.push(bindFileReferencePopup(input, { app: this.app, host: composer }));
 
         const submit = () => {
             if (!onSubmit) return;

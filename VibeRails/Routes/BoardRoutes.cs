@@ -130,6 +130,16 @@ public static class BoardRoutes
 
         // ---------------------------------------------------------------- rails
 
+        // ---------------------------------------------------------------- files
+        //
+        // Repo-wide file names for the composer's `@path` typeahead (VB-35): names only, never
+        // contents, and only under the dashboard's root path. The text a user writes is the
+        // reference; nothing is stored here.
+
+        app.MapGet("/api/v1/board/files", (IBoardFileIndexService files, string? q, CancellationToken cancellationToken) =>
+            RunAsync(async () => Results.Ok(await files.SearchAsync(Project(), q, cancellationToken))))
+            .WithName("SearchBoardFiles");
+
         app.MapGet("/api/v1/board/cards/{card}/links/candidates", (IBoardService board, string card, string? q, CancellationToken cancellationToken) =>
             RunAsync(async () => OkOrNotFound(await board.GetCardLinkCandidatesAsync(Project(), card, q, cancellationToken), "Card")))
             .WithName("GetBoardCardLinkCandidates");

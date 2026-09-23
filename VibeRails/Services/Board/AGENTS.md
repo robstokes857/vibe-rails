@@ -11,6 +11,7 @@ across UI, REST, MCP and storage. The root [AGENTS.md](../../../AGENTS.md),
 | --- | --- |
 | Lanes, filters, editor and launches | `VibeRails/wwwroot/js/modules/board-controller.js`; read [frontend instructions](../../wwwroot/AGENTS.md) |
 | Text, uploads/previews, card links, base options | Adjacent `board-text`, `board-attachments`, `board-card-links`, `board-launch-options` modules |
+| `@path` file references (typeahead, rendering, prompt line) | `board-file-refs.js`, the `@` token in `board-text.js`, `BoardFileReferences.cs`, `BoardFileIndexService.cs` |
 | Browser requests / REST shape | `board-api.js`, `VibeRails/Routes/BoardRoutes.cs`, Board DTOs in `ResponseRecords.cs` |
 | Validation and orchestration | `BoardService.cs` and its partials in this directory |
 | SQL and migration | `VibeRails.Data.Sqlite/Board/BoardStore*.cs`, `BoardStore.Options.cs`; contracts in `VibeRails.Data.Abstractions/Board` |
@@ -88,6 +89,25 @@ serialization or tool discovery into the Native AOT path.
   and native script-only runs link their timestamped script-output recording.
   The run's immutable Board trigger and project scope determine the card; manual retries do not
   inherit the original trigger's Board context.
+
+## Card text syntax: `@path` file references
+
+Card descriptions and comments can name a repository file as `@relative/path/from/repo/root` or
+`@"path with spaces"` (VB-35). The text is the only storage: no link table, no unlink UI, no
+existence check, and agents already receive the description verbatim through `get_board_card`
+and the launch prompt. A reference counts only at the start of the text or after whitespace, never
+inside inline code or a fence, and a bare reference must contain a `/` or a `.` so an email or
+`@claude` in prose stays prose. Three places implement that rule and must stay in step:
+`board-text.js` renders the token as an inert `<code class="board-file-ref">` built from escaped
+text only (no href in v1); `BoardFileReferences.cs` extracts distinct references for the launch
+prompt's `Referenced files (relative to repo root):` line (inside the fence, cap 20, `SanitizeLine`
+each, `+N more`); and `formatFileReference` in `board-file-refs.js` decides whether the popup
+inserts the bare or the quoted form. `GET /api/v1/board/files?q=` (root-only, both credentials)
+backs the composer typeahead through `BoardFileIndexService`: `git ls-files --cached --others
+--exclude-standard` filtered to files that still exist, a bounded directory walk that skips
+`.git`/`bin`/`obj`/`node_modules` when git is unavailable, a ten-second in-memory cache, file-name
+hits before directory hits, 50 results, `q` at most 256 characters. Names only, never contents,
+never outside the dashboard's root path.
 
 ## Security and resource policy
 
@@ -176,6 +196,7 @@ Never replace the durable queue with a browser timer or an in-memory queue.
 
 Common focused commands from repository root:
 
+| `@path` references / file index | `BoardFileIndexServiceTests`, the referenced-files cases in `BoardPromptComposerTests`, the files route case in `BoardRoutesTests`, `board-text.test.mjs`, `board-file-refs.test.mjs`, the typeahead case in `board-ux.spec.js` |
 ```powershell
 dotnet test Tests/Tests.csproj --no-restore --filter "FullyQualifiedName~Board|FullyQualifiedName~CookieAuthMiddlewareTests|FullyQualifiedName~McpServerHttpTests|FullyQualifiedName~McpStdioHostTests" -p:OutputPath=bin/BoardChecks/ --verbosity quiet
 node --test Tests/wwwroot/js/board-*.test.mjs

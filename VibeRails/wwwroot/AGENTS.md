@@ -30,6 +30,7 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | [js/modules/board-api.js](js/modules/board-api.js) | Board data layer: a thin client over `/api/v1/board/*` (every call rides `app.apiCall`, so cookie + tab header apply). `BoardApi.attach(app)` once from the controller |
 | [js/modules/board-card-links.js](js/modules/board-card-links.js) | Linked cards rail: project-wide key/title search, immediate link/unlink, and navigation through the card editor's unsaved-edit guard |
 | [js/modules/board-text.js](js/modules/board-text.js) | Renders a comment/description body. **Escape-first**: the input is escaped before any transform, so no sanitizer is needed and none is present |
+| [js/modules/board-file-refs.js](js/modules/board-file-refs.js) | The composer's `@` typeahead over `GET /api/v1/board/files`: inserts `@path` / `@"path"` text, "Browse for a file…" fallback through the shared file explorer; pure helpers are node-tested |
 | [js/modules/diff-modal.js](js/modules/diff-modal.js) | Shared Monaco diff viewer as a nested modal layer. Used by Board commits and the sandbox "View Diff" |
 
 ## Settings signing keys
@@ -205,7 +206,9 @@ auto-grow routine can then make the textarea taller than its composer and its te
 Attachments section. `.board-editor-scroll` is the one viewport overflow owner.
 
 **Comment and description text is not Markdown.** `board-text.js` supports a deliberately tiny
-syntax: fenced code, inline code, `http(s)` autolinks and images. It escapes the entire input
+syntax: fenced code, inline code, `http(s)` autolinks, images and `@path` file references
+(`@relative/path` or `@"path with spaces"`, only at the start of the text or after whitespace, and a
+bare one needs a `/` or `.` so `@claude` stays prose — see the Board guide). It escapes the entire input
 *before* any transform runs, so raw HTML never enters the pipeline and every tag in the output is
 one the renderer wrote itself. That is why there is no sanitizer here, and why adding a transform
 that interpolates unescaped user text would break the whole security story. The invariants are
@@ -215,6 +218,20 @@ no nonce, so an injected handler *would* run; this renderer is the only thing st
 Layout rules worth keeping: `pre.board-code` uses `white-space: pre` + `overflow-x: auto`, and
 every ancestor carries `min-width: 0` (including `grid-template-columns: 28px minmax(0, 1fr)` on
 `.board-comment`). Without that chain a wide stack trace widens the whole dialog. Long comment
+**The `@` typeahead** (`board-file-refs.js`) is bound to every composer textarea from
+`bindComposer` — description, comment and the new-card description alike. Typing `@` opens a list
+under the caret (a hidden mirror div measures the caret; measured synchronously, same rule as
+below); keystrokes filter it with a 200 ms debounce over `BoardApi.searchFilesAsync`, an
+AbortController and a generation counter so a stale response never paints. Up/Down move, Enter/Tab
+insert `@path` (or `@"path"` when the bare form would not render), Esc closes with `preventDefault`
+so the app-level Escape handler does not also close the card, and the last row is always "Browse
+for a file…", which opens `app.pickFileSystemEntry` at the project root and inserts the repo-relative
+path (the absolute path when the pick is outside the repo). The popup only ever rewrites the
+textarea's value and dispatches a bubbling `input` event, so auto-grow and the editor's
+unsaved-edit tracking see the change. Its disposers live in `composerDisposers` and are torn down
+by `disposeComposers()` on close/replacement — deliberately **not** in `disposeCardPickers()`, which
+`bindCardEditor` re-runs after the composers are wired and would kill the popups before they opened.
+
 bodies clamp with a Show more expander, and the clamp class must be applied **before** measuring
 overflow — an unclamped body always reports `scrollHeight === clientHeight`, so measuring first
 detects nothing.

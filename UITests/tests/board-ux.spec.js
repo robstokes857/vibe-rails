@@ -80,6 +80,13 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
             return route.fulfill({ json: attachment });
         }
         if (path.endsWith('/attachments/att_uploaded/content')) return route.fulfill({ contentType: 'application/octet-stream', body: contents.get('att_uploaded') });
+        if (path === '/api/v1/board/files') {
+            // The composer's @ typeahead: a tiny repo index, filtered like the server does.
+            const query = (url.searchParams.get('q') || '').toLowerCase();
+            const files = ['AGENTS.md', 'VibeRails/Services/Board/BoardService.cs', 'docs/with space.md', '<img src=x onerror="window.__fileXss=1">.md']
+                .filter(file => file.toLowerCase().includes(query));
+            return route.fulfill({ json: { files, truncated: false } });
+        }
         if (path.endsWith('/launch')) return route.fulfill({ json: {
             tabId: 'board_background', cardKey: card.key, selection: route.request().postDataJSON().selection || card.assignee
         } });
@@ -463,6 +470,46 @@ test('a description edit saves without touching the running agent or keeping his
 test('new cards queue files until Save and do not launch', async ({ page }) => {
     const requests = await openBoard(page);
     await page.getByRole('button', { name: 'New card', exact: true }).click();
+test('typing @ in a composer opens the file typeahead, the keyboard inserts a reference and Browse is always offered', async ({ page }) => {
+    const requests = await openBoard(page);
+    await page.getByText('Description images', { exact: true }).click();
+    const input = page.locator('[data-board-composer="comment"] textarea');
+    const popup = page.locator('[data-board-composer="comment"] [data-board-file-popup]');
+    const fileRows = popup.locator('[data-board-file-row]:not([data-board-file-browse])');
+    await input.click();
+    await input.pressSequentially('see @Board');
+    await expect(popup).toBeVisible();
+    await expect(fileRows).toHaveCount(1);
+    await expect(popup.locator('[data-board-file-browse]')).toContainText('Browse for a file');
+    await expect(popup.locator('.is-active')).toContainText('BoardService.cs');
+    await input.press('Enter');
+    await expect(popup).toHaveCount(0);
+    await expect(input).toHaveValue('see @VibeRails/Services/Board/BoardService.cs ');
+
+    // A path with spaces is inserted quoted; Down reaches Browse, Up comes back, Tab inserts.
+    await input.pressSequentially('and @with');
+    await expect(fileRows).toHaveCount(1);
+    await input.press('ArrowDown');
+    await expect(popup.locator('.is-active')).toContainText('Browse for a file');
+    await input.press('ArrowUp');
+    await input.press('Tab');
+    await expect(input).toHaveValue('see @VibeRails/Services/Board/BoardService.cs and @"docs/with space.md" ');
+    await expect(input).toBeFocused();
+
+    // A bare @ lists everything. File names render as text: a hostile name is no element.
+    await input.pressSequentially('@');
+    await expect(fileRows).toHaveCount(4);
+    await expect(popup.locator('img')).toHaveCount(0);
+    expect(await page.evaluate(() => window.__fileXss)).toBeUndefined();
+    // Escape closes the popup and leaves the card open; typing a space ends the token.
+    await input.press('Escape');
+    await expect(popup).toHaveCount(0);
+    await expect(page.locator('[data-board-card-editor]')).toBeVisible();
+    await input.pressSequentially('x ');
+    await expect(popup).toHaveCount(0);
+    expect(requests.filter(request => request.path.startsWith('/api/v1/board/cards') && request.method !== 'GET')).toHaveLength(0);
+});
+
     await expect(page.locator('[data-board-card-links]')).toContainText('Save the card to link other cards.');
     await page.locator('#board-card-title').fill('File first');
     await page.locator('[data-board-files]').setInputFiles({ name: 'notes.zip', mimeType: 'application/zip', buffer: Buffer.from('archive') });

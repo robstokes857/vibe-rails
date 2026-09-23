@@ -19,6 +19,7 @@
 //   session    { id, tabId, displayName, cli, selection, origin, createdAt, active }
 //   attachment { id, name, url (data: URL), mimeType, bytes, createdAt }
 //   commit     { sha, shortSha, author, message, committedAt, linkedAt }
+//   files      { files: ['repo/relative/path', …], truncated }   (searchFilesAsync, for `@path` refs)
 //
 //   board      { id, name, position, createdAt, cardCount, columns[] }
 //
@@ -163,6 +164,17 @@ async function linkCardAsync(cardId, linkedCardId) {
 }
 
 async function unlinkCardAsync(cardId, linkedCardId) {
+// ---------------------------------------------- repository files (the composer's @ typeahead)
+
+/** Repo-relative paths matching `query` (server-ranked, capped at 50) plus whether more matched. */
+async function searchFilesAsync(query = '', extra = {}) {
+    const response = await call(`/files?q=${enc(query)}`, 'GET', null, extra);
+    return {
+        files: Array.isArray(response?.files) ? response.files.filter(item => typeof item === 'string') : [],
+        truncated: Boolean(response?.truncated)
+    };
+}
+
     return call(`/cards/${enc(cardId)}/links/${enc(linkedCardId)}`, 'DELETE');
 }
 
@@ -285,6 +297,7 @@ export const BoardApi = {
     linkCardAsync,
     unlinkCardAsync,
     addBoardCommentAsync,
+    searchFilesAsync,
     getCardNotesAsync,
     addCardNoteAsync,
     addCardAttachmentAsync,

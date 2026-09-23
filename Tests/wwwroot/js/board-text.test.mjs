@@ -170,3 +170,63 @@ test('wrapSelectionAsCode fences a selection and parks the caret for an empty on
     assert.equal(empty.value, '```\n\n```');
     assert.equal(empty.selectionStart, 4);
 });
+
+// ---------------------------------------------------------------- @file references (VB-35)
+//
+// A card can name a repository file with `@path`. The token is rendered from the
+// already-escaped source and never becomes an attribute, so it inherits the
+// escape-first guarantee above for free. These pin the syntax the popup inserts
+// and the prompt composer (BoardFileReferences.cs) extracts; keep both in step.
+
+test('@path renders as a file reference and trailing punctuation stays outside it', () => {
+    const html = renderCommentHtml('see @VibeRails/Services/Board/BoardService.cs, then @AGENTS.md.');
+    assert.match(html, /<code class="board-file-ref">@VibeRails\/Services\/Board\/BoardService\.cs<\/code>, then /);
+    assert.match(html, /<code class="board-file-ref">@AGENTS\.md<\/code>\.$/);
+    // Start of text counts as "after whitespace".
+    assert.match(renderCommentHtml('@Tests/x.cs first'), /^<code class="board-file-ref">@Tests\/x\.cs<\/code> first$/);
+});
+
+test('@"quoted path" carries spaces and renders with its quotes, escaped', () => {
+    const html = renderCommentHtml('open @"docs/with space.md" now');
+    assert.equal(html, 'open <code class="board-file-ref">@&quot;docs/with space.md&quot;</code> now');
+    // An unterminated quote is not a reference; the text just shows as typed.
+    assert.doesNotMatch(renderCommentHtml('open @"docs/with space.md now'), /board-file-ref/);
+});
+
+test('emails, @mentions and bare words are prose, not file references', () => {
+    for (const source of ['mail rob@example.com today', 'ask @claude to review', '@codex please', 'about @README']) {
+        const html = renderCommentHtml(source);
+        assert.doesNotMatch(html, /board-file-ref/, source);
+        assert.equal(html, source, 'the text is untouched');
+    }
+    // Only a slash or an extension dot turns a bare @word into a path.
+    assert.match(renderCommentHtml('@src/'), /board-file-ref/);
+    assert.match(renderCommentHtml('@Makefile.in'), /board-file-ref/);
+});
+
+test('inline code and fenced blocks win over @path', () => {
+    const inline = renderCommentHtml('use `@Tests/x.cs` verbatim');
+    assert.match(inline, /<code class="board-inline-code">@Tests\/x\.cs<\/code>/);
+    assert.doesNotMatch(inline, /board-file-ref/);
+    const fenced = renderCommentHtml('```\n@Tests/x.cs\n```');
+    assert.doesNotMatch(fenced, /board-file-ref/);
+});
+
+test('an @ followed by markup or quotes stays literal text and never reaches an attribute', () => {
+    const injected = renderCommentHtml('@<img src=x onerror="alert(1)"> and @"x" onerror="alert(1)"');
+    assert.doesNotMatch(injected, /<img/);
+    assert.match(injected, /@&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;/, 'the markup is visible as text');
+    // The quoted form ends at its closing quote; the rest is plain text outside any tag.
+    assert.match(injected, /<code class="board-file-ref">@&quot;x&quot;<\/code> onerror=&quot;alert\(1\)&quot;/);
+    for (const tag of injected.match(EMITTED_TAG) || []) {
+        assert.doesNotMatch(tag, /\son[a-z]+\s*=/i);
+        assert.equal(tag.startsWith('<code') || tag === '</code>', true, tag);
+    }
+    // Entities are never swallowed into a bare reference: `&` ends it, so no
+    // escaped `<`, `"` or `&` can sit inside the emitted <code>.
+    assert.doesNotMatch(renderCommentHtml('@a.cs&lt;b'), /board-file-ref">@a\.cs&lt;/);
+});
+
+test('toPlainPreview leaves @path references exactly as typed', () => {
+    assert.equal(toPlainPreview('see @a/b.cs and @"c d.md" now'), 'see @a/b.cs and @"c d.md" now');
+});

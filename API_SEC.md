@@ -76,6 +76,17 @@ the stale Kanban subsection heading from 38 routes to 37 after the description-h
 global `OPTIONS`, and exact `GET /auth/bootstrap?code={one-time-code}&redirect={local-path}`.
 Every other endpoint requires the session credential; `/api/v1`, MCP, WebSocket upgrades, and
 enabled proxy operations retain their documented additional tab-token checks. The mandatory
+VB-35 file-reference amendment (2026-09-23): one authenticated route added, `GET /api/v1/board/files?q=`,
+mapped with the other Board routes only by an active root backend and behind both credentials
+through the existing `/api/v1` middleware; no new listener, credential rule or exception. It returns
+repository-relative file **names** (never contents) from `git ls-files --cached --others
+--exclude-standard` under the dashboard's root path, or a bounded directory walk when git is
+unavailable, capped at 50 results with `q` at most 256 characters; nothing is stored. Card text may
+now carry `@path` references, which the renderer emits from escaped text with no href and the
+launch prompt lists inside the fenced card block after sanitising. The active inventory becomes
+**214 mapped surfaces**, **202 under `/api/v1`** and **38 Board routes**; `Tests/Routes/BoardRoutesTests.cs`
+pins the credential requirement and the AOT JSON binding.
+
 listener searches found only the approved main Kestrel host, non-serving port probe, and
 test-only hosts. No insecure endpoint or additional production listener was found, so no
 `SECURITY_ERROR.md` was created. The targeted authentication, proxy, MCP, diagnostics,
@@ -846,6 +857,10 @@ before the process starts; session options are set at spawn time or not at all. 
 the agent" surface is a fresh capability decision and must be validated against each provider's
 real TUI before it ships.
 - `POST /api/v1/board/cards/{card}/comments`,
+- `GET /api/v1/board/files?q=` — repository file names for the composer's `@path` typeahead
+  (VB-35). Root backend only, like every Board route; `q` is capped at 256 characters and the
+  answer at 50 repo-relative paths under the dashboard's root path. Names only, never contents,
+  nothing written.
   `GET /api/v1/board/cards/{card}/notes`, `POST /api/v1/board/cards/{card}/notes`,
   `POST /api/v1/board/cards/{card}/attachments`,
   `DELETE /api/v1/board/cards/{card}/attachments/{attachmentId}` — comments, agent notes and file

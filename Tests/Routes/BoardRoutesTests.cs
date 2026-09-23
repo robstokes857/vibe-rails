@@ -71,6 +71,8 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         builder.Services.AddSingleton(commits.Object);
         builder.Services.AddSingleton<IBoardLiveSessionProbe, NullBoardLiveSessionProbe>();
         builder.Services.AddScoped<IBoardService, BoardService>();
+        // The temp project is not a repository; pin the non-git walk so the test never depends on git.
+        builder.Services.AddSingleton<IBoardFileIndexService>(new BoardFileIndexService(TimeProvider.System, (_, _) => Task.FromResult<IReadOnlyList<string>?>(null)));
         builder.Services.AddSingleton(_tabHost.Object);
         builder.Services.AddSingleton(_repository.Object);
         builder.Services.AddScoped<IBoardLaunchService, BoardLaunchService>();
@@ -158,6 +160,7 @@ public sealed class BoardRoutesTests : IAsyncLifetime
     [InlineData("GET", "/api/v1/board/cards/PROJ-1/links/candidates")]
     [InlineData("POST", "/api/v1/board/cards/PROJ-1/links")]
     [InlineData("DELETE", "/api/v1/board/cards/PROJ-1/links/PROJ-2")]
+    [InlineData("GET", "/api/v1/board/files?q=board")]
     public async Task NewBoardSurfaces_RequireSessionAndTab(string method, string path)
     {
         using var none = await SendAsync(new HttpMethod(method), path);
@@ -443,6 +446,34 @@ public sealed class BoardRoutesTests : IAsyncLifetime
     [Fact]
     public async Task CardLinks_RoundTrip_ThroughTheJsonContext_WithValidationAndProjectScope()
     {
+    [Fact]
+    public async Task Files_ListsTheProjectRoot_ThroughTheJsonContext_RanksNamesFirst_AndCapsTheQuery()
+    {
+        // BoardRoutes.Map itself is only called for the active root backend (Routes.cs), the same
+        // gate as every other board route; nothing here can be reached from a terminal-tab child.
+        foreach (var relative in new[] { "src/BoardService.cs", "docs/board.md", "src/Board/Helpers.cs", "LICENSE", "bin/skip.dll", ".git/HEAD" })
+        {
+            var path = Path.Combine(_project, relative.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            await File.WriteAllTextAsync(path, relative, TestContext.Current.CancellationToken);
+        }
+
+        using var matched = await GetJsonAsync("/api/v1/board/files?q=board");
+        var files = matched.RootElement.GetProperty("files").EnumerateArray().Select(item => item.GetString()).ToList();
+        Assert.Equal(["docs/board.md", "src/BoardService.cs", "src/Board/Helpers.cs"], files);
+        Assert.False(matched.RootElement.GetProperty("truncated").GetBoolean());
+
+        using var everything = await GetJsonAsync("/api/v1/board/files");
+        var all = everything.RootElement.GetProperty("files").EnumerateArray().Select(item => item.GetString()).ToList();
+        Assert.Equal(["docs/board.md", "LICENSE", "src/Board/Helpers.cs", "src/BoardService.cs"], all);
+
+        using var empty = await GetJsonAsync("/api/v1/board/files?q=");
+        Assert.Equal(4, empty.RootElement.GetProperty("files").GetArrayLength());
+
+        using var tooLong = await SendAsync(HttpMethod.Get, "/api/v1/board/files?q=" + new string('x', BoardFileIndexService.MaxQueryLength + 1), "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.BadRequest, tooLong.StatusCode);
+    }
+
         using var first = await PostJsonAsync("/api/v1/board/cards", new { title = "First" });
         first.EnsureSuccessStatusCode();
         using var second = await PostJsonAsync("/api/v1/board/cards", new { title = "Second" });
