@@ -192,6 +192,11 @@ public sealed partial class BoardService(
     public async Task<BoardCardListResponse> GetCardsAsync(string projectPath, CancellationToken cancellationToken = default, string? boardId = null)
     {
         var cards = await store.GetCardsAsync(projectPath, cancellationToken, NormalizeBoardId(boardId));
+        return await GetCardListResponseAsync(projectPath, cards, cancellationToken);
+    }
+
+    private async Task<BoardCardListResponse> GetCardListResponseAsync(string projectPath, IReadOnlyList<BoardCardRecord> cards, CancellationToken cancellationToken)
+    {
         var live = await liveSessions.GetLiveSessionsAsync(cancellationToken);
         var activeByCard = new Dictionary<string, (string SessionId, string TabId)>(StringComparer.Ordinal);
         if (live.Count > 0)

@@ -112,6 +112,19 @@ async function getBoardCardsAsync(boardId = null) {
     return (response?.cards || []).sort((a, b) => a.position - b.position || a.key.localeCompare(b.key));
 }
 
+async function getBoardCardPageAsync(boardId, filters = {}, { columnId, offset = 0, signal } = {}) {
+    const params = new URLSearchParams({ pageSize: '30' });
+    for (const [key, value] of Object.entries(filters)) {
+        if (value) params.set(key, value);
+    }
+    if (columnId) {
+        params.set('columnId', columnId);
+        params.set('offset', String(offset));
+    }
+    if (boardId) params.set('boardId', boardId);
+    return call(`/cards?${params}`, 'GET', null, { signal });
+}
+
 async function getBoardCardAsync(cardId, extra = {}) {
     return call(`/cards/${enc(cardId)}`, 'GET', null, extra);
 }
@@ -261,6 +274,7 @@ export const BoardApi = {
     deleteBoardColumnAsync,
     reorderBoardColumnsAsync,
     getBoardCardsAsync,
+    getBoardCardPageAsync,
     getBoardCardAsync,
     createBoardCardAsync,
     updateBoardCardAsync,

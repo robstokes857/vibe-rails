@@ -958,6 +958,7 @@ export class VibeControlApp {
             element.classList.toggle('vb-terminal-focus-active', isTerminalFocus);
             element.classList.toggle('git-guard-focus-active', isGitGuardFocus);
             element.classList.toggle('vb-rules-workspace-active', isFlowingShell);
+            element.classList.toggle('vb-board-active', view === 'board');
         });
 
         // Removed automatic collapsing of navbars in terminal focus mode

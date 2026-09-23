@@ -67,7 +67,8 @@ public sealed record AutomationImportCatalogEntry(
     bool LaunchMinimized,
     List<JobTriggerRequest> Triggers,
     bool CanImport,
-    string? Blocker);
+    string? Blocker,
+    bool LaunchInTerminalTab = false);
 
 /// <summary>
 /// <c>WorkerName</c> is the clone's name when the Worker has to be cloned; it is ignored when a

@@ -77,20 +77,20 @@ test('adoptLaunchedTab restores authoritative CLI and session identity', async (
     const controller = new TerminalController({
         async apiCall(url, method, body, options) {
             calls.push({ url, method, body, options });
-            return {
+            return { tabs: [{
                 tabId: 'tab-1',
                 hasActiveSession: true,
                 sessionId: 'session-1',
                 cli: 'OpenCode',
                 workingDirectory: 'C:/source/project/.workspace/run-1'
-            };
+            }] };
         }
     });
     controller.manager = manager;
 
     assert.equal(await controller.adoptLaunchedTab('tab-1'), true);
     assert.deepEqual(calls, [{
-        url: '/api/v1/terminal/tabs/tab-1/status',
+        url: '/api/v1/terminal/tabs',
         method: 'GET',
         body: null,
         options: { showLoading: false }
@@ -118,4 +118,30 @@ test('adoptLaunchedTab falls back to the remembered selection when status is una
     assert.equal(added[0].tabInfo.cli, 'codex');
     assert.equal(added[0].tabInfo.sessionId, null);
     assert.equal(added[0].tabInfo.hasActiveSession, true);
+});
+
+test('Automation terminal events refresh the lazy list without adding viewers or moving focus', async () => {
+    const { manager, added, focused } = createManager({ selection: 'base:shell', rememberedCli: 'shell' });
+    const controller = new TerminalController({
+        async apiCall() { return { tabId: 'automation', sessionId: 'workflow-session', cli: 'shell', hasActiveSession: true }; },
+        navigate() { assert.fail('scheduled work must not navigate'); }
+    });
+    controller.manager = manager;
+    let refreshes = 0;
+    manager.refreshAutomationTabs = async () => { refreshes++; };
+    const remembered = [];
+    controller.rememberTabLaunch = (...args) => remembered.push(args);
+    const handlers = new Map();
+    controller.bindSessionEvents({ on: (type, callback) => handlers.set(type, callback) });
+    await handlers.get('automation_terminal_started')({ tabId: 'automation', sessionId: 'workflow-session', jobName: 'Check scripts', workingDirectory: '/repo' });
+    assert.equal(added.length, 0);
+    assert.equal(refreshes, 1);
+    assert.equal(remembered[0][1].title, 'Automation: Check scripts');
+    assert.equal(remembered[0][1].activate, false);
+    assert.deepEqual(focused, []);
+    // A duplicate event neither duplicates the tab nor steals focus.
+    await handlers.get('automation_terminal_started')({ tabId: 'automation', jobName: 'Check scripts' });
+    assert.equal(added.length, 0);
+    assert.equal(refreshes, 2);
+    assert.deepEqual(focused, []);
 });

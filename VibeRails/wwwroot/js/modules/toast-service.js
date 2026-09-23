@@ -1,6 +1,23 @@
 import { escapeHtml, escapeHtmlWithLineBreaks } from './utils.js';
 
-const DEFAULT_THEME = 'glassmorphism';
+const DEFAULT_THEME = 'dark';
+const THEME_STORAGE_KEY = 'viberails.toast.theme';
+const THEMES = new Set(['dark', 'light', 'system']);
+
+export function getToastTheme() {
+    try {
+        const stored = localStorage.getItem(THEME_STORAGE_KEY);
+        return THEMES.has(stored) ? stored : DEFAULT_THEME;
+    } catch {
+        return DEFAULT_THEME;
+    }
+}
+
+export function setToastTheme(theme) {
+    const resolved = THEMES.has(theme) ? theme : DEFAULT_THEME;
+    try { localStorage.setItem(THEME_STORAGE_KEY, resolved); } catch { /* Storage may be disabled. */ }
+    return resolved;
+}
 const DEFAULT_POSITION = 'top-right';
 const DEFAULT_ENTRY_ANIMATION = 'fadeIn';
 const DEFAULT_EXIT_ANIMATION = 'fadeOut';
@@ -13,21 +30,21 @@ const DEFAULT_DURATIONS = Object.freeze({
 });
 
 const BASE_TOAST_OPTIONS = Object.freeze({
-    borderRadius: '12px',
-    color: '#f8fafc',
+    borderRadius: '8px',
+    fontSize: '13px',
     fontFamily: '\'Inter\', -apple-system, sans-serif',
     showIcon: true,
     showCloseButton: true,
     progressBarPosition: 'bottom',
     progressBarHeight: '2px',
-    iconAnimation: 'pulse'
+    iconAnimation: 'default'
 });
 
-const DEFAULT_TONE = Object.freeze({
-    accent: '#3b82f6',
-    border: 'rgba(59, 130, 246, 0.4)',
-    iconBackground: 'rgba(59, 130, 246, 0.1)',
-    closeButtonColor: '#94a3b8'
+const TONES = Object.freeze({
+    info: '#60a5fa',
+    success: '#34d399',
+    warning: '#fbbf24',
+    error: '#fb7185'
 });
 
 const TOAST_TYPES = Object.freeze(['info', 'success', 'warning', 'error']);
@@ -55,7 +72,7 @@ export function showAppToast(title, message, type = 'info', options = {}) {
         icon,
         iconBackground,
         iconColor,
-        theme = DEFAULT_THEME,
+        theme = getToastTheme(),
         duration,
         autoClose,
         requireDismiss = false,
@@ -67,7 +84,7 @@ export function showAppToast(title, message, type = 'info', options = {}) {
     } = options;
 
     const toastType = normalizeToastType(type);
-    const tone = DEFAULT_TONE;
+    const accent = TONES[toastType];
     const shouldAutoClose = autoClose === false ? false : !requireDismiss;
     const baseDuration = DEFAULT_DURATIONS[toastType];
     const compactDuration = Math.min(baseDuration, 3000);
@@ -75,7 +92,7 @@ export function showAppToast(title, message, type = 'info', options = {}) {
         ? (duration ?? (compact ? compactDuration : baseDuration))
         : 0;
     const resolvedPosition = position ?? (compact ? 'bottom-right' : DEFAULT_POSITION);
-    const resolvedTheme = compact ? 'minimal' : theme;
+    const resolvedTheme = `vr-${THEMES.has(theme) ? theme : DEFAULT_THEME}`;
 
     const toastOptions = {
         ...BASE_TOAST_OPTIONS,
@@ -87,21 +104,13 @@ export function showAppToast(title, message, type = 'info', options = {}) {
         entryAnimation: entryAnimation ?? animation?.enter ?? DEFAULT_ENTRY_ANIMATION,
         exitAnimation: exitAnimation ?? animation?.exit ?? DEFAULT_EXIT_ANIMATION,
         iconType: toastType === 'warning' ? 'warn' : toastType,
-        showProgressBar: shouldAutoClose && !compact,
-        showCloseButton: !compact,
+        showProgressBar: false,
+        showCloseButton: !compact || !shouldAutoClose,
+        closeButtonColor: 'var(--vr-toast-muted)',
+        iconBackground: iconBackground ?? 'transparent',
+        iconColor: iconColor ?? accent,
         ...(icon != null ? { icon, showIcon: true } : {})
     };
 
-    if (!compact) {
-        toastOptions.border = `1px solid ${tone.border}`;
-        toastOptions.progressBarColor = tone.accent;
-        toastOptions.closeButtonColor = tone.closeButtonColor;
-        toastOptions.iconBackground = iconBackground ?? tone.iconBackground;
-        toastOptions.iconColor = iconColor ?? tone.accent;
-    } else {
-        if (iconBackground != null) toastOptions.iconBackground = iconBackground;
-        if (iconColor != null) toastOptions.iconColor = iconColor;
-    }
-
-    toast(toastOptions);
+    return toast(toastOptions);
 }

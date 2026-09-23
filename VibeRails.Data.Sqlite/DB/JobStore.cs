@@ -83,10 +83,10 @@ public sealed partial class JobStore : IJobStore
         command.CommandText = """
             INSERT INTO Jobs
                 (Name, ProjectPath, EnvironmentId, TimeoutMinutes, Enabled, CreatedUTC, UpdatedUTC, LaunchMinimized,
-                 ImportedFromJobId)
+                 ImportedFromJobId, LaunchInTerminalTab)
             VALUES
                 ($name, $projectPath, $environmentId, $timeoutMinutes, $enabled, $now, $now, $launchMinimized,
-                 $importedFromJobId)
+                 $importedFromJobId, $launchInTerminalTab)
             RETURNING Id;
             """;
         BindJob(
@@ -98,6 +98,7 @@ public sealed partial class JobStore : IJobStore
             request.Enabled,
             request.LaunchMinimized,
             now);
+        command.Parameters.AddWithValue("$launchInTerminalTab", request.LaunchInTerminalTab == true ? 1 : 0);
         // Provenance is written once at creation; UpdateJobAsync never touches it.
         command.Parameters.AddWithValue(
             "$importedFromJobId",
@@ -127,7 +128,7 @@ public sealed partial class JobStore : IJobStore
             UPDATE Jobs SET
                 Name = $name, ProjectPath = $projectPath, EnvironmentId = $environmentId,
                 TimeoutMinutes = $timeoutMinutes, Enabled = $enabled,
-                LaunchMinimized = $launchMinimized, UpdatedUTC = $now
+                LaunchMinimized = $launchMinimized, LaunchInTerminalTab = COALESCE($launchInTerminalTab, LaunchInTerminalTab), UpdatedUTC = $now
             WHERE Id = $id AND DeletedUTC IS NULL;
             """;
         BindJob(
@@ -139,6 +140,7 @@ public sealed partial class JobStore : IJobStore
             request.Enabled,
             request.LaunchMinimized,
             now);
+        command.Parameters.AddWithValue("$launchInTerminalTab", request.LaunchInTerminalTab is null ? DBNull.Value : request.LaunchInTerminalTab.Value ? 1 : 0);
         command.Parameters.AddWithValue("$id", id);
         if (await command.ExecuteNonQueryAsync(cancellationToken) == 0)
         {
@@ -346,11 +348,11 @@ public sealed partial class JobStore : IJobStore
             insertRun.CommandText = """
                 INSERT INTO JobRuns
                     (Id, JobId, TriggerKind, TriggerKey, Status, JobName, ProjectPath, Llm,
-                     EnvironmentId, EnvironmentName, TimeoutMinutes, QueuedUTC, LaunchMinimized)
+                     EnvironmentId, EnvironmentName, TimeoutMinutes, QueuedUTC, LaunchMinimized, LaunchInTerminalTab)
                 SELECT $retryId, source.JobId, $manual, $triggerKey, $queued, source.JobName,
                        source.ProjectPath, source.Llm, source.EnvironmentId,
                        source.EnvironmentName, source.TimeoutMinutes, $queuedUtc,
-                       source.LaunchMinimized
+                       source.LaunchMinimized, source.LaunchInTerminalTab
                 FROM JobRuns source
                 JOIN Jobs job ON job.Id = source.JobId AND job.DeletedUTC IS NULL
                 WHERE source.Id = $sourceId AND source.DeletedUTC IS NULL
@@ -950,6 +952,24 @@ public sealed partial class JobStore : IJobStore
         return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
     }
 
+    public async Task LinkRunTerminalSessionAsync(string runId, string sessionId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            UPDATE JobRuns SET TerminalSessionId = $sessionId, SessionId = COALESCE(SessionId, $sessionId)
+            WHERE Id = $runId AND DeletedUTC IS NULL;
+            UPDATE Sessions SET JobRunId = $runId
+            WHERE Id = $sessionId AND EXISTS (SELECT 1 FROM JobRuns WHERE Id = $runId AND DeletedUTC IS NULL);
+            """;
+        command.Parameters.AddWithValue("$runId", runId);
+        command.Parameters.AddWithValue("$sessionId", sessionId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
     public async Task LinkRunActionSessionAsync(
         string runId,
         string actionId,
@@ -1229,10 +1249,10 @@ public sealed partial class JobStore : IJobStore
         command.CommandText = $"""
             INSERT OR IGNORE INTO JobRuns
                 (Id, JobId, TriggerKind, TriggerKey, Status, JobName, ProjectPath, Llm,
-                 EnvironmentId, EnvironmentName, TimeoutMinutes, QueuedUTC, LaunchMinimized)
+                 EnvironmentId, EnvironmentName, TimeoutMinutes, QueuedUTC, LaunchMinimized, LaunchInTerminalTab)
             SELECT $runId, j.Id, $triggerKind, $triggerKey, $queued, j.Name, j.ProjectPath,
                    COALESCE(e.LLM, 0), j.EnvironmentId, e.CustomName, j.TimeoutMinutes, $queuedUtc,
-                   j.LaunchMinimized
+                   j.LaunchMinimized, j.LaunchInTerminalTab
             FROM Jobs j
             LEFT JOIN Environments e ON e.Id = j.EnvironmentId
             WHERE j.Id = $jobId AND ($requireEnabled = 0 OR j.Enabled = 1) AND j.DeletedUTC IS NULL
@@ -1548,7 +1568,8 @@ public sealed partial class JobStore : IJobStore
         reader.IsDBNull(11) ? null : ParseDb(reader.GetString(11)),
         [],
         reader.GetInt32(12) != 0,
-        ImportedFromJobId: reader.IsDBNull(13) ? null : reader.GetInt64(13));
+        ImportedFromJobId: reader.IsDBNull(13) ? null : reader.GetInt64(13),
+        LaunchInTerminalTab: reader.GetInt32(14) != 0);
 
     private static async Task<IReadOnlyList<JobTriggerDto>> ReadTriggersAsync(SqliteConnection connection, long jobId, CancellationToken cancellationToken)
     {
@@ -1629,7 +1650,9 @@ public sealed partial class JobStore : IJobStore
         reader.IsDBNull(16) ? null : reader.GetString(16),
         reader.GetInt32(17) != 0,
         reader.IsDBNull(18) ? null : reader.GetInt32(18),
-        reader.GetInt32(19) != 0);
+        reader.GetInt32(19) != 0,
+        LaunchInTerminalTab: reader.GetInt32(20) != 0,
+        TerminalSessionId: reader.IsDBNull(21) ? null : reader.GetString(21));
 
     private int _dependenciesReady;
 
@@ -1655,6 +1678,14 @@ public sealed partial class JobStore : IJobStore
         SqliteMigrationRunner.RequireGenerationAtMost(connection, StateDatabaseSchema.Generation, "state.db");
         SqliteMigrationRunner.Apply(connection, "jobs", 1, MigrationKind.Additive, AdoptSchema);
         SqliteMigrationRunner.Apply(connection, "jobs-import-origin", 1, MigrationKind.Additive, AdoptImportOrigin);
+        SqliteMigrationRunner.Apply(connection, "jobs-terminal-tabs", 1, MigrationKind.Additive, (db, transaction) =>
+        {
+            foreach (var table in new[] { "Jobs", "JobRuns" })
+                if (!SqliteSchema.HasColumn(db, transaction, table, "LaunchInTerminalTab"))
+                    SqliteSchema.Execute(db, transaction, $"ALTER TABLE {table} ADD COLUMN LaunchInTerminalTab INTEGER NOT NULL DEFAULT 0;");
+            if (!SqliteSchema.HasColumn(db, transaction, "JobRuns", "TerminalSessionId"))
+                SqliteSchema.Execute(db, transaction, "ALTER TABLE JobRuns ADD COLUMN TerminalSessionId TEXT;");
+        });
         EnsureDependentSchema(connection);
     }
 
@@ -1890,7 +1921,7 @@ public sealed partial class JobStore : IJobStore
     private const string JobSelectSql = """
         SELECT j.Id, j.Name, j.ProjectPath, e.LLM, j.EnvironmentId, e.CustomName,
                COALESCE(NULLIF(TRIM(e.CustomPrompt), ''), ''), j.TimeoutMinutes, j.Enabled,
-               j.CreatedUTC, j.UpdatedUTC, j.DeletedUTC, j.LaunchMinimized, j.ImportedFromJobId
+               j.CreatedUTC, j.UpdatedUTC, j.DeletedUTC, j.LaunchMinimized, j.ImportedFromJobId, j.LaunchInTerminalTab
         FROM Jobs j LEFT JOIN Environments e ON e.Id = j.EnvironmentId
         """;
 
@@ -1921,7 +1952,7 @@ public sealed partial class JobStore : IJobStore
         "Id", "JobId", "TriggerKind", "TriggerKey", "Status", "JobName", "ProjectPath",
         "Llm", "EnvironmentId", "EnvironmentName", "TimeoutMinutes", "SessionId",
         "QueuedUTC", "StartedUTC", "EndedUTC", "ExitCode", "ErrorMessage",
-        "CancelRequested", "OwnerProcessId", "LaunchMinimized"
+        "CancelRequested", "OwnerProcessId", "LaunchMinimized", "LaunchInTerminalTab", "TerminalSessionId"
     ];
 
     /// <summary>Bare column list, for projections that read JobRuns through a subquery.</summary>

@@ -195,7 +195,23 @@ namespace VibeRails.DTOs
         string Type = BoardCardTypes.Default,
         string BoardId = "",
         bool Flagged = false);
-    public record BoardCardListResponse(List<BoardCardSummaryResponse> Cards);
+    public record BoardCardListResponse(List<BoardCardSummaryResponse> Cards)
+    {
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public IReadOnlyList<BoardCardLanePage>? Lanes { get; init; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public IReadOnlyList<string>? Assignees { get; init; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public IReadOnlyList<string>? Tags { get; init; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? TotalCount { get; init; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? FilteredCount { get; init; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? BlockedCount { get; init; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public long? RemainingPoints { get; init; }
+    }
     public record BoardLinkedCardDto(string Id, string Key, string Title, string BoardId, string BoardName, string ColumnId, string ColumnName);
     public record BoardCardLinkCandidatesResponse(List<BoardLinkedCardDto> Cards);
     public record LinkBoardCardRequest(string? Card = null);
@@ -847,7 +863,10 @@ namespace VibeRails.DTOs
         bool HasActiveSession,
         string? SessionId = null,
         string? Cli = null,
-        string? WorkingDirectory = null
+        string? WorkingDirectory = null,
+        string? JobRunId = null,
+        string? AutomationName = null,
+        bool StatusAvailable = true
     );
 
     public record TerminalTabListResponse(
@@ -1385,6 +1404,7 @@ namespace VibeRails.DTOs
 
     // Session state event payloads
     public record SessionStartedPayload(string SessionId, string Cli);
+    public record AutomationTerminalStartedPayload(string TabId, string SessionId, string JobName, string WorkingDirectory);
     public record SessionIdlePayload(string SessionId, string Cli, double IdleForSeconds);
     public record SessionBusyPayload(string SessionId, string Cli);
     public record SessionInputPayload(string SessionId, string Kind, string Source);
@@ -1618,6 +1638,7 @@ namespace VibeRails.DTOs
     // Terminal Session DTOs
     [JsonSerializable(typeof(TerminalStatusResponse))]
     [JsonSerializable(typeof(TerminalTabStatusResponse))]
+    [JsonSerializable(typeof(AutomationTerminalStartedPayload))]
     [JsonSerializable(typeof(List<TerminalTabStatusResponse>))]
     [JsonSerializable(typeof(TerminalTabListResponse))]
     [JsonSerializable(typeof(StartTerminalRequest))]
@@ -1715,6 +1736,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(BoardCardSummaryResponse))]
     [JsonSerializable(typeof(List<BoardCardSummaryResponse>))]
     [JsonSerializable(typeof(BoardCardListResponse))]
+    [JsonSerializable(typeof(BoardCardLanePage))]
     [JsonSerializable(typeof(BoardCardResponse))]
     [JsonSerializable(typeof(BoardLinkedCardDto))]
     [JsonSerializable(typeof(BoardCardLinkCandidatesResponse))]

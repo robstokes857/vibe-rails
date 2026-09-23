@@ -111,7 +111,8 @@ public sealed class BoardStoreTests : IDisposable
         Assert.Equal("PA-2", second.Key);
         Assert.Equal("PB-1", elsewhere.Key);
         Assert.Equal(0, first.Position);
-        Assert.Equal(1, second.Position);
+        Assert.Equal(0, second.Position);
+        Assert.Equal(1, (await _store.FindCardAsync(_project, first.Id, Ct))!.Position);
         Assert.Equal(BoardCardTypes.Task, first.Type);
         Assert.Equal(BoardCardTypes.Bug, second.Type);
 
@@ -172,10 +173,64 @@ public sealed class BoardStoreTests : IDisposable
         cards = await _store.GetCardsAsync(_project, Ct);
         Assert.Equal([a.Id, b.Id], cards.Where(x => x.ColumnId == build.Id).OrderBy(x => x.Position).Select(x => x.Id));
 
-        // Update with a new columnId appends to that lane and renumbers the old one.
+        // A form/MCP lane update goes to the top and renumbers the old lane.
         var updated = await _store.UpdateCardAsync(_project, c.Id, new BoardCardPatch(ColumnId: build.Id), Ct);
-        Assert.Equal(2, updated!.Position);
+        Assert.Equal(0, updated!.Position);
+        Assert.Equal([c.Id, a.Id, b.Id], (await _store.GetCardsAsync(_project, Ct)).OrderBy(x => x.Position).Select(x => x.Id));
         Assert.Empty((await _store.GetCardsAsync(_project, Ct)).Where(x => x.ColumnId == backlog.Id));
+    }
+
+    [Theory]
+    [InlineData("edit")]
+    [InlineData("comment")]
+    [InlineData("note")]
+    [InlineData("session")]
+    [InlineData("rename-session")]
+    [InlineData("unlink-session")]
+    [InlineData("commit")]
+    [InlineData("unlink-commit")]
+    public async Task CardActivity_PromotesOnlyTheUpdatedCard_AndKeepsPositionsDense(string activity)
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var first = await _store.CreateCardAsync(_project, NewCard("First"), Ct);
+        const string sha = "89abcdef0123456789abcdef0123456789abcdef";
+        if (activity is "rename-session" or "unlink-session")
+            await _store.LinkSessionAsync(_project, first.Id, "session", null, "", "codex", "Session", BoardSessionRecord.ManualOrigin, Ct);
+        if (activity == "unlink-commit")
+            await _store.AddCommitAsync(_project, first.Id, sha, "Rob", "Fix", DateTime.UtcNow, Snapshot(), Ct);
+        var second = await _store.CreateCardAsync(_project, NewCard("Second"), Ct);
+        var third = await _store.CreateCardAsync(_project, NewCard("Third"), Ct);
+        Assert.Equal([third.Id, second.Id, first.Id], (await _store.GetCardsAsync(_project, Ct)).Select(card => card.Id));
+
+        switch (activity)
+        {
+            case "edit": await _store.UpdateCardAsync(_project, first.Id, new BoardCardPatch(Flagged: true), Ct); break;
+            case "comment": await _store.AddCommentAsync(_project, first.Id, BoardAuthor.User(), "Update", Ct); break;
+            case "note": await _store.AddNoteAsync(_project, first.Id, BoardAuthor.Agent("Codex", "codex", null), "Note", Ct); break;
+            case "session": await _store.LinkSessionAsync(_project, first.Id, "session", null, "", "codex", "Session", BoardSessionRecord.ManualOrigin, Ct); break;
+            case "rename-session": await _store.RenameSessionAsync(_project, first.Id, "session", "Renamed", Ct); break;
+            case "unlink-session": await _store.UnlinkSessionAsync(_project, first.Id, "session", Ct); break;
+            case "commit": await _store.AddCommitAsync(_project, first.Id, sha, "Rob", "Fix", DateTime.UtcNow, Snapshot(), Ct); break;
+            case "unlink-commit": await _store.RemoveCommitAsync(_project, first.Id, sha, Ct); break;
+        }
+
+        var cards = await _store.GetCardsAsync(_project, Ct);
+        Assert.Equal([first.Id, third.Id, second.Id], cards.Select(card => card.Id));
+        Assert.Equal([0, 1, 2], cards.Select(card => card.Position));
+        Assert.Equal(second.UpdatedUtc, cards.Single(card => card.Id == second.Id).UpdatedUtc);
+        Assert.Equal(third.UpdatedUtc, cards.Single(card => card.Id == third.Id).UpdatedUtc);
+    }
+
+    [Fact]
+    public async Task MoveWithoutPosition_GoesToTheTop_WhileExplicitDragOrderSurvives()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var first = await _store.CreateCardAsync(_project, NewCard("First"), Ct);
+        var second = await _store.CreateCardAsync(_project, NewCard("Second"), Ct);
+        await _store.MoveCardAsync(_project, first.Id, first.ColumnId, null, Ct);
+        Assert.Equal([first.Id, second.Id], (await _store.GetCardsAsync(_project, Ct)).Select(card => card.Id));
+        await _store.MoveCardAsync(_project, first.Id, first.ColumnId, 1, Ct);
+        Assert.Equal([second.Id, first.Id], (await _store.GetCardsAsync(_project, Ct)).Select(card => card.Id));
     }
 
     [Fact]
@@ -261,7 +316,7 @@ public sealed class BoardStoreTests : IDisposable
         Assert.Equal("MRN-2", (await _store.CreateCardAsync(camel, NewCard("B"), Ct)).Key);
         Assert.Equal("MONO-1", (await _store.CreateCardAsync(single, NewCard("C"), Ct)).Key);
         // The prefix is read back with the card, not recomputed from the path.
-        Assert.Equal(["MRN-1", "MRN-2"], (await _store.GetCardsAsync(camel, Ct)).Select(c => c.Key));
+        Assert.Equal(["MRN-2", "MRN-1"], (await _store.GetCardsAsync(camel, Ct)).Select(c => c.Key));
         Assert.Equal("MRN-2", (await _store.FindCardAsync(camel, "mrn-2", Ct))!.Key);
         Assert.Equal("MONO-1", (await _store.GetCardDetailAsync(single, "MONO-1", Ct))!.Card.Key);
     }

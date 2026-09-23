@@ -75,6 +75,16 @@ serialization or tool discovery into the Native AOT path.
   a static dictionary or confuse a removable session-display link with execution ownership.
 - Saving a card never sends terminal input. Do not reintroduce the removed notification/TUI
   handshake. Compose the launch prompt from the card read for that launch.
+- New cards and ordinary card updates go to the top of their lane. Comments, notes, session,
+  attachment, commit and linked-card changes promote the affected cards in the same transaction;
+  dense position rewrites do not count as activity on the other cards. Explicit drag positions
+  remain authoritative. A lane move without a position goes to the top of its destination.
+- With an active session, Start work becomes **Go to agent** and focuses its existing terminal.
+  Lane-triggered Automations link their recording to the originating card's Sessions rail:
+  native Workers link their Worker recording, terminal-tab workflows link the complete workflow,
+  and native script-only runs link their timestamped script-output recording.
+  The run's immutable Board trigger and project scope determine the card; manual retries do not
+  inherit the original trigger's Board context.
 
 ## Security and resource policy
 

@@ -526,12 +526,14 @@ changing their behavior.
   into a shell command.
 - `JobStore` snapshots `JobActions` into immutable `JobRunActions` when a run is queued. Retry
   copies the original run snapshot, not the Automation's current edited definition.
-- `JobLaunchService` always opens a native OS terminal. Script-only workflows use the neutral
+- `JobLaunchService` uses the Automation's snapshotted Native terminal (default) or Terminal tab choice.
+  Tab workflows run the same job process inside a recorded shell tab. Native script-only workflows use the neutral
   `IJobProcessLauncher`; workflows with a Worker use `EnvironmentLaunchService`, preserving the
   Worker's Project/Persistent/PerRun workspace resolution for every script in that workflow.
 - `JobRunner` executes snapshots from top to bottom, records per-action status/output, stops at the
   first failure, and retains the existing global timeout, cancellation, overlap guard, scheduler,
-  and Worker terminal-session replay behavior.
+  and Worker terminal-session replay behavior. Native script-only workflows also record their timed stdout/stderr
+  into normal session history; lane-triggered recordings link to the card's Sessions rail.
 
 #### McpClientService ([Services/Mcp/McpClientService.cs](VibeRails/Services/Mcp/McpClientService.cs))
 **Purpose**: Custom MCP client service layer built on ModelContextProtocol NuGet package

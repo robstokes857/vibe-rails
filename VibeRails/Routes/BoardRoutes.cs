@@ -94,8 +94,11 @@ public static class BoardRoutes
             RunAsync(async () => OkOrNotFound(await automation.SaveAsync(Project(), columnId, request, cancellationToken), "Lane")))
             .WithName("SaveBoardLaneAutomation");
 
-        app.MapGet("/api/v1/board/cards", (IBoardService board, string? boardId, CancellationToken cancellationToken) =>
-            RunAsync(async () => Results.Ok(await board.GetCardsAsync(Project(), cancellationToken, boardId))))
+        app.MapGet("/api/v1/board/cards", (IBoardService board, string? boardId, int? pageSize, string? columnId,
+            int? offset, string? q, string? assignee, string? type, string? priority, string? tag, CancellationToken cancellationToken) =>
+            RunAsync(async () => Results.Ok(pageSize is int size
+                ? await board.GetCardsPageAsync(Project(), new BoardCardPageQuery(size, columnId, offset ?? 0, q, assignee, type, priority, tag), cancellationToken, boardId)
+                : await board.GetCardsAsync(Project(), cancellationToken, boardId))))
             .WithName("GetBoardCards");
 
         app.MapPost("/api/v1/board/cards", (IBoardService board, CreateBoardCardRequest request, CancellationToken cancellationToken) =>

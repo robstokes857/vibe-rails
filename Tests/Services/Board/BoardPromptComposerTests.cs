@@ -8,6 +8,16 @@ namespace Tests.Services.Board;
 
 public sealed class BoardPromptComposerTests
 {
+    [Fact]
+    public void PromptDirectsAgentsToAttachmentToolsInsteadOfTheDatabase()
+    {
+        var prompt = BoardPromptComposer.Compose(Card(), "Build", "codex", null);
+        Assert.Contains("read_board_attachment to view attached images", prompt);
+        Assert.Contains("Board tools as the only access path", prompt);
+        Assert.DoesNotContain("database", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(".db", prompt, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Theory]
     [InlineData("default", true, false)]
     [InlineData("replace", false, true)]

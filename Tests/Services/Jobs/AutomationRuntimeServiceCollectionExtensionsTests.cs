@@ -1,9 +1,11 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Moq;
 using VibeRails.DB;
 using VibeRails.Services.Cli;
 using VibeRails.Services.Jobs;
+using VibeRails.Services.Terminal;
 using VibeRails.Utils;
 using Xunit;
 
@@ -44,6 +46,8 @@ public sealed class AutomationRuntimeServiceCollectionExtensionsTests : IDisposa
     {
         var services = new ServiceCollection();
         services.AddAutomationRuntime(hostScheduler: true);
+        // The root host supplies its terminal manager; process-only hosts omit the tab launcher.
+        services.AddSingleton(Mock.Of<ITerminalTabHostService>());
 
         using var provider = services.BuildServiceProvider(new ServiceProviderOptions
         {
@@ -53,6 +57,7 @@ public sealed class AutomationRuntimeServiceCollectionExtensionsTests : IDisposa
         using var scope = provider.CreateScope();
 
         Assert.IsType<JobLaunchService>(scope.ServiceProvider.GetRequiredService<IJobLaunchService>());
+        Assert.IsType<JobTerminalTabLauncher>(scope.ServiceProvider.GetRequiredService<IJobTerminalTabLauncher>());
 
         var concreteScheduler = provider.GetRequiredService<JobSchedulerHostedService>();
         Assert.Same(concreteScheduler, provider.GetRequiredService<IJobScheduler>());

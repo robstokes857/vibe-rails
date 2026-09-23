@@ -42,6 +42,7 @@ public interface IJobStore
     Task<JobRunStatus> CompleteIdleRunAsync(string runId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<JobRunActionRecord>> GetRunActionsAsync(string runId, CancellationToken cancellationToken = default);
     Task<bool> StartRunActionAsync(string runId, string actionId, CancellationToken cancellationToken = default);
+    Task LinkRunTerminalSessionAsync(string runId, string sessionId, CancellationToken cancellationToken = default);
     Task LinkRunActionSessionAsync(string runId, string actionId, string sessionId, CancellationToken cancellationToken = default);
     Task CompleteRunActionAsync(
         string runId,

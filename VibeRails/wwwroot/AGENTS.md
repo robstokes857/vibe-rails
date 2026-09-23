@@ -21,7 +21,7 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | [js/modules/dashboard-controller.js](js/modules/dashboard-controller.js) | Unified Project health page (Rules, VCA, Git Guard, and Code quality; no embedded terminal) |
 | [js/modules/code-analyzer-dashboard.js](js/modules/code-analyzer-dashboard.js) | Compact MintLint score card plus the modal file/metric/source report |
 | [js/modules/project-health-fix-launcher.js](js/modules/project-health-fix-launcher.js) | Inline shared agent/environment pickers beside Project health Fix actions; synchronizes and remembers the target for direct launch |
-| [js/modules/jobs-controller.js](js/modules/jobs-controller.js) | Automation page: ordered repository-script/Worker workflow editor, automation CRUD, per-action run details, recipes, and "Run now" (queues a native terminal run; `launchFromNav` for the nav launcher); owns the shared `PythonScriptsController` |
+| [js/modules/jobs-controller.js](js/modules/jobs-controller.js) | Automation page: ordered repository-script/Worker workflow editor, automation CRUD, per-action run details, recipes, and "Run now" (queues a native-terminal or terminal-tab run; `launchFromNav` for the nav launcher); owns the shared `PythonScriptsController` |
 | [js/modules/python-scripts-controller.js](js/modules/python-scripts-controller.js) | "Python scripts" section of the Automation page + shared lifecycle and signing flows |
 | [js/modules/python-script-workbench.js](js/modules/python-script-workbench.js) | `python-script` view: Monaco editor beside a docked agent terminal for one script (see "Python script workbench" below) |
 | [js/modules/python-run-window.js](js/modules/python-run-window.js) | The little run window: argument rows + stdin in, exit code / output / return value out, no terminal (see "Python script run window" below) |
@@ -65,6 +65,18 @@ fill the viewport height and the board scrolls sideways while the page itself do
 `flex: 1 1 0` with a 232px floor: they share the width evenly and only start scrolling once they
 cannot all fit.
 
+Completed lanes (names containing Done, Complete or Ship) initially fetch 30 cards through
+`GET /api/v1/board/cards?pageSize=30`. Scroll near the lane bottom to load another batch, or use
+Load more. Other lanes load normally. The server applies filters to the entire board and returns
+full lane counts, statistics and assignee/tag choices even for unloaded cards. Refresh/filter
+changes reset paging; aborted or stale pages cannot repaint another board, and append deduplicates
+card IDs after concurrent activity. Drag ordering is disabled while filters are active. Board-only
+viewport sizing and non-shrinking cards keep scrolling inside each lane.
+
+New cards and ordinary card activity rise to the top of the current lane. Explicit drag positions
+remain authoritative. This ordering is persisted, including comments, notes, session links/renames,
+attachments and commit links, rather than being a browser-only sort.
+
 The page heading is **Vibe Board**, using the same centered, uppercase gradient heading as
 Application Settings. New card lives in the board toolbar. Top-left of the heading sits the
 **board picker** (a project can hold several boards — sprints, sub-projects): a select, a `+`
@@ -102,7 +114,7 @@ target for an unassigned card); its selection is independent of the saved assign
 the card and uses the same launch route with the selected target and `intent: 'chat'`,
 then adopts/focuses the returned tab (or navigates to `terminal-focus`). The prompt asks for a
 status/history review and discussion, waiting for the user before implementation. Both launch
-actions share the in-flight guard and are disabled for a known running session. The
+actions share the in-flight guard. A known running session changes Start work to Go to agent; Chat stays disabled. The
 server composes the LLM's first message from the card and prepends it to the selected environment's
 Initial Message (`Services/Board/BoardPromptComposer.cs`), then links the session to the card.
 Both card pickers are disposed on modal replacement/close and Board unload.
@@ -123,8 +135,8 @@ as typed `baseLlmOptions`, never browser-built CLI argument strings. Changing/un
 provider clears those controls. Picker mount is asynchronous: initialize controls using the
 saved assignee, and explicitly clear them after the picker's silent unassign operation.
 
-Start work becomes a disabled **Agent running** button when the card has an active linked
-session. The save response is checked again before launching, and the backend refuses a launch
+Start work becomes **Go to agent** when the card has an active linked
+session; it focuses that terminal without saving the form or launching another agent. The save response is checked again before launching, and the backend refuses a launch
 when its live tab list already contains one of the card's linked sessions.
 
 `TODO(board)`: an **Auto Launch** option (per card and/or per lane) so dropping an assigned card
@@ -138,7 +150,8 @@ browser owns no debounce timer. New cards count as lane entries; same-lane edits
 not. Saved settings affect future entries and cancel pending entries for the lane. Disabled
 Automations and active-job overlap are skipped independently for each selection. Clear all
 checkboxes to disable lane Automations; selected disabled/deleted jobs remain removable. The ordinary root Automation scheduler and
-native-terminal run lifecycle apply.
+configured native-terminal or terminal-tab run lifecycle apply. Automation recordings link to the triggering card
+through the ordinary Sessions rail.
 
 The view uses the app's shared surfaces rather than its own: `app.showModal` (upgraded to
 `modal-xl` for the card editor, the same way the rule and quality modals do it), `confirmDialog`
@@ -586,11 +599,19 @@ History remains unfiltered so launch preferences never hide historical sessions.
 
 Both base CLI and custom environment launches share one unified tab API; the only difference is whether `environmentName` is included in the start body.
 
-Automations never land in this terminal surface. Every Automation run — manual **Run now**, retry,
-schedule, commit trigger — is launched by the backend scheduler into its own native OS terminal
-window, so `runNow` just POSTs, toasts and refreshes the run history. This includes `.py` actions
-inside an Automation. The separate signed Python-script workbench is the exception that can use a
-Web UI tab for its **Run in terminal…** flow (see below).
+Automations choose **Native terminal** (the compatible default) or **Terminal tab** in the editor.
+The backend scheduler honors the snapshotted choice for every trigger and retry; `runNow` still
+just POSTs, toasts and refreshes history. Tab workflows run the ordinary `vb --job-run` child in a
+recorded shell tab, retaining Worker workspace/arguments and script ordering. History shows a
+copyable session ID and a full-workflow replay alongside individual Worker recordings.
+
+Automation terminals live in a separate **robot/count** menu beside recently closed terminals.
+The list retains running and recent completed hosts; live entries attach on selection, completed
+entries open replay. Restoring or receiving a launch event updates the menu without opening an
+xterm/socket per run or stealing focus. Server-owned `jobRunId` and `automationName` classify the
+entries across reloads; unavailable status must not be treated as completed. Ordinary close/undo
+keeps its independent two-minute grace window. The root's cap is 100; at capacity it may reclaim
+the oldest finished Automation host after the recording is finalized, preserving history.
 
 ### Flow: "Web UI" Button
 
@@ -736,3 +757,14 @@ See also: [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for back
 ---
 
 *Last checked: 2026-09-01T00:00:00Z by Codex*
+
+## Notifications and session replay
+
+`toast-service.js` keeps the shared notification entry point and stacking library, using compact,
+opaque Midnight cards by default. General settings offers Midnight, Light and Follow system;
+this appearance preference applies immediately and persists in browser local storage. CSS owns
+the palette and compact spacing; toasts retain escaped content, hover pause and manual dismissal.
+
+`session-replay-playback.js` owns the replay clock shared by session/history viewers. Elapsed-time
+batching avoids a timer per output chunk, so dense recordings respect 5x/10x speeds despite browser
+timer clamping. Speed changes reschedule immediately; pause/seek/restart/close reset the clock.

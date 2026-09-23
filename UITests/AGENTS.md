@@ -70,6 +70,16 @@ Uses the real frontend with mocked board APIs to verify the Settings-style headi
 image rendering/editing/upload, save/reopen, running-agent controls, and desktop/narrow layouts.
 It starts a temporary static server and never touches the machine's board database.
 
+### Focused Automation terminal menu tests (No Backend Required)
+
+```powershell
+npx playwright test --config playwright.terminal-automations.config.js
+```
+
+Uses real terminal UI/xterm with intercepted API and WebSocket fixtures. Covers a long robot
+menu, lazy live attachment, finished-run replay, launch events/remount, independent close/undo,
+and narrow-window keyboard access. Does not launch a CLI or touch application state.
+
 ### View Report
 If a test fails, you can view the detailed HTML report:
 ```powershell

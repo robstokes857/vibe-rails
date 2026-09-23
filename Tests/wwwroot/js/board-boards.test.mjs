@@ -44,7 +44,7 @@ test('the controller loads boards first, remembers the selection, and scopes lan
     assert.match(source, /const BOARD_STORAGE_KEY = 'viberails\.board\.selected\.v1'/);
     assert.match(source, /boards = await BoardApi\.getBoardsAsync\(\);/);
     assert.match(source, /BoardApi\.getBoardColumnsAsync\(boardId\)/);
-    assert.match(source, /BoardApi\.getBoardCardsAsync\(boardId\)/);
+    assert.match(source, /BoardApi\.getBoardCardPageAsync\(boardId, this\.state\.filters,/);
     assert.match(source, /BoardApi\.reorderBoardColumnsAsync\(orderedIds, this\.state\.boardId\)/);
     assert.match(source, /createBoardColumnAsync\(\{ name, color, boardId: this\.state\.boardId \}\)/);
     assert.match(source, /picker\?\.addEventListener\('change', \(\) => this\.switchBoard\(picker\.value\)\)/);
