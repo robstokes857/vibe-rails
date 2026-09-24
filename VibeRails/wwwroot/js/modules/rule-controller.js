@@ -2,10 +2,9 @@ import { VcaConsole, copyVcaConsoleText } from './vca-console.js';
 import {
     buildCodeAnalyzerDashboardModel,
     directoryOf,
-    disposeCodeAnalyzerDashboard,
-    renderCodeAnalyzerBrief,
-    renderCodeAnalyzerDashboard
+    renderCodeAnalyzerBrief
 } from './code-analyzer-dashboard.js';
+import { CodeReportViewer } from './code-report/viewer.js';
 import {
     GIT_PREFLIGHT_STEPS,
     GitPreflightRunner,
@@ -437,10 +436,8 @@ export class RuleController {
         this.preflightState = createGitPreflightState();
         this.preflightRunner = null;
         this.focusedMode = false;
-        // The dashboard's last-known UI state (selected file/metric) so a re-render
-        // after an ignore action can drop the user back where they were instead of
-        // bouncing them to file #1.
-        this.codeAnalyzerState = null;
+        // The mounted report owns its graph, dialog, observers and request lifetime.
+        this.codeReportViewer = null;
         // A Rules overview is remounted each time the user navigates away and back. Keep the
         // most recent MintLint response so remounting can restore it without starting another
         // scan. A manual scan (or an ignore/restore that deliberately rescans) replaces this.
@@ -534,14 +531,17 @@ export class RuleController {
         if (!root) return;
 
         this.viewRoot = root;
-        this.bindCodeQualityControls(root);
-        this.bindActionMenuAutoClose(root);
+        this.codeReportViewer = new CodeReportViewer(root.querySelector('[data-code-analyzer-report]'), this.app);
         return this.runCodeQualityChecks(root);
     }
 
     async runCodeQualityChecks(root) {
         await this.refreshHookStatus();
-        if (this.viewRoot !== root || !this.hookStatus?.inGitRepo) return false;
+        if (this.viewRoot !== root) return false;
+        if (!this.hookStatus?.inGitRepo) {
+            this.codeReportViewer?.setError('Open a Git repository to inspect code reports.');
+            return false;
+        }
 
         // A scan the hub kicked off may still be running; when it completes it renders
         // into whichever view is mounted, so starting another here would double-scan.
@@ -611,6 +611,7 @@ export class RuleController {
         this.app.bindAction(root, '[data-action="run-code-analyzer-unpushed"]', () => this.runCodeAnalyzer({ unpushed: true }));
         this.app.bindAction(root, '[data-action="copy-code-analyzer-output"]', () => this.copyCodeAnalyzerOutput());
         this.app.bindAction(root, '[data-action="clear-code-analyzer-output"]', () => this.clearCodeAnalyzerOutput());
+        this.app.bindAction(root, '[data-action="manage-analyzer-ignores"]', () => this.openAnalyzerExclusions());
         this.codeAnalyzerConsole = new VcaConsole(root.querySelector('[data-code-analyzer-console]'), {
             defaultMessage: 'Code quality scan ready.\nChange a supported source file, then run the scan.',
             runningMessage: 'Analyzing working-tree source changes…',
@@ -667,7 +668,8 @@ export class RuleController {
         this.disposeHealthFixPickers = null;
         this.preflightRunner?.cancel();
         this.preflightRunner = null;
-        disposeCodeAnalyzerDashboard(this.viewRoot?.querySelector?.('[data-code-analyzer-report]'));
+        this.codeReportViewer?.destroy();
+        this.codeReportViewer = null;
         this.viewRoot = null;
         this.vcaConsole = null;
         this.codeAnalyzerConsole = null;
@@ -1017,7 +1019,7 @@ export class RuleController {
         if (this.codeAnalyzerScanInProgress
             && this.codeAnalyzerScanInProgress.repositoryPath === repositoryPath) return false;
 
-        this.codeAnalyzerScanInProgress = { repositoryPath };
+        const flight = this.codeAnalyzerScanInProgress = { repositoryPath };
         this.setHealthFixButtonsDisabled(!this.hookStatus?.inGitRepo);
         // Remember the scope so ignore/restore rescans replay it instead of silently reverting to
         // the working-tree scope, and so the source pane can request the matching revision.
@@ -1044,15 +1046,17 @@ export class RuleController {
                     'POST', null, { showLoading: false }),
                 this.fetchAnalyzerIgnores()
             ]);
+            if (this.codeAnalyzerScanInProgress !== flight) return false;
             this.codeAnalyzerConsole?.complete(response);
             this.codeAnalyzerCache = {
                 repositoryPath,
                 response,
                 ignoredFiles: this.analyzerIgnores || [],
-                unpushed: this.lastAnalyzerUnpushed
+                unpushed
             };
             this.renderCodeAnalyzerSummary(response);
         } catch (error) {
+            if (this.codeAnalyzerScanInProgress !== flight) return false;
             this.codeAnalyzerConsole?.fail(error);
             // A failed automatic scan should not repeat every time this view remounts. The user
             // can retry it with the refresh button after addressing the reported problem.
@@ -1061,12 +1065,11 @@ export class RuleController {
                 response: null,
                 error: error?.message,
                 ignoredFiles: this.analyzerIgnores || [],
-                unpushed: this.lastAnalyzerUnpushed
+                unpushed
             };
             this.renderCodeAnalyzerSummary(null);
         } finally {
-            if (this.codeAnalyzerScanInProgress
-                && this.codeAnalyzerScanInProgress.repositoryPath === repositoryPath) {
+            if (this.codeAnalyzerScanInProgress === flight) {
                 this.codeAnalyzerScanInProgress = null;
             }
             this.setButtonBusy(button, false);
@@ -1076,6 +1079,7 @@ export class RuleController {
     }
 
     renderCodeAnalyzerLoading() {
+        this.codeReportViewer?.setLoading();
         const empty = this.query('[data-code-analyzer-empty]');
         if (!empty) return;
         empty.hidden = false;
@@ -1088,14 +1092,9 @@ export class RuleController {
     renderCodeAnalyzerSummary(response) {
         this.setHealthFixButtonsDisabled(!this.hookStatus?.inGitRepo);
         const empty = this.query('[data-code-analyzer-empty]');
-        const reportContainer = this.query('[data-code-analyzer-report]');
         const briefHost = this.query('[data-vca-quality-brief]');
-        if (!response || response?.success === false) {
-            disposeCodeAnalyzerDashboard(reportContainer);
-            if (reportContainer) {
-                reportContainer.hidden = true;
-                delete reportContainer.dataset.analyzerScore;
-            }
+        if (!response || response.success === false) {
+            this.codeReportViewer?.setError(this.codeAnalyzerCache?.error || response?.output || 'Code quality could not be scored. Return to Project health to scan again.');
             if (empty) {
                 empty.hidden = false;
                 const title = empty.querySelector('strong');
@@ -1106,126 +1105,57 @@ export class RuleController {
             renderCodeAnalyzerBrief(briefHost, null);
             return;
         }
-
-        // The Validation screen carries the compact scan summary; the Code quality
-        // section's nav badge reads the score from the report container's dataset.
-        const summary = buildCodeAnalyzerSummary(response);
-        if (summary.analyzedFileCount === 0) {
-            this.codeAnalyzerConsole?.write(response.output || 'Scan complete. No changed source files to analyze.\nChange a supported source file, then scan again.');
+        renderCodeAnalyzerBrief(briefHost, response, undefined, {
+            onOpenDetails: () => this.openCodeQualityDetails()
+        });
+        if (buildCodeAnalyzerSummary(response).analyzedFileCount === 0) {
+            this.codeAnalyzerConsole?.write(response.output || 'Scan complete. No changed source files to analyze.');
             this.codeAnalyzerConsole?.finishStream({
                 tone: 'neutral', state: 'Complete', meta: 'Scan complete · No changed source files'
             });
         }
-        renderCodeAnalyzerBrief(briefHost, response, undefined, {
-            onOpenDetails: () => this.openCodeQualityDetails()
-        });
         if (empty) empty.hidden = true;
-
-        if (reportContainer) {
-            const fileCount = renderCodeAnalyzerDashboard(reportContainer, response, undefined, {
-                // The source pane shows whole files from the working tree; the report
-                // itself only carries short snippets.
-                fetchSource: path => this.app.apiCall(
-                    `/api/v1/code-analyzer/source?path=${encodeURIComponent(path)}${this.lastAnalyzerUnpushed ? '&scope=unpushed' : ''}`,
-                    'GET',
-                    null,
-                    { showLoading: false }),
-                ignoredFiles: this.analyzerIgnores || [],
-                onIgnoreFile: file => this.promptIgnoreAnalyzerFile(file),
-                onIgnoreDirectory: payload => this.promptIgnoreAnalyzerDirectory(payload),
-                onRestoreFile: entry => this.restoreAnalyzerFile(entry),
-                // Preserve the user's place across the re-render that follows an ignore.
-                preserveState: this.codeAnalyzerState || null,
-                onStateChange: state => { this.codeAnalyzerState = state; }
-            });
-            if (summary.score === null) delete reportContainer.dataset.analyzerScore;
-            else reportContainer.dataset.analyzerScore = summary.scoreLabel;
-            // Keep the report container visible whenever there are ignores to restore, even when the
-            // report itself is empty — otherwise ignoring every changed file would hide the only
-            // restore UI (which the dashboard now renders standalone in that case).
-            const hasIgnores = (this.analyzerIgnores || []).length > 0;
-            reportContainer.hidden = fileCount === 0 && !hasIgnores;
-            if (empty) {
-                empty.hidden = fileCount > 0 || hasIgnores;
-                const title = empty.querySelector('strong');
-                const message = empty.querySelector('p');
-                if (title) title.textContent = fileCount > 0 ? '' : 'No changed source files to analyze';
-                if (message) {
-                    message.textContent = fileCount > 0
-                        ? ''
-                        : 'Change a supported source file, then run the scan again.';
-                }
-            }
-        }
+        void this.codeReportViewer?.setResponse(response);
     }
 
     openCodeQualityDetails() {
-        const response = this.codeAnalyzerCache?.response;
-        if (!response || response?.success === false) {
-            this.app.showToast('Code quality', 'Run a successful scan before opening the metrics.', 'info');
-            return;
-        }
-        const unpushed = this.codeAnalyzerCache.unpushed === true;
-        const returnToReport = this.createCodeQualityReportReturn();
-
-        let report = null;
-        let disposed = false;
-        const disposeReport = () => {
-            if (disposed) return;
-            disposed = true;
-            if (report) disposeCodeAnalyzerDashboard(report);
-        };
-        this.app.showModal('Code quality metrics', `
-            <div class="project-health-quality-modal code-analyzer-panel">
-                <p class="project-health-quality-modal-intro">
-                    Select a file or metric to inspect its code. Higher quality scores are healthier.
-                </p>
-                <div class="code-analyzer-dashboard" data-project-health-quality-report></div>
-            </div>`, { onClose: disposeReport });
-
-        const modalContainer = document.getElementById('modal-container');
-        report = modalContainer?.querySelector('[data-project-health-quality-report]');
-        if (!report) return;
-        const dialog = modalContainer.querySelector('.modal-dialog');
-        dialog?.classList.remove('modal-lg');
-        dialog?.classList.add('modal-xl', 'project-health-quality-modal-dialog');
-
-        renderCodeAnalyzerDashboard(report, response, undefined, {
-            fetchSource: path => this.app.apiCall(
-                `/api/v1/code-analyzer/source?path=${encodeURIComponent(path)}${unpushed ? '&scope=unpushed' : ''}`,
-                'GET',
-                null,
-                { showLoading: false }),
-            ignoredFiles: this.analyzerIgnores || [],
-            onIgnoreFile: file => {
-                disposeReport();
-                this.promptIgnoreAnalyzerFile(file, returnToReport);
-            },
-            onIgnoreDirectory: payload => {
-                disposeReport();
-                this.promptIgnoreAnalyzerDirectory(payload, returnToReport);
-            },
-            onRestoreFile: async entry => {
-                disposeReport();
-                this.app.closeModal();
-                await this.restoreAnalyzerFile(entry);
-                returnToReport();
-            },
-            preserveState: this.codeAnalyzerState || null,
-            onStateChange: state => { this.codeAnalyzerState = state; }
-        });
+        this.app.navigate('code-quality');
     }
 
-    createCodeQualityReportReturn() {
+    // Scan policy stays on Project health, outside the report inspector.
+    async openAnalyzerExclusions() {
+        const root = this.viewRoot;
+        const ignored = await this.fetchAnalyzerIgnores();
+        if (this.viewRoot !== root || !root) return;
+        const files = this.codeAnalyzerCache?.response?.report?.files || [];
+        const esc = value => this.app.escapeHtml(String(value || ''));
+        this.app.showModal('Code quality scan exclusions', `
+            <p>Exclude files or folders from future scans. Restore an exclusion to include it again.</p>
+            <h3 class="h6">Excluded paths</h3>
+            ${ignored.length ? ignored.map((entry, i) => `<div class="d-flex align-items-center gap-2 mb-2"><code class="flex-grow-1">${esc(entry.path)}</code><button type="button" class="btn btn-sm btn-outline-secondary" data-restore-exclusion="${i}">Restore</button></div>`).join('') : '<p>No exclusions.</p>'}
+            <h3 class="h6 mt-3">Files in the latest report</h3>
+            ${files.map((file, i) => `<div class="d-flex flex-wrap align-items-center gap-2 mb-2"><code class="flex-grow-1">${esc(file.file)}</code><button type="button" class="btn btn-sm btn-outline-secondary" data-exclude-file="${i}">Exclude file</button><button type="button" class="btn btn-sm btn-outline-secondary" data-exclude-folder="${i}">Exclude folder</button></div>`).join('') || '<p>No report files.</p>'}
+        `);
+        const modal = document.getElementById('modal-container');
+        const returnToExclusions = this.createAnalyzerExclusionsReturn();
+        modal?.querySelectorAll('[data-restore-exclusion]').forEach(button => button.addEventListener('click', async () => {
+            this.app.closeModal();
+            await this.restoreAnalyzerFile(ignored[Number(button.dataset.restoreExclusion)]);
+            returnToExclusions();
+        }));
+        modal?.querySelectorAll('[data-exclude-file]').forEach(button => button.addEventListener('click', () =>
+            this.promptIgnoreAnalyzerFile({ path: files[Number(button.dataset.excludeFile)].file }, returnToExclusions)));
+        modal?.querySelectorAll('[data-exclude-folder]').forEach(button => button.addEventListener('click', () =>
+            this.promptIgnoreAnalyzerDirectory({ file: { path: files[Number(button.dataset.excludeFolder)].file } }, returnToExclusions)));
+    }
+
+    createAnalyzerExclusionsReturn() {
         const originRoot = this.viewRoot;
         const originView = this.app.currentView;
         return () => {
-            // Closing a reason dialog may also mean navigating or replacing it with
-            // another dialog. Only return when the original page still owns the UI.
             if (this.viewRoot !== originRoot || this.app.currentView !== originView) return false;
             if (document.getElementById('modal-container')?.firstElementChild) return false;
-            if (!this.codeAnalyzerCache?.response || this.codeAnalyzerCache.response.success === false) return false;
-            this.openCodeQualityDetails();
+            void this.openAnalyzerExclusions();
             return true;
         };
     }
@@ -1824,7 +1754,7 @@ export class RuleController {
     clearCodeAnalyzerOutput() {
         if (this.codeAnalyzerConsole?.clear()) {
             const report = this.query('[data-code-analyzer-report]');
-            disposeCodeAnalyzerDashboard(report);
+            this.codeReportViewer?.setLoading();
             if (report) report.hidden = true;
             const empty = this.query('[data-code-analyzer-empty]');
             if (empty) empty.hidden = false;

@@ -1,6 +1,8 @@
 import * as assert from 'assert/strict';
 import * as http from 'http';
+import * as path from 'path';
 import * as vscode from 'vscode';
+import { WebviewPanelManager } from '../../webview-panel';
 
 interface TestConnectionInfo {
     port: number | null;
@@ -275,6 +277,78 @@ suite('VibeRails VS Code Smoke', function () {
         } catch {
             // Best-effort cleanup only.
         }
+    });
+
+    test('code report loads real data under the installed webview CSP and disposes on navigation', async () => {
+        await vscode.commands.executeCommand('viberails.open');
+        connectionInfo = await getConnectionInfo();
+        const extension = vscode.extensions.getExtension(EXTENSION_ID)!;
+        const target = `${process.platform}-${process.arch}`;
+        const manager = new WebviewPanelManager(path.join(extension.extensionPath, 'bin', target, 'wwwroot'));
+        try {
+            const panel = await manager.create(connectionInfo.port!, connectionInfo.sessionToken, connectionInfo.tabToken);
+            const html = panel.webview.html;
+            const nonce = html.match(/<script nonce="([^"]+)"/)?.[1];
+            assert.ok(nonce, 'The real webview HTML must supply a script nonce.');
+            const result = new Promise<{ checks?: string[]; error?: string }>((resolve, reject) => {
+                const timer = setTimeout(() => reject(new Error('Report webview did not finish its checks.')), 90000);
+                const subscription = panel.webview.onDidReceiveMessage(message => {
+                    if (message.command !== 'report-test-result') return;
+                    clearTimeout(timer);
+                    subscription.dispose();
+                    resolve(message);
+                });
+            });
+            // Only test HTML receives this probe. The production host, CSP and modules are unchanged.
+            panel.webview.html = html.replace('</body>', `<script type="module" nonce="${nonce}">
+                const checks = [];
+                const wait = async (predicate, label) => {
+                    const deadline = Date.now() + 70000;
+                    while (!predicate()) {
+                        if (Date.now() > deadline) throw new Error('Timed out waiting for ' + label + '; view=' + window.app?.currentView + '; state=' + document.querySelector('.code-report .qr')?.dataset.state + '; error=' + document.querySelector('.qr-error')?.textContent);
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                    }
+                };
+                try {
+                    await wait(() => window.app?.data?.configs?.rootPath && document.querySelector('#app-content [data-view]'), 'initial view');
+                    window.app.navigate('code-quality');
+                    await wait(() => document.querySelector('.code-report .qr')?.dataset.state === 'complete', 'report completion');
+                    const viewer = window.app.ruleController.codeReportViewer;
+                    const atlas = viewer.atlas;
+                    if (!atlas) throw new Error('The authenticated repository graph failed to mount');
+                    const frame = viewer.root.querySelector('iframe');
+                    if (!frame || frame.sandbox.contains('allow-same-origin')) throw new Error('Iframe isolation changed');
+                    checks.push('real report and graph loaded with nonce and opaque-origin sandbox');
+                    const file = viewer.response.report.files[0];
+                    if (file) {
+                        await viewer.focusFile(file.file);
+                        const node = viewer.graph.nodes.find(n => n.kind === 'file' && n.path === file.file);
+                        if (!node) throw new Error('A report file is missing from the map');
+                        await atlas.openDetails(node.id);
+                        await wait(() => viewer.dialog.open, 'saved details');
+                        if (!viewer.dialog.textContent.includes('Show in code explorer')) throw new Error('Details action missing');
+                        viewer.dialog.close();
+                        checks.push('file focus and saved details');
+                    }
+                    const originalPreference = document.documentElement.dataset.viberailsVscodeTheme;
+                    document.documentElement.dataset.viberailsVscodeTheme = 'enabled';
+                    viewer.themes.refresh();
+                    await new Promise(resolve => setTimeout(resolve, 150));
+                    if (viewer.atlas !== atlas) throw new Error('Theme switch remounted graph');
+                    document.documentElement.dataset.viberailsVscodeTheme = originalPreference || 'disabled';
+                    checks.push('VS Code theme preference updates in place');
+                    window.app.navigate('environments');
+                    await wait(() => !document.querySelector('.code-report'), 'route disposal');
+                    if (!viewer.destroyed || frame.isConnected) throw new Error('Report not disposed');
+                    checks.push('route disposal');
+                    vscode.postMessage({command:'report-test-result', checks});
+                } catch(error) { vscode.postMessage({command:'report-test-result', error:String(error.stack || error)}); }
+            </script></body>`);
+            const outcome = await result;
+            assert.equal(outcome.error, undefined, outcome.error);
+            assert.ok(outcome.checks?.includes('route disposal'));
+            assert.ok(outcome.checks?.includes('real report and graph loaded with nonce and opaque-origin sandbox'));
+        } finally { manager.dispose(); }
     });
 
     test('opens the dashboard and starts a codex terminal tab', async () => {

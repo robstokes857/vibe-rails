@@ -44,6 +44,8 @@ public static class RouteExtensions
         AgentRoutes.Map(app);
         RulesRoutes.Map(app);
         HookRoutes.Map(app);
+        if (isActiveRootBackend)
+            CodeGraphRoutes.Map(app);
         LlmSettingsRoutes.Map(app);
         UpdateRoutes.Map(app);
         AppSettingsRoutes.Map(app);

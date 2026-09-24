@@ -1,9 +1,28 @@
 # API authentication coverage
 
+VB-41 code report amendment (2026-09-23): added read-only
+`POST /api/v1/code-analyzer/graph`, mapped only by an active root backend and requiring
+both existing credentials. The request can prioritize up to 1,000 safe repository-relative
+paths, never supply a root or arbitrary file to read. Git's file catalog and the existing
+working-tree path guard constrain source reads; links/junctions, unsafe paths and non-source
+files are excluded. Limits are 1,000 files, 2,800 nodes, 10,000 edges, 128 KiB per file,
+16 MiB source budget and a 4 Mi-character catalog with a 20-second Git timeout. The response
+contains directory/declaration structure and lexical reference evidence; it changes no files
+or database data. The viewer uses the authenticated host API/assets, existing themes and
+nonce, and an opaque-origin sandboxed iframe with explicit navigation teardown. CSP,
+credentials, middleware and production listeners are unchanged.
+
+The active inventory is now **215 mapped surfaces**, **203 under `/api/v1`** and
+**38 Board routes**. Route enumeration/registration and both mandatory listener searches
+were repeated: production matches remain the main Kestrel host and non-serving port probe;
+other matches are test-only Kestrel hosts, with no cross-runtime matches. No security
+violation was found. Graph route tests cover both credentials, unsafe input, real repository
+response and AOT serialization. This is a scoped amendment, not a fresh full authentication audit.
+
 Full route/authentication reconciliation (2026-09-23): **214 mapped surfaces**, including
 **202 under `/api/v1`** and **38 Board routes**, match the current working tree in both
 directions. No endpoint needed adding or removal; corrected the stale totals in the
-terminology section. These are the current totals; dated amendments below retain their
+terminology section. These are the totals for that audit; dated amendments below retain their
 historical counts.
 
 The only session-authentication exceptions remain exact `GET /health`, `OPTIONS *`, and
@@ -451,8 +470,8 @@ spoofer's own local exchange rows.
 Authentication is enforced primarily by
 [`CookieAuthMiddleware`](VibeRails/Middleware/CookieAuthMiddleware.cs). The LLM proxy
 routes additionally use
-[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 213 mapped route
-surfaces in this inventory: 201 `/api/v1` method/path mappings, nine non-`/api` protected
+[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 215 mapped route
+surfaces in this inventory: 203 `/api/v1` method/path mappings, nine non-`/api` protected
 API surfaces, and three bootstrap/page/probe routes. Static-file middleware and the
 global `OPTIONS` behavior are noted separately because they are not finite mapped-route
 lists.
@@ -720,7 +739,7 @@ No local endpoint is anonymous and no production listener was added.
 - `POST /api/v1/compression/preview`
 - `GET /api/v1/token-savings`
 
-### Git, hooks, and code analyzer (15)
+### Git, hooks, and code analyzer (16)
 
 - `POST /api/v1/git/init`
 - `POST /api/v1/git/open-directory`
@@ -732,6 +751,7 @@ No local endpoint is anonymous and no production listener was added.
 - `POST /api/v1/git/preflight/stream`
 - `POST /api/v1/git/preflight/console`
 - `POST /api/v1/code-analyzer`
+- `POST /api/v1/code-analyzer/graph` — read-only, active root backend only; bounded repository structure and lexical references.
 - `GET /api/v1/code-analyzer/source`
 - `GET /api/v1/code-analyzer/ignores`
 - `POST /api/v1/code-analyzer/ignores`

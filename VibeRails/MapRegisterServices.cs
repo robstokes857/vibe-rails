@@ -200,6 +200,7 @@ namespace VibeRails
             serviceCollection.AddScoped<IChatHistoryService, ChatHistoryService>();
             serviceCollection.AddSingleton<ISessionOutputParser, SessionParseV4>();
             serviceCollection.AddScoped<IGitService, GitService>();
+            serviceCollection.AddSingleton<Services.CodeReports.RepositoryCodeGraph>();
 
             // Rules and rule-file services
             serviceCollection.AddScoped<IRulesService, RulesService>();

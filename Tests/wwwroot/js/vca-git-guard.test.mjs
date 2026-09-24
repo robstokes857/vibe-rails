@@ -661,48 +661,44 @@ function analyzerIgnoreHarness(t) {
     const controller = new RuleController(app);
     controller.viewRoot = {};
     controller.codeAnalyzerCache = { response: { success: true } };
-    controller.codeAnalyzerState = { selectedFilePath: 'src/Widget.cs', selectedMetricName: 'complexity' };
-    controller.openCodeQualityDetails = () => {
+    controller.openAnalyzerExclusions = () => {
         returned += 1;
-        modal.firstElementChild = { title: 'Code quality metrics' };
+        modal.firstElementChild = { title: 'Code quality scan exclusions' };
     };
     return { controller, app, modal, confirm: () => confirm(), returned: () => returned };
 }
 
-test('cancelling a report ignore returns after the reason dialog closes and preserves selection', async t => {
+test('cancelling an exclusion returns after the reason dialog closes', async t => {
     const { controller, app, returned } = analyzerIgnoreHarness(t);
-    controller.promptIgnoreAnalyzerFile({ path: 'src/Widget.cs' }, controller.createCodeQualityReportReturn());
+    controller.promptIgnoreAnalyzerFile({ path: 'src/Widget.cs' }, controller.createAnalyzerExclusionsReturn());
     app.closeModal();
     assert.equal(returned(), 0, 'must not reopen while closeModal is still clearing its DOM');
     await Promise.resolve();
     assert.equal(returned(), 1);
-    assert.deepEqual(controller.codeAnalyzerState, {
-        selectedFilePath: 'src/Widget.cs', selectedMetricName: 'complexity'
-    });
 });
 
-test('leaving the page while dismissing ignore does not reopen the report', async t => {
+test('leaving the page while dismissing ignore does not reopen exclusions', async t => {
     const { controller, app, returned } = analyzerIgnoreHarness(t);
-    controller.promptIgnoreAnalyzerFile({ path: 'src/Widget.cs' }, controller.createCodeQualityReportReturn());
+    controller.promptIgnoreAnalyzerFile({ path: 'src/Widget.cs' }, controller.createAnalyzerExclusionsReturn());
     app.closeModal();
     app.currentView = 'terminal-focus';
     await Promise.resolve();
     assert.equal(returned(), 0);
 });
 
-test('a remounted page or a replacement dialog prevents a stale report return', async t => {
+test('a remounted page or a replacement dialog prevents a stale exclusions return', async t => {
     const { controller, app, modal, returned } = analyzerIgnoreHarness(t);
-    const returnToOriginal = controller.createCodeQualityReportReturn();
+    const returnToOriginal = controller.createAnalyzerExclusionsReturn();
     controller.viewRoot = {};
     assert.equal(returnToOriginal(), false);
-    controller.promptIgnoreAnalyzerDirectory({ directoryPaths: ['src'] }, controller.createCodeQualityReportReturn());
+    controller.promptIgnoreAnalyzerDirectory({ directoryPaths: ['src'] }, controller.createAnalyzerExclusionsReturn());
     app.showModal('An error needs attention', 'Keep this dialog visible.');
     await Promise.resolve();
     assert.equal(returned(), 0);
     assert.equal(modal.firstElementChild.title, 'An error needs attention');
 });
 
-test('confirming a directory ignore waits for its scan before returning to the report', async t => {
+test('confirming a directory ignore waits for its scan before returning to exclusions', async t => {
     const { controller, confirm, returned } = analyzerIgnoreHarness(t);
     let resolveMutation;
     const completed = new Promise(resolve => { resolveMutation = resolve; });
@@ -712,7 +708,7 @@ test('confirming a directory ignore waits for its scan before returning to the r
         assert.equal(reasonText, null);
         await completed;
     };
-    controller.promptIgnoreAnalyzerDirectory({ directoryPaths: ['src'] }, controller.createCodeQualityReportReturn());
+    controller.promptIgnoreAnalyzerDirectory({ directoryPaths: ['src'] }, controller.createAnalyzerExclusionsReturn());
     const pending = confirm();
     await Promise.resolve();
     assert.equal(returned(), 0);
@@ -727,17 +723,17 @@ test('an ignore failure dialog stays visible after the awaited operation returns
         await Promise.resolve();
         app.showModal('Could not ignore file', 'Request failed.');
     };
-    controller.promptIgnoreAnalyzerFile({ path: 'src/Widget.cs' }, controller.createCodeQualityReportReturn());
+    controller.promptIgnoreAnalyzerFile({ path: 'src/Widget.cs' }, controller.createAnalyzerExclusionsReturn());
     await confirm();
     assert.equal(returned(), 0);
     assert.equal(modal.firstElementChild.title, 'Could not ignore file');
 });
 
-test('navigating during an ignore request prevents its completed scan from reopening the report', async t => {
+test('navigating during an ignore request prevents its completed scan from reopening exclusions', async t => {
     const { controller, app, confirm, returned } = analyzerIgnoreHarness(t);
     let finish;
     controller.ignoreAnalyzerFile = () => new Promise(resolve => { finish = resolve; });
-    controller.promptIgnoreAnalyzerFile({ path: 'src/Widget.cs' }, controller.createCodeQualityReportReturn());
+    controller.promptIgnoreAnalyzerFile({ path: 'src/Widget.cs' }, controller.createAnalyzerExclusionsReturn());
     const pending = confirm();
     app.currentView = 'terminal-focus';
     controller.viewRoot = null;

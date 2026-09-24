@@ -593,12 +593,12 @@ test('Rules and Code quality share one Project health destination without a dock
     assert.doesNotMatch(agentsTemplate, /data-terminal-section|data-terminal-content|renderTerminalPanel/);
     assert.doesNotMatch(agentsTemplate, /data-code-analyzer-report|data-agent-file-tree|data-rules-files-door/);
 
-    // The workbench: a full-page view with a way back to the Code quality page.
+    // The report occupies the existing detail route; scans remain on Project health.
     const quality = index.match(/<template id="code-quality-template">([\s\S]*?)<\/template>/)[1];
     assert.match(quality, /data-view="code-quality"/);
-    assert.match(quality, /data-action="go-back"/);
+    assert.doesNotMatch(quality, /data-action="run-code-analyzer"|data-code-analyzer-full-scan/);
     assert.match(quality, /data-code-analyzer-report/);
-    assert.match(quality, /data-code-analyzer-full-scan/);
+    assert.match(agentsTemplate, /data-code-analyzer-full-scan/);
 
     // Legacy detail routes remain for old links and the full editor, but are no longer nav destinations.
     const files = index.match(/<template id="rule-files-template">([\s\S]*?)<\/template>/)[1];
@@ -607,7 +607,7 @@ test('Rules and Code quality share one Project health destination without a dock
     assert.match(files, /data-agent-file-tree/);
     assert.match(files, /data-agent-rule-editor/);
 
-    // Routing stays backward compatible while the card opens metrics in a modal.
+    // Routing stays backward compatible while the card opens the combined viewer.
     const app = readFileSync(path.resolve('VibeRails/wwwroot/app.js'), 'utf8');
     assert.match(app, /'code-quality': \(\) => this\.ruleController\.loadCodeQuality\(\)/);
     assert.match(app, /'rule-files': \(\) => this\.agentController\.loadRuleFiles\(\)/);
@@ -615,7 +615,7 @@ test('Rules and Code quality share one Project health destination without a dock
     const ruleController = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/rule-controller.js'), 'utf8');
     assert.match(ruleController, /loadCodeQuality\(\)/);
     assert.match(ruleController, /openCodeQualityDetails\(\)/);
-    assert.doesNotMatch(ruleController, /this\.app\.navigate\('code-quality'\)/);
+    assert.match(ruleController, /this\.app\.navigate\('code-quality'\)/);
     assert.doesNotMatch(ruleController, /data-rules-tab/);
 
     const dashboardController = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/dashboard-controller.js'), 'utf8');
