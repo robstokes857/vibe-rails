@@ -94,7 +94,8 @@ public sealed class BoardLaunchService(
             detail?.Attachments ?? [],
             boardName,
             boardContext?.Context,
-            orderedColumns.Select(c => (IReadOnlyList<string>)laneAutomations[c.Id].Select(a => a.Name).ToList()).ToList());
+            orderedColumns.Select(c => (IReadOnlyList<string>)laneAutomations[c.Id].Select(a => a.Name).ToList()).ToList(),
+            detail is null ? null : new BoardPromptComposer.CardActivity(detail.Comments.Count, detail.Notes.Count, detail.Sessions.Count));
         var prompt = BoardPromptComposer.Compose(card, column?.Name ?? "(no lane)", assigneeLabel, environment?.CustomPrompt, context, intent);
         var title = $"{card.Key} · {Truncate(card.Title, 60)}";
 

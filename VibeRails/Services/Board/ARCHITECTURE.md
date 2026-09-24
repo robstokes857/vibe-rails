@@ -1,5 +1,23 @@
 # Vibe Board architecture and review
 
+## Launch prompt activity and Automation discovery (2026-09-24)
+
+`BoardLaunchService` passes comment, note and earlier-session counts from the detail it already
+reads, before linking the new session. `BoardPromptComposer` includes those counts and the linked
+commit count inside the card fence. Missing activity context is explicitly `unknown`.
+Work launches request `get_board_card` before project work only for a truncated description,
+unknown activity or a nonzero activity count; fresh cards start with the repository instructions
+and inline task. Attachment ids already carried inline can go directly to `read_board_attachment`.
+Chat launches still read the full card, summarize status and wait for the user's direction.
+
+Both prompts tell agents to call `list_board_columns` before moving a card to check the
+Automations (jobs) that may run on entry. This uses the existing MCP descriptions for any
+configured workflow. Commit links and a handoff summary precede the move; its report describes
+what queued or skipped. The prompt also reserves attention flags for unresolved owner decisions
+or intervention. Tests cover fresh/prior activity, excluding the launching session from the
+counts, discussion intent, sanitization and prompt budgets. Installed behavior requires a build
+containing these source changes.
+
 ## VB-37: explicit YOLO launch option (2026-09-23)
 
 When a card is assigned to a base CLI, its typed launch controls include a warning-styled,
