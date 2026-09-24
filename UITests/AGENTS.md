@@ -55,10 +55,11 @@ npx playwright test --config playwright.quality.config.js
 ```
 
 This starts a temporary local static server and runs `code-quality-ux.spec.js` against the real
-frontend, shared agent picker, and Monaco editor, with mocked API responses and launch dispatch.
+frontend, combined code report viewer and shared agent picker, with mocked API responses and launch dispatch.
 It needs no database or installed LLM CLI and does not change the standard suite's configuration.
-The tests cover compact actions, source visibility across window sizes, metric and file selection,
-keyboard access, modal cleanup, ignore/restore return flow, and agent/environment choice.
+The tests cover compact actions, file-to-map selection, visible domain links and large overviews,
+saved metrics, radar keyboard access, themes/reduced motion, independent scrolling, narrow layouts,
+failure/empty states, request cancellation and cleanup, exclusion/restore flow, and agent choice.
 
 ### Focused Board UX Tests (No Backend Required)
 

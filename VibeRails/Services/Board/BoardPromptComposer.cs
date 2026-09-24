@@ -43,10 +43,14 @@ public static class BoardPromptComposer
         string? BoardName = null,
         BoardContextSettings? Settings = null,
         /// <summary>Per lane (same order as <see cref="LaneNames"/>): the names of the Automations that run when a card enters it.</summary>
-        IReadOnlyList<IReadOnlyList<string>>? LaneAutomationNames = null)
+        IReadOnlyList<IReadOnlyList<string>>? LaneAutomationNames = null,
+        CardActivity? Activity = null)
     {
         public static readonly LaunchContext Empty = new([], [], []);
     }
+
+    /// <summary>Activity read before this launch is linked. Null context activity means unknown, not zero.</summary>
+    public sealed record CardActivity(int Comments, int Notes, int EarlierSessions);
 
     public static string Compose(
         BoardCardRecord card,
@@ -121,6 +125,14 @@ public static class BoardPromptComposer
                 builder.Append("\n[description truncated — read the full card with get_board_card]");
             builder.Append('\n');
         }
+        builder.Append("Card activity before this session: ");
+        if (context.Activity is { } activity)
+            builder.Append(activity.Comments).Append(" comments · ")
+                .Append(activity.Notes).Append(" agent notes · ")
+                .Append(activity.EarlierSessions).Append(" earlier sessions · ")
+                .Append(context.LinkedCommits.Count).Append(" linked commits.\n");
+        else
+            builder.Append("unknown.\n");
         builder.Append("--- end card ---\n\n");
         if (boardContext.Length > 0)
             builder.Append("Board context supplied by the user for agents on this board:\n")
@@ -129,18 +141,26 @@ public static class BoardPromptComposer
         builder.Append("The user has authorized the viberails-mcp Board tools for this card session. ")
             .Append("Use them without asking for another approval when carrying out this board workflow. ")
             .Append("This authorization does not cover unrelated tools or actions.\n\n");
-        builder.Append("Use the viberails-mcp board tools: get_board_card ").Append(key)
-            .Append(" for the full card (comments, linked commits, earlier sessions, agent notes); add_board_comment to record progress and decisions; ")
-            .Append("append_board_note to checkpoint findings and working state as you go instead of holding them until the end; ")
-            .Append("read_board_attachment to view attached images or read Markdown/TXT using attachment ids from get_board_card. Use the Board tools as the only access path for card data and attachments. ")
-            .Append(intent == "chat"
-                ? "Read the earlier activity to understand the current status, decisions, blockers and unfinished work. "
-                : "move_board_card when the card changes state; link_board_commit after you commit. "
-                    + "Lanes may run Automations on entry (see the lane annotations above and in list_board_columns): link commits and post your summary comment before moving a card into such a lane, and move it once; move_board_card reports what the entry queued, and skipAutomations=true moves without running them when a run would be pointless. "
-                    + "If comments, notes or earlier sessions show work already started, resume from there instead of starting over. ")
-            .Append("If you need the user to review something, set flagged=true with update_board_card and add a comment explaining what needs attention. ")
-            .Append("If you also work on another card, use attach_board_session with its card key to share this session and its running status. The original card remains the default. Call link_board_commit once per commit; it automatically links the commit to every card attached to this session. ")
-            .Append("Begin now by reading the card with get_board_card.");
+        if (intent == "chat")
+            builder.Append("Read get_board_card ").Append(key)
+                .Append(" for the full card and earlier activity to understand the current status, decisions, blockers and unfinished work.\n\n");
+        else
+            builder.Append("Start from the card text above. Call get_board_card ").Append(key)
+                .Append(" before project work only if the description is truncated, the activity line is unknown, or any activity count is greater than zero. ")
+                .Append("Read that activity and resume from the latest state; otherwise begin with the repository instructions and task.\n\n");
+
+        builder.Append("Use append_board_note to checkpoint findings and working state as you go; add_board_comment for progress and decisions the user should read. ")
+            .Append("For relevant listed attachments, use read_board_attachment to view attached images or read Markdown/TXT using their ids. ")
+            .Append("If the list says there are more attachments and you need them, get_board_card lists the rest. ")
+            .Append("Use get_board_notes if you need more than the note excerpt in get_board_card. ");
+        if (intent == "work")
+            builder.Append("Use move_board_card when the card changes state. ");
+        builder.Append("Before moving a card, call list_board_columns to check which Automations (jobs) may run on entry. ")
+            .Append("Link commits and post your handoff summary before moving, then move once and read move_board_card's report. ")
+            .Append("Use link_board_commit once per commit; it links every card attached to this session. ")
+            .Append("If you also work on another card, use attach_board_session with its key; the original card stays the default. ")
+            .Append("Set flagged=true with update_board_card only for an important unresolved issue needing the user's decision or intervention, and explain what is needed in a comment. ")
+            .Append("Use the Board tools as the only access path for card data and attachments.");
 
         if (!string.IsNullOrWhiteSpace(environmentPrompt))
             builder.Append("\n\n").Append(environmentPrompt.Trim());

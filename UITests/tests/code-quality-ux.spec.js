@@ -1,4 +1,5 @@
 // @ts-check
+// The full report now uses the host-owned combined Code Atlas / Quality Lab viewer.
 
 // The focused static config skips the machine-wide backend; the normal suite keeps
 // using the authenticated backend fixture. Both modes exercise the same UI tests.
@@ -48,6 +49,9 @@ function scanResponse() {
         output: 'Fixture scan complete.',
         report: {
             score: 36, rating: 'NeedsWork', worstMetrics: [],
+            overview: ['Complexity', 'Size', 'Cohesion', 'Coupling', 'Testability', 'Duplication', 'Maintainability'].map(category => ({
+                category, concern: 36, worstConcern: 88, worstMetricFile: PAYMENT_PATH, worstMetricName: 'cognitive_complexity'
+            })),
             files: [
                 {
                     file: PAYMENT_PATH, score: 82, rating: 'AtRisk', priority: 95,
@@ -63,6 +67,21 @@ function scanResponse() {
             ]
         }
     };
+}
+
+function graphResponse() {
+    return { schemaVersion: '1.0', repository: { name: 'Test repository' }, fileCount: 2, truncated: false,
+        description: 'Source references from the test repository.',
+        nodes: [
+            { id: 'payments', name: 'Payments', kind: 'module', path: 'src/Payments' },
+            { id: 'utilities', name: 'Utilities', kind: 'module', path: 'src/Utilities' },
+            { id: 'payment-file', name: 'PaymentProcessor.cs', kind: 'file', path: PAYMENT_PATH, parentId: 'payments' },
+            { id: 'helper-file', name: 'HealthyHelper.cs', kind: 'file', path: HELPER_PATH, parentId: 'utilities' }
+        ], edges: [
+            { id: 'one', source: 'payments', target: 'payment-file', kind: 'contains' },
+            { id: 'two', source: 'utilities', target: 'helper-file', kind: 'contains' },
+            { id: 'reference', source: 'payments', target: 'utilities', kind: 'references', evidence: 'A supplied source reference' }
+        ] };
 }
 
 async function installQualityApi(page, { empty = false } = {}) {
@@ -114,6 +133,7 @@ async function installQualityApi(page, { empty = false } = {}) {
         response.analyzedFileCount = response.report.files.length;
         return route.fulfill({ json: response });
     });
+    await page.route('**/api/v1/code-analyzer/graph', route => route.fulfill({ json: graphResponse() }));
     await page.route('**/api/v1/code-analyzer/ignores*', route => {
         if (route.request().method() === 'POST') ignoredFiles.push(route.request().postDataJSON());
         if (route.request().method() === 'DELETE') {
@@ -143,19 +163,10 @@ async function openQuality(page) {
 async function openDetails(page) {
     const brief = await openQuality(page);
     await brief.getByRole('button', { name: 'View metrics' }).click();
-    const report = page.locator('[data-project-health-quality-report]');
+    const report = page.locator('.code-report');
     await expect(report).toBeVisible();
-    await expect(report.locator('.monaco-editor')).toBeVisible({ timeout: 20_000 });
+    await expect(report.locator('.qr')).toHaveAttribute('data-state', 'complete', { timeout: 25_000 });
     return report;
-}
-
-async function visibleEditorHeight(report) {
-    return report.locator('[data-code-analyzer-monaco-host]').evaluate(host => {
-        const bounds = host.getBoundingClientRect();
-        const body = host.closest('.modal-body')?.getBoundingClientRect();
-        return Math.max(0, Math.min(bounds.bottom, body?.bottom ?? innerHeight, innerHeight)
-            - Math.max(bounds.top, body?.top ?? 0, 0));
-    });
 }
 
 async function selectNamedOption(select, label) {
@@ -217,12 +228,6 @@ test('Quality actions use the shared app button styles', async ({ page }) => {
     ].join(', '));
     await expect(actions).toHaveCount(8);
     for (const action of await actions.all()) await expectSharedButtonStyle(action);
-    await page.getByRole('button', { name: 'View metrics', exact: true }).click();
-    const report = page.locator('[data-project-health-quality-report]');
-    await expect(report.locator('.monaco-editor')).toBeVisible();
-    await page.mouse.move(0, 0);
-    await expectSharedButtonStyle(report.getByRole('button', { name: 'Ignore', exact: true }));
-    await expectSharedButtonStyle(report.getByRole('button', { name: 'Ignore folder', exact: true }));
 });
 
 test('Quality summary has a compact, usable View metrics button', async ({ page }) => {
@@ -234,158 +239,188 @@ test('Quality summary has a compact, usable View metrics button', async ({ page 
     expect(bounds).not.toBeNull();
     expect(bounds.height).toBeLessThanOrEqual(52);
     await button.click();
-    await expect(page.locator('[data-project-health-quality-report]')).toBeVisible();
+    await expect(page.locator('.code-report')).toBeVisible();
 });
 
-for (const viewport of [{ width: 1366, height: 768 }, { width: 1024, height: 768 }]) {
-    test(`source is visible on opening Quality at ${viewport.width}x${viewport.height}`, async ({ page }, testInfo) => {
-        await page.setViewportSize(viewport);
-        await installQualityApi(page);
-        const report = await openDetails(page);
-        await expect(report.locator('.code-analyzer-file-title')).toHaveText('PaymentProcessor.cs');
-        expect(await visibleEditorHeight(report)).toBeGreaterThanOrEqual(180);
-        await page.screenshot({ path: testInfo.outputPath('quality-modal.png') });
-        await expect(report.locator('.code-analyzer-file-context')).not.toHaveAttribute('open');
-        const healthyGroup = report.locator('details.code-analyzer-metric-group').filter({ has: page.locator('summary', { hasText: 'Size' }) });
-        await expect(healthyGroup).not.toHaveAttribute('open');
-        await healthyGroup.locator('summary').click();
-        await expect(healthyGroup).toHaveAttribute('open');
-        await expect(healthyGroup.getByRole('button', { name: /Lines of code/ })).toBeVisible();
+test('report selection focuses the isolated map and opens saved details', async ({ page }) => {
+    const { scanRequests, sourceRequests } = await installQualityApi(page);
+    const report = await openDetails(page);
+    const frame = report.locator('iframe');
+    const sandbox = await frame.getAttribute('sandbox');
+    expect(sandbox).toContain('allow-scripts');
+    expect(sandbox).not.toContain('allow-same-origin');
+    await report.getByRole('button', { name: new RegExp(PAYMENT_PATH) }).click();
+    const map = page.frameLocator('.code-report iframe');
+    await expect(map.locator('#inspector h2')).toHaveText('PaymentProcessor.cs');
+    await map.getByRole('button', { name: /Open details/ }).click();
+    const dialog = report.locator('dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('.code-excerpt')).toContainText('cognitive_complexity evidence');
+    await expect(dialog.getByRole('button', { name: /Copy context/i })).toHaveCount(0);
+    await dialog.getByRole('button', { name: 'Show in code explorer' }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(map.locator('#inspector h2')).toHaveText('PaymentProcessor.cs');
+    expect(scanRequests).toHaveLength(1);
+    expect(sourceRequests).toHaveLength(0);
+});
+
+test('radar supports keyboard categories, saved detail activation and Escape', async ({ page }) => {
+    await installQualityApi(page);
+    const report = await openDetails(page);
+    const complexity = report.getByRole('button', { name: /^Complexity:/ });
+    await complexity.focus();
+    await expect(report.locator('.radar-detail')).toBeVisible();
+    await complexity.press('Escape');
+    await expect(report.locator('.radar-detail')).not.toBeVisible();
+    await expect(report).toBeVisible();
+    await complexity.press('ArrowRight');
+    const size = report.getByRole('button', { name: /^Size:/ });
+    await expect(size).toBeFocused();
+    await size.press('Enter');
+    await expect(report.locator('dialog')).toBeVisible();
+    await report.locator('dialog').press('Escape');
+    await expect(report.locator('dialog')).not.toBeVisible();
+    await expect(report).toBeVisible();
+});
+
+test('large graphs open a connected domain overview and still focus report files', async ({ page }) => {
+    await installQualityApi(page);
+    const graph = graphResponse();
+    for (let index = 0; index < 220; index++) graph.nodes.push({
+        id: `extra-${index}`, name: `Extra${index}.cs`, kind: 'file', path: `src/Payments/Extra${index}.cs`, parentId: 'payments'
     });
-}
-
-test('metric navigation retargets source and filters keep the reviewed file stable', async ({ page }) => {
-    await page.setViewportSize({ width: 1366, height: 768 });
-    const { sourceRequests } = await installQualityApi(page);
+    await page.route('**/api/v1/code-analyzer/graph', route => route.fulfill({ json: graph }));
     const report = await openDetails(page);
-    const originalModel = await page.evaluate(() => window.monaco.editor.getModels()[0].uri.toString());
-    const metricPicker = report.getByRole('combobox', { name: 'Inspect metric' });
-    await selectNamedOption(metricPicker, 'Cyclomatic complexity');
-    await expect(report.locator('.code-analyzer-editor-position')).toHaveText('Line 28');
-    await expect(report.locator('.code-analyzer-code-head')).toContainText('Cyclomatic complexity');
-    expect(await page.evaluate(() => window.monaco.editor.getModels()[0].uri.toString())).toBe(originalModel);
-    expect(sourceRequests.filter(path => path === PAYMENT_PATH)).toHaveLength(1);
-
-    const search = report.getByRole('searchbox', { name: 'Filter analyzed files' });
-    await search.fill('HealthyHelper');
-    await expect(report.locator('.code-analyzer-file-item')).toHaveCount(1);
-    await expect(report.locator('.code-analyzer-file-title')).toHaveText('PaymentProcessor.cs');
-    await report.locator('.code-analyzer-file-item').click();
-    await expect(report.locator('.code-analyzer-file-title')).toHaveText('HealthyHelper.cs');
-    await expect(report.locator('.code-analyzer-editor-position')).toHaveText('Line 6');
-    await expect.poll(() => page.evaluate(() => window.monaco.editor.getModels()[0]?.getValue())).toContain(HELPER_PATH);
-
-    await search.fill('no-such-file');
-    await expect(report.locator('.code-analyzer-file-list-empty')).toBeVisible();
-    await report.getByRole('button', { name: 'Clear filters' }).click();
-    await expect(search).toHaveValue('');
-    await expect(report.locator('.code-analyzer-file-item')).toHaveCount(2);
+    const map = page.frameLocator('.code-report iframe');
+    await expect(map.getByText(/Showing 2 of 224 entities/)).toBeVisible();
+    await expect(map.locator('.cross-link .edge').first()).toBeVisible();
+    await report.getByRole('button', { name: new RegExp(PAYMENT_PATH) }).click();
+    await expect(map.locator('#inspector h2')).toHaveText('PaymentProcessor.cs');
 });
 
-test('capped NPath estimates explain the limit beside the source', async ({ page }, testInfo) => {
-    await page.setViewportSize({ width: 1366, height: 768 });
+test('graph failures leave saved report and all metrics accessible', async ({ page }) => {
     await installQualityApi(page);
-    const response = scanResponse();
-    response.report.files[0].categories[0].metrics.unshift({
-        ...metric('npath_complexity', 100, 12),
-        value: 1_000_000_000,
-        warn: 200,
-        critical: 1000,
-        source: '<global>'
-    });
-    await page.route('**/api/v1/code-analyzer', route => route.fulfill({ json: response }));
+    await page.route('**/api/v1/code-analyzer/graph', route => route.fulfill({ status: 503, json: { error: 'Map unavailable' } }));
     const report = await openDetails(page);
-    const sourceHeader = report.locator('.code-analyzer-code-head');
-    await expect(sourceHeader).toContainText('NPath complexity');
-    await expect(sourceHeader).toContainText('Estimated paths');
-    await expect(sourceHeader).toContainText('1B (cap)');
-    await expect(sourceHeader).toContainText('1-billion cap. It is not an exact path count.');
-    const metricRow = report.locator('.code-analyzer-metric-row').filter({ hasText: 'NPath complexity' });
-    await expect(metricRow.locator('.code-analyzer-metric-raw')).toContainText('1B (cap)');
-    expect(await visibleEditorHeight(report)).toBeGreaterThanOrEqual(180);
-    await page.screenshot({ path: testInfo.outputPath('quality-npath-cap.png') });
-
-    await selectNamedOption(report.getByRole('combobox', { name: 'Inspect metric' }), 'Cyclomatic complexity');
-    await expect(sourceHeader).toContainText('Measured');
-    await expect(sourceHeader).not.toContainText('not an exact path count');
-    await expect(report.locator('.code-analyzer-editor-position')).toHaveText('Line 28');
+    await expect(report.locator('[data-code-map]')).toContainText('Map unavailable');
+    await report.getByRole('button', { name: new RegExp(PAYMENT_PATH) }).click();
+    await expect(report.locator('dialog')).toBeVisible();
+    await report.locator('dialog').getByRole('button', { name: /Parameter count/ }).click();
+    await expect(report.locator('.code-excerpt')).toContainText('parameter_count evidence');
 });
 
-test('closing Quality disposes its editor and reopening retains the selected file', async ({ page }) => {
+test('empty, failed and malformed reports keep their honest state beside the map', async ({ page }) => {
     await installQualityApi(page);
     const report = await openDetails(page);
-    await report.locator('.code-analyzer-file-item').filter({ hasText: 'HealthyHelper.cs' }).click();
-    await expect.poll(() => page.evaluate(() => window.monaco.editor.getModels()[0]?.getValue())).toContain(HELPER_PATH);
-    await page.locator('#modal-container [data-action="close-modal"]').click();
-    await expect(report).toHaveCount(0);
-    await expect.poll(() => page.evaluate(() => window.monaco.editor.getModels().length)).toBe(0);
-    await page.locator('[data-vca-quality-brief]').getByRole('button', { name: 'View metrics' }).click();
-    await expect(report.locator('.code-analyzer-file-title')).toHaveText('HealthyHelper.cs');
-    await expect(report.locator('.monaco-editor')).toBeVisible();
-    await expect.poll(() => page.evaluate(() => window.monaco.editor.getModels().length)).toBe(1);
-});
-
-test('cancelling Ignore returns to the selected file in the Quality report', async ({ page }) => {
-    await installQualityApi(page);
-    const report = await openDetails(page);
-    await report.locator('.code-analyzer-file-item').filter({ hasText: 'HealthyHelper.cs' }).click();
-    await report.getByRole('button', { name: 'Ignore', exact: true }).click();
-    const confirmation = page.locator('.analyzer-ignore-modal');
-    await expect(confirmation).toContainText(HELPER_PATH);
-    await expect(report).toHaveCount(0);
-    await expect.poll(() => page.evaluate(() => window.monaco.editor.getModels().length)).toBe(0);
-    await confirmation.getByRole('button', { name: 'Cancel', exact: true }).click();
-    await expect(report.locator('.code-analyzer-file-title')).toHaveText('HealthyHelper.cs');
-    await expect(report.locator('.monaco-editor')).toBeVisible();
-});
-
-test('ignoring and restoring a file keeps the Quality report open', async ({ page }) => {
-    await installQualityApi(page);
-    const report = await openDetails(page);
-    await report.getByRole('button', { name: 'Ignore', exact: true }).click();
-    await page.locator('[data-analyzer-ignore-confirm]').click();
-    await expect(report.locator('.code-analyzer-file-title')).toHaveText('HealthyHelper.cs');
-    const ignored = report.locator('.code-analyzer-ignored-box');
-    await ignored.locator('summary').click();
-    await expect(ignored).toContainText(PAYMENT_PATH);
-    await page.mouse.move(0, 0);
-    await expectSharedButtonStyle(ignored.getByRole('button', { name: 'Restore', exact: true }));
-    await ignored.getByRole('button', { name: 'Restore', exact: true }).click();
-    await expect(report.locator('.code-analyzer-file-item')).toHaveCount(2);
-    await expect(report.locator('.code-analyzer-file-title')).toHaveText('HealthyHelper.cs');
-    await expect(report.locator('.monaco-editor')).toBeVisible();
-});
-
-test('healthy metric details can be reached and expanded with the keyboard', async ({ page }) => {
-    await installQualityApi(page);
-    const report = await openDetails(page);
-    const group = report.locator('details.code-analyzer-metric-group').filter({ has: page.locator('summary', { hasText: 'Size' }) });
-    const summary = group.locator('summary');
-    await page.locator('#modal-container [data-action="close-modal"]').focus();
-    for (let step = 0; step < 40; step++) {
-        await page.keyboard.press('Tab');
-        if (await summary.evaluate(element => element === document.activeElement)) break;
+    for (const response of [
+        { success: false, report: { files: [] } },
+        { success: true, report: { files: 'invalid' } }
+    ]) {
+        await page.evaluate(response => window.app.ruleController.codeReportViewer.setResponse(response), response);
+        await expect(report.locator('.qr')).toHaveAttribute('data-state', 'error');
+        await expect(report.locator('.qr-error')).toBeVisible();
+        await expect(report.locator('iframe')).toBeVisible();
     }
-    await expect(summary).toBeFocused();
-    await page.keyboard.press('Enter');
-    await expect(group).toHaveAttribute('open');
+    await page.evaluate(() => window.app.ruleController.codeReportViewer.setResponse({ success: true, analyzedFileCount: 0 }));
+    await expect(report.locator('.qr')).toHaveAttribute('data-state', 'complete');
+    await expect(report.locator('.qr-score')).toHaveText('—');
+    await expect(report.locator('.qr-grade')).toHaveText('—');
+    await expect(report.getByText('No source files in this report.')).toBeVisible();
 });
 
-for (const viewport of [{ width: 600, height: 768 }, { width: 390, height: 844 }]) {
-    test(`narrow Quality at ${viewport.width}x${viewport.height} offers file selection before the source`, async ({ page }, testInfo) => {
+test('long file lists scroll independently and saved excerpts remain inert text', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await installQualityApi(page);
+    const report = await openDetails(page);
+    const response = scanResponse();
+    response.startedUtc = '2026-09-21T12:00:00Z';
+    response.report.files[0].categories[0].metrics[0].snippet = '<img src=x onerror="window.reportInjected=true">';
+    response.report.files.push(...Array.from({length: 60}, (_, index) => ({
+        ...response.report.files[1], file: `src/Extra/File${index}.cs`
+    })));
+    await page.evaluate(response => window.app.ruleController.codeReportViewer.setResponse(response), response);
+    await expect(report.locator('.qr')).toHaveAttribute('data-state', 'complete');
+    const list = report.locator('.qr-files');
+    const mapBounds = await report.locator('iframe').boundingBox();
+    await list.focus();
+    await list.press('End');
+    await expect.poll(() => list.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+    expect(await report.locator('iframe').boundingBox()).toEqual(mapBounds);
+    await page.evaluate(() => {
+        const viewer = window.app.ruleController.codeReportViewer;
+        viewer.showFile(viewer.response.report.files[0], 'cognitive_complexity');
+    });
+    const dialog = report.locator('dialog');
+    await expect(dialog.locator('.code-excerpt')).toContainText('<img src=x');
+    await expect(dialog.locator('img')).toHaveCount(0);
+    await expect(dialog).toContainText('Report captured');
+    await expect(dialog).toContainText('2026');
+    expect(await page.evaluate(() => window.reportInjected)).toBeUndefined();
+});
+
+test('navigation aborts a late graph and route re-entry uses the cached report', async ({ page }) => {
+    const { scanRequests } = await installQualityApi(page);
+    let release;
+    const pending = new Promise(resolve => { release = resolve; });
+    let started = false;
+    await page.route('**/api/v1/code-analyzer/graph', async route => {
+        started = true;
+        await pending;
+        await route.fulfill({ json: graphResponse() }).catch(() => {});
+    });
+    const brief = await openQuality(page);
+    await brief.getByRole('button', { name: 'View metrics' }).click();
+    await expect.poll(() => started).toBe(true);
+    await page.locator('[data-action="navigate"][data-view="environments"]:visible').click();
+    release();
+    await expect(page.locator('.code-report iframe')).toHaveCount(0);
+    await page.locator('[data-action="navigate-home"]:visible').click();
+    await page.getByRole('button', { name: 'View metrics' }).click();
+    await expect(page.locator('.code-report .qr')).toHaveAttribute('data-state', 'complete', { timeout: 25_000 });
+    expect(scanRequests).toHaveLength(1);
+});
+
+test('report respects reduced motion and host theme without remounting the map', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await installQualityApi(page);
+    const report = await openDetails(page);
+    await report.getByRole('button', { name: new RegExp(PAYMENT_PATH) }).click();
+    await page.evaluate(() => {
+        window.__reportFrame = document.querySelector('.code-report iframe');
+        document.documentElement.style.setProperty('--color-bg-surface', '#fafafa');
+        document.documentElement.style.setProperty('--color-text', '#111111');
+    });
+    await expect.poll(() => report.locator('.qr-panel').evaluate(el => getComputedStyle(el).backgroundColor)).toBe('rgb(250, 250, 250)');
+    expect(await page.evaluate(() => window.__reportFrame === document.querySelector('.code-report iframe'))).toBe(true);
+    await expect(page.frameLocator('.code-report iframe').locator('#inspector h2')).toHaveText('PaymentProcessor.cs');
+});
+
+for (const viewport of [{ width: 1440, height: 900 }, { width: 620, height: 800 }, { width: 390, height: 844 }]) {
+    test(`combined report fits ${viewport.width}x${viewport.height}`, async ({ page }, testInfo) => {
         await page.setViewportSize(viewport);
         await installQualityApi(page);
         const report = await openDetails(page);
-        const filePicker = report.getByRole('combobox', { name: 'Inspect file' });
-        await expect(filePicker).toBeVisible();
-        expect(await visibleEditorHeight(report)).toBeGreaterThanOrEqual(140);
-        expect(await page.locator('#modal-container .modal-body').evaluate(body => body.scrollWidth - body.clientWidth)).toBeLessThanOrEqual(1);
-        await page.screenshot({ path: testInfo.outputPath('quality-modal-narrow.png') });
-        await selectNamedOption(filePicker, 'HealthyHelper.cs');
-        await expect(report.locator('.code-analyzer-file-title')).toHaveText('HealthyHelper.cs');
-        await expect(report.locator('.code-analyzer-editor-position')).toHaveText('Line 6');
+        await expect(report.locator('.qr-grade')).toHaveText('D');
+        await expect(report.locator('.qr-score')).toHaveText('64');
+        expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+        await report.screenshot({ path: testInfo.outputPath('combined-report.png') });
     });
 }
+
+test('scan exclusions remain available on Project health', async ({ page }) => {
+    const { scanRequests } = await installQualityApi(page);
+    await openQuality(page);
+    await page.getByLabel('More scan options', { exact: true }).click();
+    await page.getByRole('button', { name: 'Manage scan exclusions' }).click();
+    const modal = page.locator('#modal-container');
+    await modal.getByRole('button', { name: 'Exclude file', exact: true }).first().click();
+    await modal.getByRole('button', { name: 'Ignore file', exact: true }).click();
+    await expect.poll(() => scanRequests.length).toBe(2);
+    await expect(modal.getByRole('button', { name: 'Restore', exact: true })).toBeVisible();
+    await modal.getByRole('button', { name: 'Restore', exact: true }).click();
+    await expect.poll(() => scanRequests.length).toBe(3);
+    await expect(modal).toContainText('No exclusions.');
+});
 
 for (const choice of [
     { value: 'base:codex', cli: 'codex', environmentName: null },

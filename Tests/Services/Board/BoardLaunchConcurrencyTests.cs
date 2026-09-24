@@ -62,6 +62,33 @@ public sealed class BoardLaunchConcurrencyTests : IDisposable
         _tabs.Verify(t => t.StartSessionAsync(It.IsAny<string>(), It.IsAny<StartTerminalRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LaunchPromptCountsActivityBeforeLinkingItsOwnSession(bool withPriorActivity)
+    {
+        var card = await CreateCardAsync();
+        if (withPriorActivity)
+        {
+            await _store.AddCommentAsync(_root, card.Id, BoardAuthor.User(), "Continue the earlier fix", Ct);
+            await _store.AddNoteAsync(_root, card.Id, BoardAuthor.Agent("codex", "codex", null), "Investigated the failing test", Ct);
+            await _store.LinkSessionAsync(_root, card.Id, Guid.NewGuid().ToString(), null, "base:codex", "codex", "Earlier work", BoardSessionRecord.LaunchOrigin, Ct);
+        }
+        StartTerminalRequest? request = null;
+        _tabs.Setup(t => t.StartSessionAsync("tab-1", It.IsAny<StartTerminalRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<string, StartTerminalRequest, CancellationToken>((_, value, _) => request = value)
+            .ReturnsAsync(new TerminalStatusResponse(true, Guid.NewGuid().ToString(), "codex", _root));
+
+        await new BoardLaunchService(_store, _repository.Object, _tabs.Object).LaunchAsync(_root, card.Id, null, Ct);
+
+        var count = withPriorActivity ? 1 : 0;
+        Assert.NotNull(request);
+        Assert.Contains($"Card activity before this session: {count} comments · {count} agent notes · {count} earlier sessions · 0 linked commits.", request.InitialPrompt);
+        Assert.Contains("otherwise begin with the repository instructions and task", request.InitialPrompt);
+        Assert.DoesNotContain("Begin now by reading the card", request.InitialPrompt);
+        Assert.Equal(count + 1, (await _store.GetCardDetailAsync(_root, card.Id, Ct))!.Sessions.Count);
+    }
+
     private async Task<BoardCardRecord> CreateCardAsync()
     {
         await _store.EnsureDefaultColumnsAsync(_root, Ct);

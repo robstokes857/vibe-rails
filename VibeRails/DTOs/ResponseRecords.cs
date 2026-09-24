@@ -1534,6 +1534,8 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(List<MintLintScorecardEntryResponse>))]
     [JsonSerializable(typeof(MintLintReportResponse))]
     [JsonSerializable(typeof(CodeAnalyzerSourceResponse))]
+    [JsonSerializable(typeof(CodeGraphRequest))]
+    [JsonSerializable(typeof(CodeGraphResponse))]
     [JsonSerializable(typeof(CodeAnalyzerIgnoreEntryResponse))]
     [JsonSerializable(typeof(List<CodeAnalyzerIgnoreEntryResponse>))]
     [JsonSerializable(typeof(CodeAnalyzerIgnoreListResponse))]

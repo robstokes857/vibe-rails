@@ -57,6 +57,12 @@
         appStyleLink.rel = 'stylesheet';
         appStyleLink.href = window.__viberails_asset_url__('style.css');
         document.head.appendChild(appStyleLink);
+        for (const path of ['js/modules/code-report/vendor/quality/quality-report.css', 'js/modules/code-report/styles.css']) {
+            const link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = window.__viberails_asset_url__(path);
+            document.head.appendChild(link);
+        }
     </script>
 </head>
 
@@ -514,6 +520,9 @@
                                         <i class="fa-solid fa-cloud-arrow-up" data-button-icon aria-hidden="true"></i>
                                         <span data-button-label>Scan unpushed commits</span>
                                     </button>
+                                    <button type="button" data-action="manage-analyzer-ignores">
+                                        <i class="fa-solid fa-eye-slash" aria-hidden="true"></i>Manage scan exclusions
+                                    </button>
                                     <button type="button" data-action="copy-code-analyzer-output">
                                         <i class="fa-regular fa-copy" aria-hidden="true"></i>Copy scan summary
                                     </button>
@@ -574,108 +583,10 @@
         </div>
     </template>
 
-    <!-- Code quality workbench. Opened from the Code quality page's brief card; the
-         report gets the whole page instead of a half-height pane.
-         RuleController.loadCodeQuality restores the last scan from cache or starts one. -->
+    <!-- Host-owned report viewer. Scan and policy controls live on Project health. -->
     <template id="code-quality-template">
-        <div class="view rules-subpage" data-view="code-quality">
-            <div class="rules-subpage-bar">
-                <button class="btn btn-sm btn-outline-secondary rules-subpage-back" type="button"
-                    data-action="go-back" title="Back to the Code quality summary">
-                    <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
-                    Back
-                </button>
-            </div>
-
-            <section class="rules-section card code-analyzer-panel vca-console-card"
-                data-code-analyzer-console data-tone="neutral" aria-busy="false">
-                <header class="rules-section-header">
-                    <div class="rules-section-heading">
-                        <h2 id="code-analyzer-title">Code quality</h2>
-                        <span class="rules-section-note">Working tree analysis</span>
-                    </div>
-                    <div class="rules-section-actions" aria-label="Code quality actions">
-                        <span class="rules-check-running" data-vca-console-spinner hidden aria-hidden="true">
-                            <span class="spinner-border spinner-border-sm"></span>
-                        </span>
-                        <span class="vca-console-state" data-vca-console-state>Ready</span>
-                        <details class="rules-action-menu">
-                            <summary aria-label="More code quality actions" title="More actions">
-                                <i class="fa-solid fa-ellipsis" aria-hidden="true"></i>
-                            </summary>
-                            <div class="rules-action-menu-popover" role="group"
-                                aria-label="Code quality utilities">
-                                <label class="rules-action-menu-toggle"
-                                    title="Include every source file under the repository">
-                                    <span>
-                                        <i class="fa-solid fa-folder-tree" aria-hidden="true"></i>
-                                        Scan full repository
-                                    </span>
-                                    <input type="checkbox" data-code-analyzer-full-scan>
-                                </label>
-                                <button type="button" data-action="run-code-analyzer-unpushed"
-                                    data-idle-label="Scan unpushed commits">
-                                    <span class="spinner-border spinner-border-sm" data-button-spinner hidden
-                                        aria-hidden="true"></span>
-                                    <i class="fa-solid fa-cloud-arrow-up" data-button-icon aria-hidden="true"></i>
-                                    <span data-button-label>Scan unpushed commits</span>
-                                </button>
-                                <button type="button" data-action="copy-code-analyzer-output">
-                                    <i class="fa-regular fa-copy" aria-hidden="true"></i>
-                                    Copy scan summary
-                                </button>
-                                <button type="button" data-action="clear-code-analyzer-output">
-                                    <i class="fa-solid fa-eraser" aria-hidden="true"></i>
-                                    Clear results
-                                </button>
-                            </div>
-                        </details>
-                        <button class="btn btn-sm btn-primary d-inline-flex align-items-center gap-2"
-                            type="button" data-action="run-code-analyzer" data-idle-label="Scan changes">
-                            <span class="spinner-border spinner-border-sm" data-button-spinner hidden
-                                aria-hidden="true"></span>
-                            <i class="fa-solid fa-rotate-right" data-button-icon aria-hidden="true"></i>
-                            <span data-button-label>Scan changes</span>
-                        </button>
-                    </div>
-                </header>
-
-                <div class="rules-section-body rules-section-body-flush">
-                    <div class="code-analyzer-empty" data-code-analyzer-empty>
-                        <span class="code-analyzer-empty-icon" aria-hidden="true">
-                            <i class="fa-solid fa-chart-line"></i>
-                        </span>
-                        <div>
-                            <strong>Preparing code quality</strong>
-                            <p>Your staged, unstaged, and untracked changes will be organized into file
-                                metrics and source evidence, with a summary on the Rules page.</p>
-                        </div>
-                    </div>
-
-                    <div class="code-analyzer-dashboard" data-code-analyzer-report hidden></div>
-
-                    <details class="rules-console-transcript code-analyzer-transcript">
-                        <summary>
-                            <span class="vca-console-pulse" aria-hidden="true"></span>
-                            <span class="rules-console-transcript-label">Scan transcript</span>
-                            <small data-vca-console-meta>Waiting for analysis</small>
-                        </summary>
-                        <div class="vca-console-shell">
-                            <pre class="vca-console-output" data-vca-console-output role="log"
-                                aria-live="polite" aria-atomic="false" tabindex="0"></pre>
-                        </div>
-                    </details>
-                </div>
-
-                <footer class="code-analyzer-note">
-                    <span>Risk scores are normalized so higher always means more risk.</span>
-                    <span class="code-analyzer-legend">
-                        <span><i data-tone="success"></i>Healthy</span>
-                        <span><i data-tone="warning"></i>Review</span>
-                        <span><i data-tone="danger"></i>Change required</span>
-                    </span>
-                </footer>
-            </section>
+        <div class="code-report-view" data-view="code-quality">
+            <div data-code-analyzer-report></div>
         </div>
     </template>
 
