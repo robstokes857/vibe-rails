@@ -18,6 +18,9 @@ namespace Tests.Routes;
 
 public sealed class CodeGraphRoutesTests
 {
+    // One client per class: a client per test leaves sockets in TIME_WAIT across the suite.
+    private static readonly HttpClient SharedClient = new();
+
     [Fact]
     public async Task Graph_RequiresBothCredentials_BindsAotJson_AndRejectsUnsafeInput()
     {
@@ -37,7 +40,7 @@ public sealed class CodeGraphRoutesTests
         app.UseMiddleware<CookieAuthMiddleware>();
         CodeGraphRoutes.Map(app);
         await app.StartAsync(TestContext.Current.CancellationToken);
-        using var client = new HttpClient { BaseAddress = new Uri(app.Urls.First()) };
+        var baseAddress = app.Urls.First();
         try
         {
             using var noAuth = await Send(false, false, "{}");
@@ -93,12 +96,12 @@ public sealed class CodeGraphRoutesTests
 
         async Task<HttpResponseMessage> Send(bool session, bool tab, string body)
         {
-            using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/code-analyzer/graph") {
+            using var request = new HttpRequestMessage(HttpMethod.Post, baseAddress + "/api/v1/code-analyzer/graph") {
                 Content = new StringContent(body, Encoding.UTF8, "application/json")
             };
             if (session) request.Headers.Add("viberails_session", "test-session");
             if (tab) request.Headers.Add("viberails_tab", "test-tab");
-            return await client.SendAsync(request, TestContext.Current.CancellationToken);
+            return await SharedClient.SendAsync(request, TestContext.Current.CancellationToken);
         }
     }
 }

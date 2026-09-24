@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.Text.Json;
 using MintLint;
+using VibeRails.DTOs;
 using VibeRails.Services.CodeReports;
 using Xunit;
 
@@ -18,6 +20,46 @@ public sealed class RepositoryCodeGraphTests
         Assert.Contains(outline.Declarations, item => item.Name == "Run");
         Assert.Contains(outline.References, item => item.Name == "Service");
         Assert.DoesNotContain(outline.References, item => item.Name is "Ghost" or "Phantom" or "Imaginary");
+    }
+
+    [Fact]
+    public void SourceOutline_ReportsNoLanguage_WhenNoParserClaimsTheExtension_SoTheFieldIsOmitted()
+    {
+        var outline = SourceOutline.Read("notes.unmapped", "class Caller { Service value; }");
+        Assert.Null(outline.Language);
+        Assert.Empty(outline.Declarations);
+        Assert.Empty(outline.References);
+
+        var graph = RepositoryCodeGraph.Build("test", [("notes.unmapped", outline)], false,
+            TestContext.Current.CancellationToken);
+        var file = Assert.Single(graph.Nodes, node => node.Kind == "file");
+        Assert.Null(file.Language);
+        // An unclaimed extension has no language name, so the wire must omit the field rather
+        // than publish an empty string the viewer would render as a language badge.
+        Assert.DoesNotContain("\"language\"",
+            JsonSerializer.Serialize(graph, AppJsonSerializerContext.Default.CodeGraphResponse));
+    }
+
+    [Fact]
+    public void Build_ReturnsSnapshotCollections_SoTrimmingNeverRewritesAReturnedResponse()
+    {
+        var directory = string.Join('/', Enumerable.Repeat(new string('a', 240), 15));
+        var trimmed = RepositoryCodeGraph.Build("large", Enumerable.Range(0, 1000).Select(index =>
+            Source($"{directory}/File{index}.cs", $"class Type{index} {{ void Run() {{}} }}")).ToArray(),
+            false, TestContext.Current.CancellationToken);
+        var whole = RepositoryCodeGraph.Build("small", [Source("src/Api.cs", "class Api {}")], false,
+            TestContext.Current.CancellationToken);
+
+        Assert.True(trimmed.Truncated);
+        Assert.True(trimmed.Nodes.Count < RepositoryCodeGraph.MaxNodes);
+        foreach (var graph in new[] { trimmed, whole })
+        {
+            // The builder keeps shrinking its own lists while fitting the byte budget, so a
+            // response that held them would describe a different map than the one it reports.
+            Assert.False(graph.Nodes is ICollection<CodeGraphNode> { IsReadOnly: false });
+            Assert.False(graph.Edges is ICollection<CodeGraphEdge> { IsReadOnly: false });
+            Assert.Equal(graph.FileCount, graph.Nodes.Count(node => node.Kind == "file"));
+        }
     }
 
     [Fact]
@@ -71,6 +113,75 @@ public sealed class RepositoryCodeGraphTests
         Assert.True(graph.Truncated);
         Assert.True(graph.Edges.Count <= 10000);
         Assert.DoesNotContain(graph.Edges, edge => edge.Evidence?.Contains("imports") == true);
+    }
+
+    [Fact]
+    public void Build_BoundsLongReferenceEvidence_AndKeepsItsUsefulSuffix()
+    {
+        var directory = string.Join('/', Enumerable.Repeat(new string('a', 240), 14));
+        var graph = RepositoryCodeGraph.Build("long-paths", [
+            Source($"{directory}/Caller.cs", "class Caller { Service value; }"),
+            Source("other/Service.cs", "class Service {}")
+        ], false, TestContext.Current.CancellationToken);
+
+        var references = graph.Edges.Where(edge => edge.Kind == "references").ToArray();
+        Assert.NotEmpty(references);
+        Assert.All(references, edge => Assert.True(edge.Evidence!.Length <= 512));
+        Assert.Contains(references, edge => edge.Evidence!.EndsWith("mentions Service"));
+        Assert.True(graph.Truncated);
+    }
+
+    [Fact]
+    public void Build_FitsAtlasByteLimit_WhileRetainingFilesAndValidRelationships()
+    {
+        var directory = string.Join('/', Enumerable.Repeat(new string('a', 240), 15));
+        var files = Enumerable.Range(0, 1000).Select(index =>
+            Source($"{directory}/File{index}.cs", $"class Type{index} {{ void Run() {{}} }}")).ToArray();
+        var graph = RepositoryCodeGraph.Build("large", files, false, TestContext.Current.CancellationToken);
+        var wire = JsonSerializer.SerializeToUtf8Bytes(graph, AppJsonSerializerContext.Default.CodeGraphResponse);
+
+        Assert.True(graph.Truncated);
+        Assert.True(wire.Length <= RepositoryCodeGraph.MaxSerializedBytes);
+        Assert.True(graph.Nodes.Count < RepositoryCodeGraph.MaxNodes);
+        Assert.Equal(1000, graph.FileCount);
+        Assert.Equal(graph.FileCount, graph.Nodes.Count(node => node.Kind == "file"));
+        var ids = graph.Nodes.Select(node => node.Id).ToHashSet();
+        Assert.All(graph.Nodes.Where(node => node.ParentId is not null), node => Assert.Contains(node.ParentId!, ids));
+        Assert.All(graph.Edges, edge => {
+            Assert.Contains(edge.Source, ids);
+            Assert.Contains(edge.Target, ids);
+        });
+    }
+
+    [Fact]
+    public void Build_TrimsLongPathFilesOnlyAfterOptionalDetails_AreExhausted()
+    {
+        var shared = string.Join('/', Enumerable.Repeat(new string('a', 240), 14));
+        var files = Enumerable.Range(0, 1000).Select(index => {
+            var suffix = index.ToString("D4").PadRight(200, 'b');
+            return ($"{shared}/{suffix}/{suffix}/File.cs", (SourceOutline?)null);
+        }).ToArray();
+        var graph = RepositoryCodeGraph.Build("long-paths", files, false, TestContext.Current.CancellationToken);
+        var wire = JsonSerializer.SerializeToUtf8Bytes(graph, AppJsonSerializerContext.Default.CodeGraphResponse);
+
+        Assert.True(graph.Truncated);
+        Assert.True(wire.Length <= RepositoryCodeGraph.MaxSerializedBytes);
+        Assert.InRange(graph.FileCount, 1, 999);
+        Assert.Equal(graph.FileCount, graph.Nodes.Count(node => node.Kind == "file"));
+        var ids = graph.Nodes.Select(node => node.Id).ToHashSet();
+        Assert.All(graph.Nodes.Where(node => node.ParentId is not null), node => Assert.Contains(node.ParentId!, ids));
+        Assert.All(graph.Edges, edge => {
+            Assert.Contains(edge.Source, ids);
+            Assert.Contains(edge.Target, ids);
+        });
+    }
+
+    [Fact]
+    public void RepositoryName_UsesFilesystemRootWhenItHasNoFinalComponent()
+    {
+        var root = Path.GetPathRoot(Path.GetTempPath())!;
+        Assert.Equal(root, RepositoryCodeGraph.RepositoryName(root));
+        Assert.Equal("project", RepositoryCodeGraph.RepositoryName(Path.Combine(root, "project")));
     }
 
     [Fact]
@@ -157,6 +268,8 @@ public sealed class RepositoryCodeGraphTests
             else Directory.CreateSymbolicLink(link, outside);
             var graph = await new RepositoryCodeGraph().ReadAsync(root, ["linked/secret.cs"], TestContext.Current.CancellationToken);
             Assert.Empty(graph.Nodes);
+            // The guard dropped the only catalogued file, so the map is partial and must say so.
+            Assert.True(graph.Truncated);
         }
         finally
         {

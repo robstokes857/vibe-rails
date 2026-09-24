@@ -443,6 +443,10 @@ export class RuleController {
         // scan. A manual scan (or an ignore/restore that deliberately rescans) replaces this.
         this.codeAnalyzerCache = null;
         this.codeAnalyzerScanInProgress = null;
+        // Scan scope survives navigation between Project health and the Code quality workbench,
+        // where neither control is mounted.
+        this.lastAnalyzerUnpushed = false;
+        this.lastAnalyzerFullScan = false;
         this.disposeHealthFixPickers = null;
         this.healthFixLaunching = false;
         this.hookStatusRequestId = 0;
@@ -574,6 +578,10 @@ export class RuleController {
         if (!cache || cache.repositoryPath !== this.hookStatus?.repositoryPath) return false;
 
         this.lastAnalyzerUnpushed = cache.unpushed;
+        this.lastAnalyzerFullScan = cache.fullScan === true;
+        // Project health owns the toggle; show it the scope the cached scan actually used.
+        const fullScanToggle = this.query('[data-code-analyzer-full-scan]');
+        if (fullScanToggle) fullScanToggle.checked = this.lastAnalyzerFullScan;
         this.analyzerIgnores = cache.ignoredFiles;
         if (cache.response) this.codeAnalyzerConsole?.complete(cache.response);
         else this.codeAnalyzerConsole?.fail(cache.error || 'The previous code quality scan failed. Scan again to retry.');
@@ -1024,6 +1032,11 @@ export class RuleController {
         // Remember the scope so ignore/restore rescans replay it instead of silently reverting to
         // the working-tree scope, and so the source pane can request the matching revision.
         this.lastAnalyzerUnpushed = unpushed === true;
+        // The full-scan toggle only exists on the Project health view. Scans started from the Code
+        // quality workbench must replay the remembered choice instead of quietly falling back off.
+        const fullScanToggle = this.query('[data-code-analyzer-full-scan]');
+        const fullScan = fullScanToggle ? fullScanToggle.checked === true : this.lastAnalyzerFullScan === true;
+        this.lastAnalyzerFullScan = fullScan;
         const button = unpushed
             ? this.query('[data-action="run-code-analyzer-unpushed"]')
             : this.query('[data-action="run-code-analyzer"]');
@@ -1033,7 +1046,6 @@ export class RuleController {
         this.renderCodeAnalyzerLoading();
 
         try {
-            const fullScan = this.query('[data-code-analyzer-full-scan]')?.checked === true;
             // Build the query string. scope=unpushed takes precedence over the default
             // working-tree scope; fullScan is independent and can be combined with either.
             const params = [];
@@ -1052,7 +1064,8 @@ export class RuleController {
                 repositoryPath,
                 response,
                 ignoredFiles: this.analyzerIgnores || [],
-                unpushed
+                unpushed,
+                fullScan
             };
             this.renderCodeAnalyzerSummary(response);
         } catch (error) {
@@ -1065,7 +1078,8 @@ export class RuleController {
                 response: null,
                 error: error?.message,
                 ignoredFiles: this.analyzerIgnores || [],
-                unpushed
+                unpushed,
+                fullScan
             };
             this.renderCodeAnalyzerSummary(null);
         } finally {
@@ -1751,11 +1765,10 @@ export class RuleController {
             copied ? 'success' : 'warning');
     }
 
+    // Only Project health binds this button, and that view hosts the summary placeholder rather
+    // than the mounted report, which lives on its own Code quality view root.
     clearCodeAnalyzerOutput() {
         if (this.codeAnalyzerConsole?.clear()) {
-            const report = this.query('[data-code-analyzer-report]');
-            this.codeReportViewer?.setLoading();
-            if (report) report.hidden = true;
             const empty = this.query('[data-code-analyzer-empty]');
             if (empty) empty.hidden = false;
         }

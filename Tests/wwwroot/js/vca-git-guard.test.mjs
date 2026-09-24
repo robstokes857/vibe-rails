@@ -172,7 +172,8 @@ test('Rules overview automatically starts validation and analysis together', asy
 
 test('Rules overview restores its MintLint result instead of rescanning on return', async () => {
     const controller = new RuleController({});
-    const root = {};
+    // Restoring a cached scan reads the view's own controls, so the stub root answers queries.
+    const root = { querySelector: () => null };
     const calls = [];
     const cachedResponse = { healthScore: 90 };
     controller.viewRoot = root;

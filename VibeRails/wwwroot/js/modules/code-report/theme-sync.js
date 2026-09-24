@@ -24,8 +24,12 @@ export function observeReportTheme(element,onTheme,onError=()=>{}){
     }catch(error){last='';onError(error);}
   }
   function schedule(){if(!disposed&&!frame)frame=win.requestAnimationFrame(refresh);}
+  // Only the attributes a host actually themes through: watching every attribute wakes this on
+  // unrelated churn (aria state, hidden, data-view) on every ancestor up to <html>.
+  const themeAttributes=['class','style','data-theme','data-bs-theme','data-vscode-theme-kind','data-vscode-theme-name'];
   const ancestors=new win.MutationObserver(schedule);
-  for(let current=element;current;current=current.parentElement)ancestors.observe(current,{attributes:true});
+  for(let current=element;current;current=current.parentElement)
+    ancestors.observe(current,{attributes:true,attributeFilter:themeAttributes});
   // Also handle CSS custom-theme files/styles replaced by the host.
   const styles=new win.MutationObserver(schedule);
   styles.observe(doc.head,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['href','media','disabled']});

@@ -43,11 +43,16 @@ local JS/TS imports and unambiguous type-name references. Cross-directory refere
 domain edges. These are lexical source evidence, not resolved call graphs or runtime dependencies.
 No coverage or quality metric is inferred from the graph.
 
-Limits: 1,000 files, 2,800 nodes, 10,000 edges, 12 declarations per file, 128 KiB per source file,
-16 MiB source budget and a 4 Mi-character Git catalog with a 20-second catalog timeout. Files
-beyond source-read limits retain structure without declarations. Standard generated/vendor
-directories are excluded unless a file is explicitly in the report. Truncation is disclosed in
-the map note. Search covers the supplied snapshot, not omitted repository files.
+Limits: 1,000 files, 2,800 nodes, 10,000 edges, 512 characters per reference evidence,
+8 MiB serialized graph, 12 declarations per file, 128 KiB per source file,
+16 MiB source budget and a 4 Mi-character Git catalog with a two-minute catalog timeout.
+Files beyond source-read limits retain structure without declarations. An entry the path guard
+refuses is omitted and marks the map truncated; a catalog read that exceeds its character bound
+or its timeout is reported as that bound, not as a server fault. Standard generated/vendor
+directories are excluded unless a file is explicitly in the report. When the graph exceeds the
+byte limit, references and declarations give way before file nodes; exceptionally long paths can
+also reduce the file set. Truncation is disclosed in the map note. Search covers the supplied
+snapshot, not omitted repository files.
 
 ## Provenance and vendor updates
 

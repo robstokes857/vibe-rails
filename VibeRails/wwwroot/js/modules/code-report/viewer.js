@@ -102,15 +102,16 @@ export class CodeReportViewer {
             this.response.report = { files: [], overview: [], scorecard: [] };
         const reportFiles = this.response?.report?.files;
         const files = Array.isArray(reportFiles) ? reportFiles.map(file => reportPath(file?.file)).filter(Boolean) : [];
+        // Start the map, then paint the report we already hold in memory: the quality panel needs no
+        // network data, and focusFile awaits this.ready before it touches the map.
         this.ready = this.loadGraph(files, generation);
-        await this.ready;
-        if (!this.isCurrent(generation)) return;
         if (this.quality.setResponse(this.response)) {
             this.composeFiles();
             this.radar = enhanceRadar(this.qualityHost.querySelector('.qr'), this.response, {
                 onSelect: category => this.showCategory(category)
             });
         }
+        await this.ready;
     }
 
     isCurrent(generation) { return !this.destroyed && generation === this.generation; }

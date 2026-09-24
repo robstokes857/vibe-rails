@@ -9,8 +9,10 @@ namespace MintLint;
 public sealed record SourceOutlineSymbol(string Name, string Kind, int Line);
 
 /// <summary>Parser evidence for a repository map, without running or grading the code.</summary>
+/// <remarks><paramref name="Language"/> is null when no parser claims the extension, so hosts omit
+/// the field instead of publishing an empty language name.</remarks>
 public sealed record SourceOutline(
-    string Language,
+    string? Language,
     IReadOnlyList<SourceOutlineSymbol> Declarations,
     IReadOnlyList<SourceOutlineSymbol> References,
     IReadOnlyList<string> Imports)
@@ -19,13 +21,15 @@ public sealed record SourceOutline(
     public static SourceOutline Read(string path, string content)
     {
         if (!LanguageRegistry.TryGetParser(Path.GetExtension(path), out var parser))
-            return new SourceOutline("", [], [], []);
+            return new SourceOutline(null, [], [], []);
 
         var source = parser.Parse(path, path, content);
         var declarations = new List<SourceOutlineSymbol>();
         foreach (var type in source.Classes)
         {
             var token = source.Tokens[type.StartIndex];
+            // The parser groups every named type together, so "class" here means "named type":
+            // structs, enums, records, traits and Go type declarations all land in this bucket.
             var kind = token.Text == "interface" ? "interface" : "class";
             declarations.Add(new(type.Name, kind, token.Line));
         }
