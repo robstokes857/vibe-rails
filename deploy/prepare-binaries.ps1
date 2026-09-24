@@ -250,10 +250,10 @@ foreach ($platform in $platforms) {
         }
     }
 
-    # Keep the VSIX inside vsce's JavaScript-file limit, which is what produced the
-    # "This extension consists of N files, out of which M are JavaScript files"
-    # warning on every publish. Failing here is far cheaper than finding out at
-    # publish time.
+    # Report how close the VSIX is to vsce's JavaScript-file limit, which is what
+    # produced the "This extension consists of N files, out of which M are JavaScript
+    # files" warning on every publish. vsce only warns above the limit, so this does
+    # too: a release must never die over a performance advisory (v1.10.21 did).
     #
     # The VSIX's .js files are the staged backend plus the extension's own compiled
     # output. out/ is compiled by vsce's `vscode:prepublish` *after* this script
@@ -269,9 +269,10 @@ foreach ($platform in $platforms) {
     $totalJsCount = $stagedJsCount + $extensionJsCount
 
     if ($totalJsCount -gt $VsceJsFileLimit) {
-        throw "bin/$($platform.Name)/ would ship $totalJsCount .js files ($stagedJsCount staged backend + $extensionJsCount compiled from src/), over vsce's limit of $VsceJsFileLimit. vsce warns above that and tells you to bundle. Add the new assets to the prune list above, or bundle them."
+        Write-Warning "bin/$($platform.Name)/ will ship $totalJsCount .js files ($stagedJsCount staged backend + $extensionJsCount compiled from src/), over vsce's limit of $VsceJsFileLimit, so vsce will print its bundling warning. Packaging continues. To clear it, add unused assets to the prune list above or bundle them."
+    } else {
+        Write-Host "    $totalJsCount .js files will ship ($stagedJsCount backend + $extensionJsCount extension; vsce warns above $VsceJsFileLimit)" -ForegroundColor Gray
     }
-    Write-Host "    $totalJsCount .js files will ship ($stagedJsCount backend + $extensionJsCount extension; vsce warns above $VsceJsFileLimit)" -ForegroundColor Gray
 }
 
 # Display summary
