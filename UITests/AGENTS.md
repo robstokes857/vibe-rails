@@ -67,8 +67,8 @@ failure/empty states, request cancellation and cleanup, exclusion/restore flow, 
 npx playwright test --config playwright.board.config.js
 ```
 
-Uses the real frontend with mocked board APIs to verify the Settings-style heading, description
-image rendering/editing/upload, save/reopen, running-agent controls, and desktop/narrow layouts.
+Uses the real frontend with mocked board APIs to verify compact board controls, description
+image rendering/editing/upload/deletion, save/reopen, running-agent controls, and desktop/narrow layouts.
 It starts a temporary static server and never touches the machine's board database.
 
 ### Focused Automation terminal menu tests (No Backend Required)

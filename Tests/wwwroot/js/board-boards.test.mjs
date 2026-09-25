@@ -27,18 +27,6 @@ function rule(css, selector) {
     return match[0];
 }
 
-test('the board picker sits top-left of the title with an add button next to it', () => {
-    const html = boardTemplate();
-    const head = html.slice(html.indexOf('<header class="board-head">'), html.indexOf('</header>'));
-    assert.match(head, /<select class="board-control board-picker-select" data-board-select/);
-    assert.match(head, /data-board-action="new-board"/);
-    assert.match(head, /data-board-action="edit-board"/);
-    // The picker comes before the title in source order: top-left, title centred.
-    assert.ok(head.indexOf('data-board-select') < head.indexOf('Vibe Board'));
-    assert.match(rule(html, '.board-view .board-head'), /grid-template-columns:\s*1fr auto 1fr/);
-    assert.match(rule(html, '.board-view .board-head-title'), /text-align:\s*center/);
-});
-
 test('the controller loads boards first, remembers the selection, and scopes lanes and cards to it', () => {
     const source = readFileSync(controllerPath, 'utf8');
     // The key lives in board-selection.js so Settings → Integrations reads the same selection.

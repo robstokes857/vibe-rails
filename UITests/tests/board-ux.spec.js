@@ -5,7 +5,8 @@ const { test, expect } = process.env.VIBERAILS_BOARD_STATIC === '1'
 const IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=';
 const DESCRIPTION = 'Repro screenshot\n![Screenshot.png](attachment:att_image)\n<img src=x onerror="window.__injected=true">';
 
-async function openBoard(page, { active = false, assignee = null, relatedCards = false } = {}) {
+async function openBoard(page, { active = false, assignee = null, relatedCards = false,
+    columns = [{ id: 'col_ready', name: 'Ready', position: 0, color: '#3b82f6', boardId: 'brd_main' }] } = {}) {
     if (process.env.VIBERAILS_BOARD_STATIC === '1') {
         await page.addInitScript(() => sessionStorage.setItem('viberails_tab', 'board-fixture'));
     }
@@ -15,7 +16,7 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
         assignee, points: null, tags: [], blocked: false, flagged: false, commentCount: 1,
         activeSessionId: active ? 'session_test' : null,
         createdAt: '2026-09-11T06:00:00Z', updatedAt: '2026-09-11T06:00:00Z',
-        attachments: [{ id: 'att_image', name: 'Screenshot.png', url: IMAGE }],
+        attachments: [{ id: 'att_image', name: 'Screenshot.png', url: IMAGE, mimeType: 'image/png', bytes: 68 }],
         comments: [{ id: 'comment_1', author: { kind: 'user', label: 'You' },
             body: '![Screenshot.png](attachment:att_image)', createdAt: '2026-09-11T06:00:00Z' }],
         commits: [], sessions: [{ id: 'session_test', tabId: active ? 'agent_tab' : null, displayName: 'Codex session', cli: 'codex',
@@ -79,6 +80,12 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
             card.attachments.push(attachment);
             return route.fulfill({ json: attachment });
         }
+        const deletedAttachment = path.match(/^\/api\/v1\/board\/cards\/[^/]+\/attachments\/([^/]+)$/);
+        if (deletedAttachment && route.request().method() === 'DELETE') {
+            card.attachments = card.attachments.filter(item => item.id !== deletedAttachment[1]);
+            contents.delete(deletedAttachment[1]);
+            return route.fulfill({ json: { ok: true } });
+        }
         if (path.endsWith('/attachments/att_uploaded/content')) return route.fulfill({ contentType: 'application/octet-stream', body: contents.get('att_uploaded') });
         if (path === '/api/v1/board/files') {
             // The composer's @ typeahead: a tiny repo index, filtered like the server does.
@@ -101,10 +108,10 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
                     cli: 'claude', environmentId: 7, enabled: true, order: 2 }
             ] },
             '/api/v1/board/boards': { boards: [{ id: 'brd_main', name: 'Main', position: 0, cardCount: 1,
-                columns: [{ id: 'col_ready', name: 'Ready', position: 0, color: '#3b82f6', boardId: 'brd_main' }] },
+                columns },
                 ...(relatedCards ? [{ id: 'brd_sprint', name: 'Sprint 2', position: 1, cardCount: 2,
                     columns: [{ id: 'col_build', name: 'Build', position: 0, color: '#06b6d4', boardId: 'brd_sprint' }] }] : [])] },
-            '/api/v1/board/columns': { columns: [{ id: 'col_ready', name: 'Ready', position: 0, color: '#3b82f6', boardId: 'brd_main' }] },
+            '/api/v1/board/columns': { columns },
             '/api/v1/board/cards': { cards: [card] }
         };
         return route.fulfill({ json: payloads[path] || {} });
@@ -114,23 +121,8 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
     return requests;
 }
 
-test('board heading matches Settings and description images survive editing and save', async ({ page }) => {
+test('description images survive editing and save', async ({ page }) => {
     await openBoard(page);
-    const heading = page.getByRole('heading', { name: 'Vibe Board', exact: true });
-    await expect(heading).toBeVisible();
-    const styles = await heading.evaluate(element => {
-        const settings = document.getElementById('settings-template').content.cloneNode(true);
-        const reference = settings.querySelector('h4');
-        document.body.append(settings);
-        const read = node => {
-            const style = getComputedStyle(node);
-            return [style.fontSize, style.fontWeight, style.letterSpacing, style.textTransform, style.textAlign];
-        };
-        const result = { actual: read(element), settings: read(reference) };
-        reference.closest('[data-view="settings"]').remove();
-        return result;
-    });
-    expect(styles.actual).toEqual(styles.settings);
     await page.getByText('Description images', { exact: true }).click();
     await expect(page.locator('[data-board-open-session="session_test"]')).toBeVisible();
     await expect(page.locator('[data-board-dump-session]')).toHaveCount(0);
@@ -155,6 +147,107 @@ test('board heading matches Settings and description images survive editing and 
     await page.getByText('Description images', { exact: true }).click();
     await expect(preview).toContainText('Edited context');
     await expect(preview.locator('img.board-image')).toBeVisible();
+});
+
+for (const width of [1440, 900, 390]) {
+    test(`compact board controls and New card work at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 900 });
+        const columns = ['Ready', 'In Progress', 'Review', 'Done'].map((name, position) => ({
+            id: position ? `col_${position}` : 'col_ready', name, position, boardId: 'brd_main',
+            color: ['#64748b', '#06b6d4', '#a855f7', '#10b981'][position]
+        }));
+        const requests = await openBoard(page, { columns });
+        await expect(page.getByRole('heading', { name: 'Vibe Board', exact: true })).toBeVisible();
+        await expect(page.locator('[data-board-select] option:checked')).toHaveText('Main');
+        await expect(page.locator('[data-quick-add]')).toHaveCount(0);
+        await expect(page.locator('.board-lane input')).toHaveCount(0);
+        await expect(page.locator('[data-board-stats]')).toContainText('1 card');
+        const tools = page.locator('.board-tools');
+        const bounds = await tools.boundingBox();
+        if (width >= 900) expect(bounds.height).toBeLessThan(120);
+        expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+        for (const control of await tools.locator('button:visible, input, select').all()) {
+            const box = await control.boundingBox();
+            expect(box.x).toBeGreaterThanOrEqual(0);
+            expect(box.x + box.width).toBeLessThanOrEqual(width);
+        }
+        await page.screenshot({ path: testInfo.outputPath('board-header.png') });
+        await page.getByRole('button', { name: 'Board settings', exact: true }).click();
+        await expect(page.locator('[data-board-board-editor]')).toBeVisible();
+        await page.locator('#modal-container [data-action="close-modal"]').first().click();
+        await page.getByRole('button', { name: 'New card', exact: true }).click();
+        await page.locator('#board-card-title').fill('A card in Review');
+        await page.locator('#board-card-lane').selectOption('col_2');
+        await page.locator('[data-board-save-card]').click();
+        await expect(page.locator('[data-board-card-editor]')).toHaveCount(0);
+        expect(requests.find(request => request.path === '/api/v1/board/cards' && request.method === 'POST').body.columnId).toBe('col_2');
+    });
+}
+
+for (const width of [1440, 390]) {
+    test(`uploaded images and files have visible deletion that preserves drafts at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 900 });
+        const requests = await openBoard(page);
+        await page.getByText('Description images', { exact: true }).click();
+        const editor = page.locator('[data-board-card-editor]');
+        const description = editor.locator('[data-board-composer="description"]');
+        const comment = editor.locator('[data-board-composer="comment"] textarea');
+        await editor.locator('[data-board-files]').setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('Keep this text') });
+        await expect(editor.getByRole('button', { name: 'Delete notes.txt' })).toHaveCSS('opacity', '1');
+        const remove = editor.getByRole('button', { name: 'Delete Screenshot.png' });
+        await expect(remove).toHaveCSS('opacity', '1');
+        await remove.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: testInfo.outputPath('attachment-delete.png') });
+        await remove.click();
+        await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel' }).click();
+        expect(requests.filter(request => request.method === 'DELETE')).toHaveLength(0);
+        await editor.locator('#board-card-title').fill('Unsaved title');
+        await description.getByRole('button', { name: 'Edit description' }).click();
+        await description.locator('textarea').fill(`${DESCRIPTION}\nUnsaved description`);
+        await comment.fill('Unsaved comment');
+        await remove.click();
+        await page.getByRole('alertdialog').getByRole('button', { name: 'Delete', exact: true }).click();
+        await expect(remove).toHaveCount(0);
+        await expect(editor.locator('[data-board-count="attachments"]')).toHaveText('1');
+        await expect(editor.locator('#board-card-title')).toHaveValue('Unsaved title');
+        await expect(description.locator('textarea')).toHaveValue(`${DESCRIPTION}\nUnsaved description`);
+        await expect(comment).toHaveValue('Unsaved comment');
+        await expect(editor.locator('img.board-image')).toHaveCount(0);
+        await editor.getByRole('button', { name: 'Delete notes.txt' }).click();
+        await page.getByRole('alertdialog').getByRole('button', { name: 'Delete', exact: true }).click();
+        await expect(editor.locator('[data-board-attachments]')).toHaveText('No files attached.');
+        await editor.locator('[data-board-save-card]').click();
+        await page.getByText('Unsaved title', { exact: true }).click();
+        await expect(page.locator('[data-board-count="attachments"]')).toHaveText('0');
+        await expect(page.locator('img.board-image')).toHaveCount(0);
+        expect(requests.filter(request => request.method === 'DELETE')).toHaveLength(2);
+    });
+}
+
+test('attachment deletion blocks overlapping saves and keeps the file on failure for retry', async ({ page }) => {
+    const requests = await openBoard(page);
+    await page.getByText('Description images', { exact: true }).click();
+    let finish;
+    await page.route('**/api/v1/board/cards/card_test/attachments/att_image', async route => {
+        await new Promise(resolve => { finish = resolve; });
+        await route.fulfill({ status: 500, json: { error: 'Delete failed. Try again.' } });
+    });
+    const remove = page.getByRole('button', { name: 'Delete Screenshot.png' });
+    await remove.click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect.poll(() => typeof finish).toBe('function');
+    await expect(remove).toBeDisabled();
+    await page.locator('[data-board-save-card]').click();
+    expect(requests.filter(request => request.method === 'PUT')).toHaveLength(0);
+    finish();
+    await expect(remove).toBeEnabled();
+    await expect(page.locator('[data-board-count="attachments"]')).toHaveText('1');
+    await expect(page.locator('[data-board-composer-preview] img.board-image')).toHaveCount(1);
+    await page.unroute('**/api/v1/board/cards/card_test/attachments/att_image');
+    await remove.click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(remove).toHaveCount(0);
 });
 
 test('board context settings persist default and per-type choices and preserve a conflicted draft', async ({ page }) => {
@@ -517,6 +610,12 @@ test('new cards queue files until Save and do not launch', async ({ page }) => {
     await page.locator('#board-card-title').fill('File first');
     await page.locator('[data-board-files]').setInputFiles({ name: 'notes.zip', mimeType: 'application/zip', buffer: Buffer.from('archive') });
     await expect(page.locator('[data-board-attachments]')).toContainText('Uploads when you save');
+    const remove = page.getByRole('button', { name: 'Remove notes.zip' });
+    await expect(remove).toHaveCSS('opacity', '1');
+    await remove.click();
+    await expect(page.locator('[data-board-count="attachments"]')).toHaveText('0');
+    await page.locator('[data-board-files]').setInputFiles({ name: 'notes.zip', mimeType: 'application/zip', buffer: Buffer.from('archive') });
+    await expect(page.locator('[data-board-count="attachments"]')).toHaveText('1');
     expect(requests.filter(request => request.path.endsWith('/attachments'))).toHaveLength(0);
     await page.locator('[data-board-save-card]').click();
     await expect(page.locator('[data-board-card-editor]')).toHaveCount(0);

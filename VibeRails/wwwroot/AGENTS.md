@@ -81,11 +81,12 @@ New cards and ordinary card activity rise to the top of the current lane. Explic
 remain authoritative. This ordering is persisted, including comments, notes, session links/renames,
 attachments and commit links, rather than being a browser-only sort.
 
-The page heading is **Vibe Board**, using the same centered, uppercase gradient heading as
-Application Settings. New card lives in the board toolbar. Top-left of the heading sits the
-**board picker** (a project can hold several boards — sprints, sub-projects): a select, a `+`
-that creates one (default lanes; the new board opens at once), and a settings button for
-rename/delete. The settings modal also includes **Agent context**: a default message plus default-only,
+The compact **Vibe Board** header groups the title, name-only **board picker**, `+` for a new
+board (default lanes; opens at once), and a settings cog for rename/delete. New card and the
+optional Jira pull sit on the right alongside board statistics; search and filters share a second
+row on the same surface. Lane headers retain their card counts. There are no lane-bottom entry
+fields: **New card** opens the editor, whose Lane selector chooses the destination.
+The settings modal also includes **Agent context**: a default message plus default-only,
 type-only, or combined messages for each card type. `board-settings.js` owns these asynchronous,
 abortable editors and revision-checked saves. Context is sent for both Start work and Chat with
 agent. **Save context** is independent of **Save name**.
@@ -276,6 +277,9 @@ sanitizer to re-earn what textContent gives for free.
 Cards have one current state: no History rail or expected-description token. Attachment changes
 do not require a revision refresh. Failed queued uploads retain the card ID and unfinished queue
 so Save retries only remaining files. Removing an attachment deletes its stored bytes.
+Each uploaded image/file has a visible **Delete** button with confirmation; queued new-card
+files have **Remove**. Deletion serializes with uploads/saves, keeps failed removals available
+for retry, and refreshes inline description/comment/note previews without changing draft text.
 
 **Needs your attention** is the `flagged` editor checkbox. A flagged tile is red with a small
 flag beside its key and an accessible attention label. `blocked` remains a separate field.

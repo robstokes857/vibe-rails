@@ -411,15 +411,14 @@ export class BoardController {
         this.renderLanes();
     }
 
-    // The select top-left: one option per board, the current one selected. Card counts come from
-    // the boards list, which every refresh re-reads.
+    // Board names stay uncluttered; counts belong in the stats and lane headers.
     renderBoardPicker() {
         const select = this.query('[data-board-select]');
         if (!select) return;
         select.innerHTML = this.state.boards
             .slice()
             .sort((a, b) => a.position - b.position)
-            .map(board => `<option value="${escapeHtml(board.id)}">${escapeHtml(board.name)}${board.cardCount ? ` (${Number(board.cardCount)})` : ''}</option>`)
+            .map(board => `<option value="${escapeHtml(board.id)}">${escapeHtml(board.name)}</option>`)
             .join('');
         select.value = this.state.boardId || '';
         select.title = select.selectedOptions[0]?.textContent || 'Switch board';
@@ -555,7 +554,7 @@ export class BoardController {
         if (filteredOut) return 'No cards match these filters.';
         if (this.isDoneLane(column)) return 'Nothing done yet.';
         if (/review/i.test(column.name)) return 'Park a card here when it is ready for eyes.';
-        if (/build|progress/i.test(column.name)) return 'Drag work in, or add a card below.';
+        if (/build|progress/i.test(column.name)) return 'Drag work in, or use New card.';
         if (/ready|next/i.test(column.name)) return 'Queue the next thing to build.';
         return 'Nothing here. Add a card or drag one in.';
     }
@@ -596,11 +595,6 @@ export class BoardController {
                             </button>
                         </header>
                         <div class="board-lane-list" data-column-id="${escapeHtml(column.id)}">${list}${more}</div>
-                        <div class="board-quick-add">
-                            <input type="text" class="board-quick-add-input" data-quick-add="${escapeHtml(column.id)}"
-                                placeholder="Add a card" autocomplete="off"
-                                aria-label="Add a card to ${escapeHtml(column.name)}">
-                        </div>
                     </section>`;
             })
             .join('');
@@ -925,15 +919,6 @@ export class BoardController {
     }
 
     onKeydown(event) {
-        if (event.key === 'Enter' && event.target.matches('[data-quick-add]')) {
-            event.preventDefault();
-            const input = event.target;
-            const value = input.value;
-            input.value = '';
-            this.quickAdd(input.dataset.quickAdd, value);
-            return;
-        }
-
         if ((event.key === 'Enter' || event.key === ' ') && event.target.classList?.contains('board-card')) {
             event.preventDefault();
             this.openCardEditor(event.target.dataset.cardId);
@@ -1514,11 +1499,11 @@ export class BoardController {
                     <span class="board-side-copy"><span class="board-side-title">${escapeHtml(attachment.name)}</span>
                     <span class="board-side-sub">${formatFileSize(attachment.bytes)} · ${getAttachmentPreviewKind(attachment) === 'download' ? 'Download' : 'Preview'}</span></span>
                 </button>
-                <button type="button" class="board-side-remove" data-board-remove-attachment="${escapeHtml(attachment.id)}" aria-label="Remove ${escapeHtml(attachment.name)}"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+                <button type="button" class="btn btn-sm btn-outline-danger board-attachment-remove" data-board-remove-attachment="${escapeHtml(attachment.id)}" aria-label="Delete ${escapeHtml(attachment.name)}"><i class="fa-solid fa-trash-can" aria-hidden="true"></i> Delete</button>
             </div>`).join('') + pending.map((attachment, index) => `
             <div class="board-attachment-row"><span class="board-side-copy"><span class="board-side-title">${escapeHtml(attachment.name)}</span>
                 <span class="board-side-sub">${formatFileSize(attachment.bytes)} · Uploads when you save</span></span>
-                <button type="button" class="board-side-remove" data-board-remove-pending="${index}" aria-label="Remove ${escapeHtml(attachment.name)}"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+                <button type="button" class="btn btn-sm btn-outline-secondary board-attachment-remove" data-board-remove-pending="${index}" aria-label="Remove ${escapeHtml(attachment.name)}"><i class="fa-solid fa-xmark" aria-hidden="true"></i> Remove</button>
             </div>`).join('') || '<p class="board-editor-muted">No files attached.</p>';
         host.querySelectorAll('[data-board-view-attachment]').forEach(button => button.addEventListener('click', async () => {
             const attachment = attachments.find(item => item.id === button.dataset.boardViewAttachment);
@@ -1527,18 +1512,39 @@ export class BoardController {
             catch (error) { this.app.showToast('Board', error?.message || 'Could not open the file.', 'error'); }
         }));
         host.querySelectorAll('[data-board-remove-pending]').forEach(button => button.addEventListener('click', () => {
+            if (editor._boardUploading || editor._boardSaving || editor._boardStarting) return;
             pending.splice(Number(button.dataset.boardRemovePending), 1);
             this.renderAttachmentsPanel(editor, card);
         }));
         host.querySelectorAll('[data-board-remove-attachment]').forEach(button => button.addEventListener('click', async () => {
             if (editor._boardUploading || editor._boardSaving || editor._boardStarting) return;
             const attachment = attachments.find(item => item.id === button.dataset.boardRemoveAttachment);
-            if (!attachment || !await confirmDialog({ title: 'Remove attachment', message: `Remove ${attachment.name} from this card?`, confirmLabel: 'Remove', danger: true })) return;
+            if (!attachment) return;
+            // Share the attachment-mutation guard with uploads so Save and other removals
+            // cannot race this operation or reintroduce a removed file from a stale array.
+            editor._boardUploading = true;
+            button.disabled = true;
             try {
+                if (!await confirmDialog({ title: 'Delete attachment', message: `Delete ${attachment.name} from this card? This also removes its inline previews.`, confirmLabel: 'Delete', danger: true }) || !editor.isConnected) return;
                 await BoardApi.deleteCardAttachmentAsync(card.id, attachment.id);
-                card.attachments = attachments.filter(item => item.id !== attachment.id);
+                card.attachments = card.attachments.filter(item => item.id !== attachment.id);
+                if (!editor.isConnected) return;
                 this.renderAttachmentsPanel(editor, card);
-            } catch (error) { this.app.showToast('Board', error?.message || 'Could not remove the file.', 'error'); }
+                // Repaint from the current text, preserving every unsaved field and comment.
+                editor.querySelectorAll('[data-board-composer]').forEach(composer => {
+                    const preview = composer.querySelector('[data-board-composer-preview]');
+                    const input = composer.querySelector('[data-board-composer-input]');
+                    if (preview && input) preview.innerHTML = renderCommentHtml(input.value, { attachments: card.attachments });
+                });
+                this.renderCommentsPanel(editor, card);
+                this.renderNotesPanel(editor, card);
+                this.app.showToast('Board', 'Attachment deleted.', 'success');
+            } catch (error) {
+                if (editor.isConnected) this.app.showToast('Board', error?.message || 'Could not delete the file.', 'error');
+            } finally {
+                editor._boardUploading = false;
+                button.disabled = false;
+            }
         }));
     }
 
@@ -2124,18 +2130,6 @@ export class BoardController {
             await this.refresh();
         } catch (error) {
             this.app.showToast('Board', error?.message || 'Failed to delete the card.', 'error');
-        }
-    }
-
-    async quickAdd(columnId, title) {
-        const text = String(title || '').trim();
-        if (!text) return;
-        try {
-            const card = await BoardApi.createBoardCardAsync({ columnId, title: text, type: 'task', priority: 'medium' });
-            this.app.showToast('Board', `Created ${card.key}.`, 'success');
-            await this.refresh();
-        } catch (error) {
-            this.app.showToast('Board', error?.message || 'Failed to add the card.', 'error');
         }
     }
 

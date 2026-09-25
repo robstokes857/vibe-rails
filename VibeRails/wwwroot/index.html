@@ -3140,19 +3140,37 @@
                     pointer-events: none;
                 }
 
-                /* Header: board picker left, title centred ---------------- */
+                /* Compact board identity/actions and filters share one surface. */
+                .board-view .board-tools {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 0.55rem;
+                    padding: 0.6rem 0.75rem;
+                    border: 1px solid var(--color-border, #334155);
+                    border-radius: 8px;
+                    background: var(--color-bg-surface, #1e1e1e);
+                }
+
                 .board-view .board-head {
-                    display: grid;
-                    grid-template-columns: 1fr auto 1fr;
+                    display: flex;
+                    flex-wrap: wrap;
                     align-items: center;
                     gap: 0.75rem;
-                    margin-bottom: 0.15rem;
                 }
 
                 .board-view .board-head-title {
-                    grid-column: 2;
-                    text-align: center;
+                    margin: 0;
+                    font-size: 1.05rem;
+                    font-weight: 700;
+                    letter-spacing: 0.04em;
                     white-space: nowrap;
+                }
+
+                .board-view .board-head-actions {
+                    display: flex;
+                    align-items: center;
+                    flex-wrap: wrap;
+                    gap: 0.5rem;
                 }
 
                 .board-view .board-picker {
@@ -3163,7 +3181,8 @@
                 }
 
                 .board-view .board-picker-select {
-                    min-width: 150px;
+                    min-width: 130px;
+                    width: 180px;
                     max-width: 260px;
                     overflow: hidden;
                     text-overflow: ellipsis;
@@ -3183,17 +3202,12 @@
                     align-items: center;
                     gap: 0.5rem;
                     flex-wrap: wrap;
-                    padding: 0.6rem 0.75rem;
-                    border: 1px solid var(--color-border, #334155);
-                    border-radius: 8px;
-                    background: var(--color-bg-surface, #1e1e1e);
                 }
 
                 .board-view .board-search {
                     position: relative;
-                    flex: 1 1 220px;
+                    flex: 1 1 180px;
                     min-width: 180px;
-                    max-width: 340px;
                 }
 
                 .board-view .board-search > i {
@@ -3426,28 +3440,6 @@
                     font-size: 0.78rem;
                     line-height: 1.4;
                     text-align: center;
-                }
-
-                .board-view .board-quick-add {
-                    padding: 0 0.5rem 0.55rem;
-                }
-
-                .board-view .board-quick-add-input {
-                    width: 100%;
-                    min-height: 32px;
-                    padding: 0.3rem 0.5rem;
-                    border: 1px solid var(--color-border, #334155);
-                    border-radius: 4px;
-                    background: var(--color-bg-base, #121212);
-                    color: var(--color-text, #f8fafc);
-                    font: inherit;
-                    font-size: 0.8rem;
-                }
-
-                .board-view .board-quick-add-input:focus {
-                    outline: none;
-                    border-color: var(--color-primary, #3b82f6);
-                    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
                 }
 
                 .board-view .board-add-lane {
@@ -3916,6 +3908,11 @@
                     padding: 0.4rem 0;
                 }
                 .board-attachment-row > .board-side-copy { flex: 1; min-width: 0; }
+                .board-attachment-remove {
+                    flex: none;
+                    min-height: 32px;
+                    white-space: nowrap;
+                }
                 .board-attachment-thumb {
                     flex: none;
                     width: 34px;
@@ -4800,76 +4797,106 @@
                         padding-left: 0;
                     }
 
+                    .board-view .board-search {
+                        flex-basis: 100%;
+                    }
+
                     .board-view .board-head {
-                        grid-template-columns: 1fr;
+                        display: grid;
+                        grid-template-columns: minmax(0, 1fr) auto;
+                        gap: 0.5rem;
                     }
 
-                    .board-view .board-head-title {
-                        grid-column: 1;
-                        text-align: left;
+                    .board-view .board-head-actions {
+                        grid-column: 2;
+                        grid-row: 1;
+                        justify-content: flex-end;
                     }
 
-                    .board-view .board-head-side {
-                        display: none;
+                    .board-view .board-head > .board-stats {
+                        grid-column: 1 / -1;
+                    }
+
+                    .board-view .board-toolbar select.board-control {
+                        flex: 1 1 130px;
+                        min-width: 0;
+                        max-width: none;
+                    }
+
+                    .board-view .board-picker {
+                        grid-column: 1 / -1;
+                        flex: 1 1 auto;
+                    }
+
+                    .board-view .board-picker-select {
+                        flex: 1 1 130px;
+                        width: 130px;
+                    }
+
+                    .board-view .board-head-actions {
+                        gap: 0.4rem;
                     }
                 }
             </style>
 
-            <header class="board-head">
-                <!-- Which board: a project can hold several (sprints, sub-projects). -->
-                <div class="board-picker" data-board-picker>
-                    <select class="board-control board-picker-select" data-board-select aria-label="Board" title="Switch board"></select>
-                    <button type="button" class="btn btn-sm btn-outline-primary board-picker-add" data-board-action="new-board"
-                        title="New board" aria-label="New board">
-                        <i class="fa-solid fa-plus" aria-hidden="true"></i>
-                    </button>
-                    <button type="button" class="board-icon-btn" data-board-action="edit-board" title="Board settings" aria-label="Board settings">
-                        <i class="fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>
-                    </button>
-                </div>
-                <h4 class="text-uppercase fw-bold mb-0 board-head-title" style="letter-spacing: 0.05em;"><span class="text-gradient">Vibe Board</span></h4>
-                <div class="board-head-side" aria-hidden="true"></div>
-            </header>
+            <div class="board-tools">
+                <header class="board-head">
+                    <h1 class="board-head-title"><span class="text-gradient">Vibe Board</span></h1>
+                    <!-- Which board: a project can hold several (sprints, sub-projects). -->
+                    <div class="board-picker" data-board-picker>
+                        <select class="board-control board-picker-select" data-board-select aria-label="Board" title="Switch board"></select>
+                        <button type="button" class="btn btn-sm btn-outline-primary board-picker-add" data-board-action="new-board"
+                            title="New board" aria-label="New board">
+                            <i class="fa-solid fa-plus" aria-hidden="true"></i>
+                        </button>
+                        <button type="button" class="board-icon-btn" data-board-action="edit-board" title="Board settings" aria-label="Board settings">
+                            <i class="fa-solid fa-gear" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                    <div class="board-stats" data-board-stats></div>
+                    <div class="board-head-actions">
+                        <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap" data-board-action="jira-pull"
+                            title="Pull the saved Jira filter into this board" hidden>
+                            <i class="fa-brands fa-jira" aria-hidden="true"></i>
+                            <span>Pull from Jira</span>
+                        </button>
+                        <span class="text-muted small text-nowrap" data-jira-pull-status hidden></span>
+                        <button type="button" class="btn btn-sm btn-outline-primary text-nowrap" data-board-action="new-card">
+                            <i class="fa-solid fa-plus" aria-hidden="true"></i>
+                            <span>New card</span>
+                        </button>
+                    </div>
+                </header>
 
-            <div class="board-toolbar">
-                <button type="button" class="btn btn-sm btn-outline-primary text-nowrap" data-board-action="new-card">
-                    <i class="fa-solid fa-plus" aria-hidden="true"></i>
-                    <span>New card</span>
-                </button>
-                <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap" data-board-action="jira-pull"
-                    title="Pull the saved Jira filter into this board" hidden>
-                    <i class="fa-brands fa-jira" aria-hidden="true"></i>
-                    <span>Pull from Jira</span>
-                </button>
-                <span class="text-muted small text-nowrap" data-jira-pull-status hidden></span>
-                <div class="board-search">
-                    <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
-                    <input type="search" class="board-control board-search-input" data-board-search
-                        placeholder="Search cards" autocomplete="off" aria-label="Search cards">
+                <div class="board-toolbar" role="group" aria-label="Filter cards">
+                    <div class="board-search">
+                        <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                        <input type="search" class="board-control board-search-input" data-board-search
+                            placeholder="Search cards" autocomplete="off" aria-label="Search cards">
+                    </div>
+                    <select class="board-control" data-board-filter-type aria-label="Filter by type">
+                        <option value="">Any type</option>
+                        <option value="task">Task</option>
+                        <option value="bug">Bug</option>
+                        <option value="feature">Feature</option>
+                        <option value="research-spike">Research spike</option>
+                        <option value="chore">Chore / tech debt</option>
+                    </select>
+                    <select class="board-control" data-board-filter-assignee aria-label="Filter by assignee"></select>
+                    <select class="board-control" data-board-filter-priority aria-label="Filter by priority">
+                        <option value="">Any priority</option>
+                        <option value="critical">Critical</option>
+                        <option value="high">High</option>
+                        <option value="medium">Medium</option>
+                        <option value="low">Low</option>
+                    </select>
+                    <select class="board-control" data-board-filter-tag aria-label="Filter by tag"></select>
+                    <button type="button" class="board-clear-filters" data-board-clear-filters
+                        data-board-action="clear-filters" hidden>
+                        <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                        <span>Clear</span>
+                    </button>
                 </div>
-                <select class="board-control" data-board-filter-type aria-label="Filter by type">
-                    <option value="">Any type</option>
-                    <option value="task">Task</option>
-                    <option value="bug">Bug</option>
-                    <option value="feature">Feature</option>
-                    <option value="research-spike">Research spike</option>
-                    <option value="chore">Chore / tech debt</option>
-                </select>
-                <select class="board-control" data-board-filter-assignee aria-label="Filter by assignee"></select>
-                <select class="board-control" data-board-filter-priority aria-label="Filter by priority">
-                    <option value="">Any priority</option>
-                    <option value="critical">Critical</option>
-                    <option value="high">High</option>
-                    <option value="medium">Medium</option>
-                    <option value="low">Low</option>
-                </select>
-                <select class="board-control" data-board-filter-tag aria-label="Filter by tag"></select>
-                <button type="button" class="board-clear-filters" data-board-clear-filters
-                    data-board-action="clear-filters" hidden>
-                    <i class="fa-solid fa-xmark" aria-hidden="true"></i>
-                    <span>Clear</span>
-                </button>
-                <div class="board-stats" data-board-stats></div>
             </div>
 
             <div class="board-canvas" data-board-canvas>
