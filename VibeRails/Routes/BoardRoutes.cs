@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http.Features;
 using VibeRails.DTOs;
 using VibeRails.Services.Board;
+using VibeRails.Services.Jira;
 using VibeRails.Utils;
 
 namespace VibeRails.Routes;
@@ -234,7 +235,42 @@ public static class BoardRoutes
                 ? Results.Ok(new OK("Session unlinked"))
                 : NotFound("Session", sessionId)))
             .WithName("UnlinkBoardCardSession");
+
+        // Jira Cloud, one saved JQL filter per board. The token is accepted on save and never
+        // returned. Pull is one-way: Jira wins on the mapped fields.
+        app.MapGet("/api/v1/board/boards/{boardId}/jira", (IJiraPullService jira, string boardId, CancellationToken cancellationToken) =>
+            RunAsync(async () => Results.Ok(ToResponse(await jira.GetAsync(Project(), boardId, cancellationToken), boardId))))
+            .WithName("GetJiraConnection");
+
+        app.MapPut("/api/v1/board/boards/{boardId}/jira", (IJiraPullService jira, string boardId, SaveJiraConnectionRequest request, CancellationToken cancellationToken) =>
+            RunAsync(async () => Results.Ok(ToResponse(await jira.SaveAsync(Project(), boardId, new BoardJiraConnectionSave(
+                request.SiteUrl ?? string.Empty, request.Email ?? string.Empty, request.StoryPointsFieldId,
+                request.Jql ?? string.Empty, request.Enabled), request.ApiToken, cancellationToken), boardId))))
+            .WithName("SaveJiraConnection");
+
+        app.MapPost("/api/v1/board/boards/{boardId}/jira/test", (IJiraPullService jira, string boardId, CancellationToken cancellationToken) =>
+            RunAsync(async () =>
+            {
+                var result = await jira.TestAsync(Project(), boardId, cancellationToken);
+                return Results.Ok(new JiraTestResponse(result.Outcome == JiraCallOutcome.Ok, result.Value, result.Detail));
+            }))
+            .WithName("TestJiraConnection");
+
+        app.MapPost("/api/v1/board/boards/{boardId}/jira/pull", (IJiraPullService jira, string boardId, bool? dryRun, CancellationToken cancellationToken) =>
+            RunAsync(async () =>
+            {
+                var report = await jira.PullAsync(Project(), boardId, dryRun == true, cancellationToken);
+                return Results.Ok(new JiraPullResponse(report.DryRun, report.Outcome, report.Created, report.Updated, report.Skipped, report.Failed, report.Message));
+            }))
+            .WithName("PullJiraFilter");
     }
+
+    private static JiraConnectionResponse ToResponse(BoardJiraConnectionRecord? connection, string boardId) =>
+        connection is null
+            ? new JiraConnectionResponse(boardId, null, null, false, BoardJiraAuthStatus.None, null, null, false, null, null, null, null, true)
+            : new JiraConnectionResponse(connection.BoardId, connection.SiteUrl, connection.Email, connection.HasToken,
+                connection.AuthStatus, connection.StoryPointsFieldId, connection.Jql, connection.Enabled,
+                connection.DisabledReason, connection.LastTestedUtc, connection.LastPullUtc, connection.LastReport, true);
 
     private static string Project() => ParserConfigs.GetRootPath();
 
@@ -253,6 +289,11 @@ public static class BoardRoutes
         }
         catch (BoardValidationException ex)
         {
+            return Results.BadRequest(new ErrorResponse(ex.Message));
+        }
+        catch (JiraConfigException ex)
+        {
+            // Bad site/email/JQL/field, no token, or an expired connection: the message says which.
             return Results.BadRequest(new ErrorResponse(ex.Message));
         }
         catch (BoardConflictException ex)

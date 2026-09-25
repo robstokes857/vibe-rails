@@ -149,6 +149,18 @@ namespace VibeRails
             serviceCollection.AddSingleton<Services.Board.IBoardProjectResolver, Services.Board.BoardProjectResolver>();
             serviceCollection.AddSingleton<Services.Board.IBoardCommitService, Services.Board.BoardCommitService>();
             serviceCollection.AddScoped<Services.Board.IBoardService, Services.Board.BoardService>();
+            // Jira Cloud pull (VB-40). The client follows redirects off and never logs the token.
+            // The scheduler is ticked by the leased root job scheduler, so only one process pulls.
+            serviceCollection.AddHttpClient(Services.Jira.JiraCloudClient.HttpClientName, client =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(30);
+            }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+            serviceCollection.AddSingleton<Services.Jira.IJiraSecretStore, Services.Jira.JiraSecretStore>();
+            serviceCollection.AddSingleton<Services.Jira.IJiraCloudClient>(sp =>
+                new Services.Jira.JiraCloudClient(sp.GetRequiredService<IHttpClientFactory>().CreateClient(Services.Jira.JiraCloudClient.HttpClientName)));
+            serviceCollection.AddSingleton(_ => Services.Jira.JiraPullLock.BesideStateDatabase());
+            serviceCollection.AddScoped<Services.Jira.IJiraPullService, Services.Jira.JiraPullService>();
+            serviceCollection.AddSingleton<Services.Jira.IJiraPullScheduler, Services.Jira.JiraPullScheduler>();
             serviceCollection.AddScoped<Services.Board.BoardAutomationService>();
             // Singleton: it holds the ten-second repo file-list cache behind the composer's `@` typeahead.
             serviceCollection.AddSingleton<Services.Board.IBoardFileIndexService, Services.Board.BoardFileIndexService>();

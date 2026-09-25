@@ -30,6 +30,7 @@
 import { escapeHtml, confirmDialog, parseLlmSelection, getCliBrand, canonicalLlmSelection } from './utils.js';
 import { mountLlmPicker, setLlmPickerValue, getEnabledLlmItems } from './pickers/llm-picker.js';
 import { BoardApi } from './board-api.js';
+import { BOARD_SELECTION_STORAGE_KEY } from './board-selection.js';
 import { boardContextSection, laneAutomationSection, mountBoardContext, mountLaneAutomation } from './board-settings.js';
 import { renderCardLinksSection, bindCardLinks } from './board-card-links.js';
 import { renderCommentHtml, wrapSelectionAsCode, toPlainPreview } from './board-text.js';
@@ -50,9 +51,8 @@ const CARD_TYPES = [
 const POINTS = [1, 2, 3, 5, 8, 13];
 const LANE_COLORS = ['#64748b', '#3b82f6', '#06b6d4', '#f59e0b', '#10b981', '#a855f7', '#ec4899'];
 const FILTERS_STORAGE_KEY = 'viberails.board.filters.v1';
-// The last board the user looked at. Board ids are unique across projects, so a stale id from
-// another workspace simply fails to match and the first board is shown.
-const BOARD_STORAGE_KEY = 'viberails.board.selected.v1';
+// The last board the user looked at (shared with Settings → Integrations, see board-selection.js).
+const BOARD_STORAGE_KEY = BOARD_SELECTION_STORAGE_KEY;
 const RASTER_DATA_URL_RE = /^data:image\/(?:png|jpeg|gif|webp);base64,/i;
 
 const emptyFilters = () => ({ q: '', assignee: '', type: '', priority: '', tag: '' });
@@ -806,6 +806,7 @@ export class BoardController {
             this._loadedBoardId = boardId;
             this.persistBoardSelection();
             this.renderAll();
+            void this.refreshJiraPullButton();
         } catch (error) {
             if (isCurrent()) this.app.showToast('Board', error?.message || 'Failed to refresh the board.', 'error');
         } finally {
@@ -854,6 +855,9 @@ export class BoardController {
             case 'new-card':
                 this.openCardEditor(null);
                 break;
+            case 'jira-pull':
+                void this.pullFromJira();
+                break;
             case 'add-lane':
                 this.openLaneEditor(null);
                 break;
@@ -873,6 +877,50 @@ export class BoardController {
                 break;
             default:
                 break;
+        }
+    }
+
+    // The toolbar pull is shown only when this board has a saved Jira connection.
+    // Jira wins on the mapped fields; the status line says when the last pull ran.
+    // Called fire-and-forget from refresh(), so it never rejects. The answer is dropped when a
+    // later refresh, a board switch or a navigation owns the toolbar by the time it arrives.
+    async refreshJiraPullButton() {
+        const root = this.root;
+        const boardId = this.state.boardId;
+        const generation = this._refreshGeneration;
+        const isCurrent = () => root === this.root && root?.isConnected
+            && boardId === this.state.boardId && generation === this._refreshGeneration;
+        let connection = null;
+        try {
+            if (!boardId || !this.query('[data-board-action="jira-pull"]')) return;
+            connection = await BoardApi.getJiraConnectionAsync(boardId);
+        } catch {
+            connection = null;
+        }
+        try {
+            if (!isCurrent()) return;
+            const button = this.query('[data-board-action="jira-pull"]');
+            const status = this.query('[data-jira-pull-status]');
+            if (!button) return;
+            button.hidden = !(connection?.hasToken && connection?.jql);
+            if (status) {
+                status.hidden = !connection?.lastReport;
+                status.textContent = connection?.lastReport || '';
+            }
+        } catch {
+            // The toolbar was torn down between the checks above.
+        }
+    }
+
+    async pullFromJira() {
+        if (!this.state.boardId) return;
+        this.app.showToast('Jira', 'Pulling the saved filter. Jira replaces the mapped fields.', 'info');
+        try {
+            const report = await BoardApi.pullJiraAsync(this.state.boardId, false);
+            this.app.showToast('Jira', report?.message || 'Pull finished.', report?.outcome === 'ok' ? 'success' : 'warning');
+            await this.refresh();
+        } catch (error) {
+            this.app.showToast('Jira', error?.message || 'Pull failed.', 'error');
         }
     }
 

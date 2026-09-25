@@ -1,16 +1,20 @@
 # Code report viewer
 
-`RuleController.loadCodeQuality()` mounts `CodeReportViewer` on the existing `code-quality`
-route. Project health's **View metrics** opens it. The controller supplies the latest real
-MintLint response from its scan cache; the viewer requests a current repository graph through
-`app.apiCall`. Scan scope, exclusions, rule enforcement and Git Guard remain on Project health.
-There is no second report store, scan engine or theme preference.
+`RuleController.attachRulesOverview()` mounts `CodeReportViewer` inline in Project health's
+Code quality card (`[data-code-analyzer-report]`), so the map, health summary and file list are
+the first thing QUALITY shows. There is no second screen: the old `code-quality` route is an
+alias that loads Project health. The controller supplies the latest real MintLint response from
+its scan cache; the viewer requests a current repository graph through `app.apiCall`. Scan
+scope, exclusions, Scan again, Fix and Copy scan summary stay in the card header; rule
+enforcement and Git Guard stay in the Rules card. There is no second report store, scan engine
+or theme preference.
 
 ## Composition and lifetime
 
-- `viewer.js` owns the split map/health/file-list composition and saved-details dialog.
-  File selection focuses Atlas and its inspector; **Open details** displays saved measurements
-  and captured excerpts. **Show in code explorer** returns to the map. Copy context is absent.
+- `viewer.js` owns the split map/health/file-list composition and the saved-details panel.
+  File selection focuses Atlas and its inspector; **Open details** replaces the sidebar with an
+  inline panel of saved measurements and captured excerpts (never a modal or window).
+  **Show in code explorer** and Escape return to the map. Copy context is absent.
 - `radar-interactions.js` adds category explanations, hover sectors, roving category keys,
   detail activation and Escape dismissal. Capture-phase Escape handling precedes the app's
   document-level Back shortcut. Interactions wait for the quality reveal to finish.
@@ -20,7 +24,8 @@ There is no second report store, scan engine or theme preference.
   then this file. Container queries handle narrow webviews; the file list scrolls independently.
 - `setLoading`, `setResponse`, `setError` and `destroy` own graph requests, generation guards,
   component state and teardown. Navigation destroys Atlas, radar interactions, theme observers,
-  animation frames and the dialog, and aborts pending graph requests. Late responses are ignored.
+  animation frames and the details panel, and aborts pending graph requests. Late responses
+  are ignored.
   A graph failure preserves saved metrics; failed/missing analysis is never given a score.
 
 Excerpts and report timestamps describe the supplied scan; the graph describes the current

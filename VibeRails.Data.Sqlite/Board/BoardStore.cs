@@ -382,7 +382,15 @@ public sealed partial class BoardStore : IBoardStore
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
+        var created = await InsertCardAsync(connection, transaction, project, card, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return created;
+    }
 
+    /// <summary>Allocates the key and inserts the card inside the caller's write transaction.</summary>
+    private async Task<BoardCardRecord> InsertCardAsync(
+        SqliteConnection connection, SqliteTransaction transaction, string project, NewBoardCard card, CancellationToken cancellationToken)
+    {
         BoardColumnRecord column;
         if (string.IsNullOrWhiteSpace(card.ColumnId))
         {
@@ -445,7 +453,6 @@ public sealed partial class BoardStore : IBoardStore
         }
         await PromoteCardAsync(connection, transaction, id, cancellationToken);
         await WriteBaseLlmOptionsAsync(connection, transaction, id, card.BaseLlmOptions, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
 
         return new BoardCardRecord(id, project, number, column.Id, position, card.Title, card.Description,
             card.Assignee, card.Priority, card.Points, card.Tags, card.Blocked, 0, now, now, card.BaseLlmOptions, Type: card.Type, BoardId: column.BoardId, Flagged: card.Flagged, KeyPrefix: prefix);
@@ -1483,6 +1490,14 @@ public sealed partial class BoardStore : IBoardStore
         // board/11: per-project card key prefixes; existing projects are seeded with VB (see
         // BoardStore.ProjectKeys.cs), so no key changes on upgrade.
         SqliteMigrationRunner.Apply(connection, "board", 11, MigrationKind.Additive, ApplyProjectKeysMigration);
+        // board/12: one Jira Cloud connection per board and the issue-link table. Additive, no
+        // backfill; an older binary ignores both tables.
+        SqliteMigrationRunner.Apply(connection, "board", 12, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, JiraSchemaSql));
+        // board/13: a deleted board takes its Jira connection with it. Additive (a trigger); existing
+        // rows are not cleaned up, the scheduler just never pulls a connection whose board is gone.
+        SqliteMigrationRunner.Apply(connection, "board", 13, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, JiraBoardDeleteTriggerSql));
         ReconcileDerivedRows(connection);
     }
 

@@ -41,7 +41,11 @@ test('the board picker sits top-left of the title with an add button next to it'
 
 test('the controller loads boards first, remembers the selection, and scopes lanes and cards to it', () => {
     const source = readFileSync(controllerPath, 'utf8');
-    assert.match(source, /const BOARD_STORAGE_KEY = 'viberails\.board\.selected\.v1'/);
+    // The key lives in board-selection.js so Settings → Integrations reads the same selection.
+    const selection = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/board-selection.js'), 'utf8');
+    assert.match(selection, /export const BOARD_SELECTION_STORAGE_KEY = 'viberails\.board\.selected\.v1'/);
+    assert.match(source, /import \{ BOARD_SELECTION_STORAGE_KEY \} from '\.\/board-selection\.js';/);
+    assert.match(source, /const BOARD_STORAGE_KEY = BOARD_SELECTION_STORAGE_KEY;/);
     assert.match(source, /boards = await BoardApi\.getBoardsAsync\(\);/);
     assert.match(source, /BoardApi\.getBoardColumnsAsync\(boardId\)/);
     assert.match(source, /BoardApi\.getBoardCardPageAsync\(boardId, this\.state\.filters,/);

@@ -38,12 +38,27 @@ or database data. The viewer uses the authenticated host API/assets, existing th
 nonce, and an opaque-origin sandboxed iframe with explicit navigation teardown. CSP,
 credentials, middleware and production listeners are unchanged.
 
-The active inventory is now **215 mapped surfaces**, **203 under `/api/v1`** and
-**38 Board routes**. Route enumeration/registration and both mandatory listener searches
+The active inventory is now **219 mapped surfaces**, **207 under `/api/v1`** and
+**42 Board routes**. Route enumeration/registration and both mandatory listener searches
 were repeated: production matches remain the main Kestrel host and non-serving port probe;
 other matches are test-only Kestrel hosts, with no cross-runtime matches. No security
 violation was found. Graph route tests cover both credentials, unsafe input, real repository
 response and AOT serialization. This is a scoped amendment, not a fresh full authentication audit.
+
+VB-40 Jira pull amendment (2026-09-25): added four Board routes,
+`GET` and `PUT /api/v1/board/boards/{boardId}/jira`, `POST …/jira/test` and
+`POST …/jira/pull`. Same active-root mapping and the same session-plus-tab credentials as
+every other Board route; the project still comes from the dashboard root, never the request.
+The PUT body may carry an API token. The token is written to `~/.vibe_rails/jira-tokens.json`
+(plain text, same user-locked directory as `settings.json`) and is absent from `board.db`,
+from every response, and from logs. A blank token on a later save keeps the stored one.
+Outbound calls go to the saved `https` site origin only (`/rest/api/3/myself` and
+`/rest/api/3/search/jql`); redirects are off, so the token is not forwarded to another host.
+Changing the site origin requires the token again: a saved token is never sent to a different
+origin, and the old connection's token is deleted. The token file is read and written under an
+OS file lock (`jira-tokens.json.lock`), so two root backends cannot lose each other's tokens.
+Invalid input, a missing token or an expired connection is a 400 with a readable message.
+No new listener. No security violation was found, so no `SECURITY_ERROR.md` entry.
 
 Full route/authentication reconciliation (2026-09-23): **214 mapped surfaces**, including
 **202 under `/api/v1`** and **38 Board routes**, match the current working tree in both
@@ -496,8 +511,8 @@ spoofer's own local exchange rows.
 Authentication is enforced primarily by
 [`CookieAuthMiddleware`](VibeRails/Middleware/CookieAuthMiddleware.cs). The LLM proxy
 routes additionally use
-[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 215 mapped route
-surfaces in this inventory: 203 `/api/v1` method/path mappings, nine non-`/api` protected
+[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 219 mapped route
+surfaces in this inventory: 207 `/api/v1` method/path mappings, nine non-`/api` protected
 API surfaces, and three bootstrap/page/probe routes. Static-file middleware and the
 global `OPTIONS` behavior are noted separately because they are not finite mapped-route
 lists.
@@ -866,7 +881,7 @@ transcript text out of messages and exception text; do not rely on the Logs view
 hidden. `Tests/Routes/InternalToolsRoutesTests.cs` pins the two-credential requirement, the
 whitelist rejection of path-like sources, and the absence of mutating verbs.
 
-### Kanban board (38; active root backend only)
+### Kanban board (42; active root backend only)
 
 All mapped by `BoardRoutes.Map` under `if (isActiveRootBackend)`; every path contains `/api/`,
 so both credentials are enforced by the middleware with no route-level registration. The
@@ -884,6 +899,12 @@ cannot read or write another project's board through this surface.
 - `GET /api/v1/board/boards/{boardId}/context`,
   `PUT /api/v1/board/boards/{boardId}/context` — read/save Board context settings.
   Both require session and tab credentials and use the server-derived project.
+- `GET /api/v1/board/boards/{boardId}/jira`, `PUT /api/v1/board/boards/{boardId}/jira`,
+  `POST /api/v1/board/boards/{boardId}/jira/test`,
+  `POST /api/v1/board/boards/{boardId}/jira/pull` — one Jira Cloud connection per board
+  (VB-40, 2026-09-25). The PUT accepts the API token and never echoes it; GET and the pull
+  report say only whether a token is saved. Pull writes cards on this board. `?dryRun=true`
+  counts creates and updates without writing. Outbound only; no new listener.
 - `GET /api/v1/board/columns/{columnId}/automation`,
   `PUT /api/v1/board/columns/{columnId}/automation` — read/save lane automation settings.
   Both require session and tab credentials and use the server-derived project.

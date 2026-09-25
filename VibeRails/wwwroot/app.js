@@ -900,7 +900,8 @@ export class VibeControlApp {
             'agents': () => this.dashboardController.loadDashboard(data),
             'agent-edit': () => this.agentController.loadAgentEdit(data),
             'agent-create': () => this.agentController.loadAgentCreate(),
-            'code-quality': () => this.ruleController.loadCodeQuality(),
+            // Legacy route: the code report now lives inline on Project health.
+            'code-quality': () => this.dashboardController.loadDashboard(data),
             'rule-files': () => this.agentController.loadRuleFiles(),
             'check-violations': () => this.ruleController.loadCheckViolations(),
             'git-guard': () => this.ruleController.loadFocusedGitGuard(),

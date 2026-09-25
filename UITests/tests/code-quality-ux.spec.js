@@ -89,7 +89,10 @@ async function installQualityApi(page, { empty = false } = {}) {
     const scanRequests = [];
     let ignoredFiles = [];
     if (process.env.VIBERAILS_QUALITY_STATIC === '1') {
-        await page.addInitScript(() => sessionStorage.setItem('viberails_tab', 'quality-fixture'));
+        await page.addInitScript(() => {
+            // Atlas frames have opaque origins; only the app needs the API fixture token.
+            if (window === window.top) sessionStorage.setItem('viberails_tab', 'quality-fixture');
+        });
     }
     await page.routeWebSocket('**/api/v1/events/ws*', () => {});
     // Keep the UX fixture independent of machine-wide environments, preferences, and
@@ -213,6 +216,37 @@ async function expectSharedButtonStyle(button) {
         return result;
     });
     expect(styles.actual).toEqual(styles.standard);
+}
+
+for (const view of ['dashboard', 'agents']) {
+    test(`dashboard report mounts in the live document from ${view}`, async ({ page }) => {
+        const errors = [];
+        page.on('pageerror', error => errors.push(error.message));
+        await page.emulateMedia({ reducedMotion: 'reduce' });
+        const { scanRequests } = await installQualityApi(page);
+        await page.goto(`/?view=${view}`, { waitUntil: 'domcontentloaded' });
+
+        const report = page.locator('.code-report');
+        await expect(report.locator('.qr')).toHaveAttribute('data-state', 'complete');
+        expect(await page.evaluate(() => {
+            const viewer = window.app.ruleController.codeReportViewer;
+            return viewer.host.isConnected && viewer.document === document && viewer.window === window;
+        })).toBe(true);
+
+        // Document-level Escape must close saved details without navigating away.
+        await report.getByRole('button', { name: /^Complexity:/ }).click();
+        await expect(report.locator('.details-panel')).toBeVisible();
+        await report.locator('.details-panel h2').press('Escape');
+        await expect(report.locator('.details-panel')).toBeHidden();
+        await expect(report).toBeVisible();
+
+        await page.locator('[data-action="navigate"][data-view="environments"]:visible').click();
+        await expect(report).toHaveCount(0);
+        await page.locator('[data-action="navigate-home"]:visible').click();
+        await expect(report.locator('.qr')).toHaveAttribute('data-state', 'complete');
+        expect(scanRequests).toHaveLength(1);
+        expect(errors).toEqual([]);
+    });
 }
 
 test('Quality actions use the shared app button styles', async ({ page }) => {

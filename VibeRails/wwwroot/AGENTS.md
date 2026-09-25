@@ -19,8 +19,8 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | [js/modules/environment-controller.js](js/modules/environment-controller.js) | Environment CRUD + "Web UI" launch button |
 | [js/modules/sandbox-controller.js](js/modules/sandbox-controller.js) | Sandbox CRUD + launch terminals/VS Code into sandbox dirs |
 | [js/modules/dashboard-controller.js](js/modules/dashboard-controller.js) | Unified Project health page (Rules, VCA, Git Guard, and Code quality; no embedded terminal) |
-| [js/modules/code-analyzer-dashboard.js](js/modules/code-analyzer-dashboard.js) | Compact MintLint score card and report model helpers |
-| [js/modules/code-report/viewer.js](js/modules/code-report/viewer.js) | Full-page Code Atlas / Quality Lab report, real repository graph, saved details and explicit teardown; see [integration contract](js/modules/code-report/README.md) |
+| [js/modules/code-analyzer-dashboard.js](js/modules/code-analyzer-dashboard.js) | MintLint report model helpers (plus the unmounted legacy workspace renderer) |
+| [js/modules/code-report/viewer.js](js/modules/code-report/viewer.js) | Code Atlas / Quality Lab report inline in Project health's Code quality card: real repository graph, inline saved-details panel and explicit teardown; see [integration contract](js/modules/code-report/README.md) |
 | [js/modules/project-health-fix-launcher.js](js/modules/project-health-fix-launcher.js) | Inline shared agent/environment pickers beside Project health Fix actions; synchronizes and remembers the target for direct launch |
 | [js/modules/jobs-controller.js](js/modules/jobs-controller.js) | Automation page: ordered repository-script/Worker workflow editor, automation CRUD, per-action run details, recipes, and "Run now" (queues a native-terminal or terminal-tab run; `launchFromNav` for the nav launcher); owns the shared `PythonScriptsController` |
 | [js/modules/python-scripts-controller.js](js/modules/python-scripts-controller.js) | "Python scripts" section of the Automation page + shared lifecycle and signing flows |
@@ -551,12 +551,7 @@ and CSV quote wrappers are rejected. Backend write validation remains authoritat
 Project health's Fix actions use inline selectors with the shared `sandbox` picker context,
 including custom environments. Selecting an agent synchronizes all three Fix selectors and
 remembers the choice; each Fix button launches directly without an intermediate dialog.
-The page disposes its pickers on unload. The quality report keeps file context and healthy metric
-groups collapsed, with an `Inspect metric` selector beside the read-only source. On smaller
-windows, source precedes the detailed metrics; narrow windows also offer `Inspect file`.
-Keep the report's `code-analyzer-panel` class: it supplies theme variables and hides the
-source-loading overlay when Monaco is ready. Metric clicks retarget the existing editor;
-closing the report disposes the editor and file-rail listeners.
+The page disposes its pickers on unload, and the inline quality report is destroyed with it.
 
 `LlmPickerController` loads the resolved machine-wide catalog from
 `/api/v1/llm-picker/preferences` before the initial view renders. It mounts the native selects,

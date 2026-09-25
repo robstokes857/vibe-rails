@@ -60,6 +60,22 @@ async function updateBoardAsync(boardId, patch) {
     return call(`/boards/${enc(boardId)}`, 'PUT', patch);
 }
 
+async function getJiraConnectionAsync(boardId) {
+    return call(`/boards/${enc(boardId)}/jira`);
+}
+
+async function saveJiraConnectionAsync(boardId, payload) {
+    return call(`/boards/${enc(boardId)}/jira`, 'PUT', payload);
+}
+
+async function testJiraConnectionAsync(boardId) {
+    return call(`/boards/${enc(boardId)}/jira/test`, 'POST');
+}
+
+async function pullJiraAsync(boardId, dryRun = false) {
+    return call(`/boards/${enc(boardId)}/jira/pull${dryRun ? '?dryRun=true' : ''}`, 'POST');
+}
+
 async function getBoardContextAsync(boardId, extra = {}) {
     return call(`/boards/${enc(boardId)}/context`, 'GET', null, extra);
 }
@@ -276,6 +292,10 @@ export const BoardApi = {
     getBoardsAsync,
     createBoardAsync,
     updateBoardAsync,
+    getJiraConnectionAsync,
+    saveJiraConnectionAsync,
+    testJiraConnectionAsync,
+    pullJiraAsync,
     getBoardContextAsync,
     saveBoardContextAsync,
     getLaneAutomationAsync,

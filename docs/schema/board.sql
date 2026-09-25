@@ -26,6 +26,9 @@ CREATE INDEX IX_BoardColumns_Project ON BoardColumns(ProjectPath, Position);
 -- index IX_BoardComments_Card
 CREATE INDEX IX_BoardComments_Card ON BoardComments(CardId, CreatedUTC);
 
+-- index IX_BoardJiraLinks_Card
+CREATE INDEX IX_BoardJiraLinks_Card ON BoardJiraLinks(CardId);
+
 -- index IX_BoardPendingAdditionalAutomations_Due
 CREATE INDEX IX_BoardPendingAdditionalAutomations_Due ON BoardPendingAdditionalAutomations(DueUnixMs);
 
@@ -77,6 +80,12 @@ CREATE TABLE BoardCommits ( CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DE
 -- table BoardContextSettings
 CREATE TABLE BoardContextSettings ( BoardId TEXT PRIMARY KEY REFERENCES Boards(Id) ON DELETE CASCADE, ContextJson TEXT NOT NULL, Revision INTEGER NOT NULL );
 
+-- table BoardJiraConnections
+CREATE TABLE BoardJiraConnections ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, BoardId TEXT NOT NULL, SiteUrl TEXT NOT NULL, Email TEXT NOT NULL DEFAULT '', HasToken INTEGER NOT NULL DEFAULT 0, AuthStatus TEXT NOT NULL DEFAULT 'none', StoryPointsFieldId TEXT NULL, Jql TEXT NOT NULL DEFAULT '', Enabled INTEGER NOT NULL DEFAULT 0, DisabledReason TEXT NULL, OverflowColumnId TEXT NULL, LastTestedUTC TEXT NULL, LastPullUTC TEXT NULL, LastReport TEXT NULL, UNIQUE(ProjectPath, BoardId) );
+
+-- table BoardJiraLinks
+CREATE TABLE BoardJiraLinks ( CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, SiteId TEXT NOT NULL, IssueId TEXT NOT NULL, IssueKey TEXT NOT NULL, AssigneeDisplay TEXT NULL, IssueUpdated TEXT NOT NULL, LastPulledUTC TEXT NOT NULL, UNIQUE(SiteId, IssueId) );
+
 -- table BoardLaneAdditionalAutomations
 CREATE TABLE BoardLaneAdditionalAutomations ( ColumnId TEXT NOT NULL REFERENCES BoardLaneAutomations(ColumnId) ON DELETE CASCADE, JobId INTEGER NOT NULL, Position INTEGER NOT NULL, PRIMARY KEY (ColumnId, JobId) );
 
@@ -112,4 +121,7 @@ CREATE TRIGGER BoardCards_LaneAutomation_Move AFTER UPDATE OF ColumnId ON BoardC
 
 -- trigger BoardLaneAutomations_ClearAdditional
 CREATE TRIGGER BoardLaneAutomations_ClearAdditional AFTER UPDATE ON BoardLaneAutomations BEGIN DELETE FROM BoardLaneAdditionalAutomations WHERE ColumnId = NEW.ColumnId; END;
+
+-- trigger Boards_DeleteJiraConnection
+CREATE TRIGGER Boards_DeleteJiraConnection AFTER DELETE ON Boards BEGIN DELETE FROM BoardJiraConnections WHERE BoardId = OLD.Id; END;
 

@@ -1,5 +1,6 @@
 import {adaptApiResponse,healthFromConcern,formatNumber,isNumber} from './vendor/quality/report-model.js';
 import {point} from './vendor/quality/radar.js';
+import {isConfirmDialogOpen} from '../utils.js';
 
 const descriptions={
   Complexity:'Branching, execution paths, and nesting in the analyzed code.',
@@ -100,7 +101,7 @@ export function enhanceRadar(root,response,{onSelect}={}){
   }
   function select(index){
     if(!ready()||!categories[index]?.source)return;
-    // Focus the source control so the native details dialog can return here.
+    // Focus the source control so the inline details panel can return here.
     labels[index].focus({preventScroll:true});hide();dismissed=true;
     onSelect?.(structuredClone(categories[index].source));
   }
@@ -127,7 +128,7 @@ export function enhanceRadar(root,response,{onSelect}={}){
   listen(detail,'pointerleave',()=>{detailInside=false;scheduleHide();});
   listen(detail,'focusin',clearTimer);listen(detail,'focusout',scheduleHide);
   listen(action,'click',()=>select(active));
-  listen(doc,'keydown',event=>{if(event.key==='Escape'&&!detail.hidden){
+  listen(doc,'keydown',event=>{if(isConfirmDialogOpen())return;if(event.key==='Escape'&&!detail.hidden){
     if(detail.contains(doc.activeElement)&&active>=0)labels[active].focus({preventScroll:true});
     dismissed=true;hide();event.preventDefault();
   }},true);

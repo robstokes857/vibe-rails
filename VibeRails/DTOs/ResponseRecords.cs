@@ -146,6 +146,36 @@ namespace VibeRails.DTOs
     public record BoardSummaryResponse(string Id, string Name, int Position, DateTime CreatedAt, int CardCount, List<BoardColumnResponse> Columns);
     public record BoardListResponse(List<BoardSummaryResponse> Boards);
     public record CreateBoardRequest(string? Name = null);
+
+    // Jira Cloud pull (VB-40). The API token is write-only: a response never carries it.
+    // Last write wins from Jira on the mapped fields; the response says so with lastWriteWins.
+    public record JiraConnectionResponse(
+        string BoardId,
+        string? SiteUrl,
+        string? Email,
+        bool HasToken,
+        string AuthStatus,
+        string? StoryPointsFieldId,
+        string? Jql,
+        bool Enabled,
+        string? DisabledReason,
+        DateTime? LastTestedUtc,
+        DateTime? LastPullUtc,
+        string? LastReport,
+        bool LastWriteWins);
+
+    public record SaveJiraConnectionRequest(
+        string? SiteUrl = null,
+        string? Email = null,
+        string? ApiToken = null,
+        string? StoryPointsFieldId = null,
+        string? Jql = null,
+        bool Enabled = false);
+
+    public record JiraTestResponse(bool Ok, string? Account, string? Error);
+
+    public record JiraPullResponse(
+        bool DryRun, string Outcome, int Created, int Updated, int Skipped, int Failed, string? Message);
     public record UpdateBoardRequest(string? Name = null);
     public record UpdateBoardContextRequest(BoardContextSettings? Context = null, int? ExpectedRevision = null);
     public record BoardAutomationOption(long Id, string Name, bool Enabled);
@@ -1748,6 +1778,10 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(BoardCardLinkCandidatesResponse))]
     [JsonSerializable(typeof(BoardFileSearchResponse))]
     [JsonSerializable(typeof(LinkBoardCardRequest))]
+    [JsonSerializable(typeof(JiraConnectionResponse))]
+    [JsonSerializable(typeof(SaveJiraConnectionRequest))]
+    [JsonSerializable(typeof(JiraTestResponse))]
+    [JsonSerializable(typeof(JiraPullResponse))]
     [JsonSerializable(typeof(CreateBoardCardRequest))]
     [JsonSerializable(typeof(UpdateBoardCardRequest))]
     [JsonSerializable(typeof(MoveBoardCardRequest))]

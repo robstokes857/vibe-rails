@@ -155,7 +155,7 @@ the header displays the full card count. Tests should use realistic asynchronous
 ## Storage changes
 
 Read [database migration instructions](../../../VibeRails.Data.Sqlite/DB/AGENTS.md).
-`board/1`–`board/11` already exist. `board/8` is a breaking retirement (generation 3)
+`board/1`–`board/13` already exist. `board/12` adds the Jira connection and issue-link tables; `board/13` adds the trigger that deletes a board's Jira connection with the board. `board/8` is a breaking retirement (generation 3)
 that drops history tables, WIP limits and removed-file retention through an automatic, backed-up upgrade;
 `board/9` adds the current-state attention flag. `board/10` adds `BoardAdditionalCardSessions`,
 leaving primary links in `BoardCardSessions` and reading both through the store without a backfill.

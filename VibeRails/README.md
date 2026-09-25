@@ -175,7 +175,7 @@ wwwroot/
 │   ├── terminal-multitab.js       (~121KB)  # Web terminal (multi-tab)
 │   ├── environment-controller.js  (~93KB)   # Environment CRUD + Web UI launch
 │   ├── rule-controller.js         (~70KB)   # Rule management
-│   ├── code-analyzer-dashboard.js (~67KB)   # Code quality scan UI
+│   ├── code-analyzer-dashboard.js (~76KB)   # Code quality report model
 │   ├── jobs-controller.js         (~84KB)   # Automated jobs
 │   ├── agent-controller.js        (~64KB)   # Rule file management
 │   ├── chat-history-sidebar.js    (~59KB)   # Session chat history

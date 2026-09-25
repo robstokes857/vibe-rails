@@ -137,7 +137,7 @@ public sealed class BoardDatabaseIsolationTests : IDisposable
         Assert.Equal(stateVersion, Scalar(state, "PRAGMA data_version;"));
         Assert.Equal("Keep in state", Scalar(state, "SELECT Title FROM BoardCards;"));
         Assert.Equal(1L, Scalar(state, "SELECT COUNT(*) FROM BoardPendingAutomations;"));
-        Assert.Equal(10L, Scalar(state, "SELECT COUNT(*) FROM SchemaMigrations WHERE Component='board';")); // board/1-11 minus the deleted 9: board.db hosts never re-migrate state.db
+        Assert.Equal(12L, Scalar(state, "SELECT COUNT(*) FROM SchemaMigrations WHERE Component='board';")); // board/1-13 minus the deleted 9: board.db hosts never re-migrate state.db
         using var boardDb = OpenBoard();
         Assert.Equal(0L, Scalar(boardDb, "SELECT COUNT(*) FROM sqlite_schema WHERE name IN ('Jobs','Sessions','ChatSummary');"));
         Assert.Null(Scalar(boardDb, "PRAGMA foreign_key_check;"));

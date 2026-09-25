@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Serilog;
 using Serilog.Events;
 using VibeRails.DB;
+using VibeRails.Services.Jira;
 using VibeRails.Utils;
 
 namespace VibeRails.Services.Jobs;
@@ -32,6 +33,7 @@ public sealed class JobSchedulerHostedService : BackgroundService, IJobScheduler
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IJobStore _store;
     private readonly JobSchedulerHealth _health;
+    private readonly IJiraPullScheduler? _jira;
     private readonly string _ownerId = $"{Environment.ProcessId}:{Guid.NewGuid():N}";
     private readonly Channel<byte> _wake = Channel.CreateBounded<byte>(new BoundedChannelOptions(1)
     {
@@ -54,11 +56,13 @@ public sealed class JobSchedulerHostedService : BackgroundService, IJobScheduler
     public JobSchedulerHostedService(
         IServiceScopeFactory scopeFactory,
         IJobStore store,
-        JobSchedulerHealth? health = null)
+        JobSchedulerHealth? health = null,
+        IJiraPullScheduler? jira = null)
     {
         _scopeFactory = scopeFactory;
         _store = store;
         _health = health ?? new JobSchedulerHealth();
+        _jira = jira;
     }
 
     public void Kick()
@@ -117,6 +121,10 @@ public sealed class JobSchedulerHostedService : BackgroundService, IJobScheduler
         finally
         {
             _wake.Writer.TryComplete();
+            // A background Jira pull observes the stopping token; let it unwind before the host
+            // disposes the services it is using. It never throws.
+            if (_jira is not null)
+                await _jira.WhenIdleAsync();
             if (_ownsLease)
             {
                 try
@@ -168,6 +176,14 @@ public sealed class JobSchedulerHostedService : BackgroundService, IJobScheduler
         await using var scope = _scopeFactory.CreateAsyncScope();
         var launcher = scope.ServiceProvider.GetRequiredService<IJobLaunchService>();
         var (leaseMaintained, launched) = await LaunchQueuedRunsWithLeaseRenewalAsync(launcher, cancellationToken);
+        if (leaseMaintained)
+        {
+            // About every 15 minutes, started only by the process that holds the scheduler lease
+            // and never awaited here: a pull can outlast the lease by minutes and must not delay
+            // enqueueing or reaping. Its own OS lock stops a second process (one that picked up
+            // the lease meanwhile) from pulling at the same time. Failures stay inside the pull.
+            _jira?.Tick(nowUtc, cancellationToken);
+        }
         _health.CycleCompleted(
             DateTime.UtcNow,
             leaseMaintained,

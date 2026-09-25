@@ -26,13 +26,14 @@ export class DashboardController {
 
         // A navigation that happened while the fetches above were in flight owns the
         // page now; painting the dashboard over it would clobber that view.
-        if (!['dashboard', 'agents'].includes(this.app.currentView)) return;
+        // 'code-quality' is the legacy route that now renders Project health.
+        if (!['dashboard', 'agents', 'code-quality'].includes(this.app.currentView)) return;
 
         const content = document.getElementById('app-content');
         if (!content) return;
 
         content.innerHTML = '';
-        content.appendChild(this.renderUnifiedDashboard(data));
+        this.renderUnifiedDashboard(content, data);
 
         // Ensure we are at the top on load
         window.scrollTo(0, 0);
@@ -40,16 +41,17 @@ export class DashboardController {
 
     // Rules, validation, Git Guard, and Code quality share one dashboard. Agent work
     // opens in the dedicated terminal view, so this surface never mounts xterm.
-    renderUnifiedDashboard(data = {}) {
+    renderUnifiedDashboard(container, data = {}) {
         const fragment = this.app.cloneTemplate('dashboard-template');
         const root = fragment.querySelector('[data-dashboard]');
-        if (!root) return fragment;
+        // Template clones have an inert ownerDocument with no defaultView. Adopt the
+        // dashboard into the page before mounting children that use its window/events.
+        container.appendChild(fragment);
+        if (!root) return;
 
         const rulesHost = root.querySelector('[data-rules-overview-host]');
         if (rulesHost) {
             this.app.agentController.mountAgentsOverview(rulesHost);
         }
-
-        return fragment;
     }
 }

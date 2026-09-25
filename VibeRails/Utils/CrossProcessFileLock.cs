@@ -54,6 +54,25 @@ internal sealed class CrossProcessFileLock : IDisposable
     }
 
     /// <summary>
+    /// Waits up to <paramref name="timeout"/> for the exclusive lock, for short critical sections
+    /// (a read-modify-write of a small shared file) that must not be skipped. Throws
+    /// <see cref="TimeoutException"/> when another holder keeps it longer than that.
+    /// </summary>
+    internal static CrossProcessFileLock Acquire(string lockPath, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (true)
+        {
+            var held = TryAcquire(lockPath);
+            if (held is not null)
+                return held;
+            if (DateTime.UtcNow >= deadline)
+                throw new TimeoutException($"Another VibeRails process is holding {Path.GetFileName(lockPath)}.");
+            Thread.Sleep(25);
+        }
+    }
+
+    /// <summary>
     /// Places a coordination lock beside the shared state database so installations with a custom
     /// state path still coordinate on the same OS object.
     /// </summary>

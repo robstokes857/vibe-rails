@@ -386,8 +386,9 @@ See [VibeRails/Services/Mcp/AGENTS.md](VibeRails/Services/Mcp/AGENTS.md) for the
 
 ### Code report inspection
 
-Project health's **View metrics** opens the host-owned Code Atlas / Quality Lab viewer on
-`code-quality`. `RuleController` supplies the cached MintLint report; the authenticated,
+Project health's Code quality card renders the host-owned Code Atlas / Quality Lab viewer
+inline (the `code-quality` route is an alias for Project health). `RuleController` supplies the
+cached MintLint report; the authenticated,
 root-only `POST /api/v1/code-analyzer/graph` supplies bounded working-tree structure and
 lexical source references through `RepositoryCodeGraph`. No preview fixtures are shipped.
 Scan/exclusion controls and all rule/commit enforcement remain outside the viewer.

@@ -15,6 +15,7 @@ using VibeRails.Middleware;
 using VibeRails.Routes;
 using VibeRails.Services;
 using VibeRails.Services.Board;
+using VibeRails.Services.Jira;
 using VibeRails.Services.Terminal;
 using VibeRails.Utils;
 using Xunit;
@@ -76,6 +77,11 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         builder.Services.AddSingleton(_tabHost.Object);
         builder.Services.AddSingleton(_repository.Object);
         builder.Services.AddScoped<IBoardLaunchService, BoardLaunchService>();
+        // Jira routes: real service over this fixture's board.db; the cloud client is never reached.
+        builder.Services.AddSingleton<IJiraSecretStore>(new JiraSecretStore(Path.Combine(_root, "jira-tokens.json")));
+        builder.Services.AddSingleton(new JiraPullLock(Path.Combine(_root, JiraPullLock.FileName)));
+        builder.Services.AddSingleton(new Mock<IJiraCloudClient>(MockBehavior.Strict).Object);
+        builder.Services.AddScoped<IJiraPullService, JiraPullService>();
 
         _app = builder.Build();
         _app.UseMiddleware<CookieAuthMiddleware>();
@@ -704,6 +710,34 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
         using var tooLong = await SendAsync(HttpMethod.Get, "/api/v1/board/cards?pageSize=30&q=" + new string('x', 301), "test-session", "test-tab");
         Assert.Equal(HttpStatusCode.BadRequest, tooLong.StatusCode);
+    }
+
+    [Fact]
+    public async Task JiraConfigurationErrors_AreReadable400s_NotServerErrors()
+    {
+        using var list = await GetJsonAsync("/api/v1/board/boards");
+        var boardId = list.RootElement.GetProperty("boards")[0].GetProperty("id").GetString()!;
+        var valid = new { siteUrl = "https://acme.atlassian.net", email = "ada@example.com", apiToken = "token", jql = "project = PROJ", enabled = true };
+
+        using var untested = await SendAsync(HttpMethod.Post, $"/api/v1/board/boards/{boardId}/jira/test", "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.BadRequest, untested.StatusCode);
+        using (var body = await ReadJsonAsync(untested))
+            Assert.Contains("Save the Jira connection", body.RootElement.GetProperty("error").GetString());
+
+        using var badSite = await SendJsonAsync(HttpMethod.Put, $"/api/v1/board/boards/{boardId}/jira", valid with { siteUrl = "http://acme.atlassian.net" });
+        Assert.Equal(HttpStatusCode.BadRequest, badSite.StatusCode);
+        using (var body = await ReadJsonAsync(badSite))
+            Assert.Contains("https", body.RootElement.GetProperty("error").GetString());
+
+        using var missingBoard = await SendJsonAsync(HttpMethod.Put, "/api/v1/board/boards/brd_missing/jira", valid);
+        Assert.Equal(HttpStatusCode.BadRequest, missingBoard.StatusCode);
+        using (var body = await ReadJsonAsync(missingBoard))
+            Assert.Contains("no longer exists", body.RootElement.GetProperty("error").GetString());
+
+        using var saved = await SendJsonAsync(HttpMethod.Put, $"/api/v1/board/boards/{boardId}/jira", valid);
+        saved.EnsureSuccessStatusCode();
+        using (var body = await ReadJsonAsync(saved))
+            Assert.False(body.RootElement.TryGetProperty("apiToken", out _));
     }
 
     private async Task<JsonDocument> GetJsonAsync(string path)

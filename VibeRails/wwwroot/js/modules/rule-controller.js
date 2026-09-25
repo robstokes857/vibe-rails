@@ -1,8 +1,7 @@
 import { VcaConsole, copyVcaConsoleText } from './vca-console.js';
 import {
     buildCodeAnalyzerDashboardModel,
-    directoryOf,
-    renderCodeAnalyzerBrief
+    directoryOf
 } from './code-analyzer-dashboard.js';
 import { CodeReportViewer } from './code-report/viewer.js';
 import {
@@ -436,15 +435,15 @@ export class RuleController {
         this.preflightState = createGitPreflightState();
         this.preflightRunner = null;
         this.focusedMode = false;
-        // The mounted report owns its graph, dialog, observers and request lifetime.
+        // The mounted report owns its graph, details panel, observers and request lifetime.
         this.codeReportViewer = null;
         // A Rules overview is remounted each time the user navigates away and back. Keep the
         // most recent MintLint response so remounting can restore it without starting another
         // scan. A manual scan (or an ignore/restore that deliberately rescans) replaces this.
         this.codeAnalyzerCache = null;
         this.codeAnalyzerScanInProgress = null;
-        // Scan scope survives navigation between Project health and the Code quality workbench,
-        // where neither control is mounted.
+        // Scan scope survives leaving and remounting Project health, so a rescan started before
+        // the scope controls are restored replays the last choice.
         this.lastAnalyzerUnpushed = false;
         this.lastAnalyzerFullScan = false;
         this.disposeHealthFixPickers = null;
@@ -464,8 +463,10 @@ export class RuleController {
         this.unload();
         this.focusedMode = false;
         this.viewRoot = root;
-        // Both cards own a console and scan controls; the full metrics workbench
-        // is opened separately from the Code quality brief.
+        // Both cards own a console and scan controls. The Code quality card hosts the
+        // Code Atlas / Quality Lab report inline; there is no second report screen.
+        const reportHost = root.querySelector('[data-code-analyzer-report]');
+        this.codeReportViewer = reportHost ? new CodeReportViewer(reportHost, this.app) : null;
         this.bindGuardControls(root);
         this.bindValidationControls(root);
         this.bindCodeQualityControls(root);
@@ -519,53 +520,23 @@ export class RuleController {
         this.setText('[data-rules-card-message]', message);
     }
 
-    // The full-page Code quality workbench (opened from the hub's brief card). Restores
-    // the last scan from cache so flipping hub <-> workbench never re-runs MintLint;
-    // a genuinely fresh visit starts one scan.
-    loadCodeQuality() {
-        this.unload();
-        const content = document.getElementById('app-content');
-        if (!content) return;
-
-        this.focusedMode = false;
-        content.innerHTML = '';
-        const fragment = this.app.cloneTemplate('code-quality-template');
-        const root = fragment.querySelector('[data-view="code-quality"]');
-        content.appendChild(fragment);
-        if (!root) return;
-
-        this.viewRoot = root;
-        this.codeReportViewer = new CodeReportViewer(root.querySelector('[data-code-analyzer-report]'), this.app);
-        return this.runCodeQualityChecks(root);
-    }
-
-    async runCodeQualityChecks(root) {
+    // Restores the last scan from cache so leaving and returning to Project health never
+    // re-runs MintLint; a genuinely fresh visit starts one scan. A scan already in flight
+    // renders into whichever overview is mounted when it completes.
+    async runRulesOverviewChecks(root) {
         await this.refreshHookStatus();
         if (this.viewRoot !== root) return false;
         if (!this.hookStatus?.inGitRepo) {
-            this.codeReportViewer?.setError('Open a Git repository to inspect code reports.');
+            this.codeReportViewer?.setError('Code quality needs a Git repository. Open a project repository, then return here to scan its changed source files.');
             return false;
         }
 
-        // A scan the hub kicked off may still be running; when it completes it renders
-        // into whichever view is mounted, so starting another here would double-scan.
-        if (this.restoreCodeAnalyzerCache()) return true;
-        if (this.codeAnalyzerScanInProgress
-            && this.codeAnalyzerScanInProgress.repositoryPath === this.hookStatus?.repositoryPath) {
-            return true;
-        }
-        await this.runCodeAnalyzer();
-        return true;
-    }
-
-    async runRulesOverviewChecks(root) {
-        await this.refreshHookStatus();
-        if (this.viewRoot !== root || !this.hookStatus?.inGitRepo) return false;
-
         const repositoryPath = this.hookStatus?.repositoryPath;
-        const restoreCachedAnalyzer = this.restoreCodeAnalyzerCache()
-            || (this.codeAnalyzerScanInProgress
-                && this.codeAnalyzerScanInProgress.repositoryPath === repositoryPath);
+        const scanInFlight = Boolean(this.codeAnalyzerScanInProgress)
+            && this.codeAnalyzerScanInProgress.repositoryPath === repositoryPath;
+        const restoreCachedAnalyzer = this.restoreCodeAnalyzerCache() || scanInFlight;
+        // A first scan still running from the previous mount renders here when it completes.
+        if (scanInFlight && !this.codeAnalyzerCache) this.renderCodeAnalyzerLoading();
         await Promise.all([
             this.runHookPreview(),
             restoreCachedAnalyzer ? Promise.resolve() : this.runCodeAnalyzer()
@@ -590,8 +561,8 @@ export class RuleController {
     }
 
     // Composition kept for the Git Guard views, which host all three concerns on one
-    // root. The Rules hub binds guard + validation; the Code quality view binds only
-    // its own controls. Every binder tolerates absent hosts.
+    // root. Project health binds each concern separately. Every binder tolerates
+    // absent hosts.
     bindHookControls(root) {
         this.bindGuardControls(root);
         this.bindValidationControls(root);
@@ -929,14 +900,6 @@ export class RuleController {
                 title: 'Open a Git repository to check rules',
                 message: 'Rule validation and Code quality need a local Git working tree.'
             });
-            const empty = this.query('[data-code-analyzer-empty]');
-            if (empty) {
-                empty.hidden = false;
-                const title = empty.querySelector('strong');
-                const message = empty.querySelector('p');
-                if (title) title.textContent = 'Code quality needs a Git repository';
-                if (message) message.textContent = 'Open a project repository, then return here to scan its changed source files.';
-            }
         }
         if (this.preflightRunner?.isRunning) this.setHookMutationButtonsDisabled(true);
     }
@@ -1032,8 +995,8 @@ export class RuleController {
         // Remember the scope so ignore/restore rescans replay it instead of silently reverting to
         // the working-tree scope, and so the source pane can request the matching revision.
         this.lastAnalyzerUnpushed = unpushed === true;
-        // The full-scan toggle only exists on the Project health view. Scans started from the Code
-        // quality workbench must replay the remembered choice instead of quietly falling back off.
+        // The full-scan toggle only exists while Project health is mounted. A scan started without
+        // it must replay the remembered choice instead of quietly falling back off.
         const fullScanToggle = this.query('[data-code-analyzer-full-scan]');
         const fullScan = fullScanToggle ? fullScanToggle.checked === true : this.lastAnalyzerFullScan === true;
         this.lastAnalyzerFullScan = fullScan;
@@ -1094,46 +1057,22 @@ export class RuleController {
 
     renderCodeAnalyzerLoading() {
         this.codeReportViewer?.setLoading();
-        const empty = this.query('[data-code-analyzer-empty]');
-        if (!empty) return;
-        empty.hidden = false;
-        const title = empty.querySelector('strong');
-        const message = empty.querySelector('p');
-        if (title) title.textContent = 'Checking code quality…';
-        if (message) message.textContent = 'Scoring the source files changed in your working tree.';
     }
 
     renderCodeAnalyzerSummary(response) {
         this.setHealthFixButtonsDisabled(!this.hookStatus?.inGitRepo);
-        const empty = this.query('[data-code-analyzer-empty]');
-        const briefHost = this.query('[data-vca-quality-brief]');
         if (!response || response.success === false) {
-            this.codeReportViewer?.setError(this.codeAnalyzerCache?.error || response?.output || 'Code quality could not be scored. Return to Project health to scan again.');
-            if (empty) {
-                empty.hidden = false;
-                const title = empty.querySelector('strong');
-                const message = empty.querySelector('p');
-                if (title) title.textContent = 'Code quality could not be scored';
-                if (message) message.textContent = 'Open the technical details, then scan again when the issue is resolved.';
-            }
-            renderCodeAnalyzerBrief(briefHost, null);
+            this.codeReportViewer?.setError(this.codeAnalyzerCache?.error || response?.output
+                || 'Code quality could not be scored. Open Technical details, then scan again.');
             return;
         }
-        renderCodeAnalyzerBrief(briefHost, response, undefined, {
-            onOpenDetails: () => this.openCodeQualityDetails()
-        });
         if (buildCodeAnalyzerSummary(response).analyzedFileCount === 0) {
             this.codeAnalyzerConsole?.write(response.output || 'Scan complete. No changed source files to analyze.');
             this.codeAnalyzerConsole?.finishStream({
                 tone: 'neutral', state: 'Complete', meta: 'Scan complete · No changed source files'
             });
         }
-        if (empty) empty.hidden = true;
         void this.codeReportViewer?.setResponse(response);
-    }
-
-    openCodeQualityDetails() {
-        this.app.navigate('code-quality');
     }
 
     // Scan policy stays on Project health, outside the report inspector.
@@ -1765,13 +1704,9 @@ export class RuleController {
             copied ? 'success' : 'warning');
     }
 
-    // Only Project health binds this button, and that view hosts the summary placeholder rather
-    // than the mounted report, which lives on its own Code quality view root.
+    // Clears only the Technical details transcript; the report above it keeps the last scan.
     clearCodeAnalyzerOutput() {
-        if (this.codeAnalyzerConsole?.clear()) {
-            const empty = this.query('[data-code-analyzer-empty]');
-            if (empty) empty.hidden = false;
-        }
+        this.codeAnalyzerConsole?.clear();
     }
 
     setConsoleUtilityButtonsDisabled(disabled) {

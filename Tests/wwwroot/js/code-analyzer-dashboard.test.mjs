@@ -10,7 +10,6 @@ const {
     createCodeEvidenceEditor,
     disposeCodeAnalyzerDashboard,
     getMonacoLanguageForPath,
-    renderCodeAnalyzerBrief,
     renderCodeAnalyzerDashboard
 } = await import(pathToFileURL(modulePath).href);
 
@@ -431,44 +430,6 @@ test('code analyzer file rail groups files by directory with collapse and kebab 
     disposeCodeAnalyzerDashboard(container);
 });
 
-test('code analyzer brief summarizes the scan for the Rules hub door card', () => {
-    const documentRef = { createElement: tagName => new FakeElement(tagName) };
-    const host = new FakeElement('section');
-    host.hidden = true;
-    let opened = 0;
-
-    const rendered = renderCodeAnalyzerBrief(host, sampleResponse(), documentRef, {
-        onOpenDetails: () => { opened += 1; }
-    });
-
-    assert.equal(rendered, true);
-    assert.equal(host.hidden, false);
-    const brief = host.children[0];
-    assert.equal(brief.className, 'code-analyzer-brief');
-    assert.equal(brief.dataset.tone, 'warning');
-    assert.equal(brief.children[0].className, 'code-analyzer-brief-ring');
-    const copy = brief.children[1];
-    assert.equal(copy.children[1].textContent, 'Needs attention');
-    assert.equal(copy.children[2].textContent, '2 files analyzed');
-    const stats = brief.children[2];
-    assert.equal(stats.children[0].children[0].textContent, '1');
-    assert.equal(stats.children[0].dataset.tone, 'danger');
-    const categories = brief.children[3];
-    assert.equal(categories.children[0].children[1].textContent, 'Complexity');
-    assert.equal(brief.children[4].children[0].textContent, 'View metrics');
-    const radar = brief.children[5];
-    assert.equal(radar.className, 'code-analyzer-radar');
-    assert.equal(radar.children[0].children[0].textContent, 'Quality profile');
-    assert.equal(radar.children[1].tagName, 'svg');
-
-    brief.children[4].fire('click');
-    assert.equal(opened, 1);
-
-    assert.equal(renderCodeAnalyzerBrief(host, null, documentRef), false);
-    assert.equal(host.hidden, true);
-    assert.equal(host.children.length, 0);
-});
-
 function findElement(root, predicate) {
     if (predicate(root)) return root;
     for (const child of root.children || []) {
@@ -553,25 +514,6 @@ test('NPath saturation is described as a capped estimate rather than an exact me
     disposeCodeAnalyzerDashboard(container);
 });
 
-test('code analyzer brief does not offer an empty metrics drill-down', () => {
-    const documentRef = { createElement: tagName => new FakeElement(tagName) };
-    const host = new FakeElement('section');
-    let opened = 0;
-
-    renderCodeAnalyzerBrief(host, {
-        healthScore: null,
-        analyzedFileCount: 0,
-        ignoredFileCount: 0,
-        report: null
-    }, documentRef, {
-        onOpenDetails: () => { opened += 1; }
-    });
-
-    const brief = host.children[0];
-    assert.equal(brief.children.some(child => child.className.split(/\s+/).includes('code-analyzer-brief-open')), false);
-    assert.equal(opened, 0);
-});
-
 test('Rules and Code quality share one Project health destination without a docked terminal', () => {
     const index = readFileSync(path.resolve('VibeRails/wwwroot/index.html'), 'utf8');
 
@@ -586,18 +528,16 @@ test('Rules and Code quality share one Project health destination without a dock
     assert.doesNotMatch(agentsTemplate, /rules-localnav|role="tablist"|data-rules-tab/);
     assert.match(agentsTemplate, /Rules and code quality<\/h1>/);
     assert.match(agentsTemplate, /data-vca-console\b/);
-    assert.match(agentsTemplate, /data-vca-quality-brief/);
+    assert.match(agentsTemplate, /data-code-analyzer-console[\s\S]*?data-code-analyzer-report[\s\S]*?Technical details/);
     assert.match(agentsTemplate, /project-health-status-copy" role="status"[\s\S]*?aria-live="polite" aria-atomic="true"/);
     assert.match(agentsTemplate, /data-action="manage-rules"/);
     assert.equal((agentsTemplate.match(/data-action="launch-health-fix"/g) || []).length, 2);
     assert.doesNotMatch(agentsTemplate, /data-terminal-section|data-terminal-content|renderTerminalPanel/);
-    assert.doesNotMatch(agentsTemplate, /data-code-analyzer-report|data-agent-file-tree|data-rules-files-door/);
+    assert.doesNotMatch(agentsTemplate, /data-agent-file-tree|data-rules-files-door/);
 
-    // The report occupies the existing detail route; scans remain on Project health.
-    const quality = index.match(/<template id="code-quality-template">([\s\S]*?)<\/template>/)[1];
-    assert.match(quality, /data-view="code-quality"/);
-    assert.doesNotMatch(quality, /data-action="run-code-analyzer"|data-code-analyzer-full-scan/);
-    assert.match(quality, /data-code-analyzer-report/);
+    // The report renders inline in the Code quality card: no second screen, modal or window.
+    assert.doesNotMatch(index, /id="code-quality-template"/);
+    assert.equal((index.match(/data-code-analyzer-report/g) || []).length, 1);
     assert.match(agentsTemplate, /data-code-analyzer-full-scan/);
 
     // Legacy detail routes remain for old links and the full editor, but are no longer nav destinations.
@@ -607,15 +547,15 @@ test('Rules and Code quality share one Project health destination without a dock
     assert.match(files, /data-agent-file-tree/);
     assert.match(files, /data-agent-rule-editor/);
 
-    // Routing stays backward compatible while the card opens the combined viewer.
+    // The old detail route stays valid for saved links, but lands on Project health.
     const app = readFileSync(path.resolve('VibeRails/wwwroot/app.js'), 'utf8');
-    assert.match(app, /'code-quality': \(\) => this\.ruleController\.loadCodeQuality\(\)/);
+    assert.match(app, /'code-quality': \(\) => this\.dashboardController\.loadDashboard\(data\)/);
     assert.match(app, /'rule-files': \(\) => this\.agentController\.loadRuleFiles\(\)/);
 
     const ruleController = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/rule-controller.js'), 'utf8');
-    assert.match(ruleController, /loadCodeQuality\(\)/);
-    assert.match(ruleController, /openCodeQualityDetails\(\)/);
-    assert.match(ruleController, /this\.app\.navigate\('code-quality'\)/);
+    assert.match(ruleController, /new CodeReportViewer\(reportHost, this\.app\)/);
+    assert.match(ruleController, /this\.codeReportViewer\?\.destroy\(\)/);
+    assert.doesNotMatch(ruleController, /loadCodeQuality|openCodeQualityDetails|navigate\('code-quality'\)/);
     assert.doesNotMatch(ruleController, /data-rules-tab/);
 
     const dashboardController = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/dashboard-controller.js'), 'utf8');

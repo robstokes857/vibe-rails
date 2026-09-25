@@ -106,12 +106,17 @@
 .code-report .report-files-loading>i{display:block;height:38px;margin:18px 0;border-radius:5px;background:linear-gradient(105deg,var(--color-border) 20%,var(--color-bg-surface-hover) 45%,var(--color-border) 70%);background-size:300% 100%;animation:file-shimmer 1.9s linear infinite;opacity:.6}
 .code-report [data-quality-report] .qr:not([data-state=loading]) .report-files-loading{display:none}
 @keyframes file-shimmer{from{background-position:100% 0}to{background-position:0 0}}
-.code-report dialog{background:var(--color-bg-surface);color:var(--color-text);border:1px solid var(--color-border);border-radius:14px;padding:0;box-shadow:0 30px 120px color-mix(in srgb,var(--color-shadow,#000) 45%,transparent);width:min(850px,calc(100vw - 32px));max-height:calc(100dvh - 48px)}
-.code-report dialog::backdrop{background:color-mix(in srgb,var(--color-shadow,#000) 70%,transparent);backdrop-filter:blur(5px)}
-.code-report .dialog-header{display:flex;justify-content:space-between;align-items:flex-start;padding:24px;border-bottom:1px solid var(--color-border);gap:16px}
-.code-report .dialog-header h2{font-size:19px;overflow-wrap:anywhere}
-.code-report .dialog-body{padding:24px}
-.code-report .dialog-actions{border-top:1px solid var(--color-border);padding:16px 24px;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap}
+/* Details replace the health summary inside the sidebar; the report never opens a modal. */
+.code-report .details-panel{display:flex;flex-direction:column;height:100%;min-height:0;overflow:auto;background:var(--color-bg-surface);border:1px solid var(--color-border);border-radius:10px;animation:details-in .18s ease-out}
+.code-report .details-panel[hidden],.code-report .details-actions[hidden]{display:none}
+.code-report .details-header{position:sticky;top:0;z-index:1;display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:16px 18px;border-bottom:1px solid var(--color-border);background:var(--color-bg-surface)}
+.code-report .details-header>div{min-width:0}
+.code-report .details-header h2{font-size:17px;overflow-wrap:anywhere}
+.code-report .details-header h2:focus{outline:none}
+.code-report .details-body{flex:1 0 auto;padding:18px}
+.code-report .details-actions{position:sticky;bottom:0;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;padding:14px 18px;border-top:1px solid var(--color-border);background:var(--color-bg-surface)}
+.code-report .details-panel .metric-list{grid-template-columns:1fr}
+@keyframes details-in{from{opacity:0;transform:translateX(12px)}to{opacity:1;transform:none}}
 .code-report .details-path{font:12px var(--report-font-mono);color:var(--color-text-muted);overflow-wrap:anywhere;margin-bottom:22px}
 .code-report .detail-summary{display:flex;gap:28px;margin-bottom:24px;flex-wrap:wrap}
 .code-report .detail-summary strong{font-size:24px;font-weight:500;display:block}
@@ -141,9 +146,8 @@
 .code-report [data-quality-report] .qr-results{height:auto}
 .code-report .page-footer{flex-direction:column;gap:5px;font-size:10px}
 .code-report .metric-list{grid-template-columns:1fr}
-.code-report .dialog-header,.code-report .dialog-body{padding:18px}
-.code-report .dialog-header h2{font-size:17px}
-.code-report .dialog-actions{padding:14px 18px}
+.code-report .details-header,.code-report .details-body{padding:14px}
+.code-report .details-actions{padding:12px 14px}
 .code-report .code-excerpt{font-size:11px;padding:12px}
 .code-report .detail-summary{gap:20px}
 }
@@ -156,4 +160,3 @@ html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body:i
 .code-report .metric-detail[aria-pressed=true]{border-color:var(--color-accent)}
 .code-report .load-error{color:var(--color-text-muted)}
 .code-report .load-error[role=alert]{color:var(--color-danger)}
-.code-report-view{width:100%;min-width:0;padding:16px 0}

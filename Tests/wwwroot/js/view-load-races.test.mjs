@@ -31,7 +31,38 @@ test('the dashboard view checks it is still current after its async refresh, bef
     assert.ok(start >= 0 && paintAt > start, 'loadDashboard should paint into #app-content');
     const body = dashboardSource.slice(start, paintAt);
     const refreshAt = body.search(/await Promise\.all\(\[this\.app\.refreshDashboardData\(\), nameTask\]\);/);
-    const guardAt = body.search(/if \(!\['dashboard', 'agents'\]\.includes\(this\.app\.currentView\)\) return;/);
+    const guardAt = body.search(/if \(!\['dashboard', 'agents', 'code-quality'\]\.includes\(this\.app\.currentView\)\) return;/);
     assert.ok(refreshAt >= 0, 'the refresh must be awaited before painting');
     assert.ok(guardAt > refreshAt, 'the stand-down guard must run after the refresh, before painting');
+});
+
+// app.js routes the legacy `code-quality` view (saved tabs, deep links) to loadDashboard, so the
+// stand-down guard must count it as the dashboard or the page loads its data and paints nothing.
+test('the legacy code-quality route paints Project health', async () => {
+    const { DashboardController } = await import('../../../VibeRails/wwwroot/js/modules/dashboard-controller.js');
+    const previousDocument = globalThis.document;
+    const previousWindow = globalThis.window;
+    const painted = [];
+    const content = { innerHTML: 'old view', appendChild: node => painted.push(node) };
+    globalThis.document = { getElementById: id => (id === 'app-content' ? content : null) };
+    globalThis.window = { scrollTo() {} };
+    try {
+        const mounted = [];
+        const rulesHost = {};
+        const dashboard = { querySelector: selector => (selector === '[data-rules-overview-host]' ? rulesHost : null) };
+        const app = {
+            currentView: 'code-quality',
+            data: { isInGit: false },
+            refreshDashboardData: async () => {},
+            cloneTemplate: () => ({ querySelector: selector => (selector === '[data-dashboard]' ? dashboard : null) }),
+            agentController: { mountAgentsOverview: host => mounted.push(host) }
+        };
+        await new DashboardController(app).loadDashboard();
+        assert.equal(content.innerHTML, '');
+        assert.equal(painted.length, 1);
+        assert.deepEqual(mounted, [rulesHost]);
+    } finally {
+        globalThis.document = previousDocument;
+        globalThis.window = previousWindow;
+    }
 });

@@ -3,6 +3,7 @@ import { mountQualityReport } from './vendor/quality/quality-report.js';
 import { escapeHtml as esc, formatNumber, healthFromConcern } from './vendor/quality/report-model.js';
 import { readReportTheme, observeReportTheme } from './theme-sync.js';
 import { enhanceRadar } from './radar-interactions.js';
+import { isConfirmDialogOpen } from '../utils.js';
 
 let instanceId = 0;
 export const reportPath = path => String(path || '').replace(/\\/g, '/').replace(/:\d+(?::\d+)?$/, '').replace(/^\.\//, '');
@@ -30,24 +31,31 @@ export class CodeReportViewer {
                         <div data-code-map><p class="load-error" role="status">Preparing repository map…</p></div>
                         <div class="graph-note" data-graph-note>Hover a domain to trace its connections. Select a report file to explore it in the map.</div>
                     </section>
-                    <section class="report-sidebar" aria-label="Code health and report files"><div data-quality-report></div></section>
+                    <section class="report-sidebar" aria-label="Code health and report files"><div data-quality-report></div>
+                        <section class="details-panel" role="region" aria-labelledby="${titleId}" hidden>
+                            <div class="details-header"><div><span class="eyebrow" data-details-kicker>CODE DETAILS</span><h2 id="${titleId}" tabindex="-1"></h2></div>
+                                <button type="button" class="icon-button" data-close-details aria-label="Back to code health">✕</button></div>
+                            <div class="details-body" data-details-body></div><div class="details-actions" data-details-actions></div>
+                        </section>
+                    </section>
                 </div>
             </main>
-            <dialog class="details-dialog" aria-labelledby="${titleId}">
-                <div class="dialog-header"><div><span class="eyebrow" data-details-kicker>CODE DETAILS</span><h2 id="${titleId}"></h2></div>
-                    <button type="button" class="icon-button" data-close-details aria-label="Close details">✕</button></div>
-                <div class="dialog-body" data-details-body></div><div class="dialog-actions" data-details-actions></div>
-            </dialog>
         </div>`;
         this.root = host.querySelector('.code-report');
         this.mapHost = this.root.querySelector('[data-code-map]');
         this.qualityHost = this.root.querySelector('[data-quality-report]');
-        this.dialog = this.root.querySelector('dialog');
-        this.root.querySelector('[data-close-details]').addEventListener('click', () => this.dialog.close());
-        // The app has a document-level Escape shortcut. Let this dialog own its Escape.
-        this.dialog.addEventListener('keydown', event => {
-            if (event.key === 'Escape') event.stopPropagation();
-        });
+        // Details replace the health summary in the sidebar: the report stays inline, never a modal.
+        this.details = this.root.querySelector('.details-panel');
+        this.root.querySelector('[data-close-details]').addEventListener('click', () => this.closeDetails(true));
+        // Captured so the app's document-level Escape (Back) does not also leave Project health.
+        this.onKeydown = event => {
+            if (isConfirmDialogOpen()) return;
+            if (event.key !== 'Escape' || this.details.hidden || event.defaultPrevented) return;
+            event.preventDefault();
+            event.stopPropagation();
+            this.closeDetails(true);
+        };
+        this.document.addEventListener('keydown', this.onKeydown, true);
         this.quality = mountQualityReport(this.qualityHost, {
             onFileClick: file => this.focusFile(file.file),
             onMetricClick: metric => this.showFile(this.findFile(metric.file), metric.metricName),
@@ -78,7 +86,7 @@ export class CodeReportViewer {
         ++this.generation;
         this.radar?.destroy();
         this.radar = null;
-        this.dialog.close();
+        this.closeDetails();
         this.disposeGraph();
         this.quality.setLoading();
         this.mapHost.innerHTML = '<p class="load-error" role="status">Preparing repository map…</p>';
@@ -177,7 +185,7 @@ export class CodeReportViewer {
 
     async focusFile(path, nodeId) {
         const generation = this.generation;
-        this.dialog.close();
+        this.closeDetails();
         await this.ready;
         if (!this.isCurrent(generation)) return;
         const id = nodeId || this.graph?.nodes?.find(node => node.kind === 'file' && reportPath(node.path) === reportPath(path))?.id;
@@ -198,10 +206,13 @@ export class CodeReportViewer {
 
     openDetails(title, kicker, body, action) {
         if (this.destroyed) return;
-        this.dialog.querySelector('h2').textContent = title;
-        this.dialog.querySelector('[data-details-kicker]').textContent = kicker;
-        this.dialog.querySelector('[data-details-body]').innerHTML = body;
-        const actions = this.dialog.querySelector('[data-details-actions]');
+        // Details replace the summary in the sidebar; Escape or close returns focus to the source.
+        if (this.details.hidden) this.detailsReturn = this.document.activeElement;
+        const heading = this.details.querySelector('h2');
+        heading.textContent = title;
+        this.details.querySelector('[data-details-kicker]').textContent = kicker;
+        this.details.querySelector('[data-details-body]').innerHTML = body;
+        const actions = this.details.querySelector('[data-details-actions]');
         actions.replaceChildren();
         if (action) {
             const button = this.document.createElement('button');
@@ -211,7 +222,19 @@ export class CodeReportViewer {
             button.addEventListener('click', action);
             actions.append(button);
         }
-        if (!this.dialog.open) this.dialog.showModal();
+        actions.hidden = !action;
+        this.qualityHost.hidden = true;
+        this.details.hidden = false;
+        this.details.scrollTop = 0;
+        heading.focus({ preventScroll: true });
+    }
+
+    closeDetails(restoreFocus) {
+        if (this.details.hidden) return;
+        this.details.hidden = true;
+        this.qualityHost.hidden = false;
+        if (restoreFocus && this.detailsReturn?.isConnected) this.detailsReturn.focus({ preventScroll: true });
+        this.detailsReturn = null;
     }
 
     showFile(file, preferredName) {
@@ -232,9 +255,9 @@ export class CodeReportViewer {
                 : '<p class="detail-note">No source excerpt was included for this metric.</p>'}
             <p class="detail-note">${esc(date)}. Excerpts may differ from the current working tree.</p>`;
         this.openDetails(basename(file.file), 'FILE QUALITY', body, () => this.focusFile(file.file));
-        this.dialog.querySelectorAll('[data-report-metric]').forEach(button => button.addEventListener('click', () => {
+        this.details.querySelectorAll('[data-report-metric]').forEach(button => button.addEventListener('click', () => {
             this.showFile(file, metrics[Number(button.dataset.reportMetric)].name);
-            this.dialog.querySelector(`[data-report-metric="${button.dataset.reportMetric}"]`)?.focus();
+            this.details.querySelector(`[data-report-metric="${button.dataset.reportMetric}"]`)?.focus();
         }));
     }
 
@@ -266,7 +289,8 @@ export class CodeReportViewer {
         this.radar?.destroy();
         this.disposeGraph();
         this.quality.destroy();
-        this.dialog.close();
+        this.closeDetails();
+        this.document.removeEventListener('keydown', this.onKeydown, true);
         this.window.removeEventListener('pagehide', this.pagehide);
         this.root.remove();
         this.response = null;

@@ -5,7 +5,7 @@ Read the cross-layer [Board contributor guide](../../VibeRails/Services/Board/AG
 [database migration policy](../DB/AGENTS.md), before changing this component.
 
 This directory owns `IBoardStore`'s SQLite implementation in `~/.vibe_rails/board.db`, including
-component migrations `board/1`–`board/11`. The historical `VibeRails.Services.Board` namespace
+component migrations `board/1`–`board/13`. The historical `VibeRails.Services.Board` namespace
 does not move this code back into the application project. Keep DTO/contracts in
 `VibeRails.Data.Abstractions/Board`; keep Git, live terminal state and UI policy in the host.
 
@@ -72,6 +72,20 @@ project's row uses. Card reads `LEFT JOIN` the table and `COALESCE` to `VB`; the
 TriggerKey and link-candidate search build the key the same way. Key lookups match the number
 plus either the project's prefix or the `VB` alias. A prefix is never updated or deleted by the
 current code; there is no override, and old versions ignore the table entirely.
+
+`board/12` adds `BoardJiraConnections` (one row per board) and `BoardJiraLinks` (one row per
+mirrored Jira issue, unique on site and numeric issue id, cascading with the card). The API
+token is not a column; it stays in `jira-tokens.json` beside `state.db`. No backfill. An older
+binary ignores both tables. A link's `SiteId` is the connection id, and Jira issue ids are only
+unique within one site, so changing a board's site gives the connection a new id (the upsert
+updates `Id`); old-site cards keep their old links and are no longer updated. A pulled card and
+its link are written in one transaction (`CreateJiraCardAsync`). Saving a connection checks the
+board exists in the same statement.
+
+`board/13` adds the `Boards_DeleteJiraConnection` trigger: deleting a board, from any binary,
+deletes its Jira connection. It is a trigger rather than a foreign key because `board/12` already
+shipped the table. No cleanup of existing rows; `GetJiraConnectionsAsync` skips a connection whose
+board is gone, and the next scheduled pull prunes tokens that no longer have a connection.
 
 Session commit linking reads this membership inside the commit-write transaction and writes the
 snapshot to the target and all same-project attachments atomically. One failed write rolls back
