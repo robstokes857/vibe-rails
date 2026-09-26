@@ -42,11 +42,11 @@ namespace VibeRails.Services.VCA.Validators
                 return new RuleValidationResult(true);
 
             var complexity = await EstimateComplexity(fullPath, ct);
-            if (complexity > _threshold)
+            if (complexity >= _threshold)
             {
                 return new RuleValidationResult(
                     false,
-                    $"Estimated complexity {complexity} exceeds threshold {_threshold}");
+                    $"Estimated complexity {complexity} is not under the threshold {_threshold}");
             }
 
             return new RuleValidationResult(true);

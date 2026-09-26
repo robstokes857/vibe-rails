@@ -415,7 +415,7 @@ namespace VibeRails.Services
                 if (ext != ".cs" && ext != ".js" && ext != ".ts") continue;
 
                 var complexity = await EstimateComplexity(fullPath, cancellationToken);
-                if (complexity > threshold)
+                if (complexity >= threshold)
                 {
                     violations.Add($"{file} (estimated complexity: {complexity})");
                 }
@@ -427,7 +427,7 @@ namespace VibeRails.Services
                     rule.RuleText,
                     rule.Enforcement,
                     false,
-                    $"{violations.Count} file(s) exceed complexity threshold of {threshold}",
+                    $"{violations.Count} file(s) are not under the complexity limit of {threshold}",
                     violations);
             }
 
@@ -502,15 +502,11 @@ namespace VibeRails.Services
             return ext is ".cs" or ".js" or ".ts" or ".py" or ".java";
         }
 
-        private bool IsTestFile(string file)
-        {
-            var name = Path.GetFileName(file).ToLowerInvariant();
-            return name.Contains("test") || name.Contains("spec") ||
-                   file.Contains("/test/", StringComparison.OrdinalIgnoreCase) ||
-                   file.Contains("/tests/", StringComparison.OrdinalIgnoreCase) ||
-                   file.Contains("\\test\\", StringComparison.OrdinalIgnoreCase) ||
-                   file.Contains("\\tests\\", StringComparison.OrdinalIgnoreCase);
-        }
+        // One classifier for the Rules page, the Git hook (RulesTool) and the legacy validators,
+        // so "is this production code" cannot be answered differently by different callers.
+        private static readonly FileClassifier TestFileClassifier = new();
+
+        private bool IsTestFile(string file) => TestFileClassifier.IsTestFile(file);
 
         private static readonly HashSet<string> PackageFileNames = new(StringComparer.OrdinalIgnoreCase)
         {

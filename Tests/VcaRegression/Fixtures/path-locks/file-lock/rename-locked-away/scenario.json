@@ -1,0 +1,8 @@
+{
+  "rename": [
+    {
+      "from": "src/app.cs",
+      "to": "src/renamed.cs"
+    }
+  ]
+}

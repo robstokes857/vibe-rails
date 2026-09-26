@@ -701,10 +701,11 @@ public class RulesTool
                 var content = file.Content
                     ?? await ReadIndexFileAsync(gitRoot, file.RelativePath, cancellationToken);
                 var complexity = EstimateCyclomaticComplexity(content);
-                if (complexity > maxComplexity)
+                // The rule reads "< N": a file whose estimate is exactly N is not under N.
+                if (complexity >= maxComplexity)
                 {
                     return RuleValidationResult.Violation(
-                        $"Staged file '{file.RelativePath}' estimated complexity {complexity} exceeds {maxComplexity}");
+                        $"Staged file '{file.RelativePath}' estimated complexity {complexity} is not under {maxComplexity}");
                 }
             }
 
@@ -722,7 +723,7 @@ public class RulesTool
             var hasChangedProductionCode = stagedFiles.Any(file =>
                 file.ExistsInIndex
                 && IsCodeFile(file.RelativePath)
-                && !IsTestFile(file.RelativePath));
+                && !FileClassifier.IsTestFile(file.RelativePath));
             if (!hasChangedProductionCode)
             {
                 return RuleValidationResult.Pass(
@@ -823,7 +824,7 @@ public class RulesTool
     private static IEnumerable<string> GetFilesSectionEntries(string content)
     {
         var inFilesSection = false;
-        foreach (var line in content.Split('\n'))
+        foreach (var line in content.TrimStart('\uFEFF').Split('\n'))
         {
             var trimmed = line.Trim();
             if (trimmed.StartsWith("## Files", StringComparison.OrdinalIgnoreCase))
@@ -970,14 +971,6 @@ public class RulesTool
             or ".go" or ".rb" or ".rs"
             or ".cpp" or ".cc" or ".cxx" or ".c" or ".h" or ".hpp"
             or ".php" or ".swift" or ".scala";
-    }
-
-    private static bool IsTestFile(string path)
-    {
-        var fileName = Path.GetFileName(path).ToLowerInvariant();
-        return fileName.Contains("test") || fileName.Contains("spec") ||
-               path.Contains("test", StringComparison.OrdinalIgnoreCase) ||
-               path.Contains("spec", StringComparison.OrdinalIgnoreCase);
     }
 
     private static int EstimateCyclomaticComplexity(string content)

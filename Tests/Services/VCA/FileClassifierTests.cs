@@ -40,6 +40,15 @@ namespace Tests.Services.VCA
         [InlineData("\\src\\test\\MyClass.cs", true)]
         [InlineData("MyClass.cs", false)]
         [InlineData("Testimony.cs", false)]
+        [InlineData("test_math.py", true)]
+        [InlineData("TestOrders.java", true)]
+        [InlineData("src/__tests__/app.js", true)]
+        [InlineData("spec/models/user.rb", true)]
+        [InlineData("tests/helpers.py", true)]
+        [InlineData("src/Inspector.cs", false)]
+        [InlineData("src/LatestReport.cs", false)]
+        [InlineData("src/latest/Report.cs", false)]
+        [InlineData("testimonial.py", false)]
         public void IsTestFile_ShouldIdentifyTestFiles(string fileName, bool expected)
         {
             // Act

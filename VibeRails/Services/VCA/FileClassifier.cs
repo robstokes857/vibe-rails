@@ -67,21 +67,32 @@ namespace VibeRails.Services.VCA
 
         public bool IsTestFile(string filePath)
         {
+            var originalName = Path.GetFileNameWithoutExtension(filePath);
             var name = Path.GetFileName(filePath).ToLowerInvariant();
             var nameWithoutExt = Path.GetFileNameWithoutExtension(name);
 
-            // Check if filename ends with "test" or "tests" (e.g., MyTest.cs, MyTests.cs)
-            // or contains ".test." or ".spec." segments (e.g., my.test.js, my.spec.ts)
+            // Suffix conventions (MyTest.cs, MyTests.cs, calc.spec.ts, my.test.js) plus the
+            // pytest and Java-style prefixes (test_math.py, TestOrders.java). A name that merely
+            // contains the letters (Testimony.cs, LatestReport.cs, Inspector.cs) is production
+            // code: treating it as a test silently exempts it from the coverage gate.
             if (nameWithoutExt.EndsWith("test") || nameWithoutExt.EndsWith("tests") ||
                 nameWithoutExt.EndsWith("spec") || nameWithoutExt.EndsWith("specs") ||
-                name.Contains(".test.") || name.Contains(".spec."))
+                name.Contains(".test.") || name.Contains(".spec.") ||
+                nameWithoutExt.StartsWith("test_") || nameWithoutExt.StartsWith("tests_") ||
+                (originalName.StartsWith("Test", StringComparison.Ordinal)
+                    && originalName.Length > 4
+                    && char.IsUpper(originalName[4])))
                 return true;
 
-            // Check if file is in a test/tests directory
-            return filePath.Contains("/test/", StringComparison.OrdinalIgnoreCase) ||
-                   filePath.Contains("/tests/", StringComparison.OrdinalIgnoreCase) ||
-                   filePath.Contains("\\test\\", StringComparison.OrdinalIgnoreCase) ||
-                   filePath.Contains("\\tests\\", StringComparison.OrdinalIgnoreCase);
+            // Test directories anywhere on the path, whichever separator the caller used. The
+            // leading slash lets a repository-relative path that starts with the directory
+            // (tests/helpers.py, spec/models/user.rb) match too.
+            var normalized = "/" + filePath.Replace('\\', '/');
+            return normalized.Contains("/test/", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.Contains("/tests/", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.Contains("/__tests__/", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.Contains("/spec/", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.Contains("/specs/", StringComparison.OrdinalIgnoreCase);
         }
 
         public bool IsPackageFile(string filePath)

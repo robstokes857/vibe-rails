@@ -45,6 +45,9 @@ internal sealed record AgentRuleDocument(
 /// <c>- Rule text (STOP)</c>, or a bare <c>- Rule text</c>, which means WARN. The bare form remains
 /// supported for existing and hand-authored files. Service writers use an explicit WARN suffix so
 /// rule arguments ending in an enforcement-shaped phrase cannot be mistaken for the level.</item>
+/// <item>A leading UTF-8 byte-order mark is ignored. The Git-hook path decodes index bytes
+/// without a BOM-stripping reader, so without this a rules heading on the first line of a
+/// file saved by Notepad was invisible to the hook while the Rules page displayed it.</item>
 /// <item>Recognizing a rule's <em>text</em> is not this type's job. It reports what the file
 /// declares; deciding whether a validator exists for it belongs to the caller, so that both
 /// callers can make the same decision from the same list.</item>
@@ -97,6 +100,11 @@ public static partial class AgentRuleSectionReader
         if (string.IsNullOrEmpty(content))
         {
             return new AgentRuleDocument(sections, rules);
+        }
+
+        if (content[0] == '\uFEFF')
+        {
+            content = content[1..];
         }
 
         var insideFence = false;

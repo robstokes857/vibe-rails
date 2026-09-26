@@ -85,3 +85,7 @@ Tests/TokenSaver/Fixtures/** -text
 #*.PDF   diff=astextplain
 #*.rtf   diff=astextplain
 #*.RTF   diff=astextplain
+
+# VCA regression fixtures are byte-exact (CRLF, BOM, and binary cases are
+# deliberate). text=auto would rewrite them at commit or checkout.
+Tests/VcaRegression/Fixtures/** -text

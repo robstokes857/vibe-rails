@@ -1,0 +1,1 @@
+# Root policy without rules

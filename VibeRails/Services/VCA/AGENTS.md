@@ -93,7 +93,14 @@ other changed files remain subject to the rule. `RuleFileDocumentation` shares t
 between Git Guard, the Rules page, and legacy validators; staged-hook regression tests cover new
 and existing policy files.
 
-### 6. Parameterized path locks
+### 6. Bytes
+
+A leading UTF-8 byte-order mark is ignored (2026-09-26). The hook decodes index bytes
+without a BOM-stripping reader, so a rules heading on the first line of a file saved with a
+BOM was invisible to the hook while the Rules page and the MCP `validate_vca` tool, whose
+readers strip it, both showed the rule. CRLF files are read line by line as before.
+
+### 7. Parameterized path locks
 
 `File Lock('path/to/file')` protects one exact Git path. `Directory Lock('path/to/directory')`
 protects the directory and every descendant. Paths are relative to the directory containing the
@@ -104,6 +111,21 @@ on `src/locked` does not match `src/locked-old`.
 The declaring vc.rules.md is excluded from its own lock. This is the control-plane escape hatch that
 keeps a STOP rule editable and removable; other vc.rules.md files beneath a directory lock remain
 ordinary protected content.
+
+## Thresholds
+
+Pinned by `Tests/VcaRegression` on 2026-09-26, after the regression sweep found the first one
+wrong in all three validators:
+
+- `Cyclomatic complexity < N` rejects an estimate of exactly N. It reads "under N"; 20 is not
+  under 20. The estimate is 1 + decision keywords in the staged content of code files.
+- `Log file changes > N lines` admits exactly N changed lines (numstat added + deleted of the
+  staged delta) and requires a Files entry from N+1. Binary files cannot be counted and report
+  `UNSUPPORTED:` at the declared level.
+- Coverage rules decide "is production code staged" with `FileClassifier.IsTestFile`, the one
+  classifier shared by the hook, the Rules page and the legacy validators. A substring match on
+  "test"/"spec" used to treat `src/Inspector.cs` and `src/LatestReport.cs` as tests and let
+  the gate pass silently.
 
 ## Enforcement levels
 
@@ -215,6 +237,7 @@ author junk. Reads no longer filter, so hand-edited junk is shown rather than hi
 | Discovery contract | `Tests/Services/VCA/AgentRuleSectionReaderTests.cs` |
 | Validation + parsing | `Tests/Services/Mcp/RulesToolTests.cs` |
 | Real hooks, real repos | `Tests/Services/VCA/VcaHookEndToEndTests.cs` |
+| Every catalog rule × every level, real repos | `Tests/VcaRegression/` (fixture scenarios under `Fixtures/`; see its README) |
 | Rules-page CRUD | `Tests/AgentFileServiceTests.cs` |
 
 `VcaHookEndToEndTests` builds throwaway Git repositories and runs the real hook host against them.

@@ -129,7 +129,7 @@ namespace Tests.Services.VCA
 
             // Assert
             Assert.False(result.IsValid);
-            Assert.Contains("exceeds threshold", result.Message);
+            Assert.Contains("is not under the threshold", result.Message);
         }
 
         [Fact]

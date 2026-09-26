@@ -1,0 +1,8 @@
+{
+  "rename": [
+    {
+      "from": "locked/a.txt",
+      "to": "outside/a.txt"
+    }
+  ]
+}

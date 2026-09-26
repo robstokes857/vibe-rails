@@ -54,4 +54,14 @@
     <Content Remove="headless\**\*" />
   </ItemGroup>
 
+  <!-- VCA regression fixtures are sample repositories, not test sources: the .cs files inside
+       them are staged-content fixtures and must never be compiled into this assembly. The
+       tests read them from the source tree by path (see VcaRegressionRepository). -->
+  <ItemGroup>
+    <Compile Remove="VcaRegression\Fixtures\**" />
+    <None Remove="VcaRegression\Fixtures\**" />
+    <EmbeddedResource Remove="VcaRegression\Fixtures\**" />
+    <Content Remove="VcaRegression\Fixtures\**" />
+  </ItemGroup>
+
 </Project>
