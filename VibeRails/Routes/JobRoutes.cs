@@ -90,8 +90,8 @@ public static class JobRoutes
         }).WithName("DeleteJob");
 
         // Run Now only enqueues and wakes the scheduler. The launch itself belongs to
-        // JobLaunchService, which opens the Automation's own native terminal window exactly as a
-        // scheduled or retried run does - an Automation never runs inside a Web UI terminal tab.
+        // JobLaunchService opens these runs in native terminals, like schedules and retries.
+        // Explicit card runs use the separate Board endpoint and open linked terminal tabs.
         app.MapPost("/api/v1/jobs/{id:long}/run", (
             IJobService service,
             long id,

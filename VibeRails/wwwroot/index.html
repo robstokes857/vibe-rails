@@ -3697,32 +3697,8 @@
                 .board-view .board-card-meta {
                     display: flex;
                     align-items: center;
-                    justify-content: space-between;
+                    justify-content: flex-end;
                     gap: 0.5rem;
-                }
-
-                .board-view .board-tags {
-                    display: flex;
-                    flex-wrap: wrap;
-                    gap: 0.2rem;
-                    min-width: 0;
-                }
-
-                .board-view .board-tag {
-                    padding: 1px 6px;
-                    border: 0;
-                    border-radius: 4px;
-                    background: var(--color-bg-surface, #1e1e1e);
-                    color: var(--color-text-muted, #94a3b8);
-                    font-size: 0.66rem;
-                    font-weight: 600;
-                    cursor: pointer;
-                }
-
-                .board-view .board-tag:hover,
-                .board-view .board-tag.is-on {
-                    background: color-mix(in srgb, var(--color-primary, #3b82f6) 22%, var(--color-bg-surface, #1e1e1e));
-                    color: var(--color-text, #f8fafc);
                 }
 
                 .board-view .board-card-aside {
@@ -3769,6 +3745,18 @@
                     height: 100%;
                     object-fit: contain;
                     border-radius: 50%;
+                }
+
+                .board-automation-running {
+                    color: var(--color-primary, #3b82f6);
+                    animation: board-automation-blink 1.4s ease-in-out infinite;
+                }
+                @keyframes board-automation-blink {
+                    0%, 100% { opacity: 1; }
+                    50% { opacity: 0.25; }
+                }
+                @media (prefers-reduced-motion: reduce) {
+                    .board-automation-running { animation: none; }
                 }
 
                 /* A terminal session is working this card right now. */
@@ -4890,7 +4878,6 @@
                         <option value="medium">Medium</option>
                         <option value="low">Low</option>
                     </select>
-                    <select class="board-control" data-board-filter-tag aria-label="Filter by tag"></select>
                     <button type="button" class="board-clear-filters" data-board-clear-filters
                         data-board-action="clear-filters" hidden>
                         <i class="fa-solid fa-xmark" aria-hidden="true"></i>

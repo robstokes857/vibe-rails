@@ -23,6 +23,9 @@ public interface IJobStore
         CancellationToken cancellationToken = default);
     Task<bool> ReleaseSchedulerLeaseAsync(string ownerId, CancellationToken cancellationToken = default);
     Task<string?> EnqueueManualRunAsync(long jobId, CancellationToken cancellationToken = default);
+    Task<string?> EnqueueBoardCardRunAsync(string projectPath, long jobId, string cardKey, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<JobRunRecord>> GetBoardCardRunsAsync(string projectPath, string cardKey, CancellationToken cancellationToken = default,
+        IReadOnlyList<string>? linkedRecordingIds = null);
     Task<string?> EnqueueRetryAsync(string runId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<string>> EnqueueEventRunsAsync(string projectPath, JobTriggerKind kind, string eventKey, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<string>> EnqueueDueSchedulesAsync(DateTime nowUtc, CancellationToken cancellationToken = default);

@@ -33,7 +33,7 @@ test('board-api.js is a thin client over /api/v1/board with no local placeholder
     for (const route of [
         "call('/boards')", "call('/boards', 'POST', payload)",
         "call(withBoard('/columns', boardId))", "call('/columns', 'POST', payload)", "call('/columns/order', 'PUT', { orderedIds, boardId: boardId || null })",
-        "call(withBoard('/cards', boardId))", "call('/cards', 'POST', payload)", "/move`, 'POST'", "/launch`, 'POST'",
+        "call(withBoard('/cards', boardId), 'GET', null, extra)", "call('/cards', 'POST', payload)", "/move`, 'POST'", "/launch`, 'POST'",
         "/comments`, 'POST', { body })", "/attachments`, 'POST'", "/commits`, 'POST', { sha })", "/diff`)",
         "/sessions`, 'POST'"
     ]) {

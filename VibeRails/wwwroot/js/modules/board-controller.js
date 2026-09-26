@@ -33,6 +33,7 @@ import { BoardApi } from './board-api.js';
 import { BOARD_SELECTION_STORAGE_KEY } from './board-selection.js';
 import { boardContextSection, laneAutomationSection, mountBoardContext, mountLaneAutomation } from './board-settings.js';
 import { renderCardLinksSection, bindCardLinks } from './board-card-links.js';
+import { cardAutomationControls, bindCardAutomations } from './board-card-automations.js';
 import { renderCommentHtml, wrapSelectionAsCode, toPlainPreview } from './board-text.js';
 import { bindFileReferencePopup } from './board-file-refs.js';
 import { openDiffModal } from './diff-modal.js';
@@ -40,7 +41,6 @@ import * as SessionDebug from './session-viewer.js';
 import { renderBoardLaunchOptions, readBoardLaunchOptions, bindBoardLaunchOptions } from './board-launch-options.js';
 import { openBoardAttachment, disposeBoardAttachmentPreview, fileToAttachmentPayload, getAttachmentPreviewKind } from './board-attachments.js';
 
-const PRIORITIES = ['critical', 'high', 'medium', 'low'];
 const CARD_TYPES = [
     { value: 'task', label: 'Task' },
     { value: 'bug', label: 'Bug' },
@@ -48,14 +48,13 @@ const CARD_TYPES = [
     { value: 'research-spike', label: 'Research spike' },
     { value: 'chore', label: 'Chore / tech debt' }
 ];
-const POINTS = [1, 2, 3, 5, 8, 13];
 const LANE_COLORS = ['#64748b', '#3b82f6', '#06b6d4', '#f59e0b', '#10b981', '#a855f7', '#ec4899'];
 const FILTERS_STORAGE_KEY = 'viberails.board.filters.v1';
 // The last board the user looked at (shared with Settings → Integrations, see board-selection.js).
 const BOARD_STORAGE_KEY = BOARD_SELECTION_STORAGE_KEY;
 const RASTER_DATA_URL_RE = /^data:image\/(?:png|jpeg|gif|webp);base64,/i;
 
-const emptyFilters = () => ({ q: '', assignee: '', type: '', priority: '', tag: '' });
+const emptyFilters = () => ({ q: '', assignee: '', type: '', priority: '' });
 // Task-key namespace for the terminal tab that works a card (see wwwroot/AGENTS.md).
 const CARD_TASK_KEY = cardId => `board-card:${cardId}`;
 
@@ -94,6 +93,8 @@ export class BoardController {
         this._filterTimer = null;
         this._refreshAbort = null;
         this.cardPage = null;
+        this._activityDisposers = [];
+        this._activityGeneration = 0;
         BoardApi.attach(app);
         this.state = {
             boards: [],
@@ -127,9 +128,11 @@ export class BoardController {
         this.state.columns = [];
         this.state.cards = [];
         await this.refresh({ restoreSelection: true });
+        if (this.root?.isConnected && this.app.currentView === 'board') this.bindSessionActivity();
     }
 
     unload() {
+        this.disposeSessionActivity();
         clearTimeout(this._filterTimer);
         this.cancelPageRequests();
         this._refreshAbort?.abort();
@@ -150,7 +153,103 @@ export class BoardController {
         this.root = null;
     }
 
+    bindSessionActivity() {
+        this.disposeSessionActivity();
+        const refresh = () => {
+            clearTimeout(this._activityTimer);
+            this._activityTimer = setTimeout(() => void this.refreshSessionActivity(), 500);
+        };
+        for (const event of ['automation_terminal_started', 'session_started', 'session_completed']) {
+            const dispose = this.app.appEventClient?.on(event, refresh);
+            if (dispose) this._activityDisposers.push(dispose);
+        }
+        // Also catches launches in another root and a final event missed during a reconnect.
+        this._activityPoll = setInterval(() => {
+            if (!document.hidden) void this.refreshSessionActivity();
+        }, 10000);
+    }
+
+    disposeSessionActivity() {
+        clearTimeout(this._activityTimer);
+        clearInterval(this._activityPoll);
+        this._activityAbort?.abort();
+        for (const dispose of this._activityDisposers) dispose();
+        this._activityDisposers = [];
+        this._activityGeneration++;
+    }
+
+    async refreshSessionActivity() {
+        const root = this.root;
+        if (!root?.isConnected || this.app.currentView !== 'board' || this._activityPending) return;
+        const generation = this._activityGeneration;
+        const refreshGeneration = this._refreshGeneration;
+        const boardId = this.state.boardId;
+        const editor = document.querySelector('[data-board-card-editor]');
+        const cardId = editor?.dataset.cardId;
+        const current = () => root === this.root && root.isConnected && generation === this._activityGeneration
+            && refreshGeneration === this._refreshGeneration && boardId === this.state.boardId;
+        const abort = this._activityAbort = new AbortController();
+        this._activityPending = true;
+        const loadedIds = [...new Set(this.state.cards.map(card => card.id))];
+        const readActivity = async () => {
+            const cards = [];
+            // Bound every request and never fetch the unloaded remainder of a completed lane.
+            for (let offset = 0; offset < loadedIds.length; offset += 100) {
+                if (!current() || abort.signal.aborted) return [];
+                cards.push(...await BoardApi.getBoardCardActivityAsync(boardId,
+                    loadedIds.slice(offset, offset + 100), { signal: abort.signal }));
+            }
+            return cards;
+        };
+        try {
+            const [cards, detail] = await Promise.all([
+                readActivity(),
+                cardId ? BoardApi.getBoardCardAsync(cardId, { signal: abort.signal }) : null
+            ]);
+            if (!current()) return;
+            const byId = new Map(cards.map(card => [card.id, card]));
+            const tiles = new Map([...root.querySelectorAll('[data-card-id]')].map(tile => [tile.dataset.cardId, tile]));
+            for (const card of this.state.cards) {
+                const fresh = byId.get(card.id);
+                if (!fresh) continue;
+                const changed = card.activeTabId !== fresh.activeTabId || card.hasActiveAutomation !== fresh.hasActiveAutomation;
+                card.activeSessionId = fresh.activeSessionId;
+                card.activeTabId = fresh.activeTabId;
+                card.hasActiveAutomation = fresh.hasActiveAutomation;
+                if (!changed) continue;
+                const tile = tiles.get(card.id);
+                if (!tile) continue;
+                tile.classList.toggle('is-live', Boolean(card.activeTabId));
+                const aside = tile.querySelector('.board-card-aside');
+                aside?.querySelector('.board-automation-running')?.remove();
+                aside?.querySelector('.board-live-dot')?.remove();
+                if (card.hasActiveAutomation) aside?.insertAdjacentHTML('afterbegin', this.automationIndicator());
+                if (card.activeTabId) aside?.insertAdjacentHTML('beforeend', '<span class="board-live-dot" title="A terminal session is working this card" aria-label="Session open"></span>');
+            }
+            // Update only the rails and live controls. Never replace the user's draft fields.
+            if (detail && editor.isConnected && editor === document.querySelector('[data-board-card-editor]') && editor.dataset.cardId === cardId) {
+                const card = editor._boardCard || detail;
+                const changed = card === detail || JSON.stringify(card.sessions) !== JSON.stringify(detail.sessions)
+                    || card.activeSessionId !== detail.activeSessionId || card.activeTabId !== detail.activeTabId;
+                Object.assign(card, { sessions: detail.sessions, activeSessionId: detail.activeSessionId,
+                    activeTabId: detail.activeTabId, hasActiveAutomation: detail.hasActiveAutomation });
+                if (changed) this.renderSessionsPanel(editor, card);
+                void this.cardAutomations?.refresh();
+            }
+        } catch (error) {
+            if (current()) console.warn('Could not refresh Board session activity:', error);
+        } finally {
+            this._activityPending = false;
+        }
+    }
+
+    automationIndicator() {
+        return '<span class="board-automation-running" title="Automation running" role="img" aria-label="Automation running"><i class="fa-solid fa-robot" aria-hidden="true"></i></span>';
+    }
+
     disposeCardPickers() {
+        this.cardAutomations?.dispose();
+        this.cardAutomations = null;
         try { this.launchOptionsDispose?.(); } catch { /* already torn down */ }
         this.launchOptionsDispose = null;
         try { this.assigneePickerDispose?.(); } catch { /* already torn down */ }
@@ -180,7 +279,9 @@ export class BoardController {
         try {
             const raw = localStorage.getItem(FILTERS_STORAGE_KEY);
             if (!raw) return emptyFilters();
-            return { ...emptyFilters(), ...JSON.parse(raw) };
+            const saved = JSON.parse(raw);
+            return Object.fromEntries(Object.keys(emptyFilters()).map(key =>
+                [key, typeof saved?.[key] === 'string' ? saved[key] : '']));
         } catch {
             return emptyFilters();
         }
@@ -292,7 +393,6 @@ export class BoardController {
         if (filters.assignee && canonicalLlmSelection(card.assignee) !== canonicalLlmSelection(filters.assignee)) return false;
         if (filters.type && cardType(card.type).value !== filters.type) return false;
         if (filters.priority && card.priority !== filters.priority) return false;
-        if (filters.tag && !(card.tags || []).includes(filters.tag)) return false;
         return true;
     }
 
@@ -317,16 +417,9 @@ export class BoardController {
         return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label));
     }
 
-    allTags() {
-        if (this.cardPage?.tags) return this.cardPage.tags;
-        const tags = new Set();
-        this.state.cards.forEach(card => (card.tags || []).forEach(tag => tags.add(tag)));
-        return [...tags].sort();
-    }
-
     hasActiveFilters() {
-        const { q, assignee, type, priority, tag } = this.state.filters;
-        return Boolean(q.trim() || assignee || type || priority || tag);
+        const { q, assignee, type, priority } = this.state.filters;
+        return Boolean(q.trim() || assignee || type || priority);
     }
 
     stats() {
@@ -395,7 +488,6 @@ export class BoardController {
         bindSelect('[data-board-filter-assignee]', 'assignee');
         bindSelect('[data-board-filter-type]', 'type');
         bindSelect('[data-board-filter-priority]', 'priority');
-        bindSelect('[data-board-filter-tag]', 'tag');
 
         const picker = this.query('[data-board-select]');
         picker?.addEventListener('change', () => this.switchBoard(picker.value));
@@ -451,14 +543,6 @@ export class BoardController {
         const type = this.query('[data-board-filter-type]');
         if (type) type.value = this.state.filters.type;
 
-        const tag = this.query('[data-board-filter-tag]');
-        if (tag) {
-            tag.innerHTML = '<option value="">Any tag</option>'
-                + this.allTags().map(name =>
-                    `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
-            tag.value = this.state.filters.tag;
-        }
-
         const search = this.query('[data-board-search]');
         if (search && document.activeElement !== search) search.value = this.state.filters.q;
 
@@ -499,11 +583,6 @@ export class BoardController {
         const live = card.activeTabId
             ? `<span class="board-live-dot" title="A terminal session is working this card" aria-label="Session open"></span>`
             : '';
-        const tags = (card.tags || []).slice(0, 3).map(tag => {
-            const active = tag === this.state.filters.tag ? ' is-on' : '';
-            return `<button type="button" class="board-tag${active}" data-board-action="filter-tag"
-                data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</button>`;
-        }).join('');
         const excerpt = toPlainPreview(card.description || '', 110);
         const commentCount = Number(card.commentCount) || 0;
         const comments = commentCount > 0
@@ -537,8 +616,8 @@ export class BoardController {
                     <h3 class="board-card-title">${escapeHtml(card.title)}</h3>
                     ${excerpt ? `<p class="board-card-excerpt">${escapeHtml(excerpt)}</p>` : ''}
                     <div class="board-card-meta">
-                        <div class="board-tags">${tags}</div>
                         <div class="board-card-aside">
+                            ${card.hasActiveAutomation ? this.automationIndicator() : ''}
                             ${live}
                             ${card.blocked ? `<i class="fa-solid fa-triangle-exclamation board-blocked"
                                 title="Blocked" aria-hidden="true"></i>` : ''}
@@ -818,16 +897,6 @@ export class BoardController {
         const cardEl = event.target.closest('.board-card');
         const avatar = event.target.closest('[data-assignee-id]');
 
-        if (action === 'filter-tag') {
-            event.preventDefault();
-            event.stopPropagation();
-            const next = trigger.dataset.tag;
-            this.state.filters.tag = this.state.filters.tag === next ? '' : next;
-            this.persistFilters();
-            this.filtersChanged();
-            return;
-        }
-
         if (avatar && cardEl) {
             event.stopPropagation();
             const id = avatar.dataset.assigneeId;
@@ -1028,30 +1097,6 @@ export class BoardController {
                             </div>
                         </div>
                         <div data-board-launch-options></div>
-                        <div class="row g-2">
-                            <div class="col-6">
-                                <label class="board-editor-label" for="board-card-priority">Priority</label>
-                                <select class="form-select form-select-sm" id="board-card-priority">
-                                    ${PRIORITIES.map(priority => `
-                                        <option value="${priority}"${priority === (card?.priority || 'medium') ? ' selected' : ''}>${priority[0].toUpperCase()}${priority.slice(1)}</option>
-                                    `).join('')}
-                                </select>
-                            </div>
-                            <div class="col-6">
-                                <label class="board-editor-label" for="board-card-points">Points</label>
-                                <select class="form-select form-select-sm" id="board-card-points">
-                                    <option value="">None</option>
-                                    ${POINTS.map(points => `
-                                        <option value="${points}"${String(points) === String(card?.points ?? '') ? ' selected' : ''}>${points}</option>
-                                    `).join('')}
-                                </select>
-                            </div>
-                        </div>
-                        <div>
-                            <label class="board-editor-label" for="board-card-tags">Tags</label>
-                            <input type="text" class="form-control form-control-sm" id="board-card-tags"
-                                placeholder="auth, bug" value="${escapeHtml((card?.tags || []).join(', '))}">
-                        </div>
                         <div class="form-check">
                             <input class="form-check-input" type="checkbox" id="board-card-flagged"
                                 data-board-flagged${card?.flagged ? ' checked' : ''}>
@@ -1086,7 +1131,7 @@ export class BoardController {
                     <section class="board-side-section">
                         <h3 class="board-side-label">
                             <i class="fa-solid fa-terminal" aria-hidden="true"></i>
-                            Sessions <span class="board-count" data-board-count="sessions">${card?.sessions?.length || 0}</span>
+                            Sessions <span class="board-count" data-board-count="sessions">${(card?.sessions || []).filter(session => !session.isAutomation).length}</span>
                         </h3>
                         <div class="board-side-list" data-board-sessions></div>
                         <p class="board-side-empty">Link the same session to every card it is working on.</p>
@@ -1098,6 +1143,15 @@ export class BoardController {
                                 <i class="fa-solid fa-plus" aria-hidden="true"></i>
                             </button>
                         </form>` : ''}
+                    </section>
+
+                    <section class="board-side-section">
+                        <h3 class="board-side-label">
+                            <i class="fa-solid fa-robot" aria-hidden="true"></i>
+                            Automations <span class="board-count" data-board-count="automations">${(card?.sessions || []).filter(session => session.isAutomation).length}</span>
+                        </h3>
+                        ${cardAutomationControls(Boolean(card))}
+                        <div class="board-side-list" data-board-automations></div>
                     </section>
 
                     ${card ? `<section class="board-side-section">
@@ -1222,6 +1276,10 @@ export class BoardController {
         // environments plus the bare CLIs, never a shell, never a Worker).
         this.disposeCardPickers();
         const assigneeSelect = editor.querySelector('#board-card-assignee');
+        this.cardAutomations = bindCardAutomations(editor, card, {
+            app: this.app,
+            onQueued: () => void this.refreshSessionActivity()
+        });
         if (assigneeSelect) {
             this.assigneePickerDispose = mountLlmPicker(this.app, assigneeSelect, {
                 context: 'sandbox',
@@ -1785,12 +1843,17 @@ export class BoardController {
 
     renderSessionsPanel(editor, card) {
         this.updateStartWorkButton(editor, card);
-        const host = editor.querySelector('[data-board-sessions]');
-        if (!host) return;
         const sessions = card?.sessions || [];
+        this.renderSessionList(editor, card, sessions.filter(session => !session.isAutomation), 'sessions');
+        this.renderSessionList(editor, card, sessions.filter(session => session.isAutomation), 'automations');
+    }
 
+    renderSessionList(editor, card, sessions, section) {
+        const host = editor.querySelector(`[data-board-${section}]`);
+        if (!host) return;
+        this.updateSectionCount(editor, section, sessions.length);
         if (!sessions.length) {
-            host.innerHTML = '<p class="board-side-empty">No sessions linked.</p>';
+            host.innerHTML = `<p class="board-side-empty">${section === 'automations' ? 'No recordings yet.' : 'No sessions linked.'}</p>`;
             return;
         }
 
@@ -1802,7 +1865,7 @@ export class BoardController {
             <div class="board-side-row${session.active ? ' is-live' : ''}" data-session-id="${escapeHtml(session.id)}">
                 <button type="button" class="board-side-main" data-board-open-session="${escapeHtml(session.id)}"
                     title="${escapeHtml(session.active ? 'Open this terminal tab' : 'Replay this session')}">
-                    <i class="fa-solid ${session.active ? 'fa-terminal' : 'fa-clock-rotate-left'} board-side-icon" aria-hidden="true"></i>
+                    <i class="fa-solid ${session.isAutomation ? 'fa-robot' : session.active ? 'fa-terminal' : 'fa-clock-rotate-left'} board-side-icon${session.isAutomation && session.active ? ' board-automation-running' : ''}" aria-hidden="true"></i>
                     <span class="board-side-text">
                         <span class="board-side-title">${session.active ? '<span class="board-live-dot" aria-hidden="true"></span>' : ''}${escapeHtml(session.displayName)}</span>
                         <span class="board-side-sub">${escapeHtml(sub)}</span>
@@ -1905,7 +1968,6 @@ export class BoardController {
             const card = await this.reloadEditingCard(editor);
             if (!card) return;
             this.renderSessionsPanel(editor, card);
-            this.updateSectionCount(editor, 'sessions', card.sessions.length);
             editor.querySelector('[data-board-add-session]')?.reset();
         } catch (error) {
             this.app.showToast('Board', error?.message || 'Failed to add the session.', 'error');
@@ -1918,7 +1980,6 @@ export class BoardController {
             const fresh = await this.reloadEditingCard(editor);
             if (!fresh) return;
             this.renderSessionsPanel(editor, fresh);
-            this.updateSectionCount(editor, 'sessions', fresh.sessions.length);
         } catch (error) {
             this.app.showToast('Board', error?.message || 'Failed to remove the session.', 'error');
         }
@@ -1944,9 +2005,6 @@ export class BoardController {
             type: value('#board-card-type'),
             assignee: value('#board-card-assignee'),
             baseLlmOptions: readBoardLaunchOptions(editor, value('#board-card-assignee')),
-            priority: value('#board-card-priority'),
-            points: value('#board-card-points'),
-            tags: value('#board-card-tags').split(',').map(tag => tag.trim()).filter(Boolean),
             blocked: Boolean(editor.querySelector('[data-board-blocked]')?.checked),
             flagged: Boolean(editor.querySelector('[data-board-flagged]')?.checked)
         };

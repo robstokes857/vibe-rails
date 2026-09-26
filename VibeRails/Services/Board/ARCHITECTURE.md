@@ -1,11 +1,61 @@
 # Vibe Board architecture and review
 
+## VB-44: manual card Automations and simpler Board controls (2026-09-26)
+
+Review fixes: visible-page activity refresh calls `POST /api/v1/board/cards/activity` with
+only loaded card IDs, in batches of at most 100. `IBoardStore.GetCardActivityAsync` reads
+scoped card IDs and live session references without descriptions or historical rails. Responses
+contain only the card ID, active session/tab IDs and Automation indicator; navigation discards
+stale responses and stops further batches. The open editor retains its independent detail refresh.
+The card-run query excludes already-linked recordings before applying its 20-run limit, so newer
+recordings cannot hide older queued runs or failures before launch.
+
+The card's Automations rail has a project Automation selector and **Run automation** action.
+It runs against the saved card, preserving editor drafts. New cards must be saved first.
+`BoardCardAutomationService` resolves the card through `IBoardStore`; `JobService` checks
+the job/project, enabled state and runtime availability. `JobStore.EnqueueBoardCardRunAsync`
+rechecks the project and enabled/overlap conditions while snapshotting the actions.
+The existing `JobRuns.TriggerKey` retains `board-card:<actual-card-key>:<unique-event>` with
+`TriggerKind.Manual`; no table, column, stored tag, or historical run is rewritten.
+
+`JobBoardContext` recognizes both lane entries and explicit card runs. Both open terminal tabs,
+retain Worker Board context and link their recordings through `BoardAutomationSessionLinker`.
+Ordinary manual runs and retries keep native-terminal behavior; retries receive a new trigger
+key and do not inherit the earlier card. The card's new GET endpoint returns the latest 20
+manual card runs that have no linked recording, including queued runs and launch failures.
+Once linked, the existing Automations recording rail provides open/replay actions. Catalog/status
+refreshes use the editor lifecycle and existing activity refresh; stale responses cannot repaint
+another editor, and submitting a run never replaces unsaved text.
+
+Board tiles and toolbar no longer display tags. The editor already omits them on save, and
+legacy browser tag filters are ignored. Stored tags, API fields and schema remain intact.
+Chat uses a visible accent outline, subtle tint and keyboard focus ring.
+
+## Automation presentation and launch location (2026-09-25)
+
+Board lane runs open recorded terminal tabs regardless of the retired saved launch preference.
+Schedule, commit, pre-commit and manual runs (including retries) open native terminals. New run
+snapshots retain the derived value for older readers; no schema or historical rows are rewritten.
+The Jobs runner detects an existing outer recording by TerminalSessionId to avoid double recording.
+
+Board keeps one session-link store and presents two rails: Sessions, then Automations. Automation
+links have an explicit origin; older native/outer/Worker recordings are recognized through their
+project-scoped JobRuns session IDs on read. The display name is never used for classification.
+A live Automation sets hasActiveAutomation on list/detail responses and blinks the shared robot
+icon on the card. The same root-local live-session probe drives the existing border and this icon.
+The editor omits Priority, Points, Tags and the YOLO warning text while preserving stored fields
+and the explicit YOLO checkbox. No database cleanup or backfill is involved.
+
 ## Launch prompt activity and Automation discovery (2026-09-24)
 
 `BoardLaunchService` passes comment, note and earlier-session counts from the detail it already
 reads, before linking the new session. `BoardPromptComposer` includes those counts and the linked
 commit count inside the card fence. Missing activity context is explicitly `unknown`.
-Work launches request `get_board_card` before project work only for a truncated description,
+Both launch intents report the card's flag status. A flagged card explicitly requires reading
+`get_board_card` and its comments for the agent's unresolved issue and any code review findings,
+then checking later comments for decisions or fixes. This applies even with zero activity counts;
+the flag is cleared only after its reasons are resolved. Chat still waits for the user's direction.
+Other work launches request `get_board_card` before project work only for a truncated description,
 unknown activity or a nonzero activity count; fresh cards start with the repository instructions
 and inline task. Attachment ids already carried inline can go directly to `read_board_attachment`.
 Chat launches still read the full card, summarize status and wait for the user's direction.

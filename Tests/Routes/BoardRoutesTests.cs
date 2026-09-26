@@ -16,6 +16,7 @@ using VibeRails.Routes;
 using VibeRails.Services;
 using VibeRails.Services.Board;
 using VibeRails.Services.Jira;
+using VibeRails.Services.Jobs;
 using VibeRails.Services.Terminal;
 using VibeRails.Utils;
 using Xunit;
@@ -69,6 +70,11 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         builder.Services.AddSqliteBoardStorage(_ => Path.Combine(_root, "state.db"));
         builder.Services.AddSqliteJobStorage(_ => Path.Combine(_root, "state.db"));
         builder.Services.AddScoped<BoardAutomationService>();
+        builder.Services.AddScoped<BoardCardAutomationService>();
+        builder.Services.AddScoped<IJobService, JobService>();
+        builder.Services.AddSingleton(new Mock<IJobExecutableResolver>().Object);
+        builder.Services.AddSingleton(new Mock<IJobScheduler>().Object);
+        builder.Services.AddSingleton(new Mock<IAutomationScriptService>().Object);
         builder.Services.AddSingleton(commits.Object);
         builder.Services.AddSingleton<IBoardLiveSessionProbe, NullBoardLiveSessionProbe>();
         builder.Services.AddScoped<IBoardService, BoardService>();
@@ -145,6 +151,86 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         Assert.Equal(job.Id, pending.JobId);
         Assert.Equal(reviewId, pending.ColumnId);
         Assert.InRange(pending.DueUtc, DateTime.UtcNow.AddSeconds(50), DateTime.UtcNow.AddSeconds(70));
+    }
+
+    [Fact]
+    public async Task CardAutomations_UseAuthenticatedScopedAotRequests_AndRetainQueuedRuns()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var boards = _app.Services.GetRequiredService<IBoardStore>();
+        var jobs = _app.Services.GetRequiredService<IJobStore>();
+        await boards.EnsureDefaultColumnsAsync(_project, ct);
+        var card = await boards.CreateCardAsync(_project, new(null, "Run from here", "", null, "medium", null, [], false), ct);
+        await using (var connection = new SqliteConnection(_connectionString))
+        {
+            await connection.OpenAsync(ct);
+            await using var command = connection.CreateCommand();
+            command.CommandText = SqlStrings.CreateEnvironmentsTable;
+            await command.ExecuteNonQueryAsync(ct);
+        }
+        var job = await jobs.CreateJobAsync(new("Checks", _project, LLM.NotSet, null, "", null, true, [],
+            Actions: [new(null, JobActionKind.Script, ScriptPath: "check.py", ScriptRuntime: JobScriptRuntime.Python, ApprovedHash: "pinned")]), ct);
+        var path = $"/api/v1/board/cards/{card.Id}/automations";
+        foreach (var method in new[] { HttpMethod.Get, HttpMethod.Post })
+        {
+            using var none = await SendAsync(method, path);
+            using var sessionOnly = await SendAsync(method, path, "test-session");
+            using var tabOnly = await SendAsync(method, path, tab: "test-tab");
+            Assert.Equal(HttpStatusCode.Unauthorized, none.StatusCode);
+            Assert.Equal(HttpStatusCode.Unauthorized, sessionOnly.StatusCode);
+            Assert.Equal(HttpStatusCode.Unauthorized, tabOnly.StatusCode);
+        }
+        using var listed = await GetJsonAsync(path);
+        Assert.Equal(job.Id, listed.RootElement.GetProperty("jobs")[0].GetProperty("id").GetInt64());
+        using var invalid = await SendJsonAsync(HttpMethod.Post, path, new { jobId = 0 });
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        using var queued = await SendJsonAsync(HttpMethod.Post, path, new { jobId = job.Id });
+        queued.EnsureSuccessStatusCode();
+        using var queuedJson = await ReadJsonAsync(queued);
+        var runId = queuedJson.RootElement.GetProperty("runId").GetString();
+        Assert.Equal(card.Key, JobRunner.GetBoardCardKey((await jobs.GetRunAsync(runId!, ct))!));
+        using var reopened = await GetJsonAsync(path);
+        Assert.Equal(runId, reopened.RootElement.GetProperty("runs")[0].GetProperty("id").GetString());
+        using var duplicate = await SendJsonAsync(HttpMethod.Post, path, new { jobId = job.Id });
+        Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
+        using var foreign = await SendJsonAsync(HttpMethod.Post, "/api/v1/board/cards/card_foreign/automations", new { jobId = job.Id });
+        Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
+    }
+
+    [Fact]
+    public async Task ActivityRequiresBothCredentials_BoundsRequests_AndOmitsCardText()
+    {
+        const string path = "/api/v1/board/cards/activity";
+        using var none = await SendAsync(HttpMethod.Post, path);
+        using var sessionOnly = await SendAsync(HttpMethod.Post, path, "test-session");
+        using var tabOnly = await SendAsync(HttpMethod.Post, path, tab: "test-tab");
+        Assert.Equal(HttpStatusCode.Unauthorized, none.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, sessionOnly.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, tabOnly.StatusCode);
+        var ct = TestContext.Current.CancellationToken;
+        var boards = _app.Services.GetRequiredService<IBoardStore>();
+        await boards.EnsureDefaultColumnsAsync(_project, ct);
+        var card = await boards.CreateCardAsync(_project, new(null, "Large card", new string('x', 100_000), null, "medium", null, [], false), ct);
+        var boardId = (await boards.GetBoardsAsync(_project, ct))[0].Id;
+        using var response = await PostJsonAsync(path, new { boardId, cardIds = new[] { card.Id } });
+        response.EnsureSuccessStatusCode();
+        using var json = await ReadJsonAsync(response);
+        var activity = Assert.Single(json.RootElement.GetProperty("cards").EnumerateArray());
+        Assert.Equal(card.Id, activity.GetProperty("id").GetString());
+        Assert.Equal(JsonValueKind.Null, activity.GetProperty("activeTabId").ValueKind);
+        Assert.False(activity.GetProperty("hasActiveAutomation").GetBoolean());
+        Assert.Equal(4, activity.EnumerateObject().Count());
+        Assert.True(json.RootElement.GetRawText().Length < 250);
+        using var oversized = await PostJsonAsync(path, new { boardId, cardIds = Enumerable.Repeat(card.Id, 101) });
+        Assert.Equal(HttpStatusCode.BadRequest, oversized.StatusCode);
+        using var invalid = await PostJsonAsync(path, new { boardId, cardIds = new string?[] { null } });
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        using var missing = await PostJsonAsync(path, new { boardId });
+        Assert.Equal(HttpStatusCode.BadRequest, missing.StatusCode);
+        using var foreign = await PostJsonAsync(path, new { boardId = "foreign", cardIds = new[] { card.Id } });
+        foreign.EnsureSuccessStatusCode();
+        using var foreignJson = await ReadJsonAsync(foreign);
+        Assert.Empty(foreignJson.RootElement.GetProperty("cards").EnumerateArray());
     }
 
     [Fact]

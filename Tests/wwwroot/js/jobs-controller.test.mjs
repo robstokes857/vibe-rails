@@ -265,8 +265,7 @@ test('New Automations derive repository, LLM, and prompt from the current Enviro
         ['#job-name', { value: 'OpenCode review' }],
         ['#job-timeout', { value: '30' }],
         ['#job-enabled', { checked: false }],
-        ['#job-launch-minimized', { checked: true }],
-        ['#job-launch-target', { value: 'tab' }]
+        ['#job-launch-minimized', { checked: true }]
     ]);
     const form = {
         querySelector(selector) { return controls.get(selector) || null; },
@@ -283,7 +282,7 @@ test('New Automations derive repository, LLM, and prompt from the current Enviro
     assert.equal(app.calls[0].body.environmentId, 42);
     assert.equal(app.calls[0].body.prompt, 'Perform the Environment-owned security review.');
     assert.equal(app.calls[0].body.launchMinimized, true);
-    assert.equal(app.calls[0].body.launchInTerminalTab, true);
+    assert.equal(Object.hasOwn(app.calls[0].body, 'launchInTerminalTab'), false);
     assert.deepEqual(app.calls[0].body.triggers, [{ kind: 2 }]);
 });
 

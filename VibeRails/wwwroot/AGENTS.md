@@ -22,7 +22,7 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | [js/modules/code-analyzer-dashboard.js](js/modules/code-analyzer-dashboard.js) | MintLint report model helpers (plus the unmounted legacy workspace renderer) |
 | [js/modules/code-report/viewer.js](js/modules/code-report/viewer.js) | Code Atlas / Quality Lab report inline in Project health's Code quality card: real repository graph, inline saved-details panel and explicit teardown; see [integration contract](js/modules/code-report/README.md) |
 | [js/modules/project-health-fix-launcher.js](js/modules/project-health-fix-launcher.js) | Inline shared agent/environment pickers beside Project health Fix actions; synchronizes and remembers the target for direct launch |
-| [js/modules/jobs-controller.js](js/modules/jobs-controller.js) | Automation page: ordered repository-script/Worker workflow editor, automation CRUD, per-action run details, recipes, and "Run now" (queues a native-terminal or terminal-tab run; `launchFromNav` for the nav launcher); owns the shared `PythonScriptsController` |
+| [js/modules/jobs-controller.js](js/modules/jobs-controller.js) | Automation page: ordered repository-script/Worker workflow editor, automation CRUD, per-action run details, recipes, and "Run now" (queues a native-terminal run; `launchFromNav` for the nav launcher); owns the shared `PythonScriptsController` |
 | [js/modules/python-scripts-controller.js](js/modules/python-scripts-controller.js) | "Python scripts" section of the Automation page + shared lifecycle and signing flows |
 | [js/modules/python-script-workbench.js](js/modules/python-script-workbench.js) | `python-script` view: Monaco editor beside a docked agent terminal for one script (see "Python script workbench" below) |
 | [js/modules/python-run-window.js](js/modules/python-run-window.js) | The little run window: argument rows + stdin in, exit code / output / return value out, no terminal (see "Python script run window" below) |
@@ -156,8 +156,7 @@ browser owns no debounce timer. New cards count as lane entries; same-lane edits
 not. Saved settings affect future entries and cancel pending entries for the lane. Disabled
 Automations and active-job overlap are skipped independently for each selection. Clear all
 checkboxes to disable lane Automations; selected disabled/deleted jobs remain removable. The ordinary root Automation scheduler and
-configured native-terminal or terminal-tab run lifecycle apply. Automation recordings link to the triggering card
-through the ordinary Sessions rail.
+trigger-based run lifecycle apply: Board lane runs and runs started from a card open terminal tabs; ordinary manual runs, retries and other triggers open native terminals. Automation recordings appear in the Automations rail immediately below Sessions.
 
 The view uses the app's shared surfaces rather than its own: `app.showModal` (upgraded to
 `modal-xl` for the card editor, the same way the rule and quality modals do it), `confirmDialog`
@@ -619,9 +618,10 @@ History remains unfiltered so launch preferences never hide historical sessions.
 
 Both base CLI and custom environment launches share one unified tab API; the only difference is whether `environmentName` is included in the start body.
 
-Automations choose **Native terminal** (the compatible default) or **Terminal tab** in the editor.
-The backend scheduler honors the snapshotted choice for every trigger and retry; `runNow` still
-just POSTs, toasts and refreshes history. Tab workflows run the ordinary `vb --job-run` child in a
+Board lane Automations open **Terminal tabs**. All other triggers, including manual retries, open
+**Native terminals**. The editor has no launch-location selector; older stored preferences remain
+in place but do not choose the launch location. `runNow` still just POSTs, toasts and refreshes history.
+Tab workflows run the ordinary `vb --job-run` child in a
 recorded shell tab, retaining Worker workspace/arguments and script ordering. History shows a
 copyable session ID and a full-workflow replay alongside individual Worker recordings.
 
@@ -788,3 +788,34 @@ the palette and compact spacing; toasts retain escaped content, hover pause and 
 `session-replay-playback.js` owns the replay clock shared by session/history viewers. Elapsed-time
 batching avoids a timer per output chunk, so dense recordings respect 5x/10x speeds despite browser
 timer clamping. Speed changes reschedule immediately; pause/seek/restart/close reset the clock.
+
+
+### Board Automation activity
+
+Saved cards also expose **Run automation** in this rail. `board-card-automations.js` owns its
+project workflow selector, submit guard, inline queued/failed runs and abortable catalog reads.
+It uses the saved card without saving or replacing editor drafts. Close/replacement/unload
+dispose it alongside the card pickers; the existing activity refresh updates it. New cards show
+a Save-first hint. The two `/cards/{card}/automations` endpoints resolve both the card and job
+within the server-derived project; card-originated runs open terminal tabs and keep the card
+link in their immutable run trigger. Linked recordings use the existing open/replay rail.
+
+Board tags are hidden: no tile chips, editor field, or tag filter. Ignore legacy saved tag filters
+and omit tags on card saves; keep stored tag data and API compatibility. The discussion button
+has an accent outline and focus ring so it reads as an action beside the agent picker.
+
+The card editor groups linked recordings into Sessions and Automations (`session.isAutomation`),
+with separate counts and the same live-terminal/replay/remove actions. New Automation links carry
+an `automation` origin; older recordings are identified by their project-scoped JobRuns recording
+IDs through `IBoardStore`, so renaming a recording does not change its group. List/detail responses
+include `hasActiveAutomation`; cards show the Environment UI's `fa-robot` icon blinking alongside
+the live-session border. Reduced-motion preferences disable the animation.
+
+While Board is mounted, session lifecycle events and a ten-second visible-page fallback refresh
+activity through `POST /api/v1/board/cards/activity`, requesting only loaded card IDs in batches
+of at most 100. Its response contains live session fields without card descriptions or historical
+rails; it never fetches the unloaded card catalog. The open editor keeps its own detail refresh.
+Loaded lane pages, ordering, scroll and editor drafts are preserved; stale responses
+are discarded after navigation/editor replacement. Unload disposes subscriptions, timers and requests.
+The editor no longer shows the YOLO warning text or Priority, Points and Tags fields. Saves omit
+those retired fields so stored values survive; YOLO remains an explicit checkbox.

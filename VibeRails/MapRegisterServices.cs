@@ -162,6 +162,7 @@ namespace VibeRails
             serviceCollection.AddScoped<Services.Jira.IJiraPullService, Services.Jira.JiraPullService>();
             serviceCollection.AddSingleton<Services.Jira.IJiraPullScheduler, Services.Jira.JiraPullScheduler>();
             serviceCollection.AddScoped<Services.Board.BoardAutomationService>();
+            serviceCollection.AddScoped<Services.Board.BoardCardAutomationService>();
             // Singleton: it holds the ten-second repo file-list cache behind the composer's `@` typeahead.
             serviceCollection.AddSingleton<Services.Board.IBoardFileIndexService, Services.Board.BoardFileIndexService>();
             if (isActiveRootBackendProcess)

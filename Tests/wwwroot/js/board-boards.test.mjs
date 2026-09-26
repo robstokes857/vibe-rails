@@ -59,7 +59,7 @@ test('board-api.js exposes the boards endpoints and passes the board id through'
         assert.match(source, new RegExp(`^\\s+${name},?$`, 'm'), `BoardApi must export ${name}`);
     }
     assert.match(source, /async function getBoardColumnsAsync\(boardId = null\)/);
-    assert.match(source, /async function getBoardCardsAsync\(boardId = null\)/);
+    assert.match(source, /async function getBoardCardsAsync\(boardId = null, extra = \{\}\)/);
     assert.match(source, /async function reorderBoardColumnsAsync\(orderedIds, boardId = null\)/);
 });
 

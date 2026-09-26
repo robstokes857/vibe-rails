@@ -43,7 +43,7 @@ public sealed class JobStoreTerminalTabTests : IDisposable
     }
 
     [Fact]
-    public async Task LaunchPreferenceIsSnapshottedAndRetryUsesOriginalPreference()
+    public async Task ManualRunsAndRetriesUseNativeRegardlessOfRetiredPreference()
     {
         StateDatabaseSchema.Ensure(ConnectionString);
         var store = new JobStore(ConnectionString);
@@ -54,7 +54,7 @@ public sealed class JobStoreTerminalTabTests : IDisposable
         var job = await store.CreateJobAsync(request, token);
         Assert.True(job.LaunchInTerminalTab);
         var runId = (await store.EnqueueManualRunAsync(job.Id, token))!;
-        Assert.True((await store.GetRunAsync(runId, token))!.LaunchInTerminalTab);
+        Assert.False((await store.GetRunAsync(runId, token))!.LaunchInTerminalTab);
 
         var update = new UpdateJobRequest(job.Name, job.ProjectPath, job.Llm, null, "", null, true, [], Actions: request.Actions);
         Assert.True((await store.UpdateJobAsync(job.Id, update, token))!.LaunchInTerminalTab); // old client omits preference
@@ -62,7 +62,7 @@ public sealed class JobStoreTerminalTabTests : IDisposable
         await store.StartRunAsync(runId, Environment.ProcessId, token);
         await store.CompleteRunAsync(runId, JobRunStatus.Failed, 1, "test", token);
         var retry = (await store.EnqueueRetryAsync(runId, token))!;
-        Assert.True((await store.GetRunAsync(retry, token))!.LaunchInTerminalTab);
+        Assert.False((await store.GetRunAsync(retry, token))!.LaunchInTerminalTab);
     }
 
     [Fact]

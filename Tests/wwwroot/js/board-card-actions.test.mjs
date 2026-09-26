@@ -379,3 +379,10 @@ test('Go to agent refreshes an incomplete active session and opens its tab', asy
     assert.equal(h.calls[0].method, 'GET');
     assert.equal(focused, 'live-tab');
 });
+
+
+test('Card edits omit retired fields so existing priority, points and tags survive', async () => {
+    const h = harness();
+    await h.controller.saveCard(h.editor);
+    for (const field of ['priority', 'points', 'tags']) assert.equal(Object.hasOwn(h.calls[0].body, field), false);
+});

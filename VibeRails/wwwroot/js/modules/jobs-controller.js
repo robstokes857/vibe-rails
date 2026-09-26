@@ -922,7 +922,6 @@ export class JobController {
                         <small>Leave blank to let the CLI finish on its own.</small>
                     </div>
                     <label class="job-option-toggle" for="job-enabled"><span><strong>Enabled</strong><small>Allow automatic runs</small></span><input class="job-switch-input" type="checkbox" id="job-enabled" ${source.enabled !== false ? 'checked' : ''}></label>
-                    <div class="job-timeout-option"><label class="form-label" for="job-launch-target">Open workflow in</label><select class="form-select" id="job-launch-target"><option value="native" ${source.launchInTerminalTab !== true ? 'selected' : ''}>Native terminal</option><option value="tab" ${source.launchInTerminalTab === true ? 'selected' : ''}>Terminal tab</option></select></div>
                     <label class="job-option-toggle" for="job-launch-minimized"><span><strong>Launch minimized</strong><small>Keep the run in the background</small></span><input class="job-switch-input" type="checkbox" id="job-launch-minimized" ${source.launchMinimized === true ? 'checked' : ''}></label>
                 </div>
 
@@ -960,12 +959,6 @@ export class JobController {
         afterCommitTrigger?.addEventListener('change', () => {
             if (afterCommitTrigger.checked && beforeCommitTrigger) beforeCommitTrigger.checked = false;
         });
-        const updateLaunchOptions = () => {
-            const minimized = form.querySelector('#job-launch-minimized');
-            if (minimized) minimized.disabled = form.querySelector('#job-launch-target')?.value === 'tab';
-        };
-        form?.querySelector('#job-launch-target')?.addEventListener('change', updateLaunchOptions);
-        updateLaunchOptions();
         form?.addEventListener('submit', event => this.saveJob(event, job));
         updateScheduleFields();
         this.updateEditorEnvironmentPreview();
@@ -1512,7 +1505,6 @@ export class JobController {
             enabled: form.querySelector('#job-enabled').checked,
             triggers,
             launchMinimized: form.querySelector('#job-launch-minimized')?.checked === true,
-            launchInTerminalTab: form.querySelector('#job-launch-target')?.value === 'tab',
             actions: normalizedActions
         };
     }
@@ -1591,7 +1583,6 @@ export class JobController {
             timeoutMinutes: job.timeoutMinutes,
             enabled: !job.enabled,
             launchMinimized: job.launchMinimized === true,
-            launchInTerminalTab: job.launchInTerminalTab === true,
             triggers: (job.triggers || []).map(({ kind, scheduleKind, intervalMinutes, localTime, daysOfWeekMask, timeZoneId }) => ({ kind, scheduleKind, intervalMinutes, localTime, daysOfWeekMask, timeZoneId }))
         };
         return this.withBusy(button, job.enabled ? 'Disabling…' : 'Enabling…', async () => {
@@ -1894,7 +1885,6 @@ export class JobController {
                 }),
             timeoutMinutes: job.timeoutMinutes,
             launchMinimized: job.launchMinimized === true,
-            launchInTerminalTab: job.launchInTerminalTab === true,
             triggers
         };
 
@@ -2135,7 +2125,6 @@ viberails-recipe -->
                 }),
             timeoutMinutes: entry.timeoutMinutes ?? null,
             launchMinimized: entry.launchMinimized === true,
-            launchInTerminalTab: entry.launchInTerminalTab === true,
             triggers: Array.isArray(entry.triggers) ? entry.triggers : []
         };
     }
@@ -2228,7 +2217,6 @@ viberails-recipe -->
             actions: [{ kind: JOB_ACTION.WORKER }],
             timeoutMinutes: recipe?.timeoutMinutes ?? null,
             launchMinimized: recipe?.launchMinimized === true,
-            launchInTerminalTab: recipe?.launchInTerminalTab === true,
             triggers: Array.isArray(recipe?.triggers) ? recipe.triggers : []
         };
     }
@@ -2396,7 +2384,6 @@ viberails-recipe -->
                     timeoutMinutes: Number(recipe.timeoutMinutes) || null,
                     enabled: false,
                     launchMinimized: recipe.launchMinimized === true,
-                    launchInTerminalTab: recipe.launchInTerminalTab === true,
                     actions,
                     triggers: (recipe.triggers || []).filter(t => {
                         const kind = Number(t.kind);

@@ -76,6 +76,7 @@ public static class BoardPromptComposer
             .Append(" · Priority: ").Append(SanitizeLine(card.Priority, 20));
         if (!string.IsNullOrWhiteSpace(assigneeLabel))
             builder.Append(" · Assignee: ").Append(SanitizeLine(assigneeLabel, 80));
+        builder.Append(card.Flagged ? " · FLAGGED: needs attention" : " · Flagged: no");
         builder.Append("\n\n");
 
         // Everything between the fences is board content: title, lane list, commit subjects and
@@ -141,7 +142,12 @@ public static class BoardPromptComposer
         builder.Append("The user has authorized the viberails-mcp Board tools for this card session. ")
             .Append("Use them without asking for another approval when carrying out this board workflow. ")
             .Append("This authorization does not cover unrelated tools or actions.\n\n");
-        if (intent == "chat")
+        if (card.Flagged)
+            builder.Append("This card has been flagged by an agent for an unresolved issue. Read get_board_card ").Append(key)
+                .Append(" and its comments before any project work. Find the comment explaining the flag, including any code review findings, ")
+                .Append("and check later comments for decisions or fixes. Do not infer the remaining work from the title or description alone. ")
+                .Append("Explain any issue that still needs the user's decision. Clear the flag only after its reasons are resolved.\n\n");
+        else if (intent == "chat")
             builder.Append("Read get_board_card ").Append(key)
                 .Append(" for the full card and earlier activity to understand the current status, decisions, blockers and unfinished work.\n\n");
         else

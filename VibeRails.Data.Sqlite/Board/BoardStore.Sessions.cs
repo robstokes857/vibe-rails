@@ -1,9 +1,40 @@
 using Microsoft.Data.Sqlite;
+using VibeRails.Data.Sqlite;
 
 namespace VibeRails.Services.Board;
 
 public sealed partial class BoardStore
 {
+    public async Task<IReadOnlySet<string>> GetAutomationSessionIdsAsync(string projectPath,
+        IReadOnlyList<string> sessionIds, CancellationToken cancellationToken = default)
+    {
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        if (sessionIds.Count == 0) return result;
+        await using var state = await OpenStateAsync(cancellationToken);
+        // A Board-only/stdio host need not have initialized Jobs. This is a read, not setup.
+        if (!SqliteSchema.HasColumn(state, null, "JobRuns", "SessionId"))
+            return result;
+        var hasTerminalSession = SqliteSchema.HasColumn(state, null, "JobRuns", "TerminalSessionId");
+        foreach (var batch in sessionIds.Distinct(StringComparer.Ordinal).Chunk(100))
+        {
+            await using var command = state.CreateCommand();
+            var parameters = string.Join(",", batch.Select((_, index) => $"$s{index}"));
+            var terminal = hasTerminalSession ? "TerminalSessionId" : "NULL";
+            command.CommandText = $"""
+                SELECT SessionId, {terminal} FROM JobRuns
+                WHERE ProjectPath = $project{ProjectPathCollation}
+                  AND (SessionId IN ({parameters}) OR {terminal} IN ({parameters}));
+                """;
+            command.Parameters.AddWithValue("$project", NormalizeProjectPath(projectPath));
+            for (var i = 0; i < batch.Length; i++) command.Parameters.AddWithValue($"$s{i}", batch[i]);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+                for (var i = 0; i < 2; i++)
+                    if (!reader.IsDBNull(i)) result.Add(reader.GetString(i));
+        }
+        return result;
+    }
+
     private static async Task<HashSet<string>> ReadCommitTargetCardsAsync(SqliteConnection connection,
         SqliteTransaction transaction, string project, string cardId, string? sessionId, CancellationToken cancellationToken)
     {

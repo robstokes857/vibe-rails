@@ -3,7 +3,7 @@ using VibeRails.Services.Jobs;
 
 namespace VibeRails.Services.Board;
 
-/// <summary>Links a lane-triggered Automation's replay to the card that queued it.</summary>
+/// <summary>Links a Board Automation's replay to the card that queued it.</summary>
 internal static class BoardAutomationSessionLinker
 {
     internal static async Task LinkAsync(IBoardStore boards, JobRunRecord run, string sessionId,
@@ -21,7 +21,7 @@ internal static class BoardAutomationSessionLinker
         try
         {
             await boards.LinkSessionAsync(run.ProjectPath, card.Card.Id, sessionId, tabId, selection,
-                cli, $"Automation: {run.JobName}", BoardSessionRecord.LaunchOrigin, cancellationToken);
+                cli, $"Automation: {run.JobName}", BoardSessionRecord.AutomationOrigin, cancellationToken);
         }
         catch (BoardConflictException)
         {

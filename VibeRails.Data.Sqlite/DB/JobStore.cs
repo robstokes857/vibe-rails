@@ -352,7 +352,7 @@ public sealed partial class JobStore : IJobStore
                 SELECT $retryId, source.JobId, $manual, $triggerKey, $queued, source.JobName,
                        source.ProjectPath, source.Llm, source.EnvironmentId,
                        source.EnvironmentName, source.TimeoutMinutes, $queuedUtc,
-                       source.LaunchMinimized, source.LaunchInTerminalTab
+                       source.LaunchMinimized, 0
                 FROM JobRuns source
                 JOIN Jobs job ON job.Id = source.JobId AND job.DeletedUTC IS NULL
                 WHERE source.Id = $sourceId AND source.DeletedUTC IS NULL
@@ -1252,7 +1252,7 @@ public sealed partial class JobStore : IJobStore
                  EnvironmentId, EnvironmentName, TimeoutMinutes, QueuedUTC, LaunchMinimized, LaunchInTerminalTab)
             SELECT $runId, j.Id, $triggerKind, $triggerKey, $queued, j.Name, j.ProjectPath,
                    COALESCE(e.LLM, 0), j.EnvironmentId, e.CustomName, j.TimeoutMinutes, $queuedUtc,
-                   j.LaunchMinimized, j.LaunchInTerminalTab
+                   j.LaunchMinimized, $launchInTerminalTab
             FROM Jobs j
             LEFT JOIN Environments e ON e.Id = j.EnvironmentId
             WHERE j.Id = $jobId AND ($requireEnabled = 0 OR j.Enabled = 1) AND j.DeletedUTC IS NULL
@@ -1266,6 +1266,8 @@ public sealed partial class JobStore : IJobStore
         command.Parameters.AddWithValue("$jobId", jobId);
         command.Parameters.AddWithValue("$projectPath", expectedProjectPath is null ? DBNull.Value : expectedProjectPath);
         command.Parameters.AddWithValue("$triggerKind", (int)kind);
+        // Retain the column for older readers; launch location follows the trigger, not the retired preference.
+        command.Parameters.AddWithValue("$launchInTerminalTab", JobBoardContext.OpensTerminalTab(kind, triggerKey) ? 1 : 0);
         command.Parameters.AddWithValue("$triggerKey", triggerKey);
         command.Parameters.AddWithValue("$queued", (int)JobRunStatus.Queued);
         command.Parameters.AddWithValue("$running", (int)JobRunStatus.Running);

@@ -92,6 +92,14 @@ async function saveLaneAutomationAsync(columnId, payload) {
     return call(`/columns/${enc(columnId)}/automation`, 'PUT', payload);
 }
 
+async function getCardAutomationsAsync(cardId, extra = {}) {
+    return call(`/cards/${enc(cardId)}/automations`, 'GET', null, extra);
+}
+
+async function runCardAutomationAsync(cardId, jobId) {
+    return call(`/cards/${enc(cardId)}/automations`, 'POST', { jobId });
+}
+
 /** Deletes the board with its lanes and cards; the server refuses the project's last board. */
 async function deleteBoardAsync(boardId) {
     return call(`/boards/${enc(boardId)}`, 'DELETE');
@@ -124,9 +132,14 @@ async function reorderBoardColumnsAsync(orderedIds, boardId = null) {
 
 // ---------------------------------------------- cards
 
-async function getBoardCardsAsync(boardId = null) {
-    const response = await call(withBoard('/cards', boardId));
+async function getBoardCardsAsync(boardId = null, extra = {}) {
+    const response = await call(withBoard('/cards', boardId), 'GET', null, extra);
     return (response?.cards || []).sort((a, b) => a.position - b.position || a.key.localeCompare(b.key));
+}
+
+async function getBoardCardActivityAsync(boardId, cardIds, extra = {}) {
+    const response = await call('/cards/activity', 'POST', { boardId, cardIds }, extra);
+    return response?.cards || [];
 }
 
 async function getBoardCardPageAsync(boardId, filters = {}, { columnId, offset = 0, continuationToken, signal } = {}) {
@@ -300,6 +313,8 @@ export const BoardApi = {
     saveBoardContextAsync,
     getLaneAutomationAsync,
     saveLaneAutomationAsync,
+    getCardAutomationsAsync,
+    runCardAutomationAsync,
     deleteBoardAsync,
     getBoardColumnsAsync,
     createBoardColumnAsync,
@@ -307,6 +322,7 @@ export const BoardApi = {
     deleteBoardColumnAsync,
     reorderBoardColumnsAsync,
     getBoardCardsAsync,
+    getBoardCardActivityAsync,
     getBoardCardPageAsync,
     getBoardCardAsync,
     createBoardCardAsync,

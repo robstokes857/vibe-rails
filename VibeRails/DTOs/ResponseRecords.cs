@@ -199,7 +199,8 @@ namespace VibeRails.DTOs
         string Selection,
         string Origin,
         DateTime CreatedAt,
-        bool Active);
+        bool Active,
+        bool IsAutomation = false);
 
     // LinkedAt is when the commit was put on the card; CommittedAt is the commit's own date. "Since"
     // views filter on LinkedAt: linking an old commit during a session is that session's activity.
@@ -224,7 +225,8 @@ namespace VibeRails.DTOs
         BaseLlmOptions? BaseLlmOptions = null,
         string Type = BoardCardTypes.Default,
         string BoardId = "",
-        bool Flagged = false);
+        bool Flagged = false,
+        bool HasActiveAutomation = false);
     public record BoardCardListResponse(List<BoardCardSummaryResponse> Cards)
     {
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -272,7 +274,8 @@ namespace VibeRails.DTOs
         List<BoardCommentDto>? Notes = null,
         string Type = BoardCardTypes.Default,
         string BoardId = "",
-        bool Flagged = false)
+        bool Flagged = false,
+        bool HasActiveAutomation = false)
     {
         public List<BoardLinkedCardDto> LinkedCards { get; init; } = [];
     }
@@ -1750,6 +1753,8 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(UpdateBoardContextRequest))]
     [JsonSerializable(typeof(BoardContextSettingsRecord))]
     [JsonSerializable(typeof(BoardLaneAutomationResponse))]
+    [JsonSerializable(typeof(BoardCardAutomationsResponse))]
+    [JsonSerializable(typeof(RunBoardCardAutomationRequest))]
     [JsonSerializable(typeof(UpdateBoardLaneAutomationRequest))]
     [JsonSerializable(typeof(BoardLaneAutomation))]
     [JsonSerializable(typeof(DeleteBoardResponse))]
@@ -1772,6 +1777,8 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(BoardCardSummaryResponse))]
     [JsonSerializable(typeof(List<BoardCardSummaryResponse>))]
     [JsonSerializable(typeof(BoardCardListResponse))]
+    [JsonSerializable(typeof(BoardCardActivityRequest))]
+    [JsonSerializable(typeof(BoardCardActivityListResponse))]
     [JsonSerializable(typeof(BoardCardLanePage))]
     [JsonSerializable(typeof(BoardCardResponse))]
     [JsonSerializable(typeof(BoardLinkedCardDto))]

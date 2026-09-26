@@ -31,6 +31,75 @@ public sealed class BoardServiceTests : IDisposable
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Fact]
+    public async Task ActivityIsScopedToRequestedCardsAndBoard_AndTracksSharedLiveSessions()
+    {
+        var first = await _service.CreateCardAsync(_project, new(Title: "Large card", Description: new string('x', 100_000)), Ct);
+        var second = await _service.CreateCardAsync(_project, new(Title: "Shared activity"), Ct);
+        var unloaded = await _service.CreateCardAsync(_project, new(Title: "Not requested"), Ct);
+        var foreign = await _service.CreateCardAsync(_project + "-other", new(Title: "Other project"), Ct);
+        var otherBoard = await _service.CreateBoardAsync(_project, new("Other board"), Ct);
+        var otherLane = (await _service.GetColumnsAsync(_project, Ct, otherBoard.Id)).Columns[0];
+        var otherCard = await _service.CreateCardAsync(_project, new(Title: "Other board card", ColumnId: otherLane.Id), Ct);
+        const string session = "55555555-5555-4555-8555-555555555555";
+        await _service.LinkSessionAsync(_project, first.Id, session, "tab", "", "shell", "Review", BoardSessionRecord.AutomationOrigin, Ct);
+        await _service.AttachSessionAsync(_project, second.Id, session, null, Ct);
+        _live.Sessions[session] = "tab";
+        var request = new BoardCardActivityRequest(first.BoardId, [first.Id, second.Id, foreign.Id, otherCard.Id, "missing", first.Id]);
+        var result = (await _service.GetCardActivityAsync(_project, request, Ct)).Cards;
+        Assert.Equal(2, result.Count);
+        Assert.All(result, item => Assert.Equal("tab", item.ActiveTabId));
+        Assert.True(result.Single(item => item.Id == first.Id).HasActiveAutomation);
+        Assert.DoesNotContain(result, item => item.Id == unloaded.Id);
+        Assert.Empty((await _service.GetCardActivityAsync(_project, request with { BoardId = foreign.BoardId }, Ct)).Cards);
+
+        _live.Sessions.Clear();
+        result = (await _service.GetCardActivityAsync(_project, request, Ct)).Cards;
+        Assert.Equal(2, result.Count);
+        Assert.All(result, item => { Assert.Null(item.ActiveSessionId); Assert.Null(item.ActiveTabId); Assert.False(item.HasActiveAutomation); });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AutomationRecordingsAreIdentifiedAfterRenameAndOnlyBlinkWhileLive(bool terminalRecording)
+    {
+        var card = await _service.CreateCardAsync(_project, new(Title: "Automation card"), Ct);
+        const string id = "55555555-5555-4555-8555-555555555555";
+        const string ordinary = "66666666-6666-4666-8666-666666666666";
+        await _service.LinkSessionAsync(_project, card.Id, id, "automation-tab", "", "shell", "Renamed review", BoardSessionRecord.LaunchOrigin, Ct);
+        await _service.LinkSessionAsync(_project, card.Id, ordinary, "agent-tab", "", "codex", "Automation: just a name", BoardSessionRecord.ManualOrigin, Ct);
+        await using (var connection = new SqliteConnection(_connectionString))
+        {
+            await connection.OpenAsync(Ct);
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE JobRuns(ProjectPath TEXT, SessionId TEXT, TerminalSessionId TEXT);
+                INSERT INTO JobRuns VALUES ($project, $session, $terminal);
+                INSERT INTO JobRuns VALUES ('another-project', $ordinary, NULL);
+                """;
+            command.Parameters.AddWithValue("$project", _project);
+            command.Parameters.AddWithValue("$session", terminalRecording ? "worker-recording" : id);
+            command.Parameters.AddWithValue("$terminal", terminalRecording ? id : DBNull.Value);
+            command.Parameters.AddWithValue("$ordinary", ordinary);
+            await command.ExecuteNonQueryAsync(Ct);
+        }
+        _live.Sessions[ordinary] = "agent-tab";
+        _live.Sessions[id] = "automation-tab";
+        var detail = (await _service.GetCardAsync(_project, card.Id, Ct))!;
+        Assert.True(detail.HasActiveAutomation);
+        Assert.True(detail.Sessions.Single(s => s.Id == id).IsAutomation);
+        Assert.False(detail.Sessions.Single(s => s.Id == ordinary).IsAutomation);
+        Assert.True(Assert.Single((await _service.GetCardsAsync(_project, Ct)).Cards).HasActiveAutomation);
+        Assert.True(Assert.Single((await _service.GetCardActivityAsync(_project, new(card.BoardId, [card.Id]), Ct)).Cards).HasActiveAutomation);
+        Assert.True((await _service.RenameSessionAsync(_project, card.Id, id, "New name", Ct))!.IsAutomation);
+        Assert.True((await _service.AttachSessionAsync(_project, card.Id, id, null, Ct))!.IsAutomation);
+        _live.Sessions.Remove(id);
+        Assert.False((await _service.GetCardAsync(_project, card.Id, Ct))!.HasActiveAutomation);
+        Assert.False(Assert.Single((await _service.GetCardsAsync(_project, Ct)).Cards).HasActiveAutomation);
+        Assert.True((await _service.GetSessionsAsync(_project, card.Id, Ct))!.Single(s => s.Id == id).IsAutomation);
+    }
+
+    [Fact]
     public async Task AttachedCards_ShareLiveStatus_AndUnlinkIndependently()
     {
         var first = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "A"), Ct);

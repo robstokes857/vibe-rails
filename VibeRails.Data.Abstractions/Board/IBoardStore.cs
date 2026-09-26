@@ -53,6 +53,8 @@ public partial interface IBoardStore
     Task<BoardSessionLink?> FindSessionLinkAsync(string sessionId, CancellationToken cancellationToken = default);
     Task<BoardAuthor?> FindSessionAuthorAsync(string sessionId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<BoardSessionRecord>> GetSessionsForProjectAsync(string projectPath, CancellationToken cancellationToken = default);
+    /// <summary>Identifies linked recordings owned by Automation runs, including older native runs.</summary>
+    Task<IReadOnlySet<string>> GetAutomationSessionIdsAsync(string projectPath, IReadOnlyList<string> sessionIds, CancellationToken cancellationToken = default);
 
     Task<bool> DeleteAttachmentAsync(string projectPath, string cardId, string attachmentId, CancellationToken cancellationToken = default);
 

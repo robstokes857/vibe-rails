@@ -12,6 +12,7 @@ public interface IJobService
     Task<JobResponse> UpdateJobAsync(long id, UpdateJobRequest request, CancellationToken cancellationToken = default);
     Task DeleteJobAsync(long id, CancellationToken cancellationToken = default);
     Task<JobActionResponse> RunNowAsync(long id, CancellationToken cancellationToken = default);
+    Task<JobActionResponse> RunForBoardCardAsync(long id, string projectPath, string cardKey, CancellationToken cancellationToken = default);
     Task<JobRunListResponse> GetRunsAsync(long? jobId, int limit, CancellationToken cancellationToken = default);
     Task<JobRunListResponse> GetRunsPageAsync(long jobId, int page, int pageSize, CancellationToken cancellationToken = default);
     Task<JobRunResponse> GetRunAsync(string runId, CancellationToken cancellationToken = default);
@@ -108,6 +109,24 @@ public sealed class JobService(
         // so every trigger uses exactly one launcher.
         scheduler.Kick();
         return new JobActionResponse(true, "Automation queued.", runId);
+    }
+
+    public async Task<JobActionResponse> RunForBoardCardAsync(long id, string projectPath, string cardKey,
+        CancellationToken cancellationToken = default)
+    {
+        var job = await store.GetJobAsync(id, cancellationToken);
+        if (job is null || job.DeletedUtc is not null || !ProjectPathComparer.Matches(job.ProjectPath, projectPath))
+            throw JobServiceException.NotFound("Automation not found in this project.");
+        if (!job.Enabled)
+            throw JobServiceException.BadRequest("Enable this Automation before running it from a card.");
+        ValidateRunRequirements(job.Actions, job.Llm);
+        cancellationToken.ThrowIfCancellationRequested();
+        // Recheck project/enabled/overlap under the snapshot transaction. The card key was
+        // resolved through IBoardStore; a browser never supplies a project or trigger key.
+        var runId = await store.EnqueueBoardCardRunAsync(projectPath, id, cardKey, CancellationToken.None)
+            ?? throw JobServiceException.Conflict("The Automation is already queued or running, or is no longer available in this project.");
+        scheduler.Kick();
+        return new JobActionResponse(true, "Automation queued and linked to this card.", runId);
     }
 
     public async Task<JobRunListResponse> GetRunsAsync(long? jobId, int limit, CancellationToken cancellationToken = default)

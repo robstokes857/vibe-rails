@@ -14,7 +14,7 @@ public interface IJobLaunchService
 }
 
 /// <summary>
-/// Opens one native terminal or in-app terminal tab per queued Automation run. Script-only workflows launch the
+/// Opens Board lane Automations in terminal tabs and all other triggers in native terminals. Script-only workflows launch the
 /// VibeRails child directly; a workflow with a Worker uses the same Environment launch pipeline as
 /// the Environment screen so its arguments and workspace policy remain exact.
 ///
@@ -96,7 +96,7 @@ public sealed class JobLaunchService(
         try
         {
             LaunchResult launch;
-            if (run.LaunchInTerminalTab)
+            if (JobBoardContext.OpensTerminalTab(run.TriggerKind, run.TriggerKey))
             {
                 launch = terminalTabLauncher is null
                     ? new LaunchResult(false, "Terminal tabs are unavailable in this host.")

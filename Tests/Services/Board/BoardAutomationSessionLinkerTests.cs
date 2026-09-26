@@ -36,6 +36,7 @@ public sealed class BoardAutomationSessionLinkerTests : IDisposable
         Assert.Equal(tabId, session.TabId);
         Assert.Equal("Automation: Review code", session.DisplayName);
         Assert.Equal("env:7:codex", session.Selection);
+        Assert.Equal(BoardSessionRecord.AutomationOrigin, session.Origin);
     }
 
     [Fact]

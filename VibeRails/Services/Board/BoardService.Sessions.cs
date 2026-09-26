@@ -14,7 +14,7 @@ public sealed partial class BoardService
             .Where(s => s.SessionId == id).ToList();
         var existing = links.FirstOrDefault(s => s.CardId == card.Id);
         if (existing is not null)
-            return ToDto(existing, await liveSessions.GetLiveSessionsAsync(cancellationToken));
+            return (await SessionDtosAsync(projectPath, [existing], await liveSessions.GetLiveSessionsAsync(cancellationToken), cancellationToken))[0];
 
         var source = links.FirstOrDefault();
         var author = await store.FindSessionAuthorAsync(id, cancellationToken);

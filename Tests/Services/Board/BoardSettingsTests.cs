@@ -63,6 +63,28 @@ public sealed partial class BoardSettingsTests : IDisposable
     private Task<IReadOnlyList<string>> Tick(long unixMs, JobStore? store = null) =>
         (store ?? _jobs).EnqueueDueSchedulesAsync(DateTimeOffset.FromUnixTimeMilliseconds(unixMs).UtcDateTime, Ct);
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BoardRunsUseTabsAndManualRetriesUseNativeRegardlessOfSavedPreference(bool oldPreference)
+    {
+        var (_, lane, _, _) = await Lanes();
+        var job = await _jobs.CreateJobAsync(new("Review", _root, LLM.NotSet, null, "", null, true, [],
+            Actions: [new(null, JobActionKind.Script, ScriptPath: "check.py", ScriptRuntime: JobScriptRuntime.Python)],
+            LaunchInTerminalTab: oldPreference), Ct);
+        await _boards.SaveLaneAutomationAsync(_root, lane, [job.Id], 0, Ct);
+        var card = await Card(lane);
+        var runId = Assert.Single(await Tick(await Due(card.Id) + 1));
+        var run = (await _jobs.GetRunAsync(runId, Ct))!;
+        Assert.Equal(JobTriggerKind.BoardLane, run.TriggerKind);
+        Assert.True(run.LaunchInTerminalTab);
+        await _jobs.StartRunAsync(runId, Environment.ProcessId, Ct);
+        await _jobs.CompleteRunAsync(runId, JobRunStatus.Failed, 1, "test", Ct);
+        var retry = (await _jobs.GetRunAsync((await _jobs.EnqueueRetryAsync(runId, Ct))!, Ct))!;
+        Assert.Equal(JobTriggerKind.Manual, retry.TriggerKind);
+        Assert.False(retry.LaunchInTerminalTab);
+    }
+
     [Fact]
     public async Task Context_IsPerBoard_Persists_Cascades_AndRejectsStaleWrites()
     {

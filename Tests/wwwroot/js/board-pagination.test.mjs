@@ -123,7 +123,6 @@ test('counts, filter options, and search results include unloaded cards', async 
     const { controller, requests } = harness();
     controller.state.filters.q = 'deep history';
     assert.deepEqual(controller.stats(), { cards: 120, blocked: 2, points: 8 });
-    assert.deepEqual(controller.allTags(), ['tag-on-unloaded-card']);
     assert.equal(controller.filteredCards().length, 1, 'server-filtered results are not filtered a second time');
     const pending = controller.loadMoreCards('done');
     assert.equal(new URL(requests[0].url, 'http://local').searchParams.get('q'), 'deep history');

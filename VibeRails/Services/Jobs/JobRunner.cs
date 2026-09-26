@@ -80,7 +80,7 @@ public static class JobRunner
 
         try
         {
-            if (!run.LaunchInTerminalTab && actions.Count > 0 && actions.All(action => action.Kind == JobActionKind.Script))
+            if (run.TerminalSessionId is null && actions.Count > 0 && actions.All(action => action.Kind == JobActionKind.Script))
                 shutdownState.ScriptRecording = await JobScriptSessionRecorder.StartAsync(scope.ServiceProvider, store, run, workspaceRoot);
 
             // A pre-workflow snapshot can exist only on an older database whose migration could
@@ -360,7 +360,7 @@ public static class JobRunner
                         "[Jobs] Run {RunId} is recording Worker terminal session {SessionId}",
                         runId,
                         sessionId);
-                    if (!run.LaunchInTerminalTab && boardCardKey is not null)
+                    if (run.TerminalSessionId is null && boardCardKey is not null)
                     {
                         try
                         {
@@ -420,28 +420,11 @@ public static class JobRunner
     }
 
     /// <summary>
-    /// Board lane events persist the originating card in their immutable trigger key. Keep the
-    /// extraction gated by TriggerKind so a manual retry of that run cannot inherit stale Board
-    /// context merely because its action snapshot came from a lane-triggered run.
+    /// Board launches persist their originating card in the immutable trigger key. Ordinary
+    /// retries get a new manual key and do not inherit the original run's Board context.
     /// </summary>
-    internal static string? GetBoardCardKey(JobRunRecord run)
-    {
-        const string prefix = "board-lane:";
-        if (run.TriggerKind != JobTriggerKind.BoardLane
-            || !run.TriggerKey.StartsWith(prefix, StringComparison.Ordinal))
-        {
-            return null;
-        }
-
-        var remainder = run.TriggerKey.AsSpan(prefix.Length);
-        var separator = remainder.IndexOf(':');
-        if (separator <= 0)
-            return null;
-
-        // The Board owns the display-key format. The run context only owns this envelope, so keep
-        // the embedded key opaque and allow a future format change without breaking placeholders.
-        return remainder[..separator].ToString();
-    }
+    internal static string? GetBoardCardKey(JobRunRecord run) =>
+        JobBoardContext.GetCardKey(run.TriggerKind, run.TriggerKey);
 
     private static string DescribeAction(JobRunActionRecord action) => action.Kind switch
     {

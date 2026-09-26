@@ -6,6 +6,7 @@ const IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAw
 const DESCRIPTION = 'Repro screenshot\n![Screenshot.png](attachment:att_image)\n<img src=x onerror="window.__injected=true">';
 
 async function openBoard(page, { active = false, assignee = null, relatedCards = false,
+    onCard = () => {},
     columns = [{ id: 'col_ready', name: 'Ready', position: 0, color: '#3b82f6', boardId: 'brd_main' }] } = {}) {
     if (process.env.VIBERAILS_BOARD_STATIC === '1') {
         await page.addInitScript(() => sessionStorage.setItem('viberails_tab', 'board-fixture'));
@@ -22,6 +23,7 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
         commits: [], sessions: [{ id: 'session_test', tabId: active ? 'agent_tab' : null, displayName: 'Codex session', cli: 'codex',
             active, createdAt: '2026-09-11T06:00:00Z' }]
     };
+    onCard(card);
     const requests = [];
     const contents = new Map();
     const related = relatedCards ? [{
@@ -58,6 +60,14 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
             return route.fulfill({ json: linkSummary(targetId === card.id ? card : related.find(item => item.id === targetId)) });
         }
         const relatedCard = related.find(item => path === `/api/v1/board/cards/${item.id}`);
+        if (path === '/api/v1/board/cards/activity') {
+            const { boardId, cardIds } = route.request().postDataJSON();
+            expect(boardId).toBe('brd_main');
+            expect(cardIds.length).toBeLessThanOrEqual(100);
+            return route.fulfill({ json: { cards: cardIds.includes(card.id) ? [{ id: card.id,
+                activeSessionId: card.activeSessionId, activeTabId: card.activeTabId,
+                hasActiveAutomation: Boolean(card.hasActiveAutomation) }] : [] } });
+        }
         if (relatedCard) {
             if (route.request().method() === 'PUT') Object.assign(relatedCard, route.request().postDataJSON());
             return route.fulfill({ json: { ...relatedCard, linkedCards: linkedIds.has(relatedCard.id) ? [linkSummary(card)] : [] } });
@@ -765,3 +775,169 @@ for (const width of [1440, 520]) {
         await page.screenshot({ path: testInfo.outputPath('card.png') });
     });
 }
+
+
+test('Automation recordings have their own rail and live robot without overwriting the draft', async ({ page }, testInfo) => {
+    let card;
+    const requests = await openBoard(page, { assignee: 'base:codex', onCard(value) {
+        card = value;
+        card.priority = 'critical'; card.points = 8; card.tags = ['keep-stored'];
+        card.hasActiveAutomation = true;
+        card.activeSessionId = 'automation_session'; card.activeTabId = 'automation_tab';
+        card.sessions.push({ id: 'automation_session', tabId: 'automation_tab', displayName: 'Review code',
+            cli: 'shell', isAutomation: true, active: true, createdAt: '2026-09-25T18:00:00Z' });
+        card.sessions.push({ id: 'older_automation', displayName: 'Earlier review', cli: 'codex',
+            isAutomation: true, active: false, createdAt: '2026-09-24T18:00:00Z' });
+    } });
+    const tile = page.locator('.board-card[data-card-id="card_test"]');
+    await expect(tile).not.toContainText('keep-stored');
+    await expect(page.locator('[data-board-filter-tag], .board-tag')).toHaveCount(0);
+    await expect(tile).toHaveClass(/is-live/);
+    await expect(tile.getByRole('img', { name: 'Automation running' })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath('board-automation-card.png'), fullPage: true });
+    await tile.click();
+    const editor = page.locator('[data-board-card-editor]');
+    await expect(editor.locator('[data-board-sessions] [data-session-id]')).toHaveCount(1);
+    await expect(editor.locator('[data-board-automations] [data-session-id]')).toHaveCount(2);
+    await expect(editor.locator('[data-board-count="sessions"]')).toHaveText('1');
+    await expect(editor.locator('[data-board-count="automations"]')).toHaveText('2');
+    await expect(editor.locator('[data-board-automations] [data-board-open-session="automation_session"]')).toBeEnabled();
+    await expect(editor.locator('#board-card-priority, #board-card-points, #board-card-tags')).toHaveCount(0);
+    await expect(editor.getByText('Uses this CLI', { exact: false })).toHaveCount(0);
+    await expect(editor.locator('[data-board-launch-yolo]')).toBeVisible();
+    await editor.locator('#board-card-title').fill('My unsaved title');
+    await editor.locator('[data-board-automations]').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath('board-automation-rails.png'), fullPage: true });
+    card.sessions[1].active = false;
+    card.hasActiveAutomation = false; card.activeSessionId = null; card.activeTabId = null;
+    requests.length = 0;
+    await page.evaluate(() => window.app.boardController.refreshSessionActivity());
+    expect(requests.some(request => request.path === '/api/v1/board/cards')).toBe(false);
+    expect(requests.find(request => request.path === '/api/v1/board/cards/activity')?.body)
+        .toEqual({ boardId: 'brd_main', cardIds: ['card_test'] });
+    await expect(tile.getByRole('img', { name: 'Automation running' })).toHaveCount(0);
+    await expect(tile).not.toHaveClass(/is-live/);
+    await expect(editor.locator('[data-board-automations] .board-automation-running')).toHaveCount(0);
+    await expect(editor.locator('#board-card-title')).toHaveValue('My unsaved title');
+    await expect(editor.locator('[data-board-automations]')).toContainText('Earlier review');
+    const savedRequest = page.waitForRequest(request => request.method() === 'PUT' && new URL(request.url()).pathname === '/api/v1/board/cards/card_test');
+    await editor.locator('[data-board-save-card]').click();
+    const payload = (await savedRequest).postDataJSON();
+    for (const field of ['priority', 'points', 'tags']) expect(Object.hasOwn(payload, field)).toBe(false);
+    expect(card.priority).toBe('critical'); expect(card.points).toBe(8); expect(card.tags).toEqual(['keep-stored']);
+});
+
+for (const width of [1440, 390]) {
+    test(`card Automation runs stay linked and preserve drafts at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 900 });
+        await page.addInitScript(() => localStorage.setItem('viberails.board.filters.v1', JSON.stringify({ tag: 'retired-filter' })));
+        let card;
+        const requests = await openBoard(page, { onCard(value) { card = value; card.tags = ['hidden-tag']; } });
+        let posts = 0;
+        let release;
+        const gate = new Promise(resolve => { release = resolve; });
+        const run = { id: 'run_card', name: 'Review this card', status: 0 };
+        await page.route('**/api/v1/board/cards/card_test/automations', async route => {
+            if (route.request().method() === 'POST') {
+                posts++;
+                expect(route.request().postDataJSON()).toEqual({ jobId: 11 });
+                await gate;
+                return route.fulfill({ json: { success: true, runId: run.id } });
+            }
+            return route.fulfill({ json: {
+                jobs: [{ id: 11, name: 'Review this card', enabled: true }, { id: 12, name: 'Paused', enabled: false }],
+                runs: posts && !card.sessions.some(session => session.id === 'new_recording') ? [run] : []
+            } });
+        });
+        expect(requests.filter(request => request.path === '/api/v1/board/cards').every(request => !request.body?.tag)).toBe(true);
+        expect(await page.evaluate(() => window.app.boardController.state.filters.tag)).toBeUndefined();
+        await expect(page.locator('[data-board-filter-tag], .board-tag')).toHaveCount(0);
+        await page.getByText('Description images', { exact: true }).click();
+        await page.locator('#board-card-title').fill('Unsaved title');
+        const comment = page.locator('[data-board-composer="comment"] textarea');
+        await comment.fill('Unsaved comment');
+        const select = page.getByRole('combobox', { name: 'Automation to run' });
+        await expect(select.locator('option[value="12"]')).toBeDisabled();
+        await select.selectOption('11');
+        const button = page.getByRole('button', { name: 'Run automation', exact: true });
+        await button.scrollIntoViewIfNeeded();
+        const bounds = await button.boundingBox();
+        expect(bounds.x).toBeGreaterThanOrEqual(0);
+        expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+        await page.screenshot({ path: testInfo.outputPath('card-automation-controls.png') });
+        await button.click();
+        await expect(button).toBeDisabled();
+        await button.evaluate(element => element.click());
+        expect(posts).toBe(1);
+        release();
+        await expect(page.locator('[data-board-automation-runs]')).toContainText('Queued');
+        await expect(page.locator('[data-board-count="automations"]')).toHaveText('1');
+        await expect(page.locator('#board-card-title')).toHaveValue('Unsaved title');
+        await expect(comment).toHaveValue('Unsaved comment');
+        expect(requests.filter(request => request.method === 'PUT')).toHaveLength(0);
+
+        run.status = 3; run.errorMessage = 'Terminal could not start.';
+        await page.evaluate(() => window.app.boardController.refreshSessionActivity());
+        await expect(page.locator('[data-board-automation-runs]')).toContainText('Terminal could not start.');
+        await page.locator('#modal-container [data-action="close-modal"]').first().click();
+        await page.getByText('Description images', { exact: true }).click();
+        await expect(page.locator('[data-board-automation-runs]')).toContainText('Failed');
+        // When a recording arrives it owns the open/replay action in the existing rail.
+        card.sessions.push({ id: 'new_recording', displayName: 'Review this card', isAutomation: true,
+            cli: 'shell', active: false, createdAt: '2026-09-26T05:00:00Z' });
+        await page.evaluate(() => window.app.boardController.refreshSessionActivity());
+        await expect(page.locator('[data-board-automations] [data-board-open-session="new_recording"]')).toBeVisible();
+        await expect(page.locator('[data-board-automation-runs] [data-board-run-id]')).toHaveCount(0);
+        await page.locator('[data-board-automations]').scrollIntoViewIfNeeded();
+        await page.screenshot({ path: testInfo.outputPath('card-automation-linked.png') });
+    });
+}
+
+test('card Automation load and launch failures can be retried without losing the selection', async ({ page }) => {
+    await openBoard(page);
+    let loadFailed = true;
+    let launchFailed = true;
+    await page.route('**/api/v1/board/cards/card_test/automations', route => {
+        if (route.request().method() === 'POST') return route.fulfill(launchFailed
+            ? { status: 409, json: { error: 'Automation is already running.' } }
+            : { json: { success: true, runId: 'retry_run' } });
+        return route.fulfill(loadFailed ? { status: 500, json: { error: 'Could not load Automations.' } }
+            : { json: { jobs: [{ id: 11, name: '<img src=x onerror="window.__automationXss=1">', enabled: true }], runs: [] } });
+    });
+    await page.getByText('Description images', { exact: true }).click();
+    const run = page.getByRole('button', { name: 'Run automation', exact: true });
+    await expect(run).toBeDisabled();
+    loadFailed = false;
+    await page.getByRole('button', { name: 'Reload automations', exact: true }).click();
+    const select = page.getByRole('combobox', { name: 'Automation to run' });
+    await select.selectOption('11');
+    await run.click();
+    await expect(page.locator('[data-board-automation-message]')).toHaveText('Automation is already running.');
+    await expect(select).toHaveValue('11');
+    await expect(run).toBeEnabled();
+    launchFailed = false;
+    await run.click();
+    await expect(page.getByText('Automation queued and linked to this card.', { exact: true })).toBeVisible();
+    expect(await page.evaluate(() => window.__automationXss)).toBeUndefined();
+});
+
+test('closing a card while its Automation catalog loads cannot repaint the next editor', async ({ page }) => {
+    await openBoard(page);
+    let release;
+    let requested;
+    const started = new Promise(resolve => { requested = resolve; });
+    const gate = new Promise(resolve => { release = resolve; });
+    await page.route('**/api/v1/board/cards/card_test/automations', async route => {
+        requested();
+        await gate;
+        await route.fulfill({ json: { jobs: [{ id: 11, name: 'Stale workflow', enabled: true }], runs: [] } }).catch(() => {});
+    });
+    await page.getByText('Description images', { exact: true }).click();
+    await started;
+    await page.locator('#modal-container [data-action="close-modal"]').first().click();
+    await page.getByRole('button', { name: 'New card', exact: true }).click();
+    release();
+    await expect(page.getByText('Save the card to run an Automation.', { exact: true })).toBeVisible();
+    await expect(page.locator('[data-board-automation-choice]')).toHaveCount(0);
+    await expect(page.getByText('Stale workflow', { exact: true })).toHaveCount(0);
+});

@@ -1,5 +1,35 @@
 # API authentication coverage
 
+VB-44 review amendment (2026-09-26): added read-only `POST /api/v1/board/cards/activity`.
+The active-root registration and session-plus-tab middleware apply unchanged. Requests supply a
+board ID and at most 100 card IDs (each ID at most 100 characters); the project is server-derived.
+Parameterized SQL scopes the board, lanes, cards and live links within that project, returning
+only card IDs, active session/tab IDs and Automation indicators. It selects no descriptions,
+comments, attachments or ended session history. No schema or listener change. Source-generated
+JSON and route regressions cover both credentials, request bounds and project/board scoping.
+Linked recordings are also excluded before the existing card Automation query's 20-run limit.
+
+Scoped enumeration now finds 45 Board routes. Both mandatory repository-wide listener searches
+found only the existing main Kestrel host, non-serving port probe and test Kestrel hosts; the
+cross-runtime search had no matches. No security violation was found. This is a scoped amendment.
+
+VB-44 card Automation amendment (2026-09-26): added `GET` and `POST
+/api/v1/board/cards/{card}/automations`. Both are active-root only behind the existing
+session and tab credentials. GET returns project Automation choices and up to 20 recent
+card-originated runs without a linked recording. POST accepts only `jobId`; the card resolves
+through `IBoardStore` in the server-derived project. The job must belong to that project and
+be enabled, undeleted and runnable. Project, enabled state and overlap are checked again
+inside the existing run/action snapshot transaction. No browser-supplied trigger key, project
+path or terminal input is accepted. Runs reuse the normal scheduler and Board terminal-tab
+launcher; their recordings link through `IBoardStore`. No schema or credential change.
+
+Scoped route enumeration found 44 Board routes (two additions to the previous inventory).
+Both mandatory repository-wide listener searches found only the existing main Kestrel host,
+the non-serving port probe and test-only Kestrel hosts; no cross-runtime matches. Authenticated
+route tests cover source-generated JSON, missing credentials, invalid jobs, scope, queuing and
+overlap. This is a scoped amendment, not a new full authentication audit. No security violation
+was found.
+
 Full route/authentication reconciliation (2026-09-24): **215 mapped surfaces**, including
 **203 under `/api/v1`** and **38 Board routes**, match the current working tree in both
 directions, including uncommitted and untracked source. No endpoint needed adding or removal.
@@ -881,7 +911,7 @@ transcript text out of messages and exception text; do not rely on the Logs view
 hidden. `Tests/Routes/InternalToolsRoutesTests.cs` pins the two-credential requirement, the
 whitelist rejection of path-like sources, and the absence of mutating verbs.
 
-### Kanban board (42; active root backend only)
+### Kanban board (45; active root backend only)
 
 All mapped by `BoardRoutes.Map` under `if (isActiveRootBackend)`; every path contains `/api/`,
 so both credentials are enforced by the middleware with no route-level registration. The
@@ -908,8 +938,14 @@ cannot read or write another project's board through this surface.
 - `GET /api/v1/board/columns/{columnId}/automation`,
   `PUT /api/v1/board/columns/{columnId}/automation` — read/save lane automation settings.
   Both require session and tab credentials and use the server-derived project.
+- `GET /api/v1/board/cards/{card}/automations`,
+  `POST /api/v1/board/cards/{card}/automations` — list project Automation choices and recent
+  card-originated runs, or queue an enabled Automation with the originating card retained.
+  The POST body is `{ jobId }`; card and job both resolve within the server-derived project.
 - `GET /api/v1/board/columns`, `POST /api/v1/board/columns`, `PUT /api/v1/board/columns/order`,
   `PUT /api/v1/board/columns/{columnId}`, `DELETE /api/v1/board/columns/{columnId}` — lanes.
+- `POST /api/v1/board/cards/activity` — read-only live status for up to 100 explicit card IDs
+  on the supplied board, scoped to the server's project; no card text or historical rails.
 - `GET /api/v1/board/cards`, `POST /api/v1/board/cards`, `GET /api/v1/board/cards/{card}`,
   `PUT /api/v1/board/cards/{card}`, `DELETE /api/v1/board/cards/{card}`,
   `POST /api/v1/board/cards/{card}/move` — cards (`{card}` is an id or a `VB-n` key).

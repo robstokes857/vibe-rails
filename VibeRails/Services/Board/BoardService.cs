@@ -199,19 +199,25 @@ public sealed partial class BoardService(
     {
         var live = await liveSessions.GetLiveSessionsAsync(cancellationToken);
         var activeByCard = new Dictionary<string, (string SessionId, string TabId)>(StringComparer.Ordinal);
+        var automationCards = new HashSet<string>(StringComparer.Ordinal);
         if (live.Count > 0)
         {
-            foreach (var session in await store.GetSessionsForProjectAsync(projectPath, cancellationToken))
+            var sessions = await store.GetSessionsForProjectAsync(projectPath, cancellationToken);
+            var automationIds = await store.GetAutomationSessionIdsAsync(projectPath,
+                sessions.Where(s => live.ContainsKey(s.SessionId)).Select(s => s.SessionId).ToList(), cancellationToken);
+            foreach (var session in sessions)
             {
                 if (live.TryGetValue(session.SessionId, out var tabId) && !activeByCard.ContainsKey(session.CardId))
                     activeByCard[session.CardId] = (session.SessionId, tabId);
+                if (live.ContainsKey(session.SessionId) && IsAutomation(session, automationIds))
+                    automationCards.Add(session.CardId);
             }
         }
 
         return new BoardCardListResponse(cards.Select(card =>
         {
             activeByCard.TryGetValue(card.Id, out var active);
-            return ToSummary(card, active.SessionId, active.TabId);
+            return ToSummary(card, active.SessionId, active.TabId) with { HasActiveAutomation = automationCards.Contains(card.Id) };
         }).ToList());
     }
 
@@ -448,7 +454,7 @@ public sealed partial class BoardService(
         if (detail is null)
             return null;
         var live = await liveSessions.GetLiveSessionsAsync(cancellationToken);
-        return detail.Sessions.Select(s => ToDto(s, live)).ToList();
+        return await SessionDtosAsync(projectPath, detail.Sessions, live, cancellationToken);
     }
 
     public async Task<BoardSessionDto?> LinkSessionAsync(string projectPath, string idOrKey, string sessionId, string? tabId, string selection, string cli, string displayName, string origin, CancellationToken cancellationToken = default)
@@ -463,7 +469,7 @@ public sealed partial class BoardService(
         if (record is null)
             return null;
         var live = await liveSessions.GetLiveSessionsAsync(cancellationToken);
-        return ToDto(record, live);
+        return (await SessionDtosAsync(projectPath, [record], live, cancellationToken))[0];
     }
 
     public async Task<BoardSessionDto?> RenameSessionAsync(string projectPath, string idOrKey, string sessionId, string displayName, CancellationToken cancellationToken = default)
@@ -478,7 +484,7 @@ public sealed partial class BoardService(
         if (record is null)
             return null;
         var live = await liveSessions.GetLiveSessionsAsync(cancellationToken);
-        return ToDto(record, live);
+        return (await SessionDtosAsync(projectPath, [record], live, cancellationToken))[0];
     }
 
     public async Task<bool> UnlinkSessionAsync(string projectPath, string idOrKey, string sessionId, CancellationToken cancellationToken = default)
@@ -494,6 +500,7 @@ public sealed partial class BoardService(
         var live = await liveSessions.GetLiveSessionsAsync(cancellationToken);
         var active = detail.Sessions.FirstOrDefault(s => live.ContainsKey(s.SessionId));
         var summary = ToSummary(detail.Card, active?.SessionId, active is null ? null : live[active.SessionId]);
+        var sessions = await SessionDtosAsync(detail.Card.ProjectPath, detail.Sessions, live, cancellationToken);
         // Older comments may have been written before their session was linked.
         // Resolve those labels on read without rewriting historical comment rows.
         var authors = new Dictionary<string, BoardAuthor?>();
@@ -505,10 +512,10 @@ public sealed partial class BoardService(
             summary.ActiveSessionId, summary.ActiveTabId, summary.CreatedAt, summary.UpdatedAt,
             comments,
             detail.Commits.Select(ToDto).ToList(),
-            detail.Sessions.Select(s => ToDto(s, live)).ToList(),
+            sessions,
             detail.Attachments.Select(ToDto).ToList(),
             detail.Card.BaseLlmOptions,
-            notes, summary.Type, summary.BoardId, summary.Flagged)
+            notes, summary.Type, summary.BoardId, summary.Flagged, sessions.Any(s => s.Active && s.IsAutomation))
         {
             LinkedCards = detail.LinkedCards.Select(ToDto).ToList()
         };
@@ -561,7 +568,20 @@ public sealed partial class BoardService(
     {
         var active = live.TryGetValue(session.SessionId, out var liveTab);
         return new BoardSessionDto(session.SessionId, active ? liveTab : session.TabId, session.DisplayName,
-            session.Cli, session.Selection, session.Origin, session.CreatedUtc, active);
+            session.Cli, session.Selection, session.Origin, session.CreatedUtc, active,
+            session.Origin == BoardSessionRecord.AutomationOrigin);
+    }
+
+    private static bool IsAutomation(BoardSessionRecord session, IReadOnlySet<string>? automationIds) =>
+        session.Origin == BoardSessionRecord.AutomationOrigin || automationIds?.Contains(session.SessionId) == true;
+
+    private async Task<List<BoardSessionDto>> SessionDtosAsync(string projectPath,
+        IReadOnlyList<BoardSessionRecord> sessions, IReadOnlyDictionary<string, string> live, CancellationToken cancellationToken)
+    {
+        if (sessions.Count == 0) return [];
+        var automationIds = await store.GetAutomationSessionIdsAsync(projectPath,
+            sessions.Select(s => s.SessionId).ToList(), cancellationToken);
+        return sessions.Select(s => ToDto(s, live) with { IsAutomation = IsAutomation(s, automationIds) }).ToList();
     }
 
     // ------------------------------------------------------------------ normalisation

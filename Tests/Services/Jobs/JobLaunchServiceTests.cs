@@ -14,13 +14,15 @@ public sealed class JobLaunchServiceTests
     private const string MissingProjectPath = @"C:\viberails-tests\does-not-exist";
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task LaunchQueuedRunsAsync_TabPreferenceDispatchesTheEntireWorkflow(bool withWorker)
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task LaunchQueuedRunsAsync_BoardDispatchesTheEntireWorkflowToATabRegardlessOfPreference(bool withWorker, bool oldPreference)
     {
         var run = Run(projectPath: ExistingProjectPath(),
             actions: withWorker ? [ScriptAction("script", 0), WorkerAction("worker", 1, 7, "nightly", LLM.Claude)] : [ScriptAction("script", 0)])
-            with { LaunchInTerminalTab = true };
+            with { TriggerKind = JobTriggerKind.BoardLane, LaunchInTerminalTab = oldPreference };
         var store = LaunchableStore(run);
         var native = new Mock<IEnvironmentLaunchService>(MockBehavior.Strict);
         var process = UnusedProcessLauncher();
@@ -43,6 +45,45 @@ public sealed class JobLaunchServiceTests
             JobTerminalTabLauncher.BuildRunCommand("C:/app's/vb.exe", arguments, windows: true));
         Assert.Equal("exec '/app/vb' '--job-run' 'quote'\"'\"' $(danger) `value` ; & |' '--' 'a b'",
             JobTerminalTabLauncher.BuildRunCommand("/app/vb", arguments, windows: false));
+    }
+
+    [Fact]
+    public async Task ManualCardRunUsesATabAndKeepsItsOriginatingCard()
+    {
+        var run = Run(projectPath: ExistingProjectPath(), actions: [ScriptAction("script", 0)])
+            with { TriggerKind = JobTriggerKind.Manual, TriggerKey = "board-card:VB-44:click", LaunchInTerminalTab = false };
+        var store = LaunchableStore(run);
+        var native = new Mock<IEnvironmentLaunchService>(MockBehavior.Strict);
+        var process = UnusedProcessLauncher();
+        var tabs = new Mock<IJobTerminalTabLauncher>(MockBehavior.Strict);
+        tabs.Setup(service => service.LaunchAsync(run, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LaunchResult(true, "tab"));
+        Assert.Equal("VB-44", JobRunner.GetBoardCardKey(run));
+        Assert.Equal(1, await new JobLaunchService(store.Object, native.Object, process.Object, tabs.Object)
+            .LaunchQueuedRunsAsync(TestContext.Current.CancellationToken));
+        tabs.VerifyAll();
+        native.VerifyNoOtherCalls();
+        process.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData(JobTriggerKind.Schedule)]
+    [InlineData(JobTriggerKind.Commit)]
+    [InlineData(JobTriggerKind.PreCommit)]
+    [InlineData(JobTriggerKind.Manual)]
+    public async Task NonBoardTriggersUseNativeEvenWithASavedTabPreference(JobTriggerKind trigger)
+    {
+        var run = Run(projectPath: ExistingProjectPath(), actions: [ScriptAction("script", 0)])
+            with { TriggerKind = trigger, LaunchInTerminalTab = true };
+        var process = new Mock<IJobProcessLauncher>(MockBehavior.Strict);
+        process.Setup(p => p.Launch(run.ProjectPath, It.IsAny<IReadOnlyList<string>>(), run.LaunchMinimized))
+            .Returns(new LaunchResult(true, "native"));
+        var tabs = new Mock<IJobTerminalTabLauncher>(MockBehavior.Strict);
+        Assert.Equal(1, await new JobLaunchService(LaunchableStore(run).Object,
+            new Mock<IEnvironmentLaunchService>(MockBehavior.Strict).Object, process.Object, tabs.Object)
+            .LaunchQueuedRunsAsync(TestContext.Current.CancellationToken));
+        process.VerifyAll();
+        tabs.VerifyNoOtherCalls();
     }
 
     [Fact]
@@ -80,7 +121,7 @@ public sealed class JobLaunchServiceTests
     [Fact]
     public async Task LaunchQueuedRunsAsync_UsesTheSameEnvironmentLaunchRequestAsTheApi()
     {
-        var run = Run(projectPath: ExistingProjectPath());
+        var run = Run(projectPath: ExistingProjectPath()) with { LaunchInTerminalTab = true };
         var store = LaunchableStore(run);
         var pipeline = SuccessfulPipeline();
 

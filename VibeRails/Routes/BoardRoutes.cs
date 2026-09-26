@@ -95,6 +95,14 @@ public static class BoardRoutes
             RunAsync(async () => OkOrNotFound(await automation.SaveAsync(Project(), columnId, request, cancellationToken), "Lane")))
             .WithName("SaveBoardLaneAutomation");
 
+        app.MapGet("/api/v1/board/cards/{card}/automations", (BoardCardAutomationService automation, string card, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(await automation.GetAsync(Project(), card, cancellationToken), "Card")))
+            .WithName("GetBoardCardAutomations");
+
+        app.MapPost("/api/v1/board/cards/{card}/automations", (BoardCardAutomationService automation, string card, RunBoardCardAutomationRequest request, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(await automation.RunAsync(Project(), card, request.JobId, cancellationToken), "Card")))
+            .WithName("RunBoardCardAutomation");
+
         app.MapGet("/api/v1/board/cards", (IBoardService board, string? boardId, int? pageSize, string? columnId,
             int? offset, string? continuationToken, string? q, string? assignee, string? type, string? priority, string? tag,
             CancellationToken cancellationToken) =>
@@ -107,6 +115,10 @@ public static class BoardRoutes
         app.MapPost("/api/v1/board/cards", (IBoardService board, CreateBoardCardRequest request, CancellationToken cancellationToken) =>
             RunAsync(async () => Results.Ok(await board.CreateCardAsync(Project(), request, cancellationToken))))
             .WithName("CreateBoardCard");
+
+        app.MapPost("/api/v1/board/cards/activity", (IBoardService board, BoardCardActivityRequest request, CancellationToken cancellationToken) =>
+            RunAsync(async () => Results.Ok(await board.GetCardActivityAsync(Project(), request, cancellationToken))))
+            .WithName("GetBoardCardActivity");
 
         app.MapGet("/api/v1/board/cards/{card}", (IBoardService board, string card, CancellationToken cancellationToken) =>
             RunAsync(async () => OkOrNotFound(await board.GetCardAsync(Project(), card, cancellationToken), "Card")))
@@ -299,6 +311,10 @@ public static class BoardRoutes
         catch (BoardConflictException ex)
         {
             return Results.Conflict(new ErrorResponse(ex.Message));
+        }
+        catch (Services.Jobs.JobServiceException ex)
+        {
+            return Results.Json(new ErrorResponse(ex.Message), statusCode: ex.StatusCode);
         }
         catch (Services.Environments.PromptTooLongException ex)
         {

@@ -62,7 +62,6 @@ export function renderBoardLaunchOptions(selection, options = {}) {
             <input class="form-check-input" type="checkbox" id="board-launch-yolo" data-board-launch-yolo ${values.yolo ? 'checked' : ''}>
             <label class="form-check-label" for="board-launch-yolo">YOLO mode</label>
         </div>
-        <small class="form-text text-warning">Uses this CLI's unrestricted or auto-approve launch flag. Codex also disables its sandbox.</small>
     </div>`;
 }
 

@@ -132,6 +132,7 @@ public sealed record BoardSessionRecord(
     DateTime CreatedUtc)
 {
     public const string LaunchOrigin = "launch";
+    public const string AutomationOrigin = "automation";
     public const string McpOrigin = "mcp";
     public const string ManualOrigin = "manual";
 }
