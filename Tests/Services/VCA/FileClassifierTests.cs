@@ -49,6 +49,16 @@ namespace Tests.Services.VCA
         [InlineData("src/LatestReport.cs", false)]
         [InlineData("src/latest/Report.cs", false)]
         [InlineData("testimonial.py", false)]
+        [InlineData("src/Contest.cs", false)]
+        [InlineData("src/Protest.cs", false)]
+        [InlineData("src/Attest.java", false)]
+        [InlineData("src/ABTest.cs", true)]
+        [InlineData("ParserSpec.scala", true)]
+        [InlineData("parser_test.go", true)]
+        [InlineData("user_spec.rb", true)]
+        [InlineData("calc-test.js", true)]
+        [InlineData("test.py", true)]
+        [InlineData("tests.cs", true)]
         public void IsTestFile_ShouldIdentifyTestFiles(string fileName, bool expected)
         {
             // Act

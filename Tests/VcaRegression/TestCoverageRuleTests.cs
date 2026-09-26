@@ -57,12 +57,14 @@ public sealed class TestCoverageRuleTests
     [Fact]
     public async Task ProductionFilesWhoseNamesMerelyContainTestOrSpec_StillCount()
     {
-        // src/Inspector.cs and src/LatestReport.cs are production code. A substring match on
-        // "spec" / "test" used to classify them as tests and silently open the gate.
+        // src/Inspector.cs, src/LatestReport.cs, src/Contest.cs and src/Protest.cs are production
+        // code. A substring match on "spec" / "test" classified the first two as tests, and a
+        // case-blind "ends with test" classified the last two; either silently opened the gate.
         await using var repo = await VcaRegressionRepository.CreateAsync("test-coverage/minimum-80/production-file-named-like-test");
         var run = await repo.RunPreCommitAndCrossCheckAsync();
 
         Expect.Blocked(run, Rule(80));
+        Expect.StagedFiles(run, 5);
         Assert.Contains("UNSUPPORTED: the Git hook has no coverage report", run.Transcript);
     }
 

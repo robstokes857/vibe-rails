@@ -123,9 +123,13 @@ wrong in all three validators:
   staged delta) and requires a Files entry from N+1. Binary files cannot be counted and report
   `UNSUPPORTED:` at the declared level.
 - Coverage rules decide "is production code staged" with `FileClassifier.IsTestFile`, the one
-  classifier shared by the hook, the Rules page and the legacy validators. A substring match on
-  "test"/"spec" used to treat `src/Inspector.cs` and `src/LatestReport.cs` as tests and let
-  the gate pass silently.
+  classifier shared by the hook, the Rules page and the legacy validators. A test is named by a
+  convention with a boundary: a capitalized suffix (`MyTest.cs`, `ABTest.cs`), a separated
+  suffix (`parser_test.go`, `user_spec.rb`), a dotted segment (`calc.spec.ts`), a prefix
+  (`test_math.py`, `TestOrders.java`), a whole stem (`test.py`), or a test directory. A
+  substring match on "test"/"spec" used to treat `src/Inspector.cs` and `src/LatestReport.cs`
+  as tests, and a case-blind "ends with test" treated `Contest.cs` as one; both let the gate
+  pass silently.
 
 ## Enforcement levels
 
