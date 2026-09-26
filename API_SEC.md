@@ -1,5 +1,31 @@
 # API authentication coverage
 
+Full route/authentication reconciliation (2026-09-26): **222 mapped surfaces**, including
+**210 under `/api/v1`** and **45 Board routes**, match the current working tree in both
+directions, including uncommitted and untracked source. No endpoint needed adding or removal;
+updated the stale current totals below. Earlier dated audit and amendment counts are historical.
+Resolved grouped and constant-based paths, proxy mappings, the inherited event WebSocket,
+and production route registration; checked middleware ordering and credential validation.
+
+The only session-authentication exceptions are exact `GET /health`, `OPTIONS *`, and
+exact `GET /auth/bootstrap?code={one-time-code}&redirect={local-path}`. Bootstrap validates
+and atomically consumes a single-use code that expires after two minutes. Every other
+endpoint requires a valid session credential. All `/api/v1` business handlers, MCP,
+WebSocket upgrades, and enabled proxy operations additionally require the tab credential.
+Cookie and session header carry the same secret as alternative transports; session-only
+page/static loads and conditional proxy responses remain documented in section 2.
+No additional unauthenticated endpoint was found, so no `SECURITY_ERROR.md` was created.
+
+Both mandatory repository-wide listener searches found only the approved main Kestrel host,
+non-serving port probe, and test-only Kestrel hosts; the cross-runtime search had no matches.
+Validation: **129 passed, 0 failed, 0 skipped**, using `dotnet test Tests/Tests.csproj
+--artifacts-path C:/source/vibe-rails/Tests/obj/ApiSecAuditArtifacts --verbosity quiet` with a
+`FullyQualifiedName` filter covering `CookieAuthMiddlewareTests`, `AuthServiceTests`,
+`AuthRoutesTests`, all five LLM proxy route test classes, `TokenSaverPauseRoutesTests`,
+`McpServerHttpTests`, `InternalToolsRoutesTests`, `SigningKeyRoutesTests`, `BoardRoutesTests`,
+`JobRoutesTests`, and `CodeGraphRoutesTests`. This was source reconciliation plus targeted
+regression tests, not a live request sweep of every production endpoint.
+
 VB-44 review amendment (2026-09-26): added read-only `POST /api/v1/board/cards/activity`.
 The active-root registration and session-plus-tab middleware apply unchanged. Requests supply a
 board ID and at most 100 card IDs (each ID at most 100 characters); the project is server-derived.
@@ -502,7 +528,7 @@ discovery alone is insufficient if the same feature change is allowed to expand 
 set. The production listener set is now frozen above so a new match starts as a finding, not as
 an expectation.
 
-### Repository-wide listener result — 2026-09-24
+### Repository-wide listener result — 2026-09-26
 
 - Approved serving implementation: the main Kestrel host in `VibeRails/Program.cs`.
 - Rejected and removed before merge: `GrokLoopbackBridge`'s `HttpListener`.
@@ -541,8 +567,8 @@ spoofer's own local exchange rows.
 Authentication is enforced primarily by
 [`CookieAuthMiddleware`](VibeRails/Middleware/CookieAuthMiddleware.cs). The LLM proxy
 routes additionally use
-[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 219 mapped route
-surfaces in this inventory: 207 `/api/v1` method/path mappings, nine non-`/api` protected
+[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 222 mapped route
+surfaces in this inventory: 210 `/api/v1` method/path mappings, nine non-`/api` protected
 API surfaces, and three bootstrap/page/probe routes. Static-file middleware and the
 global `OPTIONS` behavior are noted separately because they are not finite mapped-route
 lists.
