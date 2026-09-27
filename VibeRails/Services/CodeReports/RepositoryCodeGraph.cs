@@ -11,7 +11,8 @@ namespace VibeRails.Services.CodeReports;
 /// <summary>Builds a bounded working-tree map from Git's file catalog and parser evidence.</summary>
 public sealed class RepositoryCodeGraph
 {
-    internal const int MaxFiles = 1000;
+    internal const int MaxFiles = 2000;
+    internal const int MaxPriorityFiles = 1000;
     internal const int MaxNodes = 2800;
     internal const int MaxSerializedBytes = 8 * 1024 * 1024;
     private const int MaxEdges = 10000;
@@ -33,12 +34,12 @@ public sealed class RepositoryCodeGraph
         var priority = priorityFiles.ToHashSet(StringComparer.Ordinal);
         var candidates = paths.Where(path => IsSafePath(path) && MintLintAnalyzer.SupportsFile(path)
                 && (priority.Contains(path) || IsSourcePath(path))).Distinct(StringComparer.Ordinal)
-            .OrderByDescending(priority.Contains).ThenBy(path => path, StringComparer.Ordinal).ToArray();
+            .OrderBy(path => path, StringComparer.Ordinal).ToArray();
         var truncated = candidates.Length > MaxFiles;
         var guard = new GitStagedSnapshotProvider.WorkingTreePathGuard(root);
         var files = new List<(string Path, SourceOutline? Outline)>();
         long bytesRead = 0;
-        foreach (var path in candidates.Take(MaxFiles))
+        foreach (var path in SelectPaths(candidates, priority, MaxFiles))
         {
             cancellationToken.ThrowIfCancellationRequested();
             var fullPath = Path.GetFullPath(Path.Combine(root, path));
@@ -68,6 +69,27 @@ public sealed class RepositoryCodeGraph
             files.Add((path, outline));
         }
         return Build(RepositoryName(root), files, truncated, cancellationToken);
+    }
+
+    // A lexical prefix can consume the entire budget before reaching the application's UI
+    // or later monorepo packages. Give each directory a turn, after honoring report paths.
+    internal static IEnumerable<string> SelectPaths(IEnumerable<string> paths, ISet<string> priority, int limit)
+    {
+        var ordered = paths.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+        var remaining = limit;
+        foreach (var path in ordered.Where(priority.Contains))
+        {
+            if (remaining-- <= 0) yield break;
+            yield return path;
+        }
+        var directories = new Queue<Queue<string>>(ordered.Where(path => !priority.Contains(path))
+            .GroupBy(path => Path.GetDirectoryName(path), StringComparer.Ordinal)
+            .Select(group => new Queue<string>(group)));
+        while (remaining-- > 0 && directories.TryDequeue(out var directory))
+        {
+            yield return directory.Dequeue();
+            if (directory.Count > 0) directories.Enqueue(directory);
+        }
     }
 
     internal static string RepositoryName(string root)
@@ -150,14 +172,15 @@ public sealed class RepositoryCodeGraph
                 if (!declarations.TryGetValue(reference.Name, out var targetPath) || targetPath == path) continue;
                 AddReference(source, fileNodes[targetPath], $"{path}:{reference.Line} mentions {reference.Name}");
             }
-            foreach (var import in outline.Imports.Where(value => value.StartsWith('.')))
+            foreach (var import in outline.Imports.Where(value =>
+                outline.Language is "JavaScript" or "TypeScript" && (value.StartsWith("./") || value.StartsWith("../"))))
             {
                 // Resolve only exact repository files or conventional JS index modules.
                 var relative = ResolveImport(path, import);
                 if (relative is null) continue;
-                foreach (var suffix in new[] { "", ".js", ".mjs", ".ts", ".tsx", ".jsx", "/index.js", "/index.ts" })
+                foreach (var candidate in ImportCandidates(relative, outline.Language))
                 {
-                    if (!fileNodes.TryGetValue(relative + suffix, out var target)) continue;
+                    if (!fileNodes.TryGetValue(candidate, out var target)) continue;
                     AddReference(source, target, $"{path} imports {import}");
                     break;
                 }
@@ -186,6 +209,27 @@ public sealed class RepositoryCodeGraph
             if (source.ParentId != target.ParentId)
                 domainRelations.TryAdd((source.ParentId!, target.ParentId!), evidence);
         }
+    }
+
+    private static IEnumerable<string> ImportCandidates(string path, string? language)
+    {
+        // TypeScript commonly writes the emitted JS extension in source imports.
+        // Follow source extension substitution before looking for an emitted file.
+        if (language == "TypeScript")
+        {
+            var extension = Path.GetExtension(path);
+            var stem = path[..^extension.Length];
+            if (extension == ".js") { yield return stem + ".ts"; yield return stem + ".tsx"; }
+            if (extension == ".mjs") yield return stem + ".mts";
+            if (extension == ".cjs") yield return stem + ".cts";
+        }
+        yield return path;
+        if (Path.HasExtension(path)) yield break;
+        var extensions = language == "TypeScript"
+            ? new[] { ".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs" }
+            : new[] { ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts" };
+        foreach (var extension in extensions) yield return path + extension;
+        foreach (var extension in extensions) yield return path + "/index" + extension;
     }
 
     /// <summary>Trims the graph to the serialized byte budget, then snapshots it into the response.</summary>
@@ -268,7 +312,8 @@ public sealed class RepositoryCodeGraph
         && !path.Any(char.IsControl) && !path.Split('/').Any(part => part is "" or "." or "..");
 
     private static bool IsSourcePath(string path) => IsSafePath(path) && MintLintAnalyzer.SupportsFile(path)
-        && !path.Split('/').Any(part => part is ".git" or "node_modules" or "bin" or "obj" or "vendor" or "assets");
+        && !path.Split('/').Any(part => part is ".git" or "node_modules" or "vendor"
+            || (part is "bin" or "obj" && Path.GetExtension(path).Equals(".cs", StringComparison.OrdinalIgnoreCase)));
 
     private static string Id(string kind, string path) => kind + ":" + Convert.ToHexStringLower(
         SHA256.HashData(Encoding.UTF8.GetBytes(path)))[..24];

@@ -46,6 +46,33 @@ public sealed record SourceOutline(
             .DistinctBy(token => token.Text)
             .Select(token => new SourceOutlineSymbol(token.Text, "identifier", token.Line))
             .ToArray();
-        return new(source.Language.ToString(), declarations, references, source.ImportSources.ToArray());
+        var imports = source.ImportSources.AsEnumerable();
+        if (source.Language is SourceLanguage.JavaScript or SourceLanguage.TypeScript)
+            imports = imports.Concat(ReadReExports(source.Tokens));
+        return new(source.Language.ToString(), declarations, references, imports.Distinct(StringComparer.Ordinal).ToArray());
+    }
+
+    // Re-exports are dependency evidence for the mapper. Keep this separate from the
+    // analyzer's import list so this addition does not change saved quality measurements.
+    private static IEnumerable<string> ReadReExports(IReadOnlyList<Token> tokens)
+    {
+        for (var i = 0; i < tokens.Count - 1; i++)
+        {
+            if (tokens[i].Text != "export") continue;
+            var start = i + 1;
+            if (tokens[start].Text == "type" && start + 1 < tokens.Count) start++;
+            if (tokens[start].Text is not ("{" or "*")) continue;
+            for (var j = start; j < tokens.Count - 1; j++)
+            {
+                if (tokens[j].Text is ";" or "export" or "import") break;
+                if (tokens[j].Text == "from" && tokens[j + 1].Kind == TokenKind.String)
+                {
+                    yield return ParserUtilities.StringLiteralValue(tokens[j + 1].Text);
+                    break;
+                }
+                // `export { local }` has no source. Do not scan the next statement.
+                if (tokens[j].Text == "}" && tokens[j + 1].Text != "from") break;
+            }
+        }
     }
 }
