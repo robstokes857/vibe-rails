@@ -1219,8 +1219,13 @@ export class TerminalManager {
                 return doomed;
             }
         }
+        // Chrome-only refresh, deliberately not updateUi(): the strip is
+        // fixed-height and never wraps, so dropping a chip cannot change the
+        // terminal viewport, and updateUi()'s showTerminal() would schedule
+        // fit passes on the freshly connected live tab for nothing (see
+        // vibe-books TERMINAL.md, tab-activation resize shred).
         this.updateAddButtonState();
-        this.updateUi();
+        this._updateTabScrollArrows();
         return doomed;
     }
 
