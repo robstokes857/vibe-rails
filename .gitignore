@@ -459,3 +459,8 @@ Tests/Services/Terminal/Fixtures/session_b91596d9_codex_working_falsefire.fixtur
 # being published. See AGENTS.md; start at ../vibe-books/INDEX.md.
 /runbooks/
 /python-scripts/
+
+# VCA regression fixtures deliberately contain lookalike names (App.csproj.user, ...)
+# that the patterns above hid from CI checkouts; the v1.10.24 and v10.11.0 release Test jobs
+# failed on LookalikeNames_AreNotPackageFiles because the file was never committed.
+!Tests/VcaRegression/Fixtures/**
