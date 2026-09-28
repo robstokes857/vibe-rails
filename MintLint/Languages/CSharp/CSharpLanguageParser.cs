@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Text;
 
 namespace MintLint;
 
@@ -391,7 +392,8 @@ internal sealed class CSharpLanguageParser : ILanguageParser
 
     private static string ReadDottedName(List<Token> tokens, ref int index, int line)
     {
-        string result = string.Empty;
+        // Append each segment once: repeated concatenation was quadratic in the segment count.
+        StringBuilder result = new();
         bool expectName = true;
 
         while (index < tokens.Count && tokens[index].Line == line)
@@ -404,7 +406,12 @@ internal sealed class CSharpLanguageParser : ILanguageParser
                     break;
                 }
 
-                result = result.Length == 0 ? token.Text : result + "." + token.Text;
+                if (result.Length > 0)
+                {
+                    result.Append('.');
+                }
+
+                result.Append(token.Text);
                 expectName = false;
                 index++;
                 continue;
@@ -420,6 +427,6 @@ internal sealed class CSharpLanguageParser : ILanguageParser
             break;
         }
 
-        return result;
+        return result.ToString();
     }
 }

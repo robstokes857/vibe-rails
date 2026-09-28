@@ -18,16 +18,17 @@ test('settings page exposes the default-on co-author and Claude session removal 
     assert.match(source, /removeCoAuthorTrailers:\s*true/);
 });
 
-test('settings page exposes the default-off Vibe AI nav control', () => {
+test('Vibe AI stays in the nav with no settings toggle', () => {
     const html = readFileSync(indexPath, 'utf8');
     const source = readFileSync(modulePath, 'utf8');
     const appSource = readFileSync(path.resolve('VibeRails/wwwroot/app.js'), 'utf8');
 
-    assert.match(html, /id="setting-show-vibe-ai-ui"/);
-    assert.match(html, /Show Vibe AI UI/);
-    assert.match(source, /showVibeAiUi:\s*false/);
-    assert.match(appSource, /applyVibeAiNavVisibility/);
-    assert.match(html, /data-view="vibe-rails-ai"[\s\S]{0,80}hidden/);
+    assert.doesNotMatch(html, /id="setting-show-vibe-ai-ui"/);
+    assert.doesNotMatch(html, /Show Vibe AI UI/);
+    assert.doesNotMatch(source, /showVibeAiUi/);
+    assert.doesNotMatch(appSource, /applyVibeAiNavVisibility/);
+    assert.match(html, /data-view="vibe-rails-ai"/);
+    assert.doesNotMatch(html, /data-view="vibe-rails-ai"[\s\S]{0,120}\shidden/);
 });
 
 test('settings page always shares completed sessions and has no sharing switch', () => {
@@ -74,14 +75,13 @@ test('saving settings sends the co-author removal choice', async () => {
         /* grokTokenSaverEnabled */ true,
         /* removeCoAuthorTrailers */ false,
         /* routeThroughVibeRailsAi */ false,
-        /* showVibeAiUi */ false,
         /* clearApiKey */ false);
 
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, '/api/v1/settings');
     assert.equal(calls[0].method, 'POST');
     assert.equal(calls[0].body.removeCoAuthorTrailers, false);
-    assert.equal(calls[0].body.showVibeAiUi, false);
+    assert.equal(calls[0].body.showVibeAiUi, undefined);
     assert.equal(calls[0].body.dataExportOptIn, true);
 });
 

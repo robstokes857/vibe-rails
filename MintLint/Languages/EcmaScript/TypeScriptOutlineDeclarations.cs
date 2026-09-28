@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace MintLint;
@@ -14,6 +15,7 @@ internal static class TypeScriptOutlineDeclarations
 
         var result = new List<TypeScriptOutlineDeclaration>();
         var tokens = source.Tokens;
+        var partners = ReadTypeArgumentPartners(source);
         for (var i = 0; i + 2 < tokens.Count; i++)
         {
             var keyword = tokens[i];
@@ -24,7 +26,7 @@ internal static class TypeScriptOutlineDeclarations
 
             var cursor = i + 2;
             var assignmentInClose = false;
-            if (tokens[cursor].Text == "<" && !SkipTypeArguments(source, ref cursor, out assignmentInClose))
+            if (tokens[cursor].Text == "<" && !SkipTypeArguments(tokens, partners, ref cursor, out assignmentInClose))
                 continue;
 
             int end;
@@ -36,7 +38,7 @@ internal static class TypeScriptOutlineDeclarations
                     cursor++;
                 }
                 if (cursor >= tokens.Count || tokens[cursor].Text is ";" or "}") continue;
-                end = FindAliasEnd(source, cursor);
+                end = FindAliasEnd(source, partners, cursor);
             }
             else
             {
@@ -48,7 +50,7 @@ internal static class TypeScriptOutlineDeclarations
                     {
                         if (tokens[cursor].Text == "<")
                         {
-                            if (!SkipTypeArguments(source, ref cursor, out var assignment) || assignment) break;
+                            if (!SkipTypeArguments(tokens, partners, ref cursor, out var assignment) || assignment) break;
                             continue;
                         }
                         if (tokens[cursor].Kind != TokenKind.Identifier && tokens[cursor].Text is not ("." or ",")) break;
@@ -66,38 +68,67 @@ internal static class TypeScriptOutlineDeclarations
         return result;
     }
 
-    private static bool SkipTypeArguments(ParsedSource source, ref int cursor, out bool assignment)
+    // One pass pairs each `<` with the close that returns it to depth zero, scoped to its
+    // enclosing paired group. Scanning forward from every `<` on demand repeated the same walk
+    // for each unmatched delimiter, which made an in-progress or malformed source quadratic.
+    private static int[] ReadTypeArgumentPartners(ParsedSource source)
     {
-        assignment = false;
-        var depth = 0;
         var tokens = source.Tokens;
-        for (var i = cursor; i < tokens.Count; i++)
+        var partners = new int[tokens.Count];
+        Array.Fill(partners, -1);
+        var open = new List<int>();
+        var frames = new Stack<(int Close, int OpenCount)>();
+        var floor = 0;
+        for (var i = 0; i < tokens.Count; i++)
         {
+            if (frames.Count > 0 && frames.Peek().Close == i)
+            {
+                // Delimiters left open inside a group never match outside it.
+                open.RemoveRange(floor, open.Count - floor);
+                frames.Pop();
+                floor = frames.Count > 0 ? frames.Peek().OpenCount : 0;
+                continue;
+            }
             var text = tokens[i].Text;
             if (text is "(" or "[" or "{")
             {
-                i = ParserUtilities.SkipPaired(source, i);
+                var close = ParserUtilities.SkipPaired(source, i);
+                // An unmatched opener is stepped over, exactly as the forward scan did.
+                if (close <= i) continue;
+                frames.Push((close, open.Count));
+                floor = open.Count;
                 continue;
             }
-            if (text == "<") depth++;
-            else if (text is ">" or ">>" or ">>>" or ">=" or ">>=" or ">>>=")
+            if (text == "<") { open.Add(i); continue; }
+            if (text is ">" or ">>" or ">>>" or ">=" or ">>=" or ">>>=")
             {
                 var closeCount = text.EndsWith('=') ? text.Length - 1 : text.Length;
-                depth -= closeCount;
-                if (depth < 0) return false;
-                if (depth == 0)
+                var available = open.Count - floor;
+                if (closeCount <= available)
                 {
-                    assignment = text.EndsWith('=');
-                    cursor = i + 1;
-                    return true;
+                    // Only the outermost `<` this token closes lands on depth zero. The inner
+                    // ones overshoot, which a scan from them reports as no match.
+                    partners[open[open.Count - closeCount]] = i;
+                    open.RemoveRange(open.Count - closeCount, closeCount);
                 }
+                else open.RemoveRange(floor, available);
+                continue;
             }
-            else if (text is ";" or "}") return false;
+            if (text is ";" or "}") open.RemoveRange(floor, open.Count - floor);
         }
-        return false;
+        return partners;
     }
 
-    private static int FindAliasEnd(ParsedSource source, int start)
+    private static bool SkipTypeArguments(IReadOnlyList<Token> tokens, int[] partners, ref int cursor, out bool assignment)
+    {
+        var partner = partners[cursor];
+        assignment = partner >= 0 && tokens[partner].Text.EndsWith('=');
+        if (partner < 0) return false;
+        cursor = partner + 1;
+        return true;
+    }
+
+    private static int FindAliasEnd(ParsedSource source, int[] partners, int start)
     {
         var tokens = source.Tokens;
         for (var i = start; i < tokens.Count; i++)
@@ -107,11 +138,7 @@ internal static class TypeScriptOutlineDeclarations
             if (i > start && tokens[i].Line > tokens[i - 1].Line && StartsDeclaration(tokens, i))
                 return i - 1;
             if (text is "(" or "[" or "{") i = ParserUtilities.SkipPaired(source, i);
-            else if (text == "<")
-            {
-                var afterTypeArguments = i;
-                if (SkipTypeArguments(source, ref afterTypeArguments, out _)) i = afterTypeArguments - 1;
-            }
+            else if (text == "<" && partners[i] >= 0) i = partners[i];
         }
         return tokens.Count - 1;
     }

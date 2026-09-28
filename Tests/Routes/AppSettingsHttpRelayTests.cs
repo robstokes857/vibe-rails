@@ -17,14 +17,14 @@ public sealed class AppSettingsHttpRelayTests
     }
 
     [Fact]
-    public void OlderSettingsFile_DefaultsVibeAiNavOff()
+    public void OlderSettingsFile_ShowsVibeAiWhenTheKeyIsAbsent()
     {
-        Assert.False(new Settings().ShowVibeAiUi);
+        Assert.True(new Settings().ShowVibeAiUi);
 
         var settings = JsonSerializer.Deserialize("{}", ConfigJsonContext.Default.Settings);
 
         Assert.NotNull(settings);
-        Assert.False(settings!.ShowVibeAiUi);
+        Assert.True(settings!.ShowVibeAiUi);
     }
 
     [Theory]

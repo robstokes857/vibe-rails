@@ -1446,3 +1446,17 @@ Route tests cover credentials, scope, search and atomic draft links. Both mandat
 searches found the existing main Kestrel host, the non-serving PortFinder probe and test-only
 hosts; the cross-runtime search had no matches. No new listener or auth exception was added.
 This is a scoped review; unrelated existing findings remain in SECURITY_ERROR.md.
+
+## Code mapper availability review (2026-09-28)
+
+The review of the changes since v10.11.1 closed the two unresolved `SECURITY_ERROR.md`
+entries and the file was removed. Python and Rust import paths are now built in linear time
+(the analyzer's own dotted-name and `use`-path readers had the same repeated-concatenation
+shape and were converted as well), import path text is bounded to 256 Ki characters per file,
+and TypeScript type-argument delimiters are paired in one pass per file. The same review found
+and bounded the same class of defect in the new `RepositoryModuleResolver`: Python root
+discovery and Cargo owner lookup walk path prefixes once against span lookups, cross-root
+Python probes only consult roots holding the module's first segment, and a per-graph work
+budget (`module-work-limit`) stops repeated crate-map walks. The C#/PHP scope reader no longer
+rescans the file for every unterminated `using`. Allocation and timing regressions cover each
+case. No route, authentication, listener or repository-containment behaviour changed.

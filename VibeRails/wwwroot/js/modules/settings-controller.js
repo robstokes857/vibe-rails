@@ -50,7 +50,6 @@ export class SettingsController {
             codexTokenSaverEnabled: true,
             openCodeTokenSaverEnabled: true,
             removeCoAuthorTrailers: true,
-            showVibeAiUi: false,
             dataExportConfigured: false,
             machineName: ''
         };
@@ -116,7 +115,6 @@ export class SettingsController {
             const opencodeTokenSaverToggle = root.querySelector('#setting-token-saver-opencode');
             const grokTokenSaverToggle = root.querySelector('#setting-token-saver-grok');
             const removeCoAuthorTrailersToggle = root.querySelector('#setting-remove-co-author-trailers');
-            const showVibeAiUiToggle = root.querySelector('#setting-show-vibe-ai-ui');
 
             if (remoteAccessToggle) {
                 remoteAccessToggle.checked = settings.remoteAccess || false;
@@ -203,9 +201,6 @@ export class SettingsController {
                 // Missing on older servers/settings files means the documented default: enabled.
                 removeCoAuthorTrailersToggle.checked = settings.removeCoAuthorTrailers !== false;
             }
-            if (showVibeAiUiToggle) {
-                showVibeAiUiToggle.checked = settings.showVibeAiUi === true;
-            }
 
             const form = root.querySelector('#app-settings-form');
             if (form) {
@@ -252,7 +247,6 @@ export class SettingsController {
                             grokTokenSaverToggle?.checked ?? true,
                             removeCoAuthorTrailersToggle?.checked ?? true,
                             routeThroughVibeRailsAiToggle?.checked ?? false,
-                            showVibeAiUiToggle?.checked === true,
                             clearApiKey
                         );
                         if (savedSettings) {
@@ -280,7 +274,7 @@ export class SettingsController {
         }
     }
 
-    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, openCodeLlmProxyEnabled, grokLlmProxyEnabled, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, removeCoAuthorTrailers, routeThroughVibeRailsAi, showVibeAiUi = false, clearApiKey = false) {
+    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, openCodeLlmProxyEnabled, grokLlmProxyEnabled, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, removeCoAuthorTrailers, routeThroughVibeRailsAi, clearApiKey = false) {
         try {
             const savedSettings = await this.app.apiCall('/api/v1/settings', 'POST', {
                 remoteAccess: remoteAccess,
@@ -300,7 +294,6 @@ export class SettingsController {
                 grokTokenSaverEnabled: grokTokenSaverEnabled,
                 removeCoAuthorTrailers: removeCoAuthorTrailers,
                 routeThroughVibeRailsAi: routeThroughVibeRailsAi,
-                showVibeAiUi: showVibeAiUi,
                 clearApiKey: clearApiKey,
                 dataExportOptIn: true
             });
@@ -412,8 +405,7 @@ export class SettingsController {
             '#setting-token-saver-codex',
             '#setting-token-saver-opencode',
             '#setting-token-saver-grok',
-            '#setting-remove-co-author-trailers',
-            '#setting-show-vibe-ai-ui'
+            '#setting-remove-co-author-trailers'
         ].join(',');
     }
 
@@ -437,8 +429,7 @@ export class SettingsController {
             codexTokenSaverEnabled: isChecked('#setting-token-saver-codex'),
             openCodeTokenSaverEnabled: isChecked('#setting-token-saver-opencode'),
             grokTokenSaverEnabled: isChecked('#setting-token-saver-grok'),
-            removeCoAuthorTrailers: isChecked('#setting-remove-co-author-trailers'),
-            showVibeAiUi: isChecked('#setting-show-vibe-ai-ui')
+            removeCoAuthorTrailers: isChecked('#setting-remove-co-author-trailers')
         });
     }
 
@@ -534,9 +525,6 @@ export class SettingsController {
 
         const removeCoAuthorTrailersToggle = root.querySelector('#setting-remove-co-author-trailers');
         if (removeCoAuthorTrailersToggle) removeCoAuthorTrailersToggle.checked = settings.removeCoAuthorTrailers !== false;
-
-        const showVibeAiUiToggle = root.querySelector('#setting-show-vibe-ai-ui');
-        if (showVibeAiUiToggle) showVibeAiUiToggle.checked = settings.showVibeAiUi === true;
 
         this._updateDataExportAvailability(root);
     }

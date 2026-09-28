@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 
 namespace MintLint;
 
@@ -17,15 +18,27 @@ public sealed record SourceOutlineImport(string Path, string Kind, int Line,
 // Mapper-only evidence: do not change the analyzer's historical import counts or quality scores.
 internal static class SourceModuleImports
 {
+    /// <summary>
+    /// Path text emitted per file. A Rust use-group repeats its shared prefix for every leaf,
+    /// so a source under the graph's per-file read limit could otherwise expand to many times
+    /// its size; reading stops at this budget and the outline reports the omission.
+    /// </summary>
+    internal const int MaxImportTextCharacters = 256 * 1024;
+
     internal static IReadOnlyList<SourceOutlineImport> Read(SourceLanguage language, IReadOnlyList<Token> tokens)
+        => Read(language, tokens, out _);
+
+    internal static IReadOnlyList<SourceOutlineImport> Read(SourceLanguage language, IReadOnlyList<Token> tokens,
+        out bool truncated)
     {
-        var imports = new List<SourceOutlineImport>();
-        if (language == SourceLanguage.Python) ReadPython(tokens, imports);
-        if (language == SourceLanguage.Rust) ReadRust(tokens, 0, tokens.Count, "", imports, 0);
-        return imports.Distinct().ToArray();
+        var reader = new ImportReader();
+        if (language == SourceLanguage.Python) ReadPython(tokens, reader);
+        if (language == SourceLanguage.Rust) ReadRust(tokens, 0, tokens.Count, "", reader, 0);
+        truncated = reader.Exhausted;
+        return reader.Imports.Distinct().ToArray();
     }
 
-    private static void ReadPython(IReadOnlyList<Token> tokens, List<SourceOutlineImport> imports)
+    private static void ReadPython(IReadOnlyList<Token> tokens, ImportReader reader)
     {
         for (var i = 0; i < tokens.Count; i++)
         {
@@ -33,15 +46,17 @@ internal static class SourceModuleImports
             if (keyword.Text is not ("from" or "import")) continue;
             var cursor = i + 1;
             var from = keyword.Text == "from";
-            var module = from ? PythonPath(tokens, ref cursor, allowRelative: true) : "";
+            var module = from ? PythonPath(tokens, ref cursor, allowRelative: true, reader.Builder) : "";
             if (from && (module.Length == 0 || cursor >= tokens.Count || tokens[cursor].Text != "import")) continue;
+            // The module string is shared by every name the statement imports; charge it once.
+            if (from && !reader.Keep(module.Length)) return;
             if (from) cursor++;
             var grouped = cursor < tokens.Count && tokens[cursor].Text == "(";
             if (grouped) cursor++;
             while (cursor < tokens.Count)
             {
                 var name = tokens[cursor].Text == "*" ? tokens[cursor++].Text
-                    : PythonPath(tokens, ref cursor, allowRelative: false);
+                    : PythonPath(tokens, ref cursor, allowRelative: false, reader.Builder);
                 if (name.Length == 0) break;
                 string? alias = null;
                 if (cursor + 1 < tokens.Count && tokens[cursor].Text == "as"
@@ -50,7 +65,8 @@ internal static class SourceModuleImports
                     alias = tokens[cursor + 1].Text;
                     cursor += 2;
                 }
-                imports.Add(new(from ? module : name, from ? "python-from" : "python-import",
+                if (!reader.Keep(name.Length)) return;
+                reader.Imports.Add(new(from ? module : name, from ? "python-from" : "python-import",
                     keyword.Line, from ? name : null, alias));
                 if (cursor >= tokens.Count || tokens[cursor].Text != ",") break;
                 cursor++;
@@ -60,27 +76,29 @@ internal static class SourceModuleImports
         }
     }
 
-    private static string PythonPath(IReadOnlyList<Token> tokens, ref int cursor, bool allowRelative)
+    // Append every segment to one builder: the path is built once, in linear time, however
+    // many dotted segments the source contains.
+    private static string PythonPath(IReadOnlyList<Token> tokens, ref int cursor, bool allowRelative, StringBuilder builder)
     {
-        var result = "";
+        builder.Clear();
         if (allowRelative)
-            while (cursor < tokens.Count && tokens[cursor].Text is "." or "...") result += tokens[cursor++].Text;
+            while (cursor < tokens.Count && tokens[cursor].Text is "." or "...") builder.Append(tokens[cursor++].Text);
         if (cursor >= tokens.Count || tokens[cursor].Kind != TokenKind.Identifier || tokens[cursor].Text == "import")
-            return result;
-        result += tokens[cursor++].Text;
+            return builder.ToString();
+        builder.Append(tokens[cursor++].Text);
         while (cursor + 1 < tokens.Count && tokens[cursor].Text == "." && tokens[cursor + 1].Kind == TokenKind.Identifier)
         {
-            result += "." + tokens[cursor + 1].Text;
+            builder.Append('.').Append(tokens[cursor + 1].Text);
             cursor += 2;
         }
-        return result;
+        return builder.ToString();
     }
 
     private static void ReadRust(IReadOnlyList<Token> tokens, int start, int end, string scope,
-        List<SourceOutlineImport> imports, int depth)
+        ImportReader reader, int depth)
     {
         if (depth > 64) return;
-        for (var i = start; i < end; i++)
+        for (var i = start; i < end && !reader.Exhausted; i++)
         {
             // Token trees in macros are input to code generation, not literal module declarations.
             if (tokens[i].Text == "!" && i > start && tokens[i - 1].Kind == TokenKind.Identifier)
@@ -104,57 +122,73 @@ internal static class SourceModuleImports
                 var name = tokens[i + 1].Text;
                 var next = tokens[i + 2].Text;
                 if (next == ";" && !HasPathAttribute(tokens, i))
-                    imports.Add(new(name, "rust-mod", tokens[i].Line, Scope: scope));
+                    reader.Imports.Add(new(name, "rust-mod", tokens[i].Line, Scope: scope));
                 else if (next == "{")
                 {
                     var close = Close(tokens, i + 2, end);
-                    imports.Add(new(name, "rust-inline", tokens[i].Line, Scope: scope));
-                    ReadRust(tokens, i + 3, close, Join(scope, name), imports, depth + 1);
+                    reader.Imports.Add(new(name, "rust-inline", tokens[i].Line, Scope: scope));
+                    ReadRust(tokens, i + 3, close, Join(scope, name), reader, depth + 1);
                     i = close;
                 }
                 continue;
             }
             if (tokens[i].Text != "use") continue;
             var cursor = i + 1;
-            ReadRustUse(tokens, ref cursor, end, "", scope, tokens[i].Line, imports, 0);
+            reader.Segments.Clear();
+            ReadRustUse(tokens, ref cursor, end, scope, tokens[i].Line, reader, 0);
             i = Math.Max(i, cursor - 1);
         }
     }
 
-    private static void ReadRustUse(IReadOnlyList<Token> tokens, ref int cursor, int end, string prefix,
-        string scope, int line, List<SourceOutlineImport> imports, int depth)
+    // The path under construction is a segment stack shared by the whole use statement. Each
+    // leaf joins it once, so a group's shared prefix is never re-copied per segment; an empty
+    // first segment stands for a leading `::`.
+    private static void ReadRustUse(IReadOnlyList<Token> tokens, ref int cursor, int end, string scope, int line,
+        ImportReader reader, int depth)
     {
-        if (depth > 64) return;
-        var path = prefix;
-        if (cursor < end && tokens[cursor].Text == "::") { path = "::"; cursor++; }
-        while (cursor < end)
+        if (depth > 64 || reader.Exhausted) return;
+        var segments = reader.Segments;
+        var entry = segments.Count;
+        if (entry == 0 && cursor < end && tokens[cursor].Text == "::") { segments.Add(""); cursor++; }
+        try
         {
-            var token = tokens[cursor];
-            if (token.Text == "{")
+            while (cursor < end)
             {
-                cursor++;
-                while (cursor < end && tokens[cursor].Text != "}")
+                var token = tokens[cursor];
+                if (token.Text == "{")
                 {
-                    var before = cursor;
-                    ReadRustUse(tokens, ref cursor, end, path, scope, line, imports, depth + 1);
-                    if (cursor < end && tokens[cursor].Text == ",") cursor++;
-                    else if (cursor == before || cursor >= end || tokens[cursor].Text != "}") break;
+                    cursor++;
+                    while (cursor < end && tokens[cursor].Text != "}")
+                    {
+                        var before = cursor;
+                        ReadRustUse(tokens, ref cursor, end, scope, line, reader, depth + 1);
+                        if (reader.Exhausted) return;
+                        if (cursor < end && tokens[cursor].Text == ",") cursor++;
+                        else if (cursor == before || cursor >= end || tokens[cursor].Text != "}") break;
+                    }
+                    if (cursor < end && tokens[cursor].Text == "}") cursor++;
+                    return;
                 }
-                if (cursor < end && tokens[cursor].Text == "}") cursor++;
+                if (token.Kind != TokenKind.Identifier && token.Text != "*") return;
+                cursor++;
+                // `self` inside a group names the prefix itself: `use a::b::{self}` imports a::b.
+                if (token.Text != "self" || segments.Count == 0) segments.Add(token.Text);
+                if (cursor < end && tokens[cursor].Text == "::") { cursor++; continue; }
+                string? alias = null;
+                if (cursor + 1 < end && tokens[cursor].Text == "as" && tokens[cursor + 1].Kind == TokenKind.Identifier)
+                {
+                    alias = tokens[cursor + 1].Text;
+                    cursor += 2;
+                }
+                var path = string.Join("::", segments);
+                if (!reader.Keep(path.Length)) return;
+                reader.Imports.Add(new(path, "rust-use", line, Alias: alias, Scope: scope));
                 return;
             }
-            if (token.Kind != TokenKind.Identifier && token.Text != "*") return;
-            cursor++;
-            path = token.Text == "self" && path.Length > 0 ? path.TrimEnd(':') : Join(path, token.Text);
-            if (cursor < end && tokens[cursor].Text == "::") { cursor++; continue; }
-            string? alias = null;
-            if (cursor + 1 < end && tokens[cursor].Text == "as" && tokens[cursor + 1].Kind == TokenKind.Identifier)
-            {
-                alias = tokens[cursor + 1].Text;
-                cursor += 2;
-            }
-            imports.Add(new(path, "rust-use", line, Alias: alias, Scope: scope));
-            return;
+        }
+        finally
+        {
+            segments.RemoveRange(entry, segments.Count - entry);
         }
     }
 
@@ -181,4 +215,22 @@ internal static class SourceModuleImports
 
     private static string Join(string prefix, string part) => prefix.Length == 0 ? part
         : prefix.EndsWith("::", StringComparison.Ordinal) ? prefix + part : prefix + "::" + part;
+
+    private sealed class ImportReader
+    {
+        private int remaining = MaxImportTextCharacters;
+
+        public List<SourceOutlineImport> Imports { get; } = [];
+        public List<string> Segments { get; } = [];
+        public StringBuilder Builder { get; } = new();
+        public bool Exhausted { get; private set; }
+
+        /// <summary>Charges emitted path text; false once the file's budget is spent.</summary>
+        public bool Keep(int characters)
+        {
+            remaining -= characters;
+            if (remaining < 0) Exhausted = true;
+            return !Exhausted;
+        }
+    }
 }

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 
 namespace MintLint;
 
@@ -1285,7 +1286,8 @@ internal abstract class BraceFamilyLanguageParser : ILanguageParser
         }
 
         end = Math.Min(end, tokens.Count - 1);
-        string result = string.Empty;
+        // Append each token once: repeated concatenation was quadratic in the path length.
+        StringBuilder result = new();
         for (int i = start; i <= end; i++)
         {
             string text = tokens[i].Text;
@@ -1294,10 +1296,10 @@ internal abstract class BraceFamilyLanguageParser : ILanguageParser
                 break;
             }
 
-            result += text;
+            result.Append(text);
         }
 
-        return result;
+        return result.ToString();
     }
 
     private readonly record struct FunctionSignature(int NameIndex, int BodyStart, int End, string? Owner);

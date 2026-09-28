@@ -182,6 +182,13 @@ public sealed class RepositoryCodeGraph
             diagnostics.Add("reference-scope-limit", limitedScopes,
                 "files have incomplete reference evidence because scope or identifier text exceeded the analysis budget.");
         }
+        var limitedImports = files.Count(file => file.Outline?.ImportEvidenceTruncated == true);
+        if (limitedImports > 0)
+        {
+            truncated = true;
+            diagnostics.Add("import-evidence-limit", limitedImports,
+                "files have incomplete module import evidence because import path text exceeded the analysis budget.");
+        }
         var nodes = new List<CodeGraphNode>();
         var edges = new List<CodeGraphEdge>();
         var domains = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -231,8 +238,9 @@ public sealed class RepositoryCodeGraph
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (outline is null || !fileNodes.TryGetValue(path, out var file)) continue;
-            if (outline.Declarations.Count > 12) truncated = true;
             var declarationsForFile = outline.Declarations.Distinct().ToArray();
+            // The flag and the omission count describe the same distinct list.
+            if (declarationsForFile.Length > 12) truncated = true;
             diagnostics.Add("declaration-limit", Math.Max(0, declarationsForFile.Length - 12),
                 "declarations omitted by the 12-declarations-per-file limit. Open the source for the full outline.");
             var declarationsToKeep = declarationsForFile.Take(12).ToArray();
@@ -285,6 +293,12 @@ public sealed class RepositoryCodeGraph
             truncated = true;
             diagnostics.Add("reference-work-limit", referenceResolver.LimitedFileCount,
                 "files have incomplete references because the candidate-analysis work budget was reached.");
+        }
+        if (moduleResolver.LimitedFileCount > 0)
+        {
+            truncated = true;
+            diagnostics.Add("module-work-limit", moduleResolver.LimitedFileCount,
+                "files have incomplete module imports because the module-resolution work budget was reached.");
         }
         // Domain connections are real cross-directory source evidence, rendered at overview scale.
         foreach (var (pair, evidence) in domainRelations)

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 
 namespace MintLint;
 
@@ -171,7 +172,8 @@ internal sealed class PythonLanguageParser : ILanguageParser
 
     private static string ReadDottedName(List<Token> tokens, ref int index, int line)
     {
-        string result = string.Empty;
+        // Append each segment once: repeated concatenation was quadratic in the segment count.
+        StringBuilder result = new();
         bool expectName = true;
 
         while (index < tokens.Count && tokens[index].Line == line)
@@ -184,7 +186,12 @@ internal sealed class PythonLanguageParser : ILanguageParser
                     break;
                 }
 
-                result = result.Length == 0 ? token.Text : result + "." + token.Text;
+                if (result.Length > 0)
+                {
+                    result.Append('.');
+                }
+
+                result.Append(token.Text);
                 expectName = false;
                 index++;
                 continue;
@@ -200,7 +207,7 @@ internal sealed class PythonLanguageParser : ILanguageParser
             break;
         }
 
-        return result;
+        return result.ToString();
     }
 
     private static bool HasPreviousTokenOnLine(List<Token> tokens, int index, string text)

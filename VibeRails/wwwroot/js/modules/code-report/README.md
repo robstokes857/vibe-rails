@@ -98,6 +98,13 @@ per graph. Exhausted scopes or resolution work report `reference-scope-limit` or
 `reference-work-limit` in coverage diagnostics. An unfinished lookup never emits a partial
 match, because a later candidate could make that match ambiguous.
 
+Python and Rust module import evidence is read in linear time and bounded to 256 Ki
+characters of emitted path text per file (a Rust use-group repeats its prefix for every
+leaf). A file that exhausts it keeps the imports already read and reports
+`import-evidence-limit`; each import is independent evidence, so a partial list is never
+ambiguous. TypeScript type-argument delimiters are paired in one pass per file, so an
+unmatched `<` in an in-progress file costs nothing further.
+
 ## Provenance and vendor updates
 
 The approved composition comes from `vibe-quality-workbench/dist` (September 2026).

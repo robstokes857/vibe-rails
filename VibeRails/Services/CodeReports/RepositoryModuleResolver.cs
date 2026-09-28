@@ -5,11 +5,28 @@ namespace VibeRails.Services.CodeReports;
 /// <summary>Resolves explicit Python and Rust module syntax against the bounded repository catalog.</summary>
 internal sealed class RepositoryModuleResolver
 {
+    /// <summary>
+    /// Work per graph for each phase: crate-map visits weighted by module path length while
+    /// building, then cross-root Python probes and per-location Rust lookups while resolving.
+    /// Every source file is untrusted input on the automatic Project Health request, so unusual
+    /// layouts stop here and report an omission.
+    /// </summary>
+    internal const int MaxWorkUnits = 4_000_000;
+
     private readonly HashSet<string> paths;
     private readonly Dictionary<string, SourceOutline> outlines;
-    private readonly string[] pythonRoots;
-    private readonly string[] cargoRoots;
+    private readonly HashSet<string> pythonRoots;
+    private readonly HashSet<string>.AlternateLookup<ReadOnlySpan<char>> pythonRootLookup;
+    private readonly Dictionary<string, string[]> pythonRootsByEntry = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string[]>.AlternateLookup<ReadOnlySpan<char>> pythonRootsByEntryLookup;
+    private readonly HashSet<string> cargoRoots;
+    private readonly HashSet<string>.AlternateLookup<ReadOnlySpan<char>> cargoRootLookup;
+    private readonly Dictionary<string, string?> cargoOwners = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<RustLocation>> rustLocations = new(StringComparer.Ordinal);
+    private readonly HashSet<string> limitedFiles = new(StringComparer.Ordinal);
+    private int buildWork;
+    private int resolveWork;
+    private bool crateMapsIncomplete;
 
     internal RepositoryModuleResolver(IReadOnlyList<(string Path, SourceOutline? Outline)> files,
         IEnumerable<string>? catalogPaths = null)
@@ -17,52 +34,123 @@ internal sealed class RepositoryModuleResolver
         paths = files.Select(file => file.Path).ToHashSet(StringComparer.Ordinal);
         outlines = files.Where(file => file.Outline is not null).ToDictionary(file => file.Path,
             file => file.Outline!, StringComparer.Ordinal);
-        pythonRoots = PythonRoots().Distinct(StringComparer.Ordinal).ToArray();
+        var packages = paths.Where(path => path.EndsWith("/__init__.py", StringComparison.Ordinal))
+            .Select(Directory).ToHashSet(StringComparer.Ordinal);
+        pythonRoots = PythonRoots(packages.GetAlternateLookup<ReadOnlySpan<char>>()).ToHashSet(StringComparer.Ordinal);
+        pythonRootLookup = pythonRoots.GetAlternateLookup<ReadOnlySpan<char>>();
+        IndexPythonRootEntries();
+        pythonRootsByEntryLookup = pythonRootsByEntry.GetAlternateLookup<ReadOnlySpan<char>>();
         cargoRoots = (catalogPaths ?? paths).Where(path => path == "Cargo.toml" || path.EndsWith("/Cargo.toml", StringComparison.Ordinal))
-            .Select(Directory).Distinct(StringComparer.Ordinal).OrderByDescending(path => path.Length).ToArray();
+            .Select(Directory).ToHashSet(StringComparer.Ordinal);
+        cargoRootLookup = cargoRoots.GetAlternateLookup<ReadOnlySpan<char>>();
         BuildRustModules();
     }
 
+    /// <summary>Source files whose module resolution stopped at the work budget.</summary>
+    internal int LimitedFileCount => limitedFiles.Count;
+
     internal IEnumerable<(string Path, SourceOutlineImport Import)> Resolve(string source, SourceOutline outline)
     {
+        if (outline.ImportEvidence.Count == 0 || outline.Language is not ("Python" or "Rust")) yield break;
+        var python = outline.Language == "Python";
+        if (!python && crateMapsIncomplete) limitedFiles.Add(source);
+        var localRoot = python ? LocalRoot(source) : "";
         foreach (var import in outline.ImportEvidence)
         {
-            string? target = outline.Language switch
-            {
-                "Python" => ResolvePython(source, import),
-                "Rust" => ResolveRust(source, import),
-                _ => null
-            };
+            var target = python ? ResolvePython(source, localRoot, import) : ResolveRust(source, import);
             if (target is not null && target != source) yield return (target, import);
         }
     }
 
-    private IEnumerable<string> PythonRoots()
+    // Crate-map construction and per-file resolution have separate budgets: a cut walk must
+    // not also stop every later lookup against the maps that were completed.
+    private static bool Charge(ref int counter, int units)
+    {
+        counter += units;
+        return counter <= MaxWorkUnits;
+    }
+
+    // Roots depend only on a file's directory. Each distinct directory walks its prefixes once,
+    // against span lookups, so deep or repetitive layouts cost their path length and no more.
+    private IEnumerable<string> PythonRoots(HashSet<string>.AlternateLookup<ReadOnlySpan<char>> packages)
     {
         yield return "";
-        foreach (var path in paths.Where(path => path.EndsWith(".py", StringComparison.Ordinal)))
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var path in paths)
         {
-            // A src directory is an explicit conventional import root, including namespace packages.
-            var segments = Directory(path).Split('/', StringSplitOptions.RemoveEmptyEntries);
-            for (var i = 0; i < segments.Length; i++)
-                if (segments[i] == "src" && !Enumerable.Range(1, i + 1)
-                    .Any(length => paths.Contains(Join(string.Join('/', segments.Take(length)), "__init__.py"))))
-                    yield return string.Join('/', segments.Take(i + 1));
-            if (!path.EndsWith("/__init__.py", StringComparison.Ordinal)) continue;
-            var package = Directory(path);
-            while (Directory(package).Length > 0 && paths.Contains(Join(Directory(package), "__init__.py"))) package = Directory(package);
-            yield return Directory(package);
+            if (!path.EndsWith(".py", StringComparison.Ordinal)) continue;
+            var directory = Directory(path);
+            if (!seen.Add(directory)) continue;
+            var insidePackage = false;
+            for (var start = 0; start < directory.Length;)
+            {
+                var slash = directory.IndexOf('/', start);
+                var end = slash < 0 ? directory.Length : slash;
+                insidePackage |= packages.Contains(directory.AsSpan(0, end));
+                // A src directory is an explicit conventional import root, including namespace
+                // packages, unless a package already encloses it.
+                if (!insidePackage && directory.AsSpan(start, end - start).SequenceEqual("src")) yield return directory[..end];
+                start = end + 1;
+            }
+            if (directory.Length == 0 || !packages.Contains(directory)) continue;
+            // The directory above the outermost enclosing package is an import root.
+            var packageEnd = directory.Length;
+            while (true)
+            {
+                var parentEnd = directory.LastIndexOf('/', packageEnd - 1);
+                if (parentEnd <= 0 || !packages.Contains(directory.AsSpan(0, parentEnd))) break;
+                packageEnd = parentEnd;
+            }
+            var rootEnd = directory.LastIndexOf('/', packageEnd - 1);
+            yield return rootEnd < 0 ? "" : directory[..rootEnd];
         }
     }
 
-    private string? ResolvePython(string source, SourceOutlineImport import)
+    // Which roots have a top-level entry of each name. A module can only live below a root that
+    // has its first segment as a direct child, so stdlib and external imports probe nothing.
+    private void IndexPythonRootEntries()
+    {
+        var entries = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        foreach (var path in paths)
+        {
+            if (!path.EndsWith(".py", StringComparison.Ordinal)) continue;
+            var end = 0;
+            while (true)
+            {
+                if (pythonRootLookup.TryGetValue(path.AsSpan(0, end), out var root))
+                {
+                    var start = end == 0 ? 0 : end + 1;
+                    var slash = path.IndexOf('/', start);
+                    var entry = slash < 0 ? path[start..^3] : path[start..slash];
+                    if (entry.Length > 0)
+                    {
+                        if (!entries.TryGetValue(entry, out var roots)) entries[entry] = roots = new(StringComparer.Ordinal);
+                        roots.Add(root);
+                    }
+                }
+                var next = path.IndexOf('/', end + 1);
+                if (next < 0) break;
+                end = next;
+            }
+        }
+        foreach (var (entry, roots) in entries) pythonRootsByEntry[entry] = roots.ToArray();
+    }
+
+    private string LocalRoot(string source)
+    {
+        // The deepest import root containing the source, by walking its directory prefixes.
+        for (var end = source.LastIndexOf('/'); end > 0; end = source.LastIndexOf('/', end - 1))
+            if (pythonRootLookup.TryGetValue(source.AsSpan(0, end), out var root)) return root;
+        return "";
+    }
+
+    private string? ResolvePython(string source, string localRoot, SourceOutlineImport import)
     {
         if (import.Kind is not ("python-import" or "python-from")) return null;
         var dots = import.Path.TakeWhile(character => character == '.').Count();
         var module = import.Path[dots..];
         if (module.Length > 0 && !Names(module.Split('.'))) return null;
-        var roots = pythonRoots.Where(root => Below(source, root)).OrderByDescending(root => root.Length).ToArray();
-        var localRoot = roots.FirstOrDefault() ?? "";
+        var modulePath = module.Replace('.', '/');
         if (dots > 0)
         {
             var package = Directory(source);
@@ -73,15 +161,24 @@ internal sealed class RepositoryModuleResolver
                 package = Directory(package);
                 if (package == localRoot || !Below(package, localRoot)) return null;
             }
-            return PythonTarget(Join(package, module.Replace('.', '/')), import);
+            return PythonTarget(Join(package, modulePath), import);
         }
         // Prefer the import root containing the source. Other roots are usable only if the full
         // qualified path is unique: never search by basename or attach an external symbol name.
-        var local = PythonTarget(Join(localRoot, module.Replace('.', '/')), import);
+        var local = PythonTarget(Join(localRoot, modulePath), import);
         if (local is not null) return local;
-        var matches = pythonRoots.Select(root => PythonTarget(Join(root, module.Replace('.', '/')), import))
-            .Where(path => path is not null).Distinct(StringComparer.Ordinal).Take(2).ToArray();
-        return matches.Length == 1 ? matches[0] : null;
+        var separator = module.IndexOf('.');
+        if (!pythonRootsByEntryLookup.TryGetValue(separator < 0 ? module : module.AsSpan(0, separator), out var roots)) return null;
+        string? match = null;
+        foreach (var root in roots)
+        {
+            if (!Charge(ref resolveWork, 1)) { limitedFiles.Add(source); return null; }
+            var candidate = PythonTarget(Join(root, modulePath), import);
+            if (candidate is null || candidate == match) continue;
+            if (match is not null) return null;
+            match = candidate;
+        }
+        return match;
     }
 
     private string? PythonTarget(string module, SourceOutlineImport import)
@@ -103,8 +200,10 @@ internal sealed class RepositoryModuleResolver
         // The catalog, including Cargo.toml paths when available, establishes workspace boundaries.
         // Conventional crate roots cover src/{lib,main}.rs and custom-layout main.rs/lib.rs targets.
         // Cargo aliases, generated modules and #[path] modules deliberately remain unresolved.
+        // Shallow roots first, so a budget cut leaves the conventional top-level crates complete.
         var roots = paths.Where(path => path.EndsWith(".rs", StringComparison.Ordinal)
-            && Path.GetFileName(path) is "main.rs" or "lib.rs").ToArray();
+                && Path.GetFileName(path) is "main.rs" or "lib.rs")
+            .OrderBy(path => path.AsSpan().Count('/')).ThenBy(path => path, StringComparer.Ordinal).ToArray();
         foreach (var root in roots)
         {
             var crate = new Dictionary<string, string>(StringComparer.Ordinal) { [""] = root };
@@ -116,8 +215,12 @@ internal sealed class RepositoryModuleResolver
                     rustLocations[current.File] = locations = [];
                 locations.Add(new(crate, current.Module));
                 if (!outlines.TryGetValue(current.File, out var outline)) continue;
-                foreach (var import in outline.ImportEvidence.Where(import => import.Kind is "rust-inline" or "rust-mod"))
+                foreach (var import in outline.ImportEvidence)
                 {
+                    if (import.Kind is not ("rust-inline" or "rust-mod")) continue;
+                    // Shared files are walked once per crate root, and every lookup below hashes the
+                    // module path; charge both so repeated deep trees stop instead of running for minutes.
+                    if (!Charge(ref buildWork, 1 + current.Module.Length / 16)) { crateMapsIncomplete = true; return; }
                     var scope = import.Scope ?? "";
                     var parent = RustJoin(current.Module, scope);
                     if (!crate.ContainsKey(parent)) continue;
@@ -146,6 +249,7 @@ internal sealed class RepositoryModuleResolver
             var target = UniqueExisting(stem + ".rs", Join(stem, "mod.rs"));
             return target is not null && CargoOwner(target) == CargoOwner(source) ? target : null;
         }
+        if (!Charge(ref resolveWork, locations.Count)) { limitedFiles.Add(source); return null; }
         var resolved = locations.Select(location => ResolveRustAt(location, import)).Distinct(StringComparer.Ordinal).Take(2).ToArray();
         // Shared source can participate in several crate targets. Keep only an agreed target.
         return resolved.Length == 1 ? resolved[0] : null;
@@ -183,13 +287,29 @@ internal sealed class RepositoryModuleResolver
         return target;
     }
 
-    private string? CargoOwner(string path) => cargoRoots.FirstOrDefault(root => Below(path, root));
+    // The deepest Cargo.toml directory above the path, found by walking its directory prefixes
+    // and remembered per directory; the catalog can hold far more manifests than the map has files.
+    private string? CargoOwner(string path)
+    {
+        var directory = Directory(path);
+        if (cargoOwners.TryGetValue(directory, out var owner)) return owner;
+        var end = directory.Length;
+        while (true)
+        {
+            if (cargoRootLookup.TryGetValue(directory.AsSpan(0, end), out var root)) { owner = root; break; }
+            if (end == 0) break;
+            end = Math.Max(0, directory.LastIndexOf('/', end - 1));
+        }
+        cargoOwners[directory] = owner;
+        return owner;
+    }
+
     private string? UniqueExisting(string first, string second) => paths.Contains(first)
         ? paths.Contains(second) ? null : first : paths.Contains(second) ? second : null;
     private static bool Names(IEnumerable<string> parts) => parts.All(part => part.Length > 0
         && (char.IsLetter(part[0]) || part[0] == '_') && part.All(character => char.IsLetterOrDigit(character) || character == '_'));
     private static bool Below(string path, string directory) => directory.Length == 0
-        || path.StartsWith(directory + "/", StringComparison.Ordinal);
+        || (path.Length > directory.Length && path[directory.Length] == '/' && path.StartsWith(directory, StringComparison.Ordinal));
     private static string Directory(string path) => path.Contains('/') ? path[..path.LastIndexOf('/')] : "";
     private static string Join(string first, string second) => first.Length == 0 ? second : second.Length == 0 ? first : first + "/" + second;
     private static string RustJoin(string first, string second) => first.Length == 0 ? second : second.Length == 0 ? first : first + "::" + second;

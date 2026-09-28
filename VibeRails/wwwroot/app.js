@@ -524,15 +524,7 @@ export class VibeControlApp {
             ...settings
         });
         this.applyVsCodeThemePreference();
-        this.applyVibeAiNavVisibility();
         this.terminalTokenCompression?.setEnabledSources(getTokenSaverEnabledSources(this.appSettings));
-    }
-
-    applyVibeAiNavVisibility() {
-        const show = this.appSettings?.showVibeAiUi === true;
-        document.querySelectorAll('.app-subnav-link[data-view="vibe-rails-ai"]').forEach(link => {
-            link.hidden = !show;
-        });
     }
 
     _normalizeAppSettings(settings = {}) {
@@ -551,7 +543,6 @@ export class VibeControlApp {
             codexTokenSaverEnabled: true,
             openCodeTokenSaverEnabled: true,
             machineName: '',
-            showVibeAiUi: false,
             ...settings
         };
     }

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 
 namespace MintLint;
 
@@ -232,7 +233,8 @@ internal sealed class PhpLanguageParser : ILanguageParser
 
     private static string JoinNamespace(List<Token> tokens, int start, int end)
     {
-        string result = string.Empty;
+        // Append each token once: repeated concatenation was quadratic in the path length.
+        StringBuilder result = new();
         for (int i = start; i <= end && i < tokens.Count; i++)
         {
             if (tokens[i].Text == "as")
@@ -240,9 +242,9 @@ internal sealed class PhpLanguageParser : ILanguageParser
                 break;
             }
 
-            result += tokens[i].Text;
+            result.Append(tokens[i].Text);
         }
 
-        return result.Trim();
+        return result.ToString().Trim();
     }
 }

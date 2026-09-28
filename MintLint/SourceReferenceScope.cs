@@ -37,6 +37,9 @@ public sealed record SourceReferenceScope(IReadOnlyList<SourceOutlineSymbol> Dec
         var referenceTextCharacters = 0;
         var truncated = false;
         var depth = 0;
+        // A statement scan that found no terminator stops here; later keywords before this
+        // index would rescan the same tokens and fail the same way.
+        var unterminatedBefore = int.MaxValue;
         for (var i = 0; i < tokens.Count; i++)
         {
             if (truncated) return new([], []) { Truncated = true };
@@ -62,7 +65,7 @@ public sealed record SourceReferenceScope(IReadOnlyList<SourceOutlineSymbol> Dec
                 }
             }
             // Top-level imports only. C# using statements and PHP closure/trait uses have different semantics.
-            if (depth == scope.Depth && tokens[i].Text == (php ? "use" : "using"))
+            if (depth == scope.Depth && tokens[i].Text == (php ? "use" : "using") && i < unterminatedBefore)
             {
                 var end = i + 1;
                 while (end < tokens.Count && tokens[end].Text is not (";" or "(" or "=")) end++;
@@ -76,6 +79,7 @@ public sealed record SourceReferenceScope(IReadOnlyList<SourceOutlineSymbol> Dec
                     i = end;
                     continue;
                 }
+                unterminatedBefore = end;
             }
             if (tokens[i].Text == "{") depth++;
             else if (tokens[i].Text == "}") depth--;
@@ -89,7 +93,9 @@ public sealed record SourceReferenceScope(IReadOnlyList<SourceOutlineSymbol> Dec
         {
             var typeScope = tokenScopes[type.StartIndex] ?? root;
             var qualified = Qualify(typeScope.Name, type.Name, separator);
-            if (!KeepReferenceText(qualified.Length)) return new([], []) { Truncated = true };
+            // Declarations read so far are still facts other files may resolve against; only
+            // this file's references are withheld, since a partial list could match wrongly.
+            if (!KeepReferenceText(qualified.Length)) return new(declarations, []) { Truncated = true };
             declarations.Add(new(qualified, "type", tokens[type.StartIndex].Line));
             // A declaration is not a reference to an identically named type in another file.
             for (var i = type.StartIndex + 1; i < tokens.Count && i <= type.BodyStartIndex; i++)

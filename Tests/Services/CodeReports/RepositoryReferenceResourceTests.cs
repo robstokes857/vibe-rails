@@ -126,6 +126,40 @@ public sealed class RepositoryReferenceResourceTests
     private static string Imports(int count) => string.Join('\n', Enumerable.Range(0, count).Select(index => $"using N{index};")) + "\n";
 
     [Fact]
+    public void Read_DoesNotRescanTheFile_ForEveryUnterminatedUsing()
+    {
+        // 120 KiB of `using` keywords with no statement end: each keyword used to scan to the end
+        // of the file before the next keyword repeated the same walk.
+        var source = string.Concat(Enumerable.Repeat("using ", 20_000));
+        Assert.True(Encoding.UTF8.GetByteCount(source) < 128 * 1024);
+        _ = SourceOutline.Read("warm.cs", "using System; class W {}");
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var outline = SourceOutline.Read("unterminated.cs", source);
+        stopwatch.Stop();
+
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(3), $"Reading took {stopwatch.Elapsed}.");
+        Assert.False(outline.ReferenceScope!.Truncated);
+    }
+
+    [Fact]
+    public void Read_KeepsDeclarationsReadBeforeTheDeclarationTextBudget()
+    {
+        // A file whose class names exhaust the declaration text budget still contributes the
+        // types it had already qualified; only its own references are withheld.
+        // A long namespace is repeated in every qualified name, so 25 KiB of source needs
+        // more than the 256 Ki-character declaration budget.
+        var source = "namespace " + new string('N', 200) + ";\n"
+            + string.Concat(Enumerable.Range(0, 2000).Select(index => $"class C{index} {{}}\n"));
+        Assert.True(Encoding.UTF8.GetByteCount(source) < 128 * 1024);
+        var outline = SourceOutline.Read("Many.cs", source);
+
+        Assert.True(outline.ReferenceScope!.Truncated);
+        Assert.NotEmpty(outline.ReferenceScope.Declarations);
+        Assert.Empty(outline.ReferenceScope.References);
+    }
+
+    [Fact]
     public void Read_BoundsRepeatedCopiesOfAnAlreadySeenQualifiedChain()
     {
         var chain = string.Join('.', Enumerable.Repeat("Part", 120)) + ".Run();\n";

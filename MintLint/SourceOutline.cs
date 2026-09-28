@@ -20,6 +20,9 @@ public sealed record SourceOutline(
     /// <summary>Language-specific module import evidence for repository-local resolution.</summary>
     public IReadOnlyList<SourceOutlineImport> ImportEvidence { get; init; } = [];
 
+    /// <summary>True when import evidence stopped at the per-file path-text budget.</summary>
+    public bool ImportEvidenceTruncated { get; init; }
+
     /// <summary>Namespace and alias evidence for scoped lexical C# and PHP references.</summary>
     public SourceReferenceScope? ReferenceScope { get; init; }
 
@@ -43,7 +46,7 @@ public sealed record SourceOutline(
         foreach (var function in source.Functions)
         {
             if (function.Name is "global" or "anonymous" || function.Name.Length == 0) continue;
-            if (namedTypes.Any(type => function.StartIndex >= type.StartIndex && function.StartIndex <= type.EndIndex)) continue;
+            if (InsideNamedType(namedTypes, function.StartIndex)) continue;
             declarations.Add(new(function.Name, "function", source.Tokens[function.StartIndex].Line));
         }
         declarations.AddRange(namedTypes.Select(type => type.Symbol));
@@ -58,12 +61,29 @@ public sealed record SourceOutline(
         var imports = source.ImportSources.AsEnumerable();
         if (source.Language is SourceLanguage.JavaScript or SourceLanguage.TypeScript)
             imports = imports.Concat(ReadReExports(source.Tokens));
+        var importEvidence = SourceModuleImports.Read(source.Language, source.Tokens, out var importEvidenceTruncated);
         return new(source.Language.ToString(), namedTypes.Count > 0 ? declarations.OrderBy(symbol => symbol.Line).ToArray() : declarations, references,
             imports.Distinct(StringComparer.Ordinal).ToArray())
         {
-            ImportEvidence = SourceModuleImports.Read(source.Language, source.Tokens),
+            ImportEvidence = importEvidence,
+            ImportEvidenceTruncated = importEvidenceTruncated,
             ReferenceScope = SourceReferenceScope.Read(source)
         };
+    }
+
+    // Named types are emitted in source order without overlap, so one binary search on the
+    // start index replaces scanning every type for every function.
+    private static bool InsideNamedType(IReadOnlyList<TypeScriptOutlineDeclaration> types, int index)
+    {
+        int low = 0, high = types.Count - 1;
+        while (low <= high)
+        {
+            var middle = (low + high) / 2;
+            if (types[middle].StartIndex > index) high = middle - 1;
+            else if (types[middle].EndIndex < index) low = middle + 1;
+            else return true;
+        }
+        return false;
     }
 
     // Re-exports are dependency evidence for the mapper. Keep this separate from the

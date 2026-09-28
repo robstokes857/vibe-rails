@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Text;
 using MintLint;
 using VibeRails.Services.CodeReports;
 using Xunit;
@@ -6,6 +8,61 @@ namespace Tests.MintLintTests;
 
 public sealed class TypeScriptSourceOutlineTests
 {
+    [Fact]
+    public void MalformedAlias_WithUnmatchedGenericDelimiters_IsReadInLinearTime()
+    {
+        // 120,009 bytes: inside the graph route's 128 KiB per-file limit. Rescanning the rest
+        // of the file from every unmatched `<` previously took about 19 seconds of CPU.
+        var source = "type X = " + string.Concat(Enumerable.Repeat("< ", 60_000));
+        Assert.Equal(120_009, Encoding.UTF8.GetByteCount(source));
+
+        _ = SourceOutline.Read("warm.ts", "type W = Array<number>;");
+        var stopwatch = Stopwatch.StartNew();
+        var outline = SourceOutline.Read("broken.ts", source);
+        stopwatch.Stop();
+
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(3), $"Reading took {stopwatch.Elapsed}.");
+        Assert.Equal(new[] { new SourceOutlineSymbol("X", "type", 1) }, outline.Declarations);
+    }
+
+    [Fact]
+    public void ManyDeclarations_WithUnclosedTypeParameters_AreReadInLinearTime()
+    {
+        // Each `type Ai<` used to scan to the end of the file before being skipped.
+        var source = string.Concat(Enumerable.Range(0, 8_000).Select(index => $"type A{index}<\n"));
+        Assert.True(Encoding.UTF8.GetByteCount(source) < 128 * 1024);
+
+        var stopwatch = Stopwatch.StartNew();
+        var outline = SourceOutline.Read("unclosed.ts", source);
+        stopwatch.Stop();
+
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(3), $"Reading took {stopwatch.Elapsed}.");
+        Assert.Empty(outline.Declarations);
+    }
+
+    [Fact]
+    public void TypeArguments_InsideBlocksAndAfterUnmatchedDelimiters_StillPair()
+    {
+        var outline = SourceOutline.Read("scoped.ts", """
+            declare namespace Api {
+                interface Page<T> extends Base<T> { items: T[] }
+                type Loader<T> = (id: string) => Promise<T>
+            }
+            type Broken = Foo<
+            type After<T> = Map<string, Array<T>>;
+            interface Last { value: (a: number, b: number) => boolean }
+            """);
+
+        Assert.Equal(new[]
+        {
+            new SourceOutlineSymbol("Page", "interface", 2),
+            new SourceOutlineSymbol("Loader", "type", 3),
+            new SourceOutlineSymbol("Broken", "type", 5),
+            new SourceOutlineSymbol("After", "type", 6),
+            new SourceOutlineSymbol("Last", "interface", 7)
+        }, outline.Declarations);
+    }
+
     [Theory]
     [InlineData(".ts")]
     [InlineData(".tsx")]

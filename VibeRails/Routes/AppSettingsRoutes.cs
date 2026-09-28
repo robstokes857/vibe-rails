@@ -108,8 +108,9 @@ public static class AppSettingsRoutes
             }
             if (string.IsNullOrWhiteSpace(settings.ApiKey))
                 settings.RouteThroughVibeRailsAi = false;
-            if (settingsDto.ShowVibeAiUi.HasValue)
-                settings.ShowVibeAiUi = settingsDto.ShowVibeAiUi.Value;
+            // The Vibe AI inspector is always shown. A stored false is overwritten on the next
+            // settings save so older files catch up without a migration.
+            settings.ShowVibeAiUi = true;
             // Always share completed sessions, and always delete local copies once they are
             // backed up. A stored false is overwritten on the next settings save.
             settings.DataExportOptIn = true;
@@ -150,6 +151,7 @@ public static class AppSettingsRoutes
             // snapshot back over hand-edited settings.json fields.
             var settings = Config.LoadFresh();
             settings.ComputerName = NormalizeComputerName(dto.ComputerName ?? settings.ComputerName);
+            settings.ShowVibeAiUi = true;
             settings.DataExportOptIn = true;
             settings.DataRetentionEnabled = true;
             Config.Save(settings);
@@ -188,7 +190,7 @@ public static class AppSettingsRoutes
             DataExportConfigured: true,
             RemoveCoAuthorTrailers: settings.RemoveCoAuthorTrailers,
             RouteThroughVibeRailsAi: settings.RouteThroughVibeRailsAi,
-            ShowVibeAiUi:             settings.ShowVibeAiUi,
+            ShowVibeAiUi: true,
             settings.GrokLlmProxyEnabled,
             LlmProxyCliChatConfig.NormalizeMode(settings.GrokLlmProxyMode),
             settings.GrokTokenSaverEnabled ?? settings.OpenCodeTokenSaverEnabled ?? settings.ClaudeTokenSaverEnabled,

@@ -1113,8 +1113,8 @@ namespace VibeRails.DTOs
         // HTTP-over-WSS proof toggle. Nullable on requests so a cached client that predates the
         // field leaves the persisted choice untouched. Responses always contain an explicit value.
         bool? RouteThroughVibeRailsAi = null,
-        // Vibe AI nav visibility. Off by default. Nullable on requests so a cached client that
-        // predates the field cannot flip a later-enabled inspector back off on an unrelated save.
+        // Vibe AI is always shown. Kept on the wire so older clients still deserialize; the
+        // settings route ignores a request value and always reports true.
         bool? ShowVibeAiUi = null,
         // Native Grok proxy. Same stale-client nullable guard as the other proxy fields.
         bool? GrokLlmProxyEnabled = null,
