@@ -64,7 +64,7 @@ public sealed class BaseLlmOptionsTests
     public void ClaudeOneMillionContextSuffixIsAccepted()
     {
         // Claude Code reads `claude-fable-5-1[1m]` as the 1M-context form of the full model ID.
-        // Behind the VibeRails proxy it budgets 200K for the bare ID, so the Board offers both.
+        // Behind the VibeRails proxy it budgets 200K for the bare ID, so the catalog pins this form.
         Assert.Equal(["--model", "claude-fable-5-1[1m]"],
             BaseLlmOptionsBuilder.BuildArguments(LLM.Claude, new(Model: "claude-fable-5-1[1m]")));
         Assert.Equal(["--model", "claude-opus-5-5[1m]", "--effort", "max"],

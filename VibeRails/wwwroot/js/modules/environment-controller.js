@@ -1,4 +1,4 @@
-import { renderLlmModelOptions } from './llm-model-catalog.js';
+import { normalizeLlmModel, renderLlmModelOptions } from './llm-model-catalog.js';
 import { getEnabledLlmItems, mountLlmPicker } from './pickers/llm-picker.js';
 import { isConfirmDialogOpen } from './utils.js';
 import {
@@ -1237,7 +1237,7 @@ export class EnvironmentController {
     }
 
     normalizeClaudeModel(model) {
-        return (model || '').trim();
+        return normalizeLlmModel('claude', model);
     }
 
     renderClaudeModelOptions(selectedModel) {

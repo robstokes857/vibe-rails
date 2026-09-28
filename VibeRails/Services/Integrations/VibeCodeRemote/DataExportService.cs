@@ -20,7 +20,6 @@ namespace VibeRails.Services.Integrations.VibeCodeRemote;
 /// </summary>
 public sealed class DataExportService : IDataExportService
 {
-    internal const string ExportUrlSettingKey = "VibeRails:ExportUrl";
     internal const string SnapshotFileName = "copy_state.db";
     internal const string CompressedFileName = "copy_state.db.br";
     internal const string BoardSnapshotFileName = "copy_board.db";
@@ -73,7 +72,6 @@ public sealed class DataExportService : IDataExportService
     private const int BrotliQuality = 5;
 
     private readonly HttpClient _httpClient;
-    private readonly IConfiguration _configuration;
     private readonly Func<string> _temporaryDirectoryFactory;
     private readonly Func<string> _computerNameFactory;
     private readonly IDataExportProgress _progress;
@@ -82,13 +80,11 @@ public sealed class DataExportService : IDataExportService
 
     public DataExportService(
         HttpClient httpClient,
-        IConfiguration configuration,
         IDatabaseSnapshotStore snapshotStore,
         IDataExportProgress progress,
         IFeatureLog? featureLog = null)
         : this(
             httpClient,
-            configuration,
             snapshotStore,
             static () => Path.Combine(
                 Path.GetTempPath(),
@@ -101,7 +97,6 @@ public sealed class DataExportService : IDataExportService
 
     internal DataExportService(
         HttpClient httpClient,
-        IConfiguration configuration,
         IDatabaseSnapshotStore snapshotStore,
         Func<string> temporaryDirectoryFactory,
         Func<string> computerNameFactory,
@@ -109,45 +104,11 @@ public sealed class DataExportService : IDataExportService
         IFeatureLog? featureLog = null)
     {
         _httpClient = httpClient;
-        _configuration = configuration;
         _snapshotStore = snapshotStore;
         _temporaryDirectoryFactory = temporaryDirectoryFactory;
         _computerNameFactory = computerNameFactory;
         _progress = progress ?? NullDataExportProgress.Instance;
         _featureLog = featureLog ?? NullFeatureLog.Instance;
-    }
-
-    /// <summary>
-    /// Absolute HTTPS only. The API key travels in a request header, so a relative or cleartext
-    /// URL must never be used — and the shipped placeholder must not look configured.
-    /// </summary>
-    internal bool TryGetExportUri(out Uri exportUri)
-        => TryParseExportUri(_configuration[ExportUrlSettingKey], out exportUri);
-
-    /// <summary>
-    /// Static so the settings endpoint can gate the Export button on exactly the rule the export
-    /// itself enforces, instead of the two drifting apart.
-    /// </summary>
-    internal static bool TryParseExportUri(string? configured, out Uri exportUri)
-    {
-        exportUri = null!;
-
-        if (string.IsNullOrWhiteSpace(configured))
-            return false;
-        if (!Uri.TryCreate(configured.Trim(), UriKind.Absolute, out var parsed))
-            return false;
-        if (!string.Equals(parsed.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        // Chunk endpoints are built by appending path segments. Appending to a URL that already
-        // carries a query or fragment silently lands the new path inside the query, leaving every
-        // chunk request pointed at the base path. Refuse it here so the misconfiguration is
-        // visible rather than mysterious.
-        if (!string.IsNullOrEmpty(parsed.Query) || !string.IsNullOrEmpty(parsed.Fragment))
-            return false;
-
-        exportUri = parsed;
-        return true;
     }
 
     public async Task<DataExportResult> ExportAsync(CancellationToken cancellationToken)
@@ -161,7 +122,7 @@ public sealed class DataExportService : IDataExportService
             {
                 DataExportStatus.Success => ("succeeded", "The server acknowledged the database snapshot upload."),
                 DataExportStatus.NoApiKey => ("skipped", "Upload skipped because no API key is configured."),
-                DataExportStatus.NotConfigured => ("skipped", "Upload skipped because no HTTPS export endpoint is configured."),
+                DataExportStatus.NotConfigured => ("skipped", "Upload skipped because no API key is configured."),
                 DataExportStatus.Busy => ("skipped", "Upload skipped because another database export is running."),
                 DataExportStatus.InvalidApiKey => ("failed", "The server rejected the configured API key."),
                 DataExportStatus.UploadFailed => ("failed", "The database snapshot upload was not acknowledged by the server."),
@@ -199,12 +160,7 @@ public sealed class DataExportService : IDataExportService
                 Detail: "No API key is configured.");
         }
 
-        if (!TryGetExportUri(out var exportUri))
-        {
-            return new DataExportResult(
-                DataExportStatus.NotConfigured,
-                Detail: "No absolute HTTPS export URL is configured.");
-        }
+        var exportUri = DataExportEndpointConfiguration.ExportUri;
 
         var statePath = ParserConfigs.GetStatePath();
         if (string.IsNullOrWhiteSpace(statePath) || !File.Exists(statePath))

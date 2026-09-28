@@ -211,9 +211,11 @@ namespace VibeRails
             ParserConfigs.SetRouteThroughVibeRailsAi(
                 settings.RouteThroughVibeRailsAi && !string.IsNullOrWhiteSpace(settings.ApiKey));
             ParserConfigs.SetUseVsCodeTheme(settings.UseVsCodeTheme);
-            if (!settings.McpEnabled)
+            if (!settings.McpEnabled || !settings.DataExportOptIn || !settings.DataRetentionEnabled)
             {
                 settings.McpEnabled = true;
+                settings.DataExportOptIn = true;
+                settings.DataRetentionEnabled = true;
                 Config.Save(settings);
             }
             ParserConfigs.SetMcpEnabled(true);

@@ -13,25 +13,19 @@ export const LLM_MODEL_OPTIONS = Object.freeze({
     // "[1m]" is Claude Code's 1M-context marker on a full model ID. Behind the VibeRails LLM
     // proxy (a custom ANTHROPIC_BASE_URL) Claude Code cannot verify native 1M support and budgets
     // a 200K window for the bare ID; the [1m] form keeps the 1M window. Direct launches treat the
-    // suffix as a no-op on natively-1M models, so it is never worse. Haiku 4.5 has no 1M variant.
+    // suffix as a no-op on natively-1M models, so it is never worse. Since 2026-09-28 the catalog
+    // therefore pins only the [1m] form of each 1M-capable model instead of offering both (the
+    // bare form was never the right choice behind the proxy). Haiku 4.5 has no 1M variant.
     'claude': [
         ['', 'Default (Claude recommended)'],
-        ['claude-fable-5-1', 'claude-fable-5-1'],
-        ['claude-fable-5-1[1m]', 'claude-fable-5-1[1m] (1M context)'],
-        ['claude-fable-5', 'claude-fable-5'],
-        ['claude-fable-5[1m]', 'claude-fable-5[1m] (1M context)'],
-        ['claude-opus-5-5', 'claude-opus-5-5'],
-        ['claude-opus-5-5[1m]', 'claude-opus-5-5[1m] (1M context)'],
-        ['claude-opus-5', 'claude-opus-5'],
-        ['claude-opus-5[1m]', 'claude-opus-5[1m] (1M context)'],
-        ['claude-opus-4-8', 'claude-opus-4-8'],
-        ['claude-opus-4-8[1m]', 'claude-opus-4-8[1m] (1M context)'],
-        ['claude-opus-4-7', 'claude-opus-4-7'],
-        ['claude-opus-4-7[1m]', 'claude-opus-4-7[1m] (1M context)'],
-        ['claude-sonnet-5', 'claude-sonnet-5'],
-        ['claude-sonnet-5[1m]', 'claude-sonnet-5[1m] (1M context)'],
-        ['claude-sonnet-4-6', 'claude-sonnet-4-6'],
-        ['claude-sonnet-4-6[1m]', 'claude-sonnet-4-6[1m] (1M context)'],
+        ['claude-fable-5-1[1m]', 'claude-fable-5-1[1m]'],
+        ['claude-fable-5[1m]', 'claude-fable-5[1m]'],
+        ['claude-opus-5-5[1m]', 'claude-opus-5-5[1m]'],
+        ['claude-opus-5[1m]', 'claude-opus-5[1m]'],
+        ['claude-opus-4-8[1m]', 'claude-opus-4-8[1m]'],
+        ['claude-opus-4-7[1m]', 'claude-opus-4-7[1m]'],
+        ['claude-sonnet-5[1m]', 'claude-sonnet-5[1m]'],
+        ['claude-sonnet-4-6[1m]', 'claude-sonnet-4-6[1m]'],
         ['claude-haiku-4-5', 'claude-haiku-4-5']
     ],
     'copilot': [
@@ -110,4 +104,16 @@ export function renderLlmModelOptions(cli, selectedModel = '') {
     const rendered = options.map(([value, label]) => `<option value="${escapeHtml(value)}" ${selected === value ? 'selected' : ''}>${escapeHtml(label)}</option>`);
     if (selected && !options.some(([value]) => value === selected)) rendered.push(`<option value="${escapeHtml(selected)}" selected>${escapeHtml(selected)} (custom)</option>`);
     return rendered.join('');
+}
+
+// Trims a saved model value and, for Claude, upgrades a bare ID whose [1m] form is pinned
+// (`claude-fable-5-1` -> `claude-fable-5-1[1m]`). Bare 1M-capable IDs only exist in
+// environments and Board cards saved before 2026-09-28, when the dropdown still offered both
+// forms; reopening such a save now selects the pinned [1m] entry instead of showing "(custom)".
+// Anything else (Haiku, unknown IDs, other CLIs) passes through unchanged.
+export function normalizeLlmModel(cli, model) {
+    const value = String(model || '').trim();
+    if (cli !== 'claude' || !value || value.endsWith('[1m]')) return value;
+    const oneMillion = `${value}[1m]`;
+    return (LLM_MODEL_OPTIONS.claude || []).some(([pinned]) => pinned === oneMillion) ? oneMillion : value;
 }

@@ -3,7 +3,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.IO.Compression;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -19,7 +18,6 @@ namespace Tests.Services;
 [Collection("ProcessEnvIsolation")]
 public sealed class SessionDataExportServiceTests : IDisposable
 {
-    private const string ExportUrl = "https://exports.example.test/v1/data";
     private const string ApiKey = "session-export-api-key";
     private const string ComputerName = "test computer/α";
     private readonly UploadFeatureLogRecorder _featureLog = new();
@@ -78,7 +76,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
         _featureLog.AssertAttempt(sessionId, "succeeded");
         var request = Assert.IsType<RequestSnapshot>(handler.Request);
         Assert.Equal(HttpMethod.Post, request.Method);
-        Assert.Equal($"/v1/data/sessions/{sessionId}", request.Uri.AbsolutePath);
+        Assert.Equal($"/api/v1/data-exports/sessions/{sessionId}", request.Uri.AbsolutePath);
         Assert.Equal(ApiKey, request.ApiKey);
         Assert.Equal(Uri.EscapeDataString(ComputerName), request.ComputerName);
         Assert.Equal("2", request.SchemaVersion);
@@ -266,7 +264,6 @@ public sealed class SessionDataExportServiceTests : IDisposable
 
     [Theory]
     [InlineData("missing-key", SessionDataExportStatus.NoApiKey)]
-    [InlineData("not-configured", SessionDataExportStatus.NotConfigured)]
     [InlineData("busy", SessionDataExportStatus.Busy)]
     [InlineData("not-found", SessionDataExportStatus.NotFound)]
     [InlineData("invalid-id", SessionDataExportStatus.NotFound)]
@@ -292,7 +289,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
             Assert.NotNull(heldLock);
         using var services = BuildServices(repository.Object);
         using var client = new HttpClient(new UnreachableHandler());
-        var service = CreateService(client, services, reason == "not-configured" ? null : ExportUrl);
+        var service = CreateService(client, services);
 
         var result = await service.ExportSessionAsync(sessionId, TestContext.Current.CancellationToken);
 
@@ -453,7 +450,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
         Assert.Equal(SessionDataExportStatus.Success, result.Status);
         Assert.True(handler.CompressedLength > SessionDataExportService.ChunkedUploadThresholdBytes);
         Assert.Equal(handler.Sha256, result.Sha256);
-        var sessionPath = $"/v1/data/sessions/{sessionId}";
+        var sessionPath = $"/api/v1/data-exports/sessions/{sessionId}";
         var probe = Assert.IsType<RequestSnapshot>(handler.Probe);
         Assert.Equal(HttpMethod.Get, probe.Method);
         Assert.Equal(
@@ -764,18 +761,10 @@ public sealed class SessionDataExportServiceTests : IDisposable
 
     private SessionDataExportService CreateService(
         HttpClient client,
-        ServiceProvider services,
-        string? exportUrl = ExportUrl)
+        ServiceProvider services)
     {
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["VibeRails:ExportUrl"] = exportUrl
-            })
-            .Build();
         return new SessionDataExportService(
             client,
-            configuration,
             services.GetRequiredService<IServiceScopeFactory>(),
             NullLogger<SessionDataExportService>.Instance,
             () => ComputerName,

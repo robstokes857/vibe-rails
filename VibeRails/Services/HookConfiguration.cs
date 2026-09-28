@@ -13,6 +13,5 @@ namespace VibeRails.Services
         public string ExecutableName { get; set; } = "";
         public HookConfiguration Hooks { get; set; } = new();
         public string FrontendUrl { get; set; } = "";
-        public string ExportUrl { get; set; } = "";
     }
 }

@@ -2,14 +2,12 @@ using VibeRails.Data.Abstractions;
 using VibeRails.Services;
 using VibeRails.Services.Diagnostics;
 using VibeRails.Services.Integrations.VibeCodeRemote;
-using VibeRails.Utils;
 
 namespace VibeRails.Jobs;
 
 /// <summary>
-/// Schedules small retention batches only while automatic backup is opted in AND retention itself
-/// is switched on. Two flags on purpose: "back my data up" must never by itself mean "and then
-/// delete it locally" -- deletion is the one storage action with no undo.
+/// Deletes local copies of sessions that have already been uploaded, after their retention
+/// window. Always on. Open sessions and anything without an upload acknowledgement are kept.
 /// </summary>
 public sealed class DataRetentionJob(
     ILogger<DataRetentionJob> logger,
@@ -22,9 +20,6 @@ public sealed class DataRetentionJob(
 
     protected override async Task ExecuteJob(CancellationToken cancellationToken)
     {
-        var settings = Config.LoadFresh();
-        if (!settings.DataExportOptIn || !settings.DataRetentionEnabled)
-            return;
         // Reuse the archive drain's machine-wide lock. Retention cannot race preparation or
         // acknowledgment, and multiple root backends cannot prune the same data simultaneously.
         using var lease = CrossProcessFileLock.TryAcquire(CrossProcessFileLock.BesideStateDatabase(

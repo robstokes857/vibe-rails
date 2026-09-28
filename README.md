@@ -47,8 +47,8 @@ confirmation could not be saved. An attempt left at `started` has no recorded fi
 
 Upload history starts with this version and only covers retained attempts. It does not backfill old
 uploads or list every session waiting to be uploaded. An absent record does not establish
-whether data was sent. The existing **Share session data** setting still controls uploading;
-opening this modal or recording a local event never enables sharing.
+whether data was sent. Completed-session uploading is always on when an API key and export
+URL are configured; opening this modal or recording a local event does not start an upload.
 
 ### Logging a new feature
 

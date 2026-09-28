@@ -392,7 +392,7 @@ namespace VibeRails
                 .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
 
             // Legacy one-shot export (full state.db upload from the Settings modal). Runs beside
-            // the incremental session exporter above; both read VibeRails:ExportUrl.
+            // the incremental session exporter above; both upload to the fixed viberails.ai export URL.
             // Progress for the running export, polled by the settings modal. Singleton because a
             // process-wide gate means only one export can ever be in flight here.
             serviceCollection.AddSingleton<IDataExportProgress, DataExportProgress>();

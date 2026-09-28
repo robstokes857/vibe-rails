@@ -12,13 +12,12 @@ public class Settings
 {
     public string InstallDirName { get; set; } = PathConstants.DEFAULT_INSTALL_DIR_NAME;
     public string ApiKey { get; set; } = string.Empty;
-    // Explicit consent for the incremental session-data POC. Default-off both for new installs
-    // and for settings files written before this field existed.
-    public bool DataExportOptIn { get; set; } = false;
-    // Separate consent for local retention (deleting backed-up sessions and proxy exchanges after
-    // their window). Off by default and independent of DataExportOptIn: backing data up must never
-    // imply deleting it. Set by hand in settings.json; there is no UI toggle yet.
-    public bool DataRetentionEnabled { get; set; } = false;
+    // Session sharing is always on. The property stays so older settings.json files still
+    // deserialize; readers and the settings route ignore a stored false.
+    public bool DataExportOptIn { get; set; } = true;
+    // Local retention is always on. The property stays so older settings.json files still
+    // deserialize; startup and settings saves overwrite a stored false.
+    public bool DataRetentionEnabled { get; set; } = true;
     public bool RemoteAccess { get; set; } = false;
     // Proof-of-concept HTTP proxy. Off by default; the settings route also forces it off when
     // there is no saved cloud API key.

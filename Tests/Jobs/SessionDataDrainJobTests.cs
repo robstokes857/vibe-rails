@@ -7,7 +7,6 @@ using VibeRails.DTOs;
 using VibeRails.Jobs;
 using VibeRails.Services;
 using VibeRails.Services.Integrations.VibeCodeRemote;
-using VibeRails.Utils;
 using Xunit;
 
 namespace Tests.Jobs;
@@ -18,26 +17,6 @@ public sealed class SessionDataDrainJobTests
         new(2026, 9, 3, 18, 30, 0, TimeSpan.Zero);
 
     [Fact]
-    public async Task ExecuteJob_OptOut_SweepsSpoolButTouchesNothingElse()
-    {
-        var repository = new Mock<IRepository>(MockBehavior.Strict);
-        var exportService = new Mock<ISessionDataExportService>(MockBehavior.Strict);
-        SetupSweep(exportService);
-        using var services = BuildServices(repository.Object);
-        var job = CreateJob(services, exportService.Object, dataExportOptIn: false);
-
-        await InvokeExecuteJobAsync(job, TestContext.Current.CancellationToken);
-
-        // The sweep is deliberately above the consent gate: a user who opted out with a spool
-        // still on disk is exactly the one whose leftover session material must be reclaimed.
-        exportService.Verify(
-            service => service.SweepOrphanedSpoolAsync(It.IsAny<CancellationToken>()),
-            Times.Once);
-        repository.VerifyNoOtherCalls();
-        exportService.VerifyNoOtherCalls();
-    }
-
-    [Fact]
     public async Task ExecuteJob_UnconfiguredTransport_SweepsSpoolButDoesNotQueryDatabase()
     {
         var repository = new Mock<IRepository>(MockBehavior.Strict);
@@ -45,10 +24,12 @@ public sealed class SessionDataDrainJobTests
         SetupSweep(exportService);
         exportService.SetupGet(service => service.IsConfigured).Returns(false);
         using var services = BuildServices(repository.Object);
-        var job = CreateJob(services, exportService.Object, dataExportOptIn: true);
+        var job = CreateJob(services, exportService.Object);
 
         await InvokeExecuteJobAsync(job, TestContext.Current.CancellationToken);
 
+        // Sharing is always on, but an unconfigured transport still must not query the database.
+        // The sweep runs first and only deletes leftover spool files.
         repository.VerifyNoOtherCalls();
         exportService.VerifyGet(service => service.IsConfigured, Times.Once);
         exportService.Verify(
@@ -64,7 +45,7 @@ public sealed class SessionDataDrainJobTests
         SetupSelection(repository, null);
         var exportService = ConfiguredExportService();
         using var services = BuildServices(repository.Object);
-        var job = CreateJob(services, exportService.Object, dataExportOptIn: true);
+        var job = CreateJob(services, exportService.Object);
 
         await InvokeExecuteJobAsync(job, TestContext.Current.CancellationToken);
 
@@ -87,7 +68,7 @@ public sealed class SessionDataDrainJobTests
                 sessionId,
                 Sha256: new string('a', 64)));
         using var services = BuildServices(repository.Object);
-        var job = CreateJob(services, exportService.Object, dataExportOptIn: true);
+        var job = CreateJob(services, exportService.Object);
 
         await InvokeExecuteJobAsync(job, TestContext.Current.CancellationToken);
 
@@ -127,7 +108,7 @@ public sealed class SessionDataDrainJobTests
                 sessionId,
                 Detail: "HTTP 503."));
         using var services = BuildServices(repository.Object);
-        var job = CreateJob(services, exportService.Object, dataExportOptIn: true);
+        var job = CreateJob(services, exportService.Object);
 
         await InvokeExecuteJobAsync(job, TestContext.Current.CancellationToken);
 
@@ -169,7 +150,7 @@ public sealed class SessionDataDrainJobTests
             });
 
         using var services = BuildServices(repository.Object);
-        var job = CreateJob(services, exportService.Object, dataExportOptIn: true, clock);
+        var job = CreateJob(services, exportService.Object, clock);
 
         await InvokeExecuteJobAsync(job, TestContext.Current.CancellationToken);
 
@@ -195,7 +176,7 @@ public sealed class SessionDataDrainJobTests
                 sessionId,
                 Detail: "Another data export is running."));
         using var services = BuildServices(repository.Object);
-        var job = CreateJob(services, exportService.Object, dataExportOptIn: true);
+        var job = CreateJob(services, exportService.Object);
 
         await InvokeExecuteJobAsync(job, TestContext.Current.CancellationToken);
 
@@ -213,7 +194,7 @@ public sealed class SessionDataDrainJobTests
         var repository = new Mock<IRepository>(MockBehavior.Strict);
         var exportService = new Mock<ISessionDataExportService>(MockBehavior.Strict);
         using var services = BuildServices(repository.Object);
-        var job = CreateJob(services, exportService.Object, dataExportOptIn: true);
+        var job = CreateJob(services, exportService.Object);
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
 
@@ -266,14 +247,12 @@ public sealed class SessionDataDrainJobTests
     private static SessionDataDrainJob CreateJob(
         ServiceProvider services,
         ISessionDataExportService exportService,
-        bool dataExportOptIn,
         FixedTimeProvider? clock = null) =>
         new(
             NullLogger<SessionDataDrainJob>.Instance,
             Mock.Of<ISystemResourceService>(),
             services.GetRequiredService<IServiceScopeFactory>(),
             exportService,
-            () => new Settings { DataExportOptIn = dataExportOptIn },
             clock ?? new FixedTimeProvider(Now));
 
     private static async Task InvokeExecuteJobAsync(

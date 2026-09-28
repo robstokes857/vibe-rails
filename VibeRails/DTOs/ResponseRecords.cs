@@ -1104,9 +1104,8 @@ namespace VibeRails.DTOs
         // could never be cleared from the UI. Nullable for the same stale-client guard as the
         // proxy fields — a client that omits it must never wipe the key by accident.
         bool? ClearApiKey = null,
-        // Read-only: whether VibeRails:ExportUrl holds a usable HTTPS URL. The client gates the
-        // session-sharing switch on this as well as on an API key, so a placeholder endpoint
-        // cannot present consent for a job that can never run.
+        // Read-only. The export host is fixed in code, so this is always true; the legacy
+        // one-shot export button still hides until an API key is saved.
         bool DataExportConfigured = false,
         // Git Guard commit-msg policy. Nullable so an older cached client that does not send the
         // field cannot reset the persisted choice when it saves unrelated settings.
@@ -1121,8 +1120,8 @@ namespace VibeRails.DTOs
         bool? GrokLlmProxyEnabled = null,
         string? GrokLlmProxyMode = null,
         bool? GrokTokenSaverEnabled = null,
-        // Incremental completed-session sharing consent. Nullable on requests so a cached client
-        // that predates this field cannot opt the user in or out while saving another setting.
+        // Session sharing is always on. Kept on the wire so older clients still deserialize;
+        // the settings route ignores a request value and always reports true.
         bool? DataExportOptIn = null
     );
     // Append new fields at the END of this record, with a default. Inserting one in the middle

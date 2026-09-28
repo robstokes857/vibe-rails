@@ -91,7 +91,7 @@ public sealed class AppJsonSerializerContextTests
         Assert.Null(dto.ShowVibeAiUi);
         Assert.Null(dto.DataExportOptIn);
         Assert.False(dto.DataExportConfigured);
-        Assert.False(new VibeRails.Utils.Settings().DataExportOptIn);
+        Assert.True(new VibeRails.Utils.Settings().DataExportOptIn);
     }
 
     [Fact]

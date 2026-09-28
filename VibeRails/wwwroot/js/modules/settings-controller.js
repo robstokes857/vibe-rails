@@ -14,7 +14,6 @@ export class SettingsController {
         this._settingsSnapshot = '';
         this._removeNavigationGuard = null;
         this._beforeUnloadHandler = null;
-        this._sessionSharingConfigured = false;
         this._dataExportInProgress = false;
         this._dataExportConfigured = false;
         this._dataExportSizeBytes = null;
@@ -52,7 +51,6 @@ export class SettingsController {
             openCodeTokenSaverEnabled: true,
             removeCoAuthorTrailers: true,
             showVibeAiUi: false,
-            dataExportOptIn: false,
             dataExportConfigured: false,
             machineName: ''
         };
@@ -100,7 +98,6 @@ export class SettingsController {
             const apiKeyInput = root.querySelector('#setting-api-key');
             const routeThroughVibeRailsAiToggle = root.querySelector('#setting-route-through-viberails-ai');
             const exportDataButton = root.querySelector('#settings-export-data-button');
-            const dataExportOptInToggle = root.querySelector('#setting-data-export-opt-in');
             const performanceModeToggle = root.querySelector('#setting-performance-mode');
             const useVsCodeThemeRow = root.querySelector('#setting-use-vscode-theme-row');
             const useVsCodeThemeToggle = root.querySelector('#setting-use-vscode-theme');
@@ -141,11 +138,6 @@ export class SettingsController {
                     settings.routeThroughVibeRailsAi === true
                 );
             }
-            this._sessionSharingConfigured = settings.dataExportConfigured === true;
-            if (dataExportOptInToggle) {
-                dataExportOptInToggle.checked = settings.dataExportOptIn === true;
-            }
-            this._updateSessionSharingAvailability(root);
             this._dataExportConfigured = settings.dataExportConfigured === true;
             if (exportDataButton) {
                 exportDataButton.addEventListener('click', () => this._exportData(root));
@@ -261,8 +253,7 @@ export class SettingsController {
                             removeCoAuthorTrailersToggle?.checked ?? true,
                             routeThroughVibeRailsAiToggle?.checked ?? false,
                             showVibeAiUiToggle?.checked === true,
-                            clearApiKey,
-                            dataExportOptInToggle?.checked === true
+                            clearApiKey
                         );
                         if (savedSettings) {
                             this._applySavedSettingsToControls(root, savedSettings);
@@ -289,7 +280,7 @@ export class SettingsController {
         }
     }
 
-    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, openCodeLlmProxyEnabled, grokLlmProxyEnabled, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, removeCoAuthorTrailers, routeThroughVibeRailsAi, showVibeAiUi = false, clearApiKey = false, dataExportOptIn = false) {
+    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, openCodeLlmProxyEnabled, grokLlmProxyEnabled, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, removeCoAuthorTrailers, routeThroughVibeRailsAi, showVibeAiUi = false, clearApiKey = false) {
         try {
             const savedSettings = await this.app.apiCall('/api/v1/settings', 'POST', {
                 remoteAccess: remoteAccess,
@@ -311,7 +302,7 @@ export class SettingsController {
                 routeThroughVibeRailsAi: routeThroughVibeRailsAi,
                 showVibeAiUi: showVibeAiUi,
                 clearApiKey: clearApiKey,
-                dataExportOptIn: dataExportOptIn
+                dataExportOptIn: true
             });
             this.app.setAppSettings(savedSettings);
             this.app.showToast('Settings', 'Settings saved successfully', 'success');
@@ -408,7 +399,6 @@ export class SettingsController {
         return [
             '#setting-remote-access',
             '#setting-api-key',
-            '#setting-data-export-opt-in',
             '#setting-route-through-viberails-ai',
             '#setting-use-vscode-theme',
             '#setting-computer-name',
@@ -434,7 +424,6 @@ export class SettingsController {
         return JSON.stringify({
             remoteAccess: isChecked('#setting-remote-access'),
             apiKey: valueOf('#setting-api-key'),
-            dataExportOptIn: isChecked('#setting-data-export-opt-in'),
             routeThroughVibeRailsAi: isChecked('#setting-route-through-viberails-ai'),
             useVsCodeTheme: isChecked('#setting-use-vscode-theme'),
             computerName: valueOf('#setting-computer-name'),
@@ -456,7 +445,6 @@ export class SettingsController {
     _updateDirtyState(root) {
         this._settingsDirty = this._captureSettingsSnapshot(root) !== this._settingsSnapshot;
         this._updateSaveBar(root);
-        this._updateSessionSharingAvailability(root);
         this._updateDataExportAvailability(root);
     }
 
@@ -495,7 +483,6 @@ export class SettingsController {
         const remoteAccessToggle = root.querySelector('#setting-remote-access');
         const apiKeyInput = root.querySelector('#setting-api-key');
         const routeThroughVibeRailsAiToggle = root.querySelector('#setting-route-through-viberails-ai');
-        const dataExportOptInToggle = root.querySelector('#setting-data-export-opt-in');
         const useVsCodeThemeToggle = root.querySelector('#setting-use-vscode-theme');
         const computerNameInput = root.querySelector('#setting-computer-name');
         const codexLlmProxyEnabledToggle = root.querySelector('#setting-codex-llm-proxy-enabled');
@@ -517,10 +504,6 @@ export class SettingsController {
             routeThroughVibeRailsAiToggle.dataset.originalValue = String(
                 settings.routeThroughVibeRailsAi === true
             );
-        }
-        this._sessionSharingConfigured = settings.dataExportConfigured === true;
-        if (dataExportOptInToggle) {
-            dataExportOptInToggle.checked = settings.dataExportOptIn === true;
         }
         this._dataExportConfigured = settings.dataExportConfigured === true;
         if (useVsCodeThemeToggle) useVsCodeThemeToggle.checked = settings.useVsCodeTheme === true;
@@ -555,7 +538,6 @@ export class SettingsController {
         const showVibeAiUiToggle = root.querySelector('#setting-show-vibe-ai-ui');
         if (showVibeAiUiToggle) showVibeAiUiToggle.checked = settings.showVibeAiUi === true;
 
-        this._updateSessionSharingAvailability(root);
         this._updateDataExportAvailability(root);
     }
 
@@ -668,33 +650,6 @@ export class SettingsController {
             if (this._settingsRoot && this._settingsRoot !== root) {
                 this._updateDataExportAvailability(this._settingsRoot);
             }
-        }
-    }
-
-    _updateSessionSharingAvailability(root) {
-        const wrapper = root.querySelector('#settings-session-sharing-wrapper');
-        const toggle = root.querySelector('#setting-data-export-opt-in');
-        const unavailable = root.querySelector('#setting-data-export-unavailable');
-        const apiKeyInput = root.querySelector('#setting-api-key');
-        const savedApiKey = apiKeyInput?.dataset.originalValue || '';
-        // Consent is available only against the persisted credential. A newly typed or edited
-        // key must be saved first, matching the server's actual authorization state.
-        const hasSavedApiKey = savedApiKey.trim().length > 0
-            && apiKeyInput?.value === savedApiKey;
-        const available = this._sessionSharingConfigured && hasSavedApiKey;
-
-        if (wrapper) {
-            wrapper.hidden = !this._sessionSharingConfigured;
-        }
-
-        if (toggle) {
-            toggle.disabled = !available;
-        }
-        if (unavailable) {
-            unavailable.hidden = !this._sessionSharingConfigured || available;
-            unavailable.textContent = !this._sessionSharingConfigured
-                ? 'Session sharing is not configured in this build.'
-                : 'Save an API key to turn on session sharing.';
         }
     }
 

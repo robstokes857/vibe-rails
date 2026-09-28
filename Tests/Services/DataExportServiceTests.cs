@@ -3,7 +3,6 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Configuration;
 using VibeRails;
 using VibeRails.Services.Integrations.VibeCodeRemote;
 using VibeRails.Utils;
@@ -14,7 +13,6 @@ namespace Tests.Services;
 [Collection("ProcessEnvIsolation")]
 public sealed class DataExportServiceTests : IDisposable
 {
-    private const string ValidExportUrl = "https://exports.example.test/upload";
     private const string ConfiguredApiKey = "configured-export-api-key";
 
     private readonly string _originalApiKey = ParserConfigs.GetApiKey();
@@ -52,39 +50,11 @@ public sealed class DataExportServiceTests : IDisposable
         ParserConfigs.SetStatePath(Path.Combine(_testRoot, "missing-state.db"));
         var handler = new CapturingHandler(HttpStatusCode.OK, _exportTempRoot);
         using var httpClient = new HttpClient(handler);
-        var service = CreateService(httpClient, ValidExportUrl);
+        var service = CreateService(httpClient);
 
         var result = await service.ExportAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(DataExportStatus.NoApiKey, result.Status);
-        _featureLog.AssertAttempt("Database snapshot", "skipped");
-        Assert.Equal(0, handler.RequestCount);
-        Assert.Equal(0, Volatile.Read(ref _temporaryDirectoryCount));
-        AssertExportTempRootIsEmpty();
-    }
-
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("   ")]
-    [InlineData("relative/export")]
-    [InlineData("http://exports.example.test/upload")]
-    // Chunk endpoints are built by appending path segments, and appending to a URL that already
-    // has a query or fragment buries the new path inside the query — every chunk request would
-    // silently target the base path instead.
-    [InlineData("https://exports.example.test/upload?tenant=x")]
-    [InlineData("https://exports.example.test/upload#fragment")]
-    public async Task ExportAsync_InvalidExportUrl_DoesNoWork(string? exportUrl)
-    {
-        ParserConfigs.SetApiKey(ConfiguredApiKey);
-        ParserConfigs.SetStatePath(Path.Combine(_testRoot, "missing-state.db"));
-        var handler = new CapturingHandler(HttpStatusCode.OK, _exportTempRoot);
-        using var httpClient = new HttpClient(handler);
-        var service = CreateService(httpClient, exportUrl);
-
-        var result = await service.ExportAsync(TestContext.Current.CancellationToken);
-
-        Assert.Equal(DataExportStatus.NotConfigured, result.Status);
         _featureLog.AssertAttempt("Database snapshot", "skipped");
         Assert.Equal(0, handler.RequestCount);
         Assert.Equal(0, Volatile.Read(ref _temporaryDirectoryCount));
@@ -98,7 +68,7 @@ public sealed class DataExportServiceTests : IDisposable
         ParserConfigs.SetStatePath(Path.Combine(_testRoot, "missing-state.db"));
         var handler = new CapturingHandler(HttpStatusCode.OK, _exportTempRoot);
         using var httpClient = new HttpClient(handler);
-        var service = CreateService(httpClient, ValidExportUrl);
+        var service = CreateService(httpClient);
 
         var result = await service.ExportAsync(TestContext.Current.CancellationToken);
 
@@ -124,7 +94,7 @@ public sealed class DataExportServiceTests : IDisposable
 
         var handler = new CapturingHandler(HttpStatusCode.OK, _exportTempRoot);
         using var httpClient = new HttpClient(handler);
-        var service = CreateService(httpClient, ValidExportUrl);
+        var service = CreateService(httpClient);
 
         var result = await service.ExportAsync(TestContext.Current.CancellationToken);
 
@@ -132,7 +102,7 @@ public sealed class DataExportServiceTests : IDisposable
         _featureLog.AssertAttempt("Database snapshot", "succeeded");
         Assert.Equal(1, handler.RequestCount);
         Assert.Equal(HttpMethod.Post, handler.Method);
-        Assert.Equal(ValidExportUrl, handler.RequestUri?.AbsoluteUri);
+        Assert.Equal(DataExportEndpointConfiguration.ExportUrl, handler.RequestUri?.AbsoluteUri);
         Assert.Equal(ConfiguredApiKey, handler.ApiKey);
         Assert.Equal("test-computer", Uri.UnescapeDataString(handler.ComputerName ?? ""));
         Assert.Equal("application/octet-stream", handler.ContentType);
@@ -208,7 +178,7 @@ public sealed class DataExportServiceTests : IDisposable
         ParserConfigs.SetStatePath(statePath);
         var handler = new CapturingHandler(upstreamStatus, _exportTempRoot);
         using var httpClient = new HttpClient(handler);
-        var service = CreateService(httpClient, ValidExportUrl);
+        var service = CreateService(httpClient);
 
         var result = await service.ExportAsync(TestContext.Current.CancellationToken);
 
@@ -237,7 +207,7 @@ public sealed class DataExportServiceTests : IDisposable
             }
             """);
         using var httpClient = new HttpClient(handler);
-        var service = CreateService(httpClient, ValidExportUrl);
+        var service = CreateService(httpClient);
 
         var result = await service.ExportAsync(TestContext.Current.CancellationToken);
 
@@ -269,7 +239,7 @@ public sealed class DataExportServiceTests : IDisposable
             { "title": "Service Unavailable", "status": 503, "traceId": "retry-reference" }
             """);
         using var httpClient = new HttpClient(handler);
-        var service = CreateService(httpClient, ValidExportUrl);
+        var service = CreateService(httpClient);
 
         var result = await service.ExportAsync(TestContext.Current.CancellationToken);
 
@@ -293,7 +263,7 @@ public sealed class DataExportServiceTests : IDisposable
             "Computer name is required.",
             "text/plain");
         using var httpClient = new HttpClient(handler);
-        var service = CreateService(httpClient, ValidExportUrl);
+        var service = CreateService(httpClient);
 
         var result = await service.ExportAsync(TestContext.Current.CancellationToken);
 
@@ -323,7 +293,7 @@ public sealed class DataExportServiceTests : IDisposable
             """,
             "text/html");
         using var httpClient = new HttpClient(handler);
-        var service = CreateService(httpClient, ValidExportUrl);
+        var service = CreateService(httpClient);
 
         var result = await service.ExportAsync(TestContext.Current.CancellationToken);
 
@@ -343,7 +313,7 @@ public sealed class DataExportServiceTests : IDisposable
         ParserConfigs.SetStatePath(statePath);
         var handler = new ThrowingHandler(new HttpRequestException("Simulated transport failure."));
         using var httpClient = new HttpClient(handler);
-        var service = CreateService(httpClient, ValidExportUrl);
+        var service = CreateService(httpClient);
 
         var result = await service.ExportAsync(TestContext.Current.CancellationToken);
 
@@ -360,7 +330,7 @@ public sealed class DataExportServiceTests : IDisposable
         ParserConfigs.SetStatePath(statePath);
         var handler = new BlockingHandler();
         using var httpClient = new HttpClient(handler);
-        var service = CreateService(httpClient, ValidExportUrl);
+        var service = CreateService(httpClient);
         using var cancellationSource = CancellationTokenSource.CreateLinkedTokenSource(
             TestContext.Current.CancellationToken);
 
@@ -388,7 +358,7 @@ public sealed class DataExportServiceTests : IDisposable
         ParserConfigs.SetStatePath(statePath);
         var handler = new CapturingHandler(HttpStatusCode.OK, _exportTempRoot);
         using var httpClient = new HttpClient(handler);
-        var service = CreateService(httpClient, ValidExportUrl);
+        var service = CreateService(httpClient);
 
         var result = await service.ExportAsync(cancellationToken);
 
@@ -433,7 +403,7 @@ public sealed class DataExportServiceTests : IDisposable
         ParserConfigs.SetStatePath(statePath);
         var handler = new CapturingHandler(HttpStatusCode.OK, _exportTempRoot);
         using var httpClient = new HttpClient(handler);
-        var service = CreateService(httpClient, ValidExportUrl);
+        var service = CreateService(httpClient);
 
         var result = await service.ExportAsync(cancellationToken);
 
@@ -456,7 +426,7 @@ public sealed class DataExportServiceTests : IDisposable
         ParserConfigs.SetStatePath(statePath);
         var handler = new CapturingHandler(HttpStatusCode.OK, _exportTempRoot);
         using var httpClient = new HttpClient(handler);
-        var service = CreateService(httpClient, ValidExportUrl);
+        var service = CreateService(httpClient);
 
         var result = await service.ExportAsync(TestContext.Current.CancellationToken);
 
@@ -476,8 +446,8 @@ public sealed class DataExportServiceTests : IDisposable
         var secondHandler = new CapturingHandler(HttpStatusCode.OK, _exportTempRoot);
         using var firstClient = new HttpClient(firstHandler);
         using var secondClient = new HttpClient(secondHandler);
-        var firstService = CreateService(firstClient, ValidExportUrl);
-        var secondService = CreateService(secondClient, ValidExportUrl);
+        var firstService = CreateService(firstClient);
+        var secondService = CreateService(secondClient);
 
         Task<DataExportResult>? firstExport = null;
         DataExportResult? firstResult = null;
@@ -522,7 +492,7 @@ public sealed class DataExportServiceTests : IDisposable
         ParserConfigs.SetStatePath(statePath);
         var handler = new CapturingHandler(HttpStatusCode.OK, _exportTempRoot);
         using var httpClient = new HttpClient(handler);
-        var service = CreateService(httpClient, ValidExportUrl);
+        var service = CreateService(httpClient);
 
         using var heldLock = CrossProcessFileLock.TryAcquire(
             CrossProcessFileLock.BesideStateDatabase(
@@ -550,18 +520,10 @@ public sealed class DataExportServiceTests : IDisposable
         }
     }
 
-    private DataExportService CreateService(HttpClient httpClient, string? exportUrl)
+    private DataExportService CreateService(HttpClient httpClient)
     {
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["VibeRails:ExportUrl"] = exportUrl
-            })
-            .Build();
-
         return new DataExportService(
             httpClient,
-            configuration,
             new VibeRails.Data.Sqlite.SqliteDatabaseSnapshotStore(),
             CreateTemporaryDirectoryPath,
             static () => "test-computer",

@@ -30,23 +30,16 @@ test('settings page exposes the default-off Vibe AI nav control', () => {
     assert.match(html, /data-view="vibe-rails-ai"[\s\S]{0,80}hidden/);
 });
 
-test('settings page exposes explicit completed-session sharing consent', () => {
+test('settings page always shares completed sessions and has no sharing switch', () => {
     const html = readFileSync(indexPath, 'utf8');
     const source = readFileSync(modulePath, 'utf8');
 
-    assert.match(html, /id="setting-data-export-opt-in"/);
-    assert.match(html, /aria-describedby="setting-data-export-description setting-data-export-unavailable"/);
-    assert.match(html, /id="setting-data-export-description"/);
-    assert.match(html, /id="setting-data-export-unavailable" role="status" aria-live="polite"/);
-    assert.match(html, /Share session data/);
-    assert.match(html, /existing and future completed sessions/);
-    assert.match(html, /typed inputs/);
-    assert.match(html, /file diffs/);
-    assert.match(html, /raw terminal output/);
-    assert.match(html, /terminal replay data/);
-    assert.match(source, /dataExportOptIn:\s*false/);
-    // The legacy one-shot export (Export Data button + modal) is intentionally kept beside the
-    // opt-in switch, so its presence is allowed here rather than forbidden.
+    assert.doesNotMatch(html, /id="setting-data-export-opt-in"/);
+    assert.doesNotMatch(html, /Share session data/);
+    assert.doesNotMatch(html, /id="settings-session-sharing-wrapper"/);
+    assert.match(source, /dataExportOptIn:\s*true/);
+    // The legacy one-shot export (Export Data button + modal) stays.
+    assert.match(html, /id="settings-export-data-button"/);
 });
 
 test('saving settings sends the co-author removal choice', async () => {
@@ -82,8 +75,7 @@ test('saving settings sends the co-author removal choice', async () => {
         /* removeCoAuthorTrailers */ false,
         /* routeThroughVibeRailsAi */ false,
         /* showVibeAiUi */ false,
-        /* clearApiKey */ false,
-        /* dataExportOptIn */ true);
+        /* clearApiKey */ false);
 
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, '/api/v1/settings');

@@ -147,10 +147,7 @@ for (const scenario of [
     });
 }
 
-test('a saved key alone is not enough when the export URL is unconfigured', async ({ page }) => {
-    // appsettings.json ships ExportUrl as the "EXPORT_URL_HERE" placeholder, which the server
-    // rejects. Gating on the key alone would show every user an enabled button whose only
-    // possible outcome is "Data export is not configured."
+test('the export button stays hidden when the server reports export unavailable', async ({ page }) => {
     await installSettingsApi(page, MASKED_API_KEY, MASKED_API_KEY, false);
     const ui = await openSettings(page);
 

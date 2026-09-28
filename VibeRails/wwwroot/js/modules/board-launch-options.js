@@ -1,5 +1,5 @@
 import { escapeHtml } from './utils.js';
-import { renderLlmModelOptions } from './llm-model-catalog.js';
+import { normalizeLlmModel, renderLlmModelOptions } from './llm-model-catalog.js';
 
 const pinnedModels = Object.freeze({
     'glm-5.2': 'zai/glm-5.2', 'glm-5.3': 'zai-coding-plan/glm-5.3',
@@ -23,7 +23,7 @@ function baseCli(selection) {
 export function normalizeBoardLaunchOptions(selection, options = {}) {
     const cli = baseCli(selection);
     if (!cli) return null;
-    const model = pinnedModels[cli] ? '' : String(options?.model || '').trim();
+    const model = pinnedModels[cli] ? '' : normalizeLlmModel(cli, options?.model);
     let effort = (efforts[cli] || []).includes(options?.effort) ? options.effort : '';
     if (cli === 'codex' && model.toLowerCase() === 'gpt-5.5' && effort === 'max') effort = 'xhigh';
     return {

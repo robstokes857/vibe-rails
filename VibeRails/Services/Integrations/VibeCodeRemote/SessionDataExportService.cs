@@ -56,7 +56,6 @@ public sealed class SessionDataExportService : ISessionDataExportService
     private static readonly TimeSpan PayloadTimeout = TimeSpan.FromMinutes(2);
 
     private readonly HttpClient _httpClient;
-    private readonly IConfiguration _configuration;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<SessionDataExportService> _logger;
     private readonly Func<string> _computerNameFactory;
@@ -64,13 +63,11 @@ public sealed class SessionDataExportService : ISessionDataExportService
 
     public SessionDataExportService(
         HttpClient httpClient,
-        IConfiguration configuration,
         IServiceScopeFactory scopeFactory,
         ILogger<SessionDataExportService> logger,
         IFeatureLog? featureLog = null)
         : this(
             httpClient,
-            configuration,
             scopeFactory,
             logger,
             ResolveComputerName,
@@ -80,14 +77,12 @@ public sealed class SessionDataExportService : ISessionDataExportService
 
     internal SessionDataExportService(
         HttpClient httpClient,
-        IConfiguration configuration,
         IServiceScopeFactory scopeFactory,
         ILogger<SessionDataExportService> logger,
         Func<string> computerNameFactory,
         IFeatureLog? featureLog = null)
     {
         _httpClient = httpClient;
-        _configuration = configuration;
         _scopeFactory = scopeFactory;
         _logger = logger;
         _computerNameFactory = computerNameFactory;
@@ -111,7 +106,7 @@ public sealed class SessionDataExportService : ISessionDataExportService
             {
                 SessionDataExportStatus.Success => ("succeeded", "The server acknowledged the session upload and the local export marker was saved."),
                 SessionDataExportStatus.NoApiKey => ("skipped", "Upload skipped because no API key is configured."),
-                SessionDataExportStatus.NotConfigured => ("skipped", "Upload skipped because no HTTPS export endpoint is configured."),
+                SessionDataExportStatus.NotConfigured => ("skipped", "Upload skipped because no API key is configured."),
                 SessionDataExportStatus.Busy => ("skipped", "Upload skipped because another session export is running."),
                 SessionDataExportStatus.NotFound => ("skipped", "Upload skipped because the ended, unexported session was not found."),
                 SessionDataExportStatus.InvalidApiKey => ("failed", "The server rejected the configured API key."),
@@ -174,15 +169,7 @@ public sealed class SessionDataExportService : ISessionDataExportService
         var apiKey = ParserConfigs.GetApiKey();
         if (string.IsNullOrWhiteSpace(apiKey))
             return Failure(SessionDataExportStatus.NoApiKey, sessionId, detail: "No API key is configured.");
-        if (!DataExportEndpointConfiguration.TryParseExportUri(
-                _configuration[DataExportEndpointConfiguration.ExportUrlSettingKey],
-                out var baseUri))
-        {
-            return Failure(
-                SessionDataExportStatus.NotConfigured,
-                sessionId,
-                detail: "No absolute HTTPS export URL is configured.");
-        }
+        var baseUri = DataExportEndpointConfiguration.ExportUri;
 
         if (!ExportGate.Wait(0))
             return Failure(SessionDataExportStatus.Busy, sessionId, detail: "Another data export is running.");
@@ -336,14 +323,9 @@ public sealed class SessionDataExportService : ISessionDataExportService
 
     private bool TryResolveConfiguration(out string apiKey, out Uri exportUri)
     {
-        exportUri = null!;
         apiKey = ParserConfigs.GetApiKey();
-        if (string.IsNullOrWhiteSpace(apiKey))
-            return false;
-
-        return DataExportEndpointConfiguration.TryParseExportUri(
-            _configuration[DataExportEndpointConfiguration.ExportUrlSettingKey],
-            out exportUri);
+        exportUri = DataExportEndpointConfiguration.ExportUri;
+        return !string.IsNullOrWhiteSpace(apiKey);
     }
 
     private async Task<SessionDataExportDescriptor?> PrepareSpoolAsync(

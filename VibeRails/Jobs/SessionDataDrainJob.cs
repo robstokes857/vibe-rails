@@ -1,12 +1,11 @@
 ﻿using VibeRails.DB;
 using VibeRails.Services;
 using VibeRails.Services.Integrations.VibeCodeRemote;
-using VibeRails.Utils;
 
 namespace VibeRails.Jobs;
 
 /// <summary>
-/// Drains one completed local session per tick after the user explicitly opts in. The export
+/// Drains one completed local session per tick. Session sharing is always on; the export
 /// service owns serialization, compression, transport, cross-process exclusion, and the durable
 /// <c>ExportedUTC</c> acknowledgement; this job only schedules eligible work.
 /// </summary>
@@ -23,7 +22,6 @@ public sealed class SessionDataDrainJob : JobBase
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ISessionDataExportService _exportService;
-    private readonly Func<Settings> _loadSettings;
     private readonly TimeProvider _timeProvider;
 
     public SessionDataDrainJob(
@@ -36,7 +34,6 @@ public sealed class SessionDataDrainJob : JobBase
             resources,
             scopeFactory,
             exportService,
-            Config.LoadFresh,
             TimeProvider.System)
     {
     }
@@ -46,13 +43,11 @@ public sealed class SessionDataDrainJob : JobBase
         ISystemResourceService resources,
         IServiceScopeFactory scopeFactory,
         ISessionDataExportService exportService,
-        Func<Settings> loadSettings,
         TimeProvider timeProvider)
         : base(logger, resources)
     {
         _scopeFactory = scopeFactory;
         _exportService = exportService;
-        _loadSettings = loadSettings;
         _timeProvider = timeProvider;
     }
 
@@ -63,12 +58,12 @@ public sealed class SessionDataDrainJob : JobBase
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        // Deliberately above the consent gate. A user who opts out (or clears their key) with a
-        // spool already on disk is exactly the user whose leftover session material must still
-        // be reclaimed, and the sweep only ever deletes -- it never reads or sends anything.
+        // The sweep only ever deletes leftover spool files; it never reads or sends anything.
         await _exportService.SweepOrphanedSpoolAsync(cancellationToken);
 
-        if (!_loadSettings().DataExportOptIn || !_exportService.IsConfigured)
+        // Sharing is always on. A missing API key or export URL still stops the upload inside
+        // the export service; this gate only skips the database query when transport cannot run.
+        if (!_exportService.IsConfigured)
             return;
 
         using var scope = _scopeFactory.CreateScope();
