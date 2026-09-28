@@ -188,6 +188,40 @@ public sealed class BoardSyncRoundTripTests : IDisposable
         Assert.Equal(0, await store.CountUnsentLogEntriesAsync(local.BoardId, Ct));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task DisplayIdCollisionsConvergeInEitherArrivalOrder(bool remoteFirst)
+    {
+        var baseline = await LocalCard();
+        var board = (await store.GetBoardAsync(root, baseline.BoardId, Ct))!;
+        await store.RenameBoardAsync(root, board.Id, board.Name, Ct, "VIBE");
+        var remoteId = await Publish(baseline);
+        var local = await store.CreateCardAsync(root, new(null, "Offline", "", null, "medium", null, [], false, DisplayId: "VIBE-1"), Ct);
+        WebWriteResult web;
+        if (!remoteFirst) await Sync(baseline);
+        await using (var db = Db())
+            web = await new HostedSync(db, TimeProvider.System).CreateCardAsync(Owner, remoteId, "Owner", "Web", baseline.ColumnId, Ct);
+        await Sync(baseline);
+        await Sync(baseline); // Delivers a local conflict correction, if one was needed.
+        var localAfter = (await store.FindCardAsync(root, local.Id, Ct))!;
+        var webAfter = (await store.FindCardAsync(root, web.CardId, Ct))!;
+        Assert.Equal(local.Key, localAfter.Key);
+        Assert.Equal(web.Key, webAfter.Key);
+        Assert.NotEqual(localAfter.DisplayId, webAfter.DisplayId);
+        Assert.Equal("VIBE-1", remoteFirst ? webAfter.DisplayId : localAfter.DisplayId);
+        await using (var db = Db())
+        {
+            var hosted = new HostedSync(db, TimeProvider.System);
+            Assert.Equal(localAfter.DisplayId, (await hosted.GetCardAsync(Owner, remoteId, local.Id, Ct))!.Card.DisplayId);
+            Assert.Equal(webAfter.DisplayId, (await hosted.GetCardAsync(Owner, remoteId, web.CardId, Ct))!.Card.DisplayId);
+            await hosted.EditCardAsync(Owner, remoteId, web.CardId, "Owner", Json("""{"displayId":"PRETTY-55"}"""), Ct);
+        }
+        await Sync(baseline);
+        Assert.Equal(webAfter.Id, (await store.FindCardAsync(root, "pretty-55", Ct))!.Id);
+        Assert.Equal(0, await store.CountUnsentLogEntriesAsync(board.Id, Ct));
+    }
+
     private async Task<BoardCardRecord> LocalCard()
     {
         await store.EnsureDefaultColumnsAsync(root, Ct);

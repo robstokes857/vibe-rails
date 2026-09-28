@@ -1165,3 +1165,12 @@ vb --web  # Explicit web-dashboard launch
 - **ModelContextProtocol.AspNetCore** (v2.0.0) - ASP.NET Core integration for the in-process MCP server
 - **Pty.Net** (inlined fork) - Pseudo-terminal support
 - **PyBridge** (in-tree library) - Python script execution, streaming, and warm worker sessions
+
+### Board display IDs (VB-69)
+
+The Board now shows mutable display IDs, defaulting to a four-character repository prefix plus
+a persistent number. Board settings customize the prefix for future cards; Card settings can
+rename a label. Immutable CardKey and row Id remain the identity used by sync and stored links.
+The additive board/20 migration preserves existing displayed keys. See the Board contributor
+and sync contracts for collision correction. New-card link selections persist atomically with
+creation, and discussion launch controls are separate from Start work.

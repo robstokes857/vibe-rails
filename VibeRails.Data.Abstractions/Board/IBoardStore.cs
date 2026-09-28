@@ -14,7 +14,7 @@ public partial interface IBoardStore
     Task<BoardRecord?> GetBoardAsync(string projectPath, string boardId, CancellationToken cancellationToken = default);
     /// <summary>Creates a board with the default lanes. Position is appended.</summary>
     Task<BoardRecord> CreateBoardAsync(string projectPath, string name, CancellationToken cancellationToken = default);
-    Task<BoardRecord?> RenameBoardAsync(string projectPath, string boardId, string name, CancellationToken cancellationToken = default);
+    Task<BoardRecord?> RenameBoardAsync(string projectPath, string boardId, string name, CancellationToken cancellationToken = default, string? displayPrefix = null);
     /// <summary>Deletes the board with its lanes and cards. Refuses the project's last board.</summary>
     Task<BoardDeleteResult?> DeleteBoardAsync(string projectPath, string boardId, CancellationToken cancellationToken = default);
 

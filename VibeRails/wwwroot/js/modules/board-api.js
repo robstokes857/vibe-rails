@@ -214,7 +214,7 @@ async function launchBoardCardAsync(cardId, { selection, intent = 'work' } = {})
 // ---------------------------------------------- linked cards
 
 async function getCardLinkCandidatesAsync(cardId, query = '', extra = {}) {
-    const response = await call(`/cards/${enc(cardId)}/links/candidates?q=${enc(query)}`, 'GET', null, extra);
+    const response = await call(`${cardId ? `/cards/${enc(cardId)}/links/candidates` : '/cards/link-candidates'}?q=${enc(query)}`, 'GET', null, extra);
     return response?.cards || [];
 }
 

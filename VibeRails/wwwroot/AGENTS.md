@@ -115,8 +115,8 @@ filter lists the keys present on the board. **Start work** (`startWork`) saves t
 the board without adopting/focusing the terminal or navigating away. Creating or saving a
 card never immediately launches an agent (a lane Automation can queue after its delay). Sessions
 opens a linked terminal. The
-**Chat with:** action uses the same shared LLM/environment picker and connected control styling
-as Project health's **Fix rules with:**. It defaults to the card's assignee (or the first enabled
+**Chat with agent** action has a separate discussion section, with the shared LLM/environment
+picker followed by a link-style button. It defaults to the card's assignee (or the first enabled
 target for an unassigned card); its selection is independent of the saved assignment. It saves
 the card and uses the same launch route with the selected target and `intent: 'chat'`,
 then adopts/focuses the returned tab (or navigates to `terminal-focus`). The prompt asks for a
@@ -191,8 +191,7 @@ board in the same project; each relation appears on both cards. The full card re
 search picker (up to 50 matches by key or title), immediate link/unlink calls, and its abortable
 search lifecycle. Self/already-linked cards are omitted. All displayed metadata is escaped.
 Opening a linked card checks for unsaved fields, description or comment text first; cancel
-leaves the draft intact. Link mutations never save or reload the surrounding form. New cards
-must be saved before links can be added. Dispose the rail on modal close/replacement and unload.
+leaves the draft intact. Link mutations never save or reload the surrounding form. New cards stage links and save them atomically on Create. Dispose the rail on modal close/replacement and unload.
 
 **Shared sessions (VB-25)**: the same session ID may appear on several cards in one project.
 Agents use `attach_board_session`; users can paste the same ID into each Sessions rail. Each card
@@ -830,8 +829,9 @@ within the server-derived project; card-originated runs open terminal tabs and k
 link in their immutable run trigger. Linked recordings use the existing open/replay rail.
 
 Board tags are hidden: no tile chips, editor field, or tag filter. Ignore legacy saved tag filters
-and omit tags on card saves; keep stored tag data and API compatibility. The discussion button
-has an accent outline and focus ring so it reads as an action beside the agent picker.
+and omit tags on card saves; keep stored tag data and API compatibility. The discussion controls
+have their own section away from Start work, with the shared agent picker before a text-style
+Chat button and explanatory text.
 
 The card editor groups linked recordings into Sessions and Automations (`session.isAutomation`),
 with separate counts and the same live-terminal/replay/remove actions. New Automation links carry
@@ -848,3 +848,8 @@ Loaded lane pages, ordering, scroll and editor drafts are preserved; stale respo
 are discarded after navigation/editor replacement. Unload disposes subscriptions, timers and requests.
 The editor no longer shows the YOLO warning text or Priority, Points and Tags fields. Saves omit
 those retired fields so stored values survive; YOLO remains an explicit checkbox.
+
+Card labels use `displayId || key`; `key` remains the immutable identity. Board settings edit
+`displayPrefix` for future cards, while Card settings edit the individual display ID and show
+the permanent key. Both IDs remain searchable. New-card links live on the editor's draft card
+and are sent as `linkedCardIds` only on Create; link search and disposal retain generation guards.

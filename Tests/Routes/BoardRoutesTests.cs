@@ -256,6 +256,7 @@ public sealed class BoardRoutesTests : IAsyncLifetime
     [InlineData("POST", "/api/v1/board/cards/PROJ-1/attachments")]
     [InlineData("GET", "/api/v1/board/cards/PROJ-1/notes")]
     [InlineData("POST", "/api/v1/board/cards/PROJ-1/notes")]
+    [InlineData("GET", "/api/v1/board/cards/link-candidates")]
     [InlineData("GET", "/api/v1/board/cards/PROJ-1/links/candidates")]
     [InlineData("POST", "/api/v1/board/cards/PROJ-1/links")]
     [InlineData("DELETE", "/api/v1/board/cards/PROJ-1/links/PROJ-2")]
@@ -650,6 +651,45 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NotFound, gone.StatusCode);
         using var last = await SendAsync(HttpMethod.Delete, $"/api/v1/board/boards/{mainId}", "test-session", "test-tab");
         Assert.Equal(HttpStatusCode.Conflict, last.StatusCode);
+    }
+
+    [Fact]
+    public async Task DisplayIdsAndDraftLinksRoundTripThroughScopedRoutes()
+    {
+        using var boards = await GetJsonAsync("/api/v1/board/boards");
+        var boardId = boards.RootElement.GetProperty("boards")[0].GetProperty("id").GetString()!;
+        using var settings = await SendJsonAsync(HttpMethod.Put, $"/api/v1/board/boards/{boardId}", new { displayPrefix = "VIBE" });
+        settings.EnsureSuccessStatusCode();
+        using var targetResponse = await PostJsonAsync("/api/v1/board/cards", new { title = "Target" });
+        using var target = await ReadJsonAsync(targetResponse);
+        var targetId = target.RootElement.GetProperty("id").GetString()!;
+        Assert.Equal("VIBE-1", target.RootElement.GetProperty("displayId").GetString());
+        using var candidates = await GetJsonAsync("/api/v1/board/cards/link-candidates?q=vibe-1");
+        Assert.Equal(targetId, Assert.Single(candidates.RootElement.GetProperty("cards").EnumerateArray()).GetProperty("id").GetString());
+        using var response = await PostJsonAsync("/api/v1/board/cards", new { title = "Linked draft", linkedCardIds = new[] { targetId } });
+        response.EnsureSuccessStatusCode();
+        using var created = await ReadJsonAsync(response);
+        var id = created.RootElement.GetProperty("id").GetString()!;
+        var key = created.RootElement.GetProperty("key").GetString()!;
+        Assert.Equal("VIBE-2", created.RootElement.GetProperty("displayId").GetString());
+        Assert.Equal(targetId, Assert.Single(created.RootElement.GetProperty("linkedCards").EnumerateArray()).GetProperty("id").GetString());
+        using var changed = await SendJsonAsync(HttpMethod.Put, $"/api/v1/board/cards/{id}", new { displayId = "NEW-12" });
+        changed.EnsureSuccessStatusCode();
+        using var byDisplay = await GetJsonAsync("/api/v1/board/cards/new-12");
+        Assert.Equal(key, byDisplay.RootElement.GetProperty("key").GetString());
+        using var duplicate = await SendJsonAsync(HttpMethod.Put, $"/api/v1/board/cards/{targetId}", new { displayId = "new-12" });
+        Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
+        using var invalid = await SendJsonAsync(HttpMethod.Put, $"/api/v1/board/boards/{boardId}", new { displayPrefix = "<script>" });
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        var store = _app.Services.GetRequiredService<IBoardStore>();
+        var foreignProject = Path.Combine(_root, "foreign");
+        await store.EnsureDefaultColumnsAsync(foreignProject, TestContext.Current.CancellationToken);
+        var foreign = await store.CreateCardAsync(foreignProject, new(null, "Foreign", "", null, "medium", null, [], false), TestContext.Current.CancellationToken);
+        using var foreignSearch = await GetJsonAsync("/api/v1/board/cards/link-candidates?q=Foreign");
+        Assert.Empty(foreignSearch.RootElement.GetProperty("cards").EnumerateArray());
+        using var foreignLink = await PostJsonAsync("/api/v1/board/cards", new { title = "Invalid draft", linkedCardIds = new[] { foreign.Id } });
+        Assert.Equal(HttpStatusCode.BadRequest, foreignLink.StatusCode);
+        Assert.Equal(2, (await store.GetCardsAsync(_project, TestContext.Current.CancellationToken)).Count);
     }
 
     [Fact]

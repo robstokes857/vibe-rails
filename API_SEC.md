@@ -1103,7 +1103,8 @@ cannot read or write another project's board through this surface.
   one page per completed lane; a scoped `columnId` reads one lane page. Counts and
   filter choices cover the selected board, and filters run before the page limit. A stale
   continuation restarts at offset zero and marks `restartRequired`.
-- `GET /api/v1/board/cards/{card}/links/candidates?q=`,
+- `GET /api/v1/board/cards/link-candidates?q=` (draft link search),
+  `GET /api/v1/board/cards/{card}/links/candidates?q=`,
   `POST /api/v1/board/cards/{card}/links`,
   `DELETE /api/v1/board/cards/{card}/links/{linkedCard}` — related cards. The POST body supplies
   `card` as an id or key. Both endpoints of a link must exist in the open project; foreign ids
@@ -1430,3 +1431,18 @@ requirement and the launch composition; `Tests/Services/Mcp/BoardToolTests.cs` p
 - The bootstrap and health bypasses now match only the exact, case-insensitive GET routes.
   Other verbs and sibling paths such as `/auth/bootstrap-extra` remain behind the session
   credential check (apart from the separately documented global `OPTIONS` behavior).
+
+## VB-69 scoped amendment (2026-09-28)
+
+Added `GET /api/v1/board/cards/link-candidates?q=` under the existing active-root Board routes,
+behind both session and tab credentials. It searches at most 50 current cards in the
+server-derived project; query length is bounded to 300. Creation accepts at most 50 linked
+card IDs and resolves both ends inside the creation transaction, rolling back on a foreign,
+missing or deleted target. The existing board/card writes also accept validated display prefixes
+and display IDs. Outbound sync includes these labels; immutable IDs and the consent boundary
+are unchanged. Source-generated DTO serialization is retained.
+
+Route tests cover credentials, scope, search and atomic draft links. Both mandatory listener
+searches found the existing main Kestrel host, the non-serving PortFinder probe and test-only
+hosts; the cross-runtime search had no matches. No new listener or auth exception was added.
+This is a scoped review; unrelated existing findings remain in SECURITY_ERROR.md.

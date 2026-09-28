@@ -33,7 +33,7 @@ public sealed partial class BoardStore
         if (query.ColumnId is not null && !columns.Any(column => column.Id == query.ColumnId))
             throw new BoardValidationException("Lane not found on this board.");
 
-        var filter = CardPageFilterSql.Replace("{KEY}", CardKeySql, StringComparison.Ordinal);
+        var filter = CardPageFilterSql.Replace("{KEY}", CardDisplayIdSql + " || ' ' || " + CardKeySql, StringComparison.Ordinal);
         var counts = new Dictionary<string, (int Total, int Filtered, int Blocked, long Points)>();
         await using (var count = connection.CreateCommand())
         {

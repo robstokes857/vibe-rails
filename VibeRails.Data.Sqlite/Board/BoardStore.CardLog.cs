@@ -177,6 +177,7 @@ public sealed partial class BoardStore
 
         public void Created(BoardCardRecord card)
         {
+            WriteTo("displayId", w => w.WriteStringValue(card.DisplayId));
             WriteTo("title", w => w.WriteStringValue(card.Title));
             WriteTo("description", w => w.WriteStringValue(card.Description));
             WriteTo("type", w => w.WriteStringValue(card.Type));
@@ -191,6 +192,11 @@ public sealed partial class BoardStore
 
         public void Diff(BoardCardRecord before, BoardCardRecord after, string? fromLaneName, string? toLaneName)
         {
+            if (before.DisplayId != after.DisplayId)
+            {
+                WriteFromTo("displayId", w => w.WriteStringValue(before.DisplayId), w => w.WriteStringValue(after.DisplayId));
+                _summary.Add($"Display ID: {before.DisplayId} → {after.DisplayId}");
+            }
             if (!string.Equals(before.Title, after.Title, StringComparison.Ordinal))
             {
                 WriteFromTo("title", w => w.WriteStringValue(before.Title), w => w.WriteStringValue(after.Title));

@@ -161,7 +161,7 @@ public sealed class BoardTool(
             var builder = new StringBuilder();
             foreach (var card in rows)
             {
-                builder.Append(card.Key).Append(" [").Append(columns.TryGetValue(card.ColumnId, out var lane) ? lane.Name : card.ColumnId)
+                builder.Append(card.DisplayId ?? card.Key).Append(card.DisplayId is { } display && display != card.Key ? $" ({card.Key})" : "").Append(" [").Append(columns.TryGetValue(card.ColumnId, out var lane) ? lane.Name : card.ColumnId)
                     .Append("] [").Append(BoardCardTypes.Label(card.Type)).Append("] (")
                     .Append(card.Priority).Append(") ").Append(card.Title);
                 if (!string.IsNullOrWhiteSpace(card.Assignee)) builder.Append(" — assignee ").Append(card.Assignee);
@@ -834,6 +834,7 @@ public sealed class BoardTool(
         stats ??= new CardRenderStats();
         var builder = new StringBuilder();
         builder.Append(card.Key).Append(": ").Append(card.Title).Append('\n');
+        if (card.DisplayId is { } displayId && displayId != card.Key) builder.Append("Display ID: ").Append(displayId).Append('\n');
         builder.Append("Lane: ").Append(laneName)
             .Append(" · Type: ").Append(BoardCardTypes.Label(card.Type))
             .Append(" · Priority: ").Append(card.Priority)

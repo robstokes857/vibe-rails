@@ -1,5 +1,11 @@
 # Vibe Board architecture and review
 
+## VB-69: display IDs and creation links (2026-09-28)
+
+See [the contributor contract](AGENTS.md#display-ids-and-draft-links-vb-69) for mutable labels,
+unchanged immutable identity, board/20 compatibility, sync corrections and atomic draft links.
+Discussion controls now sit in their own section, with the picker before a text-style action.
+
 ## VB-44: manual card Automations and simpler Board controls (2026-09-26)
 
 Review fixes: visible-page activity refresh calls `POST /api/v1/board/cards/activity` with

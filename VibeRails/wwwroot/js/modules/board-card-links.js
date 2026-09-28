@@ -7,21 +7,20 @@ export function renderCardLinksSection(card) {
             Linked cards <span class="board-count" data-board-count="linked-cards">${card?.linkedCards?.length || 0}</span>
         </h3>
         <div class="board-side-list" data-board-linked-cards></div>
-        ${card?.id ? `<details class="board-link-picker" data-board-link-picker>
+        <details class="board-link-picker" data-board-link-picker>
             <summary>Link a card</summary>
             <label class="board-editor-label" for="board-link-search">Find a card</label>
             <input type="search" id="board-link-search" class="form-control form-control-sm"
-                placeholder="VB-12 or card title" maxlength="300" autocomplete="off" data-board-link-search>
+                placeholder="Display ID or card title" maxlength="300" autocomplete="off" data-board-link-search>
             <p class="board-editor-muted" data-board-link-status role="status" aria-live="polite"></p>
             <div class="board-side-list" data-board-link-results></div>
         </details>
-        <p class="board-editor-muted mt-2">Links save immediately and appear on both cards.</p>`
-        : '<p class="board-side-empty">Save the card to link other cards.</p>'}
+        <p class="board-editor-muted mt-2">${card?.id ? 'Links save immediately and appear on both cards.' : 'Links will be saved when you create this card.'}</p>
     </section>`;
 }
 
 function cardLabel(card) {
-    return `${card.key} · ${card.title}`;
+    return `${card.displayId || card.key} · ${card.title}`;
 }
 
 function cardText(card) {
@@ -48,6 +47,7 @@ export function bindCardLinks(editor, card, { openCard, showError, onChanged }) 
     let disposed = false;
     // Other rail operations may fetch fresh card data; keep this rail's current list independent.
     let links = [...(card?.linkedCards || [])];
+    let candidates = [];
 
     function renderLinks() {
         host.querySelector('[data-board-count="linked-cards"]').textContent = String(links.length);
@@ -57,7 +57,7 @@ export function bindCardLinks(editor, card, { openCard, showError, onChanged }) 
                 ${cardText(link)}
             </button>
             <button type="button" class="board-side-remove" data-board-unlink-card="${escapeHtml(link.id)}"
-                title="Unlink ${escapeHtml(link.key)}" aria-label="Unlink ${escapeHtml(link.key)}">
+                title="Unlink ${escapeHtml(link.displayId || link.key)}" aria-label="Unlink ${escapeHtml(link.displayId || link.key)}">
                 <i class="fa-solid fa-xmark" aria-hidden="true"></i>
             </button>
         </div>`).join('') : (card?.id ? '<p class="board-side-empty">No cards linked.</p>' : '');
@@ -77,8 +77,9 @@ export function bindCardLinks(editor, card, { openCard, showError, onChanged }) 
         results.innerHTML = '';
         status.textContent = 'Finding cards…';
         try {
-            const cards = await BoardApi.getCardLinkCandidatesAsync(card.id, search.value.trim(), { signal: searchAbort.signal });
+            const found = await BoardApi.getCardLinkCandidatesAsync(card.id, search.value.trim(), { signal: searchAbort.signal });
             if (disposed || current !== generation) return;
+            const cards = candidates = found.filter(candidate => !links.some(link => link.id === candidate.id));
             results.innerHTML = cards.map(candidate => `<div class="board-side-row">
                 <button type="button" class="board-side-main" data-board-link-card="${escapeHtml(candidate.id)}"
                     title="${escapeHtml(cardLabel(candidate))}" aria-label="Link ${escapeHtml(cardLabel(candidate))}">
@@ -100,7 +101,16 @@ export function bindCardLinks(editor, card, { openCard, showError, onChanged }) 
         cancelSearch();
         host.querySelectorAll('button, input').forEach(control => { control.disabled = true; });
         try {
-            if (remove) {
+            if (!card.id) {
+                if (remove) links = links.filter(link => link.id !== targetId);
+                else {
+                    const target = candidates.find(candidate => candidate.id === targetId);
+                    if (!target || links.some(link => link.id === targetId)) return;
+                    if (links.length >= 50) throw new Error('A new card can link up to 50 cards.');
+                    links = [...links, target];
+                }
+                editor._boardHasEdits = true;
+            } else if (remove) {
                 await BoardApi.unlinkCardAsync(card.id, targetId);
                 links = links.filter(link => link.id !== targetId);
             } else {
@@ -108,7 +118,7 @@ export function bindCardLinks(editor, card, { openCard, showError, onChanged }) 
                 links = [...links.filter(link => link.id !== linked.id), linked];
             }
             if (disposed) return;
-            links.sort((a, b) => a.key.localeCompare(b.key, undefined, { numeric: true }));
+            links.sort((a, b) => (a.displayId || a.key).localeCompare(b.displayId || b.key, undefined, { numeric: true }));
             card.linkedCards = links;
             renderLinks();
             onChanged?.();

@@ -5,7 +5,7 @@ Read the cross-layer [Board contributor guide](../../VibeRails/Services/Board/AG
 [database migration policy](../DB/AGENTS.md), before changing this component.
 
 This directory owns `IBoardStore`'s SQLite implementation in `~/.vibe_rails/board.db`, including
-component migrations `board/1`–`board/19`. The historical `VibeRails.Services.Board` namespace
+component migrations `board/1`–`board/20`. The historical `VibeRails.Services.Board` namespace
 does not move this code back into the application project. Keep DTO/contracts in
 `VibeRails.Data.Abstractions/Board`; keep Git, live terminal state and UI policy in the host.
 
@@ -124,3 +124,9 @@ editor. No backfill; an older binary ignores the table and the `context` field.
 Session commit linking reads this membership inside the commit-write transaction and writes the
 snapshot to the target and all same-project attachments atomically. One failed write rolls back
 every new link. Repeats leave existing metadata/snapshots unchanged and fill missing links.
+
+`board/20` (VB-69, additive) adds nullable `Boards.DisplayPrefix` and `BoardCards.DisplayId`,
+a case-insensitive project/display-ID unique index, and `BoardDisplaySequences`. It backfills
+DisplayId to the existing immutable/legacy key as requested. Allocation, local collision rename,
+Card Log corrections, and draft-link creation run inside the card write transaction. NULL values
+from older writers continue to display their immutable key. Nothing changes CardKey or row Id.

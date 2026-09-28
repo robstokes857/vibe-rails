@@ -173,6 +173,10 @@ public static class BoardRoutes
 
         // ---------------------------------------------------------------- rails
 
+        app.MapGet("/api/v1/board/cards/link-candidates", (IBoardService board, string? q, CancellationToken cancellationToken) =>
+            RunAsync(async () => Results.Ok(await board.GetCardLinkCandidatesAsync(Project(), null, q, cancellationToken))))
+            .WithName("GetNewBoardCardLinkCandidates");
+
         app.MapGet("/api/v1/board/cards/{card}/links/candidates", (IBoardService board, string card, string? q, CancellationToken cancellationToken) =>
             RunAsync(async () => OkOrNotFound(await board.GetCardLinkCandidatesAsync(Project(), card, q, cancellationToken), "Card")))
             .WithName("GetBoardCardLinkCandidates");

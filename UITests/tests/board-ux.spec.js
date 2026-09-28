@@ -5,6 +5,50 @@ const { test, expect } = process.env.VIBERAILS_BOARD_STATIC === '1'
 const IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=';
 const DESCRIPTION = 'Repro screenshot\n![Screenshot.png](attachment:att_image)\n<img src=x onerror="window.__injected=true">';
 
+test('new-card links stay in the draft and are submitted with creation', async ({ page }) => {
+    const requests = await openBoard(page, { relatedCards: true });
+    await page.getByRole('button', { name: 'New card', exact: true }).click();
+    const editor = page.locator('[data-board-card-editor]');
+    await editor.locator('#board-card-title').fill('Linked from the beginning');
+    await editor.locator('[data-board-link-picker] > summary').click();
+    await editor.locator('[data-board-link-card="card_related"]').click();
+    await expect(editor.locator('[data-board-linked-cards]')).toContainText('Related work');
+    expect(requests.filter(r => r.method === 'POST' && r.path.startsWith('/api/v1/board/cards'))).toEqual([]);
+    await editor.locator('[data-board-unlink-card="card_related"]').click();
+    await expect(editor.locator('[data-board-linked-cards]')).not.toContainText('Related work');
+    await editor.locator('[data-board-link-card="card_related"]').click();
+    await editor.locator('[data-board-save-card]').click();
+    await expect(editor).toHaveCount(0);
+    const created = requests.find(r => r.method === 'POST' && r.path === '/api/v1/board/cards');
+    expect(created.body.linkedCardIds).toEqual(['card_related']);
+    expect(requests.filter(r => r.method === 'POST' && r.path.endsWith('/links'))).toEqual([]);
+});
+
+test('display IDs are visible and editable while permanent IDs remain available', async ({ page }, testInfo) => {
+    const requests = await openBoard(page, { assignee: 'base:codex', onCard: card => {
+        card.key = 'VB-ABCDE-42'; card.displayId = 'VIBE-7';
+    } });
+    await expect(page.locator('.board-key')).toContainText('VIBE-7');
+    await page.getByText('Description images', { exact: true }).click();
+    const editor = page.locator('[data-board-card-editor]');
+    await expect(page.locator('.modal-title')).toContainText('VIBE-7');
+    await expect(editor.locator('.board-editor-actions')).not.toContainText('Chat with agent');
+    await expect(editor.locator('.board-discussion')).toContainText('Chat with an agent about the card without starting it.');
+    const picker = editor.locator('.board-chat-controls .ts-wrapper');
+    const chat = editor.locator('[data-board-chat]');
+    expect(await picker.evaluate((element, other) => Boolean(element.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING), await chat.elementHandle())).toBe(true);
+    await editor.locator('.board-discussion').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath('display-id-discussion.png') });
+    await editor.getByText('Card settings', { exact: true }).click();
+    await expect(editor.locator('#board-card-display-id')).toHaveValue('VIBE-7');
+    await expect(editor).toContainText('Permanent ID: VB-ABCDE-42');
+    await editor.locator('#board-card-display-id').fill('VIBE-88');
+    await editor.locator('[data-board-save-card]').click();
+    await expect(editor).toHaveCount(0);
+    expect(requests.find(r => r.method === 'PUT' && r.path.endsWith('/card_test')).body).toEqual({ displayId: 'VIBE-88' });
+    await expect(page.locator('.board-key')).toContainText('VIBE-88');
+});
+
 async function openBoard(page, { active = false, assignee = null, relatedCards = false,
     onCard = () => {},
     columns = [{ id: 'col_ready', name: 'Ready', position: 0, color: '#3b82f6', boardId: 'brd_main' }] } = {}) {
@@ -34,7 +78,7 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
         boardId: 'brd_sprint', columnId: 'col_build', boardName: 'Sprint 2', columnName: 'Build', linkedCards: []
     }] : [];
     const linkedIds = new Set();
-    const linkSummary = item => ({ id: item.id, key: item.key, title: item.title,
+    const linkSummary = item => ({ id: item.id, key: item.key, displayId: item.displayId, title: item.title,
         boardId: item.boardId || 'brd_main', boardName: item.boardName || 'Main',
         columnId: item.columnId, columnName: item.columnName || 'Ready' });
     await page.routeWebSocket('**/api/v1/events/ws*', () => {});
@@ -42,6 +86,10 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
         const url = new URL(route.request().url());
         const path = url.pathname;
         requests.push({ path, method: route.request().method(), body: route.request().postDataJSON() });
+        if (path === '/api/v1/board/cards/link-candidates') {
+            const query = (url.searchParams.get('q') || '').toLowerCase();
+            return route.fulfill({ json: { cards: related.filter(item => `${item.displayId || item.key} ${item.title}`.toLowerCase().includes(query)).map(linkSummary) } });
+        }
         const linkPath = path.match(/^\/api\/v1\/board\/cards\/([^/]+)\/links(?:\/(.*))?$/);
         if (linkPath && relatedCards) {
             const [, source, action] = linkPath;
@@ -73,6 +121,7 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
             return route.fulfill({ json: { ...relatedCard, linkedCards: linkedIds.has(relatedCard.id) ? [linkSummary(card)] : [] } });
         }
         if (path === '/api/v1/board/cards' && route.request().method() === 'POST') {
+            for (const id of route.request().postDataJSON().linkedCardIds || []) linkedIds.add(id);
             card = { ...card, ...route.request().postDataJSON(), id: 'card_created', key: 'VB-2', attachments: [], comments: [], sessions: [] };
             return route.fulfill({ json: { ...card, linkedCards: related.filter(item => linkedIds.has(item.id)).map(linkSummary) } });
         }
@@ -387,7 +436,7 @@ test('Chat defaults to the assignee, saves first and focuses the returned tab', 
     await page.getByText('Description images', { exact: true }).click();
     await expect(page.locator('[data-board-chat-agent]')).toHaveValue('base:codex');
     await page.locator('#board-card-title').fill('Discuss this card');
-    await page.getByRole('button', { name: 'Chat with:', exact: true }).click();
+    await page.getByRole('button', { name: 'Chat with agent', exact: true }).click();
     await expect.poll(() => page.evaluate(() => window.__chatTabs)).toEqual(['board_background']);
     const writes = requests.filter(item => item.method === 'PUT' || item.path.endsWith('/launch'));
     expect(writes[0].body.title).toBe('Discuss this card');
@@ -413,7 +462,7 @@ for (const [assignee, selection] of [
         await expect(page.locator('[data-board-chat-agent]')).toHaveValue(selection);
         await expect(page.locator('#board-card-assignee')).toHaveValue(assignee || '');
         await page.screenshot({ path: testInfo.outputPath('board-chat-picker.png') });
-        await page.getByRole('button', { name: 'Chat with:', exact: true }).click();
+        await page.getByRole('button', { name: 'Chat with agent', exact: true }).click();
         await expect.poll(() => page.evaluate(() => window.__chatTabs)).toEqual(['board_background']);
 
         const writes = requests.filter(item => item.method === 'PUT' || item.path.endsWith('/launch'));
@@ -508,7 +557,7 @@ test('a running agent exposes Go to agent while keeping Save and the session ava
     });
     await page.getByText('Description images', { exact: true }).click();
     await expect(page.getByRole('button', { name: 'Go to agent', exact: true })).toBeEnabled();
-    await expect(page.getByRole('button', { name: 'Chat with:', exact: true })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Chat with agent', exact: true })).toBeDisabled();
     await expect(page.locator('[data-board-save-card]')).toBeEnabled();
     await expect(page.locator('[data-board-open-session="session_test"]')).toBeEnabled();
     await page.getByRole('button', { name: 'Go to agent', exact: true }).click();
@@ -542,7 +591,7 @@ test('work and discussion actions remain reachable on a narrow screen', async ({
     await page.setViewportSize({ width: 390, height: 844 });
     await openBoard(page, { assignee: 'base:codex' });
     await page.getByText('Description images', { exact: true }).click();
-    for (const name of ['Chat with:', 'Start work', 'Save']) {
+    for (const name of ['Start work', 'Save']) {
         const button = page.locator('.board-editor-actions-main').getByRole('button', { name, exact: true });
         await expect(button).toBeVisible();
         const bounds = await button.boundingBox();
@@ -642,7 +691,7 @@ test('typing @ in a composer opens the file typeahead, the keyboard inserts a re
 test('new cards queue files until Save and do not launch', async ({ page }) => {
     const requests = await openBoard(page);
     await page.getByRole('button', { name: 'New card', exact: true }).click();
-    await expect(page.locator('[data-board-card-links]')).toContainText('Save the card to link other cards.');
+    await expect(page.locator('[data-board-card-links]')).toContainText('Links will be saved when you create this card.');
     await page.locator('#board-card-title').fill('File first');
     await page.locator('[data-board-files]').setInputFiles({ name: 'notes.zip', mimeType: 'application/zip', buffer: Buffer.from('archive') });
     await expect(page.locator('[data-board-attachments]')).toContainText('Uploads when you save');

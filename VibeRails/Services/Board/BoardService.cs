@@ -100,15 +100,20 @@ public sealed partial class BoardService(
     public async Task<BoardSummaryResponse> CreateBoardAsync(string projectPath, CreateBoardRequest request, CancellationToken cancellationToken = default)
     {
         var name = NormalizeBoardName(request.Name) ?? throw new BoardValidationException("A board needs a name.");
+        var prefix = request.DisplayPrefix is null ? null : BoardDisplayIds.NormalizePrefix(request.DisplayPrefix);
         var board = await store.CreateBoardAsync(projectPath, name, cancellationToken);
+        if (prefix is not null) board = (await store.RenameBoardAsync(projectPath, board.Id, name, cancellationToken, prefix))!;
         var columns = await store.GetColumnsAsync(projectPath, cancellationToken, board.Id);
         return ToDto(board, columns, new Dictionary<string, int>());
     }
 
     public async Task<BoardSummaryResponse?> UpdateBoardAsync(string projectPath, string boardId, UpdateBoardRequest request, CancellationToken cancellationToken = default)
     {
-        var name = NormalizeBoardName(request.Name) ?? throw new BoardValidationException("A board needs a name.");
-        var board = await store.RenameBoardAsync(projectPath, boardId, name, cancellationToken);
+        var existing = await store.GetBoardAsync(projectPath, boardId, cancellationToken);
+        if (existing is null) return null;
+        var name = request.Name is null ? existing.Name : NormalizeBoardName(request.Name) ?? throw new BoardValidationException("A board needs a name.");
+        var prefix = request.DisplayPrefix is null ? null : BoardDisplayIds.NormalizePrefix(request.DisplayPrefix);
+        var board = await store.RenameBoardAsync(projectPath, boardId, name, cancellationToken, prefix);
         if (board is null)
             return null;
         var columns = await store.GetColumnsAsync(projectPath, cancellationToken, board.Id);
@@ -275,7 +280,8 @@ public sealed partial class BoardService(
             request.Blocked ?? false,
             NormalizeBaseOptions(NormalizeAssignee(request.Assignee), request.BaseLlmOptions),
             Type: NormalizeCardType(request.Type) ?? BoardCardTypes.Default,
-            BoardId: NormalizeBoardId(request.BoardId), Flagged: request.Flagged ?? false), cancellationToken, author);
+            BoardId: NormalizeBoardId(request.BoardId), Flagged: request.Flagged ?? false,
+            DisplayId: request.DisplayId is null ? null : BoardDisplayIds.Normalize(request.DisplayId), LinkedCardIds: request.LinkedCardIds), cancellationToken, author);
         return (await GetCardAsync(projectPath, card.Id, cancellationToken))!;
     }
 
@@ -332,7 +338,7 @@ public sealed partial class BoardService(
             ColumnId: request.ColumnId,
             BaseLlmOptions: options,
             ClearBaseLlmOptions: clearOptions,
-            Type: type, Flagged: request.Flagged);
+            Type: type, Flagged: request.Flagged, DisplayId: request.DisplayId is null ? null : BoardDisplayIds.Normalize(request.DisplayId));
         var updated = await store.UpdateCardAsync(projectPath, existing.Id, patch, cancellationToken, author);
         if (updated is null) return null;
         var detail = await store.GetCardDetailAsync(projectPath, updated.Id, cancellationToken);
@@ -544,7 +550,7 @@ public sealed partial class BoardService(
             sessions,
             detail.Attachments.Select(ToDto).ToList(),
             detail.Card.BaseLlmOptions,
-            notes, summary.Type, summary.BoardId, summary.Flagged, sessions.Any(s => s.Active && s.IsAutomation))
+            notes, summary.Type, summary.BoardId, summary.Flagged, sessions.Any(s => s.Active && s.IsAutomation), summary.DisplayId)
         {
             LinkedCards = detail.LinkedCards.Select(ToDto).ToList()
         };
@@ -574,7 +580,7 @@ public sealed partial class BoardService(
     internal static BoardCardSummaryResponse ToSummary(BoardCardRecord card, string? activeSessionId, string? activeTabId) => new(
         card.Id, card.Key, card.ColumnId, card.Position, card.Title, card.Description, PresentAssignee(card.Assignee), card.Priority,
         card.Points, card.Tags.ToList(), card.Blocked, card.CommentCount, activeSessionId, activeTabId, card.CreatedUtc, card.UpdatedUtc,
-        card.BaseLlmOptions, card.Type, card.BoardId, card.Flagged);
+        card.BaseLlmOptions, card.Type, card.BoardId, card.Flagged, DisplayId: card.DisplayId);
 
     internal static BoardColumnResponse ToDto(BoardColumnRecord column) =>
         new(column.Id, column.Name, column.Position, column.Color, column.BoardId);
@@ -582,7 +588,7 @@ public sealed partial class BoardService(
     internal static BoardSummaryResponse ToDto(BoardRecord board, IReadOnlyList<BoardColumnRecord> columns, IReadOnlyDictionary<string, int> counts) =>
         new(board.Id, board.Name, board.Position, board.CreatedUtc,
             counts.TryGetValue(board.Id, out var count) ? count : 0,
-            columns.Where(c => c.BoardId == board.Id).OrderBy(c => c.Position).Select(ToDto).ToList());
+            columns.Where(c => c.BoardId == board.Id).OrderBy(c => c.Position).Select(ToDto).ToList(), board.EffectiveDisplayPrefix);
 
     internal static BoardCommentDto ToDto(BoardCommentRecord comment) =>
         new(comment.Id, new BoardAuthorDto(comment.Author.Kind, comment.Author.Label, comment.Author.Cli, comment.Author.SessionId), comment.Body, comment.CreatedUtc);

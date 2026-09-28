@@ -391,7 +391,7 @@ export class BoardController {
         const query = filters.q.trim().toLowerCase();
         if (query) {
             const type = cardType(card.type);
-            const haystack = [card.key, card.title, card.description, type.value, type.label, ...(card.tags || [])].join(' ').toLowerCase();
+            const haystack = [card.displayId, card.key, card.title, card.description, type.value, type.label, ...(card.tags || [])].join(' ').toLowerCase();
             if (!haystack.includes(query)) return false;
         }
         if (filters.assignee && canonicalLlmSelection(card.assignee) !== canonicalLlmSelection(filters.assignee)) return false;
@@ -604,12 +604,12 @@ export class BoardController {
         // is-live paints the marching "an agent is on this" border (see the template CSS).
         return `
             <article class="board-card${card.flagged ? ' is-flagged' : ''}${card.blocked ? ' is-blocked' : ''}${card.activeTabId ? ' is-live' : ''}" data-card-id="${escapeHtml(card.id)}"
-                tabindex="0" role="button" aria-label="${escapeHtml(card.key)}: ${escapeHtml(card.title)}${card.flagged ? ' — Needs your attention' : ''}">
+                tabindex="0" role="button" aria-label="${escapeHtml(card.displayId || card.key)}: ${escapeHtml(card.title)}${card.flagged ? ' — Needs your attention' : ''}">
                 <span class="board-card-rail" data-priority="${escapeHtml(card.priority)}"
                     title="${escapeHtml(card.priority)} priority"></span>
                 <div class="board-card-body">
                     <div class="board-card-top">
-                        <span class="board-key">${card.flagged ? '<i class="fa-solid fa-flag board-attention-flag" title="Needs your attention" aria-hidden="true"></i> ' : ''}${escapeHtml(card.key)}</span>
+                        <span class="board-key">${card.flagged ? '<i class="fa-solid fa-flag board-attention-flag" title="Needs your attention" aria-hidden="true"></i> ' : ''}${escapeHtml(card.displayId || card.key)}</span>
                         <span class="board-card-top-right">
                             <span class="board-type-chip" data-type="${escapeHtml(type.value)}"
                                 title="${escapeHtml(type.label)}">${escapeHtml(type.label)}</span>
@@ -1031,7 +1031,7 @@ export class BoardController {
 
         const columnId = card?.columnId || this.state.columns[0]?.id || '';
 
-        this.app.showModal(card ? `${card.key} · ${card.title}` : 'New card', `
+        this.app.showModal(card ? `${card.displayId || card.key} · ${card.title}` : 'New card', `
             <div class="board-card-editor" data-board-card-editor data-card-id="${escapeHtml(card?.id || '')}">
                 <div class="board-editor-scroll">
                 <div class="board-editor-main">
@@ -1111,6 +1111,17 @@ export class BoardController {
                         </div>
                     </div>
 
+                    ${card ? `<section class="board-side-section board-discussion">
+                        <label class="board-editor-label" for="board-chat-agent">Discuss this card</label>
+                        <div class="board-chat-controls">
+                            <select id="board-chat-agent" class="form-select form-select-sm" data-board-chat-agent aria-label="Agent for card discussion"></select>
+                            <button type="button" class="btn btn-link btn-sm" data-board-chat aria-describedby="board-chat-help">
+                                <i class="fa-solid fa-comments" aria-hidden="true"></i> Chat with agent
+                            </button>
+                        </div>
+                        <p class="board-editor-muted mt-2" id="board-chat-help">Chat with an agent about the card without starting it.</p>
+                    </section>` : ''}
+
                     ${contextSectionMarkup(Boolean(card))}
 
                     ${renderCardLinksSection(card)}
@@ -1165,7 +1176,10 @@ export class BoardController {
                         </details>
                     </section>` : ''}
                     ${card ? `<section class="board-side-section"><details>
-                        <summary class="board-side-label">Card settings</summary>${historySection()}
+                        <summary class="board-side-label">Card settings</summary>
+                        <label class="board-editor-label mt-2" for="board-card-display-id">Display ID</label>
+                        <input class="form-control form-control-sm" id="board-card-display-id" maxlength="32" value="${escapeHtml(card.displayId || card.key)}">
+                        <p class="board-editor-muted mt-2">Permanent ID: <code>${escapeHtml(card.key)}</code></p>${historySection()}
                     </details></section>` : ''}
 
                     </div>
@@ -1177,16 +1191,6 @@ export class BoardController {
                             <i class="fa-solid fa-trash" aria-hidden="true"></i> Delete
                         </button>` : '<span></span>'}
                         <span class="board-editor-actions-main">
-                            ${card ? `<span class="project-health-fix-controls board-chat-controls" role="group" aria-label="Chat about this card">
-                                <button type="button" class="btn btn-sm btn-outline-secondary" data-board-chat
-                                    title="Open a terminal to discuss this card with the selected LLM">
-                                    <i class="fa-solid fa-comments" aria-hidden="true"></i> Chat with:
-                                </button>
-                                <label class="project-health-fix-picker">
-                                    <span class="visually-hidden">Agent for card discussion</span>
-                                    <select class="form-select" data-board-chat-agent aria-label="Agent for card discussion"></select>
-                                </label>
-                            </span>` : ''}
                             ${card ? `<button type="button" class="btn btn-sm btn-outline-success" data-board-start-work
                                 title="Start the assigned LLM in the background with this card as its first message">
                                 <i class="fa-solid fa-play" aria-hidden="true"></i> <span data-board-start-work-label>Start work</span>
@@ -1245,7 +1249,7 @@ export class BoardController {
         });
         // Link navigation replaces this editor. Track form edits separately from link search.
         const trackEdits = event => {
-            if (event.target.closest('.board-side-fields, [data-board-composer="description"], #board-card-title'))
+            if (event.target.closest('.board-side-fields, [data-board-composer="description"], #board-card-title, #board-card-display-id'))
                 editor._boardHasEdits = true;
         };
         editor.addEventListener('input', trackEdits);
@@ -1902,8 +1906,8 @@ export class BoardController {
         if (!terminal || !tabId) return;
         terminal.rememberTabLaunch?.(tabId, {
             selection: session.selection || null,
-            label: card?.key ? `${card.key} · ${card.title || session.displayName}` : session.displayName,
-            title: `${card?.key || ''} · ${card?.title || session.displayName}`.replace(/^ · /, ''),
+            label: card?.key ? `${card.displayId || card.key} · ${card.title || session.displayName}` : session.displayName,
+            title: `${card?.displayId || card?.key || ''} · ${card?.title || session.displayName}`.replace(/^ · /, ''),
             taskKey: CARD_TASK_KEY(card?.id || session.id),
             workingDirectory: null
         });
@@ -2001,6 +2005,7 @@ export class BoardController {
     readCardForm(editor) {
         const value = selector => editor.querySelector(selector)?.value ?? '';
         return {
+            ...(this.cardIdFromEditor(editor) ? { displayId: value('#board-card-display-id').trim() || editor._boardCard?.displayId || editor._boardCard?.key } : { linkedCardIds: (editor._boardCard?.linkedCards || []).map(card => card.id) }),
             title: value('#board-card-title').trim(),
             description: value('[data-board-composer="description"] [data-board-composer-input]'),
             columnId: value('#board-card-lane'),
@@ -2044,7 +2049,7 @@ export class BoardController {
                 saved = await BoardApi.createBoardCardAsync(payload);
                 editor.dataset.cardId = saved.id;
                 if (editor._boardCard) Object.assign(editor._boardCard, saved);
-                this.app.showToast('Board', `Created ${saved.key}.`, 'success');
+                this.app.showToast('Board', `Created ${saved.displayId || saved.key}.`, 'success');
             }
             const pending = editor._boardCard?.pendingAttachments || [];
             while (pending.length) {
@@ -2061,7 +2066,7 @@ export class BoardController {
             // card failed to save sends the user looking for a card that exists. Keep the saved
             // id and remaining upload queue so Save can retry the unfinished uploads.
             this.app.showToast('Board', saved
-                ? `${saved.key} was saved, but a file did not upload. ${error?.message || ''}`.trim()
+                ? `${saved.displayId || saved.key} was saved, but a file did not upload. ${error?.message || ''}`.trim()
                 : error?.message || 'Failed to save the card.', saved ? 'warning' : 'error');
         } finally {
             editor._boardSaving = false;
@@ -2154,8 +2159,8 @@ export class BoardController {
             const info = this.assigneeInfo(result.selection || selection);
             this.app.terminalController?.rememberTabLaunch?.(tabId, {
                 selection: result.selection || selection,
-                label: `${result.cardKey || card.key} · ${payload.title || card.title}`,
-                title: `${result.cardKey || card.key} · ${payload.title || card.title}`,
+                label: `${saved.displayId || card.displayId || result.cardKey || card.key} · ${payload.title || card.title}`,
+                title: `${saved.displayId || card.displayId || result.cardKey || card.key} · ${payload.title || card.title}`,
                 taskKey: CARD_TASK_KEY(card.id),
                 accentColor: info?.color || null,
                 workingDirectory: result.workingDirectory || null
@@ -2170,7 +2175,7 @@ export class BoardController {
                 return;
             }
             if (editor.isConnected !== false) this.app.closeModal();
-            this.app.showToast('Board', `${result.cardKey || card.key} started with ${info?.label || 'the LLM'}. Open it from Sessions when ready.`, 'success');
+            this.app.showToast('Board', `${saved.displayId || card.displayId || result.cardKey || card.key} started with ${info?.label || 'the LLM'}. Open it from Sessions when ready.`, 'success');
             await this.refresh();
         } catch (error) {
             this.app.showToast('Board', error?.message || 'Failed to start work on the card.', 'error');
@@ -2213,6 +2218,9 @@ export class BoardController {
                 <label class="board-editor-label" for="board-board-name">Name</label>
                 <input type="text" class="form-control form-control-sm mb-3" id="board-board-name" maxlength="60"
                     placeholder="Sprint 12, Website, Q4 bugs…" value="${escapeHtml(board?.name || '')}">
+                <label class="board-editor-label" for="board-display-prefix">Card display ID prefix</label>
+                <input class="form-control form-control-sm mb-2" id="board-display-prefix" maxlength="8" placeholder="Defaults to the repository name" value="${escapeHtml(board?.displayPrefix || '')}">
+                <p class="board-editor-muted">New cards use this prefix followed by a number. Existing card IDs stay as they are.</p>
                 <p class="board-editor-muted mb-3">${board
                     ? 'Create a new card to work on another board. Cards can move between lanes on this board.'
                     : 'A new board starts with the default lanes. Card keys stay unique across the whole project.'}</p>
@@ -2220,7 +2228,7 @@ export class BoardController {
                     ${board ? `<button type="button" class="btn btn-sm btn-outline-danger" data-board-delete-board>
                         <i class="fa-solid fa-trash" aria-hidden="true"></i> Delete board
                     </button>` : '<span></span>'}
-                    <button type="button" class="btn btn-sm btn-outline-primary" data-board-save-board>${board ? 'Save name' : 'Create'}</button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" data-board-save-board>${board ? 'Save board' : 'Create'}</button>
                 </div>
                 ${board ? boardContextSection() + boardSyncSection() + historySection() : '<p class="board-editor-muted">Save the board to configure agent context.</p>'}
             </div>
@@ -2252,12 +2260,13 @@ export class BoardController {
             editor.querySelector('#board-board-name')?.focus();
             return;
         }
+        const displayPrefix = editor.querySelector('#board-display-prefix')?.value.trim() || undefined;
         try {
             if (board) {
-                await BoardApi.updateBoardAsync(board.id, { name });
-                this.app.showToast('Board', 'Board renamed.', 'success');
+                await BoardApi.updateBoardAsync(board.id, { name, displayPrefix });
+                this.app.showToast('Board', 'Board saved.', 'success');
             } else {
-                const created = await BoardApi.createBoardAsync({ name });
+                const created = await BoardApi.createBoardAsync({ name, displayPrefix });
                 // Open the new board straight away: that is what "add" was for.
                 this.state.boardId = created.id;
                 this.persistBoardSelection();

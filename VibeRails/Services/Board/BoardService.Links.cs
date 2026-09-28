@@ -4,7 +4,7 @@ namespace VibeRails.Services.Board;
 
 public partial interface IBoardService
 {
-    Task<BoardCardLinkCandidatesResponse?> GetCardLinkCandidatesAsync(string projectPath, string idOrKey, string? query, CancellationToken cancellationToken = default);
+    Task<BoardCardLinkCandidatesResponse?> GetCardLinkCandidatesAsync(string projectPath, string? idOrKey, string? query, CancellationToken cancellationToken = default);
     Task<BoardLinkedCardDto?> LinkCardAsync(string projectPath, string idOrKey, string? targetIdOrKey, CancellationToken cancellationToken = default);
     Task<bool> UnlinkCardAsync(string projectPath, string idOrKey, string targetIdOrKey, CancellationToken cancellationToken = default);
 }
@@ -12,7 +12,7 @@ public partial interface IBoardService
 public sealed partial class BoardService
 {
     public async Task<BoardCardLinkCandidatesResponse?> GetCardLinkCandidatesAsync(
-        string projectPath, string idOrKey, string? query, CancellationToken cancellationToken = default)
+        string projectPath, string? idOrKey, string? query, CancellationToken cancellationToken = default)
     {
         var search = query?.Trim() ?? string.Empty;
         if (search.Length > MaxTitleLength)
@@ -34,5 +34,5 @@ public sealed partial class BoardService
         store.UnlinkCardAsync(projectPath, idOrKey, targetIdOrKey, cancellationToken);
 
     private static BoardLinkedCardDto ToDto(BoardLinkedCardRecord card) =>
-        new(card.Id, card.Key, card.Title, card.BoardId, card.BoardName, card.ColumnId, card.ColumnName);
+        new(card.Id, card.Key, card.Title, card.BoardId, card.BoardName, card.ColumnId, card.ColumnName, card.DisplayId);
 }

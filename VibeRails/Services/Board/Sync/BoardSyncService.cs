@@ -101,7 +101,7 @@ public sealed class BoardSyncService(
         BoardSyncPublishResponse published;
         try
         {
-            published = await client.PublishAsync(new BoardSyncPublishRequest(board.Id, board.Name, layout.Prefix, layout.Lanes), cancellationToken, destination);
+            published = await client.PublishAsync(new BoardSyncPublishRequest(board.Id, board.Name, layout.Prefix, layout.Lanes, board.EffectiveDisplayPrefix), cancellationToken, destination);
         }
         catch (BoardSyncClientException ex)
         {
@@ -218,7 +218,7 @@ public sealed class BoardSyncService(
                 sendLayout ? board.Name : null,
                 sendLayout ? layout.Prefix : null,
                 sendLayout ? layout.Lanes : null,
-                unsent.Select(ToWire).ToList());
+                unsent.Select(ToWire).ToList(), sendLayout ? board.EffectiveDisplayPrefix : null);
             BoardSyncPushResponse response;
             try
             {
@@ -378,7 +378,7 @@ public sealed class BoardSyncService(
             .OrderBy(c => c.Position)
             .Select((c, index) => new BoardSyncLaneWire(c.Id, c.Name, string.IsNullOrWhiteSpace(c.Color) ? null : c.Color, index))
             .ToList();
-        var canonical = new StringBuilder().Append(board.Name).Append('\n').Append(prefix);
+        var canonical = new StringBuilder().Append(board.Name).Append('\n').Append(prefix).Append('\n').Append(board.EffectiveDisplayPrefix);
         foreach (var lane in lanes)
             canonical.Append('\n').Append(lane.Id).Append('\t').Append(lane.Name).Append('\t').Append(lane.Color).Append('\t').Append(lane.Position);
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical.ToString())));
@@ -413,7 +413,7 @@ public sealed class BoardSyncService(
         // "context" is not a card field: it is the agent-context sample a launch records (VB-63,
         // BoardStore.ContextSamples.cs). The hosted contract stores unknown change fields verbatim
         // and never applies them, so the numbers reach viberails.ai without a server change.
-        foreach (var field in new[] { "title", "description", "type", "priority", "points", "assignee", "tags", "blocked", "flagged", "lane", BoardStore.ContextChangeField })
+        foreach (var field in new[] { "displayId", "title", "description", "type", "priority", "points", "assignee", "tags", "blocked", "flagged", "lane", BoardStore.ContextChangeField })
         {
             if (source[field] is not JsonObject values) continue;
             var copy = new JsonObject();
@@ -458,7 +458,7 @@ public sealed class BoardSyncService(
         var tags = TagsFrom(changes) ?? [];
         var blocked = BoardSyncWire.FieldTo(changes, BoardSyncWire.FieldBlocked) is { ValueKind: JsonValueKind.True };
         var flagged = BoardSyncWire.FieldTo(changes, BoardSyncWire.FieldFlagged) is { ValueKind: JsonValueKind.True };
-        return new NewBoardCard(column.Id, title, description, assignee, priority, points, tags, blocked, null, type, boardId, flagged);
+        return new NewBoardCard(column.Id, title, description, assignee, priority, points, tags, blocked, null, type, boardId, flagged, DisplayId: TryString(changes, "displayId", value => BoardDisplayIds.Normalize(value!)));
     }
 
     /// <summary>
@@ -476,6 +476,9 @@ public sealed class BoardSyncService(
                 continue;
             switch (property.Name)
             {
+                case "displayId":
+                    patch = patch with { DisplayId = TryNormalize(to, value => BoardDisplayIds.Normalize(value!)) };
+                    break;
                 case BoardSyncWire.FieldTitle:
                     patch = patch with { Title = TryNormalize(to, BoardService.NormalizeTitle) };
                     break;
@@ -572,12 +575,13 @@ public sealed class BoardSyncService(
         foreach (var field in changes.EnumerateObject())
         {
             // Like the hosted contract, retain unknown fields verbatim without applying them.
-            if (field.Name is not ("title" or "description" or "type" or "priority" or "points"
+            if (field.Name is not ("displayId" or "title" or "description" or "type" or "priority" or "points"
                 or "assignee" or "tags" or "blocked" or "flagged" or "lane")) continue;
             if (field.Value.ValueKind != JsonValueKind.Object || !field.Value.TryGetProperty("to", out var to))
                 throw new BoardValidationException("A remote field change is missing its new value.");
             var valid = field.Name switch
             {
+                "displayId" => to.ValueKind == JsonValueKind.String && IsWireCardKey(to.GetString()),
                 "title" => to.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(to.GetString()) && to.GetString()!.Length <= BoardService.MaxTitleLength,
                 "description" => to.ValueKind == JsonValueKind.String && to.GetString()!.Length <= BoardService.MaxDescriptionLength,
                 "type" => to.ValueKind == JsonValueKind.String && BoardCardTypes.IsValid(to.GetString()),

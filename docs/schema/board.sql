@@ -56,6 +56,9 @@ CREATE INDEX IX_Boards_Project ON Boards(ProjectPath, Position);
 -- index UX_BoardCards_CardKey
 CREATE UNIQUE INDEX UX_BoardCards_CardKey ON BoardCards(CardKey) WHERE CardKey IS NOT NULL;
 
+-- index UX_BoardCards_DisplayId
+CREATE UNIQUE INDEX UX_BoardCards_DisplayId ON BoardCards(ProjectPath, DisplayId COLLATE NOCASE) WHERE DisplayId IS NOT NULL;
+
 -- table BoardAdditionalCardSessions
 CREATE TABLE BoardAdditionalCardSessions ( SessionId TEXT NOT NULL, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, TabId TEXT NULL, Selection TEXT NOT NULL, Cli TEXT NOT NULL, DisplayName TEXT NOT NULL, Origin TEXT NOT NULL, CreatedUTC TEXT NOT NULL, PRIMARY KEY (SessionId, CardId) );
 
@@ -78,7 +81,7 @@ CREATE TABLE BoardCardSequences ( ProjectPath TEXT PRIMARY KEY COLLATE NOCASE, L
 CREATE TABLE BoardCardSessions ( SessionId TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, TabId TEXT NULL, Selection TEXT NOT NULL, Cli TEXT NOT NULL, DisplayName TEXT NOT NULL, Origin TEXT NOT NULL, CreatedUTC TEXT NOT NULL );
 
 -- table BoardCards
-CREATE TABLE BoardCards ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Number INTEGER NOT NULL, ColumnId TEXT NOT NULL REFERENCES BoardColumns(Id), Position INTEGER NOT NULL, Title TEXT NOT NULL, Description TEXT NOT NULL DEFAULT '', Assignee TEXT NULL, Priority TEXT NOT NULL DEFAULT 'medium', Type TEXT NOT NULL DEFAULT 'task', Points INTEGER NULL, Tags TEXT NOT NULL DEFAULT '[]', Blocked INTEGER NOT NULL DEFAULT 0, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, Flagged INTEGER NOT NULL DEFAULT 0, CardKey TEXT, DeletedUTC TEXT, UNIQUE(ProjectPath, Number) );
+CREATE TABLE BoardCards ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Number INTEGER NOT NULL, ColumnId TEXT NOT NULL REFERENCES BoardColumns(Id), Position INTEGER NOT NULL, Title TEXT NOT NULL, Description TEXT NOT NULL DEFAULT '', Assignee TEXT NULL, Priority TEXT NOT NULL DEFAULT 'medium', Type TEXT NOT NULL DEFAULT 'task', Points INTEGER NULL, Tags TEXT NOT NULL DEFAULT '[]', Blocked INTEGER NOT NULL DEFAULT 0, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, Flagged INTEGER NOT NULL DEFAULT 0, CardKey TEXT, DeletedUTC TEXT, DisplayId TEXT, UNIQUE(ProjectPath, Number) );
 
 -- table BoardColumns
 CREATE TABLE BoardColumns ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Name TEXT NOT NULL, Position INTEGER NOT NULL, Color TEXT NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, BoardId TEXT NULL );
@@ -97,6 +100,9 @@ CREATE TABLE BoardContextSamples ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REF
 
 -- table BoardContextSettings
 CREATE TABLE BoardContextSettings ( BoardId TEXT PRIMARY KEY REFERENCES Boards(Id) ON DELETE CASCADE, ContextJson TEXT NOT NULL, Revision INTEGER NOT NULL );
+
+-- table BoardDisplaySequences
+CREATE TABLE BoardDisplaySequences ( ProjectPath TEXT NOT NULL COLLATE NOCASE, Prefix TEXT NOT NULL COLLATE NOCASE, LastNumber INTEGER NOT NULL, PRIMARY KEY (ProjectPath, Prefix) );
 
 -- table BoardHistory
 CREATE TABLE BoardHistory ( Id TEXT PRIMARY KEY, BoardId TEXT NOT NULL, ProjectPath TEXT NOT NULL, Kind TEXT NOT NULL, Body TEXT NOT NULL, CreatedUTC TEXT NOT NULL );
@@ -129,7 +135,7 @@ CREATE TABLE BoardSyncLinks ( BoardId TEXT PRIMARY KEY REFERENCES Boards(Id) ON 
 CREATE TABLE BoardSyncRejectedFields ( EntryId TEXT NOT NULL REFERENCES BoardComments(Id) ON DELETE CASCADE, Field TEXT NOT NULL, PRIMARY KEY (EntryId, Field) );
 
 -- table Boards
-CREATE TABLE Boards ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Name TEXT NOT NULL, Position INTEGER NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL );
+CREATE TABLE Boards ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Name TEXT NOT NULL, Position INTEGER NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL , DisplayPrefix TEXT);
 
 -- table SchemaMigrations
 CREATE TABLE SchemaMigrations ( Component TEXT NOT NULL, Version INTEGER NOT NULL CHECK (Version > 0), AppliedUTC TEXT NOT NULL, AppliedBy TEXT, PRIMARY KEY (Component, Version) );

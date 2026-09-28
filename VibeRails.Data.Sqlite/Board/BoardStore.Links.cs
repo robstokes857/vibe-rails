@@ -17,7 +17,7 @@ public sealed partial class BoardStore
 
     // A property because the prefix join interpolates ProjectPathCollation (see CardSequenceReseedSql).
     private static string LinkedCardSelect => $"""
-        SELECT c.Id, c.Number, c.Title, b.Id, b.Name, k.Id, k.Name, {CardPrefixSql}, c.CardKey
+        SELECT c.Id, c.Number, c.Title, b.Id, b.Name, k.Id, k.Name, {CardPrefixSql}, c.CardKey, c.DisplayId
         FROM BoardCards c
         JOIN BoardColumns k ON k.Id = c.ColumnId
         JOIN Boards b ON b.Id = k.BoardId
@@ -25,28 +25,28 @@ public sealed partial class BoardStore
         """;
 
     public async Task<IReadOnlyList<BoardLinkedCardRecord>?> GetCardLinkCandidatesAsync(
-        string projectPath, string idOrKey, string query, CancellationToken cancellationToken = default)
+        string projectPath, string? idOrKey, string query, CancellationToken cancellationToken = default)
     {
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
-        var card = await ReadCardAsync(connection, null, project, idOrKey, cancellationToken);
-        if (card is null) return null;
+        var card = idOrKey is null ? null : await ReadCardAsync(connection, null, project, idOrKey, cancellationToken);
+        if (idOrKey is not null && card is null) return null;
 
         await using var command = connection.CreateCommand();
         command.CommandText = LinkedCardSelect + $"""
 
             WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.Id <> $card AND c.DeletedUTC IS NULL
-              AND (instr(lower(c.Title), lower($query)) > 0 OR instr(lower({CardKeySql}), lower($query)) > 0
+              AND (instr(lower(c.Title), lower($query)) > 0 OR instr(lower({CardKeySql}), lower($query)) > 0 OR instr(lower({CardDisplayIdSql}), lower($query)) > 0
                    OR instr(lower({CardPrefixSql} || '-' || c.Number), lower($query)) > 0)
               AND NOT EXISTS (
                 SELECT 1 FROM BoardCardLinks l
                 WHERE (l.CardId = $card AND l.LinkedCardId = c.Id)
                    OR (l.LinkedCardId = $card AND l.CardId = c.Id))
-            ORDER BY (lower({CardKeySql}) = lower($query) OR lower({CardPrefixSql} || '-' || c.Number) = lower($query)) DESC, c.Number DESC
+            ORDER BY (lower({CardDisplayIdSql}) = lower($query) OR lower({CardKeySql}) = lower($query) OR lower({CardPrefixSql} || '-' || c.Number) = lower($query)) DESC, c.Number DESC
             LIMIT 50;
             """;
         command.Parameters.AddWithValue("$project", project);
-        command.Parameters.AddWithValue("$card", card.Id);
+        command.Parameters.AddWithValue("$card", card?.Id ?? "");
         command.Parameters.AddWithValue("$query", query);
         return await ReadLinkedCardRowsAsync(command, cancellationToken);
     }
@@ -110,6 +110,28 @@ public sealed partial class BoardStore
     private static (string First, string Second) OrderedCardPair(string cardId, string targetId) =>
         string.CompareOrdinal(cardId, targetId) < 0 ? (cardId, targetId) : (targetId, cardId);
 
+    private static async Task InsertDraftLinksAsync(SqliteConnection connection, SqliteTransaction transaction,
+        BoardCardRecord card, IReadOnlyList<string>? targets, CancellationToken ct)
+    {
+        if (targets is null) return;
+        if (targets.Count > 50) throw new BoardValidationException("A new card can link up to 50 cards.");
+        foreach (var id in targets.Distinct(StringComparer.Ordinal))
+        {
+            if (string.IsNullOrWhiteSpace(id) || id.Length > 100) throw new BoardValidationException("Invalid linked card.");
+            var target = await ReadCardAsync(connection, transaction, card.ProjectPath, id, ct)
+                ?? throw new BoardValidationException("A linked card is no longer available in this project.");
+            if (target.Id == card.Id) throw new BoardValidationException("A card cannot link to itself.");
+            var (first, second) = OrderedCardPair(card.Id, target.Id);
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "INSERT OR IGNORE INTO BoardCardLinks (CardId, LinkedCardId) VALUES ($first, $second);";
+            command.Parameters.AddWithValue("$first", first);
+            command.Parameters.AddWithValue("$second", second);
+            await command.ExecuteNonQueryAsync(ct);
+            await TouchCardAsync(connection, transaction, target.Id, ct);
+        }
+    }
+
     private static async Task<IReadOnlyList<BoardLinkedCardRecord>> ReadLinkedCardsAsync(
         SqliteConnection connection, string project, string cardId, CancellationToken cancellationToken)
     {
@@ -133,7 +155,7 @@ public sealed partial class BoardStore
         while (await reader.ReadAsync(cancellationToken))
             cards.Add(new BoardLinkedCardRecord(reader.GetString(0), reader.GetInt32(1), reader.GetString(2),
                 reader.GetString(3), reader.GetString(4), reader.GetString(5), reader.GetString(6), KeyPrefix: reader.GetString(7),
-                StoredKey: reader.IsDBNull(8) ? null : reader.GetString(8)));
+                StoredKey: reader.IsDBNull(8) ? null : reader.GetString(8), StoredDisplayId: reader.IsDBNull(9) ? null : reader.GetString(9)));
         return cards;
     }
 }

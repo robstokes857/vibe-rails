@@ -19365,25 +19365,13 @@ body.performance-mode .brand-text-sm {
 }
 
 /* Keep the card discussion action visibly distinct from its agent picker. */
-.board-chat-controls > [data-board-chat] {
-    color: var(--color-accent, #06b6d4);
-    border-color: var(--color-accent, #06b6d4);
-    background: color-mix(in srgb, var(--color-accent, #06b6d4) 10%, transparent);
-    font-weight: 600;
-    cursor: pointer;
-}
+.board-chat-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.board-chat-controls > select,
+.board-chat-controls > .ts-wrapper { flex: 1 1 160px; min-width: 0; }
+.board-chat-controls > [data-board-chat] { padding: .35rem .2rem; text-align: left; text-decoration: none; }
+.board-chat-controls > [data-board-chat]:hover:not(:disabled) { text-decoration: underline; }
+.board-chat-controls > [data-board-chat]:focus-visible { outline: 2px solid var(--bs-primary); outline-offset: 2px; }
 
-.board-chat-controls > [data-board-chat]:hover:not(:disabled),
-.board-chat-controls > [data-board-chat]:active:not(:disabled) {
-    color: var(--color-accent, #06b6d4);
-    border-color: var(--color-accent, #06b6d4);
-    background: color-mix(in srgb, var(--color-accent, #06b6d4) 22%, transparent);
-}
-
-.board-chat-controls > [data-board-chat]:focus-visible {
-    outline: 2px solid var(--color-accent, #06b6d4);
-    outline-offset: 2px;
-}
 
 .project-health-scan-transcript .vca-console-output {
     min-height: 90px;

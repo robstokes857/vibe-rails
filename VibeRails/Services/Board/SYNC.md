@@ -144,3 +144,13 @@ controller and sync service using disposable data and an in-process transport. I
 bidirectional fields/comments/notes, offline conflicts, lost acknowledgements, identities,
 local lane Automations and upload boundaries. Authentication middleware and SQL Server
 concurrency remain separate verification concerns.
+
+## Display labels (VB-69)
+
+`displayId` is a portable card field; `displayPrefix` travels with board layout. Immutable card
+keys and IDs still identify every event. Old cards keep their original keys as display labels.
+The hosted board accepts the first label, allocates an available numeric label on conflict,
+and appends a distinct correction event. It retains the original event unchanged for retries.
+Desktop imports reserve the incoming label, rename any local occupant, and queue that change
+atomically. Immutable legacy keys are reserved; an import colliding with one gets another label.
+The hosted LastSeq concurrency token serializes label allocation with all other card writes.

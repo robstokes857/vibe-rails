@@ -75,7 +75,7 @@ public sealed partial class BoardStore : IBoardStore
         return board;
     }
 
-    public async Task<BoardRecord?> RenameBoardAsync(string projectPath, string boardId, string name, CancellationToken cancellationToken = default)
+    public async Task<BoardRecord?> RenameBoardAsync(string projectPath, string boardId, string name, CancellationToken cancellationToken = default, string? displayPrefix = null)
     {
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
@@ -83,12 +83,13 @@ public sealed partial class BoardStore : IBoardStore
         var existing = await ReadBoardAsync(connection, transaction, project, boardId, cancellationToken);
         if (existing is null)
             return null;
-        var updated = existing with { Name = name, UpdatedUtc = DateTime.UtcNow };
+        var updated = existing with { Name = name, UpdatedUtc = DateTime.UtcNow, DisplayPrefix = displayPrefix is null ? existing.DisplayPrefix : BoardDisplayIds.NormalizePrefix(displayPrefix) };
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
-            command.CommandText = "UPDATE Boards SET Name = $name, UpdatedUTC = $updated WHERE Id = $id;";
+            command.CommandText = "UPDATE Boards SET Name = $name, DisplayPrefix = $prefix, UpdatedUTC = $updated WHERE Id = $id;";
             command.Parameters.AddWithValue("$name", updated.Name);
+            command.Parameters.AddWithValue("$prefix", (object?)updated.DisplayPrefix ?? DBNull.Value);
             command.Parameters.AddWithValue("$updated", ToDb(updated.UpdatedUtc));
             command.Parameters.AddWithValue("$id", updated.Id);
             await command.ExecuteNonQueryAsync(cancellationToken);
@@ -449,18 +450,22 @@ public sealed partial class BoardStore : IBoardStore
         // (astronomically unlikely) collision into a failed write rather than two cards on one key.
         var cardKey = synced?.CardKey ?? BoardKeys.NewStoredKey(prefix, number);
         var now = stamp?.CreatedUtc ?? DateTime.UtcNow;
+        var displayId = card.DisplayId is not null || synced is not null
+            ? await ResolveDisplayIdAsync(connection, transaction, project, column.BoardId, id, card.DisplayId ?? cardKey, synced is not null, cancellationToken)
+            : await AllocateDisplayIdAsync(connection, transaction, project, column.BoardId, id, cancellationToken);
 
         await using (var insert = connection.CreateCommand())
         {
             insert.Transaction = transaction;
             insert.CommandText = """
                 INSERT INTO BoardCards
-                    (Id, ProjectPath, Number, ColumnId, Position, Title, Description, Assignee, Priority, Type, Points, Tags, Blocked, Flagged, CreatedUTC, UpdatedUTC, CardKey)
+                    (Id, ProjectPath, Number, ColumnId, Position, Title, Description, Assignee, Priority, Type, Points, Tags, Blocked, Flagged, CreatedUTC, UpdatedUTC, CardKey, DisplayId)
                 VALUES
-                    ($id, $project, $number, $column, $position, $title, $description, $assignee, $priority, $type, $points, $tags, $blocked, $flagged, $created, $updated, $cardKey);
+                    ($id, $project, $number, $column, $position, $title, $description, $assignee, $priority, $type, $points, $tags, $blocked, $flagged, $created, $updated, $cardKey, $displayId);
                 """;
             insert.Parameters.AddWithValue("$id", id);
             insert.Parameters.AddWithValue("$cardKey", cardKey);
+            insert.Parameters.AddWithValue("$displayId", displayId);
             insert.Parameters.AddWithValue("$project", project);
             insert.Parameters.AddWithValue("$number", number);
             insert.Parameters.AddWithValue("$column", column.Id);
@@ -482,8 +487,10 @@ public sealed partial class BoardStore : IBoardStore
         await WriteBaseLlmOptionsAsync(connection, transaction, id, card.BaseLlmOptions, cancellationToken);
 
         var created = new BoardCardRecord(id, project, number, column.Id, position, card.Title, card.Description,
-            card.Assignee, card.Priority, card.Points, card.Tags, card.Blocked, 0, now, now, card.BaseLlmOptions, Type: card.Type, BoardId: column.BoardId, Flagged: card.Flagged, KeyPrefix: prefix, StoredKey: cardKey);
+            card.Assignee, card.Priority, card.Points, card.Tags, card.Blocked, 0, now, now, card.BaseLlmOptions, Type: card.Type, BoardId: column.BoardId, Flagged: card.Flagged, KeyPrefix: prefix, StoredKey: cardKey, StoredDisplayId: displayId);
         await LogCardCreatedAsync(connection, transaction, created, column.Name, author, cancellationToken, stamp);
+        if (synced is not null) await ReconcileSyncedDisplayIdAsync(connection, transaction, created, card.DisplayId, cancellationToken);
+        await InsertDraftLinksAsync(connection, transaction, created, card.LinkedCardIds, cancellationToken);
         return created;
     }
 
@@ -546,8 +553,11 @@ public sealed partial class BoardStore : IBoardStore
         if (description.Length > BoardCardLimits.MaxDescriptionLength)
             throw new BoardValidationException($"Description is too long (max {BoardCardLimits.MaxDescriptionLength} characters).");
 
+        var displayId = patch.DisplayId is null ? existing.DisplayId
+            : await ResolveDisplayIdAsync(connection, transaction, project, boardId, existing.Id, patch.DisplayId, stamp is not null, cancellationToken);
         var updated = existing with
         {
+            StoredDisplayId = displayId,
             ColumnId = columnId,
             BoardId = boardId,
             Position = position,
@@ -569,7 +579,7 @@ public sealed partial class BoardStore : IBoardStore
             command.Transaction = transaction;
             command.CommandText = """
                 UPDATE BoardCards SET ColumnId = $column, Position = $position, Title = $title, Description = $description,
-                    Assignee = $assignee, Priority = $priority, Type = $type, Points = $points, Tags = $tags, Blocked = $blocked, Flagged = $flagged, UpdatedUTC = $updated
+                    Assignee = $assignee, Priority = $priority, Type = $type, Points = $points, Tags = $tags, Blocked = $blocked, Flagged = $flagged, DisplayId = $displayId, UpdatedUTC = $updated
                 WHERE Id = $id;
                 """;
             command.Parameters.AddWithValue("$column", updated.ColumnId);
@@ -583,6 +593,7 @@ public sealed partial class BoardStore : IBoardStore
             command.Parameters.AddWithValue("$tags", SerializeTags(updated.Tags));
             command.Parameters.AddWithValue("$blocked", updated.Blocked ? 1 : 0);
             command.Parameters.AddWithValue("$flagged", updated.Flagged ? 1 : 0);
+            command.Parameters.AddWithValue("$displayId", updated.DisplayId);
             command.Parameters.AddWithValue("$updated", ToDb(updated.UpdatedUtc));
             command.Parameters.AddWithValue("$id", updated.Id);
             await command.ExecuteNonQueryAsync(cancellationToken);
@@ -596,6 +607,7 @@ public sealed partial class BoardStore : IBoardStore
         await LogCardChangedAsync(connection, transaction, existing, updated, fromLaneName, toLaneName,
             author, cancellationToken, stamp);
         await ReconcileMissingSyncedLaneAsync(connection, transaction, updated, stamp, cancellationToken);
+        if (stamp is not null) await ReconcileSyncedDisplayIdAsync(connection, transaction, updated, patch.DisplayId, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return updated;
     }
@@ -1125,7 +1137,7 @@ public sealed partial class BoardStore : IBoardStore
         "SELECT c.Id, c.ProjectPath, c.Name, c.Position, c.Color, c.CreatedUTC, c.UpdatedUTC, c.BoardId FROM BoardColumns c";
 
     private const string BoardSelectSql =
-        "SELECT Id, ProjectPath, Name, Position, CreatedUTC, UpdatedUTC FROM Boards";
+        "SELECT Id, ProjectPath, Name, Position, CreatedUTC, UpdatedUTC, DisplayPrefix FROM Boards";
 
     // A property because the prefix join interpolates ProjectPathCollation (see CardSequenceReseedSql).
     private static string CardSelectSql => $"""
@@ -1135,7 +1147,7 @@ public sealed partial class BoardStore : IBoardStore
                (SELECT o.OptionsJson FROM BoardCardOptions o WHERE o.CardId = c.Id),
                c.Type,
                (SELECT k.BoardId FROM BoardColumns k WHERE k.Id = c.ColumnId), c.Flagged,
-               {CardPrefixSql}, c.CardKey
+               {CardPrefixSql}, c.CardKey, c.DisplayId
         FROM BoardCards c
         {CardPrefixJoinSql}
         """;
@@ -1208,7 +1220,8 @@ public sealed partial class BoardStore : IBoardStore
         reader.GetString(2),
         reader.GetInt32(3),
         ParseDb(reader.GetString(4)),
-        ParseDb(reader.GetString(5)));
+        ParseDb(reader.GetString(5)),
+        reader.IsDBNull(6) ? null : reader.GetString(6));
 
     /// <summary>
     /// The board a caller means: the named one (which must belong to the project), else the
@@ -1236,6 +1249,18 @@ public sealed partial class BoardStore : IBoardStore
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         var live = includeDeleted ? "" : " AND c.DeletedUTC IS NULL";
+        command.CommandText = idOrKey.Trim().StartsWith("card_", StringComparison.Ordinal)
+            ? CardSelectSql + $" WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.Id = $input{live} LIMIT 1;"
+            : CardSelectSql + $"""
+                 WHERE c.ProjectPath = $project{ProjectPathCollation}
+                   AND ({CardKeySql} = $input COLLATE NOCASE OR {CardDisplayIdSql} = $input COLLATE NOCASE){live}
+                 ORDER BY ({CardKeySql} = $input COLLATE NOCASE) DESC LIMIT 1;
+                """;
+        command.Parameters.AddWithValue("$project", project);
+        command.Parameters.AddWithValue("$input", idOrKey.Trim());
+        await using (var exact = await command.ExecuteReaderAsync(cancellationToken))
+            if (await exact.ReadAsync(cancellationToken)) return ReadCard(exact);
+        command.Parameters.Clear();
         if (BoardKeys.TryParseStored(idOrKey, out var storedKey))
         {
             command.CommandText = CardSelectSql + $" WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.CardKey = $key{live} LIMIT 1;";
@@ -1297,7 +1322,8 @@ public sealed partial class BoardStore : IBoardStore
         BoardId: reader.IsDBNull(17) ? string.Empty : reader.GetString(17),
         Flagged: reader.GetInt32(18) != 0,
         KeyPrefix: reader.GetString(19),
-        StoredKey: reader.IsDBNull(20) ? null : reader.GetString(20));
+        StoredKey: reader.IsDBNull(20) ? null : reader.GetString(20),
+        StoredDisplayId: reader.IsDBNull(21) ? null : reader.GetString(21));
 
     private static async Task<IReadOnlyList<BoardCommentRecord>> ReadCommentsAsync(SqliteConnection connection, string cardId, string kind, CancellationToken cancellationToken)
     {
@@ -1529,12 +1555,13 @@ public sealed partial class BoardStore : IBoardStore
         return result is null || result is DBNull ? 0 : Convert.ToInt64(result, CultureInfo.InvariantCulture);
     }
 
-    private static async Task<string?> ScalarStringAsync(SqliteConnection connection, SqliteTransaction? transaction, string sql, (string Name, object Value) parameter, CancellationToken cancellationToken)
+    private static async Task<string?> ScalarStringAsync(SqliteConnection connection, SqliteTransaction? transaction, string sql, (string Name, object Value) parameter, CancellationToken cancellationToken, params (string Name, object Value)[] more)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = sql;
         command.Parameters.AddWithValue(parameter.Name, parameter.Value);
+        foreach (var (name, value) in more) command.Parameters.AddWithValue(name, value);
         var result = await command.ExecuteScalarAsync(cancellationToken);
         return result is string text ? text : null;
     }
@@ -1637,6 +1664,7 @@ public sealed partial class BoardStore : IBoardStore
         // Additive; an older binary ignores the table and the `context` change entries it pairs with.
         SqliteMigrationRunner.Apply(connection, "board", 19, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, ContextSamplesSchemaSql));
+        SqliteMigrationRunner.Apply(connection, "board", 20, MigrationKind.Additive, ApplyDisplayIdsMigration);
         ReconcileDerivedRows(connection);
     }
 

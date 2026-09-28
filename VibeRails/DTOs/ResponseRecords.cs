@@ -143,9 +143,9 @@ namespace VibeRails.DTOs
     // A project has one or more boards (sprints, sub-projects); every lane belongs to one. Card
     // keys stay per project. Lane and card list calls take an optional board id and default to
     // the project's first board, so a single-board client keeps working unchanged.
-    public record BoardSummaryResponse(string Id, string Name, int Position, DateTime CreatedAt, int CardCount, List<BoardColumnResponse> Columns);
+    public record BoardSummaryResponse(string Id, string Name, int Position, DateTime CreatedAt, int CardCount, List<BoardColumnResponse> Columns, string? DisplayPrefix = null);
     public record BoardListResponse(List<BoardSummaryResponse> Boards);
-    public record CreateBoardRequest(string? Name = null);
+    public record CreateBoardRequest(string? Name = null, string? DisplayPrefix = null);
 
     // Jira Cloud pull (VB-40). The API token is write-only: a response never carries it.
     // Last write wins from Jira on the mapped fields; the response says so with lastWriteWins.
@@ -195,7 +195,7 @@ namespace VibeRails.DTOs
         IReadOnlyList<BoardSyncRejectedEntry>? RejectedEntries = null);
 
     public record SetBoardSyncRequest(bool Enabled = false);
-    public record UpdateBoardRequest(string? Name = null);
+    public record UpdateBoardRequest(string? Name = null, string? DisplayPrefix = null);
     public record UpdateBoardContextRequest(BoardContextSettings? Context = null, int? ExpectedRevision = null);
     public record BoardAutomationOption(long Id, string Name, bool Enabled);
     public record BoardLaneAutomationResponse(long? JobId, int Revision, List<BoardAutomationOption> Jobs, IReadOnlyList<long> JobIds);
@@ -246,7 +246,7 @@ namespace VibeRails.DTOs
         string Type = BoardCardTypes.Default,
         string BoardId = "",
         bool Flagged = false,
-        bool HasActiveAutomation = false);
+        bool HasActiveAutomation = false, string? DisplayId = null);
     public record BoardCardListResponse(List<BoardCardSummaryResponse> Cards)
     {
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -264,7 +264,7 @@ namespace VibeRails.DTOs
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public long? RemainingPoints { get; init; }
     }
-    public record BoardLinkedCardDto(string Id, string Key, string Title, string BoardId, string BoardName, string ColumnId, string ColumnName);
+    public record BoardLinkedCardDto(string Id, string Key, string Title, string BoardId, string BoardName, string ColumnId, string ColumnName, string? DisplayId = null);
     public record BoardCardLinkCandidatesResponse(List<BoardLinkedCardDto> Cards);
     /// <summary>Repo-relative paths (forward slashes) for the composer's `@path` typeahead; <c>Truncated</c> when more matched than the cap.</summary>
     public record BoardFileSearchResponse(List<string> Files, bool Truncated);
@@ -295,7 +295,7 @@ namespace VibeRails.DTOs
         string Type = BoardCardTypes.Default,
         string BoardId = "",
         bool Flagged = false,
-        bool HasActiveAutomation = false)
+        bool HasActiveAutomation = false, string? DisplayId = null)
     {
         public List<BoardLinkedCardDto> LinkedCards { get; init; } = [];
     }
@@ -312,7 +312,7 @@ namespace VibeRails.DTOs
         string? Type = null,
         // Which board's left-most lane takes the card when ColumnId is omitted; null = the first board.
         string? BoardId = null,
-        bool? Flagged = null);
+        bool? Flagged = null, string? DisplayId = null, List<string>? LinkedCardIds = null);
     public record UpdateBoardCardRequest(
         string? Title = null,
         string? ColumnId = null,
@@ -328,7 +328,7 @@ namespace VibeRails.DTOs
         // field of this request. Mutually exclusive with Description.
         string? DescriptionAppend = null,
         string? Type = null,
-        bool? Flagged = null);
+        bool? Flagged = null, string? DisplayId = null);
 
     // SkipAutomations (VB-34): move without recording a lane entry for the destination lane's
     // Automations. Per request, never sticky; the skip is recorded as a comment by the user.

@@ -75,7 +75,7 @@ test('the card editor mounts the section, refreshes it after every rail change a
     assert.match(source, /import \{ contextSectionMarkup, bindCardContext \} from '\.\/board-card-context\.js'/);
     const open = source.slice(source.indexOf('async openCardEditor'), source.indexOf('bindCardEditor(editor, card)'));
     // Right after the fields, before the linked-cards rail: the size is the first thing about the card.
-    assert.match(open, /<\/div>\s*\$\{contextSectionMarkup\(Boolean\(card\)\)\}\s*\$\{renderCardLinksSection\(card\)\}/);
+    assert.match(open, /\$\{contextSectionMarkup\(Boolean\(card\)\)\}\s*\$\{renderCardLinksSection\(card\)\}/);
     assert.match(source, /this\.cardContextDispose\?\.\(\);\s*const cardContext = bindCardContext\(editor, card, \{ app: this\.app \}\);/);
     assert.match(source, /editor\._boardContext = cardContext;/);
     // One refresh point for comments, commits and sessions (they all reload the card), plus the

@@ -90,7 +90,7 @@ public sealed class BoardLaunchService(
             : parsed.Cli;
         var composed = await ComposePromptAsync(store, projectPath, card, assigneeLabel, environment?.CustomPrompt, intent, cancellationToken);
         var prompt = composed.Prompt;
-        var title = $"{card.Key} · {Truncate(card.Title, 60)}";
+        var title = $"{card.DisplayId ?? card.Key} · {Truncate(card.Title, 60)}";
 
         var detail = await store.GetCardDetailAsync(projectPath, card.Id, cancellationToken);
         var tabs = await tabHost.ListTabsAsync(cancellationToken);

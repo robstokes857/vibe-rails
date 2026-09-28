@@ -106,7 +106,7 @@ serialization or tool discovery into the Native AOT path.
   repeat calls preserve existing links and snapshots. No new unlink/edit MCP tool is exposed.
 - Explicit Save/Create never starts an agent. Start work saves first, retains normal workspace
   resolution, grants only Board tools, links the session, and stays on the Board. Opening a
-  terminal is a Sessions action or **Chat with:**, whose independent shared LLM/environment
+  terminal is a Sessions action or **Chat with agent**, whose independent shared LLM/environment
   picker defaults to the assignee. Chat saves first, sends the selected launch override without
   reassigning the card, and launches with discussion intent, then focuses the returned terminal.
   Lane Automations are independent existing Jobs, queued after a 60-second settling period;
@@ -265,3 +265,24 @@ Record user-facing decisions in comments, and link commits after capture succeed
 Review when it is ready for human review; do not treat open implementation findings in a research
 spike as fixed. Component documentation belongs here; runbooks and diagnostic history belong in
 the private `vibe-books` repository or the active card's notes.
+
+## Display IDs and draft links (VB-69)
+
+`CardKey` / `Key` and the card row `Id` stay immutable. `DisplayId` is the mutable label shown
+in the UI and accepted by project-scoped lookup/search. Prefer row IDs for mutations. Board
+settings supply a display prefix (1–8 ASCII letters/digits, letter first); the default is the
+first four usable repository-name characters, padded with X for short names. Prefix changes
+apply to future cards. Sequences are persistent per project/prefix, shared across its boards.
+Existing cards retain their old visible key; older writers' NULL display IDs fall back to Key.
+`board/20` is additive and performs only the expressly requested display-ID backfill.
+
+Display IDs and the board prefix sync. The server's first accepted label wins; a collision
+creates a separate correction event without changing the received event or immutable identity.
+Incoming labels can rename a local occupant and queue its correction atomically. The sibling
+Front change must ship for hosted label projection and server collision resolution.
+
+The new-card link picker searches through `GET /api/v1/board/cards/link-candidates`; selected
+`linkedCardIds` are saved in the creation transaction, with both ends scoped to the project.
+Canceling the draft writes nothing. Existing-card links still save immediately. Discussion has
+its own section with the shared agent picker followed by a text-style Chat button; its intent,
+independent assignment, save-before-launch and active-session guard remain unchanged.

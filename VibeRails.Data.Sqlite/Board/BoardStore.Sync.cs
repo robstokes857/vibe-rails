@@ -463,6 +463,7 @@ public sealed partial class BoardStore
 
     private static BoardCardPatch WithoutLockedFields(BoardCardPatch patch, IReadOnlySet<string> locked) => patch with
     {
+        DisplayId = locked.Contains("displayId") ? null : patch.DisplayId,
         Title = locked.Contains("title") ? null : patch.Title,
         Description = locked.Contains("description") ? null : patch.Description,
         Type = locked.Contains("type") ? null : patch.Type,

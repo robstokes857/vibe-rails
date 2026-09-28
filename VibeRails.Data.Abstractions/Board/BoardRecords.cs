@@ -19,7 +19,11 @@ public sealed record BoardRecord(
     string Name,
     int Position,
     DateTime CreatedUtc,
-    DateTime UpdatedUtc);
+    DateTime UpdatedUtc,
+    string? DisplayPrefix = null)
+{
+    public string EffectiveDisplayPrefix => DisplayPrefix ?? BoardDisplayIds.DefaultPrefix(ProjectPath);
+}
 
 public sealed record BoardColumnRecord(
     string Id,
@@ -57,11 +61,14 @@ public sealed record BoardCardRecord(
     string BoardId = "",
     bool Flagged = false,
     string KeyPrefix = BoardKeys.LegacyPrefix,
-    string? StoredKey = null)
+    string? StoredKey = null,
+    string? StoredDisplayId = null)
 {
     /// <summary>The stored <c>PREFIX-RRRRR-n</c> key (cards created since board/14), else the
     /// computed legacy <c>PREFIX-n</c>.</summary>
     public string Key => StoredKey ?? BoardKeys.Format(KeyPrefix, Number);
+    /// <summary>Mutable, human-readable label; identity and sync continue to use Key and Id.</summary>
+    public string DisplayId => StoredDisplayId ?? Key;
 }
 
 public sealed record BoardCardDetailRecord(
@@ -78,9 +85,10 @@ public sealed record BoardCardDetailRecord(
 /// <summary>A lightweight, current description of a related card, including its board and lane.</summary>
 public sealed record BoardLinkedCardRecord(
     string Id, int Number, string Title, string BoardId, string BoardName, string ColumnId, string ColumnName,
-    string KeyPrefix = BoardKeys.LegacyPrefix, string? StoredKey = null)
+    string KeyPrefix = BoardKeys.LegacyPrefix, string? StoredKey = null, string? StoredDisplayId = null)
 {
     public string Key => StoredKey ?? BoardKeys.Format(KeyPrefix, Number);
+    public string DisplayId => StoredDisplayId ?? Key;
 }
 
 /// <summary>
@@ -201,7 +209,9 @@ public sealed record NewBoardCard(
     BaseLlmOptions? BaseLlmOptions = null,
     string Type = BoardCardTypes.Default,
     string? BoardId = null,
-    bool Flagged = false);
+    bool Flagged = false,
+    string? DisplayId = null,
+    IReadOnlyList<string>? LinkedCardIds = null);
 
 /// <summary>Partial update. Null = leave untouched. <see cref="ClearAssignee"/> / <see cref="ClearPoints"/> express "set to null".</summary>
 public sealed record BoardCardPatch(
@@ -219,7 +229,8 @@ public sealed record BoardCardPatch(
     BaseLlmOptions? BaseLlmOptions = null,
     bool ClearBaseLlmOptions = false,
     string? Type = null,
-    bool? Flagged = null);
+    bool? Flagged = null,
+    string? DisplayId = null);
 
 /// <summary>
 /// A card key is <c>PREFIX-n</c>: the project's prefix and the card's number within the project.
