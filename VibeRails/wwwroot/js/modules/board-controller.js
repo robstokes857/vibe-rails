@@ -31,10 +31,11 @@ import { escapeHtml, confirmDialog, parseLlmSelection, getCliBrand, canonicalLlm
 import { mountLlmPicker, setLlmPickerValue, getEnabledLlmItems } from './pickers/llm-picker.js';
 import { BoardApi } from './board-api.js';
 import { BOARD_SELECTION_STORAGE_KEY } from './board-selection.js';
-import { boardContextSection, laneAutomationSection, mountBoardContext, mountLaneAutomation } from './board-settings.js';
+import { boardContextSection, boardSyncSection, laneAutomationSection, mountBoardContext, mountBoardSync, mountLaneAutomation } from './board-settings.js';
 import { renderCardLinksSection, bindCardLinks } from './board-card-links.js';
 import { cardAutomationControls, bindCardAutomations } from './board-card-automations.js';
 import { renderCommentHtml, wrapSelectionAsCode, toPlainPreview } from './board-text.js';
+import { historySection, mountHistory } from './board-history.js';
 import { bindFileReferencePopup } from './board-file-refs.js';
 import { openDiffModal } from './diff-modal.js';
 import * as SessionDebug from './session-viewer.js';
@@ -262,6 +263,8 @@ export class BoardController {
     // are wired (to reset the assignee/chat pickers), which would tear the `@` popups down before
     // they ever opened. Composers live exactly as long as the editor: close or replacement.
     disposeComposers() {
+        this.cardHistoryDispose?.();
+        this.cardHistoryDispose = null;
         for (const dispose of this.composerDisposers.splice(0)) {
             try { dispose(); } catch { /* already torn down */ }
         }
@@ -1056,9 +1059,7 @@ export class BoardController {
                     </section>
 
                     <section class="board-block board-activity">
-                        <h3 class="board-block-label">
-                            Comments <span class="board-count" data-board-count="comments">${card?.comments?.length || 0}</span>
-                        </h3>
+                        <h3 class="board-block-label">Comments <span class="board-count" data-board-count="comments">${card?.comments?.length || 0}</span></h3>
                         <div class="board-comments" data-board-comments></div>
                         ${card ? this.composerMarkup({
                             name: 'comment',
@@ -1157,10 +1158,13 @@ export class BoardController {
                     ${card ? `<section class="board-side-section">
                         <details data-board-notes-details>
                             <summary class="board-side-label"><i class="fa-solid fa-pen-ruler" aria-hidden="true"></i> Agent notes <span class="board-count" data-board-count="notes">${card?.notes?.length || 0}</span></summary>
-                            <p class="board-editor-muted">The scratchpad agents checkpoint findings in while they work. Not part of the comment thread.</p>
                             <div data-board-notes class="board-notes-list"></div>
                         </details>
                     </section>` : ''}
+                    ${card ? `<section class="board-side-section"><details>
+                        <summary class="board-side-label">Card settings</summary>${historySection()}
+                    </details></section>` : ''}
+
                     </div>
                 </aside>
                 </div>
@@ -1211,18 +1215,12 @@ export class BoardController {
         this.bindCardEditor(editor, card);
     }
 
-    // One <option> per lane. With several boards the lanes are grouped by board, so saving a
-    // card into another board's lane is how a card moves between sprints.
+    // Cards stay on their board. A different board starts with a new card.
     laneOptionsHtml(selectedId) {
         const option = column => `<option value="${escapeHtml(column.id)}"${column.id === selectedId ? ' selected' : ''}>${escapeHtml(column.name)}</option>`;
-        const boards = this.state.boards
-            .filter(board => (board.columns || []).length > 0)
-            .sort((a, b) => a.position - b.position);
-        if (boards.length <= 1) {
-            return this.state.columns.slice().sort((a, b) => a.position - b.position).map(option).join('');
-        }
-        return boards.map(board => `<optgroup label="${escapeHtml(board.name)}">${board.columns
-            .slice().sort((a, b) => a.position - b.position).map(option).join('')}</optgroup>`).join('');
+        const board = this.state.boards.find(board => (board.columns || []).some(column => column.id === selectedId));
+        return (board?.columns || this.state.columns).slice()
+            .sort((a, b) => a.position - b.position).map(option).join('');
     }
 
     // The card id lives on the editor (data-card-id), not on controller state.
@@ -1246,7 +1244,8 @@ export class BoardController {
         };
         editor.addEventListener('input', trackEdits);
         editor.addEventListener('change', trackEdits);
-        this.renderCommentsPanel(editor, card);
+        this.renderCardDiscussion(editor, card);
+        if (card) this.cardHistoryDispose = mountHistory(editor.querySelector('[data-board-history-view]'), card.boardId, card.id);
         this.renderCommitsPanel(editor, card);
         this.renderSessionsPanel(editor, card);
         this.renderAttachmentsPanel(editor, card);
@@ -1258,7 +1257,10 @@ export class BoardController {
                 editor.querySelector('[data-board-composer="description"] [data-board-composer-input]'), card, files, { inline: false });
         });
         editor.querySelector('[data-board-notes-details]')?.addEventListener('toggle', event => {
-            if (event.target.open) this.renderNotesPanel(editor, card);
+            // Notes are rendered with the comments; clamps just cannot be measured while the
+            // section is closed, so opening is the only time to redo them. Closing changes nothing.
+            const notesHost = editor.querySelector('[data-board-notes]');
+            if (event.target.open && notesHost) this.applyCommentClamps(notesHost);
         });
 
         this.bindComposer(editor.querySelector('[data-board-composer="description"]'), { card });
@@ -1329,6 +1331,7 @@ export class BoardController {
             this.saveCard(editor);
         });
 
+        editor._boardFormBaseline = this.readCardForm(editor);
         editor.querySelector('#board-card-title')?.focus();
     }
 
@@ -1594,8 +1597,7 @@ export class BoardController {
                     const input = composer.querySelector('[data-board-composer-input]');
                     if (preview && input) preview.innerHTML = renderCommentHtml(input.value, { attachments: card.attachments });
                 });
-                this.renderCommentsPanel(editor, card);
-                this.renderNotesPanel(editor, card);
+                this.renderCardDiscussion(editor, card);
                 this.app.showToast('Board', 'Attachment deleted.', 'success');
             } catch (error) {
                 if (editor.isConnected) this.app.showToast('Board', error?.message || 'Could not delete the file.', 'error');
@@ -1606,75 +1608,32 @@ export class BoardController {
         }));
     }
 
-    // Agent notes ride on the card response (card.notes), so no fetch: the section is collapsed by
-    // default and rendered when opened. Same escape-first body renderer as comments.
-    renderNotesPanel(editor, card) {
-        const host = editor.querySelector('[data-board-notes]');
-        if (!host) return;
-        const notes = card?.notes || [];
-        const count = editor.querySelector('[data-board-count="notes"]');
-        if (count) count.textContent = String(notes.length);
-        if (!notes.length) {
-            host.innerHTML = '<p class="board-editor-muted">No notes yet. Agents add them with append_board_note.</p>';
-            return;
-        }
-        const attachments = card?.attachments || [];
-        host.innerHTML = notes.map(note => {
-            const author = this.authorInfo(note.author);
-            return `
-                <article class="board-comment board-note${note.author?.kind === 'agent' ? ' is-agent' : ''}">
-                    ${this.avatarHtml(author, 24, { filterable: false })}
-                    <div class="board-comment-content">
-                        <div class="board-comment-meta">
-                            <span class="board-comment-author">${escapeHtml(author?.label || 'Someone')}</span>
-                            <span class="board-comment-when">${escapeHtml(this.formatDateTime(note.createdAt))}</span>
-                        </div>
-                        <div class="board-comment-body">${renderCommentHtml(note.body, { attachments })}</div>
-                    </div>
-                </article>`;
-        }).join('');
-    }
-
     // ============================================
-    // Comments
+    // Comments and agent notes
     // ============================================
 
-    renderCommentsPanel(editor, card) {
+    // Comments and notes ride on the card response and render in separate sections.
+    // History has an explicit settings request and never enters this response.
+    renderCardDiscussion(editor, card) {
         const host = editor.querySelector('[data-board-comments]');
         if (!host) return;
+        const attachments = card?.attachments || [];
         const comments = card?.comments || [];
-        if (!comments.length) {
-            host.innerHTML = '<p class="board-editor-muted">No comments yet. This is where the work on a card gets recorded.</p>';
-            return;
+        const notes = card?.notes || [];
+        this.updateSectionCount(editor, 'comments', comments.length);
+        this.updateSectionCount(editor, 'notes', notes.length);
+        host.innerHTML = comments.length
+            ? comments.map(entry => this.cardLogCommentHtml(entry, attachments)).join('')
+            : '<p class="board-editor-muted">No comments yet.</p>';
+        const notesHost = editor.querySelector('[data-board-notes]');
+        if (notesHost) {
+            notesHost.innerHTML = notes.length
+                ? notes.map(entry => this.cardLogCommentHtml({ ...entry, group: 'notes' }, attachments)).join('')
+                : '<p class="board-editor-muted">No agent notes yet.</p>';
+            this.applyCommentClamps(notesHost);
         }
 
-        const attachments = card?.attachments || [];
-        host.innerHTML = comments.map(comment => {
-            const author = this.authorInfo(comment.author);
-            // An agent comment knows the terminal session that wrote it and when: the link replays
-            // that session seeked to this moment (session-viewer.js seekToUtc).
-            const sessionId = comment.author?.kind === 'agent' ? String(comment.author.sessionId || '') : '';
-            const jump = sessionId
-                ? `<button type="button" class="board-comment-jump" data-board-comment-jump="${escapeHtml(sessionId)}"
-                    data-board-comment-at="${escapeHtml(comment.createdAt || '')}"
-                    title="Replay the session at the moment this was written">
-                    <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> in session</button>`
-                : '';
-            return `
-                <article class="board-comment${comment.author?.kind === 'agent' ? ' is-agent' : ''}">
-                    ${this.avatarHtml(author, 28, { filterable: false })}
-                    <div class="board-comment-content">
-                        <div class="board-comment-meta">
-                            <span class="board-comment-author">${escapeHtml(author?.label || 'Someone')}</span>
-                            <span class="board-comment-when">${jump}${escapeHtml(this.formatDateTime(comment.createdAt))}</span>
-                        </div>
-                        <div class="board-comment-body" data-board-comment-body>${renderCommentHtml(comment.body, { attachments })}</div>
-                        <button type="button" class="board-comment-more" data-board-comment-more hidden>Show more</button>
-                    </div>
-                </article>`;
-        }).join('');
-
-        host.querySelectorAll('[data-board-comment-jump]').forEach(button => {
+        editor.querySelectorAll('[data-board-comment-jump]').forEach(button => {
             button.addEventListener('click', event => {
                 event.stopPropagation();
                 this.openSessionReplay({ id: button.dataset.boardCommentJump }, { seekToUtc: button.dataset.boardCommentAt || null });
@@ -1690,6 +1649,34 @@ export class BoardController {
         // dialog genuinely has no layout yet; it is a refinement, not the mechanism.
         this.applyCommentClamps(host);
         requestAnimationFrame(() => this.applyCommentClamps(host));
+    }
+
+    // A comment or an agent note. A note is dashed and tagged, so the scratchpad never reads as
+    // part of the conversation.
+    cardLogCommentHtml(entry, attachments) {
+        const author = this.authorInfo(entry.author);
+        const note = entry.group === 'notes';
+        // An agent entry knows the terminal session that wrote it and when: the link replays
+        // that session seeked to this moment (session-viewer.js seekToUtc).
+        const sessionId = entry.author?.kind === 'agent' ? String(entry.author.sessionId || '') : '';
+        const jump = sessionId
+            ? `<button type="button" class="board-comment-jump" data-board-comment-jump="${escapeHtml(sessionId)}"
+                data-board-comment-at="${escapeHtml(entry.createdAt || '')}"
+                title="Replay the session at the moment this was written">
+                <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> in session</button>`
+            : '';
+        return `
+            <article class="board-comment${note ? ' board-note' : ''}${entry.author?.kind === 'agent' ? ' is-agent' : ''}">
+                ${this.avatarHtml(author, 28, { filterable: false })}
+                <div class="board-comment-content">
+                    <div class="board-comment-meta">
+                        <span class="board-comment-author">${escapeHtml(author?.label || 'Someone')}${note ? ' <span class="board-log-tag">note</span>' : ''}</span>
+                        <span class="board-comment-when">${jump}${escapeHtml(this.formatDateTime(entry.createdAt))}</span>
+                    </div>
+                    <div class="board-comment-body" data-board-comment-body>${renderCommentHtml(entry.body, { attachments })}</div>
+                    <button type="button" class="board-comment-more" data-board-comment-more hidden>Show more</button>
+                </div>
+            </article>`;
     }
 
     // A long comment is clamped to a readable height with an expander, so one
@@ -1729,8 +1716,7 @@ export class BoardController {
                 composerInput.value = '';
                 composerInput.style.height = 'auto';
             }
-            this.renderCommentsPanel(editor, card);
-            this.updateSectionCount(editor, 'comments', card.comments.length);
+            this.renderCardDiscussion(editor, card);
             // The thread is at the bottom of a single scrolling body, so bring the
             // new comment into view rather than leaving the reader where they were.
             // Synchronous for the same reason as the clamps: no frame is delivered
@@ -2019,6 +2005,13 @@ export class BoardController {
         return true;
     }
 
+    cardChanges(editor, payload) {
+        const baseline = editor._boardFormBaseline;
+        if (!baseline) return payload;
+        return Object.fromEntries(Object.entries(payload)
+            .filter(([field, value]) => JSON.stringify(value) !== JSON.stringify(baseline[field])));
+    }
+
     async saveCard(editor) {
         if (editor._boardSaving || editor._boardUploading || editor._boardStarting) return;
         const payload = this.readCardForm(editor);
@@ -2028,7 +2021,8 @@ export class BoardController {
         try {
             const cardId = this.cardIdFromEditor(editor);
             if (cardId) {
-                saved = await BoardApi.updateBoardCardAsync(cardId, payload);
+                saved = await BoardApi.updateBoardCardAsync(cardId, this.cardChanges(editor, payload));
+                editor._boardFormBaseline = payload;
                 this.app.showToast('Board', 'Card saved.', 'success');
             } else {
                 saved = await BoardApi.createBoardCardAsync(payload);
@@ -2128,7 +2122,8 @@ export class BoardController {
         if (button) button.disabled = true;
         editor._boardStarting = true;
         try {
-            const saved = await BoardApi.updateBoardCardAsync(card.id, payload);
+            const saved = await BoardApi.updateBoardCardAsync(card.id, this.cardChanges(editor, payload));
+            editor._boardFormBaseline = payload;
             if (this.hasRunningSession(saved)) {
                 Object.assign(card, saved);
                 editor._boardStarting = false;
@@ -2203,7 +2198,7 @@ export class BoardController {
                 <input type="text" class="form-control form-control-sm mb-3" id="board-board-name" maxlength="60"
                     placeholder="Sprint 12, Website, Q4 bugs…" value="${escapeHtml(board?.name || '')}">
                 <p class="board-editor-muted mb-3">${board
-                    ? 'Cards keep their keys when they move between boards.'
+                    ? 'Create a new card to work on another board. Cards can move between lanes on this board.'
                     : 'A new board starts with the default lanes. Card keys stay unique across the whole project.'}</p>
                 <div class="board-editor-actions mt-4">
                     ${board ? `<button type="button" class="btn btn-sm btn-outline-danger" data-board-delete-board>
@@ -2211,14 +2206,19 @@ export class BoardController {
                     </button>` : '<span></span>'}
                     <button type="button" class="btn btn-sm btn-outline-primary" data-board-save-board>${board ? 'Save name' : 'Create'}</button>
                 </div>
-                ${board ? boardContextSection() : '<p class="board-editor-muted">Save the board to configure agent context.</p>'}
+                ${board ? boardContextSection() + boardSyncSection() + historySection() : '<p class="board-editor-muted">Save the board to configure agent context.</p>'}
             </div>
         `, { onClose: () => { this.boardSettingsDispose?.(); this.boardSettingsDispose = null; } });
 
         const container = document.getElementById('modal-container');
         const editor = container?.querySelector('[data-board-board-editor]');
         if (!editor) return;
-        if (board) this.boardSettingsDispose = mountBoardContext(this.app, editor.querySelector('[data-board-context]'), board.id);
+        if (board) {
+            const disposeContext = mountBoardContext(this.app, editor.querySelector('[data-board-context]'), board.id);
+            const disposeSync = mountBoardSync(this.app, editor.querySelector('[data-board-sync]'), board.id);
+            const disposeHistory = mountHistory(editor.querySelector('[data-board-history-view]'), board.id);
+            this.boardSettingsDispose = () => { disposeContext(); disposeSync(); disposeHistory(); };
+        }
         editor.querySelector('[data-board-save-board]')?.addEventListener('click', () => this.saveBoard(editor, board));
         editor.querySelector('[data-board-delete-board]')?.addEventListener('click', () => this.deleteBoard(board));
         editor.addEventListener('keydown', event => {

@@ -235,6 +235,10 @@ public sealed class JiraPullService(
             throw new JiraConfigException("Issue has no summary.");
         var link = await store.FindJiraLinkAsync(connection.Id, issue.Id, cancellationToken);
         BoardCardRecord? existing = link is null ? null : await store.FindCardAsync(connection.ProjectPath, link.CardId, cancellationToken);
+        // A soft-deleted card keeps its link (VB-51): the issue is neither recreated nor updated,
+        // and no overflow lane is made on its behalf. Decided before the dry-run count.
+        if (link is not null && existing is null)
+            return ApplyAction.Skipped;
         if (link is not null && existing is not null
             && issue.Updated.ToUniversalTime() == link.IssueUpdated.ToUniversalTime())
             return ApplyAction.Skipped;
@@ -277,7 +281,7 @@ public sealed class JiraPullService(
             Points: mapped.Points,
             ClearPoints: mapped.ClearPoints,
             Tags: mapped.Tags.ToList(),
-            Type: mapped.Type), cancellationToken);
+            Type: mapped.Type), cancellationToken, JiraAuthor);
         if (lane.Match == JiraLaneMatch.Matched && lane.ColumnId is not null && lane.Comment)
         {
             await board.MoveCardAsync(connection.ProjectPath, existing.Id,

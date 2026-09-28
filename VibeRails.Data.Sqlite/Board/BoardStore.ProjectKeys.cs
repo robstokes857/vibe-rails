@@ -26,6 +26,12 @@ public sealed partial class BoardStore
     /// <summary>The prefix a card row displays, for queries that include <see cref="CardPrefixJoinSql"/>.</summary>
     private const string CardPrefixSql = "COALESCE(pk.Prefix, '" + BoardKeys.LegacyPrefix + "')";
 
+    /// <summary>
+    /// The key a card row displays: the stored <c>PREFIX-R5-N</c> key cards get from board/14, else
+    /// the legacy <c>PREFIX-N</c>. Needs <see cref="CardPrefixJoinSql"/>; matches <see cref="BoardCardRecord.Key"/>.
+    /// </summary>
+    private const string CardKeySql = "COALESCE(c.CardKey, " + CardPrefixSql + " || '-' || c.Number)";
+
     /// <summary>Joins a card row <c>c</c> to its project's prefix row <c>pk</c>, absent for projects an older binary numbered.</summary>
     private static string CardPrefixJoinSql => $"LEFT JOIN BoardProjectKeys pk ON pk.ProjectPath = c.ProjectPath{ProjectPathCollation}";
 

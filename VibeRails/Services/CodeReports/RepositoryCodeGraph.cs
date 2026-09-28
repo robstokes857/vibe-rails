@@ -35,11 +35,16 @@ public sealed class RepositoryCodeGraph
         var candidates = paths.Where(path => IsSafePath(path) && MintLintAnalyzer.SupportsFile(path)
                 && (priority.Contains(path) || IsSourcePath(path))).Distinct(StringComparer.Ordinal)
             .OrderBy(path => path, StringComparer.Ordinal).ToArray();
-        var truncated = candidates.Length > MaxFiles;
+        var selected = SelectPaths(candidates, priority, MaxFiles, MaxNodes).ToArray();
+        // Fewer selected than eligible means the file or node budget left some out: say the map is partial.
+        var truncated = selected.Length < candidates.Length;
         var guard = new GitStagedSnapshotProvider.WorkingTreePathGuard(root);
         var files = new List<(string Path, SourceOutline? Outline)>();
         long bytesRead = 0;
-        foreach (var path in SelectPaths(candidates, priority, MaxFiles))
+        // One read buffer for the whole map: a fresh 128 KiB array per file is a large-object
+        // allocation for each of up to MaxFiles files. Only [0, length) is read after each fill.
+        var buffer = new byte[MaxFileBytes + 1];
+        foreach (var path in selected)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var fullPath = Path.GetFullPath(Path.Combine(root, path));
@@ -53,7 +58,6 @@ public sealed class RepositoryCodeGraph
                     FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.Asynchronous);
                 if (stream.Length <= MaxFileBytes && bytesRead + stream.Length <= MaxSourceBytes)
                 {
-                    var buffer = new byte[MaxFileBytes + 1];
                     var length = await stream.ReadAtLeastAsync(buffer, buffer.Length, false, cancellationToken);
                     bytesRead += length;
                     if (length <= MaxFileBytes && !buffer.AsSpan(0, length).Contains((byte)0))
@@ -73,23 +77,58 @@ public sealed class RepositoryCodeGraph
 
     // A lexical prefix can consume the entire budget before reaching the application's UI
     // or later monorepo packages. Give each directory a turn, after honoring report paths.
-    internal static IEnumerable<string> SelectPaths(IEnumerable<string> paths, ISet<string> priority, int limit)
+    // Every file is one node and each directory it introduces is one more (see Build), so the
+    // selection also charges that ancestry against the node budget: a wide tree keeps fewer files
+    // than the file limit, but every selected file is one Build can keep. A file whose ancestry no
+    // longer fits is skipped (with the rest of its directory) rather than ending the selection, so
+    // cheaper files in directories already on the map still get their turn.
+    internal static IEnumerable<string> SelectPaths(IEnumerable<string> paths, ISet<string> priority, int limit,
+        int nodeLimit = int.MaxValue)
     {
         var ordered = paths.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
         var remaining = limit;
+        var nodes = 0;
+        var directories = new HashSet<string>(StringComparer.Ordinal);
         foreach (var path in ordered.Where(priority.Contains))
         {
-            if (remaining-- <= 0) yield break;
+            if (remaining <= 0) yield break;
+            if (!Charge(path)) continue;
+            remaining--;
             yield return path;
         }
-        var directories = new Queue<Queue<string>>(ordered.Where(path => !priority.Contains(path))
+        var queues = new Queue<Queue<string>>(ordered.Where(path => !priority.Contains(path))
             .GroupBy(path => Path.GetDirectoryName(path), StringComparer.Ordinal)
             .Select(group => new Queue<string>(group)));
-        while (remaining-- > 0 && directories.TryDequeue(out var directory))
+        while (remaining > 0 && queues.TryDequeue(out var queue))
         {
-            yield return directory.Dequeue();
-            if (directory.Count > 0) directories.Enqueue(directory);
+            var path = queue.Dequeue();
+            // Siblings share this file's ancestry, so none of them would fit either.
+            if (!Charge(path)) continue;
+            remaining--;
+            yield return path;
+            if (queue.Count > 0) queues.Enqueue(queue);
         }
+
+        bool Charge(string path)
+        {
+            var ancestors = Ancestors(path);
+            var cost = 1 + ancestors.Count(ancestor => !directories.Contains(ancestor));
+            if (nodes + cost > nodeLimit) return false;
+            nodes += cost;
+            directories.UnionWith(ancestors);
+            return true;
+        }
+    }
+
+    // The directory nodes a file introduces: the repository root for a top-level file, else each
+    // prefix of its directory, at most 32 levels deep. Shared by SelectPaths and Build so the
+    // selection budget and the node budget count the same nodes.
+    private static string[] Ancestors(string path)
+    {
+        var directory = Path.GetDirectoryName(path)?.Replace('\\', '/') ?? "";
+        if (directory.Length == 0) return [""];
+        var segments = directory.Split('/');
+        return segments.Take(32).Select((_, index) => string.Join('/', segments.Take(index + 1))).ToArray();
     }
 
     internal static string RepositoryName(string root)
@@ -109,15 +148,13 @@ public sealed class RepositoryCodeGraph
         foreach (var (path, outline) in files)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var directory = Path.GetDirectoryName(path)?.Replace('\\', '/') ?? "";
-            var segments = directory.Split('/');
             // Preserve real directory ancestry. Large-map overviews can then show the
             // top-level areas and progressively reveal their children.
-            var ancestors = directory.Length == 0 ? new[] { "" }
-                : segments.Take(32).Select((_, index) => string.Join('/', segments.Take(index + 1))).ToArray();
+            var ancestors = Ancestors(path);
             if (nodes.Count + ancestors.Count(ancestor => !domains.ContainsKey(ancestor)) + 1 > MaxNodes)
             { truncated = true; break; }
-            if (segments.Length > 32) truncated = true;
+            // Ancestors stops at 32 levels; a deeper path loses the rest of its ancestry.
+            if (path.AsSpan().Count('/') > 32) truncated = true;
             string? domainId = null;
             foreach (var ancestor in ancestors)
             {
@@ -211,25 +248,30 @@ public sealed class RepositoryCodeGraph
         }
     }
 
+    private static readonly string[] TypeScriptImportExtensions = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
+    private static readonly string[] JavaScriptImportExtensions = [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"];
+    // Extensions an import can name outright. Any other dotted tail is part of the module stem
+    // (`./user.service`, `./app.module`), which still needs the extension and index probes.
+    private static readonly string[] ExplicitImportExtensions =
+        [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts", ".json", ".vue", ".svelte", ".css"];
+
     private static IEnumerable<string> ImportCandidates(string path, string? language)
     {
+        var extension = Path.GetExtension(path);
         // TypeScript commonly writes the emitted JS extension in source imports.
         // Follow source extension substitution before looking for an emitted file.
         if (language == "TypeScript")
         {
-            var extension = Path.GetExtension(path);
             var stem = path[..^extension.Length];
             if (extension == ".js") { yield return stem + ".ts"; yield return stem + ".tsx"; }
             if (extension == ".mjs") yield return stem + ".mts";
             if (extension == ".cjs") yield return stem + ".cts";
         }
         yield return path;
-        if (Path.HasExtension(path)) yield break;
-        var extensions = language == "TypeScript"
-            ? new[] { ".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs" }
-            : new[] { ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts" };
-        foreach (var extension in extensions) yield return path + extension;
-        foreach (var extension in extensions) yield return path + "/index" + extension;
+        if (ExplicitImportExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase)) yield break;
+        var extensions = language == "TypeScript" ? TypeScriptImportExtensions : JavaScriptImportExtensions;
+        foreach (var candidate in extensions) yield return path + candidate;
+        foreach (var candidate in extensions) yield return path + "/index" + candidate;
     }
 
     /// <summary>Trims the graph to the serialized byte budget, then snapshots it into the response.</summary>
@@ -311,9 +353,28 @@ public sealed class RepositoryCodeGraph
         && path.Length <= 4096 && !path.StartsWith('/') && !path.Contains('\\') && !path.Contains(':')
         && !path.Any(char.IsControl) && !path.Split('/').Any(part => part is "" or "." or "..");
 
-    private static bool IsSourcePath(string path) => IsSafePath(path) && MintLintAnalyzer.SupportsFile(path)
-        && !path.Split('/').Any(part => part is ".git" or "node_modules" or "vendor"
-            || (part is "bin" or "obj" && Path.GetExtension(path).Equals(".cs", StringComparison.OrdinalIgnoreCase)));
+    // Dependency directories are never source; MSBuild's bin/obj output is excluded for C# only,
+    // because other ecosystems keep entry points and sources there. Segment names are matched
+    // case-insensitively: a checkout on a case-insensitive file system can spell them either way.
+    private static bool IsSourcePath(string path)
+    {
+        if (!IsSafePath(path) || !MintLintAnalyzer.SupportsFile(path)) return false;
+        var isCSharp = Path.GetExtension(path).Equals(".cs", StringComparison.OrdinalIgnoreCase);
+        foreach (var part in path.Split('/'))
+        {
+            if (IsDependencyDirectory(part) || (isCSharp && IsBuildOutputDirectory(part))) return false;
+        }
+        return true;
+    }
+
+    private static bool IsDependencyDirectory(string part) =>
+        part.Equals(".git", StringComparison.OrdinalIgnoreCase)
+        || part.Equals("node_modules", StringComparison.OrdinalIgnoreCase)
+        || part.Equals("vendor", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsBuildOutputDirectory(string part) =>
+        part.Equals("bin", StringComparison.OrdinalIgnoreCase)
+        || part.Equals("obj", StringComparison.OrdinalIgnoreCase);
 
     private static string Id(string kind, string path) => kind + ":" + Convert.ToHexStringLower(
         SHA256.HashData(Encoding.UTF8.GetBytes(path)))[..24];

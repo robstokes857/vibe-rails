@@ -107,6 +107,8 @@ public sealed class RemoteHttpRelayClientTests : IAsyncLifetime
     [Fact]
     public async Task ConcurrentRequests_AreCorrelatedWhenResponsesArriveOutOfOrder()
     {
+        var firstRequestReceived = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
         var secondResponseSent = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseFirstResponse = new TaskCompletionSource(
@@ -115,6 +117,7 @@ public sealed class RemoteHttpRelayClientTests : IAsyncLifetime
         await StartRelayServerAsync(async (socket, cancellationToken) =>
         {
             var firstInbound = await ReceiveRequestAsync(socket, cancellationToken);
+            firstRequestReceived.TrySetResult();
             var secondInbound = await ReceiveRequestAsync(socket, cancellationToken);
 
             await SendResponseAsync(
@@ -135,6 +138,9 @@ public sealed class RemoteHttpRelayClientTests : IAsyncLifetime
         var secondRequest = CreateRequest();
 
         var firstTask = client.SendAsync(firstRequest, TestContext.Current.CancellationToken);
+        // Establish arrival order before starting the second request. Both remain in flight
+        // when responses are sent; task scheduling is not a guarantee of socket send order.
+        await firstRequestReceived.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
         var secondTask = client.SendAsync(secondRequest, TestContext.Current.CancellationToken);
 
         await secondResponseSent.Task.WaitAsync(

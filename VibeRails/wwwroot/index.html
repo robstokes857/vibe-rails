@@ -4199,13 +4199,56 @@
                     background: color-mix(in srgb, var(--color-primary, #3b82f6) 6%, var(--color-bg-surface, #1e1e1e));
                 }
 
-                /* Agent notes: the scratchpad in the right rail. Same card as a comment, sized
-                   for the narrow column, dashed to read as working notes rather than the thread. */
+                /* Agent notes: the agents' scratchpad, a collapsed section of its own beside the
+                   comment thread. Same card as a comment, dashed and tagged so it reads as working notes. */
                 .board-comment.board-note {
-                    grid-template-columns: 24px minmax(0, 1fr);
-                    margin: 0.5rem 0;
-                    font-size: 0.75rem;
+                    border-style: dashed;
                     border-left-style: dashed;
+                }
+
+                .board-log-tag {
+                    margin-left: 0.35rem;
+                    padding: 0 0.35rem;
+                    border: 1px dashed var(--color-border, #334155);
+                    border-radius: 4px;
+                    color: var(--color-text-muted, #94a3b8);
+                    font-size: 0.64rem;
+                    font-weight: 600;
+                    letter-spacing: 0.04em;
+                    text-transform: uppercase;
+                }
+
+                /* A History entry (board-history.js, VB-51): one quiet line of text and author/time,
+                   never a card of its own; the recorded values expand on a full-width row beneath. */
+                .board-log-change {
+                    display: flex;
+                    flex-wrap: wrap;
+                    align-items: baseline;
+                    gap: 0.55rem;
+                    min-width: 0;
+                    padding: 0.1rem 0.75rem 0.1rem 0.95rem;
+                    color: var(--color-text-muted, #94a3b8);
+                    font-size: 0.76rem;
+                }
+
+                .board-log-change-text {
+                    flex: 1 1 auto;
+                    min-width: 0;
+                    overflow-wrap: anywhere;
+                }
+
+                .board-log-change > small,
+                .board-log-change > details {
+                    min-width: 0;
+                }
+
+                .board-log-change > details {
+                    flex-basis: 100%;
+                }
+
+                .board-log-change pre {
+                    white-space: pre-wrap;
+                    overflow-wrap: anywhere;
                 }
 
                 /* Composer ------------------------------------------------ */

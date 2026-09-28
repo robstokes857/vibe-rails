@@ -45,7 +45,7 @@ public sealed partial class BoardStore
         command.Transaction = transaction;
         command.CommandText = $"""
             SELECT s.CardId FROM {AllSessionsSql} s JOIN BoardCards c ON c.Id = s.CardId
-            WHERE s.SessionId = $session AND c.ProjectPath = $project{ProjectPathCollation};
+            WHERE s.SessionId = $session AND c.ProjectPath = $project{ProjectPathCollation} AND c.DeletedUTC IS NULL;
             """;
         command.Parameters.AddWithValue("$session", sessionId);
         command.Parameters.AddWithValue("$project", project);

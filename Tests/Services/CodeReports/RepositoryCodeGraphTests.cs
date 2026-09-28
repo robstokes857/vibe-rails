@@ -24,6 +24,44 @@ public sealed class RepositoryCodeGraphTests
     }
 
     [Fact]
+    public void SelectPaths_ChargesNewDirectoriesAgainstTheNodeBudget_SoBuildKeepsEverySelectedFile()
+    {
+        var paths = new[] { "d1/a.cs", "d1/b.cs", "d2/a.cs", "d3/a.cs", "d4/a.cs", "d5/a.cs", "d6/a.cs" };
+        var selected = RepositoryCodeGraph.SelectPaths(paths, new HashSet<string>(), 10, nodeLimit: 9).ToArray();
+        // The first file of a directory costs two nodes: d5 and d6 no longer fit, d1's second file still does.
+        Assert.Equal(new[] { "d1/a.cs", "d2/a.cs", "d3/a.cs", "d4/a.cs", "d1/b.cs" }, selected);
+        var graph = RepositoryCodeGraph.Build("test",
+            selected.Select(path => (path, (SourceOutline?)null)).ToArray(), false, TestContext.Current.CancellationToken);
+        Assert.Equal(5, graph.Nodes.Count(node => node.Kind == "file"));
+        Assert.Equal(9, graph.Nodes.Count);
+        Assert.False(graph.Truncated);
+        // A top-level file introduces the repository root node (two nodes). A report path that no longer
+        // fits is skipped rather than ending the selection, so a cheaper file still gets its turn.
+        Assert.Equal(new[] { "deep/x.cs", "deep/y.cs" }, RepositoryCodeGraph.SelectPaths(
+            ["deep/x.cs", "root.cs", "deep/y.cs"], new HashSet<string> { "deep/x.cs", "root.cs" }, 10, nodeLimit: 3));
+    }
+
+    [Fact]
+    public void Build_ProbesExtensionsForDottedModuleStems()
+    {
+        // Side-effect imports and no class declarations: the only evidence that can connect these
+        // files is import resolution, never a type-name mention.
+        var graph = RepositoryCodeGraph.Build("test", [
+            Source("src/a.ts", "import './user.service';\nimport './app.module';\nimport './data.json';"),
+            Source("src/user.service.ts", "export const service = 1"),
+            Source("src/app.module/index.ts", "export const module = 1"),
+            Source("src/data.json.ts", "export const notTheJson = 1")
+        ], false, TestContext.Current.CancellationToken);
+        var nodes = graph.Nodes.ToDictionary(n => n.Id);
+        var source = graph.Nodes.Single(n => n.Path == "src/a.ts");
+        var targets = graph.Edges.Where(e => e.Source == source.Id && e.Kind == "references")
+            .Select(e => nodes[e.Target].Path).Order().ToArray();
+        // `./user.service` and `./app.module` are stems, so `.ts` and `/index.ts` are probed as before VB-49;
+        // `./data.json` names its file outright, so `data.json.ts` is not a candidate.
+        Assert.Equal(new[] { "src/app.module/index.ts", "src/user.service.ts" }, targets);
+    }
+
+    [Fact]
     public void Build_ConnectsReExportBarrels_AndTypeScriptEmittedExtensions()
     {
         var files = new[] {
@@ -81,16 +119,27 @@ public sealed class RepositoryCodeGraphTests
         {
             await Git(root, "init");
             var sources = new[] { "bin/cli.js", "bin/task.py", "bin/cli.php", "src/bin/main.rs", "assets/main.ts" };
-            foreach (var path in sources.Concat(new[] { "bin/Debug/Generated.cs", "obj/Generated.cs", "node_modules/package/main.js", "vendor/package/main.php" }))
+            // `tools/Bin` spells the segment the other way: the exclusion is case-insensitive.
+            var excluded = new[] { "bin/Debug/Generated.cs", "obj/Generated.cs", "tools/Bin/Generated.cs", "node_modules/package/main.js", "vendor/package/main.php" };
+            foreach (var path in sources.Concat(excluded))
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(root, path))!);
                 await File.WriteAllTextAsync(Path.Combine(root, path), "// fixture", TestContext.Current.CancellationToken);
             }
+            // Track the whole fixture. The catalog's `--others --exclude-standard` half would honour a
+            // developer's global ignore file (a `bin/` or `node_modules/` line there), so the map reads
+            // these through its `--cached` half instead, and it is the map's own filter under test.
+            await Git(root, "add", "--force", "--all");
             var graph = await new RepositoryCodeGraph().ReadAsync(root, [], TestContext.Current.CancellationToken);
             Assert.Equal(sources.Order(), graph.Nodes.Where(n => n.Kind == "file").Select(n => n.Path).Order());
             Assert.False(graph.Truncated);
         }
-        finally { Directory.Delete(root, true); }
+        finally
+        {
+            foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+                File.SetAttributes(file, FileAttributes.Normal);
+            Directory.Delete(root, true);
+        }
     }
 
     [Fact]

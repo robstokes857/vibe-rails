@@ -486,6 +486,14 @@ smudge byte-exact fixtures on a fresh Windows checkout and you'll get failures w
 
 ## Things that will bite you
 
+- **A custom `ANTHROPIC_BASE_URL` changes how Claude Code budgets context.** Claude Code
+  disables MCP tool search behind a non-first-party base URL and sends every MCP tool schema
+  in the first request (about 40k tokens per session, measured 2026-09-27), and it budgets a
+  200K window for natively-1M models unless the `--model` ID carries `[1m]`. The proxy
+  therefore always ships `ENABLE_TOOL_SEARCH=true` next to the base URL
+  (`LlmProxyClaudeConfig.BuildClaudeProxyEnvironment`); the relay copies `tool_reference`
+  blocks through verbatim, which is what that opt-in requires. The window half is the
+  launcher's job: the Board and Environment catalogs offer `[1m]` model IDs.
 - **`token_saving_plan.md` does not exist, and nothing points at it any more.** It was
   deleted; the comments that cited its `§2`/`§3`/`§5`/`§6` were rewritten (2026-07-15) to
   state the rule they rely on, or to point here. The invariants were always real — only

@@ -115,6 +115,21 @@ public class LlmProxyClaudeConfigTests : IDisposable
     }
 
     [Fact]
+    public void BuildClaudeProxyEnvironment_OptsBackIntoToolSearch()
+    {
+        // A custom ANTHROPIC_BASE_URL makes Claude Code disable MCP tool search and send every MCP
+        // tool schema up front (~40k tokens per session, measured 2026-09-27). The proxy copies
+        // tool_reference blocks through verbatim, so the documented ENABLE_TOOL_SEARCH=true opt-in
+        // must ride alongside the base URL — never one without the other.
+        var env = LlmProxyClaudeConfig.BuildClaudeProxyEnvironment(
+            "http://127.0.0.1:4321", "session-abc", "tab-xyz");
+
+        Assert.Equal("ENABLE_TOOL_SEARCH", LlmProxyClaudeConfig.ToolSearchVariable);
+        Assert.Equal("true", env[LlmProxyClaudeConfig.ToolSearchVariable]);
+        Assert.Equal(3, env.Count);
+    }
+
+    [Fact]
     public async Task PrepareSession_Claude_RoutesThroughAnthropicProxy()
     {
         var service = CreateService(claudeLlmProxyEnabled: true);
@@ -131,6 +146,11 @@ public class LlmProxyClaudeConfigTests : IDisposable
             "Expected ANTHROPIC_CUSTOM_HEADERS to carry the proxy session/tab tokens.");
         Assert.Equal("viberails_session: test-session-token\nviberails_tab: test-tab-token", customHeaders);
 
+        Assert.True(
+            prepared.Environment.TryGetValue("ENABLE_TOOL_SEARCH", out var toolSearch),
+            "Expected ENABLE_TOOL_SEARCH so the custom base URL does not disable MCP tool search.");
+        Assert.Equal("true", toolSearch);
+
         // The launch command itself stays clean — the proxy is env-based, tokens never hit argv.
         Assert.StartsWith("claude", prepared.LaunchCommand);
         Assert.DoesNotContain("ANTHROPIC_BASE_URL", prepared.LaunchCommand);
@@ -146,6 +166,7 @@ public class LlmProxyClaudeConfigTests : IDisposable
 
         Assert.False(prepared.Environment.ContainsKey("ANTHROPIC_BASE_URL"));
         Assert.False(prepared.Environment.ContainsKey("ANTHROPIC_CUSTOM_HEADERS"));
+        Assert.False(prepared.Environment.ContainsKey("ENABLE_TOOL_SEARCH"));
     }
 
     [Fact]
@@ -157,6 +178,7 @@ public class LlmProxyClaudeConfigTests : IDisposable
 
         Assert.False(prepared.Environment.ContainsKey("ANTHROPIC_BASE_URL"));
         Assert.False(prepared.Environment.ContainsKey("ANTHROPIC_CUSTOM_HEADERS"));
+        Assert.False(prepared.Environment.ContainsKey("ENABLE_TOOL_SEARCH"));
     }
 
     [Theory]
@@ -181,6 +203,9 @@ public class LlmProxyClaudeConfigTests : IDisposable
         Assert.False(
             prepared.Environment.ContainsKey("ANTHROPIC_CUSTOM_HEADERS"),
             $"ANTHROPIC_CUSTOM_HEADERS must only be set for LLM.Claude, not {llm}.");
+        Assert.False(
+            prepared.Environment.ContainsKey("ENABLE_TOOL_SEARCH"),
+            $"ENABLE_TOOL_SEARCH rides with the Claude proxy env only, not {llm}.");
     }
 
     [Fact]

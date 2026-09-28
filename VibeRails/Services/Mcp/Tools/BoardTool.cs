@@ -299,7 +299,7 @@ public sealed class BoardTool(
                 Priority: priority,
                 Tags: SplitTags(tags),
                 Type: type,
-                BoardId: target.BoardId), cancellationToken);
+                BoardId: target.BoardId), cancellationToken, await ResolveAuthorAsync(cancellationToken));
             await AutoLinkSessionAsync(project, created.Id, cancellationToken);
             return $"Created {created.Key}: {created.Title}";
         }
@@ -341,7 +341,7 @@ public sealed class BoardTool(
                 Tags: tags is null ? null : SplitTags(tags) ?? [],
                 Blocked: blocked,
                 Type: type, Flagged: flagged);
-            var updated = await service.UpdateCardAsync(target.Project, target.CardId!, request, cancellationToken);
+            var updated = await service.UpdateCardAsync(target.Project, target.CardId!, request, cancellationToken, await ResolveAuthorAsync(cancellationToken));
             if (updated is null)
                 return $"FAIL: card not found: {card}";
             await AutoLinkSessionAsync(target.Project, updated.Id, cancellationToken);

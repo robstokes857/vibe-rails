@@ -171,7 +171,7 @@ public sealed partial class BoardStore : IBoardStore
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
             SELECT k.BoardId, COUNT(*) FROM BoardCards c JOIN BoardColumns k ON k.Id = c.ColumnId
-            WHERE c.ProjectPath = $project{ProjectPathCollation} AND k.BoardId IS NOT NULL
+            WHERE c.ProjectPath = $project{ProjectPathCollation} AND k.BoardId IS NOT NULL AND c.DeletedUTC IS NULL
             GROUP BY k.BoardId;
             """;
         command.Parameters.AddWithValue("$project", project);
@@ -272,7 +272,8 @@ public sealed partial class BoardStore : IBoardStore
         var destination = columns.Where(c => c.Id != target.Id).OrderBy(c => c.Position).First();
         var destinationCards = await ReadColumnCardIdsAsync(connection, transaction, destination.Id, cancellationToken);
         var movingCards = await ReadColumnCardIdsAsync(connection, transaction, target.Id, cancellationToken);
-        var now = ToDb(DateTime.UtcNow);
+        var nowUtc = DateTime.UtcNow;
+        var now = ToDb(nowUtc);
         var position = destinationCards.Count;
         foreach (var cardId in movingCards)
         {
@@ -284,13 +285,23 @@ public sealed partial class BoardStore : IBoardStore
             move.Parameters.AddWithValue("$updated", now);
             move.Parameters.AddWithValue("$id", cardId);
             await move.ExecuteNonQueryAsync(cancellationToken);
+            await LogCardMovedAsync(connection, transaction, cardId, target, destination, BoardAuthor.System(), nowUtc, cancellationToken);
         }
 
         await using (var delete = connection.CreateCommand())
         {
+            // Soft-deleted cards still reference the lane and would block its delete. They follow
+            // the live cards without a log entry, and the lane-entry triggers their move fires are
+            // removed at once: a deleted card never runs an Automation.
             delete.Transaction = transaction;
-            delete.CommandText = "DELETE FROM BoardColumns WHERE Id = $id;";
+            delete.CommandText = """
+                UPDATE BoardCards SET ColumnId = $destination WHERE ColumnId = $id AND DeletedUTC IS NOT NULL;
+                DELETE FROM BoardPendingAutomations WHERE CardId IN (SELECT Id FROM BoardCards WHERE ColumnId = $destination AND DeletedUTC IS NOT NULL);
+                DELETE FROM BoardPendingAdditionalAutomations WHERE CardId IN (SELECT Id FROM BoardCards WHERE ColumnId = $destination AND DeletedUTC IS NOT NULL);
+                DELETE FROM BoardColumns WHERE Id = $id;
+                """;
             delete.Parameters.AddWithValue("$id", target.Id);
+            delete.Parameters.AddWithValue("$destination", destination.Id);
             await delete.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -339,6 +350,7 @@ public sealed partial class BoardStore : IBoardStore
         command.CommandText = CardSelectSql + $"""
              WHERE c.ProjectPath = $project{ProjectPathCollation}
                AND c.ColumnId IN (SELECT k.Id FROM BoardColumns k WHERE k.BoardId = $board)
+               AND c.DeletedUTC IS NULL
              ORDER BY c.ColumnId, c.Position, c.Number;
             """;
         command.Parameters.AddWithValue("$project", project);
@@ -377,19 +389,28 @@ public sealed partial class BoardStore : IBoardStore
         };
     }
 
-    public async Task<BoardCardRecord> CreateCardAsync(string projectPath, NewBoardCard card, CancellationToken cancellationToken = default)
+    public async Task<BoardCardRecord> CreateCardAsync(string projectPath, NewBoardCard card, CancellationToken cancellationToken = default, BoardAuthor? author = null)
     {
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
-        var created = await InsertCardAsync(connection, transaction, project, card, cancellationToken);
+        var created = await InsertCardAsync(connection, transaction, project, card, author ?? BoardAuthor.User(), cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return created;
     }
 
-    /// <summary>Allocates the key and inserts the card inside the caller's write transaction.</summary>
+    /// <summary>A card minted on viberails.ai keeps its id and key; its number seeds the local high-water mark.</summary>
+    private sealed record SyncedCardIdentity(string CardId, string CardKey, int Number);
+
+    /// <summary>
+    /// Allocates the key and inserts the card, and its created log entry, inside the caller's write
+    /// transaction. A <paramref name="synced"/> identity comes from a pulled web card: the number
+    /// becomes the web number when that is above the project's high-water mark, else the next local
+    /// number, and the stored key is the web one either way.
+    /// </summary>
     private async Task<BoardCardRecord> InsertCardAsync(
-        SqliteConnection connection, SqliteTransaction transaction, string project, NewBoardCard card, CancellationToken cancellationToken)
+        SqliteConnection connection, SqliteTransaction transaction, string project, NewBoardCard card, BoardAuthor author, CancellationToken cancellationToken,
+        SyncedCardIdentity? synced = null, BoardSyncStamp? stamp = null)
     {
         BoardColumnRecord column;
         if (string.IsNullOrWhiteSpace(card.ColumnId))
@@ -413,27 +434,33 @@ public sealed partial class BoardStore : IBoardStore
         // Keep the high-water mark independently of card rows, so deleting even
         // the last card cannot make an old key available again. Allocation and
         // insertion share the transaction across dashboard and MCP processes.
+        // A web-minted number above the mark is adopted, so the two sides keep numbering in step;
+        // one at or below it would collide, so the card takes the next local number instead.
         var number = checked((int)await ScalarLongAsync(connection, transaction,
             """
-            INSERT INTO BoardCardSequences (ProjectPath, LastNumber) VALUES ($project, 1)
-            ON CONFLICT(ProjectPath) DO UPDATE SET LastNumber = LastNumber + 1
+            INSERT INTO BoardCardSequences (ProjectPath, LastNumber) VALUES ($project, $seed)
+            ON CONFLICT(ProjectPath) DO UPDATE SET LastNumber = MAX(LastNumber + 1, $seed)
             RETURNING LastNumber;
             """,
-            ("$project", project), cancellationToken));
+            ("$project", project), cancellationToken, ("$seed", synced?.Number ?? 1)));
         const int position = 0;
-        var id = NewId("card");
-        var now = DateTime.UtcNow;
+        var id = synced?.CardId ?? NewId("card");
+        // The stored key cannot be re-guessed from the number alone; the unique index turns the
+        // (astronomically unlikely) collision into a failed write rather than two cards on one key.
+        var cardKey = synced?.CardKey ?? BoardKeys.NewStoredKey(prefix, number);
+        var now = stamp?.CreatedUtc ?? DateTime.UtcNow;
 
         await using (var insert = connection.CreateCommand())
         {
             insert.Transaction = transaction;
             insert.CommandText = """
                 INSERT INTO BoardCards
-                    (Id, ProjectPath, Number, ColumnId, Position, Title, Description, Assignee, Priority, Type, Points, Tags, Blocked, Flagged, CreatedUTC, UpdatedUTC)
+                    (Id, ProjectPath, Number, ColumnId, Position, Title, Description, Assignee, Priority, Type, Points, Tags, Blocked, Flagged, CreatedUTC, UpdatedUTC, CardKey)
                 VALUES
-                    ($id, $project, $number, $column, $position, $title, $description, $assignee, $priority, $type, $points, $tags, $blocked, $flagged, $created, $updated);
+                    ($id, $project, $number, $column, $position, $title, $description, $assignee, $priority, $type, $points, $tags, $blocked, $flagged, $created, $updated, $cardKey);
                 """;
             insert.Parameters.AddWithValue("$id", id);
+            insert.Parameters.AddWithValue("$cardKey", cardKey);
             insert.Parameters.AddWithValue("$project", project);
             insert.Parameters.AddWithValue("$number", number);
             insert.Parameters.AddWithValue("$column", column.Id);
@@ -454,30 +481,56 @@ public sealed partial class BoardStore : IBoardStore
         await PromoteCardAsync(connection, transaction, id, cancellationToken);
         await WriteBaseLlmOptionsAsync(connection, transaction, id, card.BaseLlmOptions, cancellationToken);
 
-        return new BoardCardRecord(id, project, number, column.Id, position, card.Title, card.Description,
-            card.Assignee, card.Priority, card.Points, card.Tags, card.Blocked, 0, now, now, card.BaseLlmOptions, Type: card.Type, BoardId: column.BoardId, Flagged: card.Flagged, KeyPrefix: prefix);
+        var created = new BoardCardRecord(id, project, number, column.Id, position, card.Title, card.Description,
+            card.Assignee, card.Priority, card.Points, card.Tags, card.Blocked, 0, now, now, card.BaseLlmOptions, Type: card.Type, BoardId: column.BoardId, Flagged: card.Flagged, KeyPrefix: prefix, StoredKey: cardKey);
+        await LogCardCreatedAsync(connection, transaction, created, column.Name, author, cancellationToken, stamp);
+        return created;
     }
 
-    public async Task<BoardCardRecord?> UpdateCardAsync(string projectPath, string cardId, BoardCardPatch patch, CancellationToken cancellationToken = default)
+    public Task<BoardCardRecord?> UpdateCardAsync(string projectPath, string cardId, BoardCardPatch patch, CancellationToken cancellationToken = default, BoardAuthor? author = null) =>
+        UpdateCardCoreAsync(projectPath, cardId, patch, author ?? BoardAuthor.User(), stamp: null, cancellationToken);
+
+    /// <summary>The update, with the Card Log entry stamped when the change was pulled from viberails.ai.</summary>
+    private async Task<BoardCardRecord?> UpdateCardCoreAsync(string projectPath, string cardId, BoardCardPatch patch, BoardAuthor author, BoardSyncStamp? stamp, CancellationToken cancellationToken)
     {
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
-        var existing = await ReadCardAsync(connection, transaction, project, cardId, cancellationToken);
+        var existing = await ReadCardAsync(connection, transaction, project, cardId, cancellationToken, includeDeleted: stamp is not null);
         if (existing is null)
             return null;
+
+        if (stamp is not null)
+        {
+            RequireSyncBoard(existing, stamp);
+            if (await HasSyncStampAsync(connection, transaction, stamp, cancellationToken)) return existing;
+            var locked = await GetFieldsChangedAfterAsync(connection, transaction, existing.Id, stamp.RemoteSeq, cancellationToken);
+            patch = WithoutLockedFields(patch, locked);
+            if (await IsDeletedAsync(connection, transaction, existing.Id, cancellationToken))
+            {
+                await LogCardChangedAsync(connection, transaction, existing, existing, null, null, author, cancellationToken, stamp);
+                await transaction.CommitAsync(cancellationToken);
+                return existing;
+            }
+        }
 
         var moving = !string.IsNullOrWhiteSpace(patch.ColumnId)
             && !string.Equals(patch.ColumnId.Trim(), existing.ColumnId, StringComparison.Ordinal);
         var columnId = existing.ColumnId;
         var boardId = existing.BoardId;
         const int position = 0;
+        string? fromLaneName = null, toLaneName = null;
         if (moving)
         {
             var column = await ReadColumnAsync(connection, transaction, project, patch.ColumnId!.Trim(), cancellationToken)
                 ?? throw new BoardValidationException($"Lane not found: {patch.ColumnId}");
             columnId = column.Id;
             boardId = column.BoardId;
+            RequireLocalBoardTransfer(existing.BoardId, column.BoardId);
+            if (stamp?.BoardId is { } syncBoard && column.BoardId != syncBoard)
+                throw new BoardValidationException("A synced move must stay on its published board.");
+            toLaneName = column.Name;
+            fromLaneName = (await ReadColumnAsync(connection, transaction, project, existing.ColumnId, cancellationToken))?.Name;
         }
 
         // Append reads the current text while holding the same write transaction as the update.
@@ -540,35 +593,57 @@ public sealed partial class BoardStore : IBoardStore
         if (moving)
             await RenumberColumnAsync(connection, transaction, existing.ColumnId, cancellationToken);
         await PromoteCardAsync(connection, transaction, updated.Id, cancellationToken);
+        await LogCardChangedAsync(connection, transaction, existing, updated, fromLaneName, toLaneName,
+            author, cancellationToken, stamp);
+        await ReconcileMissingSyncedLaneAsync(connection, transaction, updated, stamp, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return updated;
     }
 
-    public async Task<bool> DeleteCardAsync(string projectPath, string cardId, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Soft delete (VB-51): the card leaves every list, lookup and count, and its pending lane
+    /// Automations are dropped, but the row, its log and its links stay for restore (VB-54).
+    /// </summary>
+    public Task<bool> DeleteCardAsync(string projectPath, string cardId, CancellationToken cancellationToken = default, BoardAuthor? author = null) =>
+        DeleteCardCoreAsync(projectPath, cardId, author ?? BoardAuthor.User(), stamp: null, cancellationToken);
+
+    private async Task<bool> DeleteCardCoreAsync(string projectPath, string cardId, BoardAuthor author, BoardSyncStamp? stamp, CancellationToken cancellationToken)
     {
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
-        var existing = await ReadCardAsync(connection, transaction, project, cardId, cancellationToken);
+        var existing = await ReadCardAsync(connection, transaction, project, cardId, cancellationToken, includeDeleted: stamp is not null);
         if (existing is null)
             return false;
+        if (stamp is not null)
+        {
+            RequireSyncBoard(existing, stamp);
+            if (await HasSyncStampAsync(connection, transaction, stamp, cancellationToken)) return true;
+        }
 
+        var now = stamp?.CreatedUtc ?? DateTime.UtcNow;
         await using (var delete = connection.CreateCommand())
         {
             delete.Transaction = transaction;
-            delete.CommandText = "DELETE FROM BoardCards WHERE Id = $id;";
+            delete.CommandText = """
+                UPDATE BoardCards SET DeletedUTC = $now, UpdatedUTC = $now WHERE Id = $id;
+                DELETE FROM BoardPendingAutomations WHERE CardId = $id;
+                DELETE FROM BoardPendingAdditionalAutomations WHERE CardId = $id;
+                """;
             delete.Parameters.AddWithValue("$id", existing.Id);
+            delete.Parameters.AddWithValue("$now", ToDb(now));
             await delete.ExecuteNonQueryAsync(cancellationToken);
         }
+        await LogCardDeletedAsync(connection, transaction, existing.Id, author, now, cancellationToken, stamp);
         await RenumberColumnAsync(connection, transaction, existing.ColumnId, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return true;
     }
 
-    public Task<BoardCardRecord?> MoveCardAsync(string projectPath, string cardId, string columnId, int? position, CancellationToken cancellationToken = default) =>
-        MoveCardAsync(projectPath, cardId, columnId, position, skipLaneAutomations: false, cancellationToken);
+    public Task<BoardCardRecord?> MoveCardAsync(string projectPath, string cardId, string columnId, int? position, CancellationToken cancellationToken = default, BoardAuthor? author = null) =>
+        MoveCardAsync(projectPath, cardId, columnId, position, skipLaneAutomations: false, cancellationToken, author);
 
-    public async Task<BoardCardRecord?> MoveCardAsync(string projectPath, string cardId, string columnId, int? position, bool skipLaneAutomations, CancellationToken cancellationToken = default)
+    public async Task<BoardCardRecord?> MoveCardAsync(string projectPath, string cardId, string columnId, int? position, bool skipLaneAutomations, CancellationToken cancellationToken = default, BoardAuthor? author = null)
     {
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
@@ -579,6 +654,8 @@ public sealed partial class BoardStore : IBoardStore
         var column = await ReadColumnAsync(connection, transaction, project, columnId, cancellationToken)
             ?? throw new BoardValidationException($"Lane not found: {columnId}");
 
+        RequireLocalBoardTransfer(existing.BoardId, column.BoardId);
+
         var sourceIds = (await ReadColumnCardIdsAsync(connection, transaction, existing.ColumnId, cancellationToken))
             .Where(id => id != existing.Id).ToList();
         var sameColumn = string.Equals(column.Id, existing.ColumnId, StringComparison.Ordinal);
@@ -588,16 +665,19 @@ public sealed partial class BoardStore : IBoardStore
         var index = Math.Clamp(position ?? 0, 0, targetIds.Count);
         targetIds.Insert(index, existing.Id);
 
-        var now = ToDb(DateTime.UtcNow);
+        var nowUtc = DateTime.UtcNow;
         await using (var move = connection.CreateCommand())
         {
             move.Transaction = transaction;
             move.CommandText = "UPDATE BoardCards SET ColumnId = $column, UpdatedUTC = $updated WHERE Id = $id;";
             move.Parameters.AddWithValue("$column", column.Id);
-            move.Parameters.AddWithValue("$updated", now);
+            move.Parameters.AddWithValue("$updated", ToDb(nowUtc));
             move.Parameters.AddWithValue("$id", existing.Id);
             await move.ExecuteNonQueryAsync(cancellationToken);
         }
+        // A reorder within the lane is not history; only a lane change is logged.
+        if (!sameColumn && await ReadColumnAsync(connection, transaction, project, existing.ColumnId, cancellationToken) is { } source)
+            await LogCardMovedAsync(connection, transaction, existing.Id, source, column, author ?? BoardAuthor.User(), nowUtc, cancellationToken);
         if (skipLaneAutomations && !sameColumn)
         {
             // The lane-entry triggers above have just replaced this card's pending entries with
@@ -672,24 +752,28 @@ public sealed partial class BoardStore : IBoardStore
     public Task<BoardCommentRecord?> AddNoteAsync(string projectPath, string cardId, BoardAuthor author, string body, CancellationToken cancellationToken = default)
         => InsertCommentRowAsync(projectPath, cardId, author, body, BoardCommentKinds.Note, cancellationToken);
 
-    private async Task<BoardCommentRecord?> InsertCommentRowAsync(string projectPath, string cardId, BoardAuthor author, string body, string kind, CancellationToken cancellationToken)
+    private async Task<BoardCommentRecord?> InsertCommentRowAsync(string projectPath, string cardId, BoardAuthor author, string body, string kind, CancellationToken cancellationToken, BoardSyncStamp? stamp = null)
     {
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
-        var card = await ReadCardAsync(connection, transaction, project, cardId, cancellationToken);
+        var card = await ReadCardAsync(connection, transaction, project, cardId, cancellationToken, includeDeleted: stamp is not null);
         if (card is null)
             return null;
+        if (stamp is not null) RequireSyncBoard(card, stamp);
 
-        // Notes use their own id prefix so an agent can tell the two apart in tool output.
-        var comment = new BoardCommentRecord(NewId(kind == BoardCommentKinds.Note ? "note" : "cm"), card.Id, author, body, DateTime.UtcNow, kind);
+        // Notes use their own id prefix so an agent can tell the two apart in tool output. A pulled
+        // web comment keeps its remote id and time and is already marked sent (VB-51).
+        var comment = new BoardCommentRecord(stamp?.EntryId ?? NewId(kind == BoardCommentKinds.Note ? "note" : "cm"), card.Id, author, body, stamp?.CreatedUtc ?? DateTime.UtcNow, kind);
+        if (stamp is not null && await HasSyncStampAsync(connection, transaction, stamp, cancellationToken)) return comment;
         await using (var insert = connection.CreateCommand())
         {
             insert.Transaction = transaction;
             insert.CommandText = """
-                INSERT INTO BoardComments (Id, CardId, AuthorKind, AuthorLabel, AuthorCli, SessionId, Body, CreatedUTC, Kind)
-                VALUES ($id, $card, $kind, $label, $cli, $session, $body, $created, $rowKind);
+                INSERT INTO BoardComments (Id, CardId, AuthorKind, AuthorLabel, AuthorCli, SessionId, Body, CreatedUTC, Kind, RemoteSeq)
+                VALUES ($id, $card, $kind, $label, $cli, $session, $body, $created, $rowKind, $remoteSeq);
                 """;
+            insert.Parameters.AddWithValue("$remoteSeq", stamp is null ? DBNull.Value : stamp.RemoteSeq);
             insert.Parameters.AddWithValue("$id", comment.Id);
             insert.Parameters.AddWithValue("$card", card.Id);
             insert.Parameters.AddWithValue("$kind", author.Kind);
@@ -701,7 +785,8 @@ public sealed partial class BoardStore : IBoardStore
             insert.Parameters.AddWithValue("$rowKind", kind);
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
-        await TouchCardAsync(connection, transaction, card.Id, cancellationToken);
+        if (!await IsDeletedAsync(connection, transaction, card.Id, cancellationToken))
+            await TouchCardAsync(connection, transaction, card.Id, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return comment;
     }
@@ -875,7 +960,7 @@ public sealed partial class BoardStore : IBoardStore
         command.CommandText = $"""
             SELECT s.SessionId, s.CardId, c.ProjectPath
             FROM {AllSessionsSql} s JOIN BoardCards c ON c.Id = s.CardId
-            WHERE s.SessionId = $session ORDER BY s.LinkOrder, s.CreatedUTC, s.CardId LIMIT 1;
+            WHERE s.SessionId = $session AND c.DeletedUTC IS NULL ORDER BY s.LinkOrder, s.CreatedUTC, s.CardId LIMIT 1;
             """;
         command.Parameters.AddWithValue("$session", sessionId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -889,7 +974,7 @@ public sealed partial class BoardStore : IBoardStore
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
-        command.CommandText = SessionSelectSql + $" JOIN BoardCards c ON c.Id = s.CardId WHERE c.ProjectPath = $project{ProjectPathCollation} ORDER BY s.CreatedUTC;";
+        command.CommandText = SessionSelectSql + $" JOIN BoardCards c ON c.Id = s.CardId WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.DeletedUTC IS NULL ORDER BY s.CreatedUTC;";
         command.Parameters.AddWithValue("$project", project);
         var sessions = new List<BoardSessionRecord>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -1050,7 +1135,7 @@ public sealed partial class BoardStore : IBoardStore
                (SELECT o.OptionsJson FROM BoardCardOptions o WHERE o.CardId = c.Id),
                c.Type,
                (SELECT k.BoardId FROM BoardColumns k WHERE k.Id = c.ColumnId), c.Flagged,
-               {CardPrefixSql}
+               {CardPrefixSql}, c.CardKey
         FROM BoardCards c
         {CardPrefixJoinSql}
         """;
@@ -1142,26 +1227,53 @@ public sealed partial class BoardStore : IBoardStore
             ("$project", project), cancellationToken);
     }
 
-    private static async Task<BoardCardRecord?> ReadCardAsync(SqliteConnection connection, SqliteTransaction? transaction, string project, string idOrKey, CancellationToken cancellationToken)
+    /// <summary>
+    /// A card by stored key (<c>VB-A7K2P-53</c>, any case), legacy key (<c>VB-53</c>) or id.
+    /// Soft-deleted cards are not found unless <paramref name="includeDeleted"/>.
+    /// </summary>
+    private static async Task<BoardCardRecord?> ReadCardAsync(SqliteConnection connection, SqliteTransaction? transaction, string project, string idOrKey, CancellationToken cancellationToken, bool includeDeleted = false)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        if (BoardKeys.TryParse(idOrKey, out var prefix, out var number))
+        var live = includeDeleted ? "" : " AND c.DeletedUTC IS NULL";
+        if (BoardKeys.TryParseStored(idOrKey, out var storedKey))
+        {
+            command.CommandText = CardSelectSql + $" WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.CardKey = $key{live} LIMIT 1;";
+            command.Parameters.AddWithValue("$key", storedKey);
+        }
+        else if (BoardKeys.TryParse(idOrKey, out var prefix, out var number))
         {
             // The project's own prefix, or the VB an older binary shows for the same number. Another
             // project's prefix is not found rather than silently resolved to this project's number.
-            command.CommandText = CardSelectSql + $" WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.Number = $number AND ($prefix = '{BoardKeys.LegacyPrefix}' OR $prefix = {CardPrefixSql}) LIMIT 1;";
+            // A stored-key card is still found by its number: PREFIX-n is the short form of PREFIX-RRRRR-n.
+            // The exact legacy row (CardKey NULL) sorts first: PREFIX-n is the only key it has.
+            command.CommandText = CardSelectSql + $"""
+                 WHERE c.ProjectPath = $project{ProjectPathCollation} AND (
+                   (c.CardKey IS NULL AND c.Number = $number AND ($prefix = '{BoardKeys.LegacyPrefix}' OR $prefix = {CardPrefixSql}))
+                   OR c.CardKey = $short
+                   OR c.CardKey GLOB ($prefix || '-?????-' || $number)
+                   OR ($prefix = '{BoardKeys.LegacyPrefix}' AND c.CardKey GLOB ({CardPrefixSql} || '-?????-' || $number)))
+                   {live} ORDER BY (c.CardKey IS NULL) DESC LIMIT 2;
+                """;
             command.Parameters.AddWithValue("$number", number);
             command.Parameters.AddWithValue("$prefix", prefix);
+            command.Parameters.AddWithValue("$short", BoardKeys.Format(prefix, number));
         }
         else
         {
-            command.CommandText = CardSelectSql + $" WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.Id = $id LIMIT 1;";
+            command.CommandText = CardSelectSql + $" WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.Id = $id{live} LIMIT 1;";
             command.Parameters.AddWithValue("$id", idOrKey.Trim());
         }
         command.Parameters.AddWithValue("$project", project);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        return await reader.ReadAsync(cancellationToken) ? ReadCard(reader) : null;
+        if (!await reader.ReadAsync(cancellationToken)) return null;
+        var found = ReadCard(reader);
+        // Only the short-form branch can return two rows. A legacy card (no stored key) wins over a
+        // synced card whose stored key merely ends in the same number, because PREFIX-n is the only
+        // key the legacy card has; two stored-key cards on one number both have full keys to use.
+        if (found.StoredKey is not null && await reader.ReadAsync(cancellationToken))
+            throw new BoardValidationException("That short card key matches more than one card. Use the full card key.");
+        return found;
     }
 
     private static BoardCardRecord ReadCard(SqliteDataReader reader) => new(
@@ -1184,7 +1296,8 @@ public sealed partial class BoardStore : IBoardStore
         Type: reader.GetString(16),
         BoardId: reader.IsDBNull(17) ? string.Empty : reader.GetString(17),
         Flagged: reader.GetInt32(18) != 0,
-        KeyPrefix: reader.GetString(19));
+        KeyPrefix: reader.GetString(19),
+        StoredKey: reader.IsDBNull(20) ? null : reader.GetString(20));
 
     private static async Task<IReadOnlyList<BoardCommentRecord>> ReadCommentsAsync(SqliteConnection connection, string cardId, string kind, CancellationToken cancellationToken)
     {
@@ -1334,7 +1447,7 @@ public sealed partial class BoardStore : IBoardStore
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT Id FROM BoardCards WHERE ColumnId = $column ORDER BY Position, Number;";
+        command.CommandText = "SELECT Id FROM BoardCards WHERE ColumnId = $column AND DeletedUTC IS NULL ORDER BY Position, Number;";
         command.Parameters.AddWithValue("$column", columnId);
         var ids = new List<string>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -1498,6 +1611,28 @@ public sealed partial class BoardStore : IBoardStore
         // rows are not cleaned up, the scheduler just never pulls a connection whose board is gone.
         SqliteMigrationRunner.Apply(connection, "board", 13, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, JiraBoardDeleteTriggerSql));
+        // board/14 (VB-51): the Card Log (change rows in BoardComments), stored random card keys,
+        // soft-deleted cards and the viberails.ai sync links (BoardStore.CardLog.cs). Additive, no
+        // backfill; an older binary ignores the columns and reads comment/note rows only.
+        SqliteMigrationRunner.Apply(connection, "board", 14, MigrationKind.Additive, (db, transaction) =>
+        {
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardCards ADD COLUMN CardKey TEXT");
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardCards ADD COLUMN DeletedUTC TEXT");
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardComments ADD COLUMN Changes TEXT");
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardComments ADD COLUMN RemoteSeq INTEGER");
+            SqliteSchema.Execute(db, transaction, CardLogSchemaSql);
+        });
+        SqliteMigrationRunner.Apply(connection, "board", 15, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, BoardHistorySchemaSql));
+        SqliteMigrationRunner.Apply(connection, "board", 16, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardSyncLinks ADD COLUMN DestinationKey TEXT"));
+        SqliteMigrationRunner.Apply(connection, "board", 17, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, RejectedFieldsSchemaSql));
+        // board/18: the board/15 history triggers recreated NULL-safe (BoardHistory.BoardId is NOT
+        // NULL, but a lane's BoardId is NULL until adoption). Drop-and-recreate from the corrected
+        // constant; no row is read, rewritten or deleted.
+        SqliteMigrationRunner.Apply(connection, "board", 18, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, BoardHistoryTriggerResetSql + BoardHistorySchemaSql));
         ReconcileDerivedRows(connection);
     }
 

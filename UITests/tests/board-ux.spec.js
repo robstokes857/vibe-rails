@@ -131,6 +131,31 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
     return requests;
 }
 
+test('comments and notes stay separate and History loads only from card settings', async ({ page }) => {
+    await openBoard(page, { onCard: card => {
+        card.boardId = 'brd_main';
+        card.notes = [{ id: 'note_one', author: { kind: 'agent', label: 'Codex' }, body: 'Agent scratchpad', createdAt: card.createdAt }];
+    } });
+    let historyRequests = 0;
+    await page.route('**/api/v1/board/boards/brd_main/history?*', route => {
+        historyRequests++;
+        return route.fulfill({ json: { entries: [{ id: 'change_one', body: 'Title edited', author: 'You', createdUtc: '2026-09-27T12:00:00Z' }], hasMore: false, nextOffset: 1 } });
+    });
+    await page.getByText('Description images', { exact: true }).click();
+    const editor = page.locator('[data-board-card-editor]');
+    await expect(editor).toBeVisible();
+    await expect(editor.locator('[data-board-comments]')).not.toContainText('Agent scratchpad');
+    await expect(editor.locator('[data-board-history-view]')).not.toBeVisible();
+    expect(historyRequests).toBe(0);
+    await editor.locator('[data-board-notes-details] > summary').click();
+    await expect(editor.locator('[data-board-notes]')).toContainText('Agent scratchpad');
+    await editor.getByText('Card settings', { exact: true }).click();
+    expect(historyRequests).toBe(0);
+    await editor.locator('[data-board-history-view] > summary').click();
+    await expect(editor.locator('[data-history-entries]')).toContainText('Title edited');
+    expect(historyRequests).toBe(1);
+});
+
 test('description images survive editing and save', async ({ page }) => {
     await openBoard(page);
     await page.getByText('Description images', { exact: true }).click();
@@ -392,7 +417,8 @@ for (const [assignee, selection] of [
         await expect.poll(() => page.evaluate(() => window.__chatTabs)).toEqual(['board_background']);
 
         const writes = requests.filter(item => item.method === 'PUT' || item.path.endsWith('/launch'));
-        expect(writes[0].body.assignee).toBe(assignee || '');
+        // An unchanged assignee must be omitted so a stale editor cannot overwrite a sync edit.
+        expect(writes[0].body).not.toHaveProperty('assignee');
         expect(writes[1].body).toEqual({ selection, intent: 'chat' });
         await expect(page.locator('[data-board-card-editor]')).toHaveCount(0);
     });

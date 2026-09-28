@@ -2,6 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BoardController } from '../../../VibeRails/wwwroot/js/modules/board-controller.js';
 
+test('saving a stale editor sends only fields changed by the user', () => {
+    const editor = { _boardFormBaseline: { title: 'Original', description: 'Original description', columnId: 'todo', flagged: false } };
+    const patch = BoardController.prototype.cardChanges(editor, { title: 'Edited', description: 'Original description', columnId: 'todo', flagged: false });
+    assert.deepEqual(patch, { title: 'Edited' });
+    assert.deepEqual(BoardController.prototype.cardChanges(editor, { ...editor._boardFormBaseline }), {});
+});
+
 function harness() {
     const calls = [];
     const toasts = [];

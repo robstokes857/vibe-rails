@@ -92,8 +92,9 @@ abortable editors and revision-checked saves. Context is sent for both Start wor
 agent. **Save context** is independent of **Save name**.
 The selection persists in `localStorage` (`viberails.board.selected.v1`), every
 list call carries the board id. Refresh generations discard stale catalog, lane, card, and error
-responses; switching boards clears the previous lanes/cards until the new board loads. The card editor's Lane field groups every board's lanes so a
-card moves between boards by saving it into another board's lane. Card keys stay per project.
+responses; switching boards clears the previous lanes/cards until the new board loads. The card
+editor's Lane field offers lanes on the current board. Create a new card to work on another board;
+cross-board transfers are rejected. Card keys stay per project.
 
 **The board is per project and server-backed.** `board-api.js` is a thin client over
 `/api/v1/board/*` (`VibeRails/Routes/BoardRoutes.cs`, root backend only); the server scopes every
@@ -285,15 +286,14 @@ flag beside its key and an accessible attention label. `blocked` remains a separ
 Both the REST editor and MCP can set or clear the flag. Lane settings have no WIP option;
 lane headers show the full card count without warnings or limits.
 
-**Agent notes** (2026-09-17) are a collapsed rail section. They
-are the scratchpad agents write over MCP (`append_board_note`) to checkpoint findings while they
-work; the server keeps them out of `comments[]` and the comment count (`BoardComments.Kind`).
-The card response carries `notes[]`, so the section renders from the loaded card with the same
-escape-first `renderCommentHtml` as comments and no extra fetch (`renderNotesPanel`);
-`board-api.js` has `getCardNotesAsync` / `addCardNoteAsync` for a refresh or a user note. Do not
-merge notes into the comment thread: the thread is what the human reads, the notes are working
-state.
-
+**Comments, Agent notes and History** (VB-51): the main editor displays Comments; Agent notes
+remain in a separate collapsed section. Card and Board settings each contain collapsed History,
+loaded on demand by `board-history.js`. Ordinary card responses contain no history. History has
+no MCP tool and is excluded from launch prompts. Cancel requests and ignore stale responses
+when closing or replacing the view. Recorded field values render as escaped text.
+Saving an existing card sends only the form fields changed since opening it, preserving unrelated
+remote edits. Cards cannot transfer between boards; create a new card on the destination board.
+See [the sync contract](../Services/Board/SYNC.md) for supported data and reconciliation.
 **Saving a description never sends terminal input.** There is no notify endpoint: it was removed
 2026-09-15 because the sequence it sent — two Escapes, the text, Enter — opens Claude Code's rewind
 menu on an idle prompt rather than clearing it, so the message and its Enter landed in that menu and

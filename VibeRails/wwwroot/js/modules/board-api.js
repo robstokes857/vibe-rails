@@ -76,6 +76,30 @@ async function pullJiraAsync(boardId, dryRun = false) {
     return call(`/boards/${enc(boardId)}/jira/pull${dryRun ? '?dryRun=true' : ''}`, 'POST');
 }
 
+// ---------------------------------------------- viberails.ai sync (VB-51)
+//
+//   syncStatus { boardId, published, enabled, remoteBoardId, remoteUrl, cursor, unsent,
+//                lastSyncUtc, lastError, configured }
+// `configured` says whether an API key and endpoint exist; the key itself never comes back.
+
+async function getBoardSyncAsync(boardId, extra = {}) {
+    return call(`/boards/${enc(boardId)}/sync`, 'GET', null, extra);
+}
+
+async function setBoardSyncAsync(boardId, enabled) {
+    return call(`/boards/${enc(boardId)}/sync`, 'PUT', { enabled: !!enabled });
+}
+
+async function syncBoardNowAsync(boardId) {
+    return call(`/boards/${enc(boardId)}/sync/now`, 'POST');
+}
+
+// History (VB-51): a human-only settings view, paged by 100 from an offset, optionally for one
+// card. Never part of a card read.
+async function getBoardHistoryAsync(boardId, { card = null, offset = 0, signal } = {}) {
+    return call(`/boards/${enc(boardId)}/history?offset=${enc(offset)}${card ? `&card=${enc(card)}` : ''}`, 'GET', null, { signal });
+}
+
 async function getBoardContextAsync(boardId, extra = {}) {
     return call(`/boards/${enc(boardId)}/context`, 'GET', null, extra);
 }
@@ -302,6 +326,7 @@ async function removeCardSessionAsync(cardId, sessionId) {
 
 export const BoardApi = {
     attach,
+    getBoardHistoryAsync,
     getBoardsAsync,
     createBoardAsync,
     updateBoardAsync,
@@ -309,6 +334,9 @@ export const BoardApi = {
     saveJiraConnectionAsync,
     testJiraConnectionAsync,
     pullJiraAsync,
+    getBoardSyncAsync,
+    setBoardSyncAsync,
+    syncBoardNowAsync,
     getBoardContextAsync,
     saveBoardContextAsync,
     getLaneAutomationAsync,

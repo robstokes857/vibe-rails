@@ -89,7 +89,7 @@ public sealed partial class BoardStore
                 return null;
         }
 
-        var created = await InsertCardAsync(connection, transaction, project, card, cancellationToken);
+        var created = await InsertCardAsync(connection, transaction, project, card, BoardAuthor.Agent("Jira", null, null), cancellationToken);
         await using (var insert = connection.CreateCommand())
         {
             insert.Transaction = transaction;

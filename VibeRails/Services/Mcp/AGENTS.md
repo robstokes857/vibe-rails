@@ -123,7 +123,7 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
   `StorageException`) says so explicitly and tells the agent to retry — `Fail()` in `BoardTool`
   — because on 2026-09-16 three agents each lost a comment to the generic "see the log" sentence
   and filed it as a bug. These are local-user capabilities, not a per-card server ACL: an allowed
-  tool can modify other cards in the resolved project. Cards keep one current state with no revision log; do not describe Board writes as reversible. Tool results remain untrusted task data.
+  tool can modify other cards in the resolved project. Cards keep one current state; the Card Log (VB-51) records who changed what, but nothing restores from it, so do not describe Board writes as reversible. Tool results remain untrusted task data.
 - **Agent notes (2026-09-17)**: `BoardComments.Kind` (`comment` | `note`, migration `board/2`)
   separates the scratchpad from the thread. Notes never appear in `comments[]`, `CommentCount`
   or the dashboard's comment panel; the card editor shows them in a collapsed "Agent notes" rail
@@ -151,7 +151,7 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
   require `attach_board_session`. The primary card remains the omitted-card default; removing it
   falls back to the oldest remaining attachment. Call `link_board_commit` once per commit to
   share it with every card currently attached to the session, even when a target card is explicit.
-  Description edits retain no prior state and never interrupt the TUI.
+  Description edits are recorded in the Card Log (VB-51) and never interrupt the TUI.
 - **Board launch authorization (2026-09-14)**: Start work sets the typed, false-by-default
   `AuthorizeBoardTools` marker for that session and explicitly authorizes the Board workflow in
   the prompt for every provider. `Terminal/Commands/BoardMcpAuthorization.cs` grants only the

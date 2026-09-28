@@ -29,7 +29,7 @@ public sealed partial class BoardStore
                   AND NOT EXISTS (SELECT 1 FROM BoardCardSessions p
                       WHERE p.CardId = a.CardId AND p.SessionId = a.SessionId)
             ) s ON s.CardId = c.Id
-            WHERE c.ProjectPath = $project{ProjectPathCollation} AND b.Id = $board
+            WHERE c.ProjectPath = $project{ProjectPathCollation} AND b.Id = $board AND c.DeletedUTC IS NULL
               AND c.Id IN (SELECT value FROM json_each($cards))
             ORDER BY c.Id, s.CreatedUTC, s.SessionId;
             """;

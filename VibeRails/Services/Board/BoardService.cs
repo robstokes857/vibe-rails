@@ -15,6 +15,12 @@ public partial interface IBoardService
     Task<BoardSummaryResponse> CreateBoardAsync(string projectPath, CreateBoardRequest request, CancellationToken cancellationToken = default);
     Task<BoardSummaryResponse?> UpdateBoardAsync(string projectPath, string boardId, UpdateBoardRequest request, CancellationToken cancellationToken = default);
     Task<DeleteBoardResponse?> DeleteBoardAsync(string projectPath, string boardId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Explicit History for the settings view, newest first: up to 101 rows from <paramref name="offset"/>
+    /// so the caller can page by 100 and tell whether more exist. Null when the board, or the card on that
+    /// board, does not exist. Never part of card responses, MCP tools or launch prompts.
+    /// </summary>
+    Task<IReadOnlyList<BoardHistoryRecord>?> GetHistoryAsync(string projectPath, string boardId, string? cardId, int offset, CancellationToken cancellationToken = default);
     /// <summary>Resolves an id or case-insensitive name within the project; ambiguous names require an id.</summary>
     Task<BoardRecord?> FindBoardAsync(string projectPath, string idOrName, CancellationToken cancellationToken = default);
 
@@ -26,10 +32,11 @@ public partial interface IBoardService
 
     Task<BoardCardListResponse> GetCardsAsync(string projectPath, CancellationToken cancellationToken = default, string? boardId = null);
     Task<BoardCardResponse?> GetCardAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
-    Task<BoardCardResponse> CreateCardAsync(string projectPath, CreateBoardCardRequest request, CancellationToken cancellationToken = default);
-    Task<BoardCardResponse?> UpdateCardAsync(string projectPath, string idOrKey, UpdateBoardCardRequest request, CancellationToken cancellationToken = default);
-    Task<bool> DeleteCardAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
-    Task<BoardCardResponse?> MoveCardAsync(string projectPath, string idOrKey, string columnIdOrName, int? position, CancellationToken cancellationToken = default);
+    // The author signs the Card Log entry the write appends; null means the local user.
+    Task<BoardCardResponse> CreateCardAsync(string projectPath, CreateBoardCardRequest request, CancellationToken cancellationToken = default, BoardAuthor? author = null);
+    Task<BoardCardResponse?> UpdateCardAsync(string projectPath, string idOrKey, UpdateBoardCardRequest request, CancellationToken cancellationToken = default, BoardAuthor? author = null);
+    Task<bool> DeleteCardAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default, BoardAuthor? author = null);
+    Task<BoardCardResponse?> MoveCardAsync(string projectPath, string idOrKey, string columnIdOrName, int? position, CancellationToken cancellationToken = default, BoardAuthor? author = null);
 
     Task<BoardCommentDto?> AddCommentAsync(string projectPath, string idOrKey, BoardAuthor author, string body, CancellationToken cancellationToken = default);
     /// <summary>Agent scratchpad entry: same validation as a comment, never shown in the comment stream.</summary>
@@ -113,6 +120,28 @@ public sealed partial class BoardService(
     {
         var result = await store.DeleteBoardAsync(projectPath, boardId, cancellationToken);
         return result is null ? null : new DeleteBoardResponse(true, result.DeletedColumns, result.DeletedCards);
+    }
+
+    public async Task<IReadOnlyList<BoardHistoryRecord>?> GetHistoryAsync(string projectPath, string boardId, string? cardId, int offset, CancellationToken cancellationToken = default)
+    {
+        var rows = await store.GetHistoryAsync(projectPath, boardId, cardId, offset, cancellationToken);
+        if (rows is null)
+            return null;
+        // An agent entry recorded under a generic label resolves through its session, exactly as
+        // comments do, so History names the CLI that made the change rather than "Agent".
+        var authors = new Dictionary<string, BoardAuthor?>();
+        var result = new List<BoardHistoryRecord>(rows.Count);
+        foreach (var row in rows)
+        {
+            if (row.AuthorKind is null || string.IsNullOrWhiteSpace(row.AuthorSessionId))
+            {
+                result.Add(row);
+                continue;
+            }
+            var resolved = await ResolveAuthorAsync(new BoardAuthor(row.AuthorKind, row.Author, null, row.AuthorSessionId), authors, cancellationToken);
+            result.Add(row with { Author = resolved.Label });
+        }
+        return result;
     }
 
     public async Task<BoardRecord?> FindBoardAsync(string projectPath, string idOrName, CancellationToken cancellationToken = default)
@@ -230,7 +259,7 @@ public sealed partial class BoardService(
     public Task<BoardCardRecord?> FindCardAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default) =>
         store.FindCardAsync(projectPath, idOrKey, cancellationToken);
 
-    public async Task<BoardCardResponse> CreateCardAsync(string projectPath, CreateBoardCardRequest request, CancellationToken cancellationToken = default)
+    public async Task<BoardCardResponse> CreateCardAsync(string projectPath, CreateBoardCardRequest request, CancellationToken cancellationToken = default, BoardAuthor? author = null)
     {
         var title = NormalizeTitle(request.Title) ?? throw new BoardValidationException("Title is required.");
         // A brand-new project's first card may arrive over MCP before anything listed the lanes.
@@ -246,11 +275,11 @@ public sealed partial class BoardService(
             request.Blocked ?? false,
             NormalizeBaseOptions(NormalizeAssignee(request.Assignee), request.BaseLlmOptions),
             Type: NormalizeCardType(request.Type) ?? BoardCardTypes.Default,
-            BoardId: NormalizeBoardId(request.BoardId), Flagged: request.Flagged ?? false), cancellationToken);
+            BoardId: NormalizeBoardId(request.BoardId), Flagged: request.Flagged ?? false), cancellationToken, author);
         return (await GetCardAsync(projectPath, card.Id, cancellationToken))!;
     }
 
-    public async Task<BoardCardResponse?> UpdateCardAsync(string projectPath, string idOrKey, UpdateBoardCardRequest request, CancellationToken cancellationToken = default)
+    public async Task<BoardCardResponse?> UpdateCardAsync(string projectPath, string idOrKey, UpdateBoardCardRequest request, CancellationToken cancellationToken = default, BoardAuthor? author = null)
     {
         var existing = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
         if (existing is null)
@@ -304,20 +333,20 @@ public sealed partial class BoardService(
             BaseLlmOptions: options,
             ClearBaseLlmOptions: clearOptions,
             Type: type, Flagged: request.Flagged);
-        var updated = await store.UpdateCardAsync(projectPath, existing.Id, patch, cancellationToken);
+        var updated = await store.UpdateCardAsync(projectPath, existing.Id, patch, cancellationToken, author);
         if (updated is null) return null;
         var detail = await store.GetCardDetailAsync(projectPath, updated.Id, cancellationToken);
         return detail is null ? null : await ToDetailAsync(detail with { Card = updated }, cancellationToken);
     }
 
-    public async Task<bool> DeleteCardAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default)
+    public async Task<bool> DeleteCardAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default, BoardAuthor? author = null)
     {
         var existing = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
-        return existing is not null && await store.DeleteCardAsync(projectPath, existing.Id, cancellationToken);
+        return existing is not null && await store.DeleteCardAsync(projectPath, existing.Id, cancellationToken, author);
     }
 
-    public async Task<BoardCardResponse?> MoveCardAsync(string projectPath, string idOrKey, string columnIdOrName, int? position, CancellationToken cancellationToken = default) =>
-        (await MoveCardAsync(projectPath, idOrKey, new BoardCardMoveRequest(columnIdOrName, position), cancellationToken))?.Card;
+    public async Task<BoardCardResponse?> MoveCardAsync(string projectPath, string idOrKey, string columnIdOrName, int? position, CancellationToken cancellationToken = default, BoardAuthor? author = null) =>
+        (await MoveCardAsync(projectPath, idOrKey, new BoardCardMoveRequest(columnIdOrName, position, Author: author), cancellationToken))?.Card;
 
     // ------------------------------------------------------------------ rails
 
@@ -525,21 +554,21 @@ public sealed partial class BoardService(
     {
         var result = new List<BoardCommentDto>(rows.Count);
         foreach (var row in rows)
-        {
-            var author = row.Author;
-            if (author.Kind == BoardAuthor.AgentKind && BoardAuthor.IsGenericAgentLabel(author.Label)
-                && !string.IsNullOrWhiteSpace(author.SessionId))
-            {
-                if (!authors.TryGetValue(author.SessionId, out var resolved))
-                {
-                    resolved = await store.FindSessionAuthorAsync(author.SessionId, cancellationToken);
-                    authors[author.SessionId] = resolved;
-                }
-                author = resolved ?? author;
-            }
-            result.Add(ToDto(row with { Author = author }));
-        }
+            result.Add(ToDto(row with { Author = await ResolveAuthorAsync(row.Author, authors, cancellationToken) }));
         return result;
+    }
+
+    private async Task<BoardAuthor> ResolveAuthorAsync(BoardAuthor author, Dictionary<string, BoardAuthor?> authors, CancellationToken cancellationToken)
+    {
+        if (author.Kind != BoardAuthor.AgentKind || !BoardAuthor.IsGenericAgentLabel(author.Label)
+            || string.IsNullOrWhiteSpace(author.SessionId))
+            return author;
+        if (!authors.TryGetValue(author.SessionId, out var resolved))
+        {
+            resolved = await store.FindSessionAuthorAsync(author.SessionId, cancellationToken);
+            authors[author.SessionId] = resolved;
+        }
+        return resolved ?? author;
     }
 
     internal static BoardCardSummaryResponse ToSummary(BoardCardRecord card, string? activeSessionId, string? activeTabId) => new(

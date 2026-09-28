@@ -74,7 +74,8 @@ public sealed partial class BoardService
         var existing = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
         if (existing is null)
             return null;
-        // A lane name means a lane on the card's own board; an id can move it to another board.
+        // A lane name means a lane on the card's own board. An id is resolved project-wide, but the
+        // store rejects a lane on another board: cards stay on their board (VB-51).
         var column = await FindColumnAsync(projectPath, move.ColumnIdOrName, cancellationToken, NormalizeBoardId(existing.BoardId))
             ?? throw new BoardValidationException($"Lane not found: {move.ColumnIdOrName}");
         if (move.Position is < 0)
@@ -84,7 +85,7 @@ public sealed partial class BoardService
         var pendingBefore = entering
             ? await store.GetPendingLaneAutomationsAsync(projectPath, existing.Id, cancellationToken)
             : [];
-        var moved = await store.MoveCardAsync(projectPath, existing.Id, column.Id, move.Position, move.SkipLaneAutomations, cancellationToken);
+        var moved = await store.MoveCardAsync(projectPath, existing.Id, column.Id, move.Position, move.SkipLaneAutomations, cancellationToken, move.Author);
         if (moved is null)
             return null;
         var automations = entering

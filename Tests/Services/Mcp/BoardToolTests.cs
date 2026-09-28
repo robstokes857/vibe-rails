@@ -70,10 +70,10 @@ public sealed class BoardToolTests : IDisposable
 
         Assert.Equal("No cards match.", await _tool.ListBoardCards(cancellationToken: Ct));
         var created = await _tool.CreateBoardCard("Fix the race", "Two 401s overlap.", "build", "HIGH", "auth, bug", "bug", cancellationToken: Ct);
-        Assert.Equal("Created PROJ-1: Fix the race", created);
+        Assert.Equal("Created PROJ-1: Fix the race", BoardKeyText.Short(created));
 
         var list = await _tool.ListBoardCards(cancellationToken: Ct);
-        Assert.Equal("PROJ-1 [Build] [Bug] (high) Fix the race", list);
+        Assert.Equal("PROJ-1 [Build] [Bug] (high) Fix the race", BoardKeyText.Short(list));
         Assert.Equal(list, await _tool.ListBoardCards(type: "bug", cancellationToken: Ct));
         Assert.Equal("No cards match.", await _tool.ListBoardCards(type: "feature", cancellationToken: Ct));
         Assert.Equal("No cards match.", await _tool.ListBoardCards(column: "Review", cancellationToken: Ct));
@@ -89,23 +89,23 @@ public sealed class BoardToolTests : IDisposable
         await _tool.CreateBoardCard("Fix the race", "Two 401s overlap.", cancellationToken: Ct);
 
         var card = await _tool.GetBoardCard("vb-1", cancellationToken: Ct);
-        Assert.StartsWith("PROJ-1: Fix the race\nLane: Backlog · Type: Task · Priority: medium · Assignee: unassigned", card);
+        Assert.StartsWith("PROJ-1: Fix the race\nLane: Backlog · Type: Task · Priority: medium · Assignee: unassigned", BoardKeyText.Short(card));
         Assert.Contains("Description:\nTwo 401s overlap.", card);
         Assert.Contains("Comments (0):\n(none)", card);
 
-        Assert.Equal("Updated PROJ-1: Fix the race (critical, blocked)", await _tool.UpdateBoardCard("PROJ-1", priority: "critical", points: 5, blocked: true, cancellationToken: Ct));
-        Assert.Equal("Updated PROJ-1: Fix the race (critical, blocked)", await _tool.UpdateBoardCard("PROJ-1", points: 0, cancellationToken: Ct));
+        Assert.Equal("Updated PROJ-1: Fix the race (critical, blocked)", BoardKeyText.Short(await _tool.UpdateBoardCard("PROJ-1", priority: "critical", points: 5, blocked: true, cancellationToken: Ct)));
+        Assert.Equal("Updated PROJ-1: Fix the race (critical, blocked)", BoardKeyText.Short(await _tool.UpdateBoardCard("PROJ-1", points: 0, cancellationToken: Ct)));
         Assert.Null((await _store.FindCardAsync(_project, "PROJ-1", Ct))!.Points);
 
         // The first line is the historical result; the lane-entry report follows it (VB-34).
-        Assert.Equal("Moved PROJ-1 to Review (position 0).\nNo lane automations.", await _tool.MoveBoardCard("PROJ-1", "review", cancellationToken: Ct));
+        Assert.Equal("Moved PROJ-1 to Review (position 0).\nNo lane automations.", BoardKeyText.Short(await _tool.MoveBoardCard("PROJ-1", "review", cancellationToken: Ct)));
         Assert.StartsWith("FAIL: Lane not found: Nowhere", await _tool.MoveBoardCard("PROJ-1", "Nowhere", cancellationToken: Ct));
 
         var comment = await _tool.AddBoardComment("Reproduced on two parallel saves.", "PROJ-1", Ct);
-        Assert.Matches(@"^Comment cm_[0-9a-f]{12} added to PROJ-1 as Agent at ", comment);
+        Assert.Matches(@"^Comment cm_[0-9a-f]{12} added to PROJ-1 as Agent at ", BoardKeyText.Short(comment));
         Assert.StartsWith("FAIL: Comment cannot be empty.", await _tool.AddBoardComment("   ", "PROJ-1", Ct));
 
-        Assert.Equal("Linked abc1234 \"Fix the race\" to PROJ-1.", await _tool.LinkBoardCommit("abc1234", "PROJ-1", Ct));
+        Assert.Equal("Linked abc1234 \"Fix the race\" to PROJ-1.", BoardKeyText.Short(await _tool.LinkBoardCommit("abc1234", "PROJ-1", Ct)));
         Assert.StartsWith("FAIL: That does not look like a commit sha.", await _tool.LinkBoardCommit("nope", "PROJ-1", Ct));
 
         card = await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct);
@@ -114,7 +114,20 @@ public sealed class BoardToolTests : IDisposable
         Assert.Matches(@"\] Agent \(cm_[0-9a-f]{12}\): Reproduced on two parallel saves\.", card);
         Assert.Contains("Linked commits (1):\n- abc1234 Fix the race (Rob)", card);
 
-        Assert.StartsWith("FAIL: card not found on this project's board: PROJ-9", await _tool.GetBoardCard("PROJ-9", cancellationToken: Ct));
+        Assert.StartsWith("FAIL: card not found on this project's board: PROJ-9", BoardKeyText.Short(await _tool.GetBoardCard("PROJ-9", cancellationToken: Ct)));
+    }
+
+    [Fact]
+    public async Task FullStoredKey_InAnyCase_NamesTheSameCardAsTheShortKey()
+    {
+        await _tool.CreateBoardCard("Fix the race", cancellationToken: Ct);
+        var key = (await _store.FindCardAsync(_project, "PROJ-1", Ct))!.Key;
+        Assert.Matches(@"^PROJ-[A-Z0-9]{5}-1$", key);
+
+        foreach (var form in new[] { key, key.ToLowerInvariant(), "PROJ-1" })
+            Assert.StartsWith(key + ": Fix the race\n", await _tool.GetBoardCard(form, cancellationToken: Ct));
+        Assert.StartsWith($"Updated {key}: Fix the race", await _tool.UpdateBoardCard(key.ToLowerInvariant(), priority: "high", cancellationToken: Ct));
+        Assert.StartsWith("FAIL: card not found", await _tool.GetBoardCard("PROJ-ZZZZZ-1" == key ? "PROJ-YYYYY-1" : "PROJ-ZZZZZ-1", cancellationToken: Ct));
     }
 
     [Fact]
@@ -125,7 +138,7 @@ public sealed class BoardToolTests : IDisposable
         var second = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "Related work", BoardId: sprint.Id), Ct);
         await _service.LinkCardAsync(_project, first.Id, second.Id, Ct);
         var text = await _tool.GetBoardCard(first.Key, since: DateTime.UtcNow.AddMinutes(1).ToString("O"), cancellationToken: Ct);
-        Assert.Contains("Linked cards (1):\n- PROJ-2: Related work (Sprint 2 · Backlog)", text);
+        Assert.Contains("Linked cards (1):\n- PROJ-2: Related work (Sprint 2 · Backlog)", BoardKeyText.Short(text));
         Assert.Contains("Read a linked card by passing its key to get_board_card.", text);
     }
 
@@ -141,20 +154,20 @@ public sealed class BoardToolTests : IDisposable
         // A VibeRails-launched session that was linked at launch resolves to its card…
         _resolver.CurrentSessionId = "sess-launch";
         await _store.LinkSessionAsync(_project, "PROJ-2", "sess-launch", "tab-1", "base:claude", "claude", "Claude · PROJ-2", BoardSessionRecord.LaunchOrigin, Ct);
-        Assert.StartsWith("PROJ-2: B", await _tool.GetBoardCard(cancellationToken: Ct));
+        Assert.StartsWith("PROJ-2: B", BoardKeyText.Short(await _tool.GetBoardCard(cancellationToken: Ct)));
         var comment = await _tool.AddBoardComment("on it", cancellationToken: Ct);
-        Assert.Matches(@"^Comment cm_[0-9a-f]{12} added to PROJ-2 as Claude · PROJ-2", comment);
+        Assert.Matches(@"^Comment cm_[0-9a-f]{12} added to PROJ-2 as Claude · PROJ-2", BoardKeyText.Short(comment));
 
         // …and an unlinked VibeRails session that touches a card explicitly gets linked (origin mcp).
         _resolver.CurrentSessionId = "sess-adhoc";
-        Assert.Matches(@"^Comment cm_[0-9a-f]{12} added to PROJ-1 as Agent", await _tool.AddBoardComment("picking this up", "PROJ-1", Ct));
+        Assert.Matches(@"^Comment cm_[0-9a-f]{12} added to PROJ-1 as Agent", BoardKeyText.Short(await _tool.AddBoardComment("picking this up", "PROJ-1", Ct)));
         var link = await _store.FindSessionLinkAsync("sess-adhoc", Ct);
         Assert.NotNull(link);
         Assert.Equal((await _store.FindCardAsync(_project, "PROJ-1", Ct))!.Id, link!.CardId);
         var detail = await _store.GetCardDetailAsync(_project, "PROJ-1", Ct);
         Assert.Equal(BoardSessionRecord.McpOrigin, Assert.Single(detail!.Sessions).Origin);
         // From then on the omitted-card default follows that link.
-        Assert.StartsWith("PROJ-1: A", await _tool.GetBoardCard(cancellationToken: Ct));
+        Assert.StartsWith("PROJ-1: A", BoardKeyText.Short(await _tool.GetBoardCard(cancellationToken: Ct)));
     }
 
     [Theory]
@@ -179,7 +192,7 @@ public sealed class BoardToolTests : IDisposable
         }
 
         var result = await _tool.AddBoardComment("Starting", "PROJ-1", Ct);
-        Assert.Matches($@"^Comment cm_[0-9a-f]{{12}} added to PROJ-1 as {System.Text.RegularExpressions.Regex.Escape(expectedLabel)} at ", result);
+        Assert.Matches($@"^Comment cm_[0-9a-f]{{12}} added to PROJ-1 as {System.Text.RegularExpressions.Regex.Escape(expectedLabel)} at ", BoardKeyText.Short(result));
         var detail = (await _store.GetCardDetailAsync(_project, "PROJ-1", Ct))!;
         var author = Assert.Single(detail.Comments).Author;
         Assert.Equal(expectedLabel, author.Label);
@@ -222,7 +235,7 @@ public sealed class BoardToolTests : IDisposable
         _resolver.CurrentSessionId = "sess-working-vb1";
         await _store.LinkSessionAsync(_project, "PROJ-1", "sess-working-vb1", "tab-1", "base:claude", "claude", "Claude · PROJ-1", BoardSessionRecord.LaunchOrigin, Ct);
 
-        Assert.StartsWith("PROJ-2: B", await _tool.GetBoardCard("PROJ-2", cancellationToken: Ct));
+        Assert.StartsWith("PROJ-2: B", BoardKeyText.Short(await _tool.GetBoardCard("PROJ-2", cancellationToken: Ct)));
 
         Assert.Empty((await _store.GetCardDetailAsync(_project, "PROJ-2", Ct))!.Sessions);
         Assert.Equal((await _store.FindCardAsync(_project, "PROJ-1", Ct))!.Id,
@@ -249,11 +262,11 @@ public sealed class BoardToolTests : IDisposable
         Assert.StartsWith("FAIL: card not found", await _tool.AttachBoardSession("PROJ-999", Ct));
         var attempts = await Task.WhenAll(Enumerable.Range(0, 6).Select(_ =>
             Task.Run(() => _tool.AttachBoardSession("PROJ-2", Ct), Ct)));
-        Assert.All(attempts, result => Assert.StartsWith("Attached session 11111111-1111-4111-8111-111111111111 to PROJ-2", result));
+        Assert.All(attempts, result => Assert.StartsWith("Attached session 11111111-1111-4111-8111-111111111111 to PROJ-2", BoardKeyText.Short(result)));
         var attached = Assert.Single((await _store.GetCardDetailAsync(_project, "PROJ-2", Ct))!.Sessions);
         Assert.Equal("tab-1", attached.TabId);
         Assert.Equal("base:codex", attached.Selection);
-        Assert.StartsWith("PROJ-1: A", await _tool.GetBoardCard(cancellationToken: Ct));
+        Assert.StartsWith("PROJ-1: A", BoardKeyText.Short(await _tool.GetBoardCard(cancellationToken: Ct)));
 
         // A repeat from the original card is safe even when the commit is already linked.
         await _tool.LinkBoardCommit("abc1234", cancellationToken: Ct);
@@ -310,8 +323,8 @@ public sealed class BoardToolTests : IDisposable
         Assert.Empty((await _store.GetCardDetailAsync(_project, "PROJ-1", Ct))!.Sessions);
 
         _resolver.CurrentSessionId = "33333333-3333-4333-8333-333333333333";
-        Assert.StartsWith("Attached session 33333333-3333-4333-8333-333333333333 to PROJ-1", await _tool.AttachBoardSession("PROJ-1", Ct));
-        Assert.StartsWith("PROJ-1: A", await _tool.GetBoardCard(cancellationToken: Ct));
+        Assert.StartsWith("Attached session 33333333-3333-4333-8333-333333333333 to PROJ-1", BoardKeyText.Short(await _tool.AttachBoardSession("PROJ-1", Ct)));
+        Assert.StartsWith("PROJ-1: A", BoardKeyText.Short(await _tool.GetBoardCard(cancellationToken: Ct)));
     }
 
     [Fact]
@@ -349,7 +362,7 @@ public sealed class BoardToolTests : IDisposable
         _resolver.CurrentSessionId = "sess-notes";
 
         var added = await _tool.AppendBoardNote("checkpoint: found 3 candidates", "PROJ-1", Ct);
-        Assert.Matches(@"^Note note_[0-9a-f]{12} added to PROJ-1 as Agent at ", added);
+        Assert.Matches(@"^Note note_[0-9a-f]{12} added to PROJ-1 as Agent at ", BoardKeyText.Short(added));
         Assert.StartsWith("FAIL: Note cannot be empty.", await _tool.AppendBoardNote("  ", "PROJ-1", Ct));
         await _tool.AddBoardComment("visible progress", "PROJ-1", Ct);
 
@@ -360,10 +373,10 @@ public sealed class BoardToolTests : IDisposable
         Assert.Contains("Agent notes (1):\n", card);
         Assert.Matches(@"\] Agent \(note_[0-9a-f]{12}\): checkpoint: found 3 candidates", card);
         Assert.Equal(1, (await _store.FindCardAsync(_project, "PROJ-1", Ct))!.CommentCount);
-        Assert.Equal("PROJ-1 [Backlog] [Task] (medium) A — 1 comment", await _tool.ListBoardCards(cancellationToken: Ct));
+        Assert.Equal("PROJ-1 [Backlog] [Task] (medium) A — 1 comment", BoardKeyText.Short(await _tool.ListBoardCards(cancellationToken: Ct)));
 
         var notes = await _tool.GetBoardNotes("PROJ-1", cancellationToken: Ct);
-        Assert.StartsWith("Agent notes on PROJ-1 (1):\n", notes);
+        Assert.StartsWith("Agent notes on PROJ-1 (1):\n", BoardKeyText.Short(notes));
         Assert.Contains("checkpoint: found 3 candidates", notes);
         Assert.DoesNotContain("visible progress", notes);
 
@@ -409,7 +422,7 @@ public sealed class BoardToolTests : IDisposable
         Assert.DoesNotContain("abc1234 Fix the race", card);
         Assert.Contains("Agent notes (0, 1 earlier hidden):\n", card);
 
-        Assert.StartsWith("FAIL: since must be an ISO-8601 timestamp", await _tool.GetBoardCard("PROJ-1", since: "yesterday", cancellationToken: Ct));
+        Assert.StartsWith("FAIL: since must be an ISO-8601 timestamp", BoardKeyText.Short(await _tool.GetBoardCard("PROJ-1", since: "yesterday", cancellationToken: Ct)));
         Assert.Contains("(0 of 1 since ", await _tool.GetBoardNotes("PROJ-1", since: cutoff.ToString("O"), cancellationToken: Ct));
     }
 
@@ -449,7 +462,7 @@ public sealed class BoardToolTests : IDisposable
         _resolver.CurrentSessionId = "sess-append";
 
         Assert.Equal("Appended to the description of PROJ-1.",
-            await _tool.UpdateBoardCard("PROJ-1", descriptionAppend: "Decision: keep the removals.", cancellationToken: Ct));
+            BoardKeyText.Short(await _tool.UpdateBoardCard("PROJ-1", descriptionAppend: "Decision: keep the removals.", cancellationToken: Ct)));
         Assert.Equal("first scope\n\nDecision: keep the removals.", (await _store.FindCardAsync(_project, "PROJ-1", Ct))!.Description);
         Assert.StartsWith("FAIL: Pass either description (replace) or descriptionAppend (append), not both.",
             await _tool.UpdateBoardCard("PROJ-1", description: "x", descriptionAppend: "y", cancellationToken: Ct));
@@ -462,7 +475,7 @@ public sealed class BoardToolTests : IDisposable
         Assert.DoesNotContain("lost", untouched.Description);
 
         // Append plus a valid field: both land in one transaction, and the reply describes the field update.
-        Assert.Equal("Updated PROJ-1: A (high)", await _tool.UpdateBoardCard("PROJ-1", descriptionAppend: "more", priority: "high", cancellationToken: Ct));
+        Assert.Equal("Updated PROJ-1: A (high)", BoardKeyText.Short(await _tool.UpdateBoardCard("PROJ-1", descriptionAppend: "more", priority: "high", cancellationToken: Ct)));
         var card = (await _store.FindCardAsync(_project, "PROJ-1", Ct))!;
         Assert.EndsWith("\n\nmore", card.Description);
         Assert.Equal("high", card.Priority);
@@ -483,8 +496,8 @@ public sealed class BoardToolTests : IDisposable
                     await _store.UpdateCardAsync(project, card!.Id, new BoardCardPatch(Description: "dashboard edit"), ct);
                 return card;
             });
-        racing.Setup(s => s.UpdateCardAsync(_project, It.IsAny<string>(), It.IsAny<BoardCardPatch>(), It.IsAny<CancellationToken>()))
-            .Returns<string, string, BoardCardPatch, CancellationToken>((project, id, patch, ct) => _store.UpdateCardAsync(project, id, patch, ct));
+        racing.Setup(s => s.UpdateCardAsync(_project, It.IsAny<string>(), It.IsAny<BoardCardPatch>(), It.IsAny<CancellationToken>(), It.IsAny<BoardAuthor?>()))
+            .Returns<string, string, BoardCardPatch, CancellationToken, BoardAuthor?>((project, id, patch, ct, author) => _store.UpdateCardAsync(project, id, patch, ct, author));
         racing.Setup(s => s.GetCardDetailAsync(_project, It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns<string, string, CancellationToken>((project, id, ct) => _store.GetCardDetailAsync(project, id, ct));
         var service = new BoardService(racing.Object, Mock.Of<IBoardCommitService>(), new NullBoardLiveSessionProbe());
@@ -501,7 +514,7 @@ public sealed class BoardToolTests : IDisposable
         _resolver.CurrentSessionId = "sess-writer";
 
         var reply = await _tool.AddBoardAttachment("findings.md", "# Findings\n\nThree candidates.\n", "PROJ-1", Ct);
-        Assert.Matches(@"^Attached findings\.md \(att_[0-9a-f]{12}, 30 bytes\) to PROJ-1 as Agent\.$", reply);
+        Assert.Matches(@"^Attached findings\.md \(att_[0-9a-f]{12}, 30 bytes\) to PROJ-1 as Agent\.$", BoardKeyText.Short(reply));
         Assert.StartsWith("FAIL: Agent attachments must be Markdown or TXT", await _tool.AddBoardAttachment("tool.exe", "MZ", "PROJ-1", Ct));
         Assert.StartsWith("FAIL: The attachment text cannot be empty.", await _tool.AddBoardAttachment("empty.txt", "  ", "PROJ-1", Ct));
 
@@ -534,7 +547,7 @@ public sealed class BoardToolTests : IDisposable
     [Fact]
     public async Task ListBoards_AndTheBoardArgument_ScopeTheListing()
     {
-        Assert.Equal("Created PROJ-1: On main", await _tool.CreateBoardCard("On main", cancellationToken: Ct));
+        Assert.Equal("Created PROJ-1: On main", BoardKeyText.Short(await _tool.CreateBoardCard("On main", cancellationToken: Ct)));
         var sprint = await _service.CreateBoardAsync(_project, new CreateBoardRequest("Sprint 2"), Ct);
 
         var boards = await _tool.ListBoards(Ct);
@@ -543,23 +556,23 @@ public sealed class BoardToolTests : IDisposable
         Assert.Contains($"- Sprint 2 (id {sprint.Id}, 0 cards; lanes:", boards);
 
         // By name, case-insensitively, or by id; unknown boards fail readably.
-        Assert.Equal("Created PROJ-2: On sprint", await _tool.CreateBoardCard("On sprint", column: "build", board: "sprint 2", cancellationToken: Ct));
-        Assert.Equal("PROJ-2 [Build] [Task] (medium) On sprint", await _tool.ListBoardCards(board: sprint.Id, cancellationToken: Ct));
-        Assert.Equal("PROJ-1 [Backlog] [Task] (medium) On main", await _tool.ListBoardCards(cancellationToken: Ct));
+        Assert.Equal("Created PROJ-2: On sprint", BoardKeyText.Short(await _tool.CreateBoardCard("On sprint", column: "build", board: "sprint 2", cancellationToken: Ct)));
+        Assert.Equal("PROJ-2 [Build] [Task] (medium) On sprint", BoardKeyText.Short(await _tool.ListBoardCards(board: sprint.Id, cancellationToken: Ct)));
+        Assert.Equal("PROJ-1 [Backlog] [Task] (medium) On main", BoardKeyText.Short(await _tool.ListBoardCards(cancellationToken: Ct)));
         Assert.StartsWith("FAIL: board not found: Nowhere", await _tool.ListBoardCards(board: "Nowhere", cancellationToken: Ct));
         Assert.Contains("(board Sprint 2):", await _tool.ListBoardColumns("Sprint 2", Ct));
 
         // A card's own board is reported, and lane names resolve on that board.
         var card = await _tool.GetBoardCard("PROJ-2", cancellationToken: Ct);
         Assert.Contains("\nBoard: Sprint 2\nLanes: Backlog → Ready → Build → Review → Done\n", card);
-        Assert.StartsWith("Moved PROJ-2 to Review", await _tool.MoveBoardCard("PROJ-2", "review", cancellationToken: Ct));
+        Assert.StartsWith("Moved PROJ-2 to Review", BoardKeyText.Short(await _tool.MoveBoardCard("PROJ-2", "review", cancellationToken: Ct)));
         Assert.Equal(sprint.Id, (await _service.FindCardAsync(_project, "PROJ-2", Ct))!.BoardId);
 
         // A terminal launched for a card on the sprint board defaults to that board.
         _resolver.CurrentSessionId = "11111111-2222-3333-4444-555555555555";
         await _store.LinkSessionAsync(_project, (await _service.FindCardAsync(_project, "PROJ-2", Ct))!.Id, _resolver.CurrentSessionId!, null, "base:codex", "codex", "Codex", BoardSessionRecord.LaunchOrigin, Ct);
-        Assert.Equal("PROJ-2 [Review] [Task] (medium) On sprint", await _tool.ListBoardCards(cancellationToken: Ct));
-        Assert.Equal("Created PROJ-3: Sibling", await _tool.CreateBoardCard("Sibling", cancellationToken: Ct));
+        Assert.Equal("PROJ-2 [Review] [Task] (medium) On sprint", BoardKeyText.Short(await _tool.ListBoardCards(cancellationToken: Ct)));
+        Assert.Equal("Created PROJ-3: Sibling", BoardKeyText.Short(await _tool.CreateBoardCard("Sibling", cancellationToken: Ct)));
         Assert.Equal(sprint.Id, (await _service.FindCardAsync(_project, "PROJ-3", Ct))!.BoardId);
         Assert.Contains("; current)", (await _tool.ListBoards(Ct)).Split('\n').Single(line => line.Contains("Sprint 2")));
     }
@@ -582,8 +595,8 @@ public sealed class BoardToolTests : IDisposable
         Assert.Empty((await _service.GetCardsAsync(_project, Ct, first.Id)).Cards);
         Assert.Empty((await _service.GetCardsAsync(_project, Ct, second.Id)).Cards);
 
-        Assert.Equal("Created PROJ-1: First", await _tool.CreateBoardCard("First", board: first.Id, cancellationToken: Ct));
-        Assert.Equal("Created PROJ-2: Second", await _tool.CreateBoardCard("Second", board: second.Id, cancellationToken: Ct));
+        Assert.Equal("Created PROJ-1: First", BoardKeyText.Short(await _tool.CreateBoardCard("First", board: first.Id, cancellationToken: Ct)));
+        Assert.Equal("Created PROJ-2: Second", BoardKeyText.Short(await _tool.CreateBoardCard("Second", board: second.Id, cancellationToken: Ct)));
         Assert.Equal("First", Assert.Single((await _service.GetCardsAsync(_project, Ct, first.Id)).Cards).Title);
         Assert.Equal("Second", Assert.Single((await _service.GetCardsAsync(_project, Ct, second.Id)).Cards).Title);
     }
@@ -667,7 +680,7 @@ public sealed class BoardToolTests : IDisposable
 
         var moved = await _tool.MoveBoardCard("PROJ-1", "review", cancellationToken: Ct);
         var lines = moved.Split('\n');
-        Assert.Equal("Moved PROJ-1 to Review (position 0).", lines[0]);
+        Assert.Equal("Moved PROJ-1 to Review (position 0).", BoardKeyText.Short(lines[0]));
         Assert.Equal("Queued: " + ReviewDetail + ".", lines[1]);
         Assert.Equal("Queued: " + OpenPrDetail + ".", lines[2]);
         Assert.Matches(@"^Entries start about 60 seconds after entry while a VibeRails dashboard is open; moving the card out of Review before then cancels them\. Poll get_board_card since=\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ for the run's session and anything it posts\.$", lines[3]);
@@ -680,7 +693,7 @@ public sealed class BoardToolTests : IDisposable
 
         // Leaving before the entries settle cancels them; the scheduler never sees them.
         Assert.Equal("Moved PROJ-1 to Build (position 0).\nNo lane automations.\nCancelled pending: \"Automated code review\", \"Open PR\" (earlier lane entries of this card that had not settled).",
-            await _tool.MoveBoardCard("PROJ-1", "build", cancellationToken: Ct));
+            BoardKeyText.Short(await _tool.MoveBoardCard("PROJ-1", "build", cancellationToken: Ct)));
         Assert.Empty(await TickAsync());
         Assert.DoesNotContain("Pending lane automations", await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct));
 
@@ -709,7 +722,7 @@ public sealed class BoardToolTests : IDisposable
         Assert.Equal("Moved PROJ-1 to Review (position 0).\n"
             + $"Skipped: \"Automated code review\" — a run of this Automation is already active (run {active}, queued); the entry is dropped if that run is still active when it settles.\n"
             + "Skipped: \"Open PR\" — the Automation is disabled.",
-            await _tool.MoveBoardCard("PROJ-1", "review", cancellationToken: Ct));
+            BoardKeyText.Short(await _tool.MoveBoardCard("PROJ-1", "review", cancellationToken: Ct)));
         // The scheduler applies the same gates when the entries settle: nothing new is queued.
         Assert.Empty(await TickAsync());
     }
@@ -721,7 +734,7 @@ public sealed class BoardToolTests : IDisposable
         await _tool.CreateBoardCard("Spike", type: "research-spike", cancellationToken: Ct);
 
         Assert.Equal("Moved PROJ-1 to Review (position 0).\nLane automations skipped at the caller's request: \"Automated code review\", \"Open PR\". Recorded as a comment on PROJ-1.",
-            await _tool.MoveBoardCard("PROJ-1", "review", skipAutomations: true, cancellationToken: Ct));
+            BoardKeyText.Short(await _tool.MoveBoardCard("PROJ-1", "review", skipAutomations: true, cancellationToken: Ct)));
         Assert.Empty((await _service.GetPendingLaneAutomationsAsync(_project, "PROJ-1", Ct))!);
         Assert.Empty(await TickAsync());
         Assert.Empty(await _jobs.GetQueuedRunsAsync(Ct));
@@ -733,11 +746,11 @@ public sealed class BoardToolTests : IDisposable
 
         // The skip is per call, never sticky: the next entry records its entries as usual.
         await _tool.MoveBoardCard("PROJ-1", "build", cancellationToken: Ct);
-        Assert.StartsWith("Moved PROJ-1 to Review (position 0).\nQueued: ", await _tool.MoveBoardCard("PROJ-1", "review", cancellationToken: Ct));
+        Assert.StartsWith("Moved PROJ-1 to Review (position 0).\nQueued: ", BoardKeyText.Short(await _tool.MoveBoardCard("PROJ-1", "review", cancellationToken: Ct)));
         Assert.Equal(2, (await _service.GetPendingLaneAutomationsAsync(_project, "PROJ-1", Ct))!.Count);
         // A skip where nothing is configured has nothing to record.
         Assert.Equal("Moved PROJ-1 to Done (position 0).\nNo lane automations.\nCancelled pending: \"Automated code review\", \"Open PR\" (earlier lane entries of this card that had not settled).",
-            await _tool.MoveBoardCard("PROJ-1", "done", skipAutomations: true, cancellationToken: Ct));
+            BoardKeyText.Short(await _tool.MoveBoardCard("PROJ-1", "done", skipAutomations: true, cancellationToken: Ct)));
         Assert.Single((await _service.GetCardAsync(_project, "PROJ-1", Ct))!.Comments);
     }
 
@@ -748,20 +761,20 @@ public sealed class BoardToolTests : IDisposable
         await _tool.CreateBoardCard("Fix the race", cancellationToken: Ct);
 
         var preview = await _tool.MoveBoardCard("PROJ-1", "review", preview: true, cancellationToken: Ct);
-        Assert.StartsWith("Preview: PROJ-1 stays in Backlog; moving it to Review would do the following.\nWould queue: " + ReviewDetail + ".\nWould queue: " + OpenPrDetail + ".\nEntries would start about 60 seconds", preview);
+        Assert.StartsWith("Preview: PROJ-1 stays in Backlog; moving it to Review would do the following.\nWould queue: " + ReviewDetail + ".\nWould queue: " + OpenPrDetail + ".\nEntries would start about 60 seconds", BoardKeyText.Short(preview));
 
         var skippedPreview = await _tool.MoveBoardCard("PROJ-1", "review", skipAutomations: true, preview: true, cancellationToken: Ct);
         Assert.Equal("Preview: PROJ-1 stays in Backlog; moving it to Review would do the following.\n"
-            + "Would skip lane automations at the caller's request: \"Automated code review\", \"Open PR\". A comment would record the skip on PROJ-1.", skippedPreview);
+            + "Would skip lane automations at the caller's request: \"Automated code review\", \"Open PR\". A comment would record the skip on PROJ-1.", BoardKeyText.Short(skippedPreview));
         Assert.Contains("Lane: Backlog", await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct));
         Assert.Empty((await _service.GetPendingLaneAutomationsAsync(_project, "PROJ-1", Ct))!);
         Assert.Empty((await _service.GetCardAsync(_project, "PROJ-1", Ct))!.Comments);
 
         Assert.Equal("Preview: PROJ-1 stays in Backlog; moving it to Build would do the following.\nNo lane automations.",
-            await _tool.MoveBoardCard("PROJ-1", "build", preview: true, cancellationToken: Ct));
+            BoardKeyText.Short(await _tool.MoveBoardCard("PROJ-1", "build", preview: true, cancellationToken: Ct)));
         Assert.StartsWith("FAIL: Lane not found: Nowhere", await _tool.MoveBoardCard("PROJ-1", "Nowhere", preview: true, cancellationToken: Ct));
         Assert.Equal("Moved PROJ-1 to Backlog (position 0).\nSame lane; no lane automations triggered.",
-            await _tool.MoveBoardCard("PROJ-1", "backlog", cancellationToken: Ct));
+            BoardKeyText.Short(await _tool.MoveBoardCard("PROJ-1", "backlog", cancellationToken: Ct)));
     }
 
     private sealed class FakeResolver(string project) : IBoardProjectResolver

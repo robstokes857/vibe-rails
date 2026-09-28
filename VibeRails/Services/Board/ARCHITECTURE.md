@@ -403,10 +403,13 @@ else the name's first letters, else four random letters, always two to four uppe
 and never one another project in `board.db` already displays. Projects that numbered cards
 before `board/11` are seeded with `VB`; a project whose first card an older binary numbers also
 gets `VB`, because that binary shows every card as `VB-n`. A prefix never changes, so no key that
-was read, committed or linked is rewritten. Keys are still computed on read
-(`COALESCE(BoardProjectKeys.Prefix, 'VB')`); the number is what the row stores. Lookups accept
-the project's own prefix or the legacy `VB` alias for the same number, and treat another
-project's prefix as not found rather than resolving it by number.
+was read, committed or linked is rewritten. Since VB-51 (`board/14`) a new card stores its key
+at creation in `BoardCards.CardKey` — `{PREFIX}-{5 crypto-random [A-Z0-9]}-{Number}`, upper-case,
+never rewritten, unique in `board.db` — so a key stays unique once boards are synced to
+viberails.ai. A card with a NULL `CardKey` (created by an older binary) keeps its computed key
+(`COALESCE(BoardProjectKeys.Prefix, 'VB')` and the number). Lookups try the stored key
+case-insensitively, then the project's own prefix or the legacy `VB` alias for the same number,
+then the id, and treat another project's prefix as not found rather than resolving it by number.
 
 The default board is `Main`. New boards start with Backlog, Ready, Build, Review, Done; users
 can rename, remove or reorder lanes. The four lanes on VB-18's own board are configuration,
@@ -613,7 +616,7 @@ and schema snapshot tests; altering already-applied migration SQL does not upgra
 | Browser content | Escape-first small text renderer; attachment images allow only raster data URLs. File response is an octet-stream attachment with `nosniff`, `no-store`, and restrictive CSP. Text uses `textContent`; PDF paints to canvas, not an active document iframe. |
 | Agent instructions | Launch composer bounds text, neutralizes template braces, flattens controls/bidi in metadata, and labels card content as data. Tool output is still untrusted text; fences are guidance, not an authorization boundary. |
 | MCP permissions | HTTP uses both credentials. Stdio is a process owned by the local user and has their database access; no new listener. `AuthorizeBoardTools` is explicit/default-false and produces a per-launch 14-tool allowlist, with provider-specific handling. It is a client approval choice, not a server-side card ACL. A separate default-off YOLO option can explicitly request the base provider's global bypass/auto-approve flag. |
-| Destruction / retention | MCP has no delete tool, but allowed tools can alter other cards in the resolved project. Description history helps recovery; ordinary metadata/position has no equivalent revision log. Do not claim all agent writes are reversible. |
+| Destruction / retention | MCP has no delete tool, but allowed tools can alter other cards in the resolved project. Card deletes are soft (`DeletedUTC`, VB-51) and the Card Log records each field change with its old value, but nothing restores from it automatically. Do not claim all agent writes are reversible. |
 | Availability | Authenticated file uploads intentionally have no byte limit, and attachment routes disable Kestrel's request limit. Base64 JSON, decoded bytes and SQLite BLOB handling buffer whole files. Current-file count is 40, but removed history bytes, comments, revisions and snapshots have no aggregate retention budget. |
 
 The unlimited-file behavior is explicit existing product policy, not an accidental missing check

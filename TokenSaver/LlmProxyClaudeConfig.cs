@@ -27,6 +27,17 @@ public static class LlmProxyClaudeConfig
     public const string CustomHeadersVariable = "ANTHROPIC_CUSTOM_HEADERS";
 
     /// <summary>
+    /// Claude Code turns MCP tool search off whenever <c>ANTHROPIC_BASE_URL</c> names a
+    /// non-first-party host, and then sends every MCP tool schema in the first request instead of
+    /// deferring them behind <c>ToolSearch</c>. Measured 2026-09-27: that cost roughly 40k tokens
+    /// of context per session before any work started. The documented opt-in is
+    /// <c>ENABLE_TOOL_SEARCH=true</c>, valid when the proxy forwards <c>tool_reference</c> blocks;
+    /// this relay copies everything outside Bash tool_result strings verbatim, so it does.
+    /// </summary>
+    public const string ToolSearchVariable = "ENABLE_TOOL_SEARCH";
+    public const string ToolSearchEnabledValue = "true";
+
+    /// <summary>
     /// Builds the <c>ANTHROPIC_BASE_URL</c> value. Claude POSTs to <c>{base}/v1/messages</c>, so we
     /// hand it <c>{apiBaseUrl}/llm/anthropic</c> and our route catches <c>/llm/anthropic/v1/messages</c>.
     /// </summary>
@@ -52,8 +63,9 @@ public static class LlmProxyClaudeConfig
     }
 
     /// <summary>
-    /// The env vars that point Claude Code at the proxy. Merged into the prepared-session
-    /// environment at the <c>CommandService</c> seam.
+    /// The env vars that point Claude Code at the proxy, plus the tool-search opt-in that the
+    /// custom base URL would otherwise switch off. Merged into the prepared-session environment
+    /// at the <c>CommandService</c> seam.
     /// </summary>
     public static IReadOnlyDictionary<string, string> BuildClaudeProxyEnvironment(
         string apiBaseUrl, string sessionToken, string tabToken, string? terminalSessionId = null)
@@ -61,7 +73,8 @@ public static class LlmProxyClaudeConfig
         return new Dictionary<string, string>
         {
             [BaseUrlVariable] = BuildAnthropicBaseUrl(apiBaseUrl),
-            [CustomHeadersVariable] = BuildCustomHeaders(sessionToken, tabToken, terminalSessionId)
+            [CustomHeadersVariable] = BuildCustomHeaders(sessionToken, tabToken, terminalSessionId),
+            [ToolSearchVariable] = ToolSearchEnabledValue
         };
     }
 }

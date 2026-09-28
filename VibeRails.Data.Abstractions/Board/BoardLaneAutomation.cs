@@ -55,5 +55,5 @@ public partial interface IBoardStore
     /// records are removed inside the same transaction, so the destination lane's Automations
     /// never queue for this entry. The move itself is unchanged.
     /// </summary>
-    Task<BoardCardRecord?> MoveCardAsync(string projectPath, string cardId, string columnId, int? position, bool skipLaneAutomations, CancellationToken cancellationToken = default);
+    Task<BoardCardRecord?> MoveCardAsync(string projectPath, string cardId, string columnId, int? position, bool skipLaneAutomations, CancellationToken cancellationToken = default, BoardAuthor? author = null);
 }

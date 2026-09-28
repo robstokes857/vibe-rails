@@ -56,9 +56,12 @@ public sealed record BoardCardRecord(
     string Type = BoardCardTypes.Default,
     string BoardId = "",
     bool Flagged = false,
-    string KeyPrefix = BoardKeys.LegacyPrefix)
+    string KeyPrefix = BoardKeys.LegacyPrefix,
+    string? StoredKey = null)
 {
-    public string Key => BoardKeys.Format(KeyPrefix, Number);
+    /// <summary>The stored <c>PREFIX-RRRRR-n</c> key (cards created since board/14), else the
+    /// computed legacy <c>PREFIX-n</c>.</summary>
+    public string Key => StoredKey ?? BoardKeys.Format(KeyPrefix, Number);
 }
 
 public sealed record BoardCardDetailRecord(
@@ -75,21 +78,28 @@ public sealed record BoardCardDetailRecord(
 /// <summary>A lightweight, current description of a related card, including its board and lane.</summary>
 public sealed record BoardLinkedCardRecord(
     string Id, int Number, string Title, string BoardId, string BoardName, string ColumnId, string ColumnName,
-    string KeyPrefix = BoardKeys.LegacyPrefix)
+    string KeyPrefix = BoardKeys.LegacyPrefix, string? StoredKey = null)
 {
-    public string Key => BoardKeys.Format(KeyPrefix, Number);
+    public string Key => StoredKey ?? BoardKeys.Format(KeyPrefix, Number);
 }
 
 /// <summary>
-/// The two kinds of BoardComments row. A <em>note</em> is the agent scratchpad: same shape and
+/// The kinds of BoardComments row. A <em>note</em> is the agent scratchpad: same shape and
 /// attribution as a comment, but kept out of the comment stream and the comment count so an agent
-/// can checkpoint findings as it goes without spamming the human-facing thread.
+/// can checkpoint findings as it goes without spamming the human-facing thread. The change kinds
+/// (board/14) are the rest of the Card Log: written by the store in the same transaction as the
+/// card write they describe, never posted by a caller, and never shown by older binaries, which
+/// read comment and note rows only.
 /// </summary>
 public static class BoardCommentKinds
 {
     public const string Comment = "comment";
     public const string Note = "note";
+    public const string Created = "created";
+    public const string Change = "change";
+    public const string Deleted = "deleted";
 
+    /// <summary>The kinds a caller may post.</summary>
     public static bool IsValid(string? value) => value is Comment or Note;
 }
 
@@ -103,8 +113,10 @@ public sealed record BoardAuthor(string Kind, string Label, string? Cli, string?
 {
     public const string UserKind = "user";
     public const string AgentKind = "agent";
+    public const string SystemKind = "system";
 
     public static BoardAuthor User() => new(UserKind, "You", null, null);
+    public static BoardAuthor System(string label = "VibeRails") => new(SystemKind, label, null, null);
     public static BoardAuthor Agent(string label, string? cli, string? sessionId) => new(AgentKind, label, cli, sessionId);
 
     internal static bool IsGenericAgentLabel(string? label) =>
@@ -119,7 +131,8 @@ public sealed record BoardCommentRecord(
     BoardAuthor Author,
     string Body,
     DateTime CreatedUtc,
-    string Kind = BoardCommentKinds.Comment);
+    string Kind = BoardCommentKinds.Comment,
+    string? Changes = null);
 
 public sealed record BoardSessionRecord(
     string SessionId,
@@ -222,10 +235,50 @@ public static class BoardKeys
     public const int MinPrefixLength = 2;
     public const int MaxPrefixLength = 4;
 
+    /// <summary>Length of the random middle part of a stored key (<c>VB-A7K2P-53</c>).</summary>
+    public const int RandomPartLength = 5;
+
     private const string RandomLetters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    private const string RandomPartAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
     public static string Format(string prefix, int number) =>
         prefix + "-" + number.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// A new card's immutable key: <c>PREFIX-RRRRR-n</c>, where the middle part is five
+    /// cryptographically random upper-case letters or digits. The number stays the project's
+    /// sequence, so <c>PREFIX-n</c> still finds the card; the random part keeps keys minted on
+    /// different machines (a synced board, VB-51) from ever naming two cards.
+    /// </summary>
+    public static string NewStoredKey(string prefix, int number) =>
+        prefix + "-" + new string(System.Security.Cryptography.RandomNumberGenerator.GetItems<char>(RandomPartAlphabet, RandomPartLength))
+        + "-" + number.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// True when <paramref name="value"/> is a stored key, <c>PREFIX-RRRRR-n</c>, in any case.
+    /// <paramref name="key"/> comes back upper-cased, the only form keys are stored in.
+    /// </summary>
+    public static bool TryParseStored(string? value, out string key)
+    {
+        key = "";
+        var trimmed = value?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+            return false;
+        var first = trimmed.IndexOf('-');
+        var last = trimmed.LastIndexOf('-');
+        if (first < 1 || last - first - 1 != RandomPartLength)
+            return false;
+        foreach (var c in trimmed.AsSpan(first + 1, RandomPartLength))
+        {
+            if (!char.IsAsciiLetterOrDigit(c))
+                return false;
+        }
+        var legacy = string.Concat(trimmed.AsSpan(0, first + 1), trimmed.AsSpan(last + 1));
+        if (!TryParse(legacy, out _, out _))
+            return false;
+        key = trimmed.ToUpperInvariant();
+        return true;
+    }
 
     /// <summary>
     /// True when <paramref name="value"/> looks like a card key: letters and digits, a dash, then a

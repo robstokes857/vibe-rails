@@ -60,10 +60,32 @@ public sealed class BaseLlmOptionsTests
     public void FixedModelIsNotDuplicated() =>
         Assert.Equal(["--agent", "build"], BaseLlmOptionsBuilder.BuildArguments(LLM.Glm53, new("zai-coding-plan/glm-5.3", Mode: "build")));
 
+    [Fact]
+    public void ClaudeOneMillionContextSuffixIsAccepted()
+    {
+        // Claude Code reads `claude-fable-5-1[1m]` as the 1M-context form of the full model ID.
+        // Behind the VibeRails proxy it budgets 200K for the bare ID, so the Board offers both.
+        Assert.Equal(["--model", "claude-fable-5-1[1m]"],
+            BaseLlmOptionsBuilder.BuildArguments(LLM.Claude, new(Model: "claude-fable-5-1[1m]")));
+        Assert.Equal(["--model", "claude-opus-5-5[1m]", "--effort", "max"],
+            BaseLlmOptionsBuilder.BuildArguments(LLM.Claude, new("claude-opus-5-5[1m]", "max")));
+    }
+
     [Theory]
     [InlineData(LLM.Codex, "--help", "", "")]
     [InlineData(LLM.Codex, "model; calc", "", "")]
     [InlineData(LLM.Codex, "model\u001b[201~", "", "")]
+    [InlineData(LLM.Claude, "[1m]", "", "")]
+    [InlineData(LLM.Claude, "[1m]claude-fable-5-1", "", "")]
+    [InlineData(LLM.Claude, "claude-fable-5-1[1M]", "", "")]
+    [InlineData(LLM.Claude, "claude-fable-5-1[2m]", "", "")]
+    [InlineData(LLM.Claude, "claude-fable-5-1[1m]x", "", "")]
+    [InlineData(LLM.Claude, "claude[1m]-fable", "", "")]
+    // The "[1m]" tail is Claude Code's alone: every other CLI rejects it at validation, not at launch.
+    [InlineData(LLM.Codex, "gpt-5.5[1m]", "", "")]
+    [InlineData(LLM.Grok46, "grok-4.7[1m]", "", "")]
+    [InlineData(LLM.Copilot, "claude-fable-5-1[1m]", "", "")]
+    [InlineData(LLM.OpenCode, "anthropic/claude-fable-5-1[1m]", "", "")]
     [InlineData(LLM.Glm53, "zai/glm-5.3", "", "")]
     [InlineData(LLM.Claude, "", "ultra", "")]
     [InlineData(LLM.Grok46, "", "none", "")]
