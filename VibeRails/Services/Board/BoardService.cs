@@ -241,10 +241,14 @@ public sealed partial class BoardService(
                 sessions.Where(s => live.ContainsKey(s.SessionId)).Select(s => s.SessionId).ToList(), cancellationToken);
             foreach (var session in sessions)
             {
-                if (live.TryGetValue(session.SessionId, out var tabId) && !activeByCard.ContainsKey(session.CardId))
-                    activeByCard[session.CardId] = (session.SessionId, tabId);
-                if (live.ContainsKey(session.SessionId) && IsAutomation(session, automationIds))
+                if (!live.TryGetValue(session.SessionId, out var tabId)) continue;
+                // A lane Automation (and the CLI it spawned) is linked to the card it came from but
+                // is never the card's working agent: once the launched agent's tab is gone the card
+                // is back to Start work, not "Go to agent" into the review terminal (VB-6Q8ZS-68).
+                if (IsAutomation(session, automationIds))
                     automationCards.Add(session.CardId);
+                else if (!activeByCard.ContainsKey(session.CardId))
+                    activeByCard[session.CardId] = (session.SessionId, tabId);
             }
         }
 
@@ -533,9 +537,10 @@ public sealed partial class BoardService(
     private async Task<BoardCardResponse> ToDetailAsync(BoardCardDetailRecord detail, CancellationToken cancellationToken)
     {
         var live = await liveSessions.GetLiveSessionsAsync(cancellationToken);
-        var active = detail.Sessions.FirstOrDefault(s => live.ContainsKey(s.SessionId));
-        var summary = ToSummary(detail.Card, active?.SessionId, active is null ? null : live[active.SessionId]);
         var sessions = await SessionDtosAsync(detail.Card.ProjectPath, detail.Sessions, live, cancellationToken);
+        // The working agent is the first live session that is not an Automation's (see GetCardListResponseAsync).
+        var active = sessions.FirstOrDefault(s => s.Active && !s.IsAutomation);
+        var summary = ToSummary(detail.Card, active?.Id, active?.TabId);
         // Older comments may have been written before their session was linked.
         // Resolve those labels on read without rewriting historical comment rows.
         var authors = new Dictionary<string, BoardAuthor?>();

@@ -143,8 +143,11 @@ as typed `baseLlmOptions`, never browser-built CLI argument strings. Changing/un
 provider clears those controls. Picker mount is asynchronous: initialize controls using the
 saved assignee, and explicitly clear them after the picker's silent unassign operation.
 
-Start work becomes **Go to agent** when the card has an active linked
-session; it focuses that terminal without saving the form or launching another agent. The save response is checked again before launching, and the backend refuses a launch
+Start work becomes **Go to agent** when the card has a live working agent: a linked session that
+is not an Automation's (`isWorkingSession`). Lane Automations and the CLIs they spawn stay on the
+Automations rail but never drive the button, the Chat lock or the live dot, so a running review
+leaves the card on Start work once the launched agent's tab is gone. Go to agent focuses that
+terminal without saving the form or launching another agent. The save response is checked again before launching, and the backend refuses a launch
 when its live tab list already contains one of the card's linked sessions.
 
 `TODO(board)`: an **Auto Launch** option (per card and/or per lane) so dropping an assigned card

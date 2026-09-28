@@ -27,11 +27,15 @@ public sealed partial class BoardService
             activity.Where(a => a.SessionId is not null).Select(a => a.SessionId!).Distinct(StringComparer.Ordinal).ToList(), cancellationToken);
         return new(activity.GroupBy(a => a.CardId).Select(group =>
         {
-            var active = group.FirstOrDefault(a => a.SessionId is not null);
+            // Same rule as the list/detail responses: an Automation's live session blinks the robot
+            // but is never the working agent, so it must not report an active session/tab.
+            var liveRows = group.Where(a => a.SessionId is not null).ToList();
+            var automationRows = liveRows
+                .Where(a => a.Origin == BoardSessionRecord.AutomationOrigin || automationIds.Contains(a.SessionId!)).ToList();
+            var active = liveRows.FirstOrDefault(a => !automationRows.Contains(a));
             return new BoardCardActivityResponse(group.Key, active?.SessionId,
                 active?.SessionId is { } id ? live[id] : null,
-                group.Any(a => a.SessionId is not null
-                    && (a.Origin == BoardSessionRecord.AutomationOrigin || automationIds.Contains(a.SessionId))));
+                automationRows.Count > 0);
         }).ToList());
     }
 }

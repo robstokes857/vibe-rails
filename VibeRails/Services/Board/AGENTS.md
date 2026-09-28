@@ -127,7 +127,11 @@ serialization or tool discovery into the Native AOT path.
   attachment, commit and linked-card changes promote the affected cards in the same transaction;
   dense position rewrites do not count as activity on the other cards. Explicit drag positions
   remain authoritative. A lane move without a position goes to the top of its destination.
-- With an active session, Start work becomes **Go to agent** and focuses its existing terminal.
+- With a live working agent, Start work becomes **Go to agent** and focuses its existing terminal.
+  The working agent (`activeSessionId`/`activeTabId`) is the first live linked session that is not
+  an Automation's. A lane Automation and the CLI it spawned stay linked to the originating card but
+  never count, and never block a launch, so once the launched agent's tab is gone the card returns
+  to Start work instead of opening the review terminal (VB-6Q8ZS-68 follow-up).
   Lane-triggered Automations link their full workflow recording to the originating card's
   Automations rail, directly below Sessions. Board runs always open terminal tabs; other triggers
   (including manual retries) open native terminals. Older native recordings remain visible.

@@ -47,8 +47,15 @@ public sealed class BoardServiceTests : IDisposable
         var request = new BoardCardActivityRequest(first.BoardId, [first.Id, second.Id, foreign.Id, otherCard.Id, "missing", first.Id]);
         var result = (await _service.GetCardActivityAsync(_project, request, Ct)).Cards;
         Assert.Equal(2, result.Count);
-        Assert.All(result, item => Assert.Equal("tab", item.ActiveTabId));
-        Assert.True(result.Single(item => item.Id == first.Id).HasActiveAutomation);
+        // On the originating card the live Automation blinks the robot but is not the working agent;
+        // the attached card's link carries the mcp origin and no JobRuns row, so there it still is.
+        var originating = result.Single(item => item.Id == first.Id);
+        Assert.True(originating.HasActiveAutomation);
+        Assert.Null(originating.ActiveSessionId);
+        Assert.Null(originating.ActiveTabId);
+        var attached = result.Single(item => item.Id == second.Id);
+        Assert.False(attached.HasActiveAutomation);
+        Assert.Equal("tab", attached.ActiveTabId);
         Assert.DoesNotContain(result, item => item.Id == unloaded.Id);
         Assert.Empty((await _service.GetCardActivityAsync(_project, request with { BoardId = foreign.BoardId }, Ct)).Cards);
 
@@ -97,6 +104,70 @@ public sealed class BoardServiceTests : IDisposable
         Assert.False((await _service.GetCardAsync(_project, card.Id, Ct))!.HasActiveAutomation);
         Assert.False(Assert.Single((await _service.GetCardsAsync(_project, Ct)).Cards).HasActiveAutomation);
         Assert.True((await _service.GetSessionsAsync(_project, card.Id, Ct))!.Single(s => s.Id == id).IsAutomation);
+    }
+
+    [Fact]
+    public async Task LiveAutomationIsNeverTheCardsWorkingAgent()
+    {
+        // VB-6Q8ZS-68 follow-up: the Review lane's codex_code_review run and the CLI it spawned
+        // stayed live after the launched agent's tab closed, so Start work read "Go to agent" and
+        // opened the review terminal. Spawned sessions stay linked but never become the agent.
+        // Ids and link order both sort the Automation rows first, so the filter is what is tested.
+        var card = await _service.CreateCardAsync(_project, new(Title: "Reviewed card"), Ct);
+        const string run = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        const string reviewer = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        const string agent = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+        await _service.LinkSessionAsync(_project, card.Id, run, "run-tab", "", "shell", "Automation: codex_code_review", BoardSessionRecord.AutomationOrigin, Ct);
+        // The review CLI is linked when its first MCP comment lands; only JobRuns.SessionId marks it as the run's own recording.
+        await _service.LinkSessionAsync(_project, card.Id, reviewer, "reviewer-tab", "", "codex", "codex_code_review", BoardSessionRecord.McpOrigin, Ct);
+        await _service.LinkSessionAsync(_project, card.Id, agent, "agent-tab", "base:claude", "claude", "Claude · VB-1", BoardSessionRecord.LaunchOrigin, Ct);
+        await using (var connection = new SqliteConnection(_connectionString))
+        {
+            await connection.OpenAsync(Ct);
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE JobRuns(ProjectPath TEXT, SessionId TEXT, TerminalSessionId TEXT);
+                INSERT INTO JobRuns VALUES ($project, $reviewer, $run);
+                """;
+            command.Parameters.AddWithValue("$project", _project);
+            command.Parameters.AddWithValue("$reviewer", reviewer);
+            command.Parameters.AddWithValue("$run", run);
+            await command.ExecuteNonQueryAsync(Ct);
+        }
+        _live.Sessions[run] = "run-tab";
+        _live.Sessions[reviewer] = "reviewer-tab";
+
+        // The agent's tab is closed: only the Automation and its CLI are live.
+        var detail = (await _service.GetCardAsync(_project, card.Id, Ct))!;
+        Assert.Null(detail.ActiveSessionId);
+        Assert.Null(detail.ActiveTabId);
+        Assert.True(detail.HasActiveAutomation);
+        Assert.True(detail.Sessions.Single(s => s.Id == reviewer) is { Active: true, IsAutomation: true });
+        Assert.True(detail.Sessions.Single(s => s.Id == run) is { Active: true, IsAutomation: true });
+        Assert.False(detail.Sessions.Single(s => s.Id == agent).Active);
+        var summary = Assert.Single((await _service.GetCardsAsync(_project, Ct)).Cards);
+        Assert.Null(summary.ActiveSessionId);
+        Assert.Null(summary.ActiveTabId);
+        Assert.True(summary.HasActiveAutomation);
+        var activity = Assert.Single((await _service.GetCardActivityAsync(_project, new(card.BoardId, [card.Id]), Ct)).Cards);
+        Assert.Null(activity.ActiveSessionId);
+        Assert.Null(activity.ActiveTabId);
+        Assert.True(activity.HasActiveAutomation);
+
+        // The launched agent is live again: it is the working agent even with the Automation still running.
+        _live.Sessions[agent] = "agent-tab";
+        detail = (await _service.GetCardAsync(_project, card.Id, Ct))!;
+        Assert.Equal(agent, detail.ActiveSessionId);
+        Assert.Equal("agent-tab", detail.ActiveTabId);
+        Assert.True(detail.HasActiveAutomation);
+        summary = Assert.Single((await _service.GetCardsAsync(_project, Ct)).Cards);
+        Assert.Equal(agent, summary.ActiveSessionId);
+        Assert.Equal("agent-tab", summary.ActiveTabId);
+        Assert.True(summary.HasActiveAutomation);
+        activity = Assert.Single((await _service.GetCardActivityAsync(_project, new(card.BoardId, [card.Id]), Ct)).Cards);
+        Assert.Equal(agent, activity.ActiveSessionId);
+        Assert.Equal("agent-tab", activity.ActiveTabId);
+        Assert.True(activity.HasActiveAutomation);
     }
 
     [Fact]

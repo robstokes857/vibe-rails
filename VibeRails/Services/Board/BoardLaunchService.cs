@@ -94,8 +94,17 @@ public sealed class BoardLaunchService(
 
         var detail = await store.GetCardDetailAsync(projectPath, card.Id, cancellationToken);
         var tabs = await tabHost.ListTabsAsync(cancellationToken);
-        var linkedSessionIds = detail?.Sessions.Select(session => session.SessionId).ToHashSet(StringComparer.Ordinal) ?? [];
-        if (tabs.Any(tab => tab.HasActiveSession && tab.SessionId is not null && linkedSessionIds.Contains(tab.SessionId)))
+        // Only a working agent blocks another launch. A lane Automation (and the CLI it spawned) is
+        // linked to the card it came from but is not the card's agent, so a review still running
+        // must not turn Start work into "already running" (VB-6Q8ZS-68 follow-up).
+        IReadOnlyList<BoardSessionRecord> linkedSessions = detail?.Sessions ?? [];
+        var automationIds = await store.GetAutomationSessionIdsAsync(projectPath,
+            linkedSessions.Select(session => session.SessionId).ToList(), cancellationToken);
+        var workingSessionIds = linkedSessions
+            .Where(session => session.Origin != BoardSessionRecord.AutomationOrigin && !automationIds.Contains(session.SessionId))
+            .Select(session => session.SessionId)
+            .ToHashSet(StringComparer.Ordinal);
+        if (tabs.Any(tab => tab.HasActiveSession && tab.SessionId is not null && workingSessionIds.Contains(tab.SessionId)))
             throw new BoardConflictException("An agent is already running on this card. Open it from Sessions.");
         if (tabs.Count >= tabHost.MaxTabs)
             throw new BoardConflictException($"All {tabHost.MaxTabs} terminal tabs are in use. Close one first.");

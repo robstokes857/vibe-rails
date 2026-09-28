@@ -2077,8 +2077,15 @@ export class BoardController {
     // prepended to that environment's Initial Message, links the session to the
     // card, and hands back the tab id. Unsaved edits in the editor are saved first
     // so the LLM reads what is on screen.
+    // The working agent is a live linked session that is not an Automation's. A lane Automation
+    // (and the CLI it spawned) stays on the card it came from, but once the launched agent's tab
+    // is gone the card is back to Start work, never "Go to agent" into the review terminal.
+    isWorkingSession(session) {
+        return Boolean(session?.active && !session.isAutomation);
+    }
+
     hasRunningSession(card) {
-        return Boolean(card?.activeSessionId || card?.sessions?.some(session => session.active));
+        return Boolean(card?.activeSessionId || card?.sessions?.some(session => this.isWorkingSession(session)));
     }
 
     updateStartWorkButton(editor, card) {
@@ -2101,7 +2108,7 @@ export class BoardController {
     }
 
     async goToAgent(editor, card) {
-        let session = card.sessions?.find(item => item.active && item.tabId);
+        let session = card.sessions?.find(item => this.isWorkingSession(item) && item.tabId);
         if (!session && card.activeTabId) {
             session = { id: card.activeSessionId, tabId: card.activeTabId, selection: card.assignee, displayName: card.title };
         }
@@ -2109,7 +2116,7 @@ export class BoardController {
             const fresh = await BoardApi.getBoardCardAsync(card.id);
             Object.assign(card, fresh);
             this.renderSessionsPanel(editor, card);
-            session = card.sessions?.find(item => item.active && item.tabId);
+            session = card.sessions?.find(item => this.isWorkingSession(item) && item.tabId);
             if (!session && card.activeTabId)
                 session = { id: card.activeSessionId, tabId: card.activeTabId, selection: card.assignee, displayName: card.title };
         }

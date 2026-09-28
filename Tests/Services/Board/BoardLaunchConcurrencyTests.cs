@@ -118,6 +118,50 @@ public sealed class BoardLaunchConcurrencyTests : IDisposable
             new BoardService(_store, new Mock<IBoardCommitService>().Object, new NullBoardLiveSessionProbe()), _store, _repository.Object));
 
     [Fact]
+    public async Task LiveAutomationDoesNotBlockStartWork_ButTheCardsOwnAgentDoes()
+    {
+        // VB-6Q8ZS-68 follow-up: the Review lane's run and the CLI it spawned stay linked to the
+        // card, so with the launched agent's tab gone Start work must still launch a new agent
+        // instead of refusing with "already running". Only JobRuns.SessionId marks the reviewer.
+        var card = await CreateCardAsync();
+        const string run = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        const string reviewer = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        const string agent = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+        await _store.LinkSessionAsync(_root, card.Id, run, "run-tab", "", "shell", "Automation: codex_code_review", BoardSessionRecord.AutomationOrigin, Ct);
+        await _store.LinkSessionAsync(_root, card.Id, reviewer, "reviewer-tab", "", "codex", "codex_code_review", BoardSessionRecord.McpOrigin, Ct);
+        await using (var connection = new SqliteConnection(_connectionString))
+        {
+            await connection.OpenAsync(Ct);
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE JobRuns(ProjectPath TEXT, SessionId TEXT, TerminalSessionId TEXT);
+                INSERT INTO JobRuns VALUES ($project, $reviewer, $run);
+                """;
+            command.Parameters.AddWithValue("$project", _root);
+            command.Parameters.AddWithValue("$reviewer", reviewer);
+            command.Parameters.AddWithValue("$run", run);
+            await command.ExecuteNonQueryAsync(Ct);
+        }
+        var liveTabs = new List<TerminalTabStatusResponse>
+        {
+            new("run-tab", DateTime.UtcNow, true, run),
+            new("reviewer-tab", DateTime.UtcNow, true, reviewer)
+        };
+        _tabs.Setup(t => t.ListTabsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => (IReadOnlyList<TerminalTabStatusResponse>)liveTabs.ToList());
+        _tabs.Setup(t => t.StartSessionAsync("tab-1", It.IsAny<StartTerminalRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TerminalStatusResponse(true, agent, "codex", _root));
+
+        Assert.NotNull(await Launcher().LaunchAsync(_root, card.Id, null, Ct));
+        _tabs.Verify(t => t.StartSessionAsync(It.IsAny<string>(), It.IsAny<StartTerminalRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+
+        // The launched agent is linked with the launch origin and now live: a second launch is refused.
+        liveTabs.Add(new("tab-1", DateTime.UtcNow, true, agent));
+        await Assert.ThrowsAsync<BoardConflictException>(() => Launcher().LaunchAsync(_root, card.Key, null, Ct));
+        _tabs.Verify(t => t.StartSessionAsync(It.IsAny<string>(), It.IsAny<StartTerminalRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task CardDeletedDuringStartupClosesTheUnlinkedTerminal()
     {
         var card = await CreateCardAsync();

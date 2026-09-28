@@ -160,7 +160,11 @@ update; moves without an explicit position enter at the top of the destination l
 
 The active-session action is **Go to agent**. It focuses the existing tab without saving the card
 or launching another agent. The same action handles a session discovered during Start work's
-save, so another window starting work does not leave a disabled dead end.
+save, so another window starting work does not leave a disabled dead end. Only a live session
+that is not an Automation's qualifies: list, detail and activity responses skip Automation runs
+and the CLIs they spawned when choosing `activeSessionId`/`activeTabId`, and the launch conflict
+check ignores them too, so a still-running review cannot keep a card on Go to agent (or refuse
+Start work) after the launched agent closed.
 
 `BoardAutomationSessionLinker` links lane-triggered Automation recordings to the originating
 card's ordinary Sessions rail. It uses the immutable `board-lane:<card-key>:<lane>:<event>` trigger

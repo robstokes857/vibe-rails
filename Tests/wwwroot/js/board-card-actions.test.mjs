@@ -354,6 +354,38 @@ test('Go to agent focuses a running session without saving or launching', async 
     assert.equal(label.textContent, 'Start work');
 });
 
+test('A live Automation is not the working agent: Start work stays and Go to agent skips it', async () => {
+    const h = harness();
+    const label = {};
+    h.fields['[data-board-start-work]'].querySelector = selector => selector === '[data-board-start-work-label]' ? label : null;
+    // The Review lane's run and the CLI it spawned outlive the launched agent's tab (VB-6Q8ZS-68).
+    h.card.sessions = [
+        { id: 'review-run', tabId: 'run-tab', active: true, isAutomation: true },
+        { id: 'review-cli', tabId: 'review-tab', active: true, isAutomation: true },
+        { id: 'agent-session', tabId: 'agent-tab', active: false }
+    ];
+    let focused;
+    h.app.terminalController = { async adoptLaunchedTab(tab) { focused = tab; return true; } };
+    h.controller.updateStartWorkButton(h.editor, h.card);
+    assert.equal(label.textContent, 'Start work');
+    assert.equal(h.fields['[data-board-chat]'].disabled, false);
+
+    // Start work launches a fresh agent instead of opening the review terminal.
+    await h.controller.startWork(h.editor, h.card);
+    assert.deepEqual(h.calls.map(call => call.method), ['PUT', 'POST']);
+    assert.equal(focused, undefined);
+
+    // With the launched agent live again, Go to agent opens its tab and never the Automation's.
+    h.card.sessions[2].active = true;
+    h.calls.length = 0;
+    h.controller.updateStartWorkButton(h.editor, h.card);
+    assert.equal(label.textContent, 'Go to agent');
+    assert.equal(h.fields['[data-board-chat]'].disabled, true);
+    await h.controller.startWork(h.editor, h.card);
+    assert.deepEqual(h.calls, []);
+    assert.equal(focused, 'agent-tab');
+});
+
 test('Start work opens a session that started in another window while saving', async () => {
     const h = harness();
     let navigation;
