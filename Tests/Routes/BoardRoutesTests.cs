@@ -478,6 +478,37 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Conflict, last.StatusCode);
     }
 
+    // VB-63: the context route needs both credentials, measures what an agent would read, never
+    // echoes card text, and scopes the card to the dashboard's project.
+    [Fact]
+    public async Task Context_RequiresBothCredentials_MeasuresTheCard_AndScopesByProject()
+    {
+        using var created = await PostJsonAsync("/api/v1/board/cards", new { title = "Measure me", description = "Some secret description text.", assignee = "base:codex" });
+        using var createdDocument = await ReadJsonAsync(created);
+        var cardId = createdDocument.RootElement.GetProperty("id").GetString()!;
+        var path = $"/api/v1/board/cards/{cardId}/context";
+        using var none = await SendAsync(HttpMethod.Get, path);
+        using var sessionOnly = await SendAsync(HttpMethod.Get, path, "test-session");
+        using var tabOnly = await SendAsync(HttpMethod.Get, path, tab: "test-tab");
+        Assert.Equal(HttpStatusCode.Unauthorized, none.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, sessionOnly.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, tabOnly.StatusCode);
+
+        using var measured = await GetJsonAsync(path);
+        var root = measured.RootElement;
+        Assert.Equal(cardId, root.GetProperty("cardId").GetString());
+        Assert.True(root.GetProperty("tokens").GetInt32() > 0);
+        Assert.True(root.GetProperty("chars").GetInt32() >= root.GetProperty("tokens").GetInt32());
+        Assert.Equal("chars/4", root.GetProperty("method").GetString());
+        Assert.Equal(new[] { "prompt", "cardRead", "lanes" }, root.GetProperty("sources").EnumerateArray().Select(s => s.GetProperty("key").GetString()).ToArray());
+        Assert.Contains(root.GetProperty("contents").EnumerateArray(), part => part.GetProperty("key").GetString() == "description");
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("lastLaunch").ValueKind);
+        Assert.DoesNotContain("Some secret description text", root.GetRawText());
+
+        using var foreign = await SendAsync(HttpMethod.Get, "/api/v1/board/cards/card_foreign/context", "test-session", tab: "test-tab");
+        Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
+    }
+
     [Fact]
     public async Task Launch_ComposesThePrompt_StartsATab_AndLinksTheSession()
     {

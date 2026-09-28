@@ -1240,7 +1240,8 @@ export class BoardController {
         editor._boardCard = card;
         this.cardLinksDispose = bindCardLinks(editor, card, {
             openCard: id => this.openLinkedCard(editor, id),
-            showError: message => this.app.showToast('Board', message, 'error')
+            showError: message => this.app.showToast('Board', message, 'error'),
+            onChanged: () => editor._boardContext?.refresh()
         });
         // Link navigation replaces this editor. Track form edits separately from link search.
         const trackEdits = event => {
@@ -1542,6 +1543,7 @@ export class BoardController {
                 if (inline && attachment.url && getAttachmentPreviewKind(attachment) === 'image')
                     insertAtCursor(input, `![${attachment.name.replace(/[\[\]\r\n]/g, '')}](attachment:${attachment.id})`);
                 if (editor) this.renderAttachmentsPanel(editor, card);
+                editor?._boardContext?.refresh();
             }
             input.dispatchEvent(new Event('input', { bubbles: true }));
         } catch (error) {
@@ -1601,6 +1603,7 @@ export class BoardController {
                 card.attachments = card.attachments.filter(item => item.id !== attachment.id);
                 if (!editor.isConnected) return;
                 this.renderAttachmentsPanel(editor, card);
+                editor._boardContext?.refresh();
                 // Repaint from the current text, preserving every unsaved field and comment.
                 editor.querySelectorAll('[data-board-composer]').forEach(composer => {
                     const preview = composer.querySelector('[data-board-composer-preview]');
@@ -1727,7 +1730,6 @@ export class BoardController {
                 composerInput.style.height = 'auto';
             }
             this.renderCardDiscussion(editor, card);
-            editor._boardContext?.refresh();
             // The thread is at the bottom of a single scrolling body, so bring the
             // new comment into view rather than leaving the reader where they were.
             // Synchronous for the same reason as the clamps: no frame is delivered
@@ -1990,6 +1992,9 @@ export class BoardController {
         const card = await BoardApi.getBoardCardAsync(cardId);
         const index = this.state.cards.findIndex(c => c.id === card.id);
         if (index >= 0) this.state.cards[index] = card;
+        // Every rail mutation that reloads the card (comment, commit, session) changed what an
+        // agent would read; the Agent context section re-measures rather than going stale.
+        editor._boardContext?.refresh();
         return card;
     }
 

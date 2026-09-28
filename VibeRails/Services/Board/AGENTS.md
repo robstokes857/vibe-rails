@@ -78,8 +78,11 @@ serialization or tool discovery into the Native AOT path.
   newest first: when comments + notes fit `BoardTool.ActivityBudgetCharacters` (24,000) nothing is
   hidden; otherwise comments fill first, notes keep `NotesReservedCharacters` (8,000), the newest
   entry is always shown (cut with a marker if it alone exceeds the allowance), and older entries
-  become one-line previews with ids. `before=<timestamp>` pages a window back, `activity=all`
-  lifts the budget, `get_board_notes` lists every note; sessions/commits list the newest 10/30.
+  become one-line previews with ids. `before=<comment/note id>` (the reply names it; an ISO-8601
+  timestamp also works, time-only) pages a window back without skipping entries that share an
+  instant, `activity=all` lifts the budget, `get_board_notes` lists every note; sessions/commits
+  list the newest 10/30. The card editor re-measures after every rail mutation (comment, commit,
+  session, attachment, linked card).
   Change the numbers in one place and update the plan in `vibe-books/vibe_board_context_rot`.
 - **Deleting a card is a soft delete (VB-51).** It sets `BoardCards.DeletedUTC` and writes a
   `deleted` log entry; every read, count, lookup, pull and lane Automation skips it, and its rows

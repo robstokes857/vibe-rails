@@ -459,6 +459,58 @@ public sealed class BoardToolTests : IDisposable
         Assert.StartsWith("FAIL: before must be an ISO-8601 timestamp", BoardKeyText.Short(await _tool.GetBoardCard("PROJ-1", before: "yesterday", cancellationToken: Ct)));
     }
 
+    // VB-63 review: the before= cursor is an entry id, so two entries stamped in the same instant
+    // (two agents writing at once) never fall between two pages.
+    [Fact]
+    public async Task GetBoardCard_BeforeCursorIsAnEntryId_SoSharedTimestampsAreNeverSkipped()
+    {
+        await _tool.CreateBoardCard("A", cancellationToken: Ct);
+        for (var i = 0; i < 10; i++)
+        {
+            await Task.Delay(2, Ct);
+            await _tool.AddBoardComment($"comment {i} " + new string('x', 2_900) + $" END{i}", "PROJ-1", Ct);
+        }
+        await ExecuteBoardSqlAsync("UPDATE BoardComments SET CreatedUTC = (SELECT CreatedUTC FROM BoardComments WHERE Body LIKE 'comment 3 %') WHERE Body LIKE 'comment 2 %'");
+        // A few notes take their reserve, so the comment allowance (~21k) splits the twin pair.
+        for (var i = 0; i < 3; i++)
+            await _tool.AppendBoardNote($"note {i} " + new string('n', 900) + $" ENDN{i}", "PROJ-1", Ct);
+
+        // Seven fit in full: the newest six plus whichever twin sorts later; the other twin is previewed.
+        var card = await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct);
+        var shownTwin = card.Contains("END3", StringComparison.Ordinal) ? "END3" : "END2";
+        var previewedTwin = shownTwin == "END3" ? "END2" : "END3";
+        Assert.Contains(shownTwin, card);
+        Assert.DoesNotContain(previewedTwin, card);
+        var before = System.Text.RegularExpressions.Regex.Match(card, @"before=(\S+),").Groups[1].Value;
+        Assert.StartsWith("cm", before);
+        Assert.DoesNotContain(":", before);
+
+        var older = await _tool.GetBoardCard("PROJ-1", before: before, cancellationToken: Ct);
+        Assert.Contains("Showing activity before " + before + " (", older);
+        Assert.Contains("Comments (3, 7 newer hidden):\n", older);
+        Assert.Contains(previewedTwin, older);
+        Assert.DoesNotContain(shownTwin, older);
+        Assert.Contains("END0", older);
+
+        // A time-only cursor at that instant hides the whole instant, by design; the id form is what the reply hands out.
+        var detail = await _service.GetCardAsync(_project, "PROJ-1", Ct);
+        var cursorAt = detail!.Comments.Single(c => c.Id == before).CreatedAt;
+        var byTime = await _tool.GetBoardCard("PROJ-1", before: cursorAt.ToString("O"), cancellationToken: Ct);
+        Assert.Contains("Comments (2, 8 newer hidden):\n", byTime);
+        Assert.DoesNotContain(previewedTwin, byTime);
+
+        Assert.StartsWith("FAIL: before=cm_000000000000 is not a comment or note on", BoardKeyText.Short(await _tool.GetBoardCard("PROJ-1", before: "cm_000000000000", cancellationToken: Ct)));
+    }
+
+    private async Task ExecuteBoardSqlAsync(string sql)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(Ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        Assert.Equal(1, await command.ExecuteNonQueryAsync(Ct));
+    }
+
     // VB-63: a long comment thread cannot starve the notes; they keep their reserve and point at get_board_notes.
     [Fact]
     public async Task GetBoardCard_NotesKeepTheirReserveWhenCommentsAreLarge()

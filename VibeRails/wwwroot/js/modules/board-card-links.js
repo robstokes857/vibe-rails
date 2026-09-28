@@ -32,7 +32,7 @@ function cardText(card) {
 }
 
 /** Owns only the links rail. It never reloads or saves the surrounding card form. */
-export function bindCardLinks(editor, card, { openCard, showError }) {
+export function bindCardLinks(editor, card, { openCard, showError, onChanged }) {
     const host = editor.querySelector('[data-board-card-links]');
     if (!host) return () => {};
     const list = host.querySelector('[data-board-linked-cards]');
@@ -111,6 +111,7 @@ export function bindCardLinks(editor, card, { openCard, showError }) {
             links.sort((a, b) => a.key.localeCompare(b.key, undefined, { numeric: true }));
             card.linkedCards = links;
             renderLinks();
+            onChanged?.();
         } catch (error) {
             if (!disposed) showError(error?.message || (remove ? 'Could not unlink the card.' : 'Could not link the card.'));
         } finally {

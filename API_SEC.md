@@ -1,5 +1,48 @@
 # API authentication coverage
 
+## Route and authentication reconciliation (2026-09-28)
+
+Compared the current working tree's registered routes against the active inventory in both
+directions, resolving grouped paths, constants, proxy mappings and the inherited event WebSocket.
+Added the missing `GET /api/v1/board/cards/{card}/context` entry. No active entry needed removal.
+The inventory now contains **227 mapped surfaces**, including **215 under `/api/v1`** and
+**50 Board routes**. Earlier dated counts are historical.
+
+VB-63 data boundary for that route and the launch it measures: `GET …/context` is read-only and
+answers with labels and counts (characters, estimated tokens per part, the latest recorded
+launch sample), never card text; a card outside the dashboard's project is 404. The existing
+`POST …/launch` now also writes a `BoardContextSamples` row and a Card Log `change` entry with a
+`context` field in `board.db`, and that field joins the outbound Board sync allowlist. It carries
+token/character counts, the prompt/card-read split, intent, CLI and the per-part breakdown
+(labels, counts, short notes); no session id, no card text, no paths. The hosted contract already
+stores unknown change fields verbatim without applying them, so no server change or credential
+was involved. The measurement runs after the terminal is linked, without the request token, and
+cannot fail or cancel a launch. Route regressions cover both credentials, project scoping and the
+no-card-text response.
+
+Checked production registration, middleware ordering, session/tab validation, bootstrap code
+expiry and single-use consumption, and the shared proxy/control gate. The only session-authentication
+exceptions remain exact `GET /health`, `OPTIONS *`, and exact
+`GET /auth/bootstrap?code={one-time-code}&redirect={local-path}`. Bootstrap requires a valid
+single-use code expiring after two minutes. Every other endpoint requires a valid session
+credential. All `/api/v1` business handlers, including the added context route, MCP, WebSocket
+upgrades and enabled proxy operations additionally require the tab credential. Cookie and session
+header carry the same secret as alternative transports; session-only pages/static files and
+conditional proxy responses remain documented in section 2. No additional endpoint lacking
+session authentication was found, so no `SECURITY_ERROR.md` was created.
+
+Both mandatory repository-wide listener searches found only the approved main Kestrel host,
+the non-serving port probe and test-only Kestrel hosts; the cross-runtime search had no matches.
+
+Validation: **135 passed, 0 failed, 0 skipped**, using `dotnet test Tests/Tests.csproj
+--artifacts-path C:/source/vibe-rails/Tests/obj/ApiSecAuditArtifacts --verbosity quiet` with a
+`FullyQualifiedName` filter covering `CookieAuthMiddlewareTests`, `AuthServiceTests`,
+`AuthRoutesTests`, all five LLM proxy route test classes, `TokenSaverPauseRoutesTests`,
+`McpServerHttpTests`, `InternalToolsRoutesTests`, `SigningKeyRoutesTests`, `BoardRoutesTests`,
+`JobRoutesTests` and `CodeGraphRoutesTests`. The build reported existing xUnit analyzer warnings.
+This was source reconciliation plus targeted regression tests, not a live request sweep of
+every production endpoint.
+
 ## VB-51 outbound Board sync review (2026-09-27)
 
 Publishing is a default-off, per-board setting. The desktop sends board/lane metadata and
@@ -595,7 +638,7 @@ discovery alone is insufficient if the same feature change is allowed to expand 
 set. The production listener set is now frozen above so a new match starts as a finding, not as
 an expectation.
 
-### Repository-wide listener result — 2026-09-27
+### Repository-wide listener result — 2026-09-28
 
 - Approved serving implementation: the main Kestrel host in `VibeRails/Program.cs`.
 - Rejected and removed before merge: `GrokLoopbackBridge`'s `HttpListener`.
@@ -634,8 +677,8 @@ spoofer's own local exchange rows.
 Authentication is enforced primarily by
 [`CookieAuthMiddleware`](VibeRails/Middleware/CookieAuthMiddleware.cs). The LLM proxy
 routes additionally use
-[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 226 mapped route
-surfaces in this inventory: 214 `/api/v1` method/path mappings, nine non-`/api` protected
+[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 227 mapped route
+surfaces in this inventory: 215 `/api/v1` method/path mappings, nine non-`/api` protected
 API surfaces, and three bootstrap/page/probe routes. Static-file middleware and the
 global `OPTIONS` behavior are noted separately because they are not finite mapped-route
 lists.
@@ -1004,7 +1047,7 @@ transcript text out of messages and exception text; do not rely on the Logs view
 hidden. `Tests/Routes/InternalToolsRoutesTests.cs` pins the two-credential requirement, the
 whitelist rejection of path-like sources, and the absence of mutating verbs.
 
-### Kanban board (49; active root backend only)
+### Kanban board (50; active root backend only)
 
 All mapped by `BoardRoutes.Map` under `if (isActiveRootBackend)`; every path contains `/api/`,
 so both credentials are enforced by the middleware with no route-level registration. The
@@ -1044,6 +1087,10 @@ cannot read or write another project's board through this surface.
   `POST /api/v1/board/cards/{card}/automations` — list project Automation choices and recent
   card-originated runs, or queue an enabled Automation with the originating card retained.
   The POST body is `{ jobId }`; card and job both resolve within the server-derived project.
+- `GET /api/v1/board/cards/{card}/context` — read-only estimate of the launch prompt and
+  initial Board tool reads, in characters and estimated tokens, plus the latest recorded
+  launch sample. Requires both credentials and resolves the card within the server-derived
+  project; asking for the estimate stores nothing.
 - `GET /api/v1/board/columns`, `POST /api/v1/board/columns`, `PUT /api/v1/board/columns/order`,
   `PUT /api/v1/board/columns/{columnId}`, `DELETE /api/v1/board/columns/{columnId}` — lanes.
 - `POST /api/v1/board/cards/activity` — read-only live status for up to 100 explicit card IDs

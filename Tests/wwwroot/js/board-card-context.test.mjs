@@ -70,7 +70,7 @@ test('renderContext shows the total, each source, the breakdown groups and the l
     assert.doesNotMatch(empty.innerHTML, /Available, not sent/);
 });
 
-test('the card editor mounts the section, refreshes it after a comment and disposes it on close', () => {
+test('the card editor mounts the section, refreshes it after every rail change and disposes it on close', () => {
     const source = readFileSync(controllerPath, 'utf8');
     assert.match(source, /import \{ contextSectionMarkup, bindCardContext \} from '\.\/board-card-context\.js'/);
     const open = source.slice(source.indexOf('async openCardEditor'), source.indexOf('bindCardEditor(editor, card)'));
@@ -78,8 +78,17 @@ test('the card editor mounts the section, refreshes it after a comment and dispo
     assert.match(open, /<\/div>\s*\$\{contextSectionMarkup\(Boolean\(card\)\)\}\s*\$\{renderCardLinksSection\(card\)\}/);
     assert.match(source, /this\.cardContextDispose\?\.\(\);\s*const cardContext = bindCardContext\(editor, card, \{ app: this\.app \}\);/);
     assert.match(source, /editor\._boardContext = cardContext;/);
-    const post = source.slice(source.indexOf('async postComment'), source.indexOf('async postComment') + 1500);
-    assert.match(post, /editor\._boardContext\?\.refresh\(\);/);
+    // One refresh point for comments, commits and sessions (they all reload the card), plus the
+    // paths that mutate a rail without reloading: attachment add/delete and linked cards.
+    const reload = source.slice(source.indexOf('async reloadEditingCard'), source.indexOf('async reloadEditingCard') + 600);
+    assert.match(reload, /editor\._boardContext\?\.refresh\(\);/);
+    const attach = source.slice(source.indexOf('async attachImages'), source.indexOf('async attachImages') + 2200);
+    assert.match(attach, /addCardAttachmentAsync[\s\S]*_boardContext\?\.refresh\(\)/);
+    assert.match(source, /deleteCardAttachmentAsync[\s\S]{0,600}_boardContext\?\.refresh\(\)/);
+    assert.match(source, /onChanged: \(\) => editor\._boardContext\?\.refresh\(\)/);
+    const links = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/board-card-links.js'), 'utf8');
+    assert.match(links, /\{ openCard, showError, onChanged \}/);
+    assert.match(links, /renderLinks\(\);\s*onChanged\?\.\(\);/);
     const close = source.slice(source.indexOf('onClose: () => {'), source.indexOf('onClose: () => {') + 400);
     assert.match(close, /this\.cardContextDispose\?\.\(\);/);
     assert.match(readFileSync(apiPath, 'utf8'), /getCardContextAsync[\s\S]*\/context`, 'GET'/);

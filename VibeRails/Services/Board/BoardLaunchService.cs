@@ -136,7 +136,7 @@ public sealed class BoardLaunchService(
                 Log.Warning("[Board] Tab {TabId} started for {Card} without a session id; the card will not show it", tab.TabId, card.Key);
             }
 
-            await RecordContextSampleAsync(projectPath, card, composed, intent, session.SessionId, parsed.Cli, parsed.Key, cancellationToken);
+            await RecordContextSampleAsync(projectPath, card, composed, intent, session.SessionId, parsed.Cli, parsed.Key);
             return new LaunchBoardCardResponse(tab.TabId, session.SessionId, session.Cli, session.WorkingDirectory, card.Id, card.Key, parsed.Key);
         }
         catch
@@ -183,14 +183,19 @@ public sealed class BoardLaunchService(
         return new BoardLaunchPrompt(prompt, environmentPrompt, boardContext?.Context, boardId, boardName);
     }
 
+    /// <summary>
+    /// Runs after the terminal is up and linked. Nothing from here may reach the launch's cleanup
+    /// path: the sample takes no request token (a cancelled HTTP request must not tear down a
+    /// terminal that already started) and every failure, cancellation included, is only logged.
+    /// </summary>
     private async Task RecordContextSampleAsync(string projectPath, BoardCardRecord card, BoardLaunchPrompt composed, string intent,
-        string? sessionId, string cli, string selection, CancellationToken cancellationToken)
+        string? sessionId, string cli, string selection)
     {
         try
         {
-            await contextEstimator.RecordLaunchAsync(projectPath, card, composed, intent, sessionId, cli, selection, cancellationToken);
+            await contextEstimator.RecordLaunchAsync(projectPath, card, composed, intent, sessionId, cli, selection, CancellationToken.None);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex)
         {
             Log.Warning(ex, "[Board] Could not record the launch context sample for {Card}", card.Key);
         }

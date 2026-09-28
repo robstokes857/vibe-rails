@@ -184,7 +184,7 @@ public sealed class BoardTool(
     public async Task<string> GetBoardCard(
         [Description("Card key like VB-12 (or the card id). Optional when this terminal was launched for a card.")] string? card = null,
         [Description("ISO-8601 UTC timestamp, e.g. 2026-09-16T21:50:00Z. Only comments, notes, sessions and commits at or after this time are listed; earlier ones are counted. Optional.")] string? since = null,
-        [Description("ISO-8601 UTC timestamp. Only comments, notes, sessions and commits before this time are listed; newer ones are counted. Pass the timestamp the reply gives for its oldest full entry to page back through older activity. Optional.")] string? before = null,
+        [Description("The id of a comment or note on this card (the reply names one after \"before=\"), or an ISO-8601 UTC timestamp. Only activity before that entry or time is listed; newer entries are counted. Pass the id the reply gives to page back through older activity without skipping entries that share a timestamp. Optional.")] string? before = null,
         [Description("recent (default): the newest comments and notes in full within a size budget, older ones as one-line previews. all: every entry in full with no budget. Optional.")] string? activity = null,
         CancellationToken cancellationToken = default)
     {
@@ -192,8 +192,10 @@ public sealed class BoardTool(
         {
             if (!TryParseSince(since, out var sinceUtc))
                 return "FAIL: since must be an ISO-8601 timestamp such as 2026-09-16T21:50:00Z.";
-            if (!TryParseSince(before, out var beforeUtc))
-                return "FAIL: before must be an ISO-8601 timestamp such as 2026-09-16T21:50:00Z.";
+            var beforeId = LooksLikeEntryId(before) ? before!.Trim() : null;
+            DateTime? beforeUtc = null;
+            if (beforeId is null && !TryParseSince(before, out beforeUtc))
+                return "FAIL: before must be an ISO-8601 timestamp such as 2026-09-16T21:50:00Z, or the id of a comment or note on this card (the reply names one after \"before=\").";
             if (!TryParseActivity(activity, out var allActivity))
                 return "FAIL: activity must be recent (the default) or all.";
             var target = await ResolveCardAsync(card, cancellationToken);
@@ -202,7 +204,17 @@ public sealed class BoardTool(
             var detail = await service.GetCardAsync(target.Project, target.CardId!, cancellationToken);
             if (detail is null)
                 return $"FAIL: card not found: {card}";
-            var render = await RenderCardAsync(service, store, target.Project, detail, new CardReadOptions(sinceUtc, beforeUtc, allActivity), cancellationToken);
+            if (beforeId is not null)
+            {
+                // An exact cursor: the entry's own time and id, so a twin sharing its timestamp is
+                // still listed on the next page instead of falling between two time windows.
+                var cursor = detail.Comments.Concat(detail.Notes ?? []).FirstOrDefault(c => string.Equals(c.Id, beforeId, StringComparison.Ordinal));
+                if (cursor is null)
+                    return $"FAIL: before={beforeId} is not a comment or note on {detail.Key}. Pass the id the previous reply named, or an ISO-8601 timestamp.";
+                beforeUtc = cursor.CreatedAt;
+                beforeId = cursor.Id;
+            }
+            var render = await RenderCardAsync(service, store, target.Project, detail, new CardReadOptions(sinceUtc, beforeUtc, allActivity, beforeId), cancellationToken);
             return render.Text;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -211,8 +223,13 @@ public sealed class BoardTool(
         }
     }
 
-    /// <summary>One card read's activity window and whether the size budget applies.</summary>
-    internal sealed record CardReadOptions(DateTime? Since = null, DateTime? Before = null, bool AllActivity = false)
+    /// <summary>
+    /// One card read's activity window and whether the size budget applies. <see cref="Before"/>
+    /// alone is a time cursor (entries at or after it are hidden). With <see cref="BeforeId"/> the
+    /// cursor is an exact comment/note: entries that share its timestamp but sort before it in the
+    /// store's (time, id) order are still listed, so paging back never skips a same-second twin.
+    /// </summary>
+    internal sealed record CardReadOptions(DateTime? Since = null, DateTime? Before = null, bool AllActivity = false, string? BeforeId = null)
     {
         public static readonly CardReadOptions Default = new();
     }
@@ -837,7 +854,14 @@ public sealed class BoardTool(
         if (options.Since is DateTime cutoff)
             builder.Append("Showing activity since ").Append(cutoff.ToString("u", CultureInfo.InvariantCulture)).Append("; earlier items are counted, not listed.\n");
         if (options.Before is DateTime ceiling)
-            builder.Append("Showing activity before ").Append(ceiling.ToString(BeforeFormat, CultureInfo.InvariantCulture)).Append("; newer items are counted, not listed.\n");
+        {
+            builder.Append("Showing activity before ");
+            if (options.BeforeId is not null)
+                builder.Append(options.BeforeId).Append(" (").Append(ceiling.ToString("u", CultureInfo.InvariantCulture)).Append(')');
+            else
+                builder.Append(ceiling.ToString(BeforeFormat, CultureInfo.InvariantCulture));
+            builder.Append("; newer items are counted, not listed.\n");
+        }
         builder.Append('\n');
 
         var descriptionStart = builder.Length;
@@ -858,8 +882,8 @@ public sealed class BoardTool(
 
         // Newest first, so the latest decision or checkpoint is the first thing read and the
         // budget below drops the oldest entries, never the newest.
-        var comments = Window(card.Comments, c => c.CreatedAt, options, out var earlierComments, out var laterComments);
-        var notes = Window(card.Notes ?? [], n => n.CreatedAt, options, out var earlierNotes, out var laterNotes);
+        var comments = Window(card.Comments, c => c.CreatedAt, options, out var earlierComments, out var laterComments, c => c.Id);
+        var notes = Window(card.Notes ?? [], n => n.CreatedAt, options, out var earlierNotes, out var laterNotes, n => n.Id);
         comments.Reverse();
         notes.Reverse();
         var commentLines = comments.Select(FormatCommentLine).ToList();
@@ -949,7 +973,7 @@ public sealed class BoardTool(
     /// characters spent on full entries so the next section can take what is left.
     /// </summary>
     private static int AppendActivity(StringBuilder builder, string heading, string kind, IReadOnlyList<BoardCommentDto> newestFirst, IReadOnlyList<string> lines,
-        int earlierHidden, int laterHidden, int allowance, string emptyText, Func<DateTime?, string> pageHint, ActivityRenderStats stats)
+        int earlierHidden, int laterHidden, int allowance, string emptyText, Func<BoardCommentDto?, string> pageHint, ActivityRenderStats stats)
     {
         var start = builder.Length;
         builder.Append(heading).Append(" (").Append(newestFirst.Count).Append(HiddenSuffix(earlierHidden, laterHidden)).Append("):\n");
@@ -987,7 +1011,7 @@ public sealed class BoardTool(
         var older = lines.Count - index;
         if (older > 0)
         {
-            var oldestFull = index > 0 ? newestFirst[index - 1].CreatedAt : (DateTime?)null;
+            var oldestFull = index > 0 ? newestFirst[index - 1] : null;
             builder.Append("Older ").Append(kind).Append(" (previews only; ").Append(pageHint(oldestFull)).Append("):\n");
             var previewed = Math.Min(older, MaxActivityPreviews);
             for (var p = index; p < index + previewed; p++)
@@ -1018,11 +1042,15 @@ public sealed class BoardTool(
     private static void AppendCommentLine(StringBuilder builder, BoardCommentDto comment) =>
         builder.Append(FormatCommentLine(comment));
 
-    /// <summary>The exact timestamp to pass as before= so the entry itself is excluded and everything older is not.</summary>
-    private static string Before(DateTime? oldestFull) =>
-        oldestFull is DateTime at ? at.ToUniversalTime().ToString(BeforeFormat, CultureInfo.InvariantCulture) : "<timestamp>";
+    /// <summary>The value to pass as before=: the oldest full entry's id, an exact cursor that excludes it and nothing older.</summary>
+    private static string Before(BoardCommentDto? oldestFull) => oldestFull?.Id ?? "<comment-or-note-id>";
 
-    private static List<T> Window<T>(IReadOnlyList<T> items, Func<T, DateTime> at, CardReadOptions options, out int earlier, out int later)
+    /// <summary>
+    /// The activity window. With an id cursor, comment and note streams compare (time, id) the
+    /// way the store orders them, so an entry sharing the cursor's timestamp but older in that
+    /// order is still listed; streams without ids (sessions, commits) compare time only.
+    /// </summary>
+    private static List<T> Window<T>(IReadOnlyList<T> items, Func<T, DateTime> at, CardReadOptions options, out int earlier, out int later, Func<T, string>? id = null)
     {
         earlier = 0;
         later = 0;
@@ -1033,10 +1061,30 @@ public sealed class BoardTool(
         {
             var when = at(item);
             if (options.Since is DateTime since && when < since) earlier++;
-            else if (options.Before is DateTime before && when >= before) later++;
+            else if (options.Before is DateTime before && IsAtOrAfterCursor(when, before, id is null ? null : id(item), options.BeforeId)) later++;
             else visible.Add(item);
         }
         return visible;
+    }
+
+    private static bool IsAtOrAfterCursor(DateTime when, DateTime before, string? itemId, string? cursorId)
+    {
+        if (when > before) return true;
+        if (when < before) return false;
+        // Same timestamp: an exact cursor hides the cursor entry and anything sorted after it; a
+        // time-only cursor hides the whole second, as documented.
+        return itemId is null || cursorId is null || string.CompareOrdinal(itemId, cursorId) >= 0;
+    }
+
+    /// <summary>A comment/note id as the store mints them (<c>cmt_…</c>, <c>note_…</c>): a prefix, an underscore, hex.</summary>
+    private static bool LooksLikeEntryId(string? value)
+    {
+        var text = value?.Trim();
+        if (string.IsNullOrEmpty(text) || text.Length > 64) return false;
+        var underscore = text.IndexOf('_');
+        return underscore > 0 && underscore < text.Length - 1
+            && text[..underscore].All(char.IsAsciiLetterLower)
+            && text[(underscore + 1)..].All(char.IsAsciiHexDigitLower);
     }
 
     private static string HiddenSuffix(int earlier, int later)
