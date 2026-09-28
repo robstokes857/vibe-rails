@@ -2,6 +2,7 @@
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services.Integrations.VibeCodeRemote;
+using VibeRails.Services.Board;
 
 namespace VibeRails.Services;
 
@@ -9,17 +10,41 @@ public class ChatHistoryService(
     IRepository repository,
     ISessionTranscriptService sessionTranscriptService,
     ISummaryService summaryService,
-    ISessionDataExportService sessionDataExportService) : IChatHistoryService
+    ISessionDataExportService sessionDataExportService,
+    IBoardStore boardStore) : IChatHistoryService
 {
     public async Task<ChatHistoryResponse> GetHistoryAsync(int page, int pageSize, string? preferredWorkingDirectory, string? sortBy, string? sortDirection, CancellationToken cancellationToken)
     {
         var offset = (page - 1) * pageSize;
         var items = await repository.GetChatHistoryPageAsync(pageSize, offset, preferredWorkingDirectory, sortBy, sortDirection, cancellationToken);
+        await AddBoardCardsAsync(items, cancellationToken);
         return new ChatHistoryResponse(items, page, pageSize);
     }
 
-    public Task<ChatHistoryItem?> GetSessionAsync(string sessionId, CancellationToken cancellationToken)
-        => repository.GetChatHistoryItemAsync(sessionId, cancellationToken);
+    public async Task<ChatHistoryItem?> GetSessionAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        var item = await repository.GetChatHistoryItemAsync(sessionId, cancellationToken);
+        if (item is null) return null;
+        var items = new List<ChatHistoryItem> { item };
+        await AddBoardCardsAsync(items, cancellationToken);
+        return items[0];
+    }
+
+    private async Task AddBoardCardsAsync(List<ChatHistoryItem> items, CancellationToken cancellationToken)
+    {
+        if (items.Count == 0) return;
+        var cards = (await boardStore.GetSessionCardsAsync(items.Select(item => item.Id).ToArray(), cancellationToken))
+            .ToLookup(card => card.SessionId, StringComparer.Ordinal);
+        for (var i = 0; i < items.Count; i++)
+        {
+            // Do not rewrite stored names: legacy automatic previews and explicit renames
+            // remain intact. The client uses card labels as the automatic display default.
+            items[i] = items[i] with
+            {
+                BoardCards = cards[items[i].Id].Select(card => new ChatHistoryCard(card.CardId, card.Key, card.Title)).ToArray()
+            };
+        }
+    }
 
     public Task<bool> RenameSessionAsync(string sessionId, string sessionDisplayName, CancellationToken cancellationToken)
         => repository.UpdateChatHistorySessionNameAsync(sessionId, sessionDisplayName, cancellationToken);

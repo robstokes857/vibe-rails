@@ -153,6 +153,9 @@ public sealed record BoardSessionRecord(
 /// <summary>A session's default card link and that card's project; other attachments may also exist.</summary>
 public sealed record BoardSessionLink(string SessionId, string CardId, string ProjectPath);
 
+/// <summary>A lightweight card label attached to a recorded session.</summary>
+public sealed record BoardSessionCard(string SessionId, string CardId, string Key, string Title);
+
 public sealed record BoardAttachmentRecord(
     string Id,
     string CardId,

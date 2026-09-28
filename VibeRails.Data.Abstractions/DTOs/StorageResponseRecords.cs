@@ -86,7 +86,14 @@ public record ChatHistoryItem(
     string? InputText,
     int UserInputCount,
     long? DurationSeconds
-);
+)
+{
+    /// <summary>Current card labels, with the session's default attachment first.</summary>
+    public IReadOnlyList<ChatHistoryCard> BoardCards { get; init; } = [];
+}
+
+/// <summary>Current Board identity and title shown in local chat history.</summary>
+public record ChatHistoryCard(string Id, string Key, string Title);
 
 public record BoardAuthorDto(string Kind, string Label, string? Cli, string? SessionId = null);
 

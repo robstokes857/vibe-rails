@@ -29,6 +29,34 @@ public sealed class BoardStoreTests : IDisposable
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Fact]
+    public async Task HistorySessionCards_ReturnOnlyRequestedActiveCards_DefaultFirst_AcrossBatches()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        await _store.EnsureDefaultColumnsAsync(_otherProject, Ct);
+        var first = await _store.CreateCardAsync(_project, NewCard("Primary"), Ct);
+        var second = await _store.CreateCardAsync(_project, NewCard("Additional"), Ct);
+        var foreign = await _store.CreateCardAsync(_otherProject, NewCard("Another project"), Ct);
+        foreach (var card in new[] { first, second })
+            await _store.LinkSessionAsync(_project, card.Id, "shared", null, "base:codex", "codex", "Name", BoardSessionRecord.LaunchOrigin, Ct);
+        await _store.LinkSessionAsync(_otherProject, foreign.Id, "foreign", null, "base:claude", "claude", "Name", BoardSessionRecord.LaunchOrigin, Ct);
+
+        var ids = new[] { "shared" }.Concat(Enumerable.Range(0, 100).Select(i => $"absent-{i}"))
+            .Concat(["foreign", "shared", "' OR 1=1 --"]).ToArray();
+        var labels = await _store.GetSessionCardsAsync(ids, Ct);
+        Assert.Equal(new[] { first.Id, second.Id, foreign.Id }, labels.Select(card => card.CardId));
+        Assert.Equal(new[] { first.Key, second.Key, foreign.Key }, labels.Select(card => card.Key));
+        Assert.Equal(new[] { "Primary", "Additional", "Another project" }, labels.Select(card => card.Title));
+        Assert.Empty(await _store.GetSessionCardsAsync(["unrelated"], Ct));
+        Assert.Empty(await _store.GetSessionCardsAsync([], Ct));
+
+        await _store.DeleteCardAsync(_project, first.Id, Ct);
+        var remaining = Assert.Single(await _store.GetSessionCardsAsync(["shared"], Ct));
+        Assert.Equal(second.Id, remaining.CardId);
+        await _store.UnlinkSessionAsync(_project, second.Id, "shared", Ct);
+        Assert.Empty(await _store.GetSessionCardsAsync(["shared"], Ct));
+    }
+
+    [Fact]
     public async Task AdditionalSessions_PreserveDefault_AndSurvivePrimaryDeletion()
     {
         await _store.EnsureDefaultColumnsAsync(_project, Ct);

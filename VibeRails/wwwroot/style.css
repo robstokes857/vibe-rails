@@ -7704,7 +7704,36 @@ input.form-control:disabled {
 .ch-filter-drawer-content {
     display: none;
     padding: 4px 2px 8px;
+    max-height: min(42vh, 380px);
+    overflow-y: auto;
+    scrollbar-width: thin;
 }
+
+.ch-filter-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: var(--color-text-secondary, #94a3b8);
+    font-size: 0.75rem;
+}
+
+.ch-filter-field :is(input, select) {
+    min-width: 0;
+    width: 100%;
+}
+
+.ch-filter-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--color-text-secondary, #94a3b8);
+    font-size: 0.72rem;
+}
+
+.ch-filter-summary button:disabled { opacity: 0.4; }
+.ch-card-meta { overflow-wrap: anywhere; }
+.ch-history-retry { padding: 10px; font-size: 0.8rem; }
 
 .ch-filter-drawer-content.is-open {
     display: flex;

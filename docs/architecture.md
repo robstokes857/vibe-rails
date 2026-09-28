@@ -11,6 +11,16 @@ interaction flows, key components (services, MCP, data, API routes, frontend), d
 configuration and file locations, development workflows, common agent tasks, troubleshooting
 and debug logging, security, performance, future enhancements, resources.
 
+## Chat history metadata (2026-09-28)
+
+The history API reads session pages from `state.db`. `ChatHistoryService` then obtains current
+card labels for those session IDs through `IBoardStore.GetSessionCardsAsync`, which batches reads
+from `board.db` and includes primary/additional attachments without deleted cards. The existing
+history endpoints retain their global local-session scope and session-plus-tab authentication.
+No cross-database SQL join, schema migration or historical-data rewrite is needed. The sidebar
+uses these labels for automatic titles, card metadata and combined filters; see the
+[frontend contract](../VibeRails/wwwroot/AGENTS.md#chat-history-sidebar).
+
 ## Project Overview
 
 **VibeRails** is a sophisticated desktop/web application for managing and enforcing coding standards across AI-powered development workflows. It serves as a unified control panel for multiple LLM CLIs (Claude, Codex, Antigravity) with comprehensive rule enforcement, session logging, and MCP integration.

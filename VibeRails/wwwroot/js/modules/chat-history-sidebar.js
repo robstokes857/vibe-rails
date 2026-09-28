@@ -29,6 +29,13 @@ export class ChatHistorySidebar {
         this.allItems = [];
         this.filterText = '';
         this.llmFilters = new Set();
+        this.environmentFilter = '';
+        this.boardFilter = '';
+        this.cardFilter = '';
+        this.statusFilter = '';
+        this._generation = 0;
+        this._requestController = new AbortController();
+        this._pendingLookups = 0;
         this.activeItem = null;
         this.pageSize = DEFAULT_PAGE_SIZE;
         this.currentPage = 0;
@@ -78,11 +85,11 @@ export class ChatHistorySidebar {
                     <div class="ch-sidebar-search">
                         <div class="ch-search-input-wrapper">
                             <i class="fa-solid fa-magnifying-glass ch-search-icon"></i>
-                            <input type="text" class="ch-search-input" id="ch-search-input" placeholder="search sessions, ids, projects" autocomplete="off" spellcheck="false">
+                            <input type="search" class="ch-search-input" id="ch-search-input" aria-label="Search chat history" placeholder="Search chats, cards, environments…" autocomplete="off" spellcheck="false">
                             <kbd class="ch-search-kbd" aria-hidden="true">/</kbd>
                         </div>
                         <div class="ch-sidebar-controls">
-                            <button class="ch-filter-drawer-toggle" id="ch-filter-drawer-toggle" type="button" aria-expanded="false">
+                            <button class="ch-filter-drawer-toggle" id="ch-filter-drawer-toggle" type="button" aria-expanded="false" aria-controls="ch-filter-drawer-content">
                                 <i class="fa-solid fa-filter ch-filter-icon"></i>
                                 <span class="ch-filter-drawer-label">Filters</span>
                                 <i class="fa-solid fa-chevron-down ch-filter-drawer-chevron"></i>
@@ -93,6 +100,31 @@ export class ChatHistorySidebar {
                                     <span class="ch-current-dir-toggle-label">This folder</span>
                                 </button>
                                 <div class="ch-llm-filter-group" id="ch-llm-filter-group"></div>
+                                <div class="ch-filter-field"><label for="ch-environment-filter">Environment</label>
+                                    <select id="ch-environment-filter" class="form-select form-select-sm"></select>
+                                </div>
+                                <div class="ch-filter-field"><label for="ch-board-filter">Board</label>
+                                    <select id="ch-board-filter" class="form-select form-select-sm">
+                                        <option value="">All sessions</option>
+                                        <option value="linked">Linked to a card</option>
+                                        <option value="unlinked">No linked card</option>
+                                    </select>
+                                </div>
+                                <div class="ch-filter-field"><label for="ch-card-filter">Card key or title</label>
+                                    <input id="ch-card-filter" class="form-control form-control-sm" type="search" placeholder="e.g. VB-64 or sidebar" autocomplete="off">
+                                </div>
+                                <div class="ch-filter-field"><label for="ch-status-filter">Status</label>
+                                    <select id="ch-status-filter" class="form-select form-select-sm">
+                                        <option value="">All statuses</option>
+                                        <option value="live">Live</option>
+                                        <option value="ended">Ended</option>
+                                        <option value="failed">Failed (nonzero exit)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="ch-filter-summary">
+                                <span id="ch-filter-results" role="status" aria-live="polite"></span>
+                                <button id="ch-clear-filters" type="button" class="ch-current-dir-toggle">Clear all</button>
                             </div>
                         </div>
                     </div>
@@ -134,6 +166,25 @@ export class ChatHistorySidebar {
         this.closeButton = root.querySelector('#ch-sidebar-close-btn');
         this.llmFilterContainer = root.querySelector('#ch-llm-filter-group');
         this.currentDirToggle = root.querySelector('#ch-current-dir-toggle');
+        this.searchInput = root.querySelector('#ch-search-input');
+        this.environmentSelect = root.querySelector('#ch-environment-filter');
+        this.boardSelect = root.querySelector('#ch-board-filter');
+        this.cardInput = root.querySelector('#ch-card-filter');
+        this.statusSelect = root.querySelector('#ch-status-filter');
+        this.clearFiltersButton = root.querySelector('#ch-clear-filters');
+        this.resultsLabel = root.querySelector('#ch-filter-results');
+        for (const [element, property] of [
+            [this.environmentSelect, 'environmentFilter'], [this.boardSelect, 'boardFilter'],
+            [this.cardInput, 'cardFilter'], [this.statusSelect, 'statusFilter']
+        ]) {
+            if (!element) continue;
+            element.value = this[property];
+            element.addEventListener(property === 'cardFilter' ? 'input' : 'change', () => {
+                this[property] = element.value.trim();
+                this._filtersChanged();
+            });
+        }
+        this.clearFiltersButton?.addEventListener('click', () => this._clearFilters());
         this.filterDrawerToggle = root.querySelector('#ch-filter-drawer-toggle');
         this.filterDrawerContent = root.querySelector('#ch-filter-drawer-content');
         this.filterDrawerToggle?.addEventListener('click', () => {
@@ -236,9 +287,12 @@ export class ChatHistorySidebar {
             }
         });
         const searchInput = root.querySelector('#ch-search-input');
+        if (searchInput) searchInput.value = this.filterText;
         searchInput?.addEventListener('input', (e) => {
             this.filterText = e.target.value.toLowerCase().trim();
             this._renderItems();
+            this._syncFilterCountBadge();
+            this._closeContextMenu();
 
             // If the user typed/pasted a full session id, look it up directly
             // (faster than scanning every page) and merge the result so the
@@ -249,7 +303,7 @@ export class ChatHistorySidebar {
                 return;
             }
 
-            if (this.filterText && this.hasMore) {
+            if (this._hasActiveFilters() && this.hasMore) {
                 void this._loadRemainingPagesForFilters();
             }
         });
@@ -278,13 +332,7 @@ export class ChatHistorySidebar {
             }
 
             this._syncLlmFilterControls();
-            this._syncFilterCountBadge();
-            this._closeContextMenu();
-            this._renderItems();
-
-            if (this._hasActiveFilters() && this.hasMore) {
-                void this._loadRemainingPagesForFilters();
-            }
+            this._filtersChanged();
         });
 
         this.currentDirToggle?.addEventListener('click', (e) => {
@@ -294,13 +342,7 @@ export class ChatHistorySidebar {
 
             e.stopPropagation();
             this.currentDirOnly = !this.currentDirOnly;
-            this._syncCurrentDirToggle();
-            this._closeContextMenu();
-            this._renderItems();
-
-            if (this.currentDirOnly && this.hasMore && this._shouldLoadNextPage()) {
-                void this._loadNextPage();
-            }
+            this._filtersChanged();
         });
 
         body?.addEventListener('scroll', () => {
@@ -338,10 +380,11 @@ export class ChatHistorySidebar {
         // "/" focuses the search input when the sidebar is open and the user
         // is not already typing somewhere else.
         this._documentKeydownHandler = (e) => {
+            if (e.key === 'Escape') { this._closeContextMenu(); return; }
             if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
             if (!sidebar || sidebar.classList.contains('ch-sidebar-collapsed')) return;
             const active = document.activeElement;
-            if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) {
+            if (active && (['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName) || active.isContentEditable)) {
                 return;
             }
             if (!searchInput || !searchInput.isConnected) return;
@@ -358,6 +401,7 @@ export class ChatHistorySidebar {
 
         syncCloseButtonState();
         this._syncLlmFilterControls();
+        this._syncEnvironmentOptions();
         this._syncCurrentDirToggle();
 
         // Initial state: first-time visitors get a collapsed sidebar (so the
@@ -373,6 +417,7 @@ export class ChatHistorySidebar {
     }
 
     destroy() {
+        this._invalidateRequests();
         if (this._documentClickHandler) {
             document.removeEventListener('click', this._documentClickHandler);
             this._documentClickHandler = null;
@@ -400,6 +445,24 @@ export class ChatHistorySidebar {
         this.currentDirToggle = null;
         this.filterDrawerToggle = null;
         this.filterDrawerContent = null;
+        this.searchInput = null;
+        this.environmentSelect = null;
+        this._environmentOptionsHtml = null;
+        this.boardSelect = null;
+        this.cardInput = null;
+        this.statusSelect = null;
+        this.clearFiltersButton = null;
+        this.resultsLabel = null;
+    }
+
+    _invalidateRequests() {
+        this._generation++;
+        this._requestController.abort();
+        this._requestController = new AbortController();
+        this.isLoadingPage = false;
+        this.isLoadingForSearch = false;
+        this._softRefreshInFlight = false;
+        this._pendingLookups = 0;
     }
 
     async _load() {
@@ -407,6 +470,7 @@ export class ChatHistorySidebar {
             return;
         }
 
+        this._invalidateRequests();
         this.activeItem = null;
         this.allItems = [];
         this.currentPage = 0;
@@ -423,6 +487,7 @@ export class ChatHistorySidebar {
             return false;
         }
 
+        const generation = this._generation;
         this.isLoadingPage = true;
         this._setRefreshButtonState();
         if (!initial) {
@@ -444,7 +509,9 @@ export class ChatHistorySidebar {
                     page: String(nextPage),
                     pageSize: String(this.pageSize)
                 });
-                const data = await this.app.apiCall(`/api/v1/chatHistory?${params.toString()}`, 'GET', null, { showLoading: false });
+                const data = await this.app.apiCall(`/api/v1/chatHistory?${params.toString()}`, 'GET', null,
+                    { showLoading: false, signal: this._requestController.signal });
+                if (generation !== this._generation) return false;
                 const fetchedItems = Array.isArray(data?.items) ? data.items : [];
 
                 if (fetchedItems.length === 0) {
@@ -454,6 +521,7 @@ export class ChatHistorySidebar {
 
                 didLoadPage = true;
                 this.currentPage = nextPage;
+                this.hasMore = fetchedItems.length >= this.pageSize;
 
                 const visibleItems = fetchedItems.filter(item => this._shouldDisplayItem(item));
                 if (visibleItems.length > 0) {
@@ -465,6 +533,7 @@ export class ChatHistorySidebar {
             this.loadFailed = false;
             return didLoadPage;
         } catch (error) {
+            if (generation !== this._generation || error?.name === 'AbortError') return false;
             this.loadFailed = true;
             this.hasMore = false;
 
@@ -475,6 +544,7 @@ export class ChatHistorySidebar {
 
             return false;
         } finally {
+            if (generation !== this._generation) return false;
             this.isLoadingPage = false;
             this._setRefreshButtonState();
             this._renderItems();
@@ -495,18 +565,20 @@ export class ChatHistorySidebar {
             return;
         }
 
+        const generation = this._generation;
         this.isLoadingForSearch = true;
         this._setRefreshButtonState();
         this._renderItems();
 
         try {
-            while (this.filterText && this.hasMore) {
+            while (generation === this._generation && this._hasActiveFilters() && this.hasMore && this.body?.isConnected) {
                 const didLoad = await this._loadNextPage();
                 if (!didLoad) {
                     break;
                 }
             }
         } finally {
+            if (generation !== this._generation) return;
             this.isLoadingForSearch = false;
             this._setRefreshButtonState();
             this._renderItems();
@@ -568,6 +640,7 @@ export class ChatHistorySidebar {
         const sessionIds = Array.from(this._softRefreshSessionIds);
         this._softRefreshSessionIds.clear();
         this._softRefreshInFlight = true;
+        const generation = this._generation;
 
         try {
             const loadedRows = Math.max(this.pageSize, this.currentPage * this.pageSize);
@@ -576,7 +649,8 @@ export class ChatHistorySidebar {
                 pageSize: String(Math.min(loadedRows, SOFT_REFRESH_MAX_ROWS))
             });
             const requests = [
-                this.app.apiCall(`/api/v1/chatHistory?${params.toString()}`, 'GET', null, { showLoading: false })
+                this.app.apiCall(`/api/v1/chatHistory?${params.toString()}`, 'GET', null,
+                    { showLoading: false, signal: this._requestController.signal })
             ];
             for (const id of sessionIds) {
                 // A session that was just deleted 404s; that is not a refresh failure.
@@ -584,12 +658,12 @@ export class ChatHistorySidebar {
                     `/api/v1/chatHistory/${encodeURIComponent(id)}`,
                     'GET',
                     null,
-                    { showLoading: false }
+                    { showLoading: false, signal: this._requestController.signal }
                 ).catch(() => null));
             }
 
             const [pageData, ...singles] = await Promise.all(requests);
-            if (!this.body?.isConnected) {
+            if (generation !== this._generation || !this.body?.isConnected) {
                 return;
             }
 
@@ -599,9 +673,9 @@ export class ChatHistorySidebar {
         } catch (error) {
             // Background refresh: the list on screen is still valid, so stay quiet. The
             // refresh button remains the loud path that surfaces a broken backend.
-            console.warn('[ChatHistory] Soft refresh failed:', error);
+            if (generation === this._generation && error?.name !== 'AbortError') console.warn('[ChatHistory] Soft refresh failed:', error);
         } finally {
-            this._softRefreshInFlight = false;
+            if (generation === this._generation) this._softRefreshInFlight = false;
         }
     }
 
@@ -655,14 +729,10 @@ export class ChatHistorySidebar {
             this.refreshButton.disabled = isBusy;
             this.refreshButton.classList.toggle('is-loading', isBusy);
         }
-        if (this.llmFilterContainer) {
-            this.llmFilterContainer.querySelectorAll('[data-llm-filter]').forEach((button) => {
-                button.disabled = isBusy;
-            });
-        }
+        // Filters stay usable while older pages load, including Clear all to stop the scan.
         if (this.currentDirToggle) {
             const hasPreferredDir = Boolean((this._getPreferredWorkingDirectory() || '').trim());
-            this.currentDirToggle.disabled = isBusy || !hasPreferredDir;
+            this.currentDirToggle.disabled = !hasPreferredDir;
         }
     }
 
@@ -673,6 +743,8 @@ export class ChatHistorySidebar {
 
         const options = this._getLlmFilterOptions();
         this._syncFilterCountBadge();
+        const focusedValue = this.llmFilterContainer.contains(document.activeElement)
+            ? document.activeElement?.dataset?.llmFilter : null;
 
         this.llmFilterContainer.innerHTML = options.map((option) => {
             const isReset = option.value === 'reset';
@@ -684,6 +756,7 @@ export class ChatHistorySidebar {
                     class="ch-llm-filter-badge${isActive ? ' is-active' : ''}${isReset ? ' is-reset' : ''}"
                     data-llm-filter="${escapeHtml(option.value)}"
                     aria-pressed="${isActive ? 'true' : 'false'}"
+                    aria-label="${escapeHtml(option.label)}"
                     title="${escapeHtml(option.label)}"
                     ${isDisabled ? 'disabled' : ''}
                 >
@@ -692,6 +765,9 @@ export class ChatHistorySidebar {
                 </button>
             `;
         }).join('');
+        if (focusedValue) {
+            this.llmFilterContainer.querySelector(`[data-llm-filter="${CSS.escape(focusedValue)}"]`)?.focus({ preventScroll: true });
+        }
     }
 
     _syncFilterCountBadge() {
@@ -700,7 +776,9 @@ export class ChatHistorySidebar {
         }
 
         let badge = this.filterDrawerToggle.querySelector('.ch-filter-count-badge');
-        const totalActive = this.llmFilters.size;
+        const totalActive = this.llmFilters.size + [this.filterText, this.currentDirOnly,
+            this.environmentFilter, this.boardFilter, this.cardFilter, this.statusFilter].filter(Boolean).length;
+        if (this.clearFiltersButton) this.clearFiltersButton.disabled = totalActive === 0;
         if (totalActive > 0) {
             if (!badge) {
                 badge = document.createElement('span');
@@ -728,7 +806,7 @@ export class ChatHistorySidebar {
 
         this.currentDirToggle.classList.toggle('is-active', this.currentDirOnly);
         this.currentDirToggle.setAttribute('aria-pressed', this.currentDirOnly ? 'true' : 'false');
-        this.currentDirToggle.disabled = !hasPreferredDir || this.isLoadingPage || this.isLoadingForSearch;
+        this.currentDirToggle.disabled = !hasPreferredDir;
 
         const tooltip = hasPreferredDir
             ? `Only show chats from ${preferredDir}`
@@ -736,11 +814,63 @@ export class ChatHistorySidebar {
         this.currentDirToggle.setAttribute('title', tooltip);
     }
 
+    _filtersChanged() {
+        this._syncFilterCountBadge();
+        this._closeContextMenu();
+        this._renderItems();
+        if (this._hasActiveFilters() && this.hasMore) void this._loadRemainingPagesForFilters();
+    }
+
+    _clearFilters() {
+        this.filterText = '';
+        this.llmFilters.clear();
+        this.currentDirOnly = false;
+        this.environmentFilter = this.boardFilter = this.cardFilter = this.statusFilter = '';
+        for (const input of [this.searchInput, this.environmentSelect, this.boardSelect, this.cardInput, this.statusSelect]) {
+            if (input) input.value = '';
+        }
+        this._syncLlmFilterControls();
+        this._filtersChanged();
+    }
+
+    _environmentKey(cli, name) {
+        return JSON.stringify([canonicalLlmCli(cli), (name || '').trim().toLowerCase()]);
+    }
+
+    _syncEnvironmentOptions() {
+        if (!this.environmentSelect) return;
+        const choices = new Map();
+        const add = (cli, name) => {
+            if (!name?.trim()) return;
+            choices.set(this._environmentKey(cli, name), `${name.trim()} (${this.app.getCliBrand(cli).label})`);
+        };
+        for (const env of this.app.data?.environments || []) add(env.cli, env.name);
+        for (const item of this.allItems) add(item.cli, item.environmentName);
+        // Keep a selected historical environment even while a refresh replaces its rows.
+        if (this.environmentFilter.startsWith('[') && !choices.has(this.environmentFilter)) {
+            choices.set(this.environmentFilter, this.environmentSelect.selectedOptions?.[0]?.textContent || 'Selected environment');
+        }
+        const options = [['', 'All environments'], ['base', 'Base CLI (no custom environment)'], ['custom', 'Any custom environment'],
+            ...[...choices].sort((a, b) => a[1].localeCompare(b[1]))];
+        const html = options.map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join('');
+        if (this._environmentOptionsHtml !== html) {
+            this.environmentSelect.innerHTML = html;
+            this._environmentOptionsHtml = html;
+        }
+        this.environmentSelect.value = this.environmentFilter;
+    }
+
     _getRawDisplayName(item) {
         const sessionName = item.sessionDisplayName?.trim();
-        if (sessionName) {
+        // The parser stores the first 120 prompt characters as an automatic name.
+        // Board prompts start with boilerplate; prefer the actual card in that case.
+        if (sessionName && sessionName !== item.inputText?.trim()) {
             return sessionName;
         }
+
+        const card = item.boardCards?.[0];
+        if (card) return `${card.key} · ${card.title}`;
+        if (sessionName) return sessionName;
 
         const inputName = item.inputText?.trim().split('\n')[0]?.trim();
         return inputName || '';
@@ -922,6 +1052,12 @@ export class ChatHistorySidebar {
         }
 
         this._syncCurrentDirToggle();
+        this._syncFilterCountBadge();
+        const filteredItems = this._getFilteredItems();
+        if (this.resultsLabel) {
+            const count = filteredItems.length;
+            this.resultsLabel.textContent = `${count}${this.hasMore || this.loadFailed ? '+' : ''} ${count === 1 ? 'chat' : 'chats'}${this.loadFailed ? ' · incomplete' : ''}`;
+        }
 
         if (this.loadFailed && this.allItems.length === 0) {
             this.body.innerHTML = `
@@ -933,10 +1069,8 @@ export class ChatHistorySidebar {
             return;
         }
 
-        const filteredItems = this._getFilteredItems();
-
         if (!filteredItems.length) {
-            if (this.filterText && (this.isLoadingPage || this.isLoadingForSearch)) {
+            if (this.isLoadingPage || this.isLoadingForSearch || this._pendingLookups > 0) {
                 this.body.innerHTML = `
                     <div class="ch-loading ch-loading-inline">
                         <span class="vb-spinner vb-spinner-sm" role="status" aria-label="Searching"></span>
@@ -946,7 +1080,7 @@ export class ChatHistorySidebar {
                 return;
             }
 
-            const filtered = this.filterText || this.llmFilters.size > 0 || this.currentDirOnly;
+            const filtered = this._hasActiveFilters();
             const title = filtered ? 'No matches' : 'No chats yet';
             const hint = filtered
                 ? 'Try a different search or clear your filters to widen the net.'
@@ -956,7 +1090,8 @@ export class ChatHistorySidebar {
                     <span class="ch-empty-glyph"><i class="fa-solid fa-clock-rotate-left"></i></span>
                     <span class="ch-empty-title">${escapeHtml(title)}</span>
                     <span class="ch-empty-hint">${escapeHtml(hint)}</span>
-                </div>`;
+                </div>${this._renderFooter()}`;
+            this._bindRetry();
             return;
         }
 
@@ -974,13 +1109,18 @@ export class ChatHistorySidebar {
             const accent = brand.accentColor || 'var(--color-accent, #06b6d4)';
             const itemStyle = ` style="--ch-item-accent: ${escapeHtml(accent)}"`;
             const metaLines = [];
+            for (const card of item.boardCards || []) {
+                metaLines.push(`<div class="ch-meta-row ch-card-meta" title="${escapeHtml(`${card.key} · ${card.title}`)}"><span class="ch-meta-label">Card</span> ${escapeHtml(card.key)}</div>`);
+            }
             if (item.environmentName?.trim()) {
                 metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">Env</span> ${escapeHtml(item.environmentName.trim())}</div>`);
             }
             if (isActive) {
                 metaLines.push(`<div class="ch-meta-row"><span class="ch-live-dot">Live</span> <span class="ch-meta-divider">·</span> <span>${escapeHtml(time)}</span></div>`);
             } else {
-                metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">Ended</span> ${escapeHtml(time)}</div>`);
+                const endedTime = formatRelativeTime(item.endedUTC);
+                const exitLabel = item.exitCode != null && item.exitCode !== 0 ? ` · Exit ${item.exitCode}` : '';
+                metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">Ended</span> ${escapeHtml(endedTime + exitLabel)}</div>`);
             }
             const metaHtml = metaLines.join('');
             const relationshipHtml = item.parentSessionId
@@ -1010,6 +1150,7 @@ export class ChatHistorySidebar {
                     </div>
                 </div>`;
         }).join('')}${this._renderFooter()}`;
+        this._bindRetry();
 
         // Bind menu buttons
         const itemElements = this.body.querySelectorAll('.ch-item');
@@ -1037,13 +1178,14 @@ export class ChatHistorySidebar {
     }
 
     _renderFooter() {
-        if (!this.isLoadingPage && !this.isLoadingForSearch) {
+        if (this.loadFailed) {
+            return '<div class="ch-history-retry">History is incomplete. <button type="button" class="btn btn-sm btn-outline-secondary" data-history-retry>Retry</button></div>';
+        }
+        if (!this.isLoadingPage && !this.isLoadingForSearch && this._pendingLookups === 0) {
             return '';
         }
 
-        const label = this.filterText
-            || this.llmFilters.size > 0
-            || this.currentDirOnly
+        const label = this._hasActiveFilters()
             ? 'Searching older sessions'
             : 'Loading more sessions';
 
@@ -1053,6 +1195,14 @@ export class ChatHistorySidebar {
                 <span class="ch-loading-label">${escapeHtml(label)}</span>
             </div>
         `;
+    }
+
+    _bindRetry() {
+        this.body?.querySelector('[data-history-retry]')?.addEventListener('click', () => {
+            this.loadFailed = false;
+            this.hasMore = true;
+            void this._loadNextPage();
+        });
     }
 
     async _showResumeModal(parsedLlm, llmDisplayLabel) {
@@ -1248,7 +1398,8 @@ export class ChatHistorySidebar {
     _hasActiveFilters() {
         return Boolean(this.filterText)
             || this.llmFilters.size > 0
-            || this.currentDirOnly;
+            || this.currentDirOnly
+            || Boolean(this.environmentFilter || this.boardFilter || this.cardFilter || this.statusFilter);
     }
 
     _looksLikeSessionId(text) {
@@ -1260,30 +1411,32 @@ export class ChatHistorySidebar {
             return;
         }
 
-        // Show the searching spinner while we hit the backend.
-        this.isLoadingForSearch = true;
-        this._setRefreshButtonState();
-        this._renderItems();
+        const generation = this._generation;
 
+        this._pendingLookups++;
+        this._renderItems();
         try {
             const fetched = await this.app.apiCall(
                 `/api/v1/chatHistory/${encodeURIComponent(sessionId)}`,
                 'GET',
                 null,
-                { showLoading: false }
+                { showLoading: false, signal: this._requestController.signal }
             );
+            if (generation !== this._generation) return;
             if (fetched) {
                 this._mergeItems([fetched]);
             }
         } catch (error) {
+            if (generation !== this._generation || error?.name === 'AbortError') return;
             // 404 just means no such session — leave the empty state alone.
             if (!/not\s*found/i.test(error?.message || '')) {
                 this.app.showError(`Failed to look up session: ${error.message}`);
             }
         } finally {
-            this.isLoadingForSearch = false;
-            this._setRefreshButtonState();
-            this._renderItems();
+            if (generation === this._generation) {
+                this._pendingLookups--;
+                this._renderItems();
+            }
         }
     }
 
@@ -1380,6 +1533,18 @@ export class ChatHistorySidebar {
                 return false;
             }
 
+            const envName = item.environmentName?.trim() || '';
+            if (this.environmentFilter === 'base' && envName) return false;
+            if (this.environmentFilter === 'custom' && !envName) return false;
+            if (this.environmentFilter.startsWith('[') && this._environmentKey(item.cli, envName) !== this.environmentFilter) return false;
+            const cards = item.boardCards || [];
+            if (this.boardFilter === 'linked' && !cards.length) return false;
+            if (this.boardFilter === 'unlinked' && cards.length) return false;
+            if (this.cardFilter && !cards.some(card => this._matchesCard(card, this.cardFilter))) return false;
+            if (this.statusFilter === 'live' && item.endedUTC) return false;
+            if (this.statusFilter === 'ended' && !item.endedUTC) return false;
+            if (this.statusFilter === 'failed' && (!item.endedUTC || item.exitCode == null || item.exitCode === 0)) return false;
+
             if (this.currentDirOnly && preferredDir) {
                 const itemDir = this._normalizeDirectoryKey(this._getItemWorkingDirectoryKey(item));
                 if (itemDir !== preferredDir) {
@@ -1395,13 +1560,27 @@ export class ChatHistorySidebar {
                 item.id || '',
                 this._getDisplayName(item),
                 this._getProjectDisplayName(item),
+                item.workingDirectory || '',
+                item.inputText || '',
+                ...cards.map(card => `${card.key}\n${this._shortCardKey(card.key)}\n${card.title}`),
                 item.environmentName || '',
                 this.app.getCliBrand(item.cli)?.label || '',
                 this.app.getCliBrand(item.parentCli || '')?.label || ''
             ];
 
-            return searchParts.join('\n').toLowerCase().includes(this.filterText);
+            const text = searchParts.join('\n').toLowerCase();
+            return this.filterText.toLowerCase().split(/\s+/).every(part => text.includes(part));
         });
+    }
+
+    _shortCardKey(key) {
+        // The human shorthand omits the random middle component (VB-ABC12-64 → VB-64).
+        return (key || '').replace(/^([^-]+)-[A-Z0-9]{5}-(\d+)$/i, '$1-$2');
+    }
+
+    _matchesCard(card, query) {
+        const text = `${card.key}\n${this._shortCardKey(card.key)}\n${card.title}`.toLowerCase();
+        return query.toLowerCase().split(/\s+/).every(part => text.includes(part));
     }
 
     _mergeItems(items) {
@@ -1419,6 +1598,8 @@ export class ChatHistorySidebar {
 
         this.allItems = Array.from(merged.values());
         this._sortItemsInMemory();
+        this._syncEnvironmentOptions();
+        this._syncLlmFilterControls();
     }
 
     _sortItemsInMemory() {
@@ -1444,9 +1625,11 @@ export class ChatHistorySidebar {
     }
 
     _getLlmFilterOptions() {
+        const providers = new Set(['claude', 'codex', 'opencode', 'glm-5.2', 'glm-5.3', 'deepseek-v4-pro', 'kimi-k3', 'grok', 'antigravity', 'copilot', 'shell',
+            ...this.allItems.map(item => canonicalLlmCli(item.cli)).filter(Boolean)]);
         return [
-            { value: 'reset', label: 'Reset', logoHtml: '<i class="fa-solid fa-rotate-left"></i>' },
-            ...['claude', 'codex', 'opencode', 'glm-5.2', 'glm-5.3', 'deepseek-v4-pro', 'kimi-k3', 'grok', 'antigravity', 'copilot'].map((cli) => {
+            { value: 'reset', label: 'All providers', logoHtml: '<i class="fa-solid fa-rotate-left"></i>' },
+            ...[...providers].map(cli => {
                 const brand = this.app.getCliBrand(cli);
                 return {
                     value: cli,
@@ -1458,6 +1641,7 @@ export class ChatHistorySidebar {
     }
 
     async _jumpToParent(item) {
+        const generation = this._generation;
         const parentSessionId = item?.parentSessionId?.trim();
         if (!parentSessionId || !this.body) {
             return;
@@ -1466,13 +1650,16 @@ export class ChatHistorySidebar {
         let parentItem = this.allItems.find(entry => entry.id === parentSessionId) || null;
         if (!parentItem) {
             try {
-                const fetched = await this.app.apiCall(`/api/v1/chatHistory/${encodeURIComponent(parentSessionId)}`, 'GET', null, { showLoading: false });
+                const fetched = await this.app.apiCall(`/api/v1/chatHistory/${encodeURIComponent(parentSessionId)}`, 'GET', null,
+                    { showLoading: false, signal: this._requestController.signal });
+                if (generation !== this._generation) return;
                 if (fetched) {
                     this._mergeItems([fetched]);
                     this._renderItems();
                     parentItem = this.allItems.find(entry => entry.id === parentSessionId) || fetched;
                 }
             } catch (error) {
+                if (generation !== this._generation || error?.name === 'AbortError') return;
                 this.app.showError(`Failed to load parent chat: ${error.message}`);
                 return;
             }
@@ -1480,8 +1667,8 @@ export class ChatHistorySidebar {
 
         const target = this.body.querySelector(`.ch-item[data-id="${CSS.escape(parentSessionId)}"]`);
         if (!target) {
-            if (this.filterText) {
-                this.app.showToast('Parent Loaded', 'Parent chat is hidden by the current search filter.', 'info');
+            if (this._hasActiveFilters()) {
+                this.app.showToast('Parent Loaded', 'Parent chat is hidden by the current filters. Clear all to show it.', 'info');
             } else {
                 this.app.showError('Parent chat is not visible in the current list.');
             }

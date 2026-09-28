@@ -5,6 +5,32 @@ namespace VibeRails.Services.Board;
 
 public sealed partial class BoardStore
 {
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<BoardSessionCard>> GetSessionCardsAsync(IReadOnlyList<string> sessionIds,
+        CancellationToken cancellationToken = default)
+    {
+        var result = new List<BoardSessionCard>();
+        if (sessionIds.Count == 0) return result;
+        await using var connection = await OpenAsync(cancellationToken);
+        foreach (var batch in sessionIds.Distinct(StringComparer.Ordinal).Chunk(100))
+        {
+            await using var command = connection.CreateCommand();
+            var parameters = string.Join(",", batch.Select((_, index) => $"$s{index}"));
+            command.CommandText = $"""
+                SELECT s.SessionId, c.Id, {CardKeySql}, c.Title
+                FROM {AllSessionsSql} s JOIN BoardCards c ON c.Id = s.CardId
+                {CardPrefixJoinSql}
+                WHERE s.SessionId IN ({parameters}) AND c.DeletedUTC IS NULL
+                ORDER BY s.SessionId, s.LinkOrder, s.CreatedUTC, s.CardId;
+                """;
+            for (var i = 0; i < batch.Length; i++) command.Parameters.AddWithValue($"$s{i}", batch[i]);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+                result.Add(new BoardSessionCard(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3)));
+        }
+        return result;
+    }
+
     public async Task<IReadOnlySet<string>> GetAutomationSessionIdsAsync(string projectPath,
         IReadOnlyList<string> sessionIds, CancellationToken cancellationToken = default)
     {

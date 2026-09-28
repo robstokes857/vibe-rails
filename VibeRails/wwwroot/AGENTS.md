@@ -340,6 +340,28 @@ Filters (search, assignee, type, priority, tag) persist per browser in
 `localStorage['viberails.board.filters.v1']`. Clicking a card's tag or avatar toggles that filter,
 which is why those two controls stop propagation before the card's own open handler runs.
 
+## Chat history sidebar
+
+`chat-history-sidebar.js` combines provider, environment, Board association, card key/title,
+session status and current-folder filters. Provider selections are OR; the other filters intersect.
+Environment identity is the recorded provider/name pair, including historical environments;
+the dropdown combines configured environments with names discovered as history pages load.
+Search covers names, session IDs, project/path, environments and every attached card. Full card
+keys and shorthand such as `VB-64` both match. Clear all resets every filter, including search.
+
+`ChatHistoryService` enriches pages and individual session lookups with `boardCards` through
+`IBoardStore.GetSessionCardsAsync` in batches. The default attachment comes first, additional
+attachments remain searchable, and deleted cards are omitted. Blank names or automatic 120-character
+prompt previews display the default card's key/title; explicit names take precedence. This is
+read-time presentation: no stored names, old Board tables or session history are rewritten.
+
+Active filters progressively scan older pages; counts have a `+` while history is incomplete.
+Filters remain usable during loading. A failed continuation keeps loaded matches and offers Retry.
+Refresh/destroy abort requests and invalidate late results; preserve that guard when adding async work.
+The filter drawer scrolls independently so it cannot consume the entire history viewport.
+Coverage: `Tests/wwwroot/js/chat-history-sidebar.test.mjs`, `ChatHistoryRoutesTests`, Board store
+tests, and `npx playwright test --config playwright.history.config.js` from `UITests`.
+
 ## Internal tools modal
 
 Three clicks on the brand icon within 900ms opens `Internal tools`. `app.js` dynamically imports

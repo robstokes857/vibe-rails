@@ -81,6 +81,13 @@ Uses real terminal UI/xterm with intercepted API and WebSocket fixtures. Covers 
 menu, lazy live attachment, finished-run replay, launch events/remount, independent close/undo,
 and narrow-window keyboard access. Does not launch a CLI or touch application state.
 
+### Focused chat history tests (No Backend Required)
+
+From `UITests`, run `npx playwright test --config playwright.history.config.js`.
+This mounts the production sidebar and styles with paged API fixtures. It checks combined filters
+against older sessions, Board titles, escaped metadata, narrow scrolling and remount behavior.
+It opens no application database and launches no CLI.
+
 ### View Report
 If a test fails, you can view the detailed HTML report:
 ```powershell
