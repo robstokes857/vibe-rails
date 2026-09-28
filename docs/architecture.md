@@ -348,7 +348,11 @@ Project health's Code quality card renders the host-owned Code Atlas / Quality L
 inline (the `code-quality` route is an alias for Project health). `RuleController` supplies the
 cached MintLint report; the authenticated,
 root-only `POST /api/v1/code-analyzer/graph` supplies bounded working-tree structure and
-lexical source references through `RepositoryCodeGraph`. No preview fixtures are shipped.
+lexical source references through `RepositoryCodeGraph`. Python package imports, Rust module
+trees, JS/TS imports/re-exports and namespace-scoped C#/PHP mentions provide link evidence;
+TypeScript interfaces and aliases appear in outlines. Coverage diagnostics distinguish source
+filters from bounded omissions, and the viewer can explicitly include cataloged dependencies.
+The request retains the existing repository containment and read limits. No preview fixtures are shipped.
 Scan/exclusion controls and all rule/commit enforcement remain outside the viewer.
 See the [viewer integration contract](../VibeRails/wwwroot/js/modules/code-report/README.md)
 for data limits, vendor provenance, themes/CSP, lifecycle and regression tests.

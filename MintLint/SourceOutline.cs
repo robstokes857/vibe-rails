@@ -17,6 +17,12 @@ public sealed record SourceOutline(
     IReadOnlyList<SourceOutlineSymbol> References,
     IReadOnlyList<string> Imports)
 {
+    /// <summary>Language-specific module import evidence for repository-local resolution.</summary>
+    public IReadOnlyList<SourceOutlineImport> ImportEvidence { get; init; } = [];
+
+    /// <summary>Namespace and alias evidence for scoped lexical C# and PHP references.</summary>
+    public SourceReferenceScope? ReferenceScope { get; init; }
+
     /// <summary>Reads the existing language parser's declarations, imports and identifier tokens.</summary>
     public static SourceOutline Read(string path, string content)
     {
@@ -25,6 +31,7 @@ public sealed record SourceOutline(
 
         var source = parser.Parse(path, path, content);
         var declarations = new List<SourceOutlineSymbol>();
+        var namedTypes = TypeScriptOutlineDeclarations.Read(source);
         foreach (var type in source.Classes)
         {
             var token = source.Tokens[type.StartIndex];
@@ -36,8 +43,10 @@ public sealed record SourceOutline(
         foreach (var function in source.Functions)
         {
             if (function.Name is "global" or "anonymous" || function.Name.Length == 0) continue;
+            if (namedTypes.Any(type => function.StartIndex >= type.StartIndex && function.StartIndex <= type.EndIndex)) continue;
             declarations.Add(new(function.Name, "function", source.Tokens[function.StartIndex].Line));
         }
+        declarations.AddRange(namedTypes.Select(type => type.Symbol));
 
         // The graph labels these as lexical references, never resolved calls. Comments and
         // strings are not identifier tokens, and ambiguous declarations are resolved by the host.
@@ -49,7 +58,12 @@ public sealed record SourceOutline(
         var imports = source.ImportSources.AsEnumerable();
         if (source.Language is SourceLanguage.JavaScript or SourceLanguage.TypeScript)
             imports = imports.Concat(ReadReExports(source.Tokens));
-        return new(source.Language.ToString(), declarations, references, imports.Distinct(StringComparer.Ordinal).ToArray());
+        return new(source.Language.ToString(), namedTypes.Count > 0 ? declarations.OrderBy(symbol => symbol.Line).ToArray() : declarations, references,
+            imports.Distinct(StringComparer.Ordinal).ToArray())
+        {
+            ImportEvidence = SourceModuleImports.Read(source.Language, source.Tokens),
+            ReferenceScope = SourceReferenceScope.Read(source)
+        };
     }
 
     // Re-exports are dependency evidence for the mapper. Keep this separate from the

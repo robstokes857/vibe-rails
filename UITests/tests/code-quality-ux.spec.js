@@ -157,15 +157,14 @@ async function installQualityApi(page, { empty = false } = {}) {
 
 async function openQuality(page) {
     await page.goto('/?view=agents', { waitUntil: 'domcontentloaded' });
-    const brief = page.locator('[data-vca-quality-brief]');
-    await expect(brief).toBeVisible({ timeout: 20_000 });
+    const quality = page.locator('.project-health-quality');
+    await expect(quality.locator('.code-report')).toBeVisible({ timeout: 20_000 });
     await expect(page.locator('#loading-overlay')).toHaveClass(/\bd-none\b/);
-    return brief;
+    return quality;
 }
 
 async function openDetails(page) {
-    const brief = await openQuality(page);
-    await brief.getByRole('button', { name: 'View metrics' }).click();
+    await openQuality(page);
     const report = page.locator('.code-report');
     await expect(report).toBeVisible();
     await expect(report.locator('.qr')).toHaveAttribute('data-state', 'complete', { timeout: 25_000 });
@@ -257,23 +256,22 @@ test('Quality actions use the shared app button styles', async ({ page }) => {
     const actions = page.locator('.project-health-page').locator([
         '[data-action="launch-health-fix"]', '[data-action="manage-rules"]',
         '[data-action="toggle-health-details"]', '[data-action="run-hook-preview"]',
-        '[data-action="run-code-analyzer"]', '[aria-label="More scan options"]',
-        '.code-analyzer-brief-open'
+        '[data-action="run-code-analyzer"]', '[aria-label="More scan options"]'
     ].join(', '));
-    await expect(actions).toHaveCount(8);
+    await expect(actions).toHaveCount(7);
     for (const action of await actions.all()) await expectSharedButtonStyle(action);
 });
 
-test('Quality summary has a compact, usable View metrics button', async ({ page }) => {
+test('Quality report opens inline beside compact scan controls', async ({ page }) => {
     await installQualityApi(page);
-    const brief = await openQuality(page);
-    const button = brief.getByRole('button', { name: 'View metrics' });
+    const quality = await openQuality(page);
+    const button = quality.getByRole('button', { name: 'Scan again', exact: true });
     await expect(button).toBeVisible();
     const bounds = await button.boundingBox();
     expect(bounds).not.toBeNull();
     expect(bounds.height).toBeLessThanOrEqual(52);
-    await button.click();
-    await expect(page.locator('.code-report')).toBeVisible();
+    await expect(quality.locator('.code-report iframe')).toBeVisible();
+    await expect(quality.getByRole('button', { name: 'View metrics' })).toHaveCount(0);
 });
 
 test('report selection focuses the isolated map and opens saved details', async ({ page }) => {
@@ -287,7 +285,7 @@ test('report selection focuses the isolated map and opens saved details', async 
     const map = page.frameLocator('.code-report iframe');
     await expect(map.locator('#inspector h2')).toHaveText('PaymentProcessor.cs');
     await map.getByRole('button', { name: /Open details/ }).click();
-    const dialog = report.locator('dialog');
+    const dialog = report.locator('.details-panel');
     await expect(dialog).toBeVisible();
     await expect(dialog.locator('.code-excerpt')).toContainText('cognitive_complexity evidence');
     await expect(dialog.getByRole('button', { name: /Copy context/i })).toHaveCount(0);
@@ -311,9 +309,9 @@ test('radar supports keyboard categories, saved detail activation and Escape', a
     const size = report.getByRole('button', { name: /^Size:/ });
     await expect(size).toBeFocused();
     await size.press('Enter');
-    await expect(report.locator('dialog')).toBeVisible();
-    await report.locator('dialog').press('Escape');
-    await expect(report.locator('dialog')).not.toBeVisible();
+    await expect(report.locator('.details-panel')).toBeVisible();
+    await report.locator('.details-panel h2').press('Escape');
+    await expect(report.locator('.details-panel')).not.toBeVisible();
     await expect(report).toBeVisible();
 });
 
@@ -332,14 +330,122 @@ test('large graphs open a connected domain overview and still focus report files
     await expect(map.locator('#inspector h2')).toHaveText('PaymentProcessor.cs');
 });
 
+test('Nodes relationships have card curves, arrows and bounded flowing signals', async ({ page }, testInfo) => {
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await installQualityApi(page);
+    await page.goto('/?view=agents', { waitUntil: 'domcontentloaded' });
+    const report = page.locator('.code-report');
+    const map = page.frameLocator('.code-report iframe');
+    await expect(map.locator('#stage')).toHaveClass(/constellation/);
+    await expect(map.locator('#atlas-loader')).toBeHidden();
+    const edge = map.locator('.edge-group:has(.edge-flow) .edge').first();
+    const flow = map.locator('.edge-flow:not([hidden])').first();
+    await expect(edge).toHaveAttribute('marker-end', 'url(#arrow)');
+    await expect(flow).toBeVisible();
+    await expect(flow).toHaveCSS('animation-name', 'connection-signal');
+    const bend = await edge.evaluate(path => {
+        const values = path.getAttribute('d').match(/-?\d+(?:\.\d+)?/g).map(Number);
+        const [startX, startY, controlX, controlY, endX, endY] = values;
+        return Math.hypot(controlX - (startX + endX) / 2, controlY - (startY + endY) / 2);
+    });
+    expect(bend).toBeCloseTo(30, 2);
+    await report.locator('iframe').screenshot({ path: testInfo.outputPath('nodes-connectors.png') });
+
+    // Exercise the frame's visibility handler; its CSS signals pause alongside node motion.
+    await map.locator('body').evaluate(() => {
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+        document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await expect(flow).toHaveCSS('animation-play-state', 'paused');
+    await map.locator('body').evaluate(() => {
+        delete document.hidden;
+        document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await expect(flow).toHaveCSS('animation-play-state', 'running');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await expect(flow).toBeHidden();
+    await expect(edge).toHaveAttribute('marker-end', 'url(#arrow)');
+
+    await map.locator('#cards-button').click();
+    await expect(map.locator('#stage')).not.toHaveClass(/constellation/);
+    await expect(map.locator('.edge').first()).toHaveAttribute('marker-end', 'url(#arrow)');
+});
+
+test('dense Nodes graphs retain all visible arrows with at most 180 animated signals', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await installQualityApi(page);
+    const graph = graphResponse();
+    graph.nodes = Array.from({ length: 24 }, (_, index) => ({
+        id: `type-${index}`, name: `Environment${index}`, kind: index % 2 ? 'interface' : 'type',
+        path: `src/environment${index}.ts:1`
+    }));
+    graph.edges = [];
+    for (let source = 0; source < 24; source++) {
+        for (let target = source + 1; target < 24; target++) graph.edges.push({
+            id: `${source}-${target}`, source: `type-${source}`, target: `type-${target}`, kind: 'references'
+        });
+    }
+    await page.route('**/api/v1/code-analyzer/graph', route => route.fulfill({ json: graph }));
+    await page.goto('/?view=agents', { waitUntil: 'domcontentloaded' });
+    const map = page.frameLocator('.code-report iframe');
+    await expect(map.locator('.edge')).toHaveCount(276);
+    await expect(map.locator('#atlas-loader')).toBeHidden();
+    await expect(map.locator('.edge[marker-end="url(#arrow)"]')).toHaveCount(276);
+    await expect(map.locator('.edge-flow:not([hidden])')).toHaveCount(180);
+    await expect(map.locator('.edge-flow:not([hidden])').first()).toBeVisible();
+    await expect(map.locator('.edge-flow[hidden]').first()).toHaveCSS('display', 'none');
+    // Atlas treats both TypeScript kinds as types instead of its generic function fallback.
+    await expect(map.locator('#nodes .orb.class')).toHaveCount(24);
+    await map.locator('#nodes [data-node-id="type-23"]').press('Enter');
+    await expect(map.locator('.edge-flow:not([hidden])')).toHaveCount(23);
+});
+
+test('map coverage explains omissions and dependency filtering refreshes one map', async ({ page }) => {
+    await installQualityApi(page);
+    const requests = [];
+    await page.route('**/api/v1/code-analyzer/graph', route => {
+        const request = route.request().postDataJSON();
+        requests.push(request);
+        const graph = graphResponse();
+        graph.truncated = true;
+        graph.diagnostics = {
+            supportedFiles: 8, excludedDependencyFiles: request.includeDependencies ? 0 : 3,
+            excludedBuildOutputFiles: 2, includesDependencies: request.includeDependencies,
+            omissions: [{ code: 'file-size', count: 1, detail: 'files exceeded the 128 KiB source limit; their file nodes remain visible.' }]
+        };
+        if (request.includeDependencies) {
+            graph.fileCount = 3;
+            graph.nodes.push({ id: 'dependency', name: 'library.ts', kind: 'file', path: 'node_modules/library.ts' });
+        }
+        return route.fulfill({ json: graph });
+    });
+    const report = await openDetails(page);
+    await expect(report.locator('[data-graph-note]')).toContainText('2 source files mapped');
+    await expect(report.locator('[data-graph-note]')).toContainText('Partial map');
+    await report.getByText('Map coverage and filters', { exact: true }).click();
+    const coverage = report.locator('[data-map-diagnostics-body]');
+    await expect(coverage).toContainText('8 supported source files');
+    await expect(coverage).toContainText('3 vendor/node_modules files');
+    await expect(coverage).toContainText('2 C# bin/obj files excluded');
+    await expect(coverage).toContainText('128 KiB source limit');
+    await expect(coverage).toContainText('Search covers this snapshot');
+    const originalFrame = await report.locator('iframe').elementHandle();
+    await report.getByLabel('Include vendor and node_modules sources').check();
+    await expect(report.locator('[data-graph-note]')).toContainText('3 source files mapped');
+    await expect(coverage).toContainText('0 vendor/node_modules files');
+    expect(requests.map(request => request.includeDependencies)).toEqual([false, true]);
+    await expect(report.locator('iframe')).toHaveCount(1);
+    expect(await originalFrame.evaluate(frame => frame.isConnected)).toBe(false);
+});
+
 test('graph failures leave saved report and all metrics accessible', async ({ page }) => {
     await installQualityApi(page);
     await page.route('**/api/v1/code-analyzer/graph', route => route.fulfill({ status: 503, json: { error: 'Map unavailable' } }));
     const report = await openDetails(page);
     await expect(report.locator('[data-code-map]')).toContainText('Map unavailable');
     await report.getByRole('button', { name: new RegExp(PAYMENT_PATH) }).click();
-    await expect(report.locator('dialog')).toBeVisible();
-    await report.locator('dialog').getByRole('button', { name: /Parameter count/ }).click();
+    await expect(report.locator('.details-panel')).toBeVisible();
+    await report.locator('.details-panel').getByRole('button', { name: /Parameter count/ }).click();
     await expect(report.locator('.code-excerpt')).toContainText('parameter_count evidence');
 });
 
@@ -364,6 +470,7 @@ test('empty, failed and malformed reports keep their honest state beside the map
 
 test('long file lists scroll independently and saved excerpts remain inert text', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await installQualityApi(page);
     const report = await openDetails(page);
     const response = scanResponse();
@@ -375,8 +482,11 @@ test('long file lists scroll independently and saved excerpts remain inert text'
     await page.evaluate(response => window.app.ruleController.codeReportViewer.setResponse(response), response);
     await expect(report.locator('.qr')).toHaveAttribute('data-state', 'complete');
     const list = report.locator('.qr-files');
-    const mapBounds = await report.locator('iframe').boundingBox();
+    await report.scrollIntoViewIfNeeded();
     await list.focus();
+    // Focusing the list may scroll the containing page into view. Subsequent list scrolling
+    // must leave the neighboring map fixed within that view.
+    const mapBounds = await report.locator('iframe').boundingBox();
     await list.press('End');
     await expect.poll(() => list.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
     expect(await report.locator('iframe').boundingBox()).toEqual(mapBounds);
@@ -384,7 +494,7 @@ test('long file lists scroll independently and saved excerpts remain inert text'
         const viewer = window.app.ruleController.codeReportViewer;
         viewer.showFile(viewer.response.report.files[0], 'cognitive_complexity');
     });
-    const dialog = report.locator('dialog');
+    const dialog = report.locator('.details-panel');
     await expect(dialog.locator('.code-excerpt')).toContainText('<img src=x');
     await expect(dialog.locator('img')).toHaveCount(0);
     await expect(dialog).toContainText('Report captured');
@@ -402,14 +512,12 @@ test('navigation aborts a late graph and route re-entry uses the cached report',
         await pending;
         await route.fulfill({ json: graphResponse() }).catch(() => {});
     });
-    const brief = await openQuality(page);
-    await brief.getByRole('button', { name: 'View metrics' }).click();
+    await openQuality(page);
     await expect.poll(() => started).toBe(true);
     await page.locator('[data-action="navigate"][data-view="environments"]:visible').click();
     release();
     await expect(page.locator('.code-report iframe')).toHaveCount(0);
     await page.locator('[data-action="navigate-home"]:visible').click();
-    await page.getByRole('button', { name: 'View metrics' }).click();
     await expect(page.locator('.code-report .qr')).toHaveAttribute('data-state', 'complete', { timeout: 25_000 });
     expect(scanRequests).toHaveLength(1);
 });
@@ -536,7 +644,7 @@ for (const viewport of [{ width: 1366, height: 768 }, { width: 390, height: 844 
 test('an empty code scan completes its transcript and cannot launch a repair agent', async ({ page }) => {
     await installQualityApi(page, { empty: true });
     const brief = await openQuality(page);
-    await expect(brief).toContainText('No changed code');
+    await expect(brief).toContainText('No source files in this report.');
     const quality = page.locator('.project-health-quality');
     const fix = quality.locator('[data-action="launch-health-fix"]');
     await expect(fix).toBeDisabled();
@@ -569,7 +677,7 @@ test('returning to QUALITY restores the completed empty transcript without resca
     await expect(page.locator('#app-content [data-view="environments"]')).toBeVisible();
     await page.locator('[data-action="navigate-home"]:visible').click();
     const quality = page.locator('.project-health-quality');
-    await expect(quality.locator('[data-vca-quality-brief]')).toContainText('No changed code');
+    await expect(quality.locator('.code-report')).toContainText('No source files in this report.');
     await expect(quality.locator('[data-vca-console-meta]')).toHaveText('Scan complete · No changed source files');
     await expect(quality.locator('[data-action="launch-health-fix"]')).toBeDisabled();
     expect(scanRequests).toHaveLength(1);

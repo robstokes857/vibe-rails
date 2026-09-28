@@ -30,6 +30,10 @@ export class CodeReportViewer {
                     <section class="graph-panel" aria-label="Interactive code explorer">
                         <div data-code-map><p class="load-error" role="status">Preparing repository map…</p></div>
                         <div class="graph-note" data-graph-note>Hover a domain to trace its connections. Select a report file to explore it in the map.</div>
+                        <div class="graph-options">
+                            <label><input type="checkbox" data-map-dependencies> Include vendor and node_modules sources</label>
+                            <details data-map-diagnostics hidden><summary>Map coverage and filters</summary><div data-map-diagnostics-body></div></details>
+                        </div>
                     </section>
                     <section class="report-sidebar" aria-label="Code health and report files"><div data-quality-report></div>
                         <section class="details-panel" role="region" aria-labelledby="${titleId}" hidden>
@@ -43,6 +47,12 @@ export class CodeReportViewer {
         </div>`;
         this.root = host.querySelector('.code-report');
         this.mapHost = this.root.querySelector('[data-code-map]');
+        this.root.querySelector('[data-map-dependencies]').addEventListener('change', () => {
+            const generation = ++this.generation;
+            this.disposeGraph();
+            this.mapHost.innerHTML = '<p class="load-error" role="status">Preparing repository map…</p>';
+            this.ready = this.loadGraph(this.graphFiles || [], generation);
+        });
         this.qualityHost = this.root.querySelector('[data-quality-report]');
         // Details replace the health summary in the sidebar: the report stays inline, never a modal.
         this.details = this.root.querySelector('.details-panel');
@@ -88,6 +98,8 @@ export class CodeReportViewer {
         this.radar = null;
         this.closeDetails();
         this.disposeGraph();
+        this.root.querySelector('[data-map-diagnostics]').hidden = true;
+        this.root.querySelector('[data-graph-note]').textContent = 'Preparing repository map…';
         this.quality.setLoading();
         this.mapHost.innerHTML = '<p class="load-error" role="status">Preparing repository map…</p>';
     }
@@ -125,10 +137,14 @@ export class CodeReportViewer {
     isCurrent(generation) { return !this.destroyed && generation === this.generation; }
 
     async loadGraph(files, generation) {
+        this.graphFiles = files;
+        this.root.querySelector('[data-map-diagnostics]').hidden = true;
+        this.root.querySelector('[data-graph-note]').textContent = 'Preparing repository map…';
         const request = this.request = new AbortController();
         try {
             const graph = await this.app.apiCall('/api/v1/code-analyzer/graph', 'POST',
-                { files: files.slice(0, 1000) }, { showLoading: false, signal: request.signal, preferErrorResponseMessage: true });
+                { files: files.slice(0, 1000), includeDependencies: this.root.querySelector('[data-map-dependencies]').checked },
+                { showLoading: false, signal: request.signal, preferErrorResponseMessage: true });
             if (!this.isCurrent(generation)) return;
             this.graph = graph;
             this.mapHost.replaceChildren();
@@ -142,8 +158,21 @@ export class CodeReportViewer {
             if (!this.isCurrent(generation)) return;
             this.themes = observeReportTheme(this.root, theme => atlas.setTheme(theme), error => this.notify(error.message));
             const note = this.root.querySelector('[data-graph-note]');
-            note.textContent = `${graph.truncated ? 'Bounded map · ' : ''}${graph.fileCount} source files. Hover a domain to trace source references. Select a report file to inspect it.`;
+            note.textContent = `${graph.fileCount} source files mapped${graph.truncated ? ' · Partial map — see Map coverage and filters.' : '. Hover a domain to trace source references.'}`;
             note.title = graph.description || '';
+            const diagnostics = graph.diagnostics;
+            if (diagnostics) {
+                const omissions = diagnostics.omissions || [];
+                const body = this.root.querySelector('[data-map-diagnostics-body]');
+                body.innerHTML = `<p>${esc(diagnostics.supportedFiles)} supported source files in the Git catalog.
+                    ${esc(diagnostics.excludedDependencyFiles)} vendor/node_modules files and
+                    ${esc(diagnostics.excludedBuildOutputFiles)} C# bin/obj files excluded. Report files are always eligible.</p>
+                    <p>Source files in assets and non-C# bin/obj remain eligible, including bundled libraries.
+                    Search covers this snapshot. Open the source for omitted declarations.</p>
+                    ${omissions.length ? `<ul>${omissions.map(item => `<li>${esc(item.count)} ${esc(item.detail)}</li>`).join('')}</ul>`
+                        : '<p>No omissions from the eligible source files.</p>'}`;
+                this.root.querySelector('[data-map-diagnostics]').hidden = false;
+            }
         } catch (error) {
             if (!this.isCurrent(generation) || request.signal.aborted) return;
             this.atlas?.destroy();

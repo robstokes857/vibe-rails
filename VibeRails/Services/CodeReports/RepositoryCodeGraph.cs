@@ -20,24 +20,38 @@ public sealed class RepositoryCodeGraph
     private const int MaxFileBytes = 128 * 1024;
     private const long MaxSourceBytes = 16 * 1024 * 1024;
     private const int MaxCatalogChars = 4 * 1024 * 1024;
-    private const string GraphDescription = "Working-tree directories, declarations, local imports and unambiguous "
-        + "type-name references. References are lexical evidence, not resolved calls or runtime dependencies.";
+    private const string GraphDescription = "Working-tree directories, declarations, local module imports and namespace-scoped "
+        + "type-name mentions. References are source evidence, not resolved calls or runtime dependencies.";
     // Large repositories with a cold Git index can take a while to enumerate; this is a bound, not a target.
     private static readonly TimeSpan CatalogTimeout = TimeSpan.FromMinutes(2);
 
     /// <summary>Reads only regular, repository-contained files; never follows links.</summary>
     public async Task<CodeGraphResponse> ReadAsync(string repositoryPath, IReadOnlyList<string> priorityFiles,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool includeDependencies = false)
     {
         var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(repositoryPath));
         var paths = await ListFilesAsync(root, cancellationToken);
         var priority = priorityFiles.ToHashSet(StringComparer.Ordinal);
-        var candidates = paths.Where(path => IsSafePath(path) && MintLintAnalyzer.SupportsFile(path)
-                && (priority.Contains(path) || IsSourcePath(path))).Distinct(StringComparer.Ordinal)
+        var supported = paths.Where(path => IsSafePath(path) && MintLintAnalyzer.SupportsFile(path))
+            .Distinct(StringComparer.Ordinal).ToArray();
+        var diagnostics = new CodeGraphDiagnosticsBuilder
+        {
+            SupportedFiles = supported.Length,
+            IncludesDependencies = includeDependencies,
+            ExcludedDependencyFiles = supported.Count(path => !priority.Contains(path)
+                && !includeDependencies && path.Split('/').Any(IsDependencyDirectory)),
+            ExcludedBuildOutputFiles = supported.Count(path => !priority.Contains(path)
+                && (includeDependencies || !path.Split('/').Any(IsDependencyDirectory)) && IsCSharpBuildOutput(path))
+        };
+        var candidates = supported.Where(path => priority.Contains(path) || IsSourcePath(path, includeDependencies))
             .OrderBy(path => path, StringComparer.Ordinal).ToArray();
         var selected = SelectPaths(candidates, priority, MaxFiles, MaxNodes).ToArray();
         // Fewer selected than eligible means the file or node budget left some out: say the map is partial.
         var truncated = selected.Length < candidates.Length;
+        diagnostics.Add(selected.Length == MaxFiles ? "file-limit" : "file-node-limit",
+            candidates.Length - selected.Length, selected.Length == MaxFiles
+                ? "source files omitted by the 2,000-file limit. Prioritize a report file to include it."
+                : "source files omitted because their directory ancestry exceeds the 2,800-node limit.");
         var guard = new GitStagedSnapshotProvider.WorkingTreePathGuard(root);
         var files = new List<(string Path, SourceOutline? Outline)>();
         long bytesRead = 0;
@@ -49,7 +63,12 @@ public sealed class RepositoryCodeGraph
             cancellationToken.ThrowIfCancellationRequested();
             var fullPath = Path.GetFullPath(Path.Combine(root, path));
             // A link, device or unreadable entry is a file the map silently omits, so say the map is partial.
-            if (!guard.IsReadableRegularFile(fullPath)) { truncated = true; continue; }
+            if (!guard.IsReadableRegularFile(fullPath))
+            {
+                truncated = true;
+                diagnostics.Add("unreadable-path", 1, "files omitted: unavailable, unreadable or refused by the repository path guard.");
+                continue;
+            }
             SourceOutline? outline = null;
             try
             {
@@ -62,17 +81,30 @@ public sealed class RepositoryCodeGraph
                     bytesRead += length;
                     if (length <= MaxFileBytes && !buffer.AsSpan(0, length).Contains((byte)0))
                         outline = SourceOutline.Read(path, Encoding.UTF8.GetString(buffer, 0, length));
-                    else truncated = true;
+                    else
+                    {
+                        truncated = true;
+                        diagnostics.Add(length > MaxFileBytes ? "file-size" : "binary-source", 1,
+                            length > MaxFileBytes ? "files kept without outlines: source exceeds 128 KiB."
+                                : "files kept without outlines: source contains NUL bytes.");
+                    }
                 }
-                else truncated = true;
+                else
+                {
+                    truncated = true;
+                    diagnostics.Add(stream.Length > MaxFileBytes ? "file-size" : "source-budget", 1,
+                        stream.Length > MaxFileBytes ? "files kept without outlines: source exceeds 128 KiB."
+                            : "files kept without outlines: the 16 MiB source-read budget was reached.");
+                }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 truncated = true;
+                diagnostics.Add("read-error", 1, "files kept without outlines: source could not be read. Retry after checking file access.");
             }
             files.Add((path, outline));
         }
-        return Build(RepositoryName(root), files, truncated, cancellationToken);
+        return Build(RepositoryName(root), files, truncated, cancellationToken, diagnostics, paths);
     }
 
     // A lexical prefix can consume the entire budget before reaching the application's UI
@@ -139,8 +171,10 @@ public sealed class RepositoryCodeGraph
 
     internal static CodeGraphResponse Build(string name,
         IReadOnlyList<(string Path, SourceOutline? Outline)> files, bool truncated,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, CodeGraphDiagnosticsBuilder? diagnostics = null,
+        IEnumerable<string>? catalogPaths = null)
     {
+        diagnostics ??= new CodeGraphDiagnosticsBuilder { SupportedFiles = files.Count };
         var nodes = new List<CodeGraphNode>();
         var edges = new List<CodeGraphEdge>();
         var domains = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -152,9 +186,18 @@ public sealed class RepositoryCodeGraph
             // top-level areas and progressively reveal their children.
             var ancestors = Ancestors(path);
             if (nodes.Count + ancestors.Count(ancestor => !domains.ContainsKey(ancestor)) + 1 > MaxNodes)
-            { truncated = true; break; }
+            {
+                truncated = true;
+                diagnostics.Add("file-node-limit", files.Count - fileNodes.Count,
+                    "source files omitted because their directory ancestry exceeds the 2,800-node limit.");
+                break;
+            }
             // Ancestors stops at 32 levels; a deeper path loses the rest of its ancestry.
-            if (path.AsSpan().Count('/') > 32) truncated = true;
+            if (path.AsSpan().Count('/') > 32)
+            {
+                truncated = true;
+                diagnostics.Add("directory-depth", 1, "files have ancestry shortened to 32 directory levels.");
+            }
             string? domainId = null;
             foreach (var ancestor in ancestors)
             {
@@ -182,7 +225,13 @@ public sealed class RepositoryCodeGraph
             cancellationToken.ThrowIfCancellationRequested();
             if (outline is null || !fileNodes.TryGetValue(path, out var file)) continue;
             if (outline.Declarations.Count > 12) truncated = true;
-            foreach (var declaration in outline.Declarations.Distinct().Take(12))
+            var declarationsForFile = outline.Declarations.Distinct().ToArray();
+            diagnostics.Add("declaration-limit", Math.Max(0, declarationsForFile.Length - 12),
+                "declarations omitted by the 12-declarations-per-file limit. Open the source for the full outline.");
+            var declarationsToKeep = declarationsForFile.Take(12).ToArray();
+            diagnostics.Add("declaration-node-limit", Math.Max(0, declarationsToKeep.Length - (MaxNodes - nodes.Count)),
+                "declarations omitted by the 2,800-node limit; file structure takes priority.");
+            foreach (var declaration in declarationsToKeep)
             {
                 if (nodes.Count == MaxNodes) { truncated = true; break; }
                 var id = Id("symbol", $"{path}:{declaration.Line}:{declaration.Kind}:{declaration.Name}");
@@ -192,23 +241,24 @@ public sealed class RepositoryCodeGraph
             }
         }
 
-        var declarations = files.Where(file => file.Outline is not null && fileNodes.ContainsKey(file.Path))
-            .SelectMany(file => file.Outline!.Declarations.Where(symbol => symbol.Kind is "class" or "interface")
-                .Select(symbol => (symbol.Name, file.Path)))
-            .Distinct().GroupBy(item => item.Name, StringComparer.Ordinal)
-            .Where(group => group.Count() == 1)
-            .ToDictionary(group => group.Key, group => group.Single().Path, StringComparer.Ordinal);
+        var referenceResolver = new RepositoryReferenceResolver(files.Where(file => fileNodes.ContainsKey(file.Path)));
+        var moduleResolver = new RepositoryModuleResolver(files.Where(file => fileNodes.ContainsKey(file.Path)).ToArray(), catalogPaths);
         var relations = new HashSet<(string Source, string Target)>();
         var domainRelations = new Dictionary<(string Source, string Target), string>();
         foreach (var (path, outline) in files)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (outline is null || !fileNodes.TryGetValue(path, out var source)) continue;
-            foreach (var reference in outline.References)
+            // Explicit module evidence wins over a weaker type mention for the same file pair.
+            foreach (var reference in moduleResolver.Resolve(path, outline))
             {
-                if (!declarations.TryGetValue(reference.Name, out var targetPath) || targetPath == path) continue;
-                AddReference(source, fileNodes[targetPath], $"{path}:{reference.Line} mentions {reference.Name}");
+                var import = reference.Import;
+                var verb = import.Kind == "rust-mod" ? "declares module" : "imports";
+                var importedName = import.ImportedName is null ? "" : $" ({import.ImportedName})";
+                AddReference(source, fileNodes[reference.Path], $"{path}:{import.Line} {verb} {import.Path}{importedName}");
             }
+            foreach (var reference in referenceResolver.Resolve(path, outline))
+                AddReference(source, fileNodes[reference.Path], reference.Evidence);
             foreach (var import in outline.Imports.Where(value =>
                 outline.Language is "JavaScript" or "TypeScript" && (value.StartsWith("./") || value.StartsWith("../"))))
             {
@@ -227,7 +277,7 @@ public sealed class RepositoryCodeGraph
         foreach (var (pair, evidence) in domainRelations)
             edges.Add(new(Id("domain-ref", pair.Source + pair.Target), pair.Source, pair.Target, "references", evidence));
 
-        return FitAtlasByteLimit(name.Length > 200 ? name[..200] : name, nodes, edges, truncated, cancellationToken);
+        return FitAtlasByteLimit(name.Length > 200 ? name[..200] : name, nodes, edges, truncated, diagnostics, cancellationToken);
 
         void AddReference(CodeGraphNode source, CodeGraphNode target, string evidence)
         {
@@ -236,12 +286,18 @@ public sealed class RepositoryCodeGraph
             {
                 evidence = evidence[..256] + "…" + evidence[^(MaxEvidenceLength - 257)..];
                 truncated = true;
+                diagnostics.Add("evidence-length", 1, "reference descriptions shortened to 512 characters.");
             }
             var newDomainRelation = source.ParentId != target.ParentId
                 && !domainRelations.ContainsKey((source.ParentId!, target.ParentId!));
-            if (edges.Count + domainRelations.Count + (newDomainRelation ? 2 : 1) > MaxEdges)
-            { truncated = true; return; }
+            // Count an omitted file pair once even when several imported names target it.
             relations.Add((source.Id, target.Id));
+            if (edges.Count + domainRelations.Count + (newDomainRelation ? 2 : 1) > MaxEdges)
+            {
+                truncated = true;
+                diagnostics.Add("edge-limit", 1, "references omitted by the 10,000-edge limit.");
+                return;
+            }
             edges.Add(new(Id("reference", source.Id + target.Id), source.Id, target.Id, "references", evidence));
             if (source.ParentId != target.ParentId)
                 domainRelations.TryAdd((source.ParentId!, target.ParentId!), evidence);
@@ -276,16 +332,19 @@ public sealed class RepositoryCodeGraph
 
     /// <summary>Trims the graph to the serialized byte budget, then snapshots it into the response.</summary>
     private static CodeGraphResponse FitAtlasByteLimit(string name,
-        List<CodeGraphNode> nodes, List<CodeGraphEdge> edges, bool truncated, CancellationToken cancellationToken)
+        List<CodeGraphNode> nodes, List<CodeGraphEdge> edges, bool truncated,
+        CodeGraphDiagnosticsBuilder diagnostics, CancellationToken cancellationToken)
     {
         var captured = DateTime.UtcNow;
         // Compose copies the lists, so a returned response is never a view onto further trimming.
         CodeGraphResponse Compose(bool partial) => new("1.0", new(name), nodes.ToArray(), edges.ToArray(),
-            captured, partial, nodes.Count(node => node.Kind == "file"), GraphDescription);
+            captured, partial, nodes.Count(node => node.Kind == "file"), GraphDescription, diagnostics.Snapshot());
 
         var response = Compose(truncated);
         var bytes = JsonSerializer.SerializeToUtf8Bytes(response, AppJsonSerializerContext.Default.CodeGraphResponse).Length;
         if (bytes <= MaxSerializedBytes) return response;
+
+        diagnostics.Add("serialized-size", 1, "map exceeded 8 MiB; references, then declarations, then file structure were trimmed.");
 
         bytes = JsonSerializer.SerializeToUtf8Bytes(Compose(true), AppJsonSerializerContext.Default.CodeGraphResponse).Length;
         // Preserve the file hierarchy before optional connections and declarations. If unusually
@@ -306,6 +365,20 @@ public sealed class RepositoryCodeGraph
             RemoveNodeAt(i);
         }
 
+        // Diagnostic counts and the file count can change the final JSON length slightly.
+        // Recheck the actual wire payload rather than relying solely on subtraction estimates.
+        while (JsonSerializer.SerializeToUtf8Bytes(Compose(true), AppJsonSerializerContext.Default.CodeGraphResponse).Length > MaxSerializedBytes
+            && nodes.Count > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var referenceIndex = edges.FindLastIndex(edge => edge.Kind == "references");
+            if (referenceIndex >= 0) RemoveEdgeAt(referenceIndex);
+            else
+            {
+                var declarationIndex = nodes.FindLastIndex(node => node.Kind is not ("file" or "module"));
+                RemoveNodeAt(declarationIndex >= 0 ? declarationIndex : nodes.Count - 1);
+            }
+        }
         var bounded = Compose(true);
         if (bytes > MaxSerializedBytes ||
             JsonSerializer.SerializeToUtf8Bytes(bounded, AppJsonSerializerContext.Default.CodeGraphResponse).Length > MaxSerializedBytes)
@@ -320,6 +393,7 @@ public sealed class RepositoryCodeGraph
             bytes -= JsonSerializer.SerializeToUtf8Bytes(nodes[index], AppJsonSerializerContext.Default.CodeGraphNode).Length
                 + (nodes.Count > 1 ? 1 : 0);
             nodes.RemoveAt(index);
+            diagnostics.Add("serialized-nodes", 1, "nodes omitted to keep the map below 8 MiB.");
         }
 
         void RemoveEdgeAt(int index)
@@ -327,6 +401,7 @@ public sealed class RepositoryCodeGraph
             bytes -= JsonSerializer.SerializeToUtf8Bytes(edges[index], AppJsonSerializerContext.Default.CodeGraphEdge).Length
                 + (edges.Count > 1 ? 1 : 0);
             edges.RemoveAt(index);
+            diagnostics.Add("serialized-edges", 1, "edges omitted to keep the map below 8 MiB.");
         }
     }
 
@@ -353,19 +428,23 @@ public sealed class RepositoryCodeGraph
         && path.Length <= 4096 && !path.StartsWith('/') && !path.Contains('\\') && !path.Contains(':')
         && !path.Any(char.IsControl) && !path.Split('/').Any(part => part is "" or "." or "..");
 
-    // Dependency directories are never source; MSBuild's bin/obj output is excluded for C# only,
+    // Dependency directories require an explicit opt-in; MSBuild's bin/obj output is excluded for C# only,
     // because other ecosystems keep entry points and sources there. Segment names are matched
     // case-insensitively: a checkout on a case-insensitive file system can spell them either way.
-    private static bool IsSourcePath(string path)
+    private static bool IsSourcePath(string path, bool includeDependencies)
     {
         if (!IsSafePath(path) || !MintLintAnalyzer.SupportsFile(path)) return false;
         var isCSharp = Path.GetExtension(path).Equals(".cs", StringComparison.OrdinalIgnoreCase);
         foreach (var part in path.Split('/'))
         {
-            if (IsDependencyDirectory(part) || (isCSharp && IsBuildOutputDirectory(part))) return false;
+            if ((!includeDependencies && IsDependencyDirectory(part)) || (isCSharp && IsBuildOutputDirectory(part))) return false;
         }
         return true;
     }
+
+    private static bool IsCSharpBuildOutput(string path) =>
+        Path.GetExtension(path).Equals(".cs", StringComparison.OrdinalIgnoreCase)
+        && path.Split('/').Any(IsBuildOutputDirectory);
 
     private static bool IsDependencyDirectory(string part) =>
         part.Equals(".git", StringComparison.OrdinalIgnoreCase)

@@ -83,18 +83,37 @@ public sealed class CodeGraphRoutesTests
                 await init!.WaitForExitAsync(TestContext.Current.CancellationToken);
                 Assert.Equal(0, init.ExitCode);
                 await File.WriteAllTextAsync(Path.Combine(root, "file.cs"), "class Example {}", TestContext.Current.CancellationToken);
+                Directory.CreateDirectory(Path.Combine(root, "vendor"));
+                await File.WriteAllTextAsync(Path.Combine(root, "vendor", "library.js"), "export class Library {}", TestContext.Current.CancellationToken);
+                using var track = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("git") {
+                    WorkingDirectory = root, UseShellExecute = false, CreateNoWindow = true,
+                    ArgumentList = { "add", "--force", "--all" }
+                });
+                await track!.WaitForExitAsync(TestContext.Current.CancellationToken);
+                Assert.Equal(0, track.ExitCode);
                 git.Setup(service => service.GetRootPathAsync(It.IsAny<CancellationToken>())).ReturnsAsync(root);
                 using var success = await Send(true, true, "{\"files\":[\"file.cs\"]}");
                 Assert.Equal(HttpStatusCode.OK, success.StatusCode);
                 using var payload = JsonDocument.Parse(await success.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
                 Assert.Equal(1, payload.RootElement.GetProperty("fileCount").GetInt32());
+                Assert.True(payload.RootElement.TryGetProperty("diagnostics", out _));
                 Assert.All(payload.RootElement.GetProperty("nodes").EnumerateArray(), item => {
                     foreach (var field in item.EnumerateObject())
                         Assert.False(field.Value.ValueKind == JsonValueKind.Null, field.Name);
                     Assert.False(string.IsNullOrEmpty(item.GetProperty("path").GetString()));
                 });
+                using var withDependencies = await Send(true, true, "{\"includeDependencies\":true}");
+                Assert.Equal(HttpStatusCode.OK, withDependencies.StatusCode);
+                using var dependencyPayload = JsonDocument.Parse(await withDependencies.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+                Assert.Equal(2, dependencyPayload.RootElement.GetProperty("fileCount").GetInt32());
+                Assert.True(dependencyPayload.RootElement.GetProperty("diagnostics").GetProperty("includesDependencies").GetBoolean());
             }
-            finally { Directory.Delete(root, true); }
+            finally
+            {
+                foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+                    File.SetAttributes(file, FileAttributes.Normal);
+                Directory.Delete(root, true);
+            }
         }
         finally { await app.StopAsync(CancellationToken.None); }
 

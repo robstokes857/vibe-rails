@@ -34,18 +34,23 @@ no source is executed, copied to the clipboard or sent to an external service by
 
 ## Graph contract
 
-`POST /api/v1/code-analyzer/graph` accepts `{ files?: string[] }` with at most 1,000 safe
+`POST /api/v1/code-analyzer/graph` accepts `{ files?: string[], includeDependencies?: boolean }` with at most 1,000 safe
 repository-relative paths to prioritize. It is read-only, mapped on active root backends,
 and requires both existing session and tab credentials. The repository root is server-derived.
 The response follows Code Atlas schema `1.0` plus `capturedUtc`, `truncated`, `fileCount`
-and an evidence description. Absent optional node fields must be omitted, not serialized as null.
+and an evidence description. `diagnostics` separates supported-file and intentional filter counts
+from omission codes/counts with explanations. Absent optional node fields must be omitted, not serialized as null.
 
 [`RepositoryCodeGraph`](../../../../Services/CodeReports/RepositoryCodeGraph.cs) reads Git's
 tracked/untracked, non-ignored file catalog and uses the existing working-tree path guard to
 refuse links, junctions and paths outside the repository. No database reads/writes are added.
 The snapshot contains real directory ancestry (up to 32 levels), file nodes, parser declarations,
-local JS/TS imports/re-exports (including TypeScript emitted-extension substitution) and
-unambiguous type-name references. Cross-directory references also have
+local JS/TS imports/re-exports (including TypeScript emitted-extension substitution), Python
+package imports, Rust declared modules and scoped `use` paths, and C#/PHP type-name mentions
+qualified by namespaces and import aliases. Bare identifiers are never matched across languages.
+TypeScript interfaces and type aliases have `interface` and `type` kinds, with source lines;
+type signatures are not mapped as runtime functions. This does not change saved analyzer metrics.
+Cross-directory references also have
 domain edges. These are lexical source evidence, not resolved call graphs or runtime dependencies.
 No coverage or quality metric is inferred from the graph.
 
@@ -63,14 +68,26 @@ Files beyond source-read limits retain structure without declarations. An entry 
 refuses is omitted and marks the map truncated; a catalog read that exceeds its character bound
 or its timeout is reported as that bound, not as a server fault. Dependency directories
 (`node_modules`, `vendor`) and C# `bin`/`obj` output are excluded (segment names matched
-case-insensitively) unless explicitly in the report. Source files in `assets` and non-C#
+case-insensitively) unless explicitly in the report. The map's **Include vendor and node_modules
+sources** checkbox sends `includeDependencies: true`, making those cataloged files eligible
+under the same containment and read bounds; C# build output remains filtered. No excluded or
+ignored file is discovered outside Git's catalog. Source files in `assets` and non-C#
 `bin`/`obj` remain eligible. A local JS/TS import that names a known file extension
 (`.js`, `.ts`, `.json`, `.vue`, …) resolves only to that file; any other dotted tail
 (`./user.service`, `./app.module`) is a module stem and still probes the source extensions and
 `index` files. When the graph exceeds the
 byte limit, references and declarations give way before file nodes; exceptionally long paths can
 also reduce the file set. Truncation is disclosed in the map note. Search covers the supplied
-snapshot, not omitted repository files.
+snapshot, not omitted repository files. **Map coverage and filters** explains file/node limits,
+per-file declaration caps, oversized or binary sources, total read budget, unreadable paths,
+depth limits, shortened evidence, edge limits and serialized trimming with separate counts.
+
+Python resolution uses package ancestry and conventional `src` roots, including namespace
+packages; ambiguous full paths stay omitted. Rust follows explicit `mod` trees under conventional
+`main.rs`/`lib.rs` roots and uses cataloged Cargo manifests as workspace boundaries. External
+crates, `#[path]`, generated modules and macro expansion are not inferred. C#/PHP references
+remain lexical evidence; compiler/project binding and C# cross-file global usings are not modeled.
+JS/TS package aliases and bundler configuration are also outside this snapshot.
 
 ## Provenance and vendor updates
 
@@ -84,7 +101,7 @@ connections, combined toolbar/canvas controls, inspector scroll reset and host n
 The source patch scripts and integration references live in the sibling workbench's `docs/`.
 Refresh from that approved bundle, retaining the relative module imports and TypeScript declarations.
 
-This integration adds one bounded-scale patch to the embedded Atlas layout library:
+This integration also patches the embedded Atlas layout and connectors:
 
 1. In `scopeNodes`, when more than 200 entities are eligible and the scope has directory
    children, show those direct children (up to the existing 700 visible-node limit). Preserve
@@ -92,6 +109,8 @@ This integration adds one bounded-scale patch to the embedded Atlas layout libra
    is outside the overview. Smaller snapshots keep the original constellation.
 2. In `layout`, use `groups.length` and `slot = i` instead of wrapping group centers every
    12 domains. Independent directories must not occupy identical centers.
+3. Nodes use curved, directed connectors and moving signals like Cards. Animation respects
+   reduced motion and hidden pages; dense overviews retain a bounded animation budget.
 
 Atlas keeps its opaque-origin sandbox and MessageChannel lifecycle. Pass the host's
 `window.__viberails_NONCE__`; do not add `allow-same-origin`, eval, or CSP exceptions.

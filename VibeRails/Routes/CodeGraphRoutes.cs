@@ -17,7 +17,7 @@ public static class CodeGraphRoutes
                 return Results.BadRequest(new ErrorResponse("Supply at most 1000 repository-relative report paths."));
             var root = await git.GetRootPathAsync(cancellationToken);
             if (string.IsNullOrWhiteSpace(root)) return Results.BadRequest(new ErrorResponse("Not in a git repository."));
-            try { return Results.Ok(await graph.ReadAsync(root, files, cancellationToken)); }
+            try { return Results.Ok(await graph.ReadAsync(root, files, cancellationToken, request.IncludeDependencies)); }
             catch (InvalidOperationException ex) { return Results.BadRequest(new ErrorResponse(ex.Message)); }
         }).WithName("GetCodeReportGraph");
     }

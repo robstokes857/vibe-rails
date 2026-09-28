@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace VibeRails.DTOs;
 
 /// <summary>Optional report paths to prioritize within the bounded repository snapshot.</summary>
-public sealed record CodeGraphRequest(string[]? Files = null);
+public sealed record CodeGraphRequest(string[]? Files = null, bool IncludeDependencies = false);
 /// <summary>Display identity for the server-resolved repository.</summary>
 public sealed record CodeGraphRepository(string Name);
 /// <summary>Atlas entity. Optional strings are absent on the wire rather than null.</summary>
@@ -17,4 +17,11 @@ public sealed record CodeGraphEdge(string Id, string Source, string Target, stri
 /// <summary>Bounded current working-tree graph; truncation never implies a complete dependency analysis.</summary>
 public sealed record CodeGraphResponse(string SchemaVersion, CodeGraphRepository Repository,
     IReadOnlyList<CodeGraphNode> Nodes, IReadOnlyList<CodeGraphEdge> Edges,
-    DateTime CapturedUtc, bool Truncated, int FileCount, string Description);
+    DateTime CapturedUtc, bool Truncated, int FileCount, string Description,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CodeGraphDiagnostics? Diagnostics = null);
+
+/// <summary>Counts explain intentional filtering separately from bounded omissions.</summary>
+public sealed record CodeGraphDiagnostics(int SupportedFiles, int ExcludedDependencyFiles,
+    int ExcludedBuildOutputFiles, bool IncludesDependencies, IReadOnlyList<CodeGraphOmission> Omissions);
+/// <summary>A bounded omission count with its unit and explanation.</summary>
+public sealed record CodeGraphOmission(string Code, int Count, string Detail);

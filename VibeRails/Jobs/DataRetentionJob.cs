@@ -2,6 +2,7 @@ using VibeRails.Data.Abstractions;
 using VibeRails.Services;
 using VibeRails.Services.Diagnostics;
 using VibeRails.Services.Integrations.VibeCodeRemote;
+using VibeRails.Utils;
 
 namespace VibeRails.Jobs;
 
