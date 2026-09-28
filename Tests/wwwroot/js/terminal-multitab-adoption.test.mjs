@@ -4,7 +4,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const modulePath = path.resolve('VibeRails/wwwroot/js/modules/terminal-multitab.js');
-const { TerminalController, shouldCreateFreshTab } = await import(pathToFileURL(modulePath).href);
+const { TerminalController, shouldCreateFreshTab, selectBlankPlaceholderTabIds } = await import(pathToFileURL(modulePath).href);
 
 function createManager({ selection = 'env:7:opencode', rememberedCli = 'opencode' } = {}) {
     const added = [];
@@ -144,4 +144,82 @@ test('Automation terminal events refresh the lazy list without adding viewers or
     assert.equal(added.length, 0);
     assert.equal(refreshes, 2);
     assert.deepEqual(focused, []);
+});
+
+// VB-6Q8ZS-68: the blank "Select LLM to launch." tab is dead weight once a live
+// session is on screen. hasCli mirrors getSelectionMeta(selection).cli.
+const hasCli = (selection) => typeof selection === 'string' && selection.length > 0;
+
+test('selectBlankPlaceholderTabIds keeps the placeholder while nothing is running', () => {
+    const states = [
+        { id: 'blank', hasActiveSession: false, selection: null },
+        { id: 'picked', hasActiveSession: false, selection: 'base:codex' }
+    ];
+    assert.deepEqual(selectBlankPlaceholderTabIds(states, { hasCli }), []);
+    // An Automation viewer is not the live session that makes the placeholder redundant.
+    states.push({ id: 'automation', hasActiveSession: true, jobRunId: 'run-1', selection: 'base:shell' });
+    assert.deepEqual(selectBlankPlaceholderTabIds(states, { hasCli }), []);
+});
+
+test('selectBlankPlaceholderTabIds drops only blank placeholders once an ordinary tab is live', () => {
+    const states = [
+        { id: 'blank', hasActiveSession: false, selection: null },
+        { id: 'live', hasActiveSession: true, selection: 'base:claude' },
+        { id: 'picked', hasActiveSession: false, selection: 'base:codex' },
+        { id: 'stopped', hasActiveSession: false, selection: 'env:7:opencode' },
+        { id: 'named', hasActiveSession: false, selection: null, customLabel: true },
+        { id: 'pinned', hasActiveSession: false, selection: null, pinned: true },
+        { id: 'closing', hasActiveSession: false, selection: null },
+        { id: 'automation', hasActiveSession: false, jobRunId: 'run-2', selection: null },
+        null,
+        { id: 'second-blank', hasActiveSession: false, selection: '' }
+    ];
+    const ids = selectBlankPlaceholderTabIds(states, {
+        hasCli,
+        isPendingClose: (id) => id === 'closing'
+    });
+    assert.deepEqual(ids, ['blank', 'second-blank']);
+    assert.deepEqual(selectBlankPlaceholderTabIds(undefined, { hasCli }), []);
+});
+
+function createPruningManager({ live }) {
+    const { manager, added, focused } = createManager({ selection: 'base:claude', rememberedCli: 'claude' });
+    const pruned = [];
+    manager.addLocalTab = (tabInfo, options) => {
+        added.push({ tabInfo, options });
+        const tab = { state: { id: tabInfo.tabId, hasActiveSession: tabInfo.hasActiveSession === true } };
+        manager.tabs.set(tabInfo.tabId, tab);
+        return tab;
+    };
+    manager.pruneBlankPlaceholderTabs = async () => {
+        // Focus must land first so the live tab, not the placeholder, is active when it goes.
+        pruned.push({ focusedBefore: focused.length });
+        return ['blank'];
+    };
+    const controller = new TerminalController({
+        async apiCall() {
+            return { tabs: [{ tabId: 'card-tab', hasActiveSession: live, sessionId: live ? 'session-9' : null, cli: 'Claude' }] };
+        }
+    });
+    controller.manager = manager;
+    return { controller, pruned, focused };
+}
+
+test('adoptLaunchedTab prunes the blank placeholder after focusing a live Board tab', async () => {
+    const { controller, pruned, focused } = createPruningManager({ live: true });
+    assert.equal(await controller.adoptLaunchedTab('card-tab'), true);
+    assert.deepEqual(focused, [{ tabId: 'card-tab', options: { connectIfNeeded: true } }]);
+    assert.deepEqual(pruned, [{ focusedBefore: 1 }]);
+});
+
+test('adoptLaunchedTab leaves the placeholder alone for a sessionless tab or a background adoption', async () => {
+    const sessionless = createPruningManager({ live: false });
+    assert.equal(await sessionless.controller.adoptLaunchedTab('card-tab'), true);
+    assert.equal(sessionless.focused.length, 1);
+    assert.deepEqual(sessionless.pruned, []);
+
+    const background = createPruningManager({ live: true });
+    assert.equal(await background.controller.adoptLaunchedTab('card-tab', { focus: false }), true);
+    assert.deepEqual(background.focused, []);
+    assert.deepEqual(background.pruned, []);
 });

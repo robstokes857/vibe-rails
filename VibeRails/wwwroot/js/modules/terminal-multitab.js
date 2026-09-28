@@ -65,6 +65,28 @@ export function shouldCreateFreshTab(options, activeTab, tabCount, maxTabs) {
     return !(tabCount >= maxTabs && activeTabIsBlank);
 }
 
+// The blank placeholder is the "Select LLM to launch." tab the strip opens
+// with so an empty panel has something to show (initialize / _commitClose).
+// It is a real server-side tab, so it outlives navigation and lands beside a
+// Board-launched or restored live session, where it is dead weight
+// (VB-6Q8ZS-68). Returns the ids to drop: no session, no CLI picked, nothing
+// the user named or pinned, not an Automation viewer, not already closing —
+// and only once some ordinary tab has a live session, because with nothing
+// running the placeholder is the panel's only surface.
+export function selectBlankPlaceholderTabIds(states, { hasCli, isPendingClose = () => false } = {}) {
+    const list = Array.isArray(states) ? states.filter(Boolean) : [];
+    const hasLiveSession = list.some((state) => state.hasActiveSession === true && !isAutomationTab(state));
+    if (!hasLiveSession) return [];
+    return list
+        .filter((state) => state.hasActiveSession !== true
+            && !isAutomationTab(state)
+            && state.pinned !== true
+            && state.customLabel !== true
+            && !isPendingClose(state.id)
+            && !hasCli(state.selection))
+        .map((state) => state.id);
+}
+
 function waitMs(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -236,6 +258,15 @@ export class TerminalManager {
         const savedFontSize = this.settings.loadFontSize();
         if (this.fontSizeLabel) this.fontSizeLabel.textContent = savedFontSize;
         await this.restoreTabs();
+
+        if (this._destroyed) {
+            return;
+        }
+
+        // A Board launch that had to navigate here restores the card's live tab
+        // next to the blank placeholder the strip opened with earlier. Drop the
+        // placeholder before choosing what to activate.
+        await this.pruneBlankPlaceholderTabs();
 
         if (this._destroyed) {
             return;
@@ -1092,6 +1123,32 @@ export class TerminalManager {
             this._refreshUndoControl();
         }
 
+        await this._removeTab(tabId);
+
+        if (this.tabOrder.length === 0 && this._pendingCloses.size === 0) {
+            await this.createAndActivateTab({ selection: DEFAULT_SELECTION });
+            return;
+        }
+
+        if (!this.activeTabId) {
+            const nextId = this._nextVisibleTabId();
+            if (nextId) {
+                await this.activateTab(nextId, { connectIfNeeded: false });
+            }
+        }
+
+        this.updateUi();
+    }
+
+    // Backend DELETE plus local teardown for one tab. Shared by the undo-window
+    // commit and the placeholder prune; what shows next (the next tab, or a
+    // fresh placeholder for an empty strip) is the caller's decision.
+    async _removeTab(tabId) {
+        const tab = this.tabs.get(tabId);
+        if (!tab) {
+            return false;
+        }
+
         const endingSessionId = tab.state.hasActiveSession ? tab.state.sessionId : null;
         try {
             await this.app.apiCall(`/api/v1/terminal/tabs/${encodeURIComponent(tabId)}`, 'DELETE');
@@ -1122,20 +1179,49 @@ export class TerminalManager {
         if (this.activeTabId === tabId) {
             this.activeTabId = null;
         }
+        return true;
+    }
 
-        if (this.tabOrder.length === 0 && this._pendingCloses.size === 0) {
-            await this.createAndActivateTab({ selection: DEFAULT_SELECTION });
-            return;
+    // Closes every blank "Select LLM to launch." placeholder once an ordinary
+    // tab has a live session (see selectBlankPlaceholderTabIds). There is
+    // nothing in a placeholder to restore, so it skips the undo window and
+    // deletes the server-side tab at once; each is also a child process that
+    // would otherwise sit idle. Callers run this where the live tab is (or is
+    // about to be) the active one, so no activation happens here. Returns the
+    // ids it removed.
+    async pruneBlankPlaceholderTabs() {
+        if (this._destroyed) {
+            return [];
         }
 
-        if (!this.activeTabId) {
-            const nextId = this._nextVisibleTabId();
-            if (nextId) {
-                await this.activateTab(nextId, { connectIfNeeded: false });
+        const states = this.tabOrder.map((id) => this.tabs.get(id)?.state);
+        const doomed = selectBlankPlaceholderTabIds(states, {
+            hasCli: (selection) => !!this.getSelectionMeta(selection).cli,
+            isPendingClose: (id) => this._pendingCloses.has(id)
+        });
+        if (doomed.length === 0) {
+            return [];
+        }
+
+        // Hide the chips before the DELETEs so the strip never shows them beside
+        // the live tab while the requests are in flight.
+        for (const tabId of doomed) {
+            const tab = this.tabs.get(tabId);
+            if (!tab) continue;
+            tab.state.ui.item.style.display = 'none';
+            tab.state.ui.panel.style.display = 'none';
+            tab.state.ui.item.classList.remove('active');
+            tab.instance.setActive(false);
+        }
+        for (const tabId of doomed) {
+            await this._removeTab(tabId);
+            if (this._destroyed) {
+                return doomed;
             }
         }
-
+        this.updateAddButtonState();
         this.updateUi();
+        return doomed;
     }
 
     _nextVisibleTabId() {
@@ -1521,6 +1607,9 @@ export class TerminalManager {
             workingDirectory: responseWorkingDirectory
         });
         this.updateUi();
+        // A forceNewTab launch leaves the blank placeholder it was opened over
+        // behind; now that this tab is live the placeholder has no job left.
+        await this.pruneBlankPlaceholderTabs();
 
         return {
             tabId: tab.state.id,
@@ -3066,7 +3155,15 @@ export class TerminalController {
             if (!tab) return false;
             if (!focus) tab.instance?.markAutoConnectDeferred?.();
         }
-        return focus ? manager.focusTab(id, { connectIfNeeded: true }) : true;
+        if (!focus) return true;
+        const shown = await manager.focusTab(id, { connectIfNeeded: true });
+        // The adopted tab is live, so the blank "Select LLM to launch." tab the
+        // panel opened with has nothing left to do (VB-6Q8ZS-68). Prune after
+        // focus so the live tab, never the placeholder, is what stays active.
+        if (manager.tabs.get(id)?.state?.hasActiveSession === true) {
+            await manager.pruneBlankPlaceholderTabs();
+        }
+        return shown;
     }
 
     resetLayoutStateForNavigation() {

@@ -710,6 +710,12 @@ POST   /api/v1/terminal/tabs/{tabId}/stop      # Stop the session in a tab
 WS     /api/v1/terminal/tabs/{tabId}/ws        # Bidirectional PTY byte stream
 ```
 
+The blank tab the strip opens with ("Select LLM to launch.") is a real server-side tab, so it
+survives navigation. Once an ordinary tab has a live session it is pruned without an undo window
+(`selectBlankPlaceholderTabIds` / `pruneBlankPlaceholderTabs`): after `restoreTabs`, after a
+Board/script tab is adopted and focused, and after a `forceNewTab` launch starts (VB-6Q8ZS-68). A
+tab with a picked CLI, a user label, a pin, or an Automation viewer is never pruned.
+
 The `start` body: `{ cli, environmentName?, workingDirectory?, title?, initialPrompt?, resumeSessionId?, resumeSummary?, makeRemote? }`.
 The WebSocket URL accepts `?cols=&rows=` so the backend can resize the PTY before
 replaying the session buffer (avoids the stale-geometry "double print" bug).
