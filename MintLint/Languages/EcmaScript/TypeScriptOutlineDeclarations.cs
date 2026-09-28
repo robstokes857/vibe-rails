@@ -124,6 +124,10 @@ internal static class TypeScriptOutlineDeclarations
             "type" or "interface" or "class" or "function" or "const" or "let" or "var" or "enum" or "namespace"
                 => index + 1 < tokens.Count && ParserUtilities.IsNameToken(tokens[index + 1]),
             "export" or "declare" => true,
+            // `async` can also name a type. Only the function-declaration prefix ends
+            // a semicolonless alias; a multiline union may legitimately mention async.
+            "async" => index + 1 < tokens.Count && tokens[index + 1].Text == "function"
+                && tokens[index + 1].Line == tokens[index].Line,
             "import" => index + 1 < tokens.Count && tokens[index + 1].Text != "(",
             _ => false
         };

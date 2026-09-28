@@ -119,6 +119,34 @@ public class RepositoryModuleResolverTests
         Assert.DoesNotContain(outline.ImportEvidence, import => import.Path.Contains("ignored") || import.Path == "custom");
     }
 
+    [Theory]
+    [InlineData("fn run(condition: bool) { if !condition { use crate::bar::Thing; } }")]
+    [InlineData("fn run(condition: bool) { if !{ use crate::bar::Thing; condition } {} }")]
+    [InlineData("fn run(condition: bool) { while !condition { use crate::bar::Thing; break; } }")]
+    [InlineData("fn run(condition: bool) -> bool { return !{ use crate::bar::Thing; condition }; }")]
+    [InlineData("fn run(condition: bool) -> bool { loop { break !{ use crate::bar::Thing; condition }; } }")]
+    [InlineData("fn run() -> ! { use crate::bar::Thing; loop {} }")]
+    public void RustImports_DoNotTreatUnaryNegationOrNeverTypeAsAMacro(string source)
+    {
+        var outline = SourceOutline.Read("src/lib.rs", source);
+        var import = Assert.Single(outline.ImportEvidence);
+        Assert.Equal("rust-use", import.Kind);
+        Assert.Equal("crate::bar::Thing", import.Path);
+    }
+
+    [Theory]
+    [InlineData("macro_rules! generated { () => { use crate::ignored; mod ignored; } }")]
+    [InlineData("generated! { use crate::ignored; mod ignored; }")]
+    [InlineData("macros::generated! (use crate::ignored; mod ignored;);")]
+    [InlineData("generated ! [use crate::ignored; mod ignored;];")]
+    public void RustImports_ExcludeDefinitionsAndInvocationTokenTrees(string macro)
+    {
+        var outline = SourceOutline.Read("src/lib.rs", macro + "\nuse crate::bar::Thing;");
+        var import = Assert.Single(outline.ImportEvidence);
+        Assert.Equal("crate::bar::Thing", import.Path);
+        Assert.Equal(2, import.Line);
+    }
+
     [Fact]
     public void RustImports_ResolveDeclaredModulesScopedPathsAndGroupedItems()
     {

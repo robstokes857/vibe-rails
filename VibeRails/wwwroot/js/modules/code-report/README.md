@@ -89,6 +89,15 @@ crates, `#[path]`, generated modules and macro expansion are not inferred. C#/PH
 remain lexical evidence; compiler/project binding and C# cross-file global usings are not modeled.
 JS/TS package aliases and bundler configuration are also outside this snapshot.
 
+C#/PHP scope evidence is bounded before graph construction: at most 8,192 references,
+64 Ki characters of shared scope text (also at most twice source length), and 256 Ki
+characters of declaration/reference text (also at most four times source length) per file.
+Candidates are lazy and unrelated identifier names do not expand imports. Resolution examines
+at most 65,536 candidates / 4 Mi characters per file and 1,048,576 candidates / 32 Mi characters
+per graph. Exhausted scopes or resolution work report `reference-scope-limit` or
+`reference-work-limit` in coverage diagnostics. An unfinished lookup never emits a partial
+match, because a later candidate could make that match ambiguous.
+
 ## Provenance and vendor updates
 
 The approved composition comes from `vibe-quality-workbench/dist` (September 2026).

@@ -79,6 +79,40 @@ public sealed class TypeScriptSourceOutlineTests
         }, outline.Declarations);
     }
 
+    [Theory]
+    [InlineData("async function run() {}")]
+    [InlineData("async /* asynchronous work */ function run() {}")]
+    [InlineData("async function* run() {}")]
+    public void SemicolonlessAlias_StopsBeforeAsyncFunctionDeclaration(string function)
+    {
+        var outline = SourceOutline.Read("types.ts", "type X = string\n" + function);
+
+        Assert.Equal(new[]
+        {
+            new SourceOutlineSymbol("X", "type", 1),
+            new SourceOutlineSymbol("run", "function", 2)
+        }, outline.Declarations);
+    }
+
+    [Fact]
+    public void MultilineAlias_ContainingAsyncTypeName_StillExcludesFunctionTypeSignatures()
+    {
+        var outline = SourceOutline.Read("types.ts", """
+            type async = { ready: boolean };
+            type Handler = string |
+                async |
+                ((one: string, two: string, three: string, four: string, five: string) => string)
+            async function run() {}
+            """);
+
+        Assert.Equal(new[]
+        {
+            new SourceOutlineSymbol("async", "type", 1),
+            new SourceOutlineSymbol("Handler", "type", 2),
+            new SourceOutlineSymbol("run", "function", 5)
+        }, outline.Declarations);
+    }
+
     [Fact]
     public void TypeScriptNamedTypes_DoNotBecomeJavaScriptDeclarationsOrAnalyzerClasses()
     {

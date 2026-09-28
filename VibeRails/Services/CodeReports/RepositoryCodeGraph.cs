@@ -175,6 +175,13 @@ public sealed class RepositoryCodeGraph
         IEnumerable<string>? catalogPaths = null)
     {
         diagnostics ??= new CodeGraphDiagnosticsBuilder { SupportedFiles = files.Count };
+        var limitedScopes = files.Count(file => file.Outline?.ReferenceScope?.Truncated == true);
+        if (limitedScopes > 0)
+        {
+            truncated = true;
+            diagnostics.Add("reference-scope-limit", limitedScopes,
+                "files have incomplete reference evidence because scope or identifier text exceeded the analysis budget.");
+        }
         var nodes = new List<CodeGraphNode>();
         var edges = new List<CodeGraphEdge>();
         var domains = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -257,7 +264,7 @@ public sealed class RepositoryCodeGraph
                 var importedName = import.ImportedName is null ? "" : $" ({import.ImportedName})";
                 AddReference(source, fileNodes[reference.Path], $"{path}:{import.Line} {verb} {import.Path}{importedName}");
             }
-            foreach (var reference in referenceResolver.Resolve(path, outline))
+            foreach (var reference in referenceResolver.Resolve(path, outline, cancellationToken))
                 AddReference(source, fileNodes[reference.Path], reference.Evidence);
             foreach (var import in outline.Imports.Where(value =>
                 outline.Language is "JavaScript" or "TypeScript" && (value.StartsWith("./") || value.StartsWith("../"))))
@@ -272,6 +279,12 @@ public sealed class RepositoryCodeGraph
                     break;
                 }
             }
+        }
+        if (referenceResolver.LimitedFileCount > 0)
+        {
+            truncated = true;
+            diagnostics.Add("reference-work-limit", referenceResolver.LimitedFileCount,
+                "files have incomplete references because the candidate-analysis work budget was reached.");
         }
         // Domain connections are real cross-directory source evidence, rendered at overview scale.
         foreach (var (pair, evidence) in domainRelations)

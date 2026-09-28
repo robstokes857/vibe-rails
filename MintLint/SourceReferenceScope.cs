@@ -5,13 +5,20 @@ using System.Linq;
 namespace MintLint;
 
 /// <summary>A lexical name with only the qualified type names visible in its source scope.</summary>
-public sealed record SourceScopedReference(string Name, int Line, IReadOnlyList<string> Candidates,
-    string Provenance);
+public sealed record SourceScopedReference(string Name, int Line, IEnumerable<string> Candidates,
+    string Provenance, string? TypeNameHint = null);
 
 /// <summary>Namespace and import evidence for C# and PHP; this is not compiler name binding.</summary>
 public sealed record SourceReferenceScope(IReadOnlyList<SourceOutlineSymbol> Declarations,
     IReadOnlyList<SourceScopedReference> References)
 {
+    private const int MaxScopeTextCharacters = 64 * 1024;
+    private const int MaxReferenceTextCharacters = 256 * 1024;
+    private const int MaxReferences = 8192;
+
+    /// <summary>True when bounded scope or reference evidence was omitted.</summary>
+    public bool Truncated { get; init; }
+
     internal static SourceReferenceScope? Read(ParsedSource source)
     {
         if (source.Language is not (SourceLanguage.CSharp or SourceLanguage.Php)) return null;
@@ -24,9 +31,15 @@ public sealed record SourceReferenceScope(IReadOnlyList<SourceOutlineSymbol> Dec
         var tokenScopes = new Scope?[tokens.Count];
         var excluded = new bool[tokens.Count];
         var references = new List<SourceScopedReference>();
+        var scopeTextLimit = (int)Math.Min(MaxScopeTextCharacters, 2L * source.Text.Length);
+        var referenceTextLimit = (int)Math.Min(MaxReferenceTextCharacters, 4L * source.Text.Length);
+        var scopeTextCharacters = 0;
+        var referenceTextCharacters = 0;
+        var truncated = false;
         var depth = 0;
         for (var i = 0; i < tokens.Count; i++)
         {
+            if (truncated) return new([], []) { Truncated = true };
             if (i == scope.End && scope.Parent is not null) scope = scope.Parent;
             tokenScopes[i] = scope;
             if (tokens[i].Text == "namespace" && depth == scope.Depth)
@@ -39,7 +52,9 @@ public sealed record SourceReferenceScope(IReadOnlyList<SourceOutlineSymbol> Dec
                     var block = tokens[end].Text == "{";
                     if (block && source.BracePartner[end] < 0) continue;
                     var parent = php || !block ? root : scope;
-                    scope = new Scope(Qualify(parent.Name, name, separator), parent,
+                    var qualified = Qualify(parent.Name, name, separator);
+                    if (!KeepScopeText(qualified.Length)) return new([], []) { Truncated = true };
+                    scope = new Scope(qualified, parent,
                         block ? depth + 1 : depth, block ? source.BracePartner[end] : tokens.Count, comparer);
                     if (block) depth++;
                     i = end;
@@ -66,11 +81,16 @@ public sealed record SourceReferenceScope(IReadOnlyList<SourceOutlineSymbol> Dec
             else if (tokens[i].Text == "}") depth--;
         }
 
+        // A partially read import scope could resolve a name to the wrong namespace.
+        if (truncated) return new([], []) { Truncated = true };
+
         var declarations = new List<SourceOutlineSymbol>();
         foreach (var type in source.Classes)
         {
             var typeScope = tokenScopes[type.StartIndex] ?? root;
-            declarations.Add(new(Qualify(typeScope.Name, type.Name, separator), "type", tokens[type.StartIndex].Line));
+            var qualified = Qualify(typeScope.Name, type.Name, separator);
+            if (!KeepReferenceText(qualified.Length)) return new([], []) { Truncated = true };
+            declarations.Add(new(qualified, "type", tokens[type.StartIndex].Line));
             // A declaration is not a reference to an identically named type in another file.
             for (var i = type.StartIndex + 1; i < tokens.Count && i <= type.BodyStartIndex; i++)
                 if (tokens[i].Text == type.Name) { excluded[i] = true; break; }
@@ -95,49 +115,41 @@ public sealed record SourceReferenceScope(IReadOnlyList<SourceOutlineSymbol> Dec
             for (var j = i; j < tokens.Count && !excluded[j] && tokens[j].Kind == TokenKind.Identifier; j += 2)
             {
                 name = Qualify(name, tokens[j].Text, separator);
+                // Charge repeated chains too: deduplicated evidence must not hide repeated
+                // quadratic prefix construction work in the source scanner.
+                if (!KeepReferenceText(name.Length))
+                    return new(declarations, references) { Truncated = true };
                 if (seen.Add((referenceScope, php ? name.ToUpperInvariant() : name, absolute)))
                 {
-                    var candidates = Candidates(referenceScope, name, absolute).Distinct(comparer).ToArray();
-                    var provenance = referenceScope.Name.Length == 0 ? "in the global namespace" : $"in namespace {referenceScope.Name}";
-                    references.Add(new(name, tokens[start].Line, candidates, provenance));
+                    var hint = TypeNameHint(referenceScope, name, absolute, php);
+                    if (references.Count >= MaxReferences || !KeepReferenceText(hint.Length))
+                        return new(declarations, references) { Truncated = true };
+                    // This static iterator holds only the shared scope, not the parsed source or
+                    // tokens. Never materialize the imports × identifiers Cartesian product here.
+                    references.Add(new(name, tokens[start].Line, Candidates(referenceScope, name, absolute, php),
+                        referenceScope.Provenance, hint));
                 }
                 if (j + 2 >= tokens.Count || tokens[j + 1].Text != separator
                     || (php && tokens[j].End != tokens[j + 1].Start)) break;
             }
         }
-        return new(declarations, references);
+        return new(declarations, references) { Truncated = truncated };
+
+        bool KeepScopeText(int characters)
+        {
+            scopeTextCharacters += characters;
+            return !(truncated = scopeTextCharacters > scopeTextLimit);
+        }
+
+        bool KeepReferenceText(int characters)
+        {
+            referenceTextCharacters += characters;
+            return !(truncated = referenceTextCharacters > referenceTextLimit);
+        }
 
         void Exclude(int start, int end)
         {
             for (var i = start; i <= end; i++) excluded[i] = true;
-        }
-
-        IEnumerable<string> Candidates(Scope current, string name, bool absolute)
-        {
-            if (absolute) { yield return name; yield break; }
-            var first = name.Split(separator)[0];
-            for (var owner = current; owner is not null; owner = php ? null : owner.Parent)
-            {
-                if (!owner.Aliases.TryGetValue(first, out var target)) continue;
-                yield return target + name[first.Length..];
-                yield break; // An external alias must never fall back to a same-spelled local type.
-            }
-            if (php)
-            {
-                yield return Qualify(current.Name, name.StartsWith("namespace\\", StringComparison.Ordinal)
-                    ? name[10..] : name, separator);
-                yield break;
-            }
-            var ns = current.Name;
-            while (true)
-            {
-                yield return Qualify(ns, name, separator);
-                var last = ns.LastIndexOf('.');
-                if (ns.Length == 0) break;
-                ns = last < 0 ? "" : ns[..last];
-            }
-            for (var owner = current; owner is not null; owner = owner.Parent)
-                foreach (var imported in owner.Imports) yield return Qualify(imported, name, separator);
         }
 
         bool ReadCSharpUsing(int start, int end, Scope current, int line)
@@ -154,10 +166,14 @@ public sealed record SourceReferenceScope(IReadOnlyList<SourceOutlineSymbol> Dec
             if (start + 1 < end && tokens[start].Text == "global" && tokens[start + 1].Text == "::") start += 2;
             var target = ReadName(tokens, ref start, ".");
             if (target.Length == 0 || start != end) return false;
+            if (!KeepScopeText(target.Length + (alias?.Length ?? 0))) return true;
             if (alias is not null) current.Aliases[alias] = target;
             else if (!isStatic) current.Imports.Add(target);
             if (alias is not null || isStatic)
-                references.Add(new(alias ?? target, line, [target], $"imports {target}" + (alias is null ? "" : $" as {alias}")));
+            {
+                if (references.Count >= MaxReferences) { truncated = true; return true; }
+                references.Add(new(alias ?? target, line, [target], $"imports {target}" + (alias is null ? "" : $" as {alias}"), SimpleName(target, '.')));
+            }
             return true;
         }
 
@@ -176,13 +192,57 @@ public sealed record SourceReferenceScope(IReadOnlyList<SourceOutlineSymbol> Dec
                 var target = grouped ? Qualify(prefix, member, "\\") : member;
                 var alias = member.Split('\\')[^1];
                 if (start + 1 < end && tokens[start].Text == "as") { alias = tokens[start + 1].Text; start += 2; }
+                if (!KeepScopeText(target.Length + alias.Length)) return;
                 current.Aliases[alias] = target;
-                references.Add(new(alias, line, [target], $"imports {target}" + (alias == member ? "" : $" as {alias}")));
+                if (references.Count >= MaxReferences) { truncated = true; return; }
+                references.Add(new(alias, line, [target], $"imports {target}" + (alias == member ? "" : $" as {alias}"), SimpleName(target, '\\')));
                 if (start >= end || tokens[start].Text != ",") break;
                 start++;
             }
         }
     }
+
+    private static IEnumerable<string> Candidates(Scope current, string name, bool absolute, bool php)
+    {
+        if (absolute) { yield return name; yield break; }
+        var separator = php ? "\\" : ".";
+        var first = name.Split(separator)[0];
+        for (var owner = current; owner is not null; owner = php ? null : owner.Parent)
+        {
+            if (!owner.Aliases.TryGetValue(first, out var target)) continue;
+            yield return target + name[first.Length..];
+            yield break; // An external alias never falls back to a same-spelled local type.
+        }
+        if (php)
+        {
+            yield return Qualify(current.Name, name.StartsWith("namespace\\", StringComparison.Ordinal)
+                ? name[10..] : name, separator);
+            yield break;
+        }
+        var ns = current.Name;
+        while (true)
+        {
+            yield return Qualify(ns, name, separator);
+            var last = ns.LastIndexOf('.');
+            if (ns.Length == 0) break;
+            ns = last < 0 ? "" : ns[..last];
+        }
+        for (var owner = current; owner is not null; owner = owner.Parent)
+            foreach (var imported in owner.Imports) yield return Qualify(imported, name, separator);
+    }
+
+    private static string TypeNameHint(Scope current, string name, bool absolute, bool php)
+    {
+        var separator = php ? '\\' : '.';
+        if (absolute) return SimpleName(name, separator);
+        var first = name.Split(separator)[0];
+        for (var owner = current; owner is not null; owner = php ? null : owner.Parent)
+            if (owner.Aliases.TryGetValue(first, out var target))
+                return SimpleName(name.Length == first.Length ? target : name, separator);
+        return SimpleName(name, separator);
+    }
+
+    private static string SimpleName(string name, char separator) => name[(name.LastIndexOf(separator) + 1)..];
 
     private static string ReadName(IReadOnlyList<Token> tokens, ref int index, string separator)
     {
@@ -202,10 +262,11 @@ public sealed record SourceReferenceScope(IReadOnlyList<SourceOutlineSymbol> Dec
     private sealed class Scope(string name, Scope? parent, int depth, int end, StringComparer comparer)
     {
         internal string Name { get; } = name;
+        internal string Provenance { get; } = name.Length == 0 ? "in the global namespace" : $"in namespace {name}";
         internal Scope? Parent { get; } = parent;
         internal int Depth { get; } = depth;
         internal int End { get; } = end;
         internal Dictionary<string, string> Aliases { get; } = new(comparer);
-        internal List<string> Imports { get; } = [];
+        internal HashSet<string> Imports { get; } = new(comparer);
     }
 }

@@ -83,11 +83,17 @@ internal static class SourceModuleImports
         for (var i = start; i < end; i++)
         {
             // Token trees in macros are input to code generation, not literal module declarations.
-            if (tokens[i].Text == "!")
+            if (tokens[i].Text == "!" && i > start && tokens[i - 1].Kind == TokenKind.Identifier)
             {
                 var open = i + 1;
-                if (open < end && tokens[open].Kind == TokenKind.Identifier) open++;
-                if (open < end && tokens[open].Text is "{" or "(" or "[")
+                var name = tokens[i - 1].Text;
+                // Only macro_rules! takes an identifier between ! and its token tree. In
+                // `if !condition { ... }`, the following block is ordinary executable code.
+                if (name == "macro_rules" && open < end && tokens[open].Kind == TokenKind.Identifier) open++;
+                // These expression keywords can precede unary negation of a block. A macro
+                // invocation instead has a macro path immediately before ! and a delimiter after it.
+                if (name is not ("if" or "while" or "match" or "return" or "break" or "yield" or "in")
+                    && open < end && tokens[open].Text is "{" or "(" or "[")
                 {
                     i = Close(tokens, open, end);
                     continue;
