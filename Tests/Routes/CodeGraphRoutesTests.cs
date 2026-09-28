@@ -51,6 +51,10 @@ public sealed class CodeGraphRoutesTests
             using var unsafePath = await Send(true, true, "{\"files\":[\"../secret.cs\"]}");
             Assert.Equal(HttpStatusCode.BadRequest, unsafePath.StatusCode);
             git.Verify(service => service.GetRootPathAsync(It.IsAny<CancellationToken>()), Times.Never);
+            using var tooMany = await Send(true, true,
+                "{\"files\":[" + string.Join(',', Enumerable.Repeat("\"file.cs\"", 1001)) + "]}");
+            Assert.Equal(HttpStatusCode.BadRequest, tooMany.StatusCode);
+            git.Verify(service => service.GetRootPathAsync(It.IsAny<CancellationToken>()), Times.Never);
             using var noRepo = await Send(true, true, "{\"files\":[\"src/file.cs\"]}");
             Assert.Equal(HttpStatusCode.BadRequest, noRepo.StatusCode);
             Assert.Contains("Not in a git repository", await noRepo.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));

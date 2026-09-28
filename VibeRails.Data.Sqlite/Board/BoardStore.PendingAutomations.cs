@@ -37,8 +37,8 @@ public sealed partial class BoardStore
             query.Transaction = transaction;
             query.CommandText = $"""
                 SELECT p.CardId, p.JobId, p.EventKey, c.ProjectPath,
-                    'board-lane:' || {CardPrefixSql} || '-' || c.Number || ':' || p.ColumnId || ':' || p.EventKey,
-                    c.ColumnId = p.ColumnId AND a.JobId = p.JobId
+                    'board-lane:' || {CardKeySql} || ':' || p.ColumnId || ':' || p.EventKey,
+                    c.ColumnId = p.ColumnId AND a.JobId = p.JobId AND c.DeletedUTC IS NULL
                 FROM {pending} p
                 JOIN BoardCards c ON c.Id = p.CardId
                 {CardPrefixJoinSql}

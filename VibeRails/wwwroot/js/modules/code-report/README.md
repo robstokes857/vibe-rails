@@ -44,17 +44,30 @@ and an evidence description. Absent optional node fields must be omitted, not se
 tracked/untracked, non-ignored file catalog and uses the existing working-tree path guard to
 refuse links, junctions and paths outside the repository. No database reads/writes are added.
 The snapshot contains real directory ancestry (up to 32 levels), file nodes, parser declarations,
-local JS/TS imports and unambiguous type-name references. Cross-directory references also have
+local JS/TS imports/re-exports (including TypeScript emitted-extension substitution) and
+unambiguous type-name references. Cross-directory references also have
 domain edges. These are lexical source evidence, not resolved call graphs or runtime dependencies.
 No coverage or quality metric is inferred from the graph.
 
-Limits: 1,000 files, 2,800 nodes, 10,000 edges, 512 characters per reference evidence,
+Limits: 2,000 files, 2,800 nodes, 10,000 edges, 512 characters per reference evidence,
 8 MiB serialized graph, 12 declarations per file, 128 KiB per source file,
 16 MiB source budget and a 4 Mi-character Git catalog with a two-minute catalog timeout.
+The request still accepts at most 1,000 priority paths. Remaining files are selected in directory
+rounds so an alphabetically early test tree cannot take the entire file budget. The selection
+charges every directory it introduces against the node budget (a file is one node, each new
+directory in its ancestry one more), so a very wide tree keeps fewer files than the file limit
+and a file whose ancestry no longer fits is skipped rather than dropped later; the map is marked
+truncated whenever an eligible file was left out. Files take precedence over optional
+declarations within the node budget.
 Files beyond source-read limits retain structure without declarations. An entry the path guard
 refuses is omitted and marks the map truncated; a catalog read that exceeds its character bound
-or its timeout is reported as that bound, not as a server fault. Standard generated/vendor
-directories are excluded unless a file is explicitly in the report. When the graph exceeds the
+or its timeout is reported as that bound, not as a server fault. Dependency directories
+(`node_modules`, `vendor`) and C# `bin`/`obj` output are excluded (segment names matched
+case-insensitively) unless explicitly in the report. Source files in `assets` and non-C#
+`bin`/`obj` remain eligible. A local JS/TS import that names a known file extension
+(`.js`, `.ts`, `.json`, `.vue`, …) resolves only to that file; any other dotted tail
+(`./user.service`, `./app.module`) is a module stem and still probes the source extensions and
+`index` files. When the graph exceeds the
 byte limit, references and declarations give way before file nodes; exceptionally long paths can
 also reduce the file set. Truncation is disclosed in the map note. Search covers the supplied
 snapshot, not omitted repository files.

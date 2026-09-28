@@ -107,9 +107,9 @@ public sealed class BoardStoreTests : IDisposable
         var second = await _store.CreateCardAsync(_project, NewCard("Second") with { Type = BoardCardTypes.Bug }, Ct);
         var elsewhere = await _store.CreateCardAsync(_otherProject, NewCard("Elsewhere"), Ct);
 
-        Assert.Equal("PA-1", first.Key);
-        Assert.Equal("PA-2", second.Key);
-        Assert.Equal("PB-1", elsewhere.Key);
+        Assert.Equal("PA-1", BoardKeyText.Short(first.Key));
+        Assert.Equal("PA-2", BoardKeyText.Short(second.Key));
+        Assert.Equal("PB-1", BoardKeyText.Short(elsewhere.Key));
         Assert.Equal(0, first.Position);
         Assert.Equal(0, second.Position);
         Assert.Equal(1, (await _store.FindCardAsync(_project, first.Id, Ct))!.Position);
@@ -243,13 +243,13 @@ public sealed class BoardStoreTests : IDisposable
 
         var reopened = new BoardStore(_connectionString, _connectionString);
         var third = await reopened.CreateCardAsync(_project, NewCard("Third"), Ct);
-        Assert.Equal("PA-3", third.Key);
+        Assert.Equal("PA-3", BoardKeyText.Short(third.Key));
         Assert.True(await reopened.DeleteCardAsync(_project, first.Id, Ct));
         Assert.True(await reopened.DeleteCardAsync(_project, third.Id, Ct));
         Assert.Empty(await reopened.GetCardsAsync(_project, Ct));
 
         var afterEmpty = new BoardStore(_connectionString, _connectionString);
-        Assert.Equal("PA-4", (await afterEmpty.CreateCardAsync(_project, NewCard("Fourth"), Ct)).Key);
+        Assert.Equal("PA-4", BoardKeyText.Short((await afterEmpty.CreateCardAsync(_project, NewCard("Fourth"), Ct)).Key));
         Assert.Null(await afterEmpty.FindCardAsync(_project, "PA-1", Ct));
         Assert.Null(await afterEmpty.FindCardAsync(_project, "PA-2", Ct));
         Assert.Null(await afterEmpty.FindCardAsync(_project, "PA-3", Ct));
@@ -265,16 +265,16 @@ public sealed class BoardStoreTests : IDisposable
             await connection.OpenAsync(Ct);
             await using var legacy = connection.CreateCommand();
             // Reproduce the old schema, which predates the migration receipt as well.
-            legacy.CommandText = "UPDATE BoardCards SET Number = 42 WHERE Id = $id; DROP TABLE BoardCardSequences; DELETE FROM SchemaMigrations WHERE Component='board';";
+            legacy.CommandText = "UPDATE BoardCards SET Number = 42, CardKey = NULL WHERE Id = $id; DROP TABLE BoardCardSequences; DELETE FROM SchemaMigrations WHERE Component='board';";
             legacy.Parameters.AddWithValue("$id", existing.Id);
             await legacy.ExecuteNonQueryAsync(Ct);
         }
 
         var migrated = new BoardStore(_connectionString, _connectionString);
-        Assert.Equal("PA-42", (await migrated.FindCardAsync(_project, existing.Id, Ct))!.Key);
+        Assert.Equal("PA-42", BoardKeyText.Short((await migrated.FindCardAsync(_project, existing.Id, Ct))!.Key));
         Assert.True(await migrated.DeleteCardAsync(_project, existing.Id, Ct));
         var reopened = new BoardStore(_connectionString, _connectionString);
-        Assert.Equal("PA-43", (await reopened.CreateCardAsync(_project, NewCard("Next"), Ct)).Key);
+        Assert.Equal("PA-43", BoardKeyText.Short((await reopened.CreateCardAsync(_project, NewCard("Next"), Ct)).Key));
     }
 
     [Fact]
@@ -301,7 +301,7 @@ public sealed class BoardStoreTests : IDisposable
 
         var next = await _store.CreateCardAsync(alternate, NewCard("Next"), Ct);
         // Linux treats the upper-cased path as a second project, whose initials PA are taken.
-        Assert.Equal(OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? "PA-2" : "PROJ-1", next.Key);
+        Assert.Equal(OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? "PA-2" : "PROJ-1", BoardKeyText.Short(next.Key));
     }
 
     [Fact]
@@ -312,13 +312,13 @@ public sealed class BoardStoreTests : IDisposable
         var single = Path.Combine(_root, "monolith");
         await _store.EnsureDefaultColumnsAsync(camel, Ct);
         await _store.EnsureDefaultColumnsAsync(single, Ct);
-        Assert.Equal("MRN-1", (await _store.CreateCardAsync(camel, NewCard("A"), Ct)).Key);
-        Assert.Equal("MRN-2", (await _store.CreateCardAsync(camel, NewCard("B"), Ct)).Key);
-        Assert.Equal("MONO-1", (await _store.CreateCardAsync(single, NewCard("C"), Ct)).Key);
+        Assert.Equal("MRN-1", BoardKeyText.Short((await _store.CreateCardAsync(camel, NewCard("A"), Ct)).Key));
+        Assert.Equal("MRN-2", BoardKeyText.Short((await _store.CreateCardAsync(camel, NewCard("B"), Ct)).Key));
+        Assert.Equal("MONO-1", BoardKeyText.Short((await _store.CreateCardAsync(single, NewCard("C"), Ct)).Key));
         // The prefix is read back with the card, not recomputed from the path.
-        Assert.Equal(["MRN-2", "MRN-1"], (await _store.GetCardsAsync(camel, Ct)).Select(c => c.Key));
-        Assert.Equal("MRN-2", (await _store.FindCardAsync(camel, "mrn-2", Ct))!.Key);
-        Assert.Equal("MONO-1", (await _store.GetCardDetailAsync(single, "MONO-1", Ct))!.Card.Key);
+        Assert.Equal(["MRN-2", "MRN-1"], (await _store.GetCardsAsync(camel, Ct)).Select(c => BoardKeyText.Short(c.Key)));
+        Assert.Equal("MRN-2", BoardKeyText.Short((await _store.FindCardAsync(camel, "mrn-2", Ct))!.Key));
+        Assert.Equal("MONO-1", BoardKeyText.Short((await _store.GetCardDetailAsync(single, "MONO-1", Ct))!.Card.Key));
     }
 
     [Fact]
@@ -330,14 +330,14 @@ public sealed class BoardStoreTests : IDisposable
         foreach (var project in new[] { first, second, third })
             await _store.EnsureDefaultColumnsAsync(project, Ct);
 
-        Assert.Equal("PC-1", (await _store.CreateCardAsync(first, NewCard("A"), Ct)).Key);
+        Assert.Equal("PC-1", BoardKeyText.Short((await _store.CreateCardAsync(first, NewCard("A"), Ct)).Key));
         // Same initials as the first project: the next candidate is the folder's first letters.
-        Assert.Equal("PLAI-1", (await _store.CreateCardAsync(second, NewCard("B"), Ct)).Key);
+        Assert.Equal("PLAI-1", BoardKeyText.Short((await _store.CreateCardAsync(second, NewCard("B"), Ct)).Key));
         // Nothing usable is left: four random letters, still checked against every project.
-        var random = (await _store.CreateCardAsync(third, NewCard("C"), Ct)).Key;
+        var random = BoardKeyText.Short((await _store.CreateCardAsync(third, NewCard("C"), Ct)).Key);
         Assert.Matches("^[A-Z]{4}-1$", random);
         Assert.NotEqual("PLAI-1", random);
-        Assert.Equal(random[..4] + "-2", (await _store.CreateCardAsync(third, NewCard("D"), Ct)).Key);
+        Assert.Equal(random[..4] + "-2", BoardKeyText.Short((await _store.CreateCardAsync(third, NewCard("D"), Ct)).Key));
     }
 
     [Fact]
@@ -348,22 +348,23 @@ public sealed class BoardStoreTests : IDisposable
         // VB-n and stay that way, whichever binary numbers the next card.
         await _store.EnsureDefaultColumnsAsync(_project, Ct);
         var first = await _store.CreateCardAsync(_project, NewCard("First"), Ct);
-        Assert.Equal("PA-1", first.Key);
+        Assert.Equal("PA-1", BoardKeyText.Short(first.Key));
         await using (var connection = new SqliteConnection(_connectionString))
         {
             await connection.OpenAsync(Ct);
             await using var forget = connection.CreateCommand();
-            forget.CommandText = "DELETE FROM BoardProjectKeys;";
+            // Such a binary also stored no key on its cards (VB-51).
+            forget.CommandText = "DELETE FROM BoardProjectKeys; UPDATE BoardCards SET CardKey = NULL;";
             await forget.ExecuteNonQueryAsync(Ct);
         }
 
-        Assert.Equal("VB-1", (await _store.FindCardAsync(_project, first.Id, Ct))!.Key);
-        Assert.Equal("VB-2", (await _store.CreateCardAsync(_project, NewCard("Second"), Ct)).Key);
-        Assert.Equal("VB-1", (await _store.FindCardAsync(_project, "VB-1", Ct))!.Key);
+        Assert.Equal("VB-1", BoardKeyText.Short((await _store.FindCardAsync(_project, first.Id, Ct))!.Key));
+        Assert.Equal("VB-2", BoardKeyText.Short((await _store.CreateCardAsync(_project, NewCard("Second"), Ct)).Key));
+        Assert.Equal("VB-1", BoardKeyText.Short((await _store.FindCardAsync(_project, "VB-1", Ct))!.Key));
         Assert.Null(await _store.FindCardAsync(_project, "PA-1", Ct));
         // Reopening (the migration pass) leaves the VB decision in place.
         var reopened = new BoardStore(_connectionString, _connectionString);
-        Assert.Equal("VB-3", (await reopened.CreateCardAsync(_project, NewCard("Third"), Ct)).Key);
+        Assert.Equal("VB-3", BoardKeyText.Short((await reopened.CreateCardAsync(_project, NewCard("Third"), Ct)).Key));
     }
 
     [Fact]
@@ -385,7 +386,7 @@ public sealed class BoardStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task DeleteCard_RenumbersItsLane_AndCascadesRails()
+    public async Task DeleteCard_RenumbersItsLane_HidesTheCard_AndKeepsItsRails()
     {
         await _store.EnsureDefaultColumnsAsync(_project, Ct);
         var a = await _store.CreateCardAsync(_project, NewCard("A"), Ct);
@@ -399,16 +400,34 @@ public sealed class BoardStoreTests : IDisposable
         Assert.False(await _store.DeleteCardAsync(_project, a.Id, Ct));
         Assert.Equal(0, (await _store.FindCardAsync(_project, b.Id, Ct))!.Position);
         Assert.Null(await _store.FindSessionLinkAsync("session-1", Ct));
+        Assert.Null(await _store.FindCardAsync(_project, a.Id, Ct));
+        Assert.Null(await _store.FindCardAsync(_project, a.Key, Ct));
+        Assert.Null(await _store.GetCardDetailAsync(_project, a.Id, Ct));
+        Assert.Equal(b.Id, Assert.Single(await _store.GetCardsAsync(_project, Ct)).Id);
 
+        // VB-51: a delete is soft. The row and its rails stay (VB-54 restores them); the Card Log
+        // records who deleted it.
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(Ct);
-        foreach (var table in new[] { "BoardComments", "BoardCardSessions", "BoardCommits", "BoardCommitSnapshots", "BoardAttachments" })
+        foreach (var table in new[] { "BoardCardSessions", "BoardCommits", "BoardCommitSnapshots", "BoardAttachments" })
         {
             await using var count = connection.CreateCommand();
             count.CommandText = $"SELECT COUNT(*) FROM {table} WHERE CardId = $card";
             count.Parameters.AddWithValue("$card", a.Id);
-            Assert.Equal(0L, (long)(await count.ExecuteScalarAsync(Ct))!);
+            Assert.Equal(1L, (long)(await count.ExecuteScalarAsync(Ct))!);
         }
+        await using var deleted = connection.CreateCommand();
+        deleted.CommandText = """
+            SELECT (SELECT DeletedUTC IS NOT NULL FROM BoardCards WHERE Id = $card),
+                   (SELECT COUNT(*) FROM BoardComments WHERE CardId = $card AND Kind = 'comment'),
+                   (SELECT COUNT(*) FROM BoardComments WHERE CardId = $card AND Kind = 'deleted' AND AuthorKind = 'user');
+            """;
+        deleted.Parameters.AddWithValue("$card", a.Id);
+        await using var reader = await deleted.ExecuteReaderAsync(Ct);
+        Assert.True(await reader.ReadAsync(Ct));
+        Assert.Equal(1L, reader.GetInt64(0));
+        Assert.Equal(1L, reader.GetInt64(1));
+        Assert.Equal(1L, reader.GetInt64(2));
     }
 
     [Fact]
@@ -468,7 +487,7 @@ public sealed class BoardStoreTests : IDisposable
         Assert.Equal(BoardStore.NormalizeProjectPath(_project), found.ProjectPath);
 
         var renamed = await _store.RenameSessionAsync(_project, card.Id, "sess-1", "Codex · PA-1", Ct);
-        Assert.Equal("Codex · PA-1", renamed!.DisplayName);
+        Assert.Equal("Codex · PA-1", BoardKeyText.Short(renamed!.DisplayName));
         Assert.True(await _store.UnlinkSessionAsync(_project, card.Id, "sess-1", Ct));
         Assert.Null(await _store.FindSessionLinkAsync("sess-1", Ct));
     }
@@ -618,14 +637,15 @@ public sealed class BoardStoreTests : IDisposable
         Assert.Equal("scratch", Assert.Single(await _store.GetNotesAsync(_project, card.Key, Ct)).Body);
         Assert.Empty(await _store.GetNotesAsync(_project, "PA-99", Ct));
 
-        // Cascade covers both kinds.
+        // A soft delete keeps both kinds, and a hidden card's notes are not served.
         Assert.True(await _store.DeleteCardAsync(_project, card.Id, Ct));
+        Assert.Empty(await _store.GetNotesAsync(_project, card.Key, Ct));
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(Ct);
         await using var count = connection.CreateCommand();
-        count.CommandText = "SELECT COUNT(*) FROM BoardComments WHERE CardId = $card";
+        count.CommandText = "SELECT COUNT(*) FROM BoardComments WHERE CardId = $card AND Kind IN ('comment','note')";
         count.Parameters.AddWithValue("$card", card.Id);
-        Assert.Equal(0L, (long)(await count.ExecuteScalarAsync(Ct))!);
+        Assert.Equal(2L, (long)(await count.ExecuteScalarAsync(Ct))!);
     }
 
     [Fact]
@@ -666,7 +686,7 @@ public sealed class BoardStoreTests : IDisposable
         var store = new BoardStore(connectionString, connectionString);
         var detail = (await store.GetCardDetailAsync(_project, "VB-1", Ct))!;
         // Numbered before prefixes existed: board/11 seeds VB, so the key it always had stays.
-        Assert.Equal("VB-1", detail.Card.Key);
+        Assert.Equal("VB-1", BoardKeyText.Short(detail.Card.Key));
         Assert.Equal("written before Kind existed", Assert.Single(detail.Comments).Body);
         Assert.Equal(BoardCommentKinds.Comment, detail.Comments[0].Kind);
         Assert.Empty(detail.Notes);
@@ -701,8 +721,8 @@ public sealed class BoardStoreTests : IDisposable
 
         var onMain = await _store.CreateCardAsync(_project, NewCard("Main card"), Ct);
         var onSprint = await _store.CreateCardAsync(_project, NewCard("Sprint card") with { BoardId = sprint.Id }, Ct);
-        Assert.Equal("PA-1", onMain.Key);
-        Assert.Equal("PA-2", onSprint.Key);
+        Assert.Equal("PA-1", BoardKeyText.Short(onMain.Key));
+        Assert.Equal("PA-2", BoardKeyText.Short(onSprint.Key));
         Assert.Equal(main.Id, onMain.BoardId);
         Assert.Equal(sprint.Id, onSprint.BoardId);
         Assert.Equal([onMain.Id], (await _store.GetCardsAsync(_project, Ct)).Select(c => c.Id));
@@ -713,11 +733,10 @@ public sealed class BoardStoreTests : IDisposable
         Assert.Equal(1, counts[main.Id]);
         Assert.Equal(1, counts[sprint.Id]);
 
-        // Moving into another board's lane moves the card across boards.
+        // Cards remain on their board; another board needs a new card.
         var sprintDone = (await _store.GetColumnsAsync(_project, Ct, sprint.Id)).Last();
-        var moved = await _store.UpdateCardAsync(_project, onMain.Id, new BoardCardPatch(ColumnId: sprintDone.Id), Ct);
-        Assert.Equal(sprint.Id, moved!.BoardId);
-        Assert.Empty(await _store.GetCardsAsync(_project, Ct, main.Id));
+        await Assert.ThrowsAsync<BoardValidationException>(() => _store.UpdateCardAsync(_project, onMain.Id, new BoardCardPatch(ColumnId: sprintDone.Id), Ct));
+        Assert.Single(await _store.GetCardsAsync(_project, Ct, main.Id));
 
         // Lane operations stay on their board: a new lane appends to its board, a reorder names its board's lanes.
         var extra = await _store.CreateColumnAsync(_project, "QA", "#ffffff", Ct, sprint.Id);
@@ -732,14 +751,14 @@ public sealed class BoardStoreTests : IDisposable
         Assert.Null(await _store.RenameBoardAsync(_project, "brd_missing", "x", Ct));
 
         var deleted = await _store.DeleteBoardAsync(_project, sprint.Id, Ct);
-        Assert.Equal(2, deleted!.DeletedCards);
+        Assert.Equal(1, deleted!.DeletedCards);
         Assert.Equal(6, deleted.DeletedColumns);
         Assert.Null(await _store.FindCardAsync(_project, "PA-2", Ct));
         Assert.Equal(main.Id, Assert.Single(await _store.GetBoardsAsync(_project, Ct)).Id);
         await Assert.ThrowsAsync<BoardConflictException>(() => _store.DeleteBoardAsync(_project, main.Id, Ct));
         Assert.Null(await _store.DeleteBoardAsync(_project, "brd_missing", Ct));
         // Numbers were consumed by the deleted board's cards and never come back.
-        Assert.Equal("PA-3", (await _store.CreateCardAsync(_project, NewCard("Next"), Ct)).Key);
+        Assert.Equal("PA-3", BoardKeyText.Short((await _store.CreateCardAsync(_project, NewCard("Next"), Ct)).Key));
     }
 
     [Fact]

@@ -97,26 +97,19 @@ test('card type is present in the editor, filters, tiles and save payload', () =
     assert.match(html, /\.board-type-chip\[data-type="bug"\]/);
 });
 
-test('the card editor has a collapsed Agent notes rail that renders card.notes with the comment renderer', () => {
+test('comments and agent notes stay separate and history is tucked into settings', () => {
     const source = readFileSync(controllerPath, 'utf8');
-    const open = source.slice(
-        source.indexOf('async openCardEditor'),
-        source.indexOf('bindCardEditor(editor, card)')
-    );
-    // Collapsed by default, with a count badge.
-    assert.match(open, /<details data-board-notes-details>/);
-    assert.match(open, /data-board-count="notes"/);
-    assert.doesNotMatch(open, /data-board-history/);
-    // Rendered on toggle, from the card response — no extra fetch — and escape-first.
-    assert.match(source, /\[data-board-notes-details\]'\)\?\.addEventListener\('toggle'/);
-    const render = source.slice(source.indexOf('renderNotesPanel(editor, card) {'), source.indexOf('renderCommentsPanel(editor, card) {'));
+    assert.match(source, /data-board-comments/);
+    assert.match(source, /data-board-notes-details/);
+    assert.match(source, /Card settings/);
+    assert.match(source, /mountHistory/);
+    assert.doesNotMatch(source, /data-board-log-filter|cardLogFilter|cardLogEntries/);
+    const render = source.slice(source.indexOf('renderCardDiscussion(editor, card) {'), source.indexOf('applyCommentClamps(host) {'));
+    assert.match(render, /const comments = card\?\.comments \|\| \[\];/);
     assert.match(render, /const notes = card\?\.notes \|\| \[\];/);
-    assert.match(render, /renderCommentHtml\(note\.body, \{ attachments \}\)/);
-    assert.match(render, /class="board-comment board-note/);
-    assert.doesNotMatch(render, /BoardApi\./);
-    // The rail style narrows the avatar column for the side rail.
-    const css = boardCss();
-    assert.match(rule(css, '.board-comment.board-note'), /grid-template-columns: 24px minmax\(0, 1fr\)/);
+    assert.doesNotMatch(render, /card\?\.history/);
+    assert.match(render, /renderCommentHtml\(entry\.body, \{ attachments \}\)/);
+    assert.match(render, /this\.applyCommentClamps\(host\)/);
 });
 
 test('board-api exposes the agent-notes routes', () => {

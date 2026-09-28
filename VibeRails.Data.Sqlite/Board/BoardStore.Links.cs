@@ -17,7 +17,7 @@ public sealed partial class BoardStore
 
     // A property because the prefix join interpolates ProjectPathCollation (see CardSequenceReseedSql).
     private static string LinkedCardSelect => $"""
-        SELECT c.Id, c.Number, c.Title, b.Id, b.Name, k.Id, k.Name, {CardPrefixSql}
+        SELECT c.Id, c.Number, c.Title, b.Id, b.Name, k.Id, k.Name, {CardPrefixSql}, c.CardKey
         FROM BoardCards c
         JOIN BoardColumns k ON k.Id = c.ColumnId
         JOIN Boards b ON b.Id = k.BoardId
@@ -35,13 +35,14 @@ public sealed partial class BoardStore
         await using var command = connection.CreateCommand();
         command.CommandText = LinkedCardSelect + $"""
 
-            WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.Id <> $card
-              AND (instr(lower(c.Title), lower($query)) > 0 OR instr(lower({CardPrefixSql} || '-' || c.Number), lower($query)) > 0)
+            WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.Id <> $card AND c.DeletedUTC IS NULL
+              AND (instr(lower(c.Title), lower($query)) > 0 OR instr(lower({CardKeySql}), lower($query)) > 0
+                   OR instr(lower({CardPrefixSql} || '-' || c.Number), lower($query)) > 0)
               AND NOT EXISTS (
                 SELECT 1 FROM BoardCardLinks l
                 WHERE (l.CardId = $card AND l.LinkedCardId = c.Id)
                    OR (l.LinkedCardId = $card AND l.CardId = c.Id))
-            ORDER BY (lower({CardPrefixSql} || '-' || c.Number) = lower($query)) DESC, c.Number DESC
+            ORDER BY (lower({CardKeySql}) = lower($query) OR lower({CardPrefixSql} || '-' || c.Number) = lower($query)) DESC, c.Number DESC
             LIMIT 50;
             """;
         command.Parameters.AddWithValue("$project", project);
@@ -115,7 +116,7 @@ public sealed partial class BoardStore
         await using var command = connection.CreateCommand();
         command.CommandText = LinkedCardSelect + $"""
 
-            WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.Id IN (
+            WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.DeletedUTC IS NULL AND c.Id IN (
                 SELECT LinkedCardId FROM BoardCardLinks WHERE CardId = $card
                 UNION ALL SELECT CardId FROM BoardCardLinks WHERE LinkedCardId = $card)
             ORDER BY c.Number;
@@ -131,7 +132,8 @@ public sealed partial class BoardStore
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
             cards.Add(new BoardLinkedCardRecord(reader.GetString(0), reader.GetInt32(1), reader.GetString(2),
-                reader.GetString(3), reader.GetString(4), reader.GetString(5), reader.GetString(6), KeyPrefix: reader.GetString(7)));
+                reader.GetString(3), reader.GetString(4), reader.GetString(5), reader.GetString(6), KeyPrefix: reader.GetString(7),
+                StoredKey: reader.IsDBNull(8) ? null : reader.GetString(8)));
         return cards;
     }
 }

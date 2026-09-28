@@ -241,6 +241,8 @@ public class CommandService : ICommandService
         // Skip if the selected environment already points Claude somewhere (base URL OR custom
         // headers): respect the user's explicit Anthropic config instead of clobbering it — the
         // proxy owns both variables together, so a partial overwrite would drop their headers.
+        // The same bundle carries ENABLE_TOOL_SEARCH=true: a custom base URL otherwise makes
+        // Claude Code load every MCP tool schema up front (see LlmProxyClaudeConfig).
         if (proxySettings.ClaudeLlmProxyEnabled
             && llm == LLM.Claude
             && !environment.ContainsKey(LlmProxyClaudeConfig.BaseUrlVariable)

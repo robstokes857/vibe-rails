@@ -33,7 +33,7 @@ public sealed partial class BoardStore
         if (query.ColumnId is not null && !columns.Any(column => column.Id == query.ColumnId))
             throw new BoardValidationException("Lane not found on this board.");
 
-        var filter = CardPageFilterSql.Replace("{KEY}", $"{CardPrefixSql} || '-' || c.Number", StringComparison.Ordinal);
+        var filter = CardPageFilterSql.Replace("{KEY}", CardKeySql, StringComparison.Ordinal);
         var counts = new Dictionary<string, (int Total, int Filtered, int Blocked, long Points)>();
         await using (var count = connection.CreateCommand())
         {
@@ -45,7 +45,7 @@ public sealed partial class BoardStore
                        SUM(CASE WHEN {filter} THEN COALESCE(c.Points, 0) ELSE 0 END)
                 FROM BoardCards c
                 {CardPrefixJoinSql}
-                WHERE c.ProjectPath = $project{ProjectPathCollation}
+                WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.DeletedUTC IS NULL
                   AND c.ColumnId IN (SELECT Id FROM BoardColumns WHERE BoardId = $board)
                 GROUP BY c.ColumnId;
                 """;
@@ -77,7 +77,7 @@ public sealed partial class BoardStore
                  WHERE c.Id IN (
                      SELECT c.Id FROM BoardCards c
                      {CardPrefixJoinSql}
-                     WHERE c.ProjectPath = $project{ProjectPathCollation}
+                     WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.DeletedUTC IS NULL
                        AND c.ColumnId = $column AND {filter}
                      ORDER BY c.Position, c.Number
                      LIMIT $limit OFFSET $offset)
@@ -124,7 +124,7 @@ public sealed partial class BoardStore
         command.CommandText = $"""
             SELECT c.Id FROM BoardCards c
             {CardPrefixJoinSql}
-            WHERE c.ProjectPath = $project{ProjectPathCollation}
+            WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.DeletedUTC IS NULL
               AND c.ColumnId = $column AND {filter}
             ORDER BY c.Position, c.Number;
             """;
@@ -146,7 +146,7 @@ public sealed partial class BoardStore
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = select + $"""
-             WHERE c.ProjectPath = $project{ProjectPathCollation}
+             WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.DeletedUTC IS NULL
                AND c.ColumnId IN (SELECT Id FROM BoardColumns WHERE BoardId = $board)
                AND {predicate}
              ORDER BY 1;

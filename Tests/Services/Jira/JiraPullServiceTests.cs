@@ -254,6 +254,36 @@ public sealed class JiraPullServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ASoftDeletedCardIsSkipped_WithoutRecreatingItOrCreatingTheOverflowLane()
+    {
+        var service = Service();
+        var board = await BoardWithLanes();
+        await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct);
+        _jira.Pages.Enqueue(Page(Issue("100", "PROJ-1", "2026-09-01T00:00:00.000Z", "Gone", "Task", "Medium", "Backlog")));
+        await service.PullAsync(_project, board.Id, dryRun: false, Ct);
+        var card = Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id));
+        Assert.True(await _store.DeleteCardAsync(_project, card.Id, Ct));
+        var lanesBefore = (await _store.GetColumnsAsync(_project, Ct, board.Id)).Count;
+
+        // A newer update with a status no lane matches: the create path would have made the overflow lane first.
+        var newer = Page(Issue("100", "PROJ-1", "2026-09-02T00:00:00.000Z", "Gone", "Task", "Medium", "In QA"));
+        _jira.Pages.Enqueue(newer);
+        var dry = await service.PullAsync(_project, board.Id, dryRun: true, Ct);
+        Assert.Equal(0, dry.Created);
+        Assert.Equal(1, dry.Skipped);
+
+        _jira.Pages.Enqueue(newer);
+        var report = await service.PullAsync(_project, board.Id, dryRun: false, Ct);
+        Assert.Equal(0, report.Created);
+        Assert.Equal(0, report.Updated);
+        Assert.Equal(1, report.Skipped);
+        Assert.Empty(await _store.GetCardsAsync(_project, Ct, board.Id));
+        var lanes = await _store.GetColumnsAsync(_project, Ct, board.Id);
+        Assert.Equal(lanesBefore, lanes.Count);
+        Assert.DoesNotContain(lanes, lane => lane.Name == "Jira");
+    }
+
+    [Fact]
     public async Task SaveRefusesAMissingBoard_AndDeletingABoardDropsItsConnectionAndToken()
     {
         var service = Service();

@@ -1,5 +1,72 @@
 # API authentication coverage
 
+## VB-51 outbound Board sync review (2026-09-27)
+
+Publishing is a default-off, per-board setting. The desktop sends board/lane metadata and
+portable card fields, comments, notes and recorded field changes to the configured website.
+The payload omits attachments, linked commits/cards, terminal sessions, launch options,
+Automation definitions/settings, project paths and environment IDs. Environment assignments
+become base CLI assignments remotely; user-authored text, including `@path`, travels verbatim.
+See [the sync contract](VibeRails/Services/Board/SYNC.md) for the complete data boundary.
+
+The existing API key is sent only in `X-Api-Key`. HTTPS is required except for loopback testing;
+redirects and endpoint credentials/query/fragment are rejected. Each publication stores a
+SHA-256 fingerprint of its endpoint and key, so a configuration change stops uploads until
+publication is explicitly enabled again. The full exchange has a 30-second timeout and bounded
+response size. Errors never copy arbitrary remote bodies into local logs or the status UI.
+An OS file lock serializes scheduled and manual sync across root processes.
+
+The four local routes use the existing root host and session-plus-tab authentication; History
+is available only through the explicit human view, with no MCP addition. The Front repository
+uses its API-key ownership filter for publish/push/pull and authenticated browser ownership
+checks plus antiforgery for web writes. No desktop listener or authentication bypass was added.
+Both mandatory listener searches were repeated: main Kestrel, the existing non-serving port
+probe and test-only Kestrel hosts; no cross-runtime acceptors. The outbound environment-ID and
+destination-binding findings in the inherited, undeployed implementation are resolved.
+
+VB-51 review follow-up: hosted History now pages metadata in SQL before loading payloads;
+History/pull responses use a conservative 8 MiB budget and discussions page 20 entries. (An
+earlier draft of this note also claimed a global four-request browser concurrency limit; no such
+limiter exists in either repository and the claim is withdrawn.) Desktop error handling reads
+only bounded, validated error codes/IDs (`invalid_entry` with its entry id, `invalid_request`,
+`board_not_found`, `write_conflict`, each accepted only on its documented HTTP status), retains
+the rejected local data and shows a durable status notice in the desktop's own wording. It never
+displays remote error prose, and it never switches publishing off by itself. These changes introduce
+no local route, listener or authentication exception. The hosted resource-exhaustion findings
+are resolved; their regression tests cover SQL paging and response bounds.
+
+Full route/authentication reconciliation (2026-09-27): **226 mapped surfaces**, including
+**214 under `/api/v1`** and **49 Board routes**, match the current working tree, including
+uncommitted and untracked source. Added four missing Board mappings: `GET
+/api/v1/board/boards/{boardId}/history`, `GET` and `PUT /api/v1/board/boards/{boardId}/sync`,
+and `POST /api/v1/board/boards/{boardId}/sync/now`. No active inventory entry needed removal.
+Earlier dated audit and amendment counts are historical.
+
+The only session-authentication exceptions remain exact `GET /health`, `OPTIONS *`, and
+exact `GET /auth/bootstrap?code={one-time-code}&redirect={local-path}`. Bootstrap validates
+and atomically consumes a single-use code that expires after two minutes. Every other
+endpoint requires a valid session credential. All `/api/v1` business handlers, including
+the four additions, MCP, WebSocket upgrades, and enabled proxy operations additionally
+require the tab credential. Cookie and session header are alternative transports of the
+same secret; session-only page/static loads and conditional proxy responses remain
+documented in section 2. No additional endpoint lacking session authentication was found,
+so no `SECURITY_ERROR.md` was created.
+
+Resolved grouped and constant-based paths, proxy mappings, the inherited event WebSocket,
+and production registration; checked middleware ordering, credential validation, bootstrap
+validation, and the shared proxy/control gate. Both mandatory repository-wide listener
+searches found only the approved main Kestrel host, non-serving port probe, and test-only
+Kestrel hosts; the cross-runtime search had no matches.
+
+Validation: **129 passed, 0 failed, 0 skipped**, using `dotnet test Tests/Tests.csproj
+--artifacts-path C:/source/vibe-rails/Tests/obj/ApiSecAuditArtifacts --verbosity quiet` with a
+`FullyQualifiedName` filter covering `CookieAuthMiddlewareTests`, `AuthServiceTests`,
+`AuthRoutesTests`, all five LLM proxy route test classes, `TokenSaverPauseRoutesTests`,
+`McpServerHttpTests`, `InternalToolsRoutesTests`, `SigningKeyRoutesTests`, `BoardRoutesTests`,
+`JobRoutesTests`, and `CodeGraphRoutesTests`. The build reported nullable-reference and
+xUnit analyzer warnings in existing tests. This was source reconciliation plus targeted
+regression tests, not a live request sweep of every production endpoint.
+
 Full route/authentication reconciliation (2026-09-26): **222 mapped surfaces**, including
 **210 under `/api/v1`** and **45 Board routes**, match the current working tree in both
 directions, including uncommitted and untracked source. No endpoint needed adding or removal;
@@ -528,7 +595,7 @@ discovery alone is insufficient if the same feature change is allowed to expand 
 set. The production listener set is now frozen above so a new match starts as a finding, not as
 an expectation.
 
-### Repository-wide listener result — 2026-09-26
+### Repository-wide listener result — 2026-09-27
 
 - Approved serving implementation: the main Kestrel host in `VibeRails/Program.cs`.
 - Rejected and removed before merge: `GrokLoopbackBridge`'s `HttpListener`.
@@ -567,8 +634,8 @@ spoofer's own local exchange rows.
 Authentication is enforced primarily by
 [`CookieAuthMiddleware`](VibeRails/Middleware/CookieAuthMiddleware.cs). The LLM proxy
 routes additionally use
-[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 222 mapped route
-surfaces in this inventory: 210 `/api/v1` method/path mappings, nine non-`/api` protected
+[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 226 mapped route
+surfaces in this inventory: 214 `/api/v1` method/path mappings, nine non-`/api` protected
 API surfaces, and three bootstrap/page/probe routes. Static-file middleware and the
 global `OPTIONS` behavior are noted separately because they are not finite mapped-route
 lists.
@@ -937,7 +1004,7 @@ transcript text out of messages and exception text; do not rely on the Logs view
 hidden. `Tests/Routes/InternalToolsRoutesTests.cs` pins the two-credential requirement, the
 whitelist rejection of path-like sources, and the absence of mutating verbs.
 
-### Kanban board (45; active root backend only)
+### Kanban board (49; active root backend only)
 
 All mapped by `BoardRoutes.Map` under `if (isActiveRootBackend)`; every path contains `/api/`,
 so both credentials are enforced by the middleware with no route-level registration. The
@@ -964,6 +1031,15 @@ cannot read or write another project's board through this surface.
 - `GET /api/v1/board/columns/{columnId}/automation`,
   `PUT /api/v1/board/columns/{columnId}/automation` — read/save lane automation settings.
   Both require session and tab credentials and use the server-derived project.
+- `GET /api/v1/board/boards/{boardId}/history` — Board history scoped to the server-derived
+  project and board, optionally filtered by `card`. Returns up to 100 entries, a next offset,
+  and a has-more indicator; `offset` must be between 0 and 1,000,000. Missing or foreign
+  boards/cards return 404. Requires both credentials.
+- `GET /api/v1/board/boards/{boardId}/sync`, `PUT /api/v1/board/boards/{boardId}/sync`,
+  `POST /api/v1/board/boards/{boardId}/sync/now` — read sync status, set publication with
+  `{ enabled }`, or run a manual sync. All require both credentials and resolve the board
+  within the server-derived project. Sync makes outbound requests to viberails.ai using
+  the saved API key; these local responses do not include that key. No additional listener.
 - `GET /api/v1/board/cards/{card}/automations`,
   `POST /api/v1/board/cards/{card}/automations` — list project Automation choices and recent
   card-originated runs, or queue an enabled Automation with the originating card retained.

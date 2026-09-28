@@ -68,7 +68,10 @@ Do not replace transaction coordination with process enumeration or user interve
 Board migration `board/8` retires description history, WIP limits and removed-file retention
 (generation 3); `board/9` adds the current attention flag; `board/10` adds additional card
 sessions; `board/11` adds per-project card key prefixes (`BoardProjectKeys`, seeded `VB` for
-existing projects). All apply automatically in `board.db`.
+existing projects); `board/14` adds stored card keys, soft delete, the Card Log columns and
+`BoardSyncLinks` (additive); `board/15`–`board/18` add board/lane history triggers, the sync
+destination fingerprint, rejected-field protection and the NULL-safe rewrite of those triggers.
+All apply automatically in `board.db`.
 The former shared-file Board migration receipts remain in `state.db` and are not applied there again.
 The owner accepted this already-shipped cleanup as an exception; it is not the template for
 future feature removals. Retire future code paths while retaining unused schema by default.

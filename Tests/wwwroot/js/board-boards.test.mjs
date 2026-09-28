@@ -47,9 +47,10 @@ test('the controller loads boards first, remembers the selection, and scopes lan
     assert.match(del, /confirmDialog\(\{/);
     assert.doesNotMatch(del, /window\.confirm/);
     assert.match(del, /this\.state\.boards\.length <= 1/);
-    // The card editor lists every board's lanes so a card can move between boards.
+    // The card editor offers only the card's own board's lanes: cards stay on their board (VB-51),
+    // and a new card falls back to the current board's lanes.
     assert.match(source, /laneOptionsHtml\(columnId\)/);
-    assert.match(source, /<optgroup label="\$\{escapeHtml\(board\.name\)\}">/);
+    assert.match(source, /board\?\.columns \|\| this\.state\.columns/);
 });
 
 test('board-api.js exposes the boards endpoints and passes the board id through', () => {

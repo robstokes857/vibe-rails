@@ -26,6 +26,15 @@ CREATE INDEX IX_BoardColumns_Project ON BoardColumns(ProjectPath, Position);
 -- index IX_BoardComments_Card
 CREATE INDEX IX_BoardComments_Card ON BoardComments(CardId, CreatedUTC);
 
+-- index IX_BoardComments_RemoteSeq
+CREATE INDEX IX_BoardComments_RemoteSeq ON BoardComments(RemoteSeq) WHERE RemoteSeq > 0;
+
+-- index IX_BoardComments_Unsent
+CREATE INDEX IX_BoardComments_Unsent ON BoardComments(CardId) WHERE RemoteSeq IS NULL;
+
+-- index IX_BoardHistory_BoardTime
+CREATE INDEX IX_BoardHistory_BoardTime ON BoardHistory(BoardId, CreatedUTC);
+
 -- index IX_BoardJiraLinks_Card
 CREATE INDEX IX_BoardJiraLinks_Card ON BoardJiraLinks(CardId);
 
@@ -40,6 +49,9 @@ CREATE INDEX IX_BoardProjectKeys_Prefix ON BoardProjectKeys(Prefix);
 
 -- index IX_Boards_Project
 CREATE INDEX IX_Boards_Project ON Boards(ProjectPath, Position);
+
+-- index UX_BoardCards_CardKey
+CREATE UNIQUE INDEX UX_BoardCards_CardKey ON BoardCards(CardKey) WHERE CardKey IS NOT NULL;
 
 -- table BoardAdditionalCardSessions
 CREATE TABLE BoardAdditionalCardSessions ( SessionId TEXT NOT NULL, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, TabId TEXT NULL, Selection TEXT NOT NULL, Cli TEXT NOT NULL, DisplayName TEXT NOT NULL, Origin TEXT NOT NULL, CreatedUTC TEXT NOT NULL, PRIMARY KEY (SessionId, CardId) );
@@ -63,13 +75,13 @@ CREATE TABLE BoardCardSequences ( ProjectPath TEXT PRIMARY KEY COLLATE NOCASE, L
 CREATE TABLE BoardCardSessions ( SessionId TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, TabId TEXT NULL, Selection TEXT NOT NULL, Cli TEXT NOT NULL, DisplayName TEXT NOT NULL, Origin TEXT NOT NULL, CreatedUTC TEXT NOT NULL );
 
 -- table BoardCards
-CREATE TABLE BoardCards ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Number INTEGER NOT NULL, ColumnId TEXT NOT NULL REFERENCES BoardColumns(Id), Position INTEGER NOT NULL, Title TEXT NOT NULL, Description TEXT NOT NULL DEFAULT '', Assignee TEXT NULL, Priority TEXT NOT NULL DEFAULT 'medium', Type TEXT NOT NULL DEFAULT 'task', Points INTEGER NULL, Tags TEXT NOT NULL DEFAULT '[]', Blocked INTEGER NOT NULL DEFAULT 0, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, Flagged INTEGER NOT NULL DEFAULT 0, UNIQUE(ProjectPath, Number) );
+CREATE TABLE BoardCards ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Number INTEGER NOT NULL, ColumnId TEXT NOT NULL REFERENCES BoardColumns(Id), Position INTEGER NOT NULL, Title TEXT NOT NULL, Description TEXT NOT NULL DEFAULT '', Assignee TEXT NULL, Priority TEXT NOT NULL DEFAULT 'medium', Type TEXT NOT NULL DEFAULT 'task', Points INTEGER NULL, Tags TEXT NOT NULL DEFAULT '[]', Blocked INTEGER NOT NULL DEFAULT 0, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, Flagged INTEGER NOT NULL DEFAULT 0, CardKey TEXT, DeletedUTC TEXT, UNIQUE(ProjectPath, Number) );
 
 -- table BoardColumns
 CREATE TABLE BoardColumns ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Name TEXT NOT NULL, Position INTEGER NOT NULL, Color TEXT NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, BoardId TEXT NULL );
 
 -- table BoardComments
-CREATE TABLE BoardComments ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, AuthorKind TEXT NOT NULL, AuthorLabel TEXT NOT NULL, AuthorCli TEXT NULL, SessionId TEXT NULL, Body TEXT NOT NULL, CreatedUTC TEXT NOT NULL, Kind TEXT NOT NULL DEFAULT 'comment' );
+CREATE TABLE BoardComments ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, AuthorKind TEXT NOT NULL, AuthorLabel TEXT NOT NULL, AuthorCli TEXT NULL, SessionId TEXT NULL, Body TEXT NOT NULL, CreatedUTC TEXT NOT NULL, Kind TEXT NOT NULL DEFAULT 'comment' , Changes TEXT, RemoteSeq INTEGER);
 
 -- table BoardCommitSnapshots
 CREATE TABLE BoardCommitSnapshots ( CardId TEXT NOT NULL, Sha TEXT NOT NULL, SnapshotJson TEXT NOT NULL, PRIMARY KEY (CardId, Sha), FOREIGN KEY (CardId, Sha) REFERENCES BoardCommits(CardId, Sha) ON DELETE CASCADE );
@@ -79,6 +91,9 @@ CREATE TABLE BoardCommits ( CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DE
 
 -- table BoardContextSettings
 CREATE TABLE BoardContextSettings ( BoardId TEXT PRIMARY KEY REFERENCES Boards(Id) ON DELETE CASCADE, ContextJson TEXT NOT NULL, Revision INTEGER NOT NULL );
+
+-- table BoardHistory
+CREATE TABLE BoardHistory ( Id TEXT PRIMARY KEY, BoardId TEXT NOT NULL, ProjectPath TEXT NOT NULL, Kind TEXT NOT NULL, Body TEXT NOT NULL, CreatedUTC TEXT NOT NULL );
 
 -- table BoardJiraConnections
 CREATE TABLE BoardJiraConnections ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, BoardId TEXT NOT NULL, SiteUrl TEXT NOT NULL, Email TEXT NOT NULL DEFAULT '', HasToken INTEGER NOT NULL DEFAULT 0, AuthStatus TEXT NOT NULL DEFAULT 'none', StoryPointsFieldId TEXT NULL, Jql TEXT NOT NULL DEFAULT '', Enabled INTEGER NOT NULL DEFAULT 0, DisabledReason TEXT NULL, OverflowColumnId TEXT NULL, LastTestedUTC TEXT NULL, LastPullUTC TEXT NULL, LastReport TEXT NULL, UNIQUE(ProjectPath, BoardId) );
@@ -101,6 +116,12 @@ CREATE TABLE BoardPendingAutomations ( CardId TEXT PRIMARY KEY REFERENCES BoardC
 -- table BoardProjectKeys
 CREATE TABLE BoardProjectKeys ( ProjectPath TEXT PRIMARY KEY COLLATE NOCASE, Prefix TEXT NOT NULL, CreatedUTC TEXT NOT NULL );
 
+-- table BoardSyncLinks
+CREATE TABLE BoardSyncLinks ( BoardId TEXT PRIMARY KEY REFERENCES Boards(Id) ON DELETE CASCADE, RemoteBoardId TEXT NOT NULL, Cursor INTEGER NOT NULL DEFAULT 0, Enabled INTEGER NOT NULL DEFAULT 1, LayoutHash TEXT, LastSyncUTC TEXT, LastError TEXT, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL , DestinationKey TEXT);
+
+-- table BoardSyncRejectedFields
+CREATE TABLE BoardSyncRejectedFields ( EntryId TEXT NOT NULL REFERENCES BoardComments(Id) ON DELETE CASCADE, Field TEXT NOT NULL, PRIMARY KEY (EntryId, Field) );
+
 -- table Boards
 CREATE TABLE Boards ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Name TEXT NOT NULL, Position INTEGER NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL );
 
@@ -119,9 +140,24 @@ CREATE TRIGGER BoardCards_LaneAutomation_Insert AFTER INSERT ON BoardCards BEGIN
 -- trigger BoardCards_LaneAutomation_Move
 CREATE TRIGGER BoardCards_LaneAutomation_Move AFTER UPDATE OF ColumnId ON BoardCards WHEN OLD.ColumnId <> NEW.ColumnId BEGIN DELETE FROM BoardPendingAutomations WHERE CardId = NEW.Id; INSERT INTO BoardPendingAutomations (CardId, ColumnId, JobId, EventKey, DueUnixMs) SELECT NEW.Id, NEW.ColumnId, a.JobId, lower(hex(randomblob(16))), CAST(unixepoch('subsec') * 1000 AS INTEGER) + 60000 FROM BoardLaneAutomations a WHERE a.ColumnId = NEW.ColumnId AND a.JobId IS NOT NULL; END;
 
+-- trigger BoardColumns_HistoryChanged
+CREATE TRIGGER BoardColumns_HistoryChanged AFTER UPDATE OF Name, Color, Position ON BoardColumns WHEN OLD.Name IS NOT NEW.Name OR OLD.Color IS NOT NEW.Color OR OLD.Position IS NOT NEW.Position BEGIN INSERT INTO BoardHistory VALUES ('bh_' || lower(hex(randomblob(16))), COALESCE(NEW.BoardId, ''), NEW.ProjectPath, 'change', 'Lane ' || OLD.Name || ': ' || CASE WHEN OLD.Name IS NOT NEW.Name THEN 'name → ' || NEW.Name || '; ' ELSE '' END || CASE WHEN OLD.Color IS NOT NEW.Color THEN 'colour → ' || NEW.Color || '; ' ELSE '' END || CASE WHEN OLD.Position IS NOT NEW.Position THEN 'position → ' || NEW.Position ELSE '' END, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')); END;
+
+-- trigger BoardColumns_HistoryCreated
+CREATE TRIGGER BoardColumns_HistoryCreated AFTER INSERT ON BoardColumns BEGIN INSERT INTO BoardHistory VALUES ('bh_' || lower(hex(randomblob(16))), COALESCE(NEW.BoardId, ''), NEW.ProjectPath, 'created', 'Created lane: ' || NEW.Name, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')); END;
+
+-- trigger BoardColumns_HistoryDeleted
+CREATE TRIGGER BoardColumns_HistoryDeleted AFTER DELETE ON BoardColumns BEGIN INSERT INTO BoardHistory VALUES ('bh_' || lower(hex(randomblob(16))), COALESCE(OLD.BoardId, ''), OLD.ProjectPath, 'deleted', 'Deleted lane: ' || OLD.Name, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')); END;
+
 -- trigger BoardLaneAutomations_ClearAdditional
 CREATE TRIGGER BoardLaneAutomations_ClearAdditional AFTER UPDATE ON BoardLaneAutomations BEGIN DELETE FROM BoardLaneAdditionalAutomations WHERE ColumnId = NEW.ColumnId; END;
 
 -- trigger Boards_DeleteJiraConnection
 CREATE TRIGGER Boards_DeleteJiraConnection AFTER DELETE ON Boards BEGIN DELETE FROM BoardJiraConnections WHERE BoardId = OLD.Id; END;
+
+-- trigger Boards_HistoryCreated
+CREATE TRIGGER Boards_HistoryCreated AFTER INSERT ON Boards BEGIN INSERT INTO BoardHistory VALUES ('bh_' || lower(hex(randomblob(16))), NEW.Id, NEW.ProjectPath, 'created', 'Created board: ' || NEW.Name, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')); END;
+
+-- trigger Boards_HistoryName
+CREATE TRIGGER Boards_HistoryName AFTER UPDATE OF Name ON Boards WHEN OLD.Name IS NOT NEW.Name BEGIN INSERT INTO BoardHistory VALUES ('bh_' || lower(hex(randomblob(16))), NEW.Id, NEW.ProjectPath, 'change', 'Board name: ' || OLD.Name || ' → ' || NEW.Name, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')); END;
 

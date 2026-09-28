@@ -161,7 +161,7 @@ public sealed class BoardServiceTests : IDisposable
         Assert.Equal(BoardCardTypes.ResearchSpike, created.Type);
         Assert.Equal(5, created.Points);
         Assert.Equal(["auth", "bug"], created.Tags);
-        Assert.Equal("PROJ-1", created.Key);
+        Assert.Equal("PROJ-1", BoardKeyText.Short(created.Key));
         Assert.Empty(created.Comments);
         Assert.Empty(created.Sessions);
     }

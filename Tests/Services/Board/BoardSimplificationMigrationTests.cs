@@ -89,6 +89,16 @@ public sealed class BoardSimplificationMigrationTests : IDisposable
                       ('removed',$card,'removed.txt','text/plain',7,'','2026-01-01','2026-01-02');
             INSERT INTO BoardAttachmentContents VALUES('current',CAST('current' AS BLOB)),('removed',CAST('removed' AS BLOB));
             INSERT INTO BoardDescriptionRevisionAttachments VALUES($card,'removed');
+            DELETE FROM BoardComments WHERE Kind NOT IN ('comment','note');
+            DROP INDEX UX_BoardCards_CardKey;
+            DROP INDEX IX_BoardComments_Unsent;
+            DROP INDEX IX_BoardComments_RemoteSeq;
+            DROP TABLE BoardSyncRejectedFields;
+            DROP TABLE BoardSyncLinks;
+            ALTER TABLE BoardCards DROP COLUMN CardKey;
+            ALTER TABLE BoardCards DROP COLUMN DeletedUTC;
+            ALTER TABLE BoardComments DROP COLUMN Changes;
+            ALTER TABLE BoardComments DROP COLUMN RemoteSeq;
             DELETE FROM SchemaMigrations WHERE Component='board' AND Version>=8;
             DROP TABLE IF EXISTS BoardProjectKeys;
             PRAGMA user_version=2;

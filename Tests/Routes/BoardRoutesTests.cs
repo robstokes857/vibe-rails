@@ -15,6 +15,8 @@ using VibeRails.Middleware;
 using VibeRails.Routes;
 using VibeRails.Services;
 using VibeRails.Services.Board;
+using VibeRails.Services.Board.Sync;
+using VibeRails.Services.Diagnostics;
 using VibeRails.Services.Jira;
 using VibeRails.Services.Jobs;
 using VibeRails.Services.Terminal;
@@ -88,6 +90,10 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         builder.Services.AddSingleton(new JiraPullLock(Path.Combine(_root, JiraPullLock.FileName)));
         builder.Services.AddSingleton(new Mock<IJiraCloudClient>(MockBehavior.Strict).Object);
         builder.Services.AddScoped<IJiraPullService, JiraPullService>();
+        builder.Services.AddSingleton(new BoardSyncLock(Path.Combine(_root, "sync.lock")));
+        builder.Services.AddSingleton(new Mock<IBoardSyncClient>(MockBehavior.Loose).Object);
+        builder.Services.AddSingleton<IFeatureLog>(NullFeatureLog.Instance);
+        builder.Services.AddScoped<IBoardSyncService, BoardSyncService>();
 
         _app = builder.Build();
         _app.UseMiddleware<CookieAuthMiddleware>();
@@ -253,6 +259,10 @@ public sealed class BoardRoutesTests : IAsyncLifetime
     [InlineData("POST", "/api/v1/board/cards/PROJ-1/links")]
     [InlineData("DELETE", "/api/v1/board/cards/PROJ-1/links/PROJ-2")]
     [InlineData("GET", "/api/v1/board/files?q=board")]
+    [InlineData("GET", "/api/v1/board/boards/missing/history")]
+    [InlineData("GET", "/api/v1/board/boards/missing/sync")]
+    [InlineData("PUT", "/api/v1/board/boards/missing/sync")]
+    [InlineData("POST", "/api/v1/board/boards/missing/sync/now")]
     public async Task NewBoardSurfaces_RequireSessionAndTab(string method, string path)
     {
         using var none = await SendAsync(new HttpMethod(method), path);
@@ -261,6 +271,78 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Unauthorized, sessionOnly.StatusCode);
         using var tabOnly = await SendAsync(new HttpMethod(method), path, tab: "test-tab");
         Assert.Equal(HttpStatusCode.Unauthorized, tabOnly.StatusCode);
+    }
+
+    [Fact]
+    public async Task SyncStatus_ForAnUnpublishedBoard_IsOkScopedAndCarriesNoCredential()
+    {
+        using var catalog = await GetJsonAsync("/api/v1/board/boards");
+        var boardId = Assert.Single(catalog.RootElement.GetProperty("boards").EnumerateArray()).GetProperty("id").GetString()!;
+
+        using var status = await GetJsonAsync($"/api/v1/board/boards/{boardId}/sync");
+        var body = status.RootElement;
+        Assert.Equal(boardId, body.GetProperty("boardId").GetString());
+        Assert.False(body.GetProperty("published").GetBoolean());
+        Assert.False(body.GetProperty("enabled").GetBoolean());
+        Assert.False(body.GetProperty("configured").GetBoolean()); // the fixture's client has no key
+        Assert.Equal(JsonValueKind.Null, body.GetProperty("remoteBoardId").ValueKind);
+        Assert.Equal(0, body.GetProperty("unsent").GetInt32());
+        Assert.Equal(0, body.GetProperty("rejected").GetInt32());
+        // The API key is read from settings for outbound calls only; no status field may carry it.
+        foreach (var property in body.EnumerateObject())
+            foreach (var secret in new[] { "key", "secret", "token", "password", "credential" })
+                Assert.DoesNotContain(secret, property.Name, StringComparison.OrdinalIgnoreCase);
+
+        using var missing = await SendAsync(HttpMethod.Get, "/api/v1/board/boards/brd_missing/sync", "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+        var foreign = await _app.Services.GetRequiredService<IBoardStore>().CreateBoardAsync(_root + "-foreign", "Foreign", TestContext.Current.CancellationToken);
+        using var foreignBoard = await SendAsync(HttpMethod.Get, $"/api/v1/board/boards/{foreign.Id}/sync", "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.NotFound, foreignBoard.StatusCode);
+    }
+
+    [Fact]
+    public async Task History_BoundsTheOffset_ScopesBoardAndCard_AndPagesLayoutThenCardEntries()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var boards = _app.Services.GetRequiredService<IBoardStore>();
+        await boards.EnsureDefaultColumnsAsync(_project, ct);
+        var boardId = (await boards.GetBoardsAsync(_project, ct))[0].Id;
+        var lanes = await boards.GetColumnsAsync(_project, ct);
+
+        using var negative = await SendAsync(HttpMethod.Get, $"/api/v1/board/boards/{boardId}/history?offset=-1", "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.BadRequest, negative.StatusCode);
+        using var beyond = await SendAsync(HttpMethod.Get, $"/api/v1/board/boards/{boardId}/history?offset=1000001", "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.BadRequest, beyond.StatusCode);
+        using var missing = await SendAsync(HttpMethod.Get, "/api/v1/board/boards/brd_missing/history", "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+        var foreign = await boards.CreateBoardAsync(_root + "-foreign", "Foreign", ct);
+        using var foreignBoard = await SendAsync(HttpMethod.Get, $"/api/v1/board/boards/{foreign.Id}/history", "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.NotFound, foreignBoard.StatusCode);
+
+        // A fresh board's History is its own layout: the board and each lane were created (board/15
+        // triggers); no card entry exists yet, so nothing carries a card key.
+        using var fresh = await GetJsonAsync($"/api/v1/board/boards/{boardId}/history");
+        var entries = fresh.RootElement.GetProperty("entries").EnumerateArray().ToList();
+        Assert.Equal(lanes.Count + 1, entries.Count);
+        Assert.Contains(entries, entry => entry.GetProperty("body").GetString() == "Created board: Main");
+        Assert.All(entries, entry => Assert.Equal(JsonValueKind.Null, entry.GetProperty("cardKey").ValueKind));
+        Assert.False(fresh.RootElement.GetProperty("hasMore").GetBoolean());
+        Assert.Equal(entries.Count, fresh.RootElement.GetProperty("nextOffset").GetInt32());
+        using var offset = await GetJsonAsync($"/api/v1/board/boards/{boardId}/history?offset={entries.Count}");
+        Assert.Empty(offset.RootElement.GetProperty("entries").EnumerateArray());
+        Assert.False(offset.RootElement.GetProperty("hasMore").GetBoolean());
+        Assert.Equal(entries.Count, offset.RootElement.GetProperty("nextOffset").GetInt32());
+
+        // The card filter narrows to that card's log; an unknown card is not found.
+        var card = await boards.CreateCardAsync(_project, new(null, "Logged", "", null, "medium", null, [], false), ct);
+        using var byCard = await GetJsonAsync($"/api/v1/board/boards/{boardId}/history?card={card.Id}");
+        var created = Assert.Single(byCard.RootElement.GetProperty("entries").EnumerateArray());
+        Assert.Equal("created", created.GetProperty("kind").GetString());
+        Assert.Equal(card.Key, created.GetProperty("cardKey").GetString());
+        Assert.False(byCard.RootElement.GetProperty("hasMore").GetBoolean());
+        Assert.Equal(1, byCard.RootElement.GetProperty("nextOffset").GetInt32());
+        using var unknownCard = await SendAsync(HttpMethod.Get, $"/api/v1/board/boards/{boardId}/history?card=card_missing", "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.NotFound, unknownCard.StatusCode);
     }
 
     [Fact]
@@ -318,7 +400,7 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         using var createdDocument = await ReadJsonAsync(created);
         var card = createdDocument.RootElement;
         var cardId = card.GetProperty("id").GetString()!;
-        Assert.Equal("PROJ-1", card.GetProperty("key").GetString());
+        Assert.Equal("PROJ-1", BoardKeyText.Short(card.GetProperty("key").GetString()));
         Assert.Equal("Fix it", card.GetProperty("title").GetString());
         Assert.Equal("base:claude", card.GetProperty("assignee").GetString());
         Assert.Equal("claude-opus-4-8", card.GetProperty("baseLlmOptions").GetProperty("model").GetString());
@@ -425,16 +507,16 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         using var launchDocument = await ReadJsonAsync(launched);
         Assert.Equal("tab-1", launchDocument.RootElement.GetProperty("tabId").GetString());
         Assert.Equal("sess-1", launchDocument.RootElement.GetProperty("sessionId").GetString());
-        Assert.Equal("PROJ-1", launchDocument.RootElement.GetProperty("cardKey").GetString());
+        Assert.Equal("PROJ-1", BoardKeyText.Short(launchDocument.RootElement.GetProperty("cardKey").GetString()));
         Assert.Equal("env:7:codex", launchDocument.RootElement.GetProperty("selection").GetString());
 
         Assert.NotNull(started);
         Assert.Equal("codex", started!.Cli);
         Assert.Equal("my-env", started.EnvironmentName);
         Assert.Equal(_project, started.WorkingDirectory);
-        Assert.Equal("PROJ-1 · Ship the board", started.Title);
+        Assert.Equal("PROJ-1 · Ship the board", BoardKeyText.Short(started.Title));
         Assert.True(started.AuthorizeBoardTools);
-        Assert.StartsWith("You are working on kanban card PROJ-1", started.InitialPrompt);
+        Assert.StartsWith("You are working on kanban card PROJ-1", BoardKeyText.Short(started.InitialPrompt));
         // Board and lane names ride inside the fenced card block, between the title and the description.
         Assert.Contains("Title: Ship the board\nBoard: Main\nLanes: Backlog → Ready → Build → Review → Done\nAll of it.", started.InitialPrompt);
         // The environment's template is appended unresolved — resolution happens once, in the tab child.
@@ -495,17 +577,17 @@ public sealed class BoardRoutesTests : IAsyncLifetime
 
         using var onSprint = await PostJsonAsync("/api/v1/board/cards", new { title = "Sprint work", boardId = sprintId });
         using var onSprintDocument = await ReadJsonAsync(onSprint);
-        Assert.Equal("PROJ-1", onSprintDocument.RootElement.GetProperty("key").GetString());
+        Assert.Equal("PROJ-1", BoardKeyText.Short(onSprintDocument.RootElement.GetProperty("key").GetString()));
         Assert.Equal(sprintId, onSprintDocument.RootElement.GetProperty("boardId").GetString());
         using var onMain = await PostJsonAsync("/api/v1/board/cards", new { title = "Main work" });
         using var onMainDocument = await ReadJsonAsync(onMain);
-        Assert.Equal("PROJ-2", onMainDocument.RootElement.GetProperty("key").GetString());
+        Assert.Equal("PROJ-2", BoardKeyText.Short(onMainDocument.RootElement.GetProperty("key").GetString()));
         Assert.Equal(mainId, onMainDocument.RootElement.GetProperty("boardId").GetString());
 
         using var sprintCards = await GetJsonAsync($"/api/v1/board/cards?boardId={sprintId}");
-        Assert.Equal("PROJ-1", Assert.Single(sprintCards.RootElement.GetProperty("cards").EnumerateArray()).GetProperty("key").GetString());
+        Assert.Equal("PROJ-1", BoardKeyText.Short(Assert.Single(sprintCards.RootElement.GetProperty("cards").EnumerateArray()).GetProperty("key").GetString()));
         using var mainCards = await GetJsonAsync("/api/v1/board/cards");
-        Assert.Equal("PROJ-2", Assert.Single(mainCards.RootElement.GetProperty("cards").EnumerateArray()).GetProperty("key").GetString());
+        Assert.Equal("PROJ-2", BoardKeyText.Short(Assert.Single(mainCards.RootElement.GetProperty("cards").EnumerateArray()).GetProperty("key").GetString()));
         // A key resolves without naming a board.
         using var byKey = await GetJsonAsync("/api/v1/board/cards/PROJ-1");
         Assert.Equal(sprintId, byKey.RootElement.GetProperty("boardId").GetString());
@@ -574,17 +656,17 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         using var second = await PostJsonAsync("/api/v1/board/cards", new { title = "Second" });
         second.EnsureSuccessStatusCode();
         using var candidates = await GetJsonAsync("/api/v1/board/cards/PROJ-1/links/candidates?q=second");
-        Assert.Equal("PROJ-2", candidates.RootElement.GetProperty("cards")[0].GetProperty("key").GetString());
+        Assert.Equal("PROJ-2", BoardKeyText.Short(candidates.RootElement.GetProperty("cards")[0].GetProperty("key").GetString()));
         using var linked = await PostJsonAsync("/api/v1/board/cards/PROJ-1/links", new { card = "vb-2" });
         linked.EnsureSuccessStatusCode();
         using var link = await ReadJsonAsync(linked);
-        Assert.Equal("PROJ-2", link.RootElement.GetProperty("key").GetString());
+        Assert.Equal("PROJ-2", BoardKeyText.Short(link.RootElement.GetProperty("key").GetString()));
         Assert.Equal("Main", link.RootElement.GetProperty("boardName").GetString());
         using var repeated = await PostJsonAsync("/api/v1/board/cards/PROJ-2/links", new { card = "PROJ-1" });
         repeated.EnsureSuccessStatusCode();
         using var detail = await GetJsonAsync("/api/v1/board/cards/PROJ-2");
         Assert.Equal(1, detail.RootElement.GetProperty("linkedCards").GetArrayLength());
-        Assert.Equal("PROJ-1", detail.RootElement.GetProperty("linkedCards")[0].GetProperty("key").GetString());
+        Assert.Equal("PROJ-1", BoardKeyText.Short(detail.RootElement.GetProperty("linkedCards")[0].GetProperty("key").GetString()));
 
         using var self = await PostJsonAsync("/api/v1/board/cards/PROJ-1/links", new { card = "PROJ-1" });
         Assert.Equal(HttpStatusCode.BadRequest, self.StatusCode);

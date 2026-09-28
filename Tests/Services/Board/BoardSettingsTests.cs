@@ -233,7 +233,7 @@ public sealed partial class BoardSettingsTests : IDisposable
     }
 
     [Fact]
-    public async Task CrossBoardMoveAndLaneDeletion_UseTheFinalDestinationAutomation()
+    public async Task LaneDeletion_UsesTheFinalDestinationAutomation()
     {
         var (_, a, _, _) = await Lanes();
         var second = await _boards.CreateBoardAsync(_root, "Second", Ct);
@@ -241,8 +241,7 @@ public sealed partial class BoardSettingsTests : IDisposable
         var job = await Job();
         var additional = await Job("Additional");
         await _boards.SaveLaneAutomationAsync(_root, lanes[0].Id, [job.Id, additional.Id], 0, Ct);
-        var card = await Card(a);
-        await _boards.MoveCardAsync(_root, card.Id, lanes[1].Id, null, Ct);
+        var card = await Card(lanes[1].Id);
         await _boards.DeleteColumnAsync(_root, lanes[1].Id, Ct);
         Assert.Equal(lanes[0].Id, (await _boards.FindCardAsync(_root, card.Id, Ct))!.ColumnId);
         Assert.Equal(2, (await Tick(await Due(card.Id))).Count);

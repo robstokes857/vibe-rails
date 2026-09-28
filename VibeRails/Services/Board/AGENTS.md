@@ -34,8 +34,13 @@ serialization or tool discovery into the Native AOT path.
   unique per project, across boards; its high-water sequence must survive card/board deletion.
   The prefix is the project's, fixed by its first card (`BoardProjectKeys`, see
   [ARCHITECTURE.md](ARCHITECTURE.md#identity-ownership-and-state)) and never rewritten; existing
-  projects keep `VB`. Keys are computed on read from `Number` and that prefix; do not store
-  them, and never build a key from a literal `'VB-'` in SQL or JS — use `card.key`/`Key`.
+  projects keep `VB`. Since VB-51 a new card stores its key once, at creation, in
+  `BoardCards.CardKey`: `{PREFIX}-{5 crypto-random [A-Z0-9]}-{Number}`, upper-case, immutable and
+  unique in `board.db`, so the same key can name the card on viberails.ai. A NULL `CardKey` is a
+  card an older binary created; its key is still computed from the prefix and `Number`. Lookups
+  try the stored key (case-insensitive), then prefix + number (so `VB-12` still finds
+  `VB-7K2QZ-12`), then the id. Never build a key from a literal `'VB-'` in SQL or JS — use
+  `card.key`/`Key`.
 - A card's board comes from its lane. Names are display values and can be duplicated. Prefer IDs
   for mutations; when resolving names, reject ambiguity. Current lane resolution still needs F5.
 - Keep number allocation, lane renumbering, card writes, attachment membership,
@@ -46,9 +51,24 @@ serialization or tool discovery into the Native AOT path.
   remaining attachment if removed. Rename/unlink acts on one card/session pair. Unknown session
   status is not ended (F6); live indicators still depend on the root-local probe.
 - Cards keep one current state. Replacements accept the last write; no description revision,
-  expected-description token, history rail, history MCP tool or launch/read revision events.
-  Description append runs against the current text inside the same write transaction as the
-  other fields, with length validation before any writes. Do not restore revision tracking.
+  expected-description token or launch/read revision events. Description append runs against the
+  current text inside the same write transaction as the other fields, with length validation
+  before any writes.
+- **Card Log (VB-51).** Every card write also appends a `BoardComments` row in the same
+  transaction: `Kind` `created` / `change` / `deleted` (`restored` is reserved for VB-54), the
+  author, a readable `Body` summary (at most 2,000 characters) and a `Changes` JSON of
+  `{field: {from, to}}` for sync. It is a log of what changed, not a revision store: nothing is
+  restored from it. A description change records the full new description (up to 100,000
+  characters) in `Changes` by design, so the log grows with description size on every edit and
+  every `descriptionAppend`. Reordering within a lane and launch options are not logged. Older binaries
+  read `comment`/`note` rows only, and `CommentCount` counts `comment` rows only. The card
+  response contains only Comments and Agent notes. History is a separate, explicit settings
+  view for both cards and boards, loaded on demand. Never expose History through MCP or agent
+  launch context. See [SYNC.md](SYNC.md) for the single-owner sync contract.
+- **Deleting a card is a soft delete (VB-51).** It sets `BoardCards.DeletedUTC` and writes a
+  `deleted` log entry; every read, count, lookup, pull and lane Automation skips it, and its rows
+  (comments, attachments, links, sessions) stay. A Jira pull never recreates a soft-deleted card.
+  Restore and the 30-day purge are VB-54. An older binary still shows soft-deleted cards.
 - Attachment removal deletes its row and cascades its bytes. Only current attachments are
   readable. Database backups can retain older data; removal is not secure erasure.
 - `Flagged` means **Needs your attention**, independently of `Blocked`. The editor saves it;
@@ -160,12 +180,15 @@ the header displays the full card count. Tests should use realistic asynchronous
 ## Storage changes
 
 Read [database migration instructions](../../../VibeRails.Data.Sqlite/DB/AGENTS.md).
-`board/1`–`board/13` already exist. `board/12` adds the Jira connection and issue-link tables; `board/13` adds the trigger that deletes a board's Jira connection with the board. `board/8` is a breaking retirement (generation 3)
+`board/1`–`board/18` already exist. `board/12` adds the Jira connection and issue-link tables; `board/13` adds the trigger that deletes a board's Jira connection with the board. `board/8` is a breaking retirement (generation 3)
 that drops history tables, WIP limits and removed-file retention through an automatic, backed-up upgrade;
 `board/9` adds the current-state attention flag. `board/10` adds `BoardAdditionalCardSessions`,
 leaving primary links in `BoardCardSessions` and reading both through the store without a backfill.
 `board/11` adds `BoardProjectKeys` (per-project card key prefix), seeded with `VB` for every
-project that already numbers cards so that no existing key changes.
+project that already numbers cards so that no existing key changes. `board/14` (VB-51, additive)
+adds `BoardCards.CardKey` / `DeletedUTC`, `BoardComments.Changes` / `RemoteSeq` (NULL unsent,
+0 local-only, >0 the viberails.ai sequence; -1 is a retained rejection since board/17) and `BoardSyncLinks` (one row per published board),
+with no backfill.
 Historical migration SQL stays immutable. Add the next numbered migration rather than editing applied SQL.
 Honor generation checks, automatic backups and transactional migration coordination. Users must
 never need a special command or manual preparation to use a new version. Prefer additive changes

@@ -176,6 +176,25 @@ namespace VibeRails.DTOs
 
     public record JiraPullResponse(
         bool DryRun, string Outcome, int Created, int Updated, int Skipped, int Failed, string? Message);
+
+    // Board sync with viberails.ai (VB-51). Published = a link exists; Enabled = it syncs every
+    // 60 s. Configured = an HTTPS endpoint and an API key are both present. The API key itself
+    // never appears here.
+    public record BoardSyncStatusResponse(
+        string BoardId,
+        bool Published,
+        bool Enabled,
+        string? RemoteBoardId,
+        string? RemoteUrl,
+        long Cursor,
+        int Unsent,
+        DateTime? LastSyncUtc,
+        string? LastError,
+        bool Configured,
+        int Rejected = 0,
+        IReadOnlyList<BoardSyncRejectedEntry>? RejectedEntries = null);
+
+    public record SetBoardSyncRequest(bool Enabled = false);
     public record UpdateBoardRequest(string? Name = null);
     public record UpdateBoardContextRequest(BoardContextSettings? Context = null, int? ExpectedRevision = null);
     public record BoardAutomationOption(long Id, string Name, bool Enabled);
@@ -191,6 +210,7 @@ namespace VibeRails.DTOs
     public record DeleteBoardColumnResponse(bool Ok, string MovedToColumnId, int MovedCards);
 
     public record BoardCommentDto(string Id, BoardAuthorDto Author, string Body, DateTime CreatedAt);
+    public record BoardHistoryResponse(List<BoardHistoryRecord> Entries, bool HasMore, int NextOffset);
     public record BoardSessionDto(
         string Id,
         string? TabId,
@@ -1768,6 +1788,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(BoardAuthorDto))]
     [JsonSerializable(typeof(BoardCommentDto))]
     [JsonSerializable(typeof(List<BoardCommentDto>))]
+    [JsonSerializable(typeof(BoardHistoryResponse))]
     [JsonSerializable(typeof(BoardSessionDto))]
     [JsonSerializable(typeof(List<BoardSessionDto>))]
     [JsonSerializable(typeof(BoardAttachmentDto))]
@@ -1789,6 +1810,8 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(SaveJiraConnectionRequest))]
     [JsonSerializable(typeof(JiraTestResponse))]
     [JsonSerializable(typeof(JiraPullResponse))]
+    [JsonSerializable(typeof(BoardSyncStatusResponse))]
+    [JsonSerializable(typeof(SetBoardSyncRequest))]
     [JsonSerializable(typeof(CreateBoardCardRequest))]
     [JsonSerializable(typeof(UpdateBoardCardRequest))]
     [JsonSerializable(typeof(MoveBoardCardRequest))]

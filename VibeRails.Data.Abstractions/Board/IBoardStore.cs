@@ -34,10 +34,12 @@ public partial interface IBoardStore
     Task<IReadOnlyList<BoardCardRecord>> GetCardsAsync(string projectPath, CancellationToken cancellationToken = default, string? boardId = null);
     Task<BoardCardRecord?> FindCardAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
     Task<BoardCardDetailRecord?> GetCardDetailAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
-    Task<BoardCardRecord> CreateCardAsync(string projectPath, NewBoardCard card, CancellationToken cancellationToken = default);
-    Task<BoardCardRecord?> UpdateCardAsync(string projectPath, string cardId, BoardCardPatch patch, CancellationToken cancellationToken = default);
-    Task<bool> DeleteCardAsync(string projectPath, string cardId, CancellationToken cancellationToken = default);
-    Task<BoardCardRecord?> MoveCardAsync(string projectPath, string cardId, string columnId, int? position, CancellationToken cancellationToken = default);
+    // Card writes append a Card Log entry in the same transaction. A null author means the local user.
+    Task<BoardCardRecord> CreateCardAsync(string projectPath, NewBoardCard card, CancellationToken cancellationToken = default, BoardAuthor? author = null);
+    Task<BoardCardRecord?> UpdateCardAsync(string projectPath, string cardId, BoardCardPatch patch, CancellationToken cancellationToken = default, BoardAuthor? author = null);
+    /// <summary>Soft-deletes the card: it disappears from every read, but its rows and links stay for a later restore.</summary>
+    Task<bool> DeleteCardAsync(string projectPath, string cardId, CancellationToken cancellationToken = default, BoardAuthor? author = null);
+    Task<BoardCardRecord?> MoveCardAsync(string projectPath, string cardId, string columnId, int? position, CancellationToken cancellationToken = default, BoardAuthor? author = null);
 
     Task<BoardCommentRecord?> AddCommentAsync(string projectPath, string cardId, BoardAuthor author, string body, CancellationToken cancellationToken = default);
     /// <summary>Appends an agent-scratchpad entry (<see cref="BoardCommentKinds.Note"/>); never part of the comment stream.</summary>

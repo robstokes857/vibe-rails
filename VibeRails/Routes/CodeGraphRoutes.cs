@@ -13,7 +13,7 @@ public static class CodeGraphRoutes
             IGitService git, RepositoryCodeGraph graph, CancellationToken cancellationToken) =>
         {
             var files = request.Files ?? [];
-            if (files.Length > RepositoryCodeGraph.MaxFiles || files.Any(path => !RepositoryCodeGraph.IsSafePath(path)))
+            if (files.Length > RepositoryCodeGraph.MaxPriorityFiles || files.Any(path => !RepositoryCodeGraph.IsSafePath(path)))
                 return Results.BadRequest(new ErrorResponse("Supply at most 1000 repository-relative report paths."));
             var root = await git.GetRootPathAsync(cancellationToken);
             if (string.IsNullOrWhiteSpace(root)) return Results.BadRequest(new ErrorResponse("Not in a git repository."));

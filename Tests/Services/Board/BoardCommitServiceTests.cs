@@ -8,6 +8,10 @@ using Xunit;
 
 namespace Tests.Services.Board;
 
+[CollectionDefinition("Git console encoding", DisableParallelization = true)]
+public sealed class GitConsoleEncodingCollection;
+
+[Collection("Git console encoding")]
 public sealed class BoardCommitServiceTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), $"viberails-board-commits-{Guid.NewGuid():N}");
@@ -65,9 +69,12 @@ public sealed class BoardCommitServiceTests : IDisposable
         Assert.Equal("csharp", small.Language);
     }
 
-    [Fact]
-    public async Task GetDiff_RootCommit_PreservesEmptyBinaryAndExactLimitUnicodeFiles()
+    [Theory]
+    [InlineData(65001)]
+    [InlineData(437)]
+    public async Task GetDiff_RootCommit_PreservesEmptyBinaryAndExactLimitUnicodeFiles(int consoleCodePage)
     {
+        using var encoding = new ConsoleEncodingScope(consoleCodePage);
         await InitializeAsync();
         var exact = new string('é', BoardCommitService.MaxFileChars);
         await WriteAsync("exact.txt", exact);
@@ -140,9 +147,12 @@ public sealed class BoardCommitServiceTests : IDisposable
         Assert.Equal(("code.cs", "old code\n", "new code\n"), (file.FileName, file.OriginalContent, file.ModifiedContent));
     }
 
-    [Fact]
-    public async Task GetDiff_Rename_PreservesUnicodeAndSpaces()
+    [Theory]
+    [InlineData(65001)]
+    [InlineData(437)]
+    public async Task GetDiff_Rename_PreservesUnicodeAndSpaces(int consoleCodePage)
     {
+        using var encoding = new ConsoleEncodingScope(consoleCodePage);
         await InitializeAsync();
         await WriteAsync("old name.txt", "unchanged content\n");
         await CommitAsync();
@@ -237,6 +247,25 @@ public sealed class BoardCommitServiceTests : IDisposable
     }
 
     public void Dispose() => DeleteDirectory(_root);
+
+    // Console encoding is process-wide on Windows. This collection runs without other tests,
+    // and restores xUnit's writers as well as the encoding after exercising a legacy code page.
+    private sealed class ConsoleEncodingScope : IDisposable
+    {
+        private readonly Encoding _original = Console.OutputEncoding;
+        private readonly TextWriter _stdout = Console.Out;
+        private readonly TextWriter _stderr = Console.Error;
+
+        public ConsoleEncodingScope(int codePage) => Console.OutputEncoding =
+            codePage == 65001 ? Encoding.UTF8 : CodePagesEncodingProvider.Instance.GetEncoding(codePage)!;
+
+        public void Dispose()
+        {
+            Console.OutputEncoding = _original;
+            Console.SetOut(_stdout);
+            Console.SetError(_stderr);
+        }
+    }
 
     private static void DeleteDirectory(string directory)
     {

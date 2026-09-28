@@ -10,6 +10,139 @@ namespace Tests.Services.CodeReports;
 public sealed class RepositoryCodeGraphTests
 {
     [Fact]
+    public void SelectPaths_KeepsReportPriority_AndRepresentsLaterDirectoriesBeforeFillingLargeOnes()
+    {
+        var paths = new[] { "a-tests/1.cs", "a-tests/2.cs", "a-tests/3.cs", "backend/main.cs",
+            "frontend/app.js", "z-tools/main.py", "z-tools/requested.py" };
+        var selected = RepositoryCodeGraph.SelectPaths(paths, new HashSet<string> { "z-tools/requested.py" }, 5).ToArray();
+        Assert.Equal("z-tools/requested.py", selected[0]);
+        Assert.Contains("backend/main.cs", selected);
+        Assert.Contains("frontend/app.js", selected);
+        Assert.Contains("z-tools/main.py", selected);
+        Assert.Equal(5, selected.Length);
+        Assert.Equal(selected, RepositoryCodeGraph.SelectPaths(paths.Reverse(), new HashSet<string> { "z-tools/requested.py" }, 5));
+    }
+
+    [Fact]
+    public void SelectPaths_ChargesNewDirectoriesAgainstTheNodeBudget_SoBuildKeepsEverySelectedFile()
+    {
+        var paths = new[] { "d1/a.cs", "d1/b.cs", "d2/a.cs", "d3/a.cs", "d4/a.cs", "d5/a.cs", "d6/a.cs" };
+        var selected = RepositoryCodeGraph.SelectPaths(paths, new HashSet<string>(), 10, nodeLimit: 9).ToArray();
+        // The first file of a directory costs two nodes: d5 and d6 no longer fit, d1's second file still does.
+        Assert.Equal(new[] { "d1/a.cs", "d2/a.cs", "d3/a.cs", "d4/a.cs", "d1/b.cs" }, selected);
+        var graph = RepositoryCodeGraph.Build("test",
+            selected.Select(path => (path, (SourceOutline?)null)).ToArray(), false, TestContext.Current.CancellationToken);
+        Assert.Equal(5, graph.Nodes.Count(node => node.Kind == "file"));
+        Assert.Equal(9, graph.Nodes.Count);
+        Assert.False(graph.Truncated);
+        // A top-level file introduces the repository root node (two nodes). A report path that no longer
+        // fits is skipped rather than ending the selection, so a cheaper file still gets its turn.
+        Assert.Equal(new[] { "deep/x.cs", "deep/y.cs" }, RepositoryCodeGraph.SelectPaths(
+            ["deep/x.cs", "root.cs", "deep/y.cs"], new HashSet<string> { "deep/x.cs", "root.cs" }, 10, nodeLimit: 3));
+    }
+
+    [Fact]
+    public void Build_ProbesExtensionsForDottedModuleStems()
+    {
+        // Side-effect imports and no class declarations: the only evidence that can connect these
+        // files is import resolution, never a type-name mention.
+        var graph = RepositoryCodeGraph.Build("test", [
+            Source("src/a.ts", "import './user.service';\nimport './app.module';\nimport './data.json';"),
+            Source("src/user.service.ts", "export const service = 1"),
+            Source("src/app.module/index.ts", "export const module = 1"),
+            Source("src/data.json.ts", "export const notTheJson = 1")
+        ], false, TestContext.Current.CancellationToken);
+        var nodes = graph.Nodes.ToDictionary(n => n.Id);
+        var source = graph.Nodes.Single(n => n.Path == "src/a.ts");
+        var targets = graph.Edges.Where(e => e.Source == source.Id && e.Kind == "references")
+            .Select(e => nodes[e.Target].Path).Order().ToArray();
+        // `./user.service` and `./app.module` are stems, so `.ts` and `/index.ts` are probed as before VB-49;
+        // `./data.json` names its file outright, so `data.json.ts` is not a candidate.
+        Assert.Equal(new[] { "src/app.module/index.ts", "src/user.service.ts" }, targets);
+    }
+
+    [Fact]
+    public void Build_ConnectsReExportBarrels_AndTypeScriptEmittedExtensions()
+    {
+        var files = new[] {
+            Source("src/index.ts", """
+                export {
+                    build
+                } from './build.js';
+                export * from './server';
+                export type { Options } from './options.mjs';
+                import { run } from './runner.cjs';
+                // export * from './comment';
+                const text = "export * from './string'";
+                export { local };
+                const from = './unrelated';
+                """),
+            Source("src/build.ts", "export function build() {}"),
+            Source("src/server/index.ts", "export function serve() {}"),
+            Source("src/options.mts", "export type Options = {}"),
+            Source("src/runner.cts", "export function run() {}"),
+            Source("src/comment.ts", "export const a = 1"),
+            Source("src/string.ts", "export const b = 1"),
+            Source("src/unrelated.ts", "export const c = 1")
+        };
+        var graph = RepositoryCodeGraph.Build("test", files, false, TestContext.Current.CancellationToken);
+        var source = graph.Nodes.Single(n => n.Path == "src/index.ts");
+        var targets = graph.Edges.Where(e => e.Source == source.Id && e.Kind == "references")
+            .Select(e => graph.Nodes.Single(n => n.Id == e.Target).Path).Order().ToArray();
+        Assert.Equal(new[] { "src/build.ts", "src/options.mts", "src/runner.cts", "src/server/index.ts" }, targets);
+    }
+
+    [Fact]
+    public void Build_UsesLanguageSpecificExtensionOrder_WithoutResolvingOtherLanguagesAsJavaScript()
+    {
+        var graph = RepositoryCodeGraph.Build("test", [
+            Source("js/main.js", "import '../shared/task';"),
+            Source("ts/main.ts", "import '../shared/task.js';"),
+            Source("shared/task.js", "export function work() {}"),
+            Source("shared/task.ts", "export function work() {}"),
+            ("python/main.py", new SourceOutline("Python", [], [], ["../shared/task.js"]))
+        ], false, TestContext.Current.CancellationToken);
+        var nodes = graph.Nodes.ToDictionary(n => n.Id);
+        var references = graph.Edges.Where(e => e.Kind == "references" && nodes[e.Source].Kind == "file")
+            .Select(e => (nodes[e.Source].Path, nodes[e.Target].Path)).ToArray();
+        Assert.Equal(2, references.Length);
+        Assert.Contains(("js/main.js", "shared/task.js"), references);
+        Assert.Contains(("ts/main.ts", "shared/task.ts"), references);
+    }
+
+    [Fact]
+    public async Task ReadAsync_IncludesSourceAssetsAndCliDirectoriesAcrossLanguages()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "viberails-graph-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await Git(root, "init");
+            var sources = new[] { "bin/cli.js", "bin/task.py", "bin/cli.php", "src/bin/main.rs", "assets/main.ts" };
+            // `tools/Bin` spells the segment the other way: the exclusion is case-insensitive.
+            var excluded = new[] { "bin/Debug/Generated.cs", "obj/Generated.cs", "tools/Bin/Generated.cs", "node_modules/package/main.js", "vendor/package/main.php" };
+            foreach (var path in sources.Concat(excluded))
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(root, path))!);
+                await File.WriteAllTextAsync(Path.Combine(root, path), "// fixture", TestContext.Current.CancellationToken);
+            }
+            // Track the whole fixture. The catalog's `--others --exclude-standard` half would honour a
+            // developer's global ignore file (a `bin/` or `node_modules/` line there), so the map reads
+            // these through its `--cached` half instead, and it is the map's own filter under test.
+            await Git(root, "add", "--force", "--all");
+            var graph = await new RepositoryCodeGraph().ReadAsync(root, [], TestContext.Current.CancellationToken);
+            Assert.Equal(sources.Order(), graph.Nodes.Where(n => n.Kind == "file").Select(n => n.Path).Order());
+            Assert.False(graph.Truncated);
+        }
+        finally
+        {
+            foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+                File.SetAttributes(file, FileAttributes.Normal);
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
     public void SourceOutline_UsesParserTokens_AndDoesNotTreatCommentsOrStringsAsReferences()
     {
         var outline = SourceOutline.Read("Caller.cs", """
@@ -93,11 +226,11 @@ public sealed class RepositoryCodeGraphTests
     [Fact]
     public void Build_BoundsSymbolsBeforeDroppingFileNodes()
     {
-        var files = Enumerable.Range(0, 1000).Select(index =>
+        var files = Enumerable.Range(0, RepositoryCodeGraph.MaxFiles).Select(index =>
             Source($"src/F{index}.cs", $"class F{index} {{ void One() {{}} void Two() {{}} }}")).ToArray();
         var graph = RepositoryCodeGraph.Build("large", files, false, TestContext.Current.CancellationToken);
         Assert.True(graph.Truncated);
-        Assert.Equal(1000, graph.Nodes.Count(node => node.Kind == "file"));
+        Assert.Equal(RepositoryCodeGraph.MaxFiles, graph.Nodes.Count(node => node.Kind == "file"));
         Assert.True(graph.Nodes.Count <= 2800);
         Assert.True(graph.Edges.Count <= 10000);
     }

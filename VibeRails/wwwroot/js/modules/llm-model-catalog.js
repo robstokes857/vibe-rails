@@ -10,16 +10,28 @@ export const LLM_MODEL_OPTIONS = Object.freeze({
         ['gpt-5.6-luna', 'gpt-5.6-luna'],
         ['gpt-5.5', 'gpt-5.5']
     ],
+    // "[1m]" is Claude Code's 1M-context marker on a full model ID. Behind the VibeRails LLM
+    // proxy (a custom ANTHROPIC_BASE_URL) Claude Code cannot verify native 1M support and budgets
+    // a 200K window for the bare ID; the [1m] form keeps the 1M window. Direct launches treat the
+    // suffix as a no-op on natively-1M models, so it is never worse. Haiku 4.5 has no 1M variant.
     'claude': [
         ['', 'Default (Claude recommended)'],
         ['claude-fable-5-1', 'claude-fable-5-1'],
+        ['claude-fable-5-1[1m]', 'claude-fable-5-1[1m] (1M context)'],
         ['claude-fable-5', 'claude-fable-5'],
+        ['claude-fable-5[1m]', 'claude-fable-5[1m] (1M context)'],
         ['claude-opus-5-5', 'claude-opus-5-5'],
+        ['claude-opus-5-5[1m]', 'claude-opus-5-5[1m] (1M context)'],
         ['claude-opus-5', 'claude-opus-5'],
+        ['claude-opus-5[1m]', 'claude-opus-5[1m] (1M context)'],
         ['claude-opus-4-8', 'claude-opus-4-8'],
+        ['claude-opus-4-8[1m]', 'claude-opus-4-8[1m] (1M context)'],
         ['claude-opus-4-7', 'claude-opus-4-7'],
+        ['claude-opus-4-7[1m]', 'claude-opus-4-7[1m] (1M context)'],
         ['claude-sonnet-5', 'claude-sonnet-5'],
+        ['claude-sonnet-5[1m]', 'claude-sonnet-5[1m] (1M context)'],
         ['claude-sonnet-4-6', 'claude-sonnet-4-6'],
+        ['claude-sonnet-4-6[1m]', 'claude-sonnet-4-6[1m] (1M context)'],
         ['claude-haiku-4-5', 'claude-haiku-4-5']
     ],
     'copilot': [

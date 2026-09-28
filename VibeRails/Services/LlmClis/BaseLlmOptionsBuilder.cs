@@ -19,7 +19,10 @@ public static partial class BaseLlmOptionsBuilder
         // stored on a card from before then is dropped rather than rejected, so those cards still
         // launch instead of failing validation on an option that can no longer be honoured.
         if (llm == LLM.Codex) mode = "";
-        if (model.Length > 200 || (model.Length > 0 && !ModelPattern().IsMatch(model)))
+        // Only Claude Code reads the "[1m]" tail (see ModelPattern); for every other CLI it is
+        // just an invalid model name, rejected here instead of by the CLI at launch.
+        if (model.Length > 200 || (model.Length > 0 && !ModelPattern().IsMatch(model))
+            || (llm != LLM.Claude && model.EndsWith(OneMillionContextSuffix, StringComparison.Ordinal)))
             throw new ArgumentException("Invalid model name.");
         var pinned = PinnedModel(llm);
         if (pinned is not null && model.Length > 0 && model != pinned)
@@ -91,6 +94,13 @@ public static partial class BaseLlmOptionsBuilder
         _ => null
     };
 
-    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9._/: ()\-]*$")]
+    // The optional "[1m]" tail is Claude Code's 1M-context marker on a full model ID
+    // (`claude-fable-5-1[1m]`). Behind the VibeRails proxy Claude Code cannot verify native 1M
+    // support and budgets 200K unless the ID carries it, so the Board catalog offers both forms.
+    // Only that exact tail is allowed, and only for Claude (Normalize rejects it for other CLIs);
+    // brackets stay out of the rest of the name.
+    private const string OneMillionContextSuffix = "[1m]";
+
+    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9._/: ()\-]*(\[1m\])?$")]
     private static partial Regex ModelPattern();
 }

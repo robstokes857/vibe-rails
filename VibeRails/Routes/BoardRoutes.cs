@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http.Features;
 using VibeRails.DTOs;
 using VibeRails.Services.Board;
+using VibeRails.Services.Board.Sync;
 using VibeRails.Services.Jira;
 using VibeRails.Utils;
 
@@ -53,6 +54,16 @@ public static class BoardRoutes
         app.MapDelete("/api/v1/board/boards/{boardId}", (IBoardService board, string boardId, CancellationToken cancellationToken) =>
             RunAsync(async () => OkOrNotFound(await board.DeleteBoardAsync(Project(), boardId, cancellationToken), "Board")))
             .WithName("DeleteBoard");
+
+        // Human inspection only. History is not part of card responses or MCP tools.
+        app.MapGet("/api/v1/board/boards/{boardId}/history", (IBoardService board, string boardId, string? card, int? offset, CancellationToken cancellationToken) =>
+            RunAsync(async () =>
+            {
+                if (offset is < 0 or > 1_000_000) throw new BoardValidationException("Invalid history offset.");
+                var rows = await board.GetHistoryAsync(Project(), boardId, card, offset ?? 0, cancellationToken);
+                return rows is null ? Results.NotFound(new ErrorResponse("Board or card not found."))
+                    : Results.Ok(new BoardHistoryResponse(rows.Take(100).ToList(), rows.Count > 100, (offset ?? 0) + Math.Min(rows.Count, 100)));
+            })).WithName("GetBoardHistory");
 
         // ---------------------------------------------------------------- columns
 
@@ -275,7 +286,29 @@ public static class BoardRoutes
                 return Results.Ok(new JiraPullResponse(report.DryRun, report.Outcome, report.Created, report.Updated, report.Skipped, report.Failed, report.Message));
             }))
             .WithName("PullJiraFilter");
+
+        // ---------------------------------------------------------------- viberails.ai sync (VB-51)
+        //
+        // Status, the per-board Publish switch, and a manual sync. Outbound only: the desktop talks
+        // to viberails.ai with the saved API key, which never appears in these responses.
+        app.MapGet("/api/v1/board/boards/{boardId}/sync", (IBoardSyncService sync, string boardId, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(ToResponse(await sync.GetStatusAsync(Project(), boardId, cancellationToken)), "Board")))
+            .WithName("GetBoardSyncStatus");
+
+        app.MapPut("/api/v1/board/boards/{boardId}/sync", (IBoardSyncService sync, string boardId, SetBoardSyncRequest request, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(ToResponse(await sync.SetPublishedAsync(Project(), boardId, request.Enabled, cancellationToken)), "Board")))
+            .WithName("SetBoardSync");
+
+        app.MapPost("/api/v1/board/boards/{boardId}/sync/now", (IBoardSyncService sync, string boardId, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(ToResponse(await sync.SyncNowAsync(Project(), boardId, cancellationToken)), "Board")))
+            .WithName("SyncBoardNow");
     }
+
+    private static BoardSyncStatusResponse? ToResponse(BoardSyncStatus? status) =>
+        status is null
+            ? null
+            : new BoardSyncStatusResponse(status.BoardId, status.Published, status.Enabled, status.RemoteBoardId, status.RemoteUrl,
+                status.Cursor, status.Unsent, status.LastSyncUtc, status.LastError, status.Configured, status.Rejected, status.RejectedEntries);
 
     private static JiraConnectionResponse ToResponse(BoardJiraConnectionRecord? connection, string boardId) =>
         connection is null

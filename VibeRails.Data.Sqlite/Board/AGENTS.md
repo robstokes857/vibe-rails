@@ -5,7 +5,7 @@ Read the cross-layer [Board contributor guide](../../VibeRails/Services/Board/AG
 [database migration policy](../DB/AGENTS.md), before changing this component.
 
 This directory owns `IBoardStore`'s SQLite implementation in `~/.vibe_rails/board.db`, including
-component migrations `board/1`–`board/13`. The historical `VibeRails.Services.Board` namespace
+component migrations `board/1`–`board/18`. The historical `VibeRails.Services.Board` namespace
 does not move this code back into the application project. Keep DTO/contracts in
 `VibeRails.Data.Abstractions/Board`; keep Git, live terminal state and UI policy in the host.
 
@@ -86,6 +86,31 @@ board exists in the same statement.
 deletes its Jira connection. It is a trigger rather than a foreign key because `board/12` already
 shipped the table. No cleanup of existing rows; `GetJiraConnectionsAsync` skips a connection whose
 board is gone, and the next scheduled pull prunes tokens that no longer have a connection.
+
+`board/14` (VB-51, additive) adds `BoardCards.CardKey` (the stored random key of a new card,
+unique where not NULL), `BoardCards.DeletedUTC` (soft delete), `BoardComments.Changes` (the
+Card Log's field diff JSON), `BoardComments.RemoteSeq` (sync state; `IX_BoardComments_Unsent`
+covers the unsent rows) and `BoardSyncLinks` (one row per board published to viberails.ai,
+cascading with the board). Card Log rows are written by `InsertLogEntryAsync`
+(`BoardStore.CardLog.cs`) inside the same transaction as the card write. Every read filters
+`DeletedUTC IS NULL`. No backfill; an older binary ignores the columns, reads `comment`/`note`
+rows only, and shows soft-deleted cards.
+
+`board/15` adds `BoardHistory` and additive board/lane-change triggers. `board/16` adds the
+nullable `BoardSyncLinks.DestinationKey` fingerprint. Neither rewrites historical rows. Human
+History reads are explicit and paged; normal card detail does not query change history. See
+[SYNC.md](../../VibeRails/Services/Board/SYNC.md) for conflict ordering and upload boundaries.
+
+`board/17` adds `BoardSyncRejectedFields` for per-field protection of rejected sync entries
+(`RemoteSeq = -1`); only acknowledgement of a later local correction releases those fields.
+Rejected rows and their content stay in the Card Log. Rejected creations keep dependent edits
+local while other cards sync. See the rejection policy in `SYNC.md` for repair and status behavior.
+It also creates the partial index `IX_BoardComments_RemoteSeq` (`RemoteSeq > 0`).
+
+`board/18` drops and recreates the five board/15 history triggers from the corrected constant
+(`BoardStore.History.cs`): the lane triggers now `COALESCE(BoardId, '')`, because a lane's
+`BoardId` is NULL until adoption while `BoardHistory.BoardId` is NOT NULL, and a trigger must
+never make an older binary's lane write fail. No row is read, rewritten or deleted.
 
 Session commit linking reads this membership inside the commit-write transaction and writes the
 snapshot to the target and all same-project attachments atomically. One failed write rolls back

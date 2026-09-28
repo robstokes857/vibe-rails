@@ -161,6 +161,19 @@ namespace VibeRails
             serviceCollection.AddSingleton(_ => Services.Jira.JiraPullLock.BesideStateDatabase());
             serviceCollection.AddScoped<Services.Jira.IJiraPullService, Services.Jira.JiraPullService>();
             serviceCollection.AddSingleton<Services.Jira.IJiraPullScheduler, Services.Jira.JiraPullScheduler>();
+            // Board sync with viberails.ai (VB-51). Outbound only, HTTPS, X-Api-Key, redirects off;
+            // the API key is re-read from settings on every call. Ticked every 60 s by the leased
+            // root job scheduler beside the Jira pull, and one OS lock across root backends.
+            serviceCollection.AddHttpClient(Services.Board.Sync.BoardSyncHttpClient.HttpClientName, client =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(30);
+            }).ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
+            serviceCollection.AddSingleton<Services.Board.Sync.IBoardSyncClient>(sp =>
+                Services.Board.Sync.BoardSyncHttpClient.FromConfiguration(
+                    sp.GetRequiredService<IHttpClientFactory>(), sp.GetRequiredService<IConfiguration>()));
+            serviceCollection.AddSingleton(_ => Services.Board.Sync.BoardSyncLock.BesideStateDatabase());
+            serviceCollection.AddScoped<Services.Board.Sync.IBoardSyncService, Services.Board.Sync.BoardSyncService>();
+            serviceCollection.AddSingleton<Services.Board.Sync.IBoardSyncScheduler, Services.Board.Sync.BoardSyncScheduler>();
             serviceCollection.AddScoped<Services.Board.BoardAutomationService>();
             serviceCollection.AddScoped<Services.Board.BoardCardAutomationService>();
             // Singleton: it holds the ten-second repo file-list cache behind the composer's `@` typeahead.
