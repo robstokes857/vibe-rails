@@ -32,6 +32,9 @@ CREATE INDEX IX_BoardComments_RemoteSeq ON BoardComments(RemoteSeq) WHERE Remote
 -- index IX_BoardComments_Unsent
 CREATE INDEX IX_BoardComments_Unsent ON BoardComments(CardId) WHERE RemoteSeq IS NULL;
 
+-- index IX_BoardContextSamples_Card
+CREATE INDEX IX_BoardContextSamples_Card ON BoardContextSamples(CardId, MeasuredUTC);
+
 -- index IX_BoardHistory_BoardTime
 CREATE INDEX IX_BoardHistory_BoardTime ON BoardHistory(BoardId, CreatedUTC);
 
@@ -88,6 +91,9 @@ CREATE TABLE BoardCommitSnapshots ( CardId TEXT NOT NULL, Sha TEXT NOT NULL, Sna
 
 -- table BoardCommits
 CREATE TABLE BoardCommits ( CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, Sha TEXT NOT NULL, Author TEXT NOT NULL, Message TEXT NOT NULL, CommittedUTC TEXT NOT NULL, LinkedUTC TEXT NOT NULL, PRIMARY KEY (CardId, Sha) );
+
+-- table BoardContextSamples
+CREATE TABLE BoardContextSamples ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, SessionId TEXT NULL, MeasuredUTC TEXT NOT NULL, Intent TEXT NOT NULL, Cli TEXT NULL, Selection TEXT NULL, Tokens INTEGER NOT NULL, Chars INTEGER NOT NULL, PromptTokens INTEGER NOT NULL, CardReadTokens INTEGER NOT NULL, Breakdown TEXT NOT NULL );
 
 -- table BoardContextSettings
 CREATE TABLE BoardContextSettings ( BoardId TEXT PRIMARY KEY REFERENCES Boards(Id) ON DELETE CASCADE, ContextJson TEXT NOT NULL, Revision INTEGER NOT NULL );

@@ -34,6 +34,7 @@ import { BOARD_SELECTION_STORAGE_KEY } from './board-selection.js';
 import { boardContextSection, boardSyncSection, laneAutomationSection, mountBoardContext, mountBoardSync, mountLaneAutomation } from './board-settings.js';
 import { renderCardLinksSection, bindCardLinks } from './board-card-links.js';
 import { cardAutomationControls, bindCardAutomations } from './board-card-automations.js';
+import { contextSectionMarkup, bindCardContext } from './board-card-context.js';
 import { renderCommentHtml, wrapSelectionAsCode, toPlainPreview } from './board-text.js';
 import { historySection, mountHistory } from './board-history.js';
 import { bindFileReferencePopup } from './board-file-refs.js';
@@ -1110,6 +1111,8 @@ export class BoardController {
                         </div>
                     </div>
 
+                    ${contextSectionMarkup(Boolean(card))}
+
                     ${renderCardLinksSection(card)}
 
                     <section class="board-side-section">
@@ -1197,6 +1200,8 @@ export class BoardController {
             this.disposeComposers();
             this.cardLinksDispose?.();
             this.cardLinksDispose = null;
+            this.cardContextDispose?.();
+            this.cardContextDispose = null;
             disposeBoardAttachmentPreview();
         } });
 
@@ -1249,6 +1254,11 @@ export class BoardController {
         this.renderCommitsPanel(editor, card);
         this.renderSessionsPanel(editor, card);
         this.renderAttachmentsPanel(editor, card);
+        // Agent context (VB-63): what an agent launched on this card would read, measured server-side.
+        this.cardContextDispose?.();
+        const cardContext = bindCardContext(editor, card, { app: this.app });
+        editor._boardContext = cardContext;
+        this.cardContextDispose = cardContext ? () => cardContext.dispose() : null;
         editor.querySelector('[data-board-add-files]')?.addEventListener('click', () => editor.querySelector('[data-board-files]')?.click());
         editor.querySelector('[data-board-files]')?.addEventListener('change', event => {
             const files = Array.from(event.target.files || []);
@@ -1717,6 +1727,7 @@ export class BoardController {
                 composerInput.style.height = 'auto';
             }
             this.renderCardDiscussion(editor, card);
+            editor._boardContext?.refresh();
             // The thread is at the bottom of a single scrolling body, so bring the
             // new comment into view rather than leaving the reader where they were.
             // Synchronous for the same reason as the clamps: no frame is delivered

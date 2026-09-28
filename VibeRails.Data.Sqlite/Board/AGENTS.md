@@ -5,7 +5,7 @@ Read the cross-layer [Board contributor guide](../../VibeRails/Services/Board/AG
 [database migration policy](../DB/AGENTS.md), before changing this component.
 
 This directory owns `IBoardStore`'s SQLite implementation in `~/.vibe_rails/board.db`, including
-component migrations `board/1`–`board/18`. The historical `VibeRails.Services.Board` namespace
+component migrations `board/1`–`board/19`. The historical `VibeRails.Services.Board` namespace
 does not move this code back into the application project. Keep DTO/contracts in
 `VibeRails.Data.Abstractions/Board`; keep Git, live terminal state and UI policy in the host.
 
@@ -111,6 +111,15 @@ It also creates the partial index `IX_BoardComments_RemoteSeq` (`RemoteSeq > 0`)
 (`BoardStore.History.cs`): the lane triggers now `COALESCE(BoardId, '')`, because a lane's
 `BoardId` is NULL until adoption while `BoardHistory.BoardId` is NOT NULL, and a trigger must
 never make an older binary's lane write fail. No row is read, rewritten or deleted.
+
+`board/19` (VB-63, additive) adds `BoardContextSamples`: one row per card launch with the session
+id, intent, CLI, selection, the estimated tokens (total, prompt, card read), characters and the
+breakdown JSON the host measured (`BoardStore.ContextSamples.cs`). `RecordContextSampleAsync`
+inserts the row and, in the same transaction, a Card Log `change` entry by the system author whose
+`Changes` is `{"context":{"to":{tokens, chars, prompt, cardRead, intent, cli, breakdown}}}` with a
+readable "Agent launch context ≈ N tokens" body, so the sample syncs and shows in History. The
+card is not touched or promoted. `GetLatestContextSampleAsync` reads the newest row for the card
+editor. No backfill; an older binary ignores the table and the `context` field.
 
 Session commit linking reads this membership inside the commit-write transaction and writes the
 snapshot to the target and all same-project attachments atomically. One failed write rolls back

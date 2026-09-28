@@ -182,6 +182,9 @@ namespace VibeRails
             {
                 serviceCollection.AddSingleton<Services.Board.IBoardLiveSessionProbe, Services.Board.TerminalTabLiveSessionProbe>();
                 serviceCollection.AddScoped<Services.Board.IBoardLaunchService, Services.Board.BoardLaunchService>();
+                // Agent-context measurement (VB-63): the card editor's estimate and the sample each
+                // launch records. Scoped like the launch service; it reads the scoped IRepository.
+                serviceCollection.AddScoped<Services.Board.IBoardContextEstimator, Services.Board.BoardContextEstimator>();
             }
             else
             {

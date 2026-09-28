@@ -410,7 +410,10 @@ public sealed class BoardSyncService(
         if (string.IsNullOrWhiteSpace(json)) return null;
         var source = JsonNode.Parse(json)?.AsObject() ?? throw new BoardValidationException("A local change entry is invalid.");
         var portable = new JsonObject();
-        foreach (var field in new[] { "title", "description", "type", "priority", "points", "assignee", "tags", "blocked", "flagged", "lane" })
+        // "context" is not a card field: it is the agent-context sample a launch records (VB-63,
+        // BoardStore.ContextSamples.cs). The hosted contract stores unknown change fields verbatim
+        // and never applies them, so the numbers reach viberails.ai without a server change.
+        foreach (var field in new[] { "title", "description", "type", "priority", "points", "assignee", "tags", "blocked", "flagged", "lane", BoardStore.ContextChangeField })
         {
             if (source[field] is not JsonObject values) continue;
             var copy = new JsonObject();

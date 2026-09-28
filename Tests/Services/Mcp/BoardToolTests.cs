@@ -384,20 +384,112 @@ public sealed class BoardToolTests : IDisposable
         Assert.NotNull(await _store.FindSessionLinkAsync("sess-notes", Ct));
     }
 
+    // VB-63: a card whose activity fits the budget hides nothing, and lists newest first.
     [Fact]
-    public async Task GetBoardCard_ShowsOnlyTheNotesTail_AndPointsAtGetBoardNotes()
+    public async Task GetBoardCard_SmallCardShowsEveryEntryInFull_NewestFirst()
     {
         await _tool.CreateBoardCard("A", cancellationToken: Ct);
+        await _tool.AddBoardComment("first decision", "PROJ-1", Ct);
+        await Task.Delay(5, Ct);
+        await _tool.AddBoardComment("second decision", "PROJ-1", Ct);
         for (var i = 0; i < 6; i++)
+        {
+            await Task.Delay(2, Ct);
             await _tool.AppendBoardNote($"note {i} " + new string((char)('a' + i), 900), "PROJ-1", Ct);
+        }
 
         var card = await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct);
-        Assert.Contains("Agent notes (6):\n(earlier notes omitted; read them all with get_board_notes)", card);
-        Assert.DoesNotContain("note 0 ", card);
+        Assert.Contains("Comments and notes are listed newest first.", card);
+        Assert.Contains("Agent notes (6):\n", card);
+        Assert.Contains("note 0 ", card);
         Assert.Contains("note 5 ", card);
+        Assert.DoesNotContain("previews only", card);
+        Assert.DoesNotContain("truncated", card);
+        Assert.True(card.IndexOf("second decision", StringComparison.Ordinal) < card.IndexOf("first decision", StringComparison.Ordinal));
+        Assert.True(card.IndexOf("note 5 ", StringComparison.Ordinal) < card.IndexOf("note 0 ", StringComparison.Ordinal));
+    }
+
+    // VB-63: a large card keeps the newest entries in full, previews the rest with their ids, and
+    // says how to page back (before=) or lift the budget (activity=all).
+    [Fact]
+    public async Task GetBoardCard_LargeCardPreviewsOlderComments_AndPagesBackWithBefore()
+    {
+        await _tool.CreateBoardCard("A", cancellationToken: Ct);
+        for (var i = 0; i < 10; i++)
+        {
+            await Task.Delay(2, Ct);
+            await _tool.AddBoardComment($"comment {i} " + new string('x', 2_900) + $" END{i}", "PROJ-1", Ct);
+        }
+        for (var i = 0; i < 3; i++)
+        {
+            await Task.Delay(2, Ct);
+            await _tool.AppendBoardNote($"note {i} " + new string('n', 1_000) + $" ENDN{i}", "PROJ-1", Ct);
+        }
+
+        var card = await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct);
+        // 10 × ~3k comments exceed the 24k budget; notes (3k) keep their share, so 21k of comments fit: the newest seven.
+        Assert.Contains("Comments (10):\n", card);
+        Assert.Contains("END9", card);
+        Assert.Contains("END3", card);
+        Assert.DoesNotContain("END2", card);
+        Assert.Contains("Older comments (previews only; read a window in full with get_board_card before=", card);
+        Assert.Contains("comment 2 xxx", card);
+        Assert.Contains("comment 0 xxx", card);
+        Assert.DoesNotContain("older comments not listed", card);
+        foreach (var i in Enumerable.Range(0, 3))
+            Assert.Contains($"ENDN{i}", card);
+        Assert.True(card.Length < 30_000, $"budgeted card was {card.Length} characters");
+
+        // Paging back: the reply names the exact timestamp that excludes the oldest full entry.
+        var before = System.Text.RegularExpressions.Regex.Match(card, @"before=(\S+),").Groups[1].Value;
+        var older = await _tool.GetBoardCard("PROJ-1", before: before, cancellationToken: Ct);
+        Assert.Contains("Showing activity before ", older);
+        Assert.Contains("Comments (3, 7 newer hidden):\n", older);
+        Assert.Contains("END2", older);
+        Assert.Contains("END0", older);
+        Assert.DoesNotContain("END3", older);
+        Assert.DoesNotContain("previews only", older);
+
+        var everything = await _tool.GetBoardCard("PROJ-1", activity: "all", cancellationToken: Ct);
+        foreach (var i in Enumerable.Range(0, 10))
+            Assert.Contains($"END{i}", everything);
+        Assert.DoesNotContain("previews only", everything);
+
+        Assert.StartsWith("FAIL: activity must be recent", BoardKeyText.Short(await _tool.GetBoardCard("PROJ-1", activity: "everything", cancellationToken: Ct)));
+        Assert.StartsWith("FAIL: before must be an ISO-8601 timestamp", BoardKeyText.Short(await _tool.GetBoardCard("PROJ-1", before: "yesterday", cancellationToken: Ct)));
+    }
+
+    // VB-63: a long comment thread cannot starve the notes; they keep their reserve and point at get_board_notes.
+    [Fact]
+    public async Task GetBoardCard_NotesKeepTheirReserveWhenCommentsAreLarge()
+    {
+        await _tool.CreateBoardCard("A", cancellationToken: Ct);
+        for (var i = 0; i < 10; i++)
+        {
+            await Task.Delay(2, Ct);
+            await _tool.AddBoardComment($"comment {i} " + new string('x', 2_900) + $" END{i}", "PROJ-1", Ct);
+        }
+        for (var i = 0; i < 12; i++)
+        {
+            await Task.Delay(2, Ct);
+            await _tool.AppendBoardNote($"note {i} " + new string('n', 1_000) + $" ENDN{i}", "PROJ-1", Ct);
+        }
+
+        var card = await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct);
+        // Comments may use 24k − 8k = 16k (five entries); notes then get the remaining ~8.7k (eight entries).
+        Assert.Contains("END9", card);
+        Assert.Contains("END5", card);
+        Assert.DoesNotContain("END4", card);
+        Assert.Contains("Agent notes (12):\n", card);
+        Assert.Contains("ENDN11", card);
+        Assert.Contains("ENDN4", card);
+        Assert.DoesNotContain("ENDN3", card);
+        Assert.Contains("note 3 nnn", card);
+        Assert.Contains("Older notes (previews only; read a window in full with get_board_card before=", card);
+        Assert.Contains("every note with get_board_notes", card);
         var all = await _tool.GetBoardNotes("PROJ-1", cancellationToken: Ct);
-        Assert.Contains("note 0 ", all);
-        Assert.Contains("note 5 ", all);
+        Assert.Contains("ENDN0", all);
+        Assert.Contains("ENDN11", all);
     }
 
     [Fact]

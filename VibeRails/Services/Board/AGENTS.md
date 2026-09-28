@@ -17,6 +17,7 @@ across UI, REST, MCP and storage. The root [AGENTS.md](../../../AGENTS.md),
 | SQL and migration | `VibeRails.Data.Sqlite/Board/BoardStore*.cs`, `BoardStore.Options.cs`; contracts in `VibeRails.Data.Abstractions/Board` |
 | Start work / prompt | `BoardLaunchService.cs`, `BoardPromptComposer.cs`, `BoardSelection.cs` |
 | Agent tools and project context | `Services/Mcp/Tools/BoardTool.cs`, `BoardProjectResolver.cs`; read [MCP instructions](../Mcp/AGENTS.md) |
+| Agent context size (VB-63): the editor's "Agent context" section, launch samples, `get_board_card` activity budget | `BoardContextEstimator.cs`, `ContextTokenEstimator.cs`, `BoardStore.ContextSamples.cs`, `BoardTool.FormatCard`, `wwwroot/js/modules/board-card-context.js`; plan in `vibe-books/vibe_board_context_rot/about.md` |
 | Provider grants / child context | `Services/Terminal/Commands/BoardMcpAuthorization.cs`, OpenCode companion; read [terminal instructions](../Terminal/AGENTS.md) |
 
 Do not add SQL to routes/tools. Board persistence lives in `~/.vibe_rails/board.db`; legacy Board
@@ -65,6 +66,21 @@ serialization or tool discovery into the Native AOT path.
   response contains only Comments and Agent notes. History is a separate, explicit settings
   view for both cards and boards, loaded on demand. Never expose History through MCP or agent
   launch context. See [SYNC.md](SYNC.md) for the single-owner sync contract.
+- **Agent context is measured, recorded and budgeted (VB-63).** `GET /api/v1/board/cards/{card}/context`
+  (`BoardContextEstimator`) renders the real launch prompt (`BoardLaunchService.ComposePromptAsync`)
+  and the real `get_board_card` / `list_board_columns` output (`BoardTool.RenderCardAsync`,
+  `RenderLanesAsync`) and counts them with `ContextTokenEstimator` (characters ÷ 4, always shown
+  as ≈); the card editor's **Agent context** section shows the result. Every Start work / Chat
+  launch records a `BoardContextSamples` row (board/19) and, in the same transaction, a Card Log
+  `change` entry whose `Changes` is `{"context":{"to":{…}}}`, so the number syncs (the `context`
+  field is in `PortableChanges`; the hosted contract keeps unknown fields verbatim) and shows in
+  History. A failed measurement never fails a launch. `get_board_card` lists comments and notes
+  newest first: when comments + notes fit `BoardTool.ActivityBudgetCharacters` (24,000) nothing is
+  hidden; otherwise comments fill first, notes keep `NotesReservedCharacters` (8,000), the newest
+  entry is always shown (cut with a marker if it alone exceeds the allowance), and older entries
+  become one-line previews with ids. `before=<timestamp>` pages a window back, `activity=all`
+  lifts the budget, `get_board_notes` lists every note; sessions/commits list the newest 10/30.
+  Change the numbers in one place and update the plan in `vibe-books/vibe_board_context_rot`.
 - **Deleting a card is a soft delete (VB-51).** It sets `BoardCards.DeletedUTC` and writes a
   `deleted` log entry; every read, count, lookup, pull and lane Automation skips it, and its rows
   (comments, attachments, links, sessions) stay. A Jira pull never recreates a soft-deleted card.
@@ -180,7 +196,7 @@ the header displays the full card count. Tests should use realistic asynchronous
 ## Storage changes
 
 Read [database migration instructions](../../../VibeRails.Data.Sqlite/DB/AGENTS.md).
-`board/1`–`board/18` already exist. `board/12` adds the Jira connection and issue-link tables; `board/13` adds the trigger that deletes a board's Jira connection with the board. `board/8` is a breaking retirement (generation 3)
+`board/1`–`board/19` already exist. `board/19` (VB-63, additive) adds `BoardContextSamples`. `board/12` adds the Jira connection and issue-link tables; `board/13` adds the trigger that deletes a board's Jira connection with the board. `board/8` is a breaking retirement (generation 3)
 that drops history tables, WIP limits and removed-file retention through an automatic, backed-up upgrade;
 `board/9` adds the current-state attention flag. `board/10` adds `BoardAdditionalCardSessions`,
 leaving primary links in `BoardCardSessions` and reading both through the store without a backfill.

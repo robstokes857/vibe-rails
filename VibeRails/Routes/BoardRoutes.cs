@@ -154,6 +154,13 @@ public static class BoardRoutes
             RunAsync(async () => OkOrNotFound(await launcher.LaunchAsync(Project(), card, request?.Selection, cancellationToken, request?.Intent ?? "work"), "Card")))
             .WithName("LaunchBoardCard");
 
+        // The context an agent launched on this card right now would receive (VB-63): the launch
+        // prompt plus the first Board tool reads, as characters and estimated tokens, with the
+        // latest recorded launch sample. Read-only; nothing is stored by asking.
+        app.MapGet("/api/v1/board/cards/{card}/context", (IBoardContextEstimator context, string card, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(await context.EstimateAsync(Project(), card, cancellationToken), "Card")))
+            .WithName("GetBoardCardContext");
+
         // ---------------------------------------------------------------- files
         //
         // Repo-wide file names for the composer's `@path` typeahead (VB-35): names only, never

@@ -83,34 +83,43 @@ public sealed class BoardTool(
             var target = await ResolveBoardAsync(project, board, cancellationToken);
             if (target.Error is not null)
                 return target.Error;
-            var columns = await service.GetColumnsAsync(project, cancellationToken, target.BoardId);
-            var cards = await service.GetCardsAsync(project, cancellationToken, target.BoardId);
-            var automations = await service.GetLaneAutomationsByLaneAsync(project, columns.Columns.Select(c => c.Id).ToList(), cancellationToken);
-            var builder = new StringBuilder();
-            builder.Append("Board lanes for ").Append(project);
-            if (target.BoardName is not null) builder.Append(" (board ").Append(target.BoardName).Append(')');
-            builder.Append(":\n");
-            var anyAutomation = false;
-            foreach (var column in columns.Columns.OrderBy(c => c.Position))
-            {
-                var count = cards.Cards.Count(c => c.ColumnId == column.Id);
-                builder.Append("- ").Append(column.Name)
-                    .Append(" (id ").Append(column.Id).Append(", ").Append(count).Append(" card").Append(count == 1 ? "" : "s");
-                builder.Append(")\n");
-                foreach (var automation in automations[column.Id])
-                {
-                    anyAutomation = true;
-                    builder.Append("  on entry: ").Append(AutomationDetail(automation)).Append('\n');
-                }
-            }
-            if (anyAutomation)
-                builder.Append(LaneAutomationGuidance).Append('\n');
-            return builder.ToString().TrimEnd();
+            return await RenderLanesAsync(service, project, target.BoardId, target.BoardName, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return Fail("list the board lanes", ex);
         }
+    }
+
+    /// <summary>
+    /// Everything list_board_columns returns, assembled from the service so the Board context
+    /// estimator (VB-63) can measure exactly what an agent would read.
+    /// </summary>
+    internal static async Task<string> RenderLanesAsync(IBoardService service, string project, string? boardId, string? boardName, CancellationToken cancellationToken)
+    {
+        var columns = await service.GetColumnsAsync(project, cancellationToken, boardId);
+        var cards = await service.GetCardsAsync(project, cancellationToken, boardId);
+        var automations = await service.GetLaneAutomationsByLaneAsync(project, columns.Columns.Select(c => c.Id).ToList(), cancellationToken);
+        var builder = new StringBuilder();
+        builder.Append("Board lanes for ").Append(project);
+        if (boardName is not null) builder.Append(" (board ").Append(boardName).Append(')');
+        builder.Append(":\n");
+        var anyAutomation = false;
+        foreach (var column in columns.Columns.OrderBy(c => c.Position))
+        {
+            var count = cards.Cards.Count(c => c.ColumnId == column.Id);
+            builder.Append("- ").Append(column.Name)
+                .Append(" (id ").Append(column.Id).Append(", ").Append(count).Append(" card").Append(count == 1 ? "" : "s");
+            builder.Append(")\n");
+            foreach (var automation in automations[column.Id])
+            {
+                anyAutomation = true;
+                builder.Append("  on entry: ").Append(AutomationDetail(automation)).Append('\n');
+            }
+        }
+        if (anyAutomation)
+            builder.Append(LaneAutomationGuidance).Append('\n');
+        return builder.ToString().TrimEnd();
     }
 
     [McpServerTool, Description("List the cards on this project's VibeRails kanban board: key, lane, type, priority, title, assignee, comment count and whether a terminal session is open on it. Optional filters by lane name, assignee key and card type.")]
@@ -171,42 +180,69 @@ public sealed class BoardTool(
         }
     }
 
-    [McpServerTool, Description("Read one kanban card in full: fields, the board's lanes (annotated with the Automations a lane runs on entry) and any lane entry of this card still waiting to run, description, comments, linked cards, linked commits, linked terminal sessions (with each session's id, outcome and last comment), the tail of the agent notes, and attachment names. Omit the card to read the card this terminal was launched for. Pass since to see only activity after a point in time when resuming.")]
+    [McpServerTool, Description("Read one kanban card in full: fields, the board's lanes (annotated with the Automations a lane runs on entry) and any lane entry of this card still waiting to run, description, comments, linked cards, linked commits, linked terminal sessions (with each session's id, outcome and last comment), agent notes, and attachment names. Comments and notes are newest first; a small card shows everything, a large one shows the newest entries in full and older ones as one-line previews, and the reply says how to page back (before=) or read everything (activity=all). Omit the card to read the card this terminal was launched for. Pass since to see only activity after a point in time when resuming.")]
     public async Task<string> GetBoardCard(
         [Description("Card key like VB-12 (or the card id). Optional when this terminal was launched for a card.")] string? card = null,
         [Description("ISO-8601 UTC timestamp, e.g. 2026-09-16T21:50:00Z. Only comments, notes, sessions and commits at or after this time are listed; earlier ones are counted. Optional.")] string? since = null,
+        [Description("ISO-8601 UTC timestamp. Only comments, notes, sessions and commits before this time are listed; newer ones are counted. Pass the timestamp the reply gives for its oldest full entry to page back through older activity. Optional.")] string? before = null,
+        [Description("recent (default): the newest comments and notes in full within a size budget, older ones as one-line previews. all: every entry in full with no budget. Optional.")] string? activity = null,
         CancellationToken cancellationToken = default)
     {
         try
         {
             if (!TryParseSince(since, out var sinceUtc))
                 return "FAIL: since must be an ISO-8601 timestamp such as 2026-09-16T21:50:00Z.";
+            if (!TryParseSince(before, out var beforeUtc))
+                return "FAIL: before must be an ISO-8601 timestamp such as 2026-09-16T21:50:00Z.";
+            if (!TryParseActivity(activity, out var allActivity))
+                return "FAIL: activity must be recent (the default) or all.";
             var target = await ResolveCardAsync(card, cancellationToken);
             if (target.Error is not null)
                 return target.Error;
             var detail = await service.GetCardAsync(target.Project, target.CardId!, cancellationToken);
             if (detail is null)
                 return $"FAIL: card not found: {card}";
-            var lanes = (await service.GetColumnsAsync(target.Project, cancellationToken, BoardService.NormalizeBoardId(detail.BoardId))).Columns.OrderBy(c => c.Position).ToList();
-            var lane = lanes.FirstOrDefault(c => c.Id == detail.ColumnId);
-            var boardName = string.IsNullOrEmpty(detail.BoardId) ? null
-                : (await store.GetBoardAsync(target.Project, detail.BoardId, cancellationToken))?.Name;
-            var outcomes = new Dictionary<string, (BoardSessionOutcomeRecord? Outcome, BoardCommentDto? LastComment)>(StringComparer.Ordinal);
-            foreach (var session in detail.Sessions)
-            {
-                var outcome = await service.FindSessionOutcomeAsync(session.Id, cancellationToken);
-                var last = detail.Comments.LastOrDefault(c => string.Equals(c.Author.SessionId, session.Id, StringComparison.Ordinal));
-                outcomes[session.Id] = (outcome, last);
-            }
-            var automations = await service.GetLaneAutomationsByLaneAsync(target.Project, lanes.Select(c => c.Id).ToList(), cancellationToken);
-            var pending = await service.GetPendingLaneAutomationsAsync(target.Project, detail.Id, cancellationToken) ?? [];
-            return FormatCard(detail, lane?.Name ?? detail.ColumnId, lanes.Select(c => LaneLabel(c.Name, automations[c.Id])).ToList(), outcomes, sinceUtc, boardName,
-                pending.Select(p => $"\"{p.Automation.Name}\" (settles {p.DueUtc.ToString("u", CultureInfo.InvariantCulture)})").ToList());
+            var render = await RenderCardAsync(service, store, target.Project, detail, new CardReadOptions(sinceUtc, beforeUtc, allActivity), cancellationToken);
+            return render.Text;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return Fail("read the card", ex);
         }
+    }
+
+    /// <summary>One card read's activity window and whether the size budget applies.</summary>
+    internal sealed record CardReadOptions(DateTime? Since = null, DateTime? Before = null, bool AllActivity = false)
+    {
+        public static readonly CardReadOptions Default = new();
+    }
+
+    /// <summary>What a card render returned and what it showed or trimmed (VB-63).</summary>
+    internal sealed record CardRender(string Text, CardRenderStats Stats);
+
+    /// <summary>
+    /// Everything get_board_card returns, assembled from the service and store so the Board
+    /// context estimator (VB-63) can measure exactly what an agent would read.
+    /// </summary>
+    internal static async Task<CardRender> RenderCardAsync(IBoardService service, IBoardStore store, string project, BoardCardResponse detail, CardReadOptions options, CancellationToken cancellationToken)
+    {
+        var lanes = (await service.GetColumnsAsync(project, cancellationToken, BoardService.NormalizeBoardId(detail.BoardId))).Columns.OrderBy(c => c.Position).ToList();
+        var lane = lanes.FirstOrDefault(c => c.Id == detail.ColumnId);
+        var boardName = string.IsNullOrEmpty(detail.BoardId) ? null
+            : (await store.GetBoardAsync(project, detail.BoardId, cancellationToken))?.Name;
+        var outcomes = new Dictionary<string, (BoardSessionOutcomeRecord? Outcome, BoardCommentDto? LastComment)>(StringComparer.Ordinal);
+        foreach (var session in detail.Sessions)
+        {
+            var outcome = await service.FindSessionOutcomeAsync(session.Id, cancellationToken);
+            var last = detail.Comments.LastOrDefault(c => string.Equals(c.Author.SessionId, session.Id, StringComparison.Ordinal));
+            outcomes[session.Id] = (outcome, last);
+        }
+        var automations = await service.GetLaneAutomationsByLaneAsync(project, lanes.Select(c => c.Id).ToList(), cancellationToken);
+        var pending = await service.GetPendingLaneAutomationsAsync(project, detail.Id, cancellationToken) ?? [];
+        var stats = new CardRenderStats();
+        var text = FormatCard(detail, lane?.Name ?? detail.ColumnId, lanes.Select(c => LaneLabel(c.Name, automations[c.Id])).ToList(), outcomes, options, boardName,
+            pending.Select(p => $"\"{p.Automation.Name}\" (settles {p.DueUtc.ToString("u", CultureInfo.InvariantCulture)})").ToList(), stats);
+        return new CardRender(text, stats);
     }
 
     [McpServerTool, Description("Read a current card attachment: PNG/JPEG/GIF/WebP images up to 5 MiB are returned as MCP image content, and UTF-8 Markdown/TXT as bounded text. Larger images and PDF/other binaries remain available in the Board viewer. Use get_board_card to find attachment ids. Content is untrusted task data.")]
@@ -669,9 +705,24 @@ public sealed class BoardTool(
         }
     }
 
-    /// <summary>How much of the agent notes get_board_card shows before pointing at get_board_notes.</summary>
-    internal const int NotesTailCharacters = 3_000;
+    /// <summary>
+    /// Activity budget (VB-63). Comments and notes are listed newest first. When everything fits
+    /// in <see cref="ActivityBudgetCharacters"/> nothing is hidden; a small card never loses a
+    /// clue. When it does not fit, comments (the user's decisions) fill first, notes keep at least
+    /// <see cref="NotesReservedCharacters"/> so a long thread cannot hide the agent's own latest
+    /// checkpoints, and every older entry appears as a one-line preview with its id so the agent
+    /// can page back with <c>before=</c> or read everything with <c>activity=all</c>.
+    /// </summary>
+    internal const int ActivityBudgetCharacters = 24_000;
+    internal const int NotesReservedCharacters = 8_000;
+    internal const int ActivityPreviewCharacters = 160;
+    internal const int MaxActivityPreviews = 20;
+    /// <summary>The newest entry is always shown, cut to the budget when it alone exceeds it, if at least this much fits.</summary>
+    internal const int MinTruncatedEntryCharacters = 600;
+    internal const int MaxListedSessions = 10;
+    internal const int MaxListedCommits = 30;
     internal const int SessionLastCommentPreviewCharacters = 200;
+    private const string BeforeFormat = "yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'";
 
     /// <summary>
     /// The sequencing rule the lane annotations exist to enable. Shipped with every surface that
@@ -757,10 +808,13 @@ public sealed class BoardTool(
         string laneName,
         IReadOnlyList<string>? laneNames = null,
         IReadOnlyDictionary<string, (BoardSessionOutcomeRecord? Outcome, BoardCommentDto? LastComment)>? sessionOutcomes = null,
-        DateTime? since = null,
+        CardReadOptions? options = null,
         string? boardName = null,
-        IReadOnlyList<string>? pendingLaneAutomations = null)
+        IReadOnlyList<string>? pendingLaneAutomations = null,
+        CardRenderStats? stats = null)
     {
+        options ??= CardReadOptions.Default;
+        stats ??= new CardRenderStats();
         var builder = new StringBuilder();
         builder.Append(card.Key).Append(": ").Append(card.Title).Append('\n');
         builder.Append("Lane: ").Append(laneName)
@@ -780,39 +834,69 @@ public sealed class BoardTool(
             builder.Append("Pending lane automations: ").Append(string.Join(", ", pendingLaneAutomations)).Append('\n');
         builder.Append("Created ").Append(card.CreatedAt.ToString("u", CultureInfo.InvariantCulture))
             .Append(" · Updated ").Append(card.UpdatedAt.ToString("u", CultureInfo.InvariantCulture)).Append('\n');
-        if (since is DateTime cutoff)
+        if (options.Since is DateTime cutoff)
             builder.Append("Showing activity since ").Append(cutoff.ToString("u", CultureInfo.InvariantCulture)).Append("; earlier items are counted, not listed.\n");
+        if (options.Before is DateTime ceiling)
+            builder.Append("Showing activity before ").Append(ceiling.ToString(BeforeFormat, CultureInfo.InvariantCulture)).Append("; newer items are counted, not listed.\n");
         builder.Append('\n');
 
+        var descriptionStart = builder.Length;
         builder.Append("Description:\n")
             .Append(string.IsNullOrWhiteSpace(card.Description) ? "(none)" : card.Description).Append("\n\n");
+        stats.DescriptionChars = builder.Length - descriptionStart;
 
         if (card.LinkedCards.Count > 0)
         {
+            var linkedStart = builder.Length;
             builder.Append("Linked cards (").Append(card.LinkedCards.Count).Append("):\n");
             foreach (var linked in card.LinkedCards)
                 builder.Append("- ").Append(linked.Key).Append(": ").Append(linked.Title)
                     .Append(" (").Append(linked.BoardName).Append(" · ").Append(linked.ColumnName).Append(")\n");
             builder.Append("Read a linked card by passing its key to get_board_card.\n\n");
+            stats.LinkedCardsChars = builder.Length - linkedStart;
         }
 
-        var comments = Since(card.Comments, c => c.CreatedAt, since, out var hiddenComments);
-        builder.Append("Comments (").Append(comments.Count).Append(HiddenSuffix(hiddenComments)).Append("):\n");
-        if (comments.Count == 0) builder.Append("(none)\n");
-        foreach (var comment in comments)
-            AppendCommentLine(builder, comment);
+        // Newest first, so the latest decision or checkpoint is the first thing read and the
+        // budget below drops the oldest entries, never the newest.
+        var comments = Window(card.Comments, c => c.CreatedAt, options, out var earlierComments, out var laterComments);
+        var notes = Window(card.Notes ?? [], n => n.CreatedAt, options, out var earlierNotes, out var laterNotes);
+        comments.Reverse();
+        notes.Reverse();
+        var commentLines = comments.Select(FormatCommentLine).ToList();
+        var noteLines = notes.Select(FormatCommentLine).ToList();
+        var commentTotal = commentLines.Sum(line => line.Length);
+        var noteTotal = noteLines.Sum(line => line.Length);
+        var budgeted = !options.AllActivity && commentTotal + noteTotal > ActivityBudgetCharacters;
+        var commentAllowance = budgeted ? ActivityBudgetCharacters - Math.Min(noteTotal, NotesReservedCharacters) : int.MaxValue;
+        if (comments.Count + notes.Count > 0)
+            builder.Append("Comments and notes are listed newest first.\n");
+
+        var commentsUsed = AppendActivity(builder, "Comments", "comments", comments, commentLines, earlierComments, laterComments, commentAllowance,
+            "(none)", oldest => $"read a window in full with get_board_card before={Before(oldest)}, or everything with activity=all", stats.Comments);
+        var noteAllowance = budgeted ? Math.Max(0, ActivityBudgetCharacters - commentsUsed) : int.MaxValue;
 
         // Linked time, not commit time: an old commit linked during this session is this session's activity.
-        var commits = Since(card.Commits, c => c.LinkedAt, since, out var hiddenCommits);
-        builder.Append("\nLinked commits (").Append(commits.Count).Append(HiddenSuffix(hiddenCommits)).Append("):\n");
+        var commitsStart = builder.Length;
+        var commits = Window(card.Commits, c => c.LinkedAt, options, out var earlierCommits, out var laterCommits);
+        commits.Reverse();
+        builder.Append("\nLinked commits (").Append(commits.Count).Append(HiddenSuffix(earlierCommits, laterCommits)).Append("):\n");
         if (commits.Count == 0) builder.Append("(none)\n");
-        foreach (var commit in commits)
+        var listedCommits = options.AllActivity ? commits.Count : Math.Min(commits.Count, MaxListedCommits);
+        foreach (var commit in commits.Take(listedCommits))
             builder.Append("- ").Append(commit.ShortSha).Append(' ').Append(commit.Message).Append(" (").Append(commit.Author).Append(")\n");
+        if (commits.Count > listedCommits)
+            builder.Append("(+").Append(commits.Count - listedCommits).Append(" earlier commits; activity=all lists them)\n");
+        stats.CommitsListed = listedCommits;
+        stats.CommitsOmitted = commits.Count - listedCommits;
+        stats.CommitsChars = builder.Length - commitsStart;
 
-        var sessions = Since(card.Sessions, s => s.CreatedAt, since, out var hiddenSessions);
-        builder.Append("\nSessions (").Append(sessions.Count).Append(HiddenSuffix(hiddenSessions)).Append("):\n");
+        var sessionsStart = builder.Length;
+        var sessions = Window(card.Sessions, s => s.CreatedAt, options, out var earlierSessions, out var laterSessions);
+        sessions.Reverse();
+        builder.Append("\nSessions (").Append(sessions.Count).Append(HiddenSuffix(earlierSessions, laterSessions)).Append("):\n");
         if (sessions.Count == 0) builder.Append("(none)\n");
-        foreach (var session in sessions)
+        var listedSessions = options.AllActivity ? sessions.Count : Math.Min(sessions.Count, MaxListedSessions);
+        foreach (var session in sessions.Take(listedSessions))
         {
             builder.Append("- ").Append(session.DisplayName).Append(" · ").Append(session.CreatedAt.ToString("u", CultureInfo.InvariantCulture));
             (BoardSessionOutcomeRecord? Outcome, BoardCommentDto? LastComment) extra = default;
@@ -833,53 +917,149 @@ public sealed class BoardTool(
             if (extra.Outcome?.Summary is { } summary)
                 builder.Append("    summary: ").Append(Preview(summary, 600)).Append('\n');
         }
+        if (sessions.Count > listedSessions)
+            builder.Append("(+").Append(sessions.Count - listedSessions).Append(" earlier sessions; activity=all lists them)\n");
+        stats.SessionsListed = listedSessions;
+        stats.SessionsOmitted = sessions.Count - listedSessions;
+        stats.SessionsChars = builder.Length - sessionsStart;
 
-        var notes = Since(card.Notes ?? [], n => n.CreatedAt, since, out var hiddenNotes);
-        builder.Append("\nAgent notes (").Append(notes.Count).Append(HiddenSuffix(hiddenNotes)).Append("):\n");
-        if (notes.Count == 0)
-            builder.Append("(none — use append_board_note to checkpoint findings as you work)\n");
-        else
-        {
-            var tail = new StringBuilder();
-            foreach (var note in notes)
-                AppendCommentLine(tail, note);
-            if (tail.Length > NotesTailCharacters)
-            {
-                builder.Append("(earlier notes omitted; read them all with get_board_notes)\n…");
-                builder.Append(tail.ToString(tail.Length - NotesTailCharacters, NotesTailCharacters));
-            }
-            else
-                builder.Append(tail);
-        }
+        builder.Append('\n');
+        AppendActivity(builder, "Agent notes", "notes", notes, noteLines, earlierNotes, laterNotes, noteAllowance,
+            "(none — use append_board_note to checkpoint findings as you work)",
+            oldest => $"read a window in full with get_board_card before={Before(oldest)}, every note with get_board_notes, or everything with activity=all", stats.Notes);
 
         if (card.Attachments.Count > 0)
         {
+            var attachmentsStart = builder.Length;
             builder.Append("\nAttachments (").Append(card.Attachments.Count).Append("):\n");
             foreach (var attachment in card.Attachments)
                 builder.Append("- ").Append(attachment.Id).Append(": ").Append(attachment.Name)
                     .Append(" (").Append(attachment.MimeType).Append(", ").Append(attachment.Bytes).Append(" bytes)\n");
             builder.Append("Read images and Markdown/TXT files with read_board_attachment(attachmentId, card). Other files open in the Board viewer. Use Board tools as the only access path for card data and attachments.\n");
+            stats.AttachmentsChars = builder.Length - attachmentsStart;
         }
-        return builder.ToString().TrimEnd();
+        var text = builder.ToString().TrimEnd();
+        stats.TotalChars = text.Length;
+        return text;
     }
 
-    private static void AppendCommentLine(StringBuilder builder, BoardCommentDto comment) =>
-        builder.Append("- [").Append(comment.CreatedAt.ToString("u", CultureInfo.InvariantCulture)).Append("] ")
-            .Append(comment.Author.Label).Append(" (").Append(comment.Id).Append("): ").Append(comment.Body).Append('\n');
-
-    private static List<T> Since<T>(IReadOnlyList<T> items, Func<T, DateTime> at, DateTime? since, out int hidden)
+    /// <summary>
+    /// One activity section: full entries newest first until the allowance is spent, then previews.
+    /// The newest entry is always shown, cut to the allowance when it alone exceeds it. Returns the
+    /// characters spent on full entries so the next section can take what is left.
+    /// </summary>
+    private static int AppendActivity(StringBuilder builder, string heading, string kind, IReadOnlyList<BoardCommentDto> newestFirst, IReadOnlyList<string> lines,
+        int earlierHidden, int laterHidden, int allowance, string emptyText, Func<DateTime?, string> pageHint, ActivityRenderStats stats)
     {
-        if (since is not DateTime cutoff)
+        var start = builder.Length;
+        builder.Append(heading).Append(" (").Append(newestFirst.Count).Append(HiddenSuffix(earlierHidden, laterHidden)).Append("):\n");
+        if (newestFirst.Count == 0)
         {
-            hidden = 0;
-            return items.ToList();
+            builder.Append(emptyText).Append('\n');
+            stats.Chars = builder.Length - start;
+            return 0;
         }
-        var visible = items.Where(i => at(i) >= cutoff).ToList();
-        hidden = items.Count - visible.Count;
+        var used = 0;
+        var index = 0;
+        for (; index < lines.Count; index++)
+        {
+            var line = lines[index];
+            if (used + line.Length <= allowance)
+            {
+                builder.Append(line);
+                used += line.Length;
+                stats.Full++;
+                continue;
+            }
+            var remaining = allowance - used;
+            if (index == 0 && remaining >= MinTruncatedEntryCharacters)
+            {
+                var cut = line[..remaining].TrimEnd();
+                builder.Append(cut).Append(" …[truncated: ").Append(line.Length - cut.Length)
+                    .Append(" more characters; get_board_card activity=all shows the whole entry]\n");
+                used += cut.Length;
+                stats.Full++;
+                stats.TrimmedChars += line.Length - cut.Length;
+                index++;
+            }
+            break;
+        }
+        var older = lines.Count - index;
+        if (older > 0)
+        {
+            var oldestFull = index > 0 ? newestFirst[index - 1].CreatedAt : (DateTime?)null;
+            builder.Append("Older ").Append(kind).Append(" (previews only; ").Append(pageHint(oldestFull)).Append("):\n");
+            var previewed = Math.Min(older, MaxActivityPreviews);
+            for (var p = index; p < index + previewed; p++)
+            {
+                var entry = newestFirst[p];
+                builder.Append("- [").Append(entry.CreatedAt.ToString("u", CultureInfo.InvariantCulture)).Append("] ")
+                    .Append(entry.Author.Label).Append(" (").Append(entry.Id).Append("): ")
+                    .Append(Preview(entry.Body, ActivityPreviewCharacters)).Append('\n');
+                stats.Previewed++;
+                stats.TrimmedChars += Math.Max(0, lines[p].Length - ActivityPreviewCharacters);
+            }
+            var omitted = older - previewed;
+            if (omitted > 0)
+            {
+                builder.Append("(+").Append(omitted).Append(" older ").Append(kind).Append(" not listed)\n");
+                stats.Omitted = omitted;
+                for (var p = index + previewed; p < lines.Count; p++)
+                    stats.TrimmedChars += lines[p].Length;
+            }
+        }
+        stats.Chars = builder.Length - start;
+        return used;
+    }
+
+    private static string FormatCommentLine(BoardCommentDto comment) =>
+        "- [" + comment.CreatedAt.ToString("u", CultureInfo.InvariantCulture) + "] " + comment.Author.Label + " (" + comment.Id + "): " + comment.Body + "\n";
+
+    private static void AppendCommentLine(StringBuilder builder, BoardCommentDto comment) =>
+        builder.Append(FormatCommentLine(comment));
+
+    /// <summary>The exact timestamp to pass as before= so the entry itself is excluded and everything older is not.</summary>
+    private static string Before(DateTime? oldestFull) =>
+        oldestFull is DateTime at ? at.ToUniversalTime().ToString(BeforeFormat, CultureInfo.InvariantCulture) : "<timestamp>";
+
+    private static List<T> Window<T>(IReadOnlyList<T> items, Func<T, DateTime> at, CardReadOptions options, out int earlier, out int later)
+    {
+        earlier = 0;
+        later = 0;
+        if (options.Since is null && options.Before is null)
+            return items.ToList();
+        var visible = new List<T>(items.Count);
+        foreach (var item in items)
+        {
+            var when = at(item);
+            if (options.Since is DateTime since && when < since) earlier++;
+            else if (options.Before is DateTime before && when >= before) later++;
+            else visible.Add(item);
+        }
         return visible;
     }
 
-    private static string HiddenSuffix(int hidden) => hidden > 0 ? $", {hidden} earlier hidden" : string.Empty;
+    private static string HiddenSuffix(int earlier, int later)
+    {
+        var suffix = string.Empty;
+        if (earlier > 0) suffix += $", {earlier} earlier hidden";
+        if (later > 0) suffix += $", {later} newer hidden";
+        return suffix;
+    }
+
+    private static bool TryParseActivity(string? activity, out bool all)
+    {
+        all = false;
+        var value = activity?.Trim();
+        if (string.IsNullOrEmpty(value) || value.Equals("recent", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (value.Equals("all", StringComparison.OrdinalIgnoreCase))
+        {
+            all = true;
+            return true;
+        }
+        return false;
+    }
 
     private static string Preview(string text, int max)
     {
@@ -929,4 +1109,33 @@ public sealed class BoardTool(
         VibeRails.Data.Abstractions.StorageException storage => storage.IsTransient,
         _ => ex.InnerException is { } inner && IsDatabaseBusy(inner),
     };
+
+    /// <summary>What one card render showed and trimmed, for the context estimate (VB-63).</summary>
+    internal sealed class CardRenderStats
+    {
+        public int TotalChars;
+        public int DescriptionChars;
+        public int LinkedCardsChars;
+        public int CommitsChars;
+        public int CommitsListed;
+        public int CommitsOmitted;
+        public int SessionsChars;
+        public int SessionsListed;
+        public int SessionsOmitted;
+        public int AttachmentsChars;
+        public ActivityRenderStats Comments { get; } = new();
+        public ActivityRenderStats Notes { get; } = new();
+        /// <summary>Header, lane list, timestamps and the fixed guidance sentences.</summary>
+        public int OtherChars => Math.Max(0, TotalChars - DescriptionChars - LinkedCardsChars - CommitsChars - SessionsChars - AttachmentsChars - Comments.Chars - Notes.Chars);
+    }
+
+    /// <summary>One activity section's outcome: entries shown in full, previewed, omitted, and the body characters that did not reach the agent.</summary>
+    internal sealed class ActivityRenderStats
+    {
+        public int Full;
+        public int Previewed;
+        public int Omitted;
+        public int Chars;
+        public int TrimmedChars;
+    }
 }

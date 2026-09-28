@@ -1633,6 +1633,10 @@ public sealed partial class BoardStore : IBoardStore
         // constant; no row is read, rewritten or deleted.
         SqliteMigrationRunner.Apply(connection, "board", 18, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, BoardHistoryTriggerResetSql + BoardHistorySchemaSql));
+        // board/19 (VB-63): agent-context samples, one row per card launch (BoardStore.ContextSamples.cs).
+        // Additive; an older binary ignores the table and the `context` change entries it pairs with.
+        SqliteMigrationRunner.Apply(connection, "board", 19, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, ContextSamplesSchemaSql));
         ReconcileDerivedRows(connection);
     }
 

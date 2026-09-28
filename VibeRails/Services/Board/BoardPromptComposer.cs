@@ -158,7 +158,8 @@ public static class BoardPromptComposer
         builder.Append("Use append_board_note to checkpoint findings and working state as you go; add_board_comment for progress and decisions the user should read. ")
             .Append("For relevant listed attachments, use read_board_attachment to view attached images or read Markdown/TXT using their ids. ")
             .Append("If the list says there are more attachments and you need them, get_board_card lists the rest. ")
-            .Append("Use get_board_notes if you need more than the note excerpt in get_board_card. ");
+            .Append("get_board_card lists comments and notes newest first and, on a large card, previews older entries: read them with before=<timestamp> or activity=all before repeating work an earlier session may have recorded. ")
+            .Append("Use get_board_notes for every note. ");
         if (intent == "work")
             builder.Append("Use move_board_card when the card changes state. ");
         builder.Append("Before moving a card, call list_board_columns to check which Automations (jobs) may run on entry. ")
@@ -183,7 +184,7 @@ public static class BoardPromptComposer
         return builder.ToString();
     }
 
-    private static string ComposeBoardContext(BoardContextSettings? settings, string cardType)
+    internal static string ComposeBoardContext(BoardContextSettings? settings, string cardType)
     {
         if (settings is null) return "";
         var selected = settings.TypeOverrides.FirstOrDefault(item => item.Type == cardType);
@@ -198,6 +199,24 @@ public static class BoardPromptComposer
     /// <summary>Inline description cap for this launch: full size unless the environment template already spends the budget.</summary>
     internal static int DescriptionBudget(string? environmentPrompt, int boardContextLength = 0) =>
         Math.Clamp(PromptBudget - (environmentPrompt?.Trim().Length ?? 0) - boardContextLength, MinDescriptionChars, MaxDescriptionChars);
+
+    /// <summary>
+    /// How a composed prompt splits, for the context estimate (VB-63): the description carried
+    /// inline, the board context, the environment's Initial Message, and the rest (card fields,
+    /// lane list and the fixed guidance sentences).
+    /// </summary>
+    public sealed record PromptMeasure(int Chars, int DescriptionChars, int BoardContextChars, int EnvironmentPromptChars)
+    {
+        public int GuidanceChars => Math.Max(0, Chars - DescriptionChars - BoardContextChars - EnvironmentPromptChars);
+    }
+
+    /// <summary>Measures a prompt <see cref="Compose"/> produced from the same card, template and settings.</summary>
+    public static PromptMeasure Measure(string prompt, BoardCardRecord card, string? environmentPrompt, BoardContextSettings? settings)
+    {
+        var boardContext = ComposeBoardContext(settings, card.Type);
+        var description = Sanitize(card.Description, DescriptionBudget(environmentPrompt, boardContext.Length));
+        return new PromptMeasure(prompt.Length, description.Length, boardContext.Length, environmentPrompt?.Trim().Length ?? 0);
+    }
 
     private const string EndFence = "--- end card ---";
 

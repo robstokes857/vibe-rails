@@ -32,6 +32,7 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | [js/modules/board-card-links.js](js/modules/board-card-links.js) | Linked cards rail: project-wide key/title search, immediate link/unlink, and navigation through the card editor's unsaved-edit guard |
 | [js/modules/board-text.js](js/modules/board-text.js) | Renders a comment/description body. **Escape-first**: the input is escaped before any transform, so no sanitizer is needed and none is present |
 | [js/modules/board-file-refs.js](js/modules/board-file-refs.js) | The composer's `@` typeahead over `GET /api/v1/board/files`: inserts `@path` / `@"path"` text, "Browse for a file…" fallback through the shared file explorer; pure helpers are node-tested |
+| [js/modules/board-card-context.js](js/modules/board-card-context.js) | The card editor's **Agent context** rail section (VB-63): fetches `GET /api/v1/board/cards/{id}/context` and shows ≈tokens for the launch prompt, `get_board_card` and `list_board_columns`, a by-content breakdown, what is available but not sent, and the last recorded launch; refreshed after a comment is posted; `formatTokens`/`renderContext` are node-tested |
 | [js/modules/diff-modal.js](js/modules/diff-modal.js) | Shared Monaco diff viewer as a nested modal layer. Used by Board commits and the sandbox "View Diff" |
 
 ## Settings signing keys

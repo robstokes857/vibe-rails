@@ -360,6 +360,10 @@ For Board UI, API, SQLite, launch and MCP work, start with the
 [architecture and VB-18 review](../VibeRails/Services/Board/ARCHITECTURE.md).
 The Board uses `~/.vibe_rails/board.db`; its contracts live in `VibeRails.Data.Abstractions/Board`
 and its store/migrations in `VibeRails.Data.Sqlite/Board`. REST and MCP share `BoardService`.
+`GET /api/v1/board/cards/{card}/context` (root-only, both credentials) reports the context an agent
+launched on a card would receive, as characters and estimated tokens (`BoardContextEstimator`);
+each launch records the same measurement in `board.db` `BoardContextSamples` and as a `context`
+Card Log entry that Board sync carries (VB-63).
 The review records open concurrency and workflow findings; documentation is not evidence that
 those findings have been fixed.
 Card text can reference repository files as `@path` (VB-35): the text is the only storage,

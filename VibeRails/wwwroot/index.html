@@ -3950,6 +3950,53 @@
                     font-size: 0.75rem;
                 }
 
+                /* Agent context (VB-63): label left, ≈tokens right, an optional note under both. */
+                .board-context-row {
+                    display: grid;
+                    grid-template-columns: minmax(0, 1fr) auto;
+                    column-gap: 0.4rem;
+                    align-items: baseline;
+                    padding: 0.1rem 0;
+                    min-width: 0;
+                }
+
+                .board-context-row .board-side-title {
+                    font-weight: 500;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                }
+
+                .board-context-row-strong .board-side-title {
+                    font-weight: 700;
+                }
+
+                .board-context-tokens {
+                    color: var(--color-text, #f8fafc);
+                    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+                    font-size: 0.72rem;
+                    white-space: nowrap;
+                }
+
+                .board-context-note {
+                    grid-column: 1 / -1;
+                    white-space: normal;
+                }
+
+                .board-context-details > summary {
+                    cursor: pointer;
+                    margin: 0.35rem 0 0.1rem;
+                    list-style: none;
+                }
+
+                .board-context-details > summary::before {
+                    content: '▸ ';
+                }
+
+                .board-context-details[open] > summary::before {
+                    content: '▾ ';
+                }
+
                 .board-side-row {
                     display: flex;
                     align-items: stretch;

@@ -37,6 +37,11 @@ title, description, type, priority, points, tags, blocked/attention flags, lane,
 comments, notes, and their recorded changes/authorship/timestamps. An environment assignee is
 represented by its base CLI; its environment ID stays local. Author session IDs are omitted.
 Field changes use an explicit allowlist. Generated summaries are rebuilt from portable fields.
+The allowlist also carries `context` (VB-63): not a card field but the agent-context sample a
+launch records (estimated tokens, prompt and card-read split, intent, CLI and the breakdown),
+sent as an ordinary `change` entry. The hosted contract stores unknown change fields verbatim
+and never applies them, so no server change was needed; the desktop's pull side retains them
+the same way. Session ids stay out of it.
 
 Attachment bytes/metadata, commit snapshots, linked-card relationships, terminal sessions,
 launch options, environment definitions, lane Automations, and agent-context settings remain

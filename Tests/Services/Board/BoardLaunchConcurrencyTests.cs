@@ -36,12 +36,12 @@ public sealed class BoardLaunchConcurrencyTests : IDisposable
         var finish = new TaskCompletionSource<TerminalStatusResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
         _tabs.Setup(t => t.StartSessionAsync("tab-1", It.IsAny<StartTerminalRequest>(), It.IsAny<CancellationToken>()))
             .Callback(() => entered.TrySetResult()).Returns(finish.Task);
-        var first = new BoardLaunchService(_store, _repository.Object, _tabs.Object).LaunchAsync(_root, card.Id, null, Ct);
+        var first = Launcher().LaunchAsync(_root, card.Id, null, Ct);
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(5), Ct);
         try
         {
             await Assert.ThrowsAsync<BoardConflictException>(() =>
-                new BoardLaunchService(_store, _repository.Object, _tabs.Object).LaunchAsync(_root, card.Key, null, Ct));
+                Launcher().LaunchAsync(_root, card.Key, null, Ct));
         }
         finally { finish.TrySetResult(new TerminalStatusResponse(true, Guid.NewGuid().ToString(), "codex", _root)); }
         Assert.NotNull(await first);
@@ -56,7 +56,7 @@ public sealed class BoardLaunchConcurrencyTests : IDisposable
         _tabs.SetupSequence(t => t.StartSessionAsync("tab-1", It.IsAny<StartTerminalRequest>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("failed startup"))
             .ReturnsAsync(new TerminalStatusResponse(true, Guid.NewGuid().ToString(), "codex", _root));
-        var service = new BoardLaunchService(_store, _repository.Object, _tabs.Object);
+        var service = Launcher();
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.LaunchAsync(_root, card.Id, null, Ct));
         Assert.NotNull(await service.LaunchAsync(_root, card.Key, null, Ct));
         _tabs.Verify(t => t.StartSessionAsync(It.IsAny<string>(), It.IsAny<StartTerminalRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
@@ -79,7 +79,7 @@ public sealed class BoardLaunchConcurrencyTests : IDisposable
             .Callback<string, StartTerminalRequest, CancellationToken>((_, value, _) => request = value)
             .ReturnsAsync(new TerminalStatusResponse(true, Guid.NewGuid().ToString(), "codex", _root));
 
-        await new BoardLaunchService(_store, _repository.Object, _tabs.Object).LaunchAsync(_root, card.Id, null, Ct);
+        await Launcher().LaunchAsync(_root, card.Id, null, Ct);
 
         var count = withPriorActivity ? 1 : 0;
         Assert.NotNull(request);
@@ -87,6 +87,23 @@ public sealed class BoardLaunchConcurrencyTests : IDisposable
         Assert.Contains("otherwise begin with the repository instructions and task", request.InitialPrompt);
         Assert.DoesNotContain("Begin now by reading the card", request.InitialPrompt);
         Assert.Equal(count + 1, (await _store.GetCardDetailAsync(_root, card.Id, Ct))!.Sessions.Count);
+
+        // VB-63: every launch records how much context the card put in front of the agent, and the
+        // Card Log carries it as a `context` change so History and Board sync see the same number.
+        var sample = await _store.GetLatestContextSampleAsync(_root, card.Id, Ct);
+        Assert.NotNull(sample);
+        Assert.Equal("work", sample!.Intent);
+        Assert.Equal("codex", sample.Cli);
+        Assert.NotNull(sample.SessionId);
+        Assert.Equal(ContextTokenEstimator.Estimate(request.InitialPrompt), sample.PromptTokens);
+        Assert.True(sample.CardReadTokens > 0);
+        Assert.True(sample.Tokens >= sample.PromptTokens + sample.CardReadTokens);
+        Assert.Contains("\"sources\"", sample.BreakdownJson);
+        var history = await _store.GetCardHistoryAsync(_root, card.Id, Ct);
+        var entry = Assert.Single(history, h => h.Changes?.Contains("\"context\"", StringComparison.Ordinal) == true);
+        Assert.Equal(BoardCommentKinds.Change, entry.Kind);
+        Assert.StartsWith("Agent launch context ≈", entry.Body);
+        Assert.Equal(BoardAuthor.SystemKind, entry.Author.Kind);
     }
 
     private async Task<BoardCardRecord> CreateCardAsync()
@@ -94,6 +111,11 @@ public sealed class BoardLaunchConcurrencyTests : IDisposable
         await _store.EnsureDefaultColumnsAsync(_root, Ct);
         return await _store.CreateCardAsync(_root, new(null, "Concurrent card", "Scope", "base:codex", "medium", null, [], false), Ct);
     }
+
+    // A real estimator over the same store: the launch records its context sample like production does.
+    private BoardLaunchService Launcher() =>
+        new(_store, _repository.Object, _tabs.Object, new BoardContextEstimator(
+            new BoardService(_store, new Mock<IBoardCommitService>().Object, new NullBoardLiveSessionProbe()), _store, _repository.Object));
 
     [Fact]
     public async Task CardDeletedDuringStartupClosesTheUnlinkedTerminal()
@@ -103,7 +125,7 @@ public sealed class BoardLaunchConcurrencyTests : IDisposable
         var finish = new TaskCompletionSource<TerminalStatusResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
         _tabs.Setup(t => t.StartSessionAsync("tab-1", It.IsAny<StartTerminalRequest>(), It.IsAny<CancellationToken>()))
             .Callback(() => entered.TrySetResult()).Returns(finish.Task);
-        var launch = new BoardLaunchService(_store, _repository.Object, _tabs.Object).LaunchAsync(_root, card.Id, null, Ct);
+        var launch = Launcher().LaunchAsync(_root, card.Id, null, Ct);
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(5), Ct);
         try { Assert.True(await _store.DeleteCardAsync(_root, card.Id, Ct)); }
         finally { finish.TrySetResult(new TerminalStatusResponse(true, Guid.NewGuid().ToString(), "codex", _root)); }

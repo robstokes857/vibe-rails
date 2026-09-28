@@ -124,6 +124,11 @@ async function runCardAutomationAsync(cardId, jobId) {
     return call(`/cards/${enc(cardId)}/automations`, 'POST', { jobId });
 }
 
+// What an agent launched on the card now would read, in characters and estimated tokens (VB-63).
+async function getCardContextAsync(cardId, extra = {}) {
+    return call(`/cards/${enc(cardId)}/context`, 'GET', null, extra);
+}
+
 /** Deletes the board with its lanes and cards; the server refuses the project's last board. */
 async function deleteBoardAsync(boardId) {
     return call(`/boards/${enc(boardId)}`, 'DELETE');
@@ -343,6 +348,7 @@ export const BoardApi = {
     saveLaneAutomationAsync,
     getCardAutomationsAsync,
     runCardAutomationAsync,
+    getCardContextAsync,
     deleteBoardAsync,
     getBoardColumnsAsync,
     createBoardColumnAsync,
