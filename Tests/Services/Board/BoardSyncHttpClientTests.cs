@@ -47,6 +47,32 @@ public sealed class BoardSyncHttpClientTests
     }
 
     [Fact]
+    public async Task AChangedEndpointIsNeverUsedUnderTheOldApproval_AndIsUsedOnceApprovedAgain()
+    {
+        var sent = new List<string>();
+        var handler = new Handler(request =>
+        {
+            sent.Add(request.RequestUri!.Host);
+            return new(HttpStatusCode.OK) { Content = new StringContent("""{"entries":[],"lastSeq":0,"hasMore":false}""") };
+        });
+        var endpoint = new Uri("https://old.example.com/api");
+        var client = new BoardSyncHttpClient(new Factory(handler), () => endpoint, () => "key");
+        var approved = client.DestinationKey;
+        await client.PullAsync("id", 0, 20, Ct, approved);
+
+        // The frontend URL moved after the client was built: the old approval stops the upload
+        // instead of the client carrying on to the host it started with.
+        endpoint = new Uri("https://new.example.com/api");
+        Assert.Equal(endpoint, client.Endpoint);
+        Assert.NotEqual(approved, client.DestinationKey);
+        var error = await Assert.ThrowsAsync<BoardSyncClientException>(() => client.PullAsync("id", 0, 20, Ct, approved));
+        Assert.Equal("destination_changed", error.Code);
+
+        await client.PullAsync("id", 0, 20, Ct, client.DestinationKey);
+        Assert.Equal(["old.example.com", "new.example.com"], sent);
+    }
+
+    [Fact]
     public async Task RemoteErrorsNeverExposeResponseBodies()
     {
         var client = Client(new Handler(_ => new(HttpStatusCode.BadRequest)

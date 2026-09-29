@@ -21,27 +21,33 @@ public interface IBoardSyncClient
 }
 
 /// <summary>
-/// HTTPS client for the desktop Board sync API. The API key is read from settings on every call
-/// (so a rotated key applies at the next tick), sent in <c>X-Api-Key</c>, and the named client
-/// follows no redirects: a redirect would replay the key and body to wherever it pointed.
+/// HTTPS client for the desktop Board sync API. The endpoint and the API key are both resolved on
+/// every call (so a rotated key or a changed frontend URL applies at the next tick, and a changed
+/// destination stops uploads until publishing is approved again), the key is sent in
+/// <c>X-Api-Key</c>, and the named client follows no redirects: a redirect would replay the key and
+/// body to wherever it pointed.
 /// </summary>
-public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Uri? endpoint, Func<string?> apiKey) : IBoardSyncClient
+public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Func<Uri?> endpoint, Func<string?> apiKey) : IBoardSyncClient
 {
     public const string HttpClientName = "board-sync";
 
-    public bool IsConfigured => endpoint is not null && !string.IsNullOrWhiteSpace(apiKey());
-    public string? DestinationKey => Identity(apiKey());
-    private string? Identity(string? key) => endpoint is null || string.IsNullOrWhiteSpace(key) ? null
-        : Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(endpoint.AbsoluteUri.TrimEnd('/') + "\n" + key)));
-    // A pull page holds at most 20 entries, each carrying up to 1 MiB of change JSON (see
-    // BoardSyncWire.MaxChangesBytes) plus a bounded body; acknowledgements are tiny. 128 MiB
-    // bounds the complete exchange with a wide margin and is read incrementally, never trusted
-    // from Content-Length alone.
-    public const int MaxResponseBytes = 128 * 1024 * 1024;
+    /// <summary>A fixed endpoint, for tests and callers that never change it.</summary>
+    public BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Uri? endpoint, Func<string?> apiKey)
+        : this(httpClientFactory, () => endpoint, apiKey) { }
+
+    public bool IsConfigured => endpoint() is not null && !string.IsNullOrWhiteSpace(apiKey());
+    public string? DestinationKey => Identity(endpoint(), apiKey());
+    private static string? Identity(Uri? target, string? key) => target is null || string.IsNullOrWhiteSpace(key) ? null
+        : Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(target.AbsoluteUri.TrimEnd('/') + "\n" + key)));
+    // The hosted board fills a pull page only up to an 8 MiB estimate that assumes every character
+    // is escaped (BoardSyncLimits.MaxReadBytes, 6 bytes a character), and acknowledgements are tiny.
+    // Twice that contract leaves headroom without buffering more than a page could hold. The body is
+    // read incrementally, never trusted from Content-Length alone.
+    public const int MaxResponseBytes = 16 * 1024 * 1024;
     public const int MaxErrorResponseBytes = 4096;
     public static readonly TimeSpan ExchangeTimeout = TimeSpan.FromSeconds(30);
 
-    public Uri? Endpoint => endpoint;
+    public Uri? Endpoint => endpoint();
 
     public Task<BoardSyncPublishResponse> PublishAsync(BoardSyncPublishRequest request, CancellationToken cancellationToken, string? expectedDestination = null) =>
         SendAsync(HttpMethod.Post, "publish", request, BoardSyncJsonContext.Default.BoardSyncPublishRequest,
@@ -64,18 +70,19 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Ur
         where TRequest : class
         where TResponse : class
     {
-        if (endpoint is null)
+        var target = endpoint();
+        if (target is null)
             throw new BoardSyncClientException("Board sync has no HTTPS endpoint configured.", "no_endpoint");
         var key = apiKey();
         if (string.IsNullOrWhiteSpace(key))
             throw new BoardSyncClientException("Add your viberails.ai API key in Settings before publishing a board.", "no_api_key");
-        if (expectedDestination is not null && expectedDestination != Identity(key))
+        if (expectedDestination is not null && expectedDestination != Identity(target, key))
             throw new BoardSyncClientException("The server or API key changed. Turn publishing off and on to approve this destination.", "destination_changed");
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(ExchangeTimeout);
 
-        using var request = new HttpRequestMessage(method, new Uri(endpoint.AbsoluteUri.TrimEnd('/') + "/" + relativePath));
+        using var request = new HttpRequestMessage(method, new Uri(target.AbsoluteUri.TrimEnd('/') + "/" + relativePath));
         request.Headers.Add("X-Api-Key", key);
         if (body is not null && requestInfo is not null)
             request.Content = JsonContent.Create(body, requestInfo);
@@ -185,7 +192,9 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Ur
             if (response.Content.Headers.ContentLength > MaxResponseBytes)
                 throw new BoardSyncClientException("The server response exceeds the sync size limit.", "response_too_large");
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            using var buffer = new MemoryStream();
+            // Sized from a trustworthy Content-Length up front, so the buffer does not double its way there.
+            using var buffer = new MemoryStream(response.Content.Headers.ContentLength is long length and > 0
+                ? (int)length : 64 * 1024);
             var chunk = new byte[64 * 1024];
             int read;
             while ((read = await stream.ReadAsync(chunk, cancellationToken)) != 0)
@@ -202,7 +211,7 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Ur
         }
     }
 
-    /// <summary>The production instance: named client, endpoint from configuration, key re-read from settings per call.</summary>
+    /// <summary>The production instance: named client, endpoint and key both re-read per call.</summary>
     public static BoardSyncHttpClient FromConfiguration(IHttpClientFactory factory, Microsoft.Extensions.Configuration.IConfiguration configuration) =>
-        new(factory, BoardSyncEndpoint.FromConfiguration(configuration), static () => ParserConfigs.GetApiKey());
+        new(factory, () => BoardSyncEndpoint.FromConfiguration(configuration), static () => ParserConfigs.GetApiKey());
 }

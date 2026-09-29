@@ -50,9 +50,11 @@ text is uploaded verbatim and can itself contain paths or other private informat
 
 The desktop uses `X-Api-Key` over HTTPS; plain HTTP is accepted only for a loopback test server.
 Redirects, URL credentials, query strings and fragments in the configured endpoint are rejected.
-Publication consent is bound to a hash of the endpoint and API key. Changing either stops
-automatic uploads until the user switches publishing off and on. No credential is returned by
-status routes. Requests have a full 30-second timeout and responses have a 128 MiB ceiling.
+Publication consent is bound to a hash of the endpoint and API key. Both are resolved on every
+call, so changing either (including the frontend URL after startup) stops automatic uploads until
+the user switches publishing off and on; nothing keeps uploading to the old host. No credential is
+returned by status routes. Requests have a full 30-second timeout and responses have a 16 MiB
+ceiling, twice the hosted 8 MiB pull-page budget.
 Push/pull pages contain at most 20 entries; a tick handles at most 25 pages in each direction.
 
 ## Ordering, retry and identity
