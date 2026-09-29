@@ -19,13 +19,15 @@ public sealed class JobLaunchServiceTests
     // opened a vibe-rails card's review Automation in its own tab host, so the vibe-rails window
     // never listed it. A Board run belongs to the window of its project.
 
+    private static readonly string[] NoOpenProjects = [];
+
     [Fact]
     public void LaunchesHere_NativeRunsBelongToTheLeaseHolderWhateverTheProject()
     {
         var run = Run(projectPath: @"C:\source\app") with { TriggerKind = JobTriggerKind.Schedule, QueuedUtc = Now };
 
-        Assert.True(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, @"C:\source\other", Now));
-        Assert.False(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: false, @"C:\source\app", Now));
+        Assert.True(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, @"C:\source\other", Now, NoOpenProjects));
+        Assert.False(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: false, @"C:\source\app", Now, NoOpenProjects));
     }
 
     [Fact]
@@ -33,10 +35,10 @@ public sealed class JobLaunchServiceTests
     {
         var run = BoardRun(@"C:\source\app", Now);
 
-        Assert.True(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: false, @"C:\source\app", Now));
-        Assert.True(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: false, @"C:\source\app\", Now));
-        Assert.True(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, @"C:\source\app", Now));
-        Assert.False(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: false, @"C:\source\other", Now.AddMinutes(5)));
+        Assert.True(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: false, @"C:\source\app", Now, NoOpenProjects));
+        Assert.True(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: false, @"C:\source\app\", Now, NoOpenProjects));
+        Assert.True(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, @"C:\source\app", Now, NoOpenProjects));
+        Assert.False(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: false, @"C:\source\other", Now.AddMinutes(5), NoOpenProjects));
     }
 
     [Fact]
@@ -45,9 +47,22 @@ public sealed class JobLaunchServiceTests
         var run = BoardRun(@"C:\source\app", Now);
         var grace = JobLaunchService.ForeignProjectBoardRunGrace;
 
-        Assert.False(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, @"C:\source\other", Now));
-        Assert.False(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, @"C:\source\other", Now + grace - TimeSpan.FromSeconds(1)));
-        Assert.True(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, @"C:\source\other", Now + grace));
+        Assert.False(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, @"C:\source\other", Now, NoOpenProjects));
+        Assert.False(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, @"C:\source\other", Now + grace - TimeSpan.FromSeconds(1), NoOpenProjects));
+        Assert.True(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, @"C:\source\other", Now + grace, NoOpenProjects));
+    }
+
+    [Fact]
+    public void LaunchesHere_TheLeaseHolderLeavesAStaleBoardRunToAProjectWindowThatIsStillAlive()
+    {
+        // Review of VIBE-2: age alone reproduced the wrong-window bug when the right window was
+        // merely slow (behind the cap, paused in a debugger). Presence, not age, says it is gone.
+        var run = BoardRun(@"C:\source\app", Now);
+        var later = Now + JobLaunchService.ForeignProjectBoardRunGrace + TimeSpan.FromMinutes(10);
+
+        Assert.False(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, @"C:\source\other", later, [@"C:\source\app\"]));
+        Assert.False(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, @"C:\source\other", later, [@"c:\SOURCE\app", @"C:\source\other"]));
+        Assert.True(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, @"C:\source\other", later, [@"C:\source\other"]));
     }
 
     [Fact]
@@ -55,8 +70,8 @@ public sealed class JobLaunchServiceTests
     {
         var run = BoardRun(@"C:\source\app", Now);
 
-        Assert.True(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, null, Now));
-        Assert.False(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: false, null, Now));
+        Assert.True(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, null, Now, NoOpenProjects));
+        Assert.False(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: false, null, Now, NoOpenProjects));
     }
 
     [Fact]
@@ -77,8 +92,10 @@ public sealed class JobLaunchServiceTests
 
         Assert.Equal(1, launched);
         tabs.VerifyAll();
-        store.Verify(s => s.TryMarkLaunchedAsync("run-mine", It.IsAny<CancellationToken>()), Times.Once);
-        store.Verify(s => s.TryMarkLaunchedAsync(It.IsNotIn("run-mine"), It.IsAny<CancellationToken>()), Times.Never);
+        store.Verify(s => s.TryClaimLaunchAsync("run-mine", JobLaunchService.MaxConcurrentJobTerminals, It.IsAny<CancellationToken>()), Times.Once);
+        store.Verify(s => s.TryClaimLaunchAsync(It.IsNotIn("run-mine"), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+        // Presence is the lease holder's concern; a root without the lease never reads it.
+        store.Verify(s => s.GetOpenProjectRootsAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Never);
         store.Verify(s => s.CompleteRunAsync(It.IsAny<string>(), It.IsAny<JobRunStatus>(), It.IsAny<int?>(),
             It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -94,7 +111,7 @@ public sealed class JobLaunchServiceTests
             .LaunchQueuedProjectRunsAsync(TestContext.Current.CancellationToken));
 
         tabs.VerifyNoOtherCalls();
-        store.Verify(s => s.TryMarkLaunchedAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        store.Verify(s => s.TryClaimLaunchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -108,9 +125,27 @@ public sealed class JobLaunchServiceTests
             .LaunchQueuedRunsAsync(TestContext.Current.CancellationToken));
 
         tabs.VerifyNoOtherCalls();
-        store.Verify(s => s.TryMarkLaunchedAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        store.Verify(s => s.TryClaimLaunchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
         store.Verify(s => s.CompleteRunAsync(It.IsAny<string>(), It.IsAny<JobRunStatus>(), It.IsAny<int?>(),
             It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task LaunchQueuedRunsAsync_LeavesAStaleBoardRunAloneWhileItsProjectStillHasAWindowOpen()
+    {
+        var project = OtherExistingProjectPath();
+        var store = LaunchableStore(BoardRun(project, DateTime.UtcNow - JobLaunchService.ForeignProjectBoardRunGrace - TimeSpan.FromMinutes(5)));
+        store
+            .Setup(s => s.GetOpenProjectRootsAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([Path.TrimEndingDirectorySeparator(project)]);
+        var tabs = new Mock<IJobTerminalTabLauncher>(MockBehavior.Strict);
+
+        Assert.Equal(0, await new JobLaunchService(store.Object, new Mock<IEnvironmentLaunchService>(MockBehavior.Strict).Object,
+                UnusedProcessLauncher().Object, tabs.Object, Resolver(ExistingProjectPath()))
+            .LaunchQueuedRunsAsync(TestContext.Current.CancellationToken));
+
+        tabs.VerifyNoOtherCalls();
+        store.Verify(s => s.TryClaimLaunchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -429,8 +464,8 @@ public sealed class JobLaunchServiceTests
     {
         var store = LaunchableStore(Run(projectPath: ExistingProjectPath()));
         store
-            .Setup(s => s.TryMarkLaunchedAsync("run-1", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(false);
+            .Setup(s => s.TryClaimLaunchAsync("run-1", It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new JobLaunchClaim(JobLaunchClaimOutcome.NotLaunchable, 1));
         var pipeline = new Mock<IEnvironmentLaunchService>(MockBehavior.Strict);
 
         var launched = await new JobLaunchService(store.Object, pipeline.Object, UnusedProcessLauncher().Object)
@@ -455,30 +490,55 @@ public sealed class JobLaunchServiceTests
             .Select(index => Run(id: $"run-{index}", projectPath: ExistingProjectPath()))
             .ToArray();
         var store = LaunchableStore(runs);
+        var claims = CountingClaims(store, alreadyOpen: 0);
         var pipeline = SuccessfulPipeline();
 
         var launched = await new JobLaunchService(store.Object, pipeline.Object, UnusedProcessLauncher().Object)
             .LaunchQueuedRunsAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(JobLaunchService.MaxConcurrentJobTerminals, launched);
+        // The first refusal ends the batch: nothing behind it is asked for again this tick.
+        Assert.Equal(JobLaunchService.MaxConcurrentJobTerminals + 1, claims.Count);
+        Assert.All(claims, cap => Assert.Equal(JobLaunchService.MaxConcurrentJobTerminals, cap));
     }
 
     [Fact]
     public async Task LaunchQueuedRunsAsync_CountsAlreadyOpenRunsAgainstTheCap()
     {
+        // The count lives inside the store's claim now (VIBE-2 review: roots launch concurrently),
+        // so the launcher's job is to pass the cap and stop at the first CapReached.
         var store = LaunchableStore(
             Run(id: "run-1", projectPath: ExistingProjectPath()),
             Run(id: "run-2", projectPath: ExistingProjectPath()),
             Run(id: "run-3", projectPath: ExistingProjectPath()));
-        store
-            .Setup(s => s.CountRunningRunsAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(JobLaunchService.MaxConcurrentJobTerminals - 1);
+        CountingClaims(store, alreadyOpen: JobLaunchService.MaxConcurrentJobTerminals - 1);
         var pipeline = SuccessfulPipeline();
 
         var launched = await new JobLaunchService(store.Object, pipeline.Object, UnusedProcessLauncher().Object)
             .LaunchQueuedRunsAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(1, launched);
+    }
+
+    /// <summary>
+    /// Mimics the store's atomic claim: each claim counts the terminals open so far (the claims
+    /// this batch already won plus <paramref name="alreadyOpen"/>) against the cap the launcher
+    /// passes. Returns the caps the launcher asked with, one per claim.
+    /// </summary>
+    private static List<int> CountingClaims(Mock<IJobStore> store, int alreadyOpen)
+    {
+        var caps = new List<int>();
+        var open = alreadyOpen;
+        store
+            .Setup(s => s.TryClaimLaunchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, int cap, CancellationToken _) =>
+            {
+                caps.Add(cap);
+                return open >= cap
+                    ? new JobLaunchClaim(JobLaunchClaimOutcome.CapReached, open)
+                    : new JobLaunchClaim(JobLaunchClaimOutcome.Claimed, ++open);
+            });
+        return caps;
     }
 
     [Theory]
@@ -520,11 +580,11 @@ public sealed class JobLaunchServiceTests
             .Setup(s => s.GetLaunchableRunsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(runs);
         store
-            .Setup(s => s.CountRunningRunsAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(0);
+            .Setup(s => s.TryClaimLaunchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new JobLaunchClaim(JobLaunchClaimOutcome.Claimed, 1));
         store
-            .Setup(s => s.TryMarkLaunchedAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(true);
+            .Setup(s => s.GetOpenProjectRootsAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
         store
             .Setup(s => s.CompleteRunAsync(
                 It.IsAny<string>(),

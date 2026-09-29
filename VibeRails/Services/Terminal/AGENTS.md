@@ -466,7 +466,11 @@ Flow:
    or not, claims its own project's queued Board runs each cycle, because a tab lives in the
    process that spawned it and must be listed in the window the card is in (VIBE-2). The lease
    owner opens another project's Board run in its own window only after it has sat queued for
-   `JobLaunchService.ForeignProjectBoardRunGrace` (30 s) with no window for that project claiming it.
+   `JobLaunchService.ForeignProjectBoardRunGrace` (30 s) and no root of that project is alive:
+   every root records its presence in `JobProjectRoots` each cycle, and a row not refreshed for a
+   minute counts as a closed window. Because roots launch concurrently, the three-terminal cap is
+   counted inside the row claim (`IJobStore.TryClaimLaunchAsync`, one BEGIN IMMEDIATE transaction),
+   and a claimed run whose terminal has not started yet already holds its slot.
 3. Native runs use `EnvironmentLaunchService` for a Worker or `IJobProcessLauncher` for a script-only
    workflow. Terminal-tab runs use `JobTerminalTabLauncher` and a recorded shell wrapper around the
    same `vb --job-run` process. Worker workspace resolution and argument quoting apply to both paths.

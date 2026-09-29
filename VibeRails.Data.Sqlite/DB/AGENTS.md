@@ -1052,6 +1052,19 @@ CREATE TABLE IF NOT EXISTS JobSchedulerLease (
 );
 ```
 
+**JobProjectRoots** — one row per open root backend (VIBE-2): the scheduler's owner id, the
+project it serves, and when the row expires (refreshed every scheduler cycle, deleted on a clean
+stop). The scheduler lease holder reads it before opening another project's Board run in its own
+window; a project with a live row keeps its runs for its own window.
+
+```sql
+CREATE TABLE IF NOT EXISTS JobProjectRoots (
+    OwnerId     TEXT PRIMARY KEY,
+    ProjectPath TEXT NOT NULL,
+    ExpiresUTC  TEXT NOT NULL
+);
+```
+
 ---
 
 ## Entity Relationships

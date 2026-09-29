@@ -31,6 +31,23 @@ public enum JobRunStatus
     Interrupted = 6
 }
 
+/// <summary>What a launch claim found.</summary>
+public enum JobLaunchClaimOutcome
+{
+    /// <summary>This caller may spawn the run's terminal.</summary>
+    Claimed = 0,
+    /// <summary>The machine-wide terminal cap is full; the run stays queued for a later tick.</summary>
+    CapReached = 1,
+    /// <summary>Another caller already claimed the run, or it was cancelled meanwhile.</summary>
+    NotLaunchable = 2
+}
+
+/// <summary>
+/// The result of one atomic launch claim: the outcome and the number of terminals open once it
+/// was made (including this one when it was claimed).
+/// </summary>
+public readonly record struct JobLaunchClaim(JobLaunchClaimOutcome Outcome, int OpenTerminals);
+
 /// <summary>
 /// One ordered action in an Automation. Existing Automations are represented as one Worker
 /// action; Script actions may run before or after it, or form a script-only Automation.

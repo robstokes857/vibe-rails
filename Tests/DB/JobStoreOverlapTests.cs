@@ -140,18 +140,72 @@ public sealed class JobStoreOverlapTests : IDisposable
     }
 
     [Fact]
-    public async Task TryMarkLaunchedAsync_LetsExactlyOneCallerSpawnTheTerminal()
+    public async Task TryClaimLaunchAsync_LetsExactlyOneCallerSpawnTheTerminal()
     {
-        // A scheduler lease handoff can briefly leave two callers looking at the same queued run.
+        // A scheduler lease handoff, or two windows of one project, can leave two callers looking
+        // at the same queued run.
         var (store, jobId) = await SeedJobAsync();
         var cancellationToken = TestContext.Current.CancellationToken;
         var runId = await store.EnqueueManualRunAsync(jobId, cancellationToken);
 
-        var winner = await store.TryMarkLaunchedAsync(runId!, cancellationToken);
-        var loser = await store.TryMarkLaunchedAsync(runId!, cancellationToken);
+        var winner = await store.TryClaimLaunchAsync(runId!, 3, cancellationToken);
+        var loser = await store.TryClaimLaunchAsync(runId!, 3, cancellationToken);
 
-        Assert.True(winner);
-        Assert.False(loser);
+        Assert.Equal(new JobLaunchClaim(JobLaunchClaimOutcome.Claimed, 1), winner);
+        Assert.Equal(new JobLaunchClaim(JobLaunchClaimOutcome.NotLaunchable, 1), loser);
+    }
+
+    [Fact]
+    public async Task TryClaimLaunchAsync_CountsClaimedAndRunningTerminalsAgainstTheCapInTheClaimItself()
+    {
+        // VIBE-2 review: every open root launches its own project's Board runs now, so the count
+        // and the claim must be one transaction, and a claimed run whose terminal is still
+        // starting must already hold its slot. Three jobs, a cap of two.
+        var (store, first) = await SeedJobAsync();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var environmentId = (await store.GetJobAsync(first, cancellationToken))!.EnvironmentId;
+        var second = (await store.CreateJobAsync(AnotherJob("Second review", environmentId), cancellationToken)).Id;
+        var third = (await store.CreateJobAsync(AnotherJob("Third review", environmentId), cancellationToken)).Id;
+        var run1 = (await store.EnqueueManualRunAsync(first, cancellationToken))!;
+        var run2 = (await store.EnqueueManualRunAsync(second, cancellationToken))!;
+        var run3 = (await store.EnqueueManualRunAsync(third, cancellationToken))!;
+
+        Assert.Equal(new JobLaunchClaim(JobLaunchClaimOutcome.Claimed, 1), await store.TryClaimLaunchAsync(run1, 2, cancellationToken));
+        Assert.Equal(new JobLaunchClaim(JobLaunchClaimOutcome.Claimed, 2), await store.TryClaimLaunchAsync(run2, 2, cancellationToken));
+        // Neither claimed run has started, yet both occupy the cap.
+        Assert.Equal(new JobLaunchClaim(JobLaunchClaimOutcome.CapReached, 2), await store.TryClaimLaunchAsync(run3, 2, cancellationToken));
+        Assert.True(await store.StartRunAsync(run1, 4242, cancellationToken));
+        Assert.Equal(new JobLaunchClaim(JobLaunchClaimOutcome.CapReached, 2), await store.TryClaimLaunchAsync(run3, 2, cancellationToken));
+        // A refused claim leaves the run launchable for the next tick.
+        Assert.Contains(await store.GetLaunchableRunsAsync(cancellationToken), run => run.Id == run3);
+
+        await store.CompleteRunAsync(run1, JobRunStatus.Succeeded, 0, null, cancellationToken);
+        Assert.Equal(new JobLaunchClaim(JobLaunchClaimOutcome.Claimed, 2), await store.TryClaimLaunchAsync(run3, 2, cancellationToken));
+    }
+
+    [Fact]
+    public async Task ProjectRoots_ArePresentUntilTheyExpireOrAreReleased()
+    {
+        // A root records its window every scheduler cycle; the lease holder leaves a project's
+        // Board runs to any window still present (VIBE-2 review).
+        var (store, _) = await SeedJobAsync();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var now = new DateTime(2026, 9, 29, 12, 0, 0, DateTimeKind.Utc);
+        var project = Path.Combine(Path.GetTempPath(), "app");
+
+        await store.RecordProjectRootAsync("1:a", project + Path.DirectorySeparatorChar, now, TimeSpan.FromMinutes(1), cancellationToken);
+        await store.RecordProjectRootAsync("2:b", Path.Combine(Path.GetTempPath(), "other"), now, TimeSpan.FromMinutes(1), cancellationToken);
+
+        Assert.Contains(project, await store.GetOpenProjectRootsAsync(now, cancellationToken));
+        Assert.Contains(project, await store.GetOpenProjectRootsAsync(now.AddSeconds(59), cancellationToken));
+        Assert.DoesNotContain(project, await store.GetOpenProjectRootsAsync(now.AddSeconds(60), cancellationToken));
+
+        // Refreshing extends the row; releasing removes it at once.
+        await store.RecordProjectRootAsync("1:a", project, now.AddSeconds(50), TimeSpan.FromMinutes(1), cancellationToken);
+        Assert.Contains(project, await store.GetOpenProjectRootsAsync(now.AddSeconds(100), cancellationToken));
+        await store.ReleaseProjectRootAsync("1:a", cancellationToken);
+        Assert.DoesNotContain(project, await store.GetOpenProjectRootsAsync(now.AddSeconds(50), cancellationToken));
+        Assert.Single(await store.GetOpenProjectRootsAsync(now.AddSeconds(50), cancellationToken));
     }
 
     [Fact]
@@ -162,7 +216,7 @@ public sealed class JobStoreOverlapTests : IDisposable
         var runId = await store.EnqueueManualRunAsync(jobId, cancellationToken);
 
         Assert.Single(await store.GetLaunchableRunsAsync(cancellationToken));
-        await store.TryMarkLaunchedAsync(runId!, cancellationToken);
+        await store.TryClaimLaunchAsync(runId!, 3, cancellationToken);
         Assert.Empty(await store.GetLaunchableRunsAsync(cancellationToken));
     }
 
@@ -175,7 +229,7 @@ public sealed class JobStoreOverlapTests : IDisposable
         var (store, jobId) = await SeedJobAsync();
         var cancellationToken = TestContext.Current.CancellationToken;
         var runId = await store.EnqueueManualRunAsync(jobId, cancellationToken);
-        await store.TryMarkLaunchedAsync(runId!, cancellationToken);
+        await store.TryClaimLaunchAsync(runId!, 3, cancellationToken);
 
         // Zero grace: anything already launched is overdue.
         var failed = await store.FailStalledLaunchesAsync(TimeSpan.Zero, cancellationToken);
@@ -212,7 +266,7 @@ public sealed class JobStoreOverlapTests : IDisposable
         var (store, jobId) = await SeedJobAsync();
         var cancellationToken = TestContext.Current.CancellationToken;
         var runId = await store.EnqueueManualRunAsync(jobId, cancellationToken);
-        await store.TryMarkLaunchedAsync(runId!, cancellationToken);
+        await store.TryClaimLaunchAsync(runId!, 3, cancellationToken);
         await store.StartRunAsync(runId!, 4242, cancellationToken);
 
         var failed = await store.FailStalledLaunchesAsync(TimeSpan.Zero, cancellationToken);
@@ -640,6 +694,17 @@ public sealed class JobStoreOverlapTests : IDisposable
 
         return (store, job.Id);
     }
+
+    private static CreateJobRequest AnotherJob(string name, int? environmentId) => new(
+        Name: name,
+        ProjectPath: Path.GetTempPath(),
+        Llm: LLM.Claude,
+        EnvironmentId: environmentId,
+        Prompt: "Run the review.",
+        TimeoutMinutes: null,
+        Enabled: true,
+        Triggers: [],
+        LaunchMinimized: false);
 
     private async Task<(JobStore Store, long JobId)> SeedScriptJobAsync(
         IReadOnlyList<JobActionRequest> actions)

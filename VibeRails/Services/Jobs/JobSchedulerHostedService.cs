@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Serilog;
 using Serilog.Events;
 using VibeRails.DB;
+using VibeRails.Services.Board;
 using VibeRails.Services.Board.Sync;
 using VibeRails.Services.Jira;
 using VibeRails.Utils;
@@ -33,12 +34,21 @@ public sealed class JobSchedulerHostedService : BackgroundService, IJobScheduler
     private static readonly TimeSpan LaunchGrace = TimeSpan.FromMinutes(3);
     internal static readonly TimeSpan SchedulerLeaseDuration = TimeSpan.FromMinutes(1);
 
+    /// <summary>
+    /// How long a root's presence row outlives its last scheduler cycle. A root that has not
+    /// polled for this long counts as a closed window, the same threshold the scheduler lease
+    /// uses; until then the lease holder leaves that project's Board runs to it.
+    /// </summary>
+    internal static readonly TimeSpan ProjectRootPresenceDuration = SchedulerLeaseDuration;
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IJobStore _store;
     private readonly JobSchedulerHealth _health;
     private readonly IJiraPullScheduler? _jira;
     private readonly IBoardSyncScheduler? _boardSync;
+    private readonly IBoardProjectResolver? _projectResolver;
     private readonly string _ownerId = $"{Environment.ProcessId}:{Guid.NewGuid():N}";
+    private bool _presenceRecorded;
     private readonly Channel<byte> _wake = Channel.CreateBounded<byte>(new BoundedChannelOptions(1)
     {
         FullMode = BoundedChannelFullMode.Wait,
@@ -62,13 +72,15 @@ public sealed class JobSchedulerHostedService : BackgroundService, IJobScheduler
         IJobStore store,
         JobSchedulerHealth? health = null,
         IJiraPullScheduler? jira = null,
-        IBoardSyncScheduler? boardSync = null)
+        IBoardSyncScheduler? boardSync = null,
+        IBoardProjectResolver? projectResolver = null)
     {
         _scopeFactory = scopeFactory;
         _store = store;
         _health = health ?? new JobSchedulerHealth();
         _jira = jira;
         _boardSync = boardSync;
+        _projectResolver = projectResolver;
     }
 
     public void Kick()
@@ -133,6 +145,7 @@ public sealed class JobSchedulerHostedService : BackgroundService, IJobScheduler
                 await _jira.WhenIdleAsync();
             if (_boardSync is not null)
                 await _boardSync.WhenIdleAsync();
+            await ReleasePresenceAsync();
             if (_ownsLease)
             {
                 try
@@ -162,6 +175,7 @@ public sealed class JobSchedulerHostedService : BackgroundService, IJobScheduler
             SchedulerLeaseDuration,
             cancellationToken);
         _health.LeaseChanged(_ownsLease);
+        await RecordPresenceAsync(nowUtc, cancellationToken);
         if (!_ownsLease)
         {
             if (previouslyOwnedLease)
@@ -228,6 +242,49 @@ public sealed class JobSchedulerHostedService : BackgroundService, IJobScheduler
         schedulesEnqueued > 0 || runsLaunched > 0 || runsReaped > 0 || stalledLaunchesFailed > 0
             ? LogEventLevel.Information
             : LogEventLevel.Debug;
+
+    /// <summary>
+    /// Says "a window for this project is open" for the next <see cref="ProjectRootPresenceDuration"/>.
+    /// The lease holder reads it before opening another project's Board run in its own window. A
+    /// failure here is logged, not thrown: the cycle's real work must still happen, and the worst
+    /// case is the pre-presence behaviour (fallback after the grace alone).
+    /// </summary>
+    private async Task RecordPresenceAsync(DateTime nowUtc, CancellationToken cancellationToken)
+    {
+        if (_projectResolver is null)
+            return;
+        try
+        {
+            var projectPath = await _projectResolver.ResolveAsync(cancellationToken);
+            if (string.IsNullOrWhiteSpace(projectPath))
+                return;
+            await _store.RecordProjectRootAsync(_ownerId, projectPath, nowUtc, ProjectRootPresenceDuration, cancellationToken);
+            _presenceRecorded = true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "[Jobs] Could not record this window's presence for {OwnerId}; another window may open this project's Board runs after the grace period", _ownerId);
+        }
+    }
+
+    private async Task ReleasePresenceAsync()
+    {
+        if (!_presenceRecorded)
+            return;
+        try
+        {
+            await _store.ReleaseProjectRootAsync(_ownerId, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "[Jobs] Could not release this window's presence for {OwnerId}; it expires on its own", _ownerId);
+        }
+        _presenceRecorded = false;
+    }
 
     private async Task<int> LaunchThisProjectsBoardRunsAsync(CancellationToken cancellationToken)
     {

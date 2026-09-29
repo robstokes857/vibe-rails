@@ -3,6 +3,7 @@ using Moq;
 using Serilog.Events;
 using VibeRails.DB;
 using VibeRails.DTOs;
+using VibeRails.Services.Board;
 using VibeRails.Services.Jobs;
 using Xunit;
 
@@ -11,6 +12,78 @@ namespace Tests.Services.Jobs;
 [Collection(JobSchedulerHostedServiceTestCollection.Name)]
 public sealed class JobSchedulerHostedServiceTests
 {
+    [Fact]
+    public async Task RunCycleAsync_RecordsThisWindowsPresence_SoTheLeaseHolderLeavesItsBoardRunsAlone()
+    {
+        // VIBE-2 review: the lease holder's fallback must know whether a window for the run's
+        // project is alive, not merely how old the run is. Every cycle, lease or not, says "here".
+        var nowUtc = new DateTime(2026, 9, 29, 12, 0, 0, DateTimeKind.Utc);
+        var store = new Mock<IJobStore>(MockBehavior.Strict);
+        store
+            .Setup(candidate => candidate.TryAcquireOrRenewSchedulerLeaseAsync(
+                It.IsAny<string>(), nowUtc, JobSchedulerHostedService.SchedulerLeaseDuration, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        store
+            .Setup(candidate => candidate.RecordProjectRootAsync(
+                It.Is<string>(owner => owner.StartsWith(Environment.ProcessId + ":", StringComparison.Ordinal)),
+                @"C:\source\app",
+                nowUtc,
+                JobSchedulerHostedService.ProjectRootPresenceDuration,
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var resolver = new Mock<IBoardProjectResolver>(MockBehavior.Strict);
+        resolver.Setup(candidate => candidate.ResolveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(@"C:\source\app");
+        var launcher = new Mock<IJobLaunchService>(MockBehavior.Strict);
+        launcher
+            .Setup(candidate => candidate.LaunchQueuedProjectRunsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0);
+        await using var services = new ServiceCollection()
+            .AddSingleton(launcher.Object)
+            .BuildServiceProvider();
+        var scheduler = new JobSchedulerHostedService(
+            services.GetRequiredService<IServiceScopeFactory>(),
+            store.Object,
+            projectResolver: resolver.Object);
+
+        Assert.False(await scheduler.RunCycleAsync(nowUtc, TestContext.Current.CancellationToken));
+
+        store.VerifyAll();
+        store.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task RunCycleAsync_StillDoesItsWork_WhenPresenceCannotBeRecorded()
+    {
+        var nowUtc = new DateTime(2026, 9, 29, 12, 0, 0, DateTimeKind.Utc);
+        var store = new Mock<IJobStore>(MockBehavior.Strict);
+        store
+            .Setup(candidate => candidate.TryAcquireOrRenewSchedulerLeaseAsync(
+                It.IsAny<string>(), nowUtc, JobSchedulerHostedService.SchedulerLeaseDuration, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        var resolver = new Mock<IBoardProjectResolver>(MockBehavior.Strict);
+        resolver.Setup(candidate => candidate.ResolveAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("no root"));
+        var launcher = new Mock<IJobLaunchService>(MockBehavior.Strict);
+        launcher
+            .Setup(candidate => candidate.LaunchQueuedProjectRunsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        await using var services = new ServiceCollection()
+            .AddSingleton(launcher.Object)
+            .BuildServiceProvider();
+        var health = new JobSchedulerHealth();
+        var scheduler = new JobSchedulerHostedService(
+            services.GetRequiredService<IServiceScopeFactory>(),
+            store.Object,
+            health,
+            projectResolver: resolver.Object);
+
+        Assert.False(await scheduler.RunCycleAsync(nowUtc, TestContext.Current.CancellationToken));
+
+        Assert.Null(health.GetSnapshot().LastError);
+        launcher.Verify(candidate => candidate.LaunchQueuedProjectRunsAsync(It.IsAny<CancellationToken>()), Times.Once);
+        store.VerifyAll();
+        store.VerifyNoOtherCalls();
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(2)]

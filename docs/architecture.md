@@ -508,9 +508,11 @@ changing their behavior.
   copies the original run snapshot, not the Automation's current edited definition.
 - `JobLaunchService` opens Board lane runs and runs started from a card in Terminal tabs. Other triggers (including ordinary manual runs and retries) use native terminals. The retired launch-location preference is ignored.
   A tab exists only in the process that spawned it, so a Board run opens in the root whose project matches its `ProjectPath`:
-  every open root claims its own project's queued Board runs each scheduler cycle, lease or not (`LaunchQueuedProjectRunsAsync`;
-  the `LaunchedUTC` row claim prevents a double launch), while the lease holder handles native runs and falls back to opening
-  another project's Board run in its own window only after `ForeignProjectBoardRunGrace` (30 s) passes unclaimed (VIBE-2).
+  every open root claims its own project's queued Board runs each scheduler cycle, lease or not (`LaunchQueuedProjectRunsAsync`),
+  while the lease holder handles native runs and falls back to opening another project's Board run in its own window only after
+  `ForeignProjectBoardRunGrace` (30 s) passes unclaimed and no root of that project is alive (`JobProjectRoots`, refreshed every
+  cycle, expires after a minute). Roots launch concurrently, so the `LaunchedUTC` row claim and the machine-wide terminal cap are
+  one store transaction, `IJobStore.TryClaimLaunchAsync` (VIBE-2).
   Tab workflows run the same job process inside a recorded shell tab. Native script-only workflows use the neutral
   `IJobProcessLauncher`; workflows with a Worker use `EnvironmentLaunchService`, preserving the
   Worker's Project/Persistent/PerRun workspace resolution for every script in that workflow.

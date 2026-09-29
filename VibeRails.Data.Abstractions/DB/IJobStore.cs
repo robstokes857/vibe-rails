@@ -36,9 +36,28 @@ public interface IJobStore
     Task<(int Deleted, int Skipped)> SoftDeleteRunsAsync(IReadOnlyList<string> runIds, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<JobRunRecord>> GetQueuedRunsAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<JobRunRecord>> GetActiveRunsAsync(CancellationToken cancellationToken = default);
-    Task<int> CountRunningRunsAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<JobRunRecord>> GetLaunchableRunsAsync(CancellationToken cancellationToken = default);
-    Task<bool> TryMarkLaunchedAsync(string runId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Counts the terminals open across the machine and claims the right to spawn this run's
+    /// terminal in one write transaction, so roots launching at the same moment cannot each see
+    /// room under <paramref name="maxOpenTerminals"/>. Open means Running, or Queued with a
+    /// claimed <c>LaunchedUTC</c> whose process has not started yet.
+    /// </summary>
+    Task<JobLaunchClaim> TryClaimLaunchAsync(string runId, int maxOpenTerminals, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records that the root <paramref name="ownerId"/> has <paramref name="projectPath"/> open,
+    /// until <paramref name="nowUtc"/> plus <paramref name="timeToLive"/>. Called every scheduler
+    /// cycle; a row that is not refreshed expires on its own.
+    /// </summary>
+    Task RecordProjectRootAsync(string ownerId, string projectPath, DateTime nowUtc, TimeSpan timeToLive, CancellationToken cancellationToken = default);
+
+    /// <summary>Removes the root's presence row when it stops cleanly.</summary>
+    Task ReleaseProjectRootAsync(string ownerId, CancellationToken cancellationToken = default);
+
+    /// <summary>The projects with at least one root whose presence has not expired at <paramref name="nowUtc"/>.</summary>
+    Task<IReadOnlyList<string>> GetOpenProjectRootsAsync(DateTime nowUtc, CancellationToken cancellationToken = default);
     Task<int> FailStalledLaunchesAsync(TimeSpan grace, CancellationToken cancellationToken = default);
     Task<bool> StartRunAsync(string runId, int processId, CancellationToken cancellationToken = default);
     Task CompleteRunAsync(string runId, JobRunStatus status, int? exitCode, string? errorMessage, CancellationToken cancellationToken = default);

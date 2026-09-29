@@ -1299,58 +1299,76 @@ public sealed partial class BoardStore : IBoardStore
     }
 
     /// <summary>
-    /// A card by stored key (<c>VB-A7K2P-53</c>, any case), legacy key (<c>VB-53</c>) or id.
+    /// A card by stored key (<c>VB-A7K2P-53</c>, any case), short key (<c>VB-53</c>), display label
+    /// or id, in that order of precedence: a key never moves, so the card it names must win over a
+    /// label another card was given in the same spelling. 10.11.2 restarted labels at 1 after the
+    /// upgrade, so a project whose label prefix is its key prefix can still hold <c>FRON-XXXXX-1</c>
+    /// beside a later card labelled <c>FRON-1</c>; that label was never rewritten (no data conversion)
+    /// and must not capture the older card's key (VIBE-2 review). Newer labels never spell a key.
     /// Soft-deleted cards are not found unless <paramref name="includeDeleted"/>.
     /// </summary>
     private static async Task<BoardCardRecord?> ReadCardAsync(SqliteConnection connection, SqliteTransaction? transaction, string project, string idOrKey, CancellationToken cancellationToken, bool includeDeleted = false)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
+        var input = idOrKey.Trim();
         var live = includeDeleted ? "" : " AND c.DeletedUTC IS NULL";
-        command.CommandText = idOrKey.Trim().StartsWith("card_", StringComparison.Ordinal)
-            ? CardSelectSql + $" WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.Id = $input{live} LIMIT 1;"
-            : CardSelectSql + $"""
-                 WHERE c.ProjectPath = $project{ProjectPathCollation}
-                   AND ({CardKeySql} = $input COLLATE NOCASE OR {CardDisplayIdSql} = $input COLLATE NOCASE){live}
-                 ORDER BY ({CardKeySql} = $input COLLATE NOCASE) DESC LIMIT 1;
-                """;
-        command.Parameters.AddWithValue("$project", project);
-        command.Parameters.AddWithValue("$input", idOrKey.Trim());
-        await using (var exact = await command.ExecuteReaderAsync(cancellationToken))
-            if (await exact.ReadAsync(cancellationToken)) return ReadCard(exact);
-        command.Parameters.Clear();
-        // A full stored key (PREFIX-RRRRR-n) had its only chance in the exact match above.
-        if (BoardKeys.TryParseStored(idOrKey, out _))
-            return null;
-        if (BoardKeys.TryParse(idOrKey, out var prefix, out var number))
+        var scope = $" WHERE c.ProjectPath = $project{ProjectPathCollation}";
+        if (input.StartsWith("card_", StringComparison.Ordinal))
+            return await ReadOneCardAsync(connection, transaction, CardSelectSql + scope + $" AND c.Id = $input{live} LIMIT 1;", [("$project", project), ("$input", input)], cancellationToken);
+
+        // 1. The immutable key itself.
+        var byKey = await ReadOneCardAsync(connection, transaction,
+            CardSelectSql + scope + $" AND {CardKeySql} = $input COLLATE NOCASE{live} LIMIT 1;",
+            [("$project", project), ("$input", input)], cancellationToken);
+        if (byKey is not null) return byKey;
+
+        // 2. A short key, PREFIX-n: the card whose immutable key answers to it. The project's own
+        // prefix, or the VB an older binary shows for the same number; another project's prefix is
+        // not found rather than silently resolved to this project's number. A stored-key card is
+        // found by its number because PREFIX-n is the short form of PREFIX-RRRRR-n. A full stored
+        // key had its only chance above.
+        if (!BoardKeys.TryParseStored(input, out _) && BoardKeys.TryParse(input, out var prefix, out var number))
         {
-            // The project's own prefix, or the VB an older binary shows for the same number. Another
-            // project's prefix is not found rather than silently resolved to this project's number.
-            // A stored-key card is still found by its number: PREFIX-n is the short form of PREFIX-RRRRR-n.
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
             // The exact legacy row (CardKey NULL) sorts first: PREFIX-n is the only key it has.
-            command.CommandText = CardSelectSql + $"""
-                 WHERE c.ProjectPath = $project{ProjectPathCollation} AND {ShortKeyMatchSql}
-                   {live} ORDER BY (c.CardKey IS NULL) DESC LIMIT 2;
-                """;
+            command.CommandText = CardSelectSql + scope + $" AND {ShortKeyMatchSql}{live} ORDER BY (c.CardKey IS NULL) DESC LIMIT 2;";
+            command.Parameters.AddWithValue("$project", project);
             command.Parameters.AddWithValue("$number", number);
             command.Parameters.AddWithValue("$prefix", prefix);
             command.Parameters.AddWithValue("$short", BoardKeys.Format(prefix, number));
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                var found = ReadCard(reader);
+                // A legacy card (no stored key) wins over a synced card whose stored key merely ends in
+                // the same number, because PREFIX-n is the only key the legacy card has; two stored-key
+                // cards on one number both have full keys to use.
+                if (found.StoredKey is not null && await reader.ReadAsync(cancellationToken))
+                    throw new BoardValidationException("That short card key matches more than one card. Use the full card key.");
+                return found;
+            }
         }
-        else
-        {
-            command.CommandText = CardSelectSql + $" WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.Id = $id{live} LIMIT 1;";
-            command.Parameters.AddWithValue("$id", idOrKey.Trim());
-        }
-        command.Parameters.AddWithValue("$project", project);
+
+        // 3. The display label, or the key an older writer's row shows in its place.
+        var byLabel = await ReadOneCardAsync(connection, transaction,
+            CardSelectSql + scope + $" AND {CardDisplayIdSql} = $input COLLATE NOCASE{live} LIMIT 1;",
+            [("$project", project), ("$input", input)], cancellationToken);
+        if (byLabel is not null || BoardKeys.TryParse(input, out _, out _)) return byLabel;
+
+        // 4. An id without the card_ prefix.
+        return await ReadOneCardAsync(connection, transaction, CardSelectSql + scope + $" AND c.Id = $id{live} LIMIT 1;", [("$project", project), ("$id", input)], cancellationToken);
+    }
+
+    private static async Task<BoardCardRecord?> ReadOneCardAsync(SqliteConnection connection, SqliteTransaction? transaction, string sql,
+        (string Name, object Value)[] parameters, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = sql;
+        foreach (var (name, value) in parameters)
+            command.Parameters.AddWithValue(name, value);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        if (!await reader.ReadAsync(cancellationToken)) return null;
-        var found = ReadCard(reader);
-        // Only the short-form branch can return two rows. A legacy card (no stored key) wins over a
-        // synced card whose stored key merely ends in the same number, because PREFIX-n is the only
-        // key the legacy card has; two stored-key cards on one number both have full keys to use.
-        if (found.StoredKey is not null && await reader.ReadAsync(cancellationToken))
-            throw new BoardValidationException("That short card key matches more than one card. Use the full card key.");
-        return found;
+        return await reader.ReadAsync(cancellationToken) ? ReadCard(reader) : null;
     }
 
     private static BoardCardRecord ReadCard(SqliteDataReader reader) => new(

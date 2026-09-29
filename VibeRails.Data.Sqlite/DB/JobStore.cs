@@ -724,24 +724,6 @@ public sealed partial class JobStore : IJobStore
     }
 
     /// <summary>
-    /// Runs with a terminal currently open. Backs the machine-wide cap: the per-job overlap guard
-    /// stops one job stacking windows, this stops many jobs each legitimately opening one at the
-    /// same moment.
-    ///
-    /// Counts Running only, never Queued — queued runs have no terminal yet, and including them
-    /// would let a tick compare against a number that already contains the runs it is about to
-    /// launch, so the cap would be reached without a single window being open.
-    /// </summary>
-    public async Task<int> CountRunningRunsAsync(CancellationToken cancellationToken = default)
-    {
-        await using var connection = await OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM JobRuns WHERE Status = $running;";
-        command.Parameters.AddWithValue("$running", (int)JobRunStatus.Running);
-        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
-    }
-
-    /// <summary>
     /// Queued runs whose terminal has not been spawned yet. A run stays Queued until the launched
     /// `vb --job-run` process claims it via <see cref="StartRunAsync"/>, so LaunchedUTC — not
     /// Status — is what stops a second tick from opening a second window for the same run.
@@ -767,21 +749,111 @@ public sealed partial class JobStore : IJobStore
     }
 
     /// <summary>
-    /// Atomically claims the right to spawn this run's terminal. The shared scheduler lease avoids
-    /// normal contention; this remains the final duplicate barrier during a stale lease handoff.
+    /// Counts the open terminals and claims the right to spawn this run's terminal in one write
+    /// transaction. BEGIN IMMEDIATE serialises the count against every other root's claim, so the
+    /// machine-wide cap holds even though several roots now launch their own project's Board runs
+    /// at the same moment (VIBE-2). The row claim is also the duplicate barrier between two roots
+    /// looking at one queued run, whether during a stale lease handoff or two windows of one project.
+    ///
+    /// Open means Running, or Queued with <c>LaunchedUTC</c> set: a claimed run whose terminal is
+    /// still starting owns its slot already, otherwise each tick could open another set on top of
+    /// the ones spawned a moment ago. A claim that never starts is released by
+    /// <see cref="FailStalledLaunchesAsync"/>. Unclaimed queued runs are never counted: that number
+    /// would contain the runs this tick is about to launch and reach the cap with no window open.
     /// </summary>
-    public async Task<bool> TryMarkLaunchedAsync(string runId, CancellationToken cancellationToken = default)
+    public async Task<JobLaunchClaim> TryClaimLaunchAsync(string runId, int maxOpenTerminals, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
+        await using var transaction = connection.BeginTransaction(deferred: false);
+
+        int open;
+        await using (var count = connection.CreateCommand())
+        {
+            count.Transaction = transaction;
+            count.CommandText = """
+                SELECT COUNT(*) FROM JobRuns
+                WHERE Status = $running OR (Status = $queued AND LaunchedUTC IS NOT NULL);
+                """;
+            count.Parameters.AddWithValue("$running", (int)JobRunStatus.Running);
+            count.Parameters.AddWithValue("$queued", (int)JobRunStatus.Queued);
+            open = Convert.ToInt32(await count.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+        }
+        if (open >= maxOpenTerminals)
+            return new JobLaunchClaim(JobLaunchClaimOutcome.CapReached, open);
+
+        await using var claim = connection.CreateCommand();
+        claim.Transaction = transaction;
+        claim.CommandText = """
             UPDATE JobRuns SET LaunchedUTC = $now
             WHERE Id = $id AND Status = $queued AND LaunchedUTC IS NULL AND CancelRequested = 0;
             """;
-        command.Parameters.AddWithValue("$now", ToDb(DateTime.UtcNow));
-        command.Parameters.AddWithValue("$id", runId);
-        command.Parameters.AddWithValue("$queued", (int)JobRunStatus.Queued);
-        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+        claim.Parameters.AddWithValue("$now", ToDb(DateTime.UtcNow));
+        claim.Parameters.AddWithValue("$id", runId);
+        claim.Parameters.AddWithValue("$queued", (int)JobRunStatus.Queued);
+        var claimed = await claim.ExecuteNonQueryAsync(cancellationToken) > 0;
+        await transaction.CommitAsync(cancellationToken);
+        return claimed
+            ? new JobLaunchClaim(JobLaunchClaimOutcome.Claimed, open + 1)
+            : new JobLaunchClaim(JobLaunchClaimOutcome.NotLaunchable, open);
+    }
+
+    /// <summary>
+    /// Upserts this root's presence row and sweeps rows other roots let expire. A Board run of a
+    /// project with a live row waits for that project's own window instead of falling back to the
+    /// lease holder's (VIBE-2).
+    /// </summary>
+    public async Task RecordProjectRootAsync(string ownerId, string projectPath, DateTime nowUtc, TimeSpan timeToLive, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(ownerId))
+            throw new ArgumentException("A root owner id is required.", nameof(ownerId));
+        if (string.IsNullOrWhiteSpace(projectPath))
+            throw new ArgumentException("A project path is required.", nameof(projectPath));
+        if (timeToLive <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(timeToLive), "The presence time to live must be positive.");
+        nowUtc = nowUtc.Kind == DateTimeKind.Unspecified
+            ? DateTime.SpecifyKind(nowUtc, DateTimeKind.Utc)
+            : nowUtc.ToUniversalTime();
+
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            DELETE FROM JobProjectRoots WHERE ExpiresUTC <= $nowUtc AND OwnerId <> $ownerId;
+            INSERT INTO JobProjectRoots (OwnerId, ProjectPath, ExpiresUTC)
+            VALUES ($ownerId, $projectPath, $expiresUtc)
+            ON CONFLICT(OwnerId) DO UPDATE SET
+                ProjectPath = excluded.ProjectPath,
+                ExpiresUTC = excluded.ExpiresUTC;
+            """;
+        command.Parameters.AddWithValue("$ownerId", ownerId);
+        command.Parameters.AddWithValue("$projectPath", NormalizeProjectPath(projectPath));
+        command.Parameters.AddWithValue("$nowUtc", ToDb(nowUtc));
+        command.Parameters.AddWithValue("$expiresUtc", ToDb(nowUtc.Add(timeToLive)));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task ReleaseProjectRootAsync(string ownerId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(ownerId))
+            throw new ArgumentException("A root owner id is required.", nameof(ownerId));
+
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM JobProjectRoots WHERE OwnerId = $ownerId;";
+        command.Parameters.AddWithValue("$ownerId", ownerId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<string>> GetOpenProjectRootsAsync(DateTime nowUtc, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT DISTINCT ProjectPath FROM JobProjectRoots WHERE ExpiresUTC > $nowUtc;";
+        command.Parameters.AddWithValue("$nowUtc", ToDb(nowUtc));
+        var results = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            results.Add(reader.GetString(0));
+        return results;
     }
 
     /// <summary>
@@ -2069,6 +2141,12 @@ public sealed partial class JobStore : IJobStore
         CREATE TABLE IF NOT EXISTS JobSchedulerLease (
             LeaseName TEXT PRIMARY KEY,
             OwnerId TEXT NOT NULL,
+            ExpiresUTC TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS JobProjectRoots (
+            OwnerId TEXT PRIMARY KEY,
+            ProjectPath TEXT NOT NULL,
             ExpiresUTC TEXT NOT NULL
         );
 

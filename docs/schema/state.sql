@@ -116,6 +116,9 @@ CREATE TABLE InputFileChanges ( Id INTEGER PRIMARY KEY AUTOINCREMENT, UserInputI
 -- table JobActions
 CREATE TABLE JobActions ( Id TEXT PRIMARY KEY, JobId INTEGER NOT NULL, Position INTEGER NOT NULL, Kind INTEGER NOT NULL, EnvironmentId INTEGER, ScriptPath TEXT, ScriptRuntime INTEGER, ArgumentsJson TEXT NOT NULL DEFAULT '[]', WorkingDirectory TEXT, TimeoutSeconds INTEGER NOT NULL DEFAULT 0, ApprovedHash TEXT, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, FOREIGN KEY (JobId) REFERENCES Jobs(Id) ON DELETE CASCADE, FOREIGN KEY (EnvironmentId) REFERENCES Environments(Id) ON DELETE SET NULL, UNIQUE(JobId, Position) );
 
+-- table JobProjectRoots
+CREATE TABLE JobProjectRoots ( OwnerId TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, ExpiresUTC TEXT NOT NULL );
+
 -- table JobRunActions
 CREATE TABLE JobRunActions ( Id TEXT PRIMARY KEY, RunId TEXT NOT NULL, SourceActionId TEXT, Position INTEGER NOT NULL, Kind INTEGER NOT NULL, Status INTEGER NOT NULL, EnvironmentId INTEGER, EnvironmentName TEXT, Llm INTEGER NOT NULL DEFAULT 0, ScriptPath TEXT, ScriptRuntime INTEGER, ArgumentsJson TEXT NOT NULL DEFAULT '[]', WorkingDirectory TEXT, TimeoutSeconds INTEGER NOT NULL DEFAULT 0, ApprovedHash TEXT, SessionId TEXT, StartedUTC TEXT, EndedUTC TEXT, ExitCode INTEGER, ErrorMessage TEXT, StandardOutput TEXT NOT NULL DEFAULT '', StandardError TEXT NOT NULL DEFAULT '', FOREIGN KEY (RunId) REFERENCES JobRuns(Id) ON DELETE CASCADE, UNIQUE(RunId, Position) );
 

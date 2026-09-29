@@ -480,7 +480,7 @@ public sealed class JobServiceTests : IDisposable
         Assert.Contains("queued", response.Message, StringComparison.OrdinalIgnoreCase);
         _scheduler.Verify(s => s.Kick(), Times.Once);
         _store.Verify(
-            s => s.TryMarkLaunchedAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            s => s.TryClaimLaunchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 

@@ -95,6 +95,33 @@ public sealed class BoardDisplayIdTests : IDisposable
     }
 
     [Fact]
+    public async Task AShortKeyBeatsALabelAnEarlierVersionMintedInItsForm()
+    {
+        // 10.11.2 restarted labels at 1 after the upgrade, so a project whose label prefix is its key
+        // prefix can hold FRON-XXXXX-1 beside a later card labelled FRON-1. The label is never rewritten
+        // (no data conversion without the owner asking); the immutable key still wins the lookup, so a
+        // move, comment or delete addressed by short key reaches the card the key names (VIBE-2 review).
+        var single = Path.Combine(root, "frontend");
+        await store.EnsureDefaultColumnsAsync(single, Ct);
+        var older = await store.CreateCardAsync(single, Card("Older"), Ct);
+        var later = await store.CreateCardAsync(single, Card("Later"), Ct);
+        await Sql($"UPDATE BoardCards SET DisplayId = CardKey WHERE Id = '{older.Id}'; UPDATE BoardCards SET DisplayId = 'FRON-1' WHERE Id = '{later.Id}';");
+        Assert.Equal("FRON-1", (await store.FindCardAsync(single, later.Id, Ct))!.DisplayId);
+
+        Assert.Equal(older.Id, (await store.FindCardAsync(single, "FRON-1", Ct))!.Id);
+        Assert.Equal(older.Id, (await store.FindCardAsync(single, "fron-1", Ct))!.Id);
+        Assert.Equal(older.Id, (await store.FindCardAsync(single, "VB-1", Ct))!.Id);
+        Assert.Equal(older.Id, (await store.FindCardAsync(single, older.Key, Ct))!.Id);
+        // The later card keeps its own key and short key; only the borrowed spelling stops finding it.
+        Assert.Equal(later.Id, (await store.FindCardAsync(single, later.Key, Ct))!.Id);
+        Assert.Equal(later.Id, (await store.FindCardAsync(single, "FRON-2", Ct))!.Id);
+        // A label that spells no key still finds its card, after the key forms have had their chance.
+        await store.UpdateCardAsync(single, later.Id, new(DisplayId: "OPS-7"), Ct);
+        Assert.Equal(later.Id, (await store.FindCardAsync(single, "ops-7", Ct))!.Id);
+        Assert.Null(await store.FindCardAsync(single, "OPS-8", Ct));
+    }
+
+    [Fact]
     public async Task IncomingLabelThatSpellsAKeyGetsANewLabel_AndLocalKeysSkipNumbersALabelHolds()
     {
         var single = Path.Combine(root, "frontend");

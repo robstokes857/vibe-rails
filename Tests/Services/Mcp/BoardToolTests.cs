@@ -592,6 +592,40 @@ public sealed class BoardToolTests : IDisposable
     }
 
     [Fact]
+    public async Task GetBoardCard_KeepsAJustLinkedOldCommitUnderTheCap()
+    {
+        // The store orders commits by commit time; the cap must keep the newest LINKS, so an old
+        // commit linked just now is listed and the link made longest ago is the one that drops off.
+        await _tool.CreateBoardCard("A", cancellationToken: Ct);
+        var card = (await _service.FindCardAsync(_project, "PROJ-1", Ct))!;
+        var snapshot = new SandboxDiffResponse([], 0);
+        for (var i = 0; i < BoardTool.MaxListedCommits; i++)
+            await _store.AddCommitAsync(_project, card.Id, (0xb000000 + i).ToString("x7") + new string('0', 33), "Rob", $"Commit {i:00}",
+                new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddHours(i), snapshot, Ct);
+        var ancient = "01d1234" + new string('0', 33);
+        await _store.AddCommitAsync(_project, card.Id, ancient, "Rob", "Ancient fix", new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc), snapshot, Ct);
+        // Pin the link times: each commit linked when it was made, the ancient one linked last of all.
+        await using (var db = new SqliteConnection(_connectionString))
+        {
+            await db.OpenAsync(Ct);
+            await using var sql = db.CreateCommand();
+            sql.CommandText = """
+                UPDATE BoardCommits SET LinkedUTC = CommittedUTC WHERE Sha <> $ancient;
+                UPDATE BoardCommits SET LinkedUTC = '2026-09-29T13:00:00.0000000Z' WHERE Sha = $ancient;
+                """;
+            sql.Parameters.AddWithValue("$ancient", ancient);
+            await sql.ExecuteNonQueryAsync(Ct);
+        }
+
+        var read = await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct);
+        var newestLink = read.IndexOf("Ancient fix", StringComparison.Ordinal);
+        Assert.True(newestLink >= 0 && newestLink < read.IndexOf("Commit 29", StringComparison.Ordinal), "newest link first");
+        Assert.Contains("Commit 01", read);
+        Assert.DoesNotContain("Commit 00", read);
+        Assert.Contains("(+1 earlier commits; activity=all lists them)", read);
+    }
+
+    [Fact]
     public async Task Since_FiltersActivity_AndCountsWhatItHides()
     {
         await _tool.CreateBoardCard("A", cancellationToken: Ct);

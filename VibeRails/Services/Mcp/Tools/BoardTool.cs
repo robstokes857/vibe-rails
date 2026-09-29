@@ -912,9 +912,14 @@ public sealed class BoardTool(
         var noteAllowance = budgeted ? Math.Max(0, ActivityBudgetCharacters - commentsUsed) : int.MaxValue;
 
         // Linked time, not commit time: an old commit linked during this session is this session's activity.
-        // The store lists commits newest first already, so the cap below keeps the newest.
+        // The store lists commits by commit time, so the window is re-sorted by link time before the cap
+        // below keeps the newest: a just-linked old commit must not be the one that falls off.
         var commitsStart = builder.Length;
-        var commits = Window(card.Commits, c => c.LinkedAt, options, out var earlierCommits, out var laterCommits);
+        var commits = Window(card.Commits, c => c.LinkedAt, options, out var earlierCommits, out var laterCommits)
+            .OrderByDescending(c => c.LinkedAt)
+            .ThenByDescending(c => c.CommittedAt)
+            .ThenBy(c => c.Sha, StringComparer.Ordinal)
+            .ToList();
         builder.Append("\nLinked commits (").Append(commits.Count).Append(HiddenSuffix(earlierCommits, laterCommits)).Append("):\n");
         if (commits.Count == 0) builder.Append("(none)\n");
         var listedCommits = options.AllActivity ? commits.Count : Math.Min(commits.Count, MaxListedCommits);

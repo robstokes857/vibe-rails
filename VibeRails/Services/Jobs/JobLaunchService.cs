@@ -34,10 +34,13 @@ public interface IJobLaunchService
 /// Several roots can be open at once (one per VS Code window) and they share one scheduler lease.
 /// A terminal tab exists only in the memory of the process that spawned it, so a Board run opened by
 /// the lease holder for another project's card would be invisible in that project's window. Every
-/// root therefore claims the queued Board runs of its own project each cycle, lease or not (the
-/// <c>LaunchedUTC</c> row claim stops two roots from opening one run twice), and the lease holder
-/// opens another project's Board run in its own window only after that run has waited
-/// <see cref="ForeignProjectBoardRunGrace"/> with no window for the project claiming it.
+/// root therefore claims the queued Board runs of its own project each cycle, lease or not, and the
+/// lease holder opens another project's Board run in its own window only after that run has waited
+/// <see cref="ForeignProjectBoardRunGrace"/> and no root of that project is alive (each root records
+/// its presence every scheduler cycle). Because roots launch concurrently, the machine-wide terminal
+/// cap and the <c>LaunchedUTC</c> row claim are one store transaction
+/// (<see cref="IJobStore.TryClaimLaunchAsync"/>): the claim is what stops two roots opening one run
+/// twice, and the count inside it is what stops them each opening a full set.
 ///
 /// There is no non-interactive Worker rewrite, auto-approval flag injection, or filtering of the
 /// Environment's saved arguments. Repository-script validation and orchestration happen later in
@@ -83,40 +86,42 @@ public sealed class JobLaunchService(
 
         var hostProjectPath = await ResolveHostProjectPathAsync(cancellationToken);
         var nowUtc = DateTime.UtcNow;
+        // Only the lease holder's fallback needs to know which projects still have a window open.
+        var openProjects = ownsSchedulerLease && hostProjectPath is not null
+            && launchable.Any(run => IsBoardRunOfAnotherProject(run, hostProjectPath))
+            ? await store.GetOpenProjectRootsAsync(nowUtc, cancellationToken)
+            : [];
         var candidates = launchable
-            .Where(run => LaunchesHere(run, ownsSchedulerLease, hostProjectPath, nowUtc))
+            .Where(run => LaunchesHere(run, ownsSchedulerLease, hostProjectPath, nowUtc, openProjects))
             .ToList();
         if (candidates.Count == 0)
             return 0;
 
-        // Terminals already open from earlier ticks count against the cap too — otherwise every
-        // tick would happily open another full set on top of the ones still running.
-        var alreadyOpen = await store.CountRunningRunsAsync(cancellationToken);
         var launched = 0;
-
         foreach (var run in candidates)
         {
             if (cancellationToken.IsCancellationRequested)
                 break;
 
-            if (alreadyOpen + launched >= MaxConcurrentJobTerminals)
+            // Claim before doing anything observable, and count inside the same store transaction:
+            // several roots launch at once now, so a count taken before the claim would let each of
+            // them see room under the cap. Terminals open from earlier ticks count too, otherwise
+            // every tick would happily open another full set on top of the ones still running.
+            var claim = await store.TryClaimLaunchAsync(run.Id, MaxConcurrentJobTerminals, cancellationToken);
+            if (claim.Outcome == JobLaunchClaimOutcome.CapReached)
             {
                 Log.Information(
                     "[Jobs] Launch cap reached ({Cap}, {Open} already open); {Remaining} run(s) stay queued for the next tick",
-                    MaxConcurrentJobTerminals, alreadyOpen, candidates.Count - launched);
+                    MaxConcurrentJobTerminals, claim.OpenTerminals, candidates.Count - launched);
                 break;
             }
-
-            // Claim before doing anything observable. The shared scheduler lease prevents normal
-            // contention; this row claim is the handoff/crash safety net and the only barrier
-            // between two open roots of the same project.
-            if (!await store.TryMarkLaunchedAsync(run.Id, cancellationToken))
+            if (claim.Outcome != JobLaunchClaimOutcome.Claimed)
                 continue;
 
             if (hostProjectPath is not null && IsBoardRunOfAnotherProject(run, hostProjectPath))
             {
                 Log.Information(
-                    "[Jobs] No open VibeRails window for {ProjectPath} claimed Board run {RunId} within {Grace}; opening it in this window ({HostProjectPath})",
+                    "[Jobs] No open VibeRails window for {ProjectPath} claimed Board run {RunId} within {Grace} and none is alive; opening it in this window ({HostProjectPath})",
                     run.ProjectPath, run.Id, ForeignProjectBoardRunGrace, hostProjectPath);
             }
 
@@ -130,19 +135,28 @@ public sealed class JobLaunchService(
     /// <summary>
     /// Whether this process opens <paramref name="run"/> now. Native-terminal runs belong to the
     /// lease holder. A Board run opens in the root whose project it belongs to, and falls back to
-    /// the lease holder once <see cref="ForeignProjectBoardRunGrace"/> has passed unclaimed. A host
-    /// that knows no project (no resolver) behaves as before: the lease holder opens everything.
+    /// the lease holder only once <see cref="ForeignProjectBoardRunGrace"/> has passed unclaimed
+    /// and no root of that project is in <paramref name="openProjects"/>: a window that is merely
+    /// slow (held behind the cap, paused in a debugger for a moment) keeps its run. A host that
+    /// knows no project (no resolver) behaves as before: the lease holder opens everything.
     /// </summary>
-    internal static bool LaunchesHere(JobRunRecord run, bool ownsSchedulerLease, string? hostProjectPath, DateTime nowUtc)
+    internal static bool LaunchesHere(
+        JobRunRecord run,
+        bool ownsSchedulerLease,
+        string? hostProjectPath,
+        DateTime nowUtc,
+        IReadOnlyCollection<string> openProjects)
     {
         if (hostProjectPath is null || !JobBoardContext.OpensTerminalTab(run.TriggerKind, run.TriggerKey))
             return ownsSchedulerLease;
         if (!IsBoardRunOfAnotherProject(run, hostProjectPath))
             return true;
         // No open window for that project has claimed the run yet. The lease holder waits a
-        // little, then opens it here rather than leaving it queued forever: the project's
-        // window may simply be closed.
-        return ownsSchedulerLease && nowUtc - run.QueuedUtc >= ForeignProjectBoardRunGrace;
+        // little and, once no root of that project is alive either, opens it here rather than
+        // leaving it queued forever: the project's window is closed.
+        return ownsSchedulerLease
+            && nowUtc - run.QueuedUtc >= ForeignProjectBoardRunGrace
+            && !openProjects.Any(project => ProjectPathComparer.Matches(run.ProjectPath, project));
     }
 
     private static bool IsBoardRunOfAnotherProject(JobRunRecord run, string hostProjectPath)
