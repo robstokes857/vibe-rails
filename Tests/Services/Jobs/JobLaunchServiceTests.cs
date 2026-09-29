@@ -2,6 +2,7 @@ using Moq;
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services;
+using VibeRails.Services.Board;
 using VibeRails.Services.Jobs;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.LlmClis.Launchers;
@@ -12,6 +13,138 @@ namespace Tests.Services.Jobs;
 public sealed class JobLaunchServiceTests
 {
     private const string MissingProjectPath = @"C:\viberails-tests\does-not-exist";
+    private static readonly DateTime Now = new(2026, 9, 29, 12, 0, 0, DateTimeKind.Utc);
+
+    // VIBE-2: three VS Code windows were open, the vibe-books window held the scheduler lease and
+    // opened a vibe-rails card's review Automation in its own tab host, so the vibe-rails window
+    // never listed it. A Board run belongs to the window of its project.
+
+    [Fact]
+    public void LaunchesHere_NativeRunsBelongToTheLeaseHolderWhateverTheProject()
+    {
+        var run = Run(projectPath: @"C:\source\app") with { TriggerKind = JobTriggerKind.Schedule, QueuedUtc = Now };
+
+        Assert.True(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, @"C:\source\other", Now));
+        Assert.False(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: false, @"C:\source\app", Now));
+    }
+
+    [Fact]
+    public void LaunchesHere_BoardRunsOpenInTheirOwnProjectsWindowWithOrWithoutTheLease()
+    {
+        var run = BoardRun(@"C:\source\app", Now);
+
+        Assert.True(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: false, @"C:\source\app", Now));
+        Assert.True(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: false, @"C:\source\app\", Now));
+        Assert.True(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, @"C:\source\app", Now));
+        Assert.False(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: false, @"C:\source\other", Now.AddMinutes(5)));
+    }
+
+    [Fact]
+    public void LaunchesHere_TheLeaseHolderOpensAnotherProjectsBoardRunOnlyAfterItsWindowHadAChance()
+    {
+        var run = BoardRun(@"C:\source\app", Now);
+        var grace = JobLaunchService.ForeignProjectBoardRunGrace;
+
+        Assert.False(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, @"C:\source\other", Now));
+        Assert.False(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, @"C:\source\other", Now + grace - TimeSpan.FromSeconds(1)));
+        Assert.True(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, @"C:\source\other", Now + grace));
+    }
+
+    [Fact]
+    public void LaunchesHere_AHostWithoutAProjectKeepsTheOldLeaseHolderBehaviour()
+    {
+        var run = BoardRun(@"C:\source\app", Now);
+
+        Assert.True(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, null, Now));
+        Assert.False(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: false, null, Now));
+    }
+
+    [Fact]
+    public async Task LaunchQueuedProjectRunsAsync_OpensOnlyThisProjectsBoardRunsWithoutTheLease()
+    {
+        var project = ExistingProjectPath();
+        var mine = BoardRun(project, DateTime.UtcNow, id: "run-mine");
+        var elsewhere = BoardRun(OtherExistingProjectPath(), DateTime.UtcNow.AddHours(-1), id: "run-elsewhere");
+        var native = Run(id: "run-native", projectPath: project) with { TriggerKind = JobTriggerKind.Schedule };
+        var store = LaunchableStore(elsewhere, native, mine);
+        var tabs = new Mock<IJobTerminalTabLauncher>(MockBehavior.Strict);
+        tabs.Setup(service => service.LaunchAsync(mine, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LaunchResult(true, "tab"));
+
+        var launched = await new JobLaunchService(store.Object, new Mock<IEnvironmentLaunchService>(MockBehavior.Strict).Object,
+                UnusedProcessLauncher().Object, tabs.Object, Resolver(project))
+            .LaunchQueuedProjectRunsAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, launched);
+        tabs.VerifyAll();
+        store.Verify(s => s.TryMarkLaunchedAsync("run-mine", It.IsAny<CancellationToken>()), Times.Once);
+        store.Verify(s => s.TryMarkLaunchedAsync(It.IsNotIn("run-mine"), It.IsAny<CancellationToken>()), Times.Never);
+        store.Verify(s => s.CompleteRunAsync(It.IsAny<string>(), It.IsAny<JobRunStatus>(), It.IsAny<int?>(),
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task LaunchQueuedProjectRunsAsync_LaunchesNothingWhenThisHostHasNoProject()
+    {
+        var store = LaunchableStore(BoardRun(ExistingProjectPath(), DateTime.UtcNow));
+        var tabs = new Mock<IJobTerminalTabLauncher>(MockBehavior.Strict);
+
+        Assert.Equal(0, await new JobLaunchService(store.Object, new Mock<IEnvironmentLaunchService>(MockBehavior.Strict).Object,
+                UnusedProcessLauncher().Object, tabs.Object)
+            .LaunchQueuedProjectRunsAsync(TestContext.Current.CancellationToken));
+
+        tabs.VerifyNoOtherCalls();
+        store.Verify(s => s.TryMarkLaunchedAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task LaunchQueuedRunsAsync_LeavesAFreshBoardRunOfAnotherProjectForItsOwnWindow()
+    {
+        var store = LaunchableStore(BoardRun(OtherExistingProjectPath(), DateTime.UtcNow));
+        var tabs = new Mock<IJobTerminalTabLauncher>(MockBehavior.Strict);
+
+        Assert.Equal(0, await new JobLaunchService(store.Object, new Mock<IEnvironmentLaunchService>(MockBehavior.Strict).Object,
+                UnusedProcessLauncher().Object, tabs.Object, Resolver(ExistingProjectPath()))
+            .LaunchQueuedRunsAsync(TestContext.Current.CancellationToken));
+
+        tabs.VerifyNoOtherCalls();
+        store.Verify(s => s.TryMarkLaunchedAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        store.Verify(s => s.CompleteRunAsync(It.IsAny<string>(), It.IsAny<JobRunStatus>(), It.IsAny<int?>(),
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task LaunchQueuedRunsAsync_OpensAnotherProjectsBoardRunHereOnceNoWindowClaimedIt()
+    {
+        var stale = BoardRun(OtherExistingProjectPath(), DateTime.UtcNow - JobLaunchService.ForeignProjectBoardRunGrace);
+        var store = LaunchableStore(stale);
+        var tabs = new Mock<IJobTerminalTabLauncher>(MockBehavior.Strict);
+        tabs.Setup(service => service.LaunchAsync(stale, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LaunchResult(true, "tab"));
+
+        Assert.Equal(1, await new JobLaunchService(store.Object, new Mock<IEnvironmentLaunchService>(MockBehavior.Strict).Object,
+                UnusedProcessLauncher().Object, tabs.Object, Resolver(ExistingProjectPath()))
+            .LaunchQueuedRunsAsync(TestContext.Current.CancellationToken));
+
+        tabs.VerifyAll();
+    }
+
+    [Fact]
+    public async Task LaunchQueuedRunsAsync_StillOpensTheLeaseHoldersOwnBoardRunsAtOnce()
+    {
+        var project = ExistingProjectPath();
+        var mine = BoardRun(project, DateTime.UtcNow);
+        var store = LaunchableStore(mine);
+        var tabs = new Mock<IJobTerminalTabLauncher>(MockBehavior.Strict);
+        tabs.Setup(service => service.LaunchAsync(mine, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LaunchResult(true, "tab"));
+
+        Assert.Equal(1, await new JobLaunchService(store.Object, new Mock<IEnvironmentLaunchService>(MockBehavior.Strict).Object,
+                UnusedProcessLauncher().Object, tabs.Object, Resolver(project))
+            .LaunchQueuedRunsAsync(TestContext.Current.CancellationToken));
+
+        tabs.VerifyAll();
+    }
 
     [Theory]
     [InlineData(false, false)]
@@ -413,6 +546,24 @@ public sealed class JobLaunchServiceTests
             Times.Once);
 
     private static string ExistingProjectPath() => AppContext.BaseDirectory;
+
+    // A second real directory: LaunchOneAsync fails a run whose project is gone before dispatch.
+    private static string OtherExistingProjectPath() => Path.GetTempPath();
+
+    private static JobRunRecord BoardRun(string projectPath, DateTime queuedUtc, string id = "run-1") =>
+        Run(id: id, projectPath: projectPath, actions: [ScriptAction("script", 0)]) with
+        {
+            TriggerKind = JobTriggerKind.BoardLane,
+            TriggerKey = $"board-lane:VB-7:col_review:{id}",
+            QueuedUtc = queuedUtc
+        };
+
+    private static IBoardProjectResolver Resolver(string projectPath)
+    {
+        var resolver = new Mock<IBoardProjectResolver>(MockBehavior.Strict);
+        resolver.Setup(r => r.ResolveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(projectPath);
+        return resolver.Object;
+    }
 
     private static JobRunRecord Run(
         int? timeoutMinutes = null,

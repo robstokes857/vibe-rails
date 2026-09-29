@@ -460,8 +460,13 @@ Entry:
 
 Flow:
 1. `JobService` enqueues the run and calls `IJobScheduler.Kick()`. It never claims the row itself.
-2. `JobSchedulerHostedService` (lease owner) drains the queue through `JobLaunchService`, which
-   claims each run and honors its snapshotted launch preference. Native terminal remains the default.
+2. `JobSchedulerHostedService` drains the queue through `JobLaunchService`, which claims each run
+   (`LaunchedUTC`). The lease owner enqueues, reaps and opens native-terminal runs. A Board run
+   (lane entry or card "Run") opens in the root whose project it belongs to: every open root, lease
+   or not, claims its own project's queued Board runs each cycle, because a tab lives in the
+   process that spawned it and must be listed in the window the card is in (VIBE-2). The lease
+   owner opens another project's Board run in its own window only after it has sat queued for
+   `JobLaunchService.ForeignProjectBoardRunGrace` (30 s) with no window for that project claiming it.
 3. Native runs use `EnvironmentLaunchService` for a Worker or `IJobProcessLauncher` for a script-only
    workflow. Terminal-tab runs use `JobTerminalTabLauncher` and a recorded shell wrapper around the
    same `vb --job-run` process. Worker workspace resolution and argument quoting apply to both paths.

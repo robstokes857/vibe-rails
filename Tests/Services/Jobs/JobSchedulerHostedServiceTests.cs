@@ -11,8 +11,10 @@ namespace Tests.Services.Jobs;
 [Collection(JobSchedulerHostedServiceTestCollection.Name)]
 public sealed class JobSchedulerHostedServiceTests
 {
-    [Fact]
-    public async Task RunCycleAsync_WhenLeaseIsHeldElsewhere_DoesNotInspectOrDrainTheQueue()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(2)]
+    public async Task RunCycleAsync_WhenLeaseIsHeldElsewhere_OpensOnlyThisProjectsBoardRuns(int launchedForThisProject)
     {
         var store = new Mock<IJobStore>(MockBehavior.Strict);
         store
@@ -22,7 +24,14 @@ public sealed class JobSchedulerHostedServiceTests
                 JobSchedulerHostedService.SchedulerLeaseDuration,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
+        // A Board card's Automation tab must open in the window that card lives in (VIBE-2: the
+        // lease holder was another project's window, so the tab was never listed where the user
+        // looked). Without the lease a root still opens its own project's Board runs, and nothing
+        // else: no enqueueing, reaping or native launches.
         var launcher = new Mock<IJobLaunchService>(MockBehavior.Strict);
+        launcher
+            .Setup(candidate => candidate.LaunchQueuedProjectRunsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(launchedForThisProject);
 
         await using var services = new ServiceCollection()
             .AddSingleton(launcher.Object)
@@ -46,6 +55,7 @@ public sealed class JobSchedulerHostedServiceTests
         Assert.Null(snapshot.LastError);
         store.VerifyAll();
         store.VerifyNoOtherCalls();
+        launcher.Verify(candidate => candidate.LaunchQueuedProjectRunsAsync(It.IsAny<CancellationToken>()), Times.Once);
         launcher.VerifyNoOtherCalls();
     }
 

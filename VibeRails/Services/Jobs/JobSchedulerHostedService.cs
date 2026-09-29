@@ -19,7 +19,9 @@ public interface IJobScheduler
 /// <summary>
 /// While VibeRails is active this enqueues what's due, launches queued runs, and reaps runs whose
 /// process died. Multiple active VibeRails instances share one SQLite lease, so only its current
-/// owner drives the timer and drains the durable queue.
+/// owner drives the timer, enqueues, reaps and opens native-terminal runs. Every open root still
+/// opens the queued Board runs of its own project each cycle, because a terminal tab lives in the
+/// process that spawns it and must appear in the window the card lives in.
 ///
 /// It never executes a run itself. Runs live in their own spawned terminal processes, which is what
 /// keeps this loop from ever blocking on one, and what lets the reaper below tell a live run from a
@@ -164,8 +166,15 @@ public sealed class JobSchedulerHostedService : BackgroundService, IJobScheduler
         {
             if (previouslyOwnedLease)
                 Log.Information("[Jobs] Scheduler lease lost by {OwnerId}", _ownerId);
+            // This root's own Board runs still open here: their terminal tab must live in the
+            // window the card is in, not in whichever window happens to hold the lease. The
+            // LaunchedUTC row claim keeps this root and the lease holder from opening one twice.
+            var launchedHere = await LaunchThisProjectsBoardRunsAsync(cancellationToken);
             _health.CycleContended(DateTime.UtcNow);
-            Log.Debug("[Jobs] Scheduler cycle healthy; lease is held by another process");
+            Log.Write(
+                launchedHere > 0 ? LogEventLevel.Information : LogEventLevel.Debug,
+                "[Jobs] Scheduler cycle healthy; lease is held by another process. launchedForThisProject={Launched}",
+                launchedHere);
             return false;
         }
 
@@ -219,6 +228,13 @@ public sealed class JobSchedulerHostedService : BackgroundService, IJobScheduler
         schedulesEnqueued > 0 || runsLaunched > 0 || runsReaped > 0 || stalledLaunchesFailed > 0
             ? LogEventLevel.Information
             : LogEventLevel.Debug;
+
+    private async Task<int> LaunchThisProjectsBoardRunsAsync(CancellationToken cancellationToken)
+    {
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var launcher = scope.ServiceProvider.GetRequiredService<IJobLaunchService>();
+        return await launcher.LaunchQueuedProjectRunsAsync(cancellationToken);
+    }
 
     private async Task<(bool LeaseMaintained, int Launched)> LaunchQueuedRunsWithLeaseRenewalAsync(
         IJobLaunchService launcher,
