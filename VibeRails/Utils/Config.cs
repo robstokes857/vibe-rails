@@ -82,98 +82,28 @@ public class Settings
 
 public static class Config
 {
-    private static Settings? _settings;
-    private static readonly string _settingsPath;
+    // Production always uses the normal application settings file. The internal file component
+    // accepts a path so automated tests can exercise the same transaction with disposable files;
+    // it does not add a runtime flag or alternate application data directory.
+    internal static SettingsFile Store { get; } = new(
+        Path.Combine(PathConstants.GetInstallDirPath(), PathConstants.SETTINGS_FILENAME));
 
-    // All settings.json reads/writes go through this gate. settings.json is shared mutable
-    // state: a terminal launch re-reads it (LoadFresh) on a request thread while the settings
-    // route may be writing it (Save). Serializing in-process turns "torn read of a half-written
-    // file" into "wait for the write to finish, then read it whole"; across processes the
-    // temp-file-and-rename write in SaveCore does the same.
-    private static readonly object _gate = new();
+    public static string SettingsDirectory => Store.DirectoryPath;
 
-    static Config()
-    {
-        // settings.json lives next to the state.db it describes.
-        var dir = PathConstants.GetInstallDirPath();
-        PrivateFilePermissions.EnsureDirectory(dir);
-        _settingsPath = Path.Combine(dir, PathConstants.SETTINGS_FILENAME);
-        PrivateFilePermissions.EnsureFile(_settingsPath);
-    }
-
-    public static string SettingsDirectory => Path.GetDirectoryName(_settingsPath)!;
-
-    public static Settings Load()
-    {
-        lock (_gate)
-        {
-            return LoadCore();
-        }
-    }
-
-    // Caller must hold _gate.
-    private static Settings LoadCore()
-    {
-        if (_settings != null)
-            return _settings;
-
-        if (!File.Exists(_settingsPath))
-        {
-            _settings = new Settings();
-            SaveCore(_settings);
-            return _settings;
-        }
-
-        var json = AtomicFile.ReadAllText(_settingsPath);
-        var settings = JsonSerializer.Deserialize(json, ConfigJsonContext.Default.Settings)
-            ?? throw new InvalidOperationException($"Failed to deserialize {_settingsPath}");
-
-        _settings = settings;
-
-        return _settings;
-    }
-
-    public static void Save(Settings settings)
-    {
-        lock (_gate)
-        {
-            SaveCore(settings);
-        }
-    }
-
-    // Caller must hold _gate. The gate only serializes this process; every VibeRails process
-    // rewrites settings.json at startup, so the write is atomic for readers in other processes
-    // (a tab child starting during a save used to read a torn file and die in LoadCore).
-    private static void SaveCore(Settings settings)
-    {
-        var json = JsonSerializer.Serialize(settings, ConfigJsonContext.Default.Settings);
-        AtomicFile.WriteAllText(_settingsPath, json);
-        PrivateFilePermissions.EnsureFile(_settingsPath);
-        _settings = settings;
-    }
-
-    public static void Reload()
-    {
-        lock (_gate)
-        {
-            _settings = null;
-            LoadCore();
-        }
-    }
+    public static Settings Load() => Store.Load();
 
     /// <summary>
-    /// Re-reads settings.json from disk, bypassing the in-memory cache, and returns it. Terminal
-    /// tabs run in child processes that snapshot settings at their own startup; the parent persists
-    /// every change to disk, so a caller that must honor a just-toggled setting reads fresh here
-    /// instead of trusting this process's stale in-memory copy. Reads under _gate so it can't
-    /// observe a concurrent Save mid-write.
+    /// Saves a complete settings snapshot. Application read/modify/write operations must hold
+    /// AcquireWriteLock from before LoadFresh through this save to preserve other roots' edits.
     /// </summary>
-    public static Settings LoadFresh()
-    {
-        lock (_gate)
-        {
-            _settings = null;
-            return LoadCore();
-        }
-    }
+    public static void Save(Settings settings) => Store.Save(settings);
+
+    public static void Reload() => Store.LoadFresh();
+
+    /// <summary>Re-reads the shared settings file instead of the process's cached snapshot.</summary>
+    public static Settings LoadFresh() => Store.LoadFresh();
+
+    // Synchronous, thread-affine and reentrant. All writers use the same in-process then OS
+    // lock order; never await while holding this lease.
+    internal static IDisposable AcquireWriteLock() => Store.AcquireWriteLock();
 }

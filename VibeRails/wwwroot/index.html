@@ -1413,6 +1413,27 @@
                                     usage</small>
                             </div>
                             <div class="mb-4">
+                                <div class="mb-3" data-remote-account-link>
+                                    <div class="d-flex gap-2 flex-wrap mb-2">
+                                        <button type="button" class="btn btn-outline-primary btn-sm"
+                                            data-remote-link-start>Sign in to viberails.ai</button>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm"
+                                            data-remote-link-cancel hidden>Cancel</button>
+                                    </div>
+                                    <p class="small text-muted text-break mb-2" data-remote-link-status role="status" aria-live="polite"></p>
+                                    <div class="border rounded p-3" data-remote-link-pending hidden>
+                                        <div class="d-flex gap-2 flex-wrap align-items-center mb-2">
+                                            <code class="fs-5 user-select-all" data-remote-link-code></code>
+                                            <button type="button" class="btn btn-outline-secondary btn-sm"
+                                                data-remote-link-copy>Copy code</button>
+                                            <span class="small text-muted" data-remote-link-copy-status role="status"></span>
+                                        </div>
+                                        <a class="btn btn-outline-primary btn-sm" data-remote-link-open
+                                            target="_blank" rel="noopener noreferrer">Open sign-in page</a>
+                                        <p class="small text-muted mt-2 mb-1">You can also open <span class="user-select-all">https://viberails.ai/link</span> in any browser and enter the code.</p>
+                                        <p class="small text-muted mb-0" data-remote-link-countdown></p>
+                                    </div>
+                                </div>
                                 <label class="form-label" for="setting-api-key">API Key</label>
                                 <input type="text" class="form-control" id="setting-api-key"
                                     placeholder="Enter API key">

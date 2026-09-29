@@ -203,7 +203,10 @@ namespace VibeRails
             var frontendUrl = configuration["VibeRails:FrontendUrl"] ?? throw new InvalidOperationException("VibeRails:FrontendUrl is not configured in appsettings.json");
             ParserConfigs.SetFrontendUrl(frontendUrl);
 
-            var settings = Config.Load();
+            // Startup normalization is also a writer: preserve another root's settings/key
+            // changes across the complete fresh read and optional rewrite.
+            using var settingsLease = Config.AcquireWriteLock();
+            var settings = Config.LoadFresh();
             ParserConfigs.SetRemoteAccess(settings.RemoteAccess);
             ParserConfigs.SetApiKey(settings.ApiKey);
             // A hand-edited legacy/inconsistent file must never make the relay effective without

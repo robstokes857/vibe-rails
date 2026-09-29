@@ -2,6 +2,7 @@ import { showDataExportModal } from './data-export-modal.js';
 import { confirmDialog } from './utils.js';
 import { SettingsKeysPanel } from './settings-keys.js';
 import { SettingsJiraPanel } from './settings-jira.js';
+import { RemoteAccountLinkPanel } from './remote-account-link.js';
 import { getToastTheme, setToastTheme } from './toast-service.js';
 
 export class SettingsController {
@@ -20,6 +21,8 @@ export class SettingsController {
         this._settingsRoot = null;
         this._keysPanel = null;
         this._jiraPanel = null;
+        this._remoteLinkPanel = null;
+        this._linkedKeyVersion = 0;
         // In-app leave-confirm (window.confirm is a silent no-op in the VS Code
         // webview). A field so tests can substitute a resolved value.
         this.confirmLeave = confirmDialog;
@@ -227,6 +230,7 @@ export class SettingsController {
                         && apiKeyValue.trim().length === 0
                         && savedApiKey.length > 0;
                     this._settingsSaving = true;
+                    const linkedKeyVersion = this._linkedKeyVersion;
                     this._updateSaveBar(root);
                     try {
                         const savedSettings = await this.saveSettings(
@@ -250,8 +254,13 @@ export class SettingsController {
                             clearApiKey
                         );
                         if (savedSettings) {
+                            await this._reconcileSavedApiKey(savedSettings, linkedKeyVersion);
+                            if (this._settingsRoot !== root) return;
+                            this.app.setAppSettings({ apiKey: savedSettings.apiKey });
                             this._applySavedSettingsToControls(root, savedSettings);
                             this._markSettingsClean(root);
+                            // A pasted key or clear can supersede the linked identity.
+                            void this._remoteLinkPanel?.refresh();
                         }
                     } finally {
                         this._settingsSaving = false;
@@ -261,6 +270,13 @@ export class SettingsController {
             }
 
             this._initSettingsDirtyTracking(root);
+            const remoteLinkRoot = root.querySelector('[data-remote-account-link]');
+            if (remoteLinkRoot) {
+                this._remoteLinkPanel = new RemoteAccountLinkPanel(this.app, remoteLinkRoot, {
+                    onLinked: state => this._applyLinkedApiKey(root, state.keyHint)
+                });
+                void this._remoteLinkPanel.mount();
+            }
         }
 
         // Attach before the PIN status round-trip: #app-content was blanked above,
@@ -307,6 +323,8 @@ export class SettingsController {
     }
 
     unload() {
+        this._remoteLinkPanel?.unload();
+        this._remoteLinkPanel = null;
         this._keysPanel?.unload();
         this._keysPanel = null;
         this._jiraPanel?.clearSecrets();
@@ -443,6 +461,38 @@ export class SettingsController {
         this._settingsSnapshot = this._captureSettingsSnapshot(root);
         this._settingsDirty = false;
         this._updateSaveBar(root);
+    }
+
+    _applyLinkedApiKey(root, keyHint) {
+        if (this._settingsRoot !== root || typeof keyHint !== 'string' || !keyHint) return;
+        const input = root.querySelector('#setting-api-key');
+        if (!input) return;
+        input.value = keyHint;
+        input.dataset.originalValue = keyHint;
+        this._linkedKeyVersion++;
+        // Only the key was saved by sign-in. Keep every other field's draft and original
+        // baseline, so the save bar still reports any unrelated unsaved edits.
+        const snapshot = JSON.parse(this._settingsSnapshot || '{}');
+        snapshot.apiKey = keyHint;
+        this._settingsSnapshot = JSON.stringify(snapshot);
+        this.app.setAppSettings({ apiKey: keyHint });
+        this._updateDirtyState(root);
+    }
+
+    async _reconcileSavedApiKey(savedSettings, linkedKeyVersion) {
+        if (linkedKeyVersion === this._linkedKeyVersion) return;
+        // Save and sign-in can finish in either order. An event is not proof that its
+        // key won: a manual clear may have committed after it. Read the saved mask.
+        try {
+            let latest;
+            do {
+                linkedKeyVersion = this._linkedKeyVersion;
+                latest = await this.app.apiCall('/api/v1/settings', 'GET', null, { showLoading: false });
+            } while (this._settingsRoot && linkedKeyVersion !== this._linkedKeyVersion);
+            savedSettings.apiKey = latest.apiKey || '';
+        } catch {
+            this.app.showToast('Settings', 'Settings saved. Reopen Settings when your connection is available to refresh the account details.', 'warning');
+        }
     }
 
     _updateSaveBar(root) {

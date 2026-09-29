@@ -1850,6 +1850,11 @@ namespace VibeRails.DTOs
     // App Configuration (for appsettings.json VibeRails section)
     [JsonSerializable(typeof(Services.VibeRailsConfiguration))]
     [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+    [JsonSerializable(typeof(RemoteAccountLinkStatus))]
+    [JsonSerializable(typeof(DeviceLinkRequest))]
+    [JsonSerializable(typeof(DeviceLinkSecret))]
+    [JsonSerializable(typeof(DeviceLinkCreated))]
+    [JsonSerializable(typeof(DeviceLinkToken))]
     internal partial class AppJsonSerializerContext : JsonSerializerContext
     {
     }

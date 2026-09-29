@@ -22,14 +22,14 @@ public static class RemoteConfig
     {
         get
         {
-            var s = Config.Load();
+            var s = Config.LoadFresh();
             return !string.IsNullOrWhiteSpace(s.PinHash) && !string.IsNullOrWhiteSpace(s.PinSalt);
         }
     }
 
     public static bool VerifyPin(string input)
     {
-        var s = Config.Load();
+        var s = Config.LoadFresh();
         if (string.IsNullOrWhiteSpace(s.PinHash) || string.IsNullOrWhiteSpace(s.PinSalt))
             return false;
 
@@ -39,7 +39,8 @@ public static class RemoteConfig
     public static void SetPin(string pin)
     {
         var (salt, hash) = Hasher.Hash(pin);
-        var s = Config.Load();
+        using var lease = Config.AcquireWriteLock();
+        var s = Config.LoadFresh();
         s.PinSalt = salt;
         s.PinHash = hash;
         Config.Save(s);
@@ -47,7 +48,8 @@ public static class RemoteConfig
 
     public static void ClearPin()
     {
-        var s = Config.Load();
+        using var lease = Config.AcquireWriteLock();
+        var s = Config.LoadFresh();
         s.PinHash = string.Empty;
         s.PinSalt = string.Empty;
         Config.Save(s);

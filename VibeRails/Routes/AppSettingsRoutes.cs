@@ -29,20 +29,36 @@ public static class AppSettingsRoutes
         // GET /api/v1/settings - Read current app settings
         app.MapGet("/api/v1/settings", () =>
         {
-            return Results.Ok(BuildAppSettingsDto(Config.Load()));
+            return Results.Ok(BuildAppSettingsDto(Config.LoadFresh()));
         }).WithName("GetAppSettings");
 
         // POST /api/v1/settings - Update app settings
         app.MapPost("/api/v1/settings", (AppSettingsDto settingsDto) =>
-        {
-            // Remote access requires a PIN — if none is set, force it off
-            var remoteAccess = settingsDto.RemoteAccess && RemoteConfig.IsPinConfigured;
+            Results.Ok(UpdateSettings(settingsDto, Config.Store, app.Services.GetService<IRemoteHttpRelayClient>())))
+            .WithName("UpdateAppSettings");
 
+        // POST /api/v1/settings/computer-name - Update ONLY the notification computer
+        // name. Loads the current settings server-side and touches a single field, so
+        // a save from the terminal panel can never overwrite unrelated settings with a
+        // stale client-side copy (remoteAccess, mcpEnabled, theme, …).
+        app.MapPost("/api/v1/settings/computer-name", (UpdateComputerNameDto dto) =>
+            Results.Ok(UpdateComputerName(dto, Config.Store))).WithName("UpdateComputerName");
+    }
+
+    // The internal store parameter is solely for isolated regression fixtures. Production calls
+    // always use Config.Store and therefore the normal application settings path.
+    internal static AppSettingsDto UpdateSettings(AppSettingsDto settingsDto, SettingsFile store, IRemoteHttpRelayClient? relay = null)
+    {
+        using (store.AcquireWriteLock())
+        {
             // LoadFresh, not Load: this handler writes the WHOLE Settings object back, including
             // fields the UI doesn't expose (e.g. the hand-editable token-saver flags). Merging over
             // the process's cached copy would silently revert any settings.json edit made since
             // the cache was filled — including flipping the token-saver kill switch back on.
-            var settings = Config.LoadFresh();
+            var settings = store.LoadFresh();
+            // Use the same locked snapshot for PIN readiness and the settings write.
+            var remoteAccess = settingsDto.RemoteAccess
+                && !string.IsNullOrWhiteSpace(settings.PinHash) && !string.IsNullOrWhiteSpace(settings.PinSalt);
             var previousApiKey = settings.ApiKey;
             var previousRelaySetting = settings.RouteThroughVibeRailsAi;
 
@@ -117,7 +133,7 @@ public static class AppSettingsRoutes
             settings.DataRetentionEnabled = true;
 
             // Save back to settings.json
-            Config.Save(settings);
+            store.Save(settings);
 
             // Update static Configs so runtime reflects the change immediately
             ParserConfigs.SetRemoteAccess(remoteAccess);
@@ -135,28 +151,27 @@ public static class AppSettingsRoutes
             if (previousRelaySetting != settings.RouteThroughVibeRailsAi
                 || !string.Equals(previousApiKey, settings.ApiKey, StringComparison.Ordinal))
             {
-                app.Services.GetService<IRemoteHttpRelayClient>()?.Reset();
+                relay?.Reset();
             }
 
-            return Results.Ok(BuildAppSettingsDto(settings));
-        }).WithName("UpdateAppSettings");
+            return BuildAppSettingsDto(settings);
+        }
+    }
 
-        // POST /api/v1/settings/computer-name - Update ONLY the notification computer
-        // name. Loads the current settings server-side and touches a single field, so
-        // a save from the terminal panel can never overwrite unrelated settings with a
-        // stale client-side copy (remoteAccess, mcpEnabled, theme, …).
-        app.MapPost("/api/v1/settings/computer-name", (UpdateComputerNameDto dto) =>
+    internal static AppSettingsDto UpdateComputerName(UpdateComputerNameDto dto, SettingsFile store)
+    {
+        using (store.AcquireWriteLock())
         {
             // LoadFresh for the same reason as the main settings POST: never write a stale cached
             // snapshot back over hand-edited settings.json fields.
-            var settings = Config.LoadFresh();
+            var settings = store.LoadFresh();
             settings.ComputerName = NormalizeComputerName(dto.ComputerName ?? settings.ComputerName);
             settings.ShowVibeAiUi = true;
             settings.DataExportOptIn = true;
             settings.DataRetentionEnabled = true;
-            Config.Save(settings);
-            return Results.Ok(BuildAppSettingsDto(settings));
-        }).WithName("UpdateComputerName");
+            store.Save(settings);
+            return BuildAppSettingsDto(settings);
+        }
     }
 
     private static AppSettingsDto BuildAppSettingsDto(Settings settings)

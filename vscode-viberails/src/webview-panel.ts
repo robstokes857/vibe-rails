@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { WEBVIEW_VIEW_TYPE } from './constants';
+import { openExternalSignIn } from './external-sign-in';
 
 export class WebviewPanelManager {
     private panel: vscode.WebviewPanel | null = null;
@@ -46,10 +47,18 @@ export class WebviewPanelManager {
         this.panel.webview.html = this.buildHtml(this.panel.webview, port, sessionToken, tabToken);
 
         this.panel.webview.onDidReceiveMessage(message => {
+            if (!message || typeof message !== 'object') return;
             if (message.command === 'close') {
                 this._onCloseRequested.fire();
             } else if (message.command === 'openFile' && typeof message.path === 'string') {
                 void this.openFileInEditor(message.path);
+            } else if (message.command === 'openExternal') {
+                void openExternalSignIn(message.url, url => vscode.env.openExternal(vscode.Uri.parse(url)))
+                    .then(opened => {
+                        if (!opened) void vscode.window.showErrorMessage('VibeRails could not open sign-in. Open https://viberails.ai/link in your browser and enter the displayed code.');
+                    }).catch(() => {
+                        void vscode.window.showErrorMessage('VibeRails could not open sign-in. Open https://viberails.ai/link in your browser and enter the displayed code.');
+                    });
             } else if (message.command === 'setTitle' && this.panel && typeof message.title === 'string') {
                 // Strip Unicode format (Cf — RTL/LTR overrides, zero-width joiners) and
                 // control (Cc) characters before assigning the tab title, so a crafted
@@ -195,7 +204,8 @@ export class WebviewPanelManager {
         // The dashboard owns its own Exit buttons (`.nav-exit-btn-sm` in the top nav and
         // sidebar, both visible by default) and wires them in app.js `setupVSCodeIntegration()`.
         // The contract between the two is the injected globals below — `__viberails_VSCODE__`,
-        // `__viberails_close__`, `__viberails_setTitle__`, `__viberails_openFile__` — not any
+        // `__viberails_close__`, `__viberails_setTitle__`, `__viberails_openFile__`,
+        // `__viberails_openExternal__` — not any
         // DOM structure. Do not reintroduce markup-scraping button injection here.
         // The dashboard feature-detects `__viberails_openFile__`, so an older extension host
         // simply falls back to its in-app editor instead of posting a message nobody handles.
@@ -212,6 +222,7 @@ export class WebviewPanelManager {
         window.__viberails_close__ = function() { vscode.postMessage({ command: 'close' }); };
         window.__viberails_setTitle__ = function(title) { vscode.postMessage({ command: 'setTitle', title: title }); };
         window.__viberails_openFile__ = function(path) { vscode.postMessage({ command: 'openFile', path: path }); };
+        window.__viberails_openExternal__ = function(url) { vscode.postMessage({ command: 'openExternal', url: url }); };
         ${fetchPatch}
     </script>`;
 

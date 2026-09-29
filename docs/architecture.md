@@ -342,6 +342,35 @@ See [VibeRails/Services/Mcp/AGENTS.md](../VibeRails/Services/Mcp/AGENTS.md) for 
 
 ## Key Components
 
+### Linking a viberails.ai account
+
+See [the authentication flow](account-link-auth-flow.md) for the protocol sequence,
+credential roles, Auth0 boundary and comparison with OAuth authorization code.
+
+Settings can create and save a new VibeRails API key through typed-code browser approval.
+`RemoteAccountLinkService` owns one temporary attempt per root backend; authenticated
+`POST`/`GET`/`DELETE /api/v1/settings/remote-link` start, poll and cancel it. The root calls
+the hosted `/api/v1/device-links` contract over HTTPS; only the short user code and display
+state reach the dashboard. The browser opens `https://viberails.ai/link`, signs in through
+the site's existing Auth0 flow, enters the code and approves. VS Code uses the narrow
+`__viberails_openExternal__` bridge to open that same page in the system browser.
+
+The hosted service keeps pending requests in memory for ten minutes and delivers the
+approved API key once. Restarting the site expires pending requests. `ApiKeyStore` merges
+the key into the current normal settings file, updates `ParserConfigs`, and resets the
+HTTP relay. Current-version processes coordinate the key comparison and save through an
+OS mutex, so a key change through Settings during approval prevents overwrite. Older
+binaries and external file editors do not participate in that mutex. Failed local writes
+retain the received key in memory for retry until cancellation, replacement or shutdown.
+The masked `remote-account-linked` event updates open Settings views without replacing
+their unrelated drafts. Navigating away stops UI polling; reopening Settings resumes it.
+
+Existing keys remain valid; the site lists a linked key with its computer name so it can be
+revoked. If a one-time response is lost in transit, the user starts again and can revoke
+the unused key on the site. No new local listener, callback, authentication exception,
+database, daemon or OS registration is required. The hosted implementation must be deployed
+before clients can use sign-in; older sites leave the manual API key input usable.
+
 ### Code report inspection
 
 Project health's Code quality card renders the host-owned Code Atlas / Quality Lab viewer

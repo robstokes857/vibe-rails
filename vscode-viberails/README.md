@@ -65,6 +65,13 @@ VibeRails is the control layer for AI coding inside VS Code. Work faster with Cl
 
 Install options for Windows, Linux, and Mac are available at https://viberails.ai/.
 
+### Connect your viberails.ai account
+
+Open **Settings → General**, then select **Sign in to viberails.ai**. Copy the displayed code
+and choose **Open sign-in page**. Sign in through your browser, enter the code, and approve
+the request. VibeRails saves the connection automatically. The API-key field also accepts a
+key from your account if you prefer to paste one.
+
 ## What's Bundled
 
 The extension ships the whole VibeRails backend inside the VSIX — there is **no separate `vb` install and no runtime download**.

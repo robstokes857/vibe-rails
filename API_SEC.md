@@ -1,5 +1,36 @@
 # API authentication coverage
 
+## VB-VF336-66 account linking (2026-09-29, scoped amendment)
+
+Added `POST`, `GET`, and `DELETE /api/v1/settings/remote-link`, mapped only by an active
+root backend. All three require the existing session and tab credentials and return
+`Cache-Control: no-store`. POST starts approval, GET polls and saves an approved key, and
+DELETE cancels. Responses and the `remote-account-linked` event contain only a short user
+code, fixed verification page, progress, masked key hint and account display details.
+Neither the secret device code nor API key is returned to the local browser.
+
+The backend calls `POST /api/v1/device-links`, `POST /api/v1/device-links/token` and
+`DELETE /api/v1/device-links` on the configured `VibeRails:FrontendUrl` origin. HTTPS is required
+(HTTP only for loopback fixtures); endpoint credentials, paths, query strings and fragments
+are rejected. The named client sends no existing API key or cookies and follows no redirects.
+Every exchange has a 20-second deadline (cancellation cleanup: five seconds), JSON responses
+are capped at 16 KiB, and the returned verification URL must equal that origin's `/link`.
+The dashboard and VS Code bridge further restrict navigation to `https://viberails.ai/link`.
+
+One in-memory attempt belongs to each root. Polling is serialized and throttled. Cancellation
+and replacement invalidate late responses before persistence. A received key stays in backend
+memory if saving fails, allowing a retry without a second redemption; cancel/replacement/shutdown
+release it. The settings writer compares the original saved key before replacing it, so a
+manual credential edit wins. Stored keys use the existing private `settings.json` file and
+runtime activation/reset sequence. No database change is involved on the local side.
+
+Both mandatory listener searches found only the approved main Kestrel host, non-serving
+`PortFinder` probe and test-only Kestrel fixtures, including the new route tests. The
+cross-runtime search had no matches. Both searches were repeated during review follow-up.
+The canonical inventory below includes these three additions: 230 total surfaces, 218 under
+`/api/v1`, and 21 in the application-settings group. The frozen listener set, skip list and
+CORS policy are unchanged. This is a scoped addition, not a new full route reconciliation.
+
 ## Route and authentication reconciliation (2026-09-28)
 
 Compared the current working tree's registered routes against the active inventory in both
@@ -677,8 +708,8 @@ spoofer's own local exchange rows.
 Authentication is enforced primarily by
 [`CookieAuthMiddleware`](VibeRails/Middleware/CookieAuthMiddleware.cs). The LLM proxy
 routes additionally use
-[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 227 mapped route
-surfaces in this inventory: 215 `/api/v1` method/path mappings, nine non-`/api` protected
+[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 230 mapped route
+surfaces in this inventory: 218 `/api/v1` method/path mappings, nine non-`/api` protected
 API surfaces, and three bootstrap/page/probe routes. Static-file middleware and the
 global `OPTIONS` behavior are noted separately because they are not finite mapped-route
 lists.
@@ -838,12 +869,15 @@ WebSocket handshakes use the session cookie/subprotocol plus the tab-token subpr
 - `GET /api/v1/rules`
 - `GET /api/v1/rules/details`
 
-### Application settings, PIN, export, push, and HTTP relay (18)
+### Application settings, PIN, export, push, and HTTP relay (21)
 
 - `GET /api/v1/settings`
 - `POST /api/v1/settings`
 - `GET /api/v1/settings/db-size`
 - `POST /api/v1/settings/computer-name`
+- `POST /api/v1/settings/remote-link` — start account approval; active root backend only.
+- `GET /api/v1/settings/remote-link` — poll approval and save the key; active root backend only.
+- `DELETE /api/v1/settings/remote-link` — cancel approval; active root backend only.
 - `GET /api/v1/settings/pin/status`
 - `POST /api/v1/settings/pin`
 - `DELETE /api/v1/settings/pin`

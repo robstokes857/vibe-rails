@@ -50,6 +50,8 @@ public static class RouteExtensions
         UpdateRoutes.Map(app);
         AppSettingsRoutes.Map(app);
         if (isActiveRootBackend)
+            RemoteAccountLinkRoutes.Map(app);
+        if (isActiveRootBackend)
             SigningKeyRoutes.Map(app);
         HttpRelayRoutes.Map(app);
         // Legacy one-shot full-database export (Settings modal "Export Data" button).

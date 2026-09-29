@@ -81,6 +81,20 @@ namespace VibeRails
 
             if (isActiveRootBackendProcess)
             {
+                serviceCollection.AddHttpClient("remote-account-link", client =>
+                    client.Timeout = TimeSpan.FromSeconds(20))
+                    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+                    {
+                        AllowAutoRedirect = false,
+                        UseCookies = false
+                    });
+                serviceCollection.AddSingleton<IRemoteAccountKeyStore, ApiKeyStore>();
+                serviceCollection.AddSingleton(sp => new RemoteAccountLinkService(
+                    sp.GetRequiredService<IHttpClientFactory>().CreateClient("remote-account-link"),
+                    new Uri(sp.GetRequiredService<IConfiguration>()["VibeRails:FrontendUrl"]
+                        ?? throw new InvalidOperationException("VibeRails:FrontendUrl is not configured in appsettings.json")),
+                    sp.GetRequiredService<IRemoteAccountKeyStore>(),
+                    sp.GetRequiredService<IAppEventBus>()));
                 serviceCollection.AddHttpClient("signing-key-registration")
                     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
                 serviceCollection.AddSingleton<Services.SigningKeys.SigningKeyStore>();

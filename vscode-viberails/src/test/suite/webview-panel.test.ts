@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import * as vm from 'vm';
 import { WebviewPanelManager } from '../../webview-panel';
 
 suite('Webview HTML', () => {
@@ -31,6 +32,19 @@ suite('Webview HTML', () => {
                 assert.ok(html.includes('Vibe Rails · 导航'));
                 assert.match(html, /<meta http-equiv="Content-Security-Policy"/);
                 assert.match(html, /<script nonce="[a-f0-9]+">/);
+                const messages: unknown[] = [];
+                const globals: Record<string, unknown> = {};
+                const injection = html.match(/<script nonce="[a-f0-9]+">([\s\S]*?)<\/script>/)?.[1];
+                assert.ok(injection);
+                vm.runInNewContext(injection, {
+                    window: globals,
+                    document: { documentElement: { dataset: {} } },
+                    acquireVsCodeApi: () => ({ postMessage: (message: unknown) => messages.push(message) })
+                });
+                const openExternal = globals.__viberails_openExternal__ as (url: string) => void;
+                assert.equal(typeof openExternal, 'function');
+                openExternal('https://viberails.ai/link');
+                assert.equal(JSON.stringify(messages), JSON.stringify([{ command: 'openExternal', url: 'https://viberails.ai/link' }]));
             } finally {
                 manager.dispose();
                 fs.rmSync(directory, { recursive: true, force: true });

@@ -39,8 +39,15 @@ The extension consists of three main components plus a shared constants module:
 The dashboard and the extension talk through injected globals, not DOM structure:
 `__viberails_VSCODE__`, `__viberails_close__`, `__viberails_setTitle__`, and
 `__viberails_openFile__` (opens a path in an editor tab beside the panel — the Python
-scripts section uses it instead of its in-app Monaco editor). The dashboard
+scripts section uses it instead of its in-app Monaco editor), and `__viberails_openExternal__`
+(opens the account sign-in page in the user's browser). The dashboard
 feature-detects each one, so an older extension host degrades instead of breaking.
+
+`external-sign-in.ts` accepts only the exact `https://viberails.ai/link` URL before calling
+`vscode.env.openExternal`. Reject other schemes, hosts, paths, explicit ports, credentials,
+queries and fragments. The dashboard stays in its webview; account authentication runs in
+the external browser. Users type or paste the short code there; API keys and device secrets
+remain in the backend and never enter bridge messages. No URI callback handler is needed.
 
 ### Backend Server
 

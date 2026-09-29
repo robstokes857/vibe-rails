@@ -88,6 +88,14 @@ This mounts the production sidebar and styles with paged API fixtures. It checks
 against older sessions, Board titles, escaped metadata, narrow scrolling and remount behavior.
 It opens no application database and launches no CLI.
 
+### Focused account sign-in tests (No Backend Required)
+
+From `UITests`, run `npx playwright test --config playwright.remote-link.config.js`.
+This serves the real frontend with local API fixtures and an intercepted sign-in page. It covers
+browser popup behavior, copy code, the VS Code bridge, narrow layout, completion alongside unsaved
+settings, cancellation, and unavailable/denied/expired requests. It opens no application database
+and creates no account or API key.
+
 ### View Report
 If a test fails, you can view the detailed HTML report:
 ```powershell
