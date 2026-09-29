@@ -456,7 +456,34 @@ public sealed class BoardToolTests : IDisposable
         Assert.DoesNotContain("previews only", everything);
 
         Assert.StartsWith("FAIL: activity must be recent", BoardKeyText.Short(await _tool.GetBoardCard("PROJ-1", activity: "everything", cancellationToken: Ct)));
-        Assert.StartsWith("FAIL: before must be an ISO-8601 timestamp", BoardKeyText.Short(await _tool.GetBoardCard("PROJ-1", before: "yesterday", cancellationToken: Ct)));
+        // An id-shaped word is checked against the card's entries; anything else must be a timestamp.
+        Assert.StartsWith("FAIL: before=yesterday is not a comment or note on", BoardKeyText.Short(await _tool.GetBoardCard("PROJ-1", before: "yesterday", cancellationToken: Ct)));
+        Assert.StartsWith("FAIL: before must be an ISO-8601 timestamp", BoardKeyText.Short(await _tool.GetBoardCard("PROJ-1", before: "last week!", cancellationToken: Ct)));
+    }
+
+    // A comment pulled from viberails.ai keeps the server's id, which need not look like a local cm_/note_ id.
+    [Fact]
+    public async Task GetBoardCard_BeforeAcceptsASyncedEntrysServerId_AndADateShapedValueFallsBackToTime()
+    {
+        await _tool.CreateBoardCard("A", cancellationToken: Ct);
+        var card = (await _service.FindCardAsync(_project, "PROJ-1", Ct))!;
+        await _tool.AddBoardComment("local first", "PROJ-1", Ct);
+        await Task.Delay(5, Ct);
+        await _store.AddSyncedCommentAsync(_project, card.Id, BoardAuthor.User(), "from the web", "comment",
+            new BoardSyncStamp("Web-Entry_42", 3, DateTime.UtcNow, BoardId: card.BoardId), Ct);
+        await Task.Delay(5, Ct);
+        await _tool.AddBoardComment("local last", "PROJ-1", Ct);
+
+        var older = await _tool.GetBoardCard("PROJ-1", before: "Web-Entry_42", cancellationToken: Ct);
+        Assert.Contains("Showing activity before Web-Entry_42 (", older);
+        Assert.Contains("local first", older);
+        Assert.DoesNotContain("from the web", older);
+        Assert.DoesNotContain("local last", older);
+
+        // No entry has this id, and it reads as a date: a time cursor that hides nothing on this card.
+        var byDate = await _tool.GetBoardCard("PROJ-1", before: "2999-01-01", cancellationToken: Ct);
+        Assert.Contains("local last", byDate);
+        Assert.Contains("Showing activity before 2999-01-01T00:00:00", byDate);
     }
 
     // VB-63 review: the before= cursor is an entry id, so two entries stamped in the same instant
@@ -542,6 +569,26 @@ public sealed class BoardToolTests : IDisposable
         var all = await _tool.GetBoardNotes("PROJ-1", cancellationToken: Ct);
         Assert.Contains("ENDN0", all);
         Assert.Contains("ENDN11", all);
+    }
+
+    [Fact]
+    public async Task GetBoardCard_ListsTheNewestThirtyCommits_AndCountsTheEarlierOnes()
+    {
+        await _tool.CreateBoardCard("A", cancellationToken: Ct);
+        var card = (await _service.FindCardAsync(_project, "PROJ-1", Ct))!;
+        var snapshot = new SandboxDiffResponse([], 0);
+        for (var i = 0; i < BoardTool.MaxListedCommits + 2; i++)
+            await _store.AddCommitAsync(_project, card.Id, (0xa000000 + i).ToString("x7") + new string('0', 33), "Rob", $"Commit {i:00}",
+                new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddHours(i), snapshot, Ct);
+
+        var read = await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct);
+        var newest = read.IndexOf("Commit 31", StringComparison.Ordinal);
+        Assert.True(newest >= 0 && newest < read.IndexOf("Commit 30", StringComparison.Ordinal), "newest commit first");
+        Assert.Contains("Commit 02", read);
+        Assert.DoesNotContain("Commit 01", read);
+        Assert.DoesNotContain("Commit 00", read);
+        Assert.Contains("(+2 earlier commits; activity=all lists them)", read);
+        Assert.Contains("Commit 00", await _tool.GetBoardCard("PROJ-1", activity: "all", cancellationToken: Ct));
     }
 
     [Fact]

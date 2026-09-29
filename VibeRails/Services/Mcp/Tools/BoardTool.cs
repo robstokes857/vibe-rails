@@ -7,6 +7,7 @@ using Serilog;
 using VibeRails.DTOs;
 using VibeRails.Services.AgentTools;
 using VibeRails.Services.Board;
+using VibeRails.Services.Board.Sync;
 
 namespace VibeRails.Services.Mcp.Tools;
 
@@ -83,7 +84,7 @@ public sealed class BoardTool(
             var target = await ResolveBoardAsync(project, board, cancellationToken);
             if (target.Error is not null)
                 return target.Error;
-            return await RenderLanesAsync(service, project, target.BoardId, target.BoardName, cancellationToken);
+            return await RenderLanesAsync(service, store, project, target.BoardId, target.BoardName, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -95,10 +96,11 @@ public sealed class BoardTool(
     /// Everything list_board_columns returns, assembled from the service so the Board context
     /// estimator (VB-63) can measure exactly what an agent would read.
     /// </summary>
-    internal static async Task<string> RenderLanesAsync(IBoardService service, string project, string? boardId, string? boardName, CancellationToken cancellationToken)
+    internal static async Task<string> RenderLanesAsync(IBoardService service, IBoardStore store, string project, string? boardId, string? boardName, CancellationToken cancellationToken)
     {
         var columns = await service.GetColumnsAsync(project, cancellationToken, boardId);
-        var cards = await service.GetCardsAsync(project, cancellationToken, boardId);
+        // A count query: the list only needs how many cards each lane holds, not the cards or their live sessions.
+        var counts = await store.CountCardsByColumnAsync(project, cancellationToken, boardId);
         var automations = await service.GetLaneAutomationsByLaneAsync(project, columns.Columns.Select(c => c.Id).ToList(), cancellationToken);
         var builder = new StringBuilder();
         builder.Append("Board lanes for ").Append(project);
@@ -107,7 +109,7 @@ public sealed class BoardTool(
         var anyAutomation = false;
         foreach (var column in columns.Columns.OrderBy(c => c.Position))
         {
-            var count = cards.Cards.Count(c => c.ColumnId == column.Id);
+            var count = counts.GetValueOrDefault(column.Id);
             builder.Append("- ").Append(column.Name)
                 .Append(" (id ").Append(column.Id).Append(", ").Append(count).Append(" card").Append(count == 1 ? "" : "s");
             builder.Append(")\n");
@@ -192,9 +194,12 @@ public sealed class BoardTool(
         {
             if (!TryParseSince(since, out var sinceUtc))
                 return "FAIL: since must be an ISO-8601 timestamp such as 2026-09-16T21:50:00Z.";
-            var beforeId = LooksLikeEntryId(before) ? before!.Trim() : null;
-            DateTime? beforeUtc = null;
-            if (beforeId is null && !TryParseSince(before, out beforeUtc))
+            // A comment/note id (cm_…, note_…, or a synced entry's server id) or a timestamp. A value
+            // that could be either is an id when this card has an entry by that id, else a time.
+            var beforeText = string.IsNullOrWhiteSpace(before) ? null : before.Trim();
+            var beforeIsTime = TryParseSince(beforeText, out var beforeUtc);
+            var beforeId = BoardSyncWire.IsOpaqueId(beforeText) ? beforeText : null;
+            if (!beforeIsTime && beforeId is null)
                 return "FAIL: before must be an ISO-8601 timestamp such as 2026-09-16T21:50:00Z, or the id of a comment or note on this card (the reply names one after \"before=\").";
             if (!TryParseActivity(activity, out var allActivity))
                 return "FAIL: activity must be recent (the default) or all.";
@@ -209,10 +214,15 @@ public sealed class BoardTool(
                 // An exact cursor: the entry's own time and id, so a twin sharing its timestamp is
                 // still listed on the next page instead of falling between two time windows.
                 var cursor = detail.Comments.Concat(detail.Notes ?? []).FirstOrDefault(c => string.Equals(c.Id, beforeId, StringComparison.Ordinal));
-                if (cursor is null)
+                if (cursor is not null)
+                {
+                    beforeUtc = cursor.CreatedAt;
+                    beforeId = cursor.Id;
+                }
+                else if (beforeIsTime)
+                    beforeId = null;
+                else
                     return $"FAIL: before={beforeId} is not a comment or note on {detail.Key}. Pass the id the previous reply named, or an ISO-8601 timestamp.";
-                beforeUtc = cursor.CreatedAt;
-                beforeId = cursor.Id;
             }
             var render = await RenderCardAsync(service, store, target.Project, detail, new CardReadOptions(sinceUtc, beforeUtc, allActivity, beforeId), cancellationToken);
             return render.Text;
@@ -248,7 +258,8 @@ public sealed class BoardTool(
         var boardName = string.IsNullOrEmpty(detail.BoardId) ? null
             : (await store.GetBoardAsync(project, detail.BoardId, cancellationToken))?.Name;
         var outcomes = new Dictionary<string, (BoardSessionOutcomeRecord? Outcome, BoardCommentDto? LastComment)>(StringComparer.Ordinal);
-        foreach (var session in detail.Sessions)
+        // Only the sessions the reply lists: each outcome is a state.db read.
+        foreach (var session in ListedSessions(detail.Sessions, options, out _, out _))
         {
             var outcome = await service.FindSessionOutcomeAsync(session.Id, cancellationToken);
             var last = detail.Comments.LastOrDefault(c => string.Equals(c.Author.SessionId, session.Id, StringComparison.Ordinal));
@@ -901,9 +912,9 @@ public sealed class BoardTool(
         var noteAllowance = budgeted ? Math.Max(0, ActivityBudgetCharacters - commentsUsed) : int.MaxValue;
 
         // Linked time, not commit time: an old commit linked during this session is this session's activity.
+        // The store lists commits newest first already, so the cap below keeps the newest.
         var commitsStart = builder.Length;
         var commits = Window(card.Commits, c => c.LinkedAt, options, out var earlierCommits, out var laterCommits);
-        commits.Reverse();
         builder.Append("\nLinked commits (").Append(commits.Count).Append(HiddenSuffix(earlierCommits, laterCommits)).Append("):\n");
         if (commits.Count == 0) builder.Append("(none)\n");
         var listedCommits = options.AllActivity ? commits.Count : Math.Min(commits.Count, MaxListedCommits);
@@ -920,8 +931,9 @@ public sealed class BoardTool(
         sessions.Reverse();
         builder.Append("\nSessions (").Append(sessions.Count).Append(HiddenSuffix(earlierSessions, laterSessions)).Append("):\n");
         if (sessions.Count == 0) builder.Append("(none)\n");
-        var listedSessions = options.AllActivity ? sessions.Count : Math.Min(sessions.Count, MaxListedSessions);
-        foreach (var session in sessions.Take(listedSessions))
+        var listed = ListedSessions(card.Sessions, options, out _, out _);
+        var listedSessions = listed.Count;
+        foreach (var session in listed)
         {
             builder.Append("- ").Append(session.DisplayName).Append(" · ").Append(session.CreatedAt.ToString("u", CultureInfo.InvariantCulture));
             (BoardSessionOutcomeRecord? Outcome, BoardCommentDto? LastComment) extra = default;
@@ -1037,6 +1049,17 @@ public sealed class BoardTool(
         return used;
     }
 
+    /// <summary>
+    /// The sessions a card read lists: the activity window, newest first, capped at
+    /// <see cref="MaxListedSessions"/> unless every entry was asked for.
+    /// </summary>
+    private static List<BoardSessionDto> ListedSessions(IReadOnlyList<BoardSessionDto> sessions, CardReadOptions options, out int earlier, out int later)
+    {
+        var windowed = Window(sessions, s => s.CreatedAt, options, out earlier, out later);
+        windowed.Reverse();
+        return options.AllActivity ? windowed : windowed.Take(MaxListedSessions).ToList();
+    }
+
     private static string FormatCommentLine(BoardCommentDto comment) =>
         "- [" + comment.CreatedAt.ToString("u", CultureInfo.InvariantCulture) + "] " + comment.Author.Label + " (" + comment.Id + "): " + comment.Body + "\n";
 
@@ -1075,17 +1098,6 @@ public sealed class BoardTool(
         // Same timestamp: an exact cursor hides the cursor entry and anything sorted after it; a
         // time-only cursor hides the whole second, as documented.
         return itemId is null || cursorId is null || string.CompareOrdinal(itemId, cursorId) >= 0;
-    }
-
-    /// <summary>A comment/note id as the store mints them (<c>cmt_…</c>, <c>note_…</c>): a prefix, an underscore, hex.</summary>
-    private static bool LooksLikeEntryId(string? value)
-    {
-        var text = value?.Trim();
-        if (string.IsNullOrEmpty(text) || text.Length > 64) return false;
-        var underscore = text.IndexOf('_');
-        return underscore > 0 && underscore < text.Length - 1
-            && text[..underscore].All(char.IsAsciiLetterLower)
-            && text[(underscore + 1)..].All(char.IsAsciiHexDigitLower);
     }
 
     private static string HiddenSuffix(int earlier, int later)

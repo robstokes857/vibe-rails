@@ -131,7 +131,10 @@ serialization or tool discovery into the Native AOT path.
   The working agent (`activeSessionId`/`activeTabId`) is the first live linked session that is not
   an Automation's. A lane Automation and the CLI it spawned stay linked to the originating card but
   never count, and never block a launch, so once the launched agent's tab is gone the card returns
-  to Start work instead of opening the review terminal (VB-6Q8ZS-68 follow-up).
+  to Start work instead of opening the review terminal (VB-6Q8ZS-68 follow-up). Start work may
+  therefore launch an agent while the card's Automation is still running beside it; that is
+  intended (86527e0). The card list, card detail, activity poll and launch gate all decide what an
+  Automation's session is through `BoardService.IsAutomationSession`; change the rule there.
   Lane-triggered Automations link their full workflow recording to the originating card's
   Automations rail, directly below Sessions. Board runs always open terminal tabs; other triggers
   (including manual retries) open native terminals. Older native recordings remain visible.

@@ -650,8 +650,7 @@ public sealed class BoardSyncService(
         }
     }
 
-    private static bool IsOpaqueId(string? value) => value is { Length: > 0 and <= BoardSyncWire.MaxIdLength }
-        && char.IsAsciiLetterOrDigit(value[0]) && value.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-');
+    private static bool IsOpaqueId(string? value) => BoardSyncWire.IsOpaqueId(value);
 
     private static bool IsWireCardKey(string? value)
     {

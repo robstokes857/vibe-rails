@@ -44,6 +44,13 @@ public static class BoardSyncWire
     public const int MaxAuthorCliLength = 64;
     public const int MaxChangesBytes = 1024 * 1024;
 
+    /// <summary>
+    /// An id as the hosted wire allows it (entry, lane): 1–64 ASCII letters, digits, <c>_</c> or <c>-</c>,
+    /// starting with a letter or digit. A pulled comment or note keeps its server id in this shape.
+    /// </summary>
+    public static bool IsOpaqueId(string? value) => value is { Length: > 0 and <= MaxIdLength }
+        && char.IsAsciiLetterOrDigit(value[0]) && value.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-');
+
     /// <summary>The <c>"to"</c> value of one field in a <c>changes</c> object, or null when the field is absent.</summary>
     public static JsonElement? FieldTo(JsonElement? changes, string field)
     {

@@ -615,7 +615,16 @@ public sealed partial class BoardService(
     }
 
     private static bool IsAutomation(BoardSessionRecord session, IReadOnlySet<string>? automationIds) =>
-        session.Origin == BoardSessionRecord.AutomationOrigin || automationIds?.Contains(session.SessionId) == true;
+        IsAutomationSession(session.Origin, session.SessionId, automationIds);
+
+    /// <summary>
+    /// The working-agent rule (VB-6Q8ZS-68): a session an Automation owns (its link origin, or a session an
+    /// Automation run recorded) stays linked to the card it came from but is never the card's working agent,
+    /// and never blocks Start work, which may launch an agent beside it. The card list, card detail, activity
+    /// poll and launch gate all decide through this.
+    /// </summary>
+    internal static bool IsAutomationSession(string origin, string sessionId, IReadOnlySet<string>? automationIds) =>
+        origin == BoardSessionRecord.AutomationOrigin || automationIds?.Contains(sessionId) == true;
 
     private async Task<List<BoardSessionDto>> SessionDtosAsync(string projectPath,
         IReadOnlyList<BoardSessionRecord> sessions, IReadOnlyDictionary<string, string> live, CancellationToken cancellationToken)

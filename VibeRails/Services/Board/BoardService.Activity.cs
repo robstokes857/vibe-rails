@@ -30,8 +30,7 @@ public sealed partial class BoardService
             // Same rule as the list/detail responses: an Automation's live session blinks the robot
             // but is never the working agent, so it must not report an active session/tab.
             var liveRows = group.Where(a => a.SessionId is not null).ToList();
-            var automationRows = liveRows
-                .Where(a => a.Origin == BoardSessionRecord.AutomationOrigin || automationIds.Contains(a.SessionId!)).ToList();
+            var automationRows = liveRows.Where(a => IsAutomationSession(a.Origin, a.SessionId!, automationIds)).ToList();
             var active = liveRows.FirstOrDefault(a => !automationRows.Contains(a));
             return new BoardCardActivityResponse(group.Key, active?.SessionId,
                 active?.SessionId is { } id ? live[id] : null,

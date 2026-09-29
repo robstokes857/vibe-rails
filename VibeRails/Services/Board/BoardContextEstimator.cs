@@ -69,7 +69,7 @@ public sealed class BoardContextEstimator(
         var detail = await service.GetCardAsync(projectPath, card.Id, cancellationToken)
             ?? throw new BoardValidationException("The card was deleted while its context was being measured.");
         var render = await BoardTool.RenderCardAsync(service, store, projectPath, detail, BoardTool.CardReadOptions.Default, cancellationToken);
-        var lanes = await BoardTool.RenderLanesAsync(service, projectPath, prompt.BoardId, prompt.BoardName, cancellationToken);
+        var lanes = await BoardTool.RenderLanesAsync(service, store, projectPath, prompt.BoardId, prompt.BoardName, cancellationToken);
         var promptParts = BoardPromptComposer.Measure(prompt.Prompt, card, prompt.EnvironmentPrompt, prompt.BoardContext);
         var stats = render.Stats;
 

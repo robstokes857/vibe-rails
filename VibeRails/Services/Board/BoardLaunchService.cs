@@ -17,7 +17,8 @@ public interface IBoardLaunchService
 /// A composed launch prompt and the inputs that shaped it, so the context estimator (VB-63) can
 /// break the same prompt down without composing a second one.
 /// </summary>
-public sealed record BoardLaunchPrompt(string Prompt, string? EnvironmentPrompt, BoardContextSettings? BoardContext, string? BoardId, string? BoardName);
+public sealed record BoardLaunchPrompt(string Prompt, string? EnvironmentPrompt, BoardContextSettings? BoardContext, string? BoardId, string? BoardName,
+    BoardCardDetailRecord? Detail = null);
 
 /// <summary>
 /// Root-backend only (it needs the in-process tab host). Copies the create/start/cleanup shape of
@@ -26,9 +27,9 @@ public sealed record BoardLaunchPrompt(string Prompt, string? EnvironmentPrompt,
 /// over the environment's, so the combined TEMPLATE reaches the one PromptPlaceholderService pass
 /// unchanged — the once-only resolution invariant holds and no prompt plumbing changes.
 ///
-/// After the session is linked, the launch records how much context the card put in front of the
-/// agent (VB-63). That measurement never fails a launch: a terminal that started is reported as
-/// started, and the missing sample is a warning in the log.
+/// After the session is linked and the launch reservation released, the launch records how much
+/// context the card put in front of the agent (VB-63). That measurement never fails a launch: a
+/// terminal that started is reported as started, and the missing sample is a warning in the log.
 ///
 /// TODO(board): "Auto Launch" — an option on the card (and/or a lane) that runs this automatically
 /// when an assigned card lands in that lane. Not built yet; plan 2026-09-09.
@@ -52,15 +53,25 @@ public sealed class BoardLaunchService(
         // Card ids are globally unique in the shared database; VB numbers are project-local.
         if (!LaunchingCards.TryAdd(card.Id, 0))
             throw new BoardConflictException("An agent is already starting on this card. Wait for it to finish starting.");
+        Launched? launched;
         try
         {
             // Re-read after the reservation: fields may have changed while resolving the key.
-            return await LaunchCoreAsync(projectPath, card.Id, selectionOverride, cancellationToken, intent);
+            launched = await LaunchCoreAsync(projectPath, card.Id, selectionOverride, cancellationToken, intent);
         }
         finally { LaunchingCards.TryRemove(card.Id, out _); }
+        if (launched is null)
+            return null;
+        // Measured after the reservation is released, so the measurement never holds the gate: a second
+        // Start work is answered by the live agent it would join, not refused while this one is counted.
+        await RecordContextSampleAsync(projectPath, launched.Card, launched.Prompt, intent, launched.Response.SessionId, launched.Cli, launched.Selection);
+        return launched.Response;
     }
 
-    private async Task<LaunchBoardCardResponse?> LaunchCoreAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken, string intent)
+    /// <summary>A started launch and what its context sample needs.</summary>
+    private sealed record Launched(LaunchBoardCardResponse Response, BoardCardRecord Card, BoardLaunchPrompt Prompt, string Cli, string Selection);
+
+    private async Task<Launched?> LaunchCoreAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken, string intent)
     {
         var card = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
         if (card is null)
@@ -90,9 +101,10 @@ public sealed class BoardLaunchService(
             : parsed.Cli;
         var composed = await ComposePromptAsync(store, projectPath, card, assigneeLabel, environment?.CustomPrompt, intent, cancellationToken);
         var prompt = composed.Prompt;
-        var title = $"{card.DisplayId ?? card.Key} · {Truncate(card.Title, 60)}";
+        var title = $"{card.DisplayId} · {Truncate(card.Title, 60)}";
 
-        var detail = await store.GetCardDetailAsync(projectPath, card.Id, cancellationToken);
+        // The detail the prompt was composed from, rather than a second read of the same card.
+        var detail = composed.Detail;
         var tabs = await tabHost.ListTabsAsync(cancellationToken);
         // Only a working agent blocks another launch. A lane Automation (and the CLI it spawned) is
         // linked to the card it came from but is not the card's agent, so a review still running
@@ -101,7 +113,7 @@ public sealed class BoardLaunchService(
         var automationIds = await store.GetAutomationSessionIdsAsync(projectPath,
             linkedSessions.Select(session => session.SessionId).ToList(), cancellationToken);
         var workingSessionIds = linkedSessions
-            .Where(session => session.Origin != BoardSessionRecord.AutomationOrigin && !automationIds.Contains(session.SessionId))
+            .Where(session => !BoardService.IsAutomationSession(session.Origin, session.SessionId, automationIds))
             .Select(session => session.SessionId)
             .ToHashSet(StringComparer.Ordinal);
         if (tabs.Any(tab => tab.HasActiveSession && tab.SessionId is not null && workingSessionIds.Contains(tab.SessionId)))
@@ -145,8 +157,8 @@ public sealed class BoardLaunchService(
                 Log.Warning("[Board] Tab {TabId} started for {Card} without a session id; the card will not show it", tab.TabId, card.Key);
             }
 
-            await RecordContextSampleAsync(projectPath, card, composed, intent, session.SessionId, parsed.Cli, parsed.Key);
-            return new LaunchBoardCardResponse(tab.TabId, session.SessionId, session.Cli, session.WorkingDirectory, card.Id, card.Key, parsed.Key);
+            return new Launched(new LaunchBoardCardResponse(tab.TabId, session.SessionId, session.Cli, session.WorkingDirectory, card.Id, card.Key, parsed.Key),
+                card, composed, parsed.Cli, parsed.Key);
         }
         catch
         {
@@ -189,7 +201,7 @@ public sealed class BoardLaunchService(
             orderedColumns.Select(c => (IReadOnlyList<string>)laneAutomations[c.Id].Select(a => a.Name).ToList()).ToList(),
             detail is null ? null : new BoardPromptComposer.CardActivity(detail.Comments.Count, detail.Notes.Count, detail.Sessions.Count));
         var prompt = BoardPromptComposer.Compose(card, column?.Name ?? "(no lane)", assigneeLabel, environmentPrompt, context, intent);
-        return new BoardLaunchPrompt(prompt, environmentPrompt, boardContext?.Context, boardId, boardName);
+        return new BoardLaunchPrompt(prompt, environmentPrompt, boardContext?.Context, boardId, boardName, detail);
     }
 
     /// <summary>

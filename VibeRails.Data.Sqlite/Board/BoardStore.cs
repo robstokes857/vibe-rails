@@ -191,6 +191,28 @@ public sealed partial class BoardStore : IBoardStore
         return counts;
     }
 
+    public async Task<IReadOnlyDictionary<string, int>> CountCardsByColumnAsync(string projectPath, CancellationToken cancellationToken = default, string? boardId = null)
+    {
+        var project = NormalizeProjectPath(projectPath);
+        await using var connection = await OpenAsync(cancellationToken);
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        var board = await ResolveBoardIdAsync(connection, null, project, boardId, cancellationToken);
+        if (board is null)
+            return counts;
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT c.ColumnId, COUNT(*) FROM BoardCards c JOIN BoardColumns k ON k.Id = c.ColumnId
+            WHERE c.ProjectPath = $project{ProjectPathCollation} AND k.BoardId = $board AND c.DeletedUTC IS NULL
+            GROUP BY c.ColumnId;
+            """;
+        command.Parameters.AddWithValue("$project", project);
+        command.Parameters.AddWithValue("$board", board);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            counts[reader.GetString(0)] = reader.GetInt32(1);
+        return counts;
+    }
+
     public async Task<IReadOnlyList<BoardColumnRecord>> GetAllColumnsAsync(string projectPath, CancellationToken cancellationToken = default)
     {
         var project = NormalizeProjectPath(projectPath);
