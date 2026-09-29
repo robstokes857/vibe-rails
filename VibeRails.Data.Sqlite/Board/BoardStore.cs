@@ -62,20 +62,24 @@ public sealed partial class BoardStore : IBoardStore
         return await ReadBoardAsync(connection, null, project, boardId, cancellationToken);
     }
 
-    public async Task<BoardRecord> CreateBoardAsync(string projectPath, string name, CancellationToken cancellationToken = default)
+    public Task<BoardRecord> CreateBoardAsync(string projectPath, string name, CancellationToken cancellationToken = default) =>
+        CreateBoardAsync(projectPath, name, null, cancellationToken);
+
+    public async Task<BoardRecord> CreateBoardAsync(string projectPath, string name, string? displayPrefix, CancellationToken cancellationToken = default)
     {
         var project = NormalizeProjectPath(projectPath);
+        var prefix = string.IsNullOrWhiteSpace(displayPrefix) ? null : BoardDisplayIds.NormalizePrefix(displayPrefix);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
         var position = (int)await ScalarLongAsync(connection, transaction,
             $"SELECT COUNT(*) FROM Boards WHERE ProjectPath = $project{ProjectPathCollation}",
             ("$project", project), cancellationToken);
-        var board = await InsertBoardWithDefaultLanesAsync(connection, transaction, project, name, position, cancellationToken);
+        var board = await InsertBoardWithDefaultLanesAsync(connection, transaction, project, name, position, cancellationToken, prefix);
         await transaction.CommitAsync(cancellationToken);
         return board;
     }
 
-    public async Task<BoardRecord?> RenameBoardAsync(string projectPath, string boardId, string name, CancellationToken cancellationToken = default, string? displayPrefix = null)
+    public async Task<BoardRecord?> RenameBoardAsync(string projectPath, string boardId, string? name, string? displayPrefix, CancellationToken cancellationToken = default)
     {
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
@@ -83,7 +87,11 @@ public sealed partial class BoardStore : IBoardStore
         var existing = await ReadBoardAsync(connection, transaction, project, boardId, cancellationToken);
         if (existing is null)
             return null;
-        var updated = existing with { Name = name, UpdatedUtc = DateTime.UtcNow, DisplayPrefix = displayPrefix is null ? existing.DisplayPrefix : BoardDisplayIds.NormalizePrefix(displayPrefix) };
+        // Null keeps a value; an empty prefix returns future cards to the repository default.
+        var prefix = displayPrefix is null ? existing.DisplayPrefix
+            : displayPrefix.Trim().Length == 0 ? null
+            : BoardDisplayIds.NormalizePrefix(displayPrefix);
+        var updated = existing with { Name = name ?? existing.Name, UpdatedUtc = DateTime.UtcNow, DisplayPrefix = prefix };
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
@@ -404,10 +412,42 @@ public sealed partial class BoardStore : IBoardStore
     private sealed record SyncedCardIdentity(string CardId, string CardKey, int Number);
 
     /// <summary>
+    /// How far above the project's high-water mark a pulled web card's number may move it. The hosted
+    /// board numbers a web card one above the highest number it has seen, so a real gap is the cards
+    /// created on the web since the last sync. A larger one (a corrupt or hostile key) would jump local
+    /// numbering, or exhaust it at <see cref="int.MaxValue"/>.
+    /// </summary>
+    internal const int MaxAdoptedCardNumberGap = 10_000;
+
+    /// <summary>
+    /// Allocates the project's next card number inside the caller's write transaction. The high-water
+    /// mark lives apart from card rows, so deleting even the last card cannot make an old key available
+    /// again, and allocation and insertion share the transaction across dashboard and MCP processes.
+    /// A web-minted <paramref name="seed"/> above the mark and within <see cref="MaxAdoptedCardNumberGap"/>
+    /// is adopted, so the two sides keep numbering in step; any other seed takes the next local number.
+    /// </summary>
+    private static async Task<int> AllocateCardNumberAsync(SqliteConnection connection, SqliteTransaction transaction,
+        string project, int seed, CancellationToken cancellationToken)
+    {
+        var number = await ScalarLongAsync(connection, transaction, """
+            INSERT INTO BoardCardSequences (ProjectPath, LastNumber)
+                VALUES ($project, CASE WHEN $seed BETWEEN 1 AND $gap THEN $seed ELSE 1 END)
+            ON CONFLICT(ProjectPath) DO UPDATE SET LastNumber =
+                CASE WHEN $seed > LastNumber AND $seed - LastNumber <= $gap THEN $seed ELSE LastNumber + 1 END
+            RETURNING LastNumber;
+            """, ("$project", project), cancellationToken, ("$seed", seed), ("$gap", MaxAdoptedCardNumberGap));
+        // The rollback leaves the mark where it was; the message replaces an OverflowException.
+        return number <= int.MaxValue
+            ? (int)number
+            : throw new BoardValidationException("This project has used every card number, so a new card cannot be numbered.");
+    }
+
+    /// <summary>
     /// Allocates the key and inserts the card, and its created log entry, inside the caller's write
     /// transaction. A <paramref name="synced"/> identity comes from a pulled web card: the number
-    /// becomes the web number when that is above the project's high-water mark, else the next local
-    /// number, and the stored key is the web one either way.
+    /// becomes the web number when that is just above the project's high-water mark (see
+    /// <see cref="AllocateCardNumberAsync"/>), else the next local number, and the stored key is the
+    /// web one either way.
     /// </summary>
     private async Task<BoardCardRecord> InsertCardAsync(
         SqliteConnection connection, SqliteTransaction transaction, string project, NewBoardCard card, BoardAuthor author, CancellationToken cancellationToken,
@@ -432,27 +472,21 @@ public sealed partial class BoardStore : IBoardStore
         // The project's first card fixes its key prefix, in this same transaction, before the
         // number exists: a prefix chosen while cards already exist would have to be VB.
         var prefix = await EnsureProjectKeyPrefixAsync(connection, transaction, project, cancellationToken);
-        // Keep the high-water mark independently of card rows, so deleting even
-        // the last card cannot make an old key available again. Allocation and
-        // insertion share the transaction across dashboard and MCP processes.
-        // A web-minted number above the mark is adopted, so the two sides keep numbering in step;
-        // one at or below it would collide, so the card takes the next local number instead.
-        var number = checked((int)await ScalarLongAsync(connection, transaction,
-            """
-            INSERT INTO BoardCardSequences (ProjectPath, LastNumber) VALUES ($project, $seed)
-            ON CONFLICT(ProjectPath) DO UPDATE SET LastNumber = MAX(LastNumber + 1, $seed)
-            RETURNING LastNumber;
-            """,
-            ("$project", project), cancellationToken, ("$seed", synced?.Number ?? 1)));
-        const int position = 0;
         var id = synced?.CardId ?? NewId("card");
+        var number = await AllocateCardNumberAsync(connection, transaction, project, synced?.Number ?? 0, cancellationToken);
+        // A pulled card keeps the number its web key carries. A local key skips a number whose short
+        // form a label (or an imported key) already spells, so no label shadows a key minted after it.
+        while (synced is null && await ShortKeyClaimedAsync(connection, transaction, project, prefix, number, id, cancellationToken))
+            number = await AllocateCardNumberAsync(connection, transaction, project, 0, cancellationToken);
+        const int position = 0;
         // The stored key cannot be re-guessed from the number alone; the unique index turns the
         // (astronomically unlikely) collision into a failed write rather than two cards on one key.
         var cardKey = synced?.CardKey ?? BoardKeys.NewStoredKey(prefix, number);
         var now = stamp?.CreatedUtc ?? DateTime.UtcNow;
+        var keyNumber = synced?.Number ?? number;
         var displayId = card.DisplayId is not null || synced is not null
-            ? await ResolveDisplayIdAsync(connection, transaction, project, column.BoardId, id, card.DisplayId ?? cardKey, synced is not null, cancellationToken)
-            : await AllocateDisplayIdAsync(connection, transaction, project, column.BoardId, id, cancellationToken);
+            ? await ResolveDisplayIdAsync(connection, transaction, project, column.BoardId, id, card.DisplayId ?? cardKey, synced is not null, keyNumber, cancellationToken)
+            : await AllocateDisplayIdAsync(connection, transaction, project, column.BoardId, id, cancellationToken, keyNumber);
 
         await using (var insert = connection.CreateCommand())
         {
@@ -554,7 +588,8 @@ public sealed partial class BoardStore : IBoardStore
             throw new BoardValidationException($"Description is too long (max {BoardCardLimits.MaxDescriptionLength} characters).");
 
         var displayId = patch.DisplayId is null ? existing.DisplayId
-            : await ResolveDisplayIdAsync(connection, transaction, project, boardId, existing.Id, patch.DisplayId, stamp is not null, cancellationToken);
+            : await ResolveDisplayIdAsync(connection, transaction, project, boardId, existing.Id, patch.DisplayId, stamp is not null,
+                ParseKeyNumber(existing.Key), cancellationToken);
         var updated = existing with
         {
             StoredDisplayId = displayId,
@@ -1261,23 +1296,17 @@ public sealed partial class BoardStore : IBoardStore
         await using (var exact = await command.ExecuteReaderAsync(cancellationToken))
             if (await exact.ReadAsync(cancellationToken)) return ReadCard(exact);
         command.Parameters.Clear();
-        if (BoardKeys.TryParseStored(idOrKey, out var storedKey))
-        {
-            command.CommandText = CardSelectSql + $" WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.CardKey = $key{live} LIMIT 1;";
-            command.Parameters.AddWithValue("$key", storedKey);
-        }
-        else if (BoardKeys.TryParse(idOrKey, out var prefix, out var number))
+        // A full stored key (PREFIX-RRRRR-n) had its only chance in the exact match above.
+        if (BoardKeys.TryParseStored(idOrKey, out _))
+            return null;
+        if (BoardKeys.TryParse(idOrKey, out var prefix, out var number))
         {
             // The project's own prefix, or the VB an older binary shows for the same number. Another
             // project's prefix is not found rather than silently resolved to this project's number.
             // A stored-key card is still found by its number: PREFIX-n is the short form of PREFIX-RRRRR-n.
             // The exact legacy row (CardKey NULL) sorts first: PREFIX-n is the only key it has.
             command.CommandText = CardSelectSql + $"""
-                 WHERE c.ProjectPath = $project{ProjectPathCollation} AND (
-                   (c.CardKey IS NULL AND c.Number = $number AND ($prefix = '{BoardKeys.LegacyPrefix}' OR $prefix = {CardPrefixSql}))
-                   OR c.CardKey = $short
-                   OR c.CardKey GLOB ($prefix || '-?????-' || $number)
-                   OR ($prefix = '{BoardKeys.LegacyPrefix}' AND c.CardKey GLOB ({CardPrefixSql} || '-?????-' || $number)))
+                 WHERE c.ProjectPath = $project{ProjectPathCollation} AND {ShortKeyMatchSql}
                    {live} ORDER BY (c.CardKey IS NULL) DESC LIMIT 2;
                 """;
             command.Parameters.AddWithValue("$number", number);
@@ -1410,20 +1439,21 @@ public sealed partial class BoardStore : IBoardStore
 
     // ------------------------------------------------------------------ writers / helpers
 
-    private static async Task<BoardRecord> InsertBoardWithDefaultLanesAsync(SqliteConnection connection, SqliteTransaction transaction, string project, string name, int position, CancellationToken cancellationToken)
+    private static async Task<BoardRecord> InsertBoardWithDefaultLanesAsync(SqliteConnection connection, SqliteTransaction transaction, string project, string name, int position, CancellationToken cancellationToken, string? displayPrefix = null)
     {
         var now = DateTime.UtcNow;
-        var board = new BoardRecord(NewId("brd"), project, name, position, now, now);
+        var board = new BoardRecord(NewId("brd"), project, name, position, now, now, displayPrefix);
         await using (var insert = connection.CreateCommand())
         {
             insert.Transaction = transaction;
             insert.CommandText = """
-                INSERT INTO Boards (Id, ProjectPath, Name, Position, CreatedUTC, UpdatedUTC)
-                VALUES ($id, $project, $name, $position, $created, $updated);
+                INSERT INTO Boards (Id, ProjectPath, Name, Position, CreatedUTC, UpdatedUTC, DisplayPrefix)
+                VALUES ($id, $project, $name, $position, $created, $updated, $prefix);
                 """;
             insert.Parameters.AddWithValue("$id", board.Id);
             insert.Parameters.AddWithValue("$project", project);
             insert.Parameters.AddWithValue("$name", name);
+            insert.Parameters.AddWithValue("$prefix", (object?)displayPrefix ?? DBNull.Value);
             insert.Parameters.AddWithValue("$position", position);
             insert.Parameters.AddWithValue("$created", ToDb(now));
             insert.Parameters.AddWithValue("$updated", ToDb(now));
@@ -1665,6 +1695,10 @@ public sealed partial class BoardStore : IBoardStore
         SqliteMigrationRunner.Apply(connection, "board", 19, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, ContextSamplesSchemaSql));
         SqliteMigrationRunner.Apply(connection, "board", 20, MigrationKind.Additive, ApplyDisplayIdsMigration);
+        // board/21: pulled sync entries this version cannot apply, recorded so the cursor moves on and
+        // the status view counts them (BoardStore.Sync.cs). Additive; an older binary ignores the table.
+        SqliteMigrationRunner.Apply(connection, "board", 21, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, SkippedEntriesSchemaSql));
         ReconcileDerivedRows(connection);
     }
 

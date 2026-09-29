@@ -21,7 +21,9 @@ public sealed record BoardSyncStatus(
     string? LastError,
     bool Configured,
     int Rejected = 0,
-    IReadOnlyList<BoardSyncRejectedEntry>? RejectedEntries = null);
+    IReadOnlyList<BoardSyncRejectedEntry>? RejectedEntries = null,
+    int Skipped = 0,
+    IReadOnlyList<BoardSyncSkippedEntry>? SkippedEntries = null);
 
 public interface IBoardSyncService
 {
@@ -204,6 +206,11 @@ public sealed class BoardSyncService(
     {
         var board = await store.GetBoardAsync(link.ProjectPath, link.BoardId, cancellationToken)
             ?? throw new BoardValidationException("The board no longer exists.");
+        // A card an older binary created since publishing has no created entry, so without a baseline
+        // nothing about it (its comments included) would ever leave the queue.
+        var baseline = await store.WriteSyncBaselineAsync(link.ProjectPath, link.BoardId, cancellationToken);
+        if (baseline > 0)
+            featureLog.Write(FeatureName, "baseline", $"{baseline} card(s) without a created entry given a baseline entry.", link.BoardId, link.RemoteBoardId, "ok");
         var layout = await ReadLayoutAsync(link.ProjectPath, board, cancellationToken);
         var lastKnownSequence = Math.Max(link.Cursor, await store.GetMaxAcknowledgedSequenceAsync(link.BoardId, cancellationToken));
         var pushed = 0;
@@ -280,6 +287,7 @@ public sealed class BoardSyncService(
     private async Task<BoardSyncLinkRecord> PullAsync(BoardSyncLinkRecord link, CancellationToken cancellationToken)
     {
         var applied = 0;
+        var skipped = 0;
         for (var page = 0; page < MaxPullPagesPerSync; page++)
         {
             var response = await client.PullAsync(link.RemoteBoardId, link.Cursor, PullPageSize, cancellationToken, link.DestinationKey);
@@ -290,8 +298,25 @@ public sealed class BoardSyncService(
             {
                 // Own pushed entries come back too; they, and anything applied by an earlier
                 // interrupted pass, already exist under their id.
-                if (!await store.HasLogEntryAsync(entry.Id, cancellationToken) && await ApplyAsync(link, columns, entry, cancellationToken))
-                    applied++;
+                if (!await store.HasLogEntryAsync(entry.Id, cancellationToken))
+                {
+                    try
+                    {
+                        if (await ApplyAsync(link, columns, entry, cancellationToken))
+                            applied++;
+                    }
+                    catch (BoardValidationException ex)
+                    {
+                        // Permanent: no retry makes this version able to apply the entry, and waiting
+                        // on it would hold back everything after it. It is recorded, logged and counted
+                        // in the status view. Transient failures (a busy database) still throw and retry.
+                        await store.RecordSkippedSyncEntryAsync(link.BoardId,
+                            new BoardSyncSkippedEntry(entry.Id, entry.Seq, entry.CardKey, SkippedKind(entry.Kind), Trim(ex.Message)), cancellationToken);
+                        featureLog.Write(FeatureName, "skip", $"Skipped remote entry {entry.Id} ({SkippedKind(entry.Kind)} on {entry.CardKey}): {Trim(ex.Message)}",
+                            link.BoardId, link.RemoteBoardId, "skipped", LogLevel.Warning);
+                        skipped++;
+                    }
+                }
                 link = link with { Cursor = entry.Seq };
             }
             link = await store.SaveSyncLinkAsync(link, cancellationToken) ?? link;
@@ -300,6 +325,8 @@ public sealed class BoardSyncService(
         }
         if (applied > 0)
             featureLog.Write(FeatureName, "pull", $"Applied {applied} web entr{(applied == 1 ? "y" : "ies")}.", link.BoardId, link.RemoteBoardId, "ok");
+        if (skipped > 0)
+            featureLog.Write(FeatureName, "pull", $"Skipped {skipped} web entr{(skipped == 1 ? "y" : "ies")} this version cannot apply.", link.BoardId, link.RemoteBoardId, "skipped", LogLevel.Warning);
         return link;
     }
 
@@ -310,23 +337,34 @@ public sealed class BoardSyncService(
             || (response.HasMore && response.Entries.Count == 0))
             throw new BoardValidationException(message);
         // Check the entire page before applying any of it, including entries already held locally.
+        // Sequences only rise. A gap (a sequence the server no longer serves) is passed over: requiring
+        // cursor + 1 would stop every later tick on it for good.
         foreach (var entry in response.Entries)
         {
-            if (entry is null || cursor == long.MaxValue || entry.Seq != cursor + 1 || entry.Seq > response.LastSeq)
+            if (entry is null || entry.Seq <= cursor || entry.Seq > response.LastSeq)
                 throw new BoardValidationException(message);
-            ValidatePulledEntry(entry);
+            ValidatePulledEntryShape(entry);
             cursor = entry.Seq;
         }
-        if (response.HasMore != (cursor < response.LastSeq))
+        // More can follow only a page that stopped short of the advertised end; a final page may stop
+        // short of it too, when the newest sequences are gaps.
+        if (response.HasMore && cursor >= response.LastSeq)
             throw new BoardValidationException(message);
     }
 
+    /// <summary>A bounded label for an entry kind this version may not know, for the skipped-entry record.</summary>
+    private static string SkippedKind(string? kind) =>
+        IsOpaqueId(kind) && kind!.Length <= 32 ? kind : "unknown";
+
     /// <summary>
-    /// Applies and retains one unseen entry. Invalid or unsupported events stop the cursor;
-    /// losing field edits are retained by the store without overwriting later local changes.
+    /// Applies and retains one unseen entry. A <see cref="BoardValidationException"/> means this
+    /// version can never apply it (unsupported kind or value, conflicting identity, a card of another
+    /// board or one that never reached this machine): the pull records and passes it. Losing field
+    /// edits are retained by the store without overwriting later local changes.
     /// </summary>
     private async Task<bool> ApplyAsync(BoardSyncLinkRecord link, IReadOnlyList<BoardColumnRecord> columns, BoardSyncPulledEntryWire entry, CancellationToken cancellationToken)
     {
+        ValidatePulledEntryContent(entry);
         var author = ToAuthor(entry.Author);
         var stamp = new BoardSyncStamp(entry.Id, entry.Seq, entry.CreatedUtc, entry.Body, entry.Changes?.GetRawText(), link.BoardId);
         bool applied;
@@ -362,10 +400,12 @@ public sealed class BoardSyncService(
                 }
 
                 default:
-                    throw new BoardValidationException("This version cannot apply remote entry kind: " + entry.Kind);
+                    throw new BoardValidationException("This version cannot apply remote entry kind: " + SkippedKind(entry.Kind));
             }
+        // Entries apply in server order, so a card's creation came first: a card still missing now
+        // was never created here (its creation was skipped or belongs to another project).
         if (!applied)
-            throw new BoardValidationException("A remote entry refers to a missing local card; sync will retry without advancing past it.");
+            throw new BoardValidationException("The remote entry refers to a card this machine does not have.");
         return true;
     }
 
@@ -540,7 +580,7 @@ public sealed class BoardSyncService(
     private static string? TryString(JsonElement? changes, string field, Func<string?, string?> normalize) =>
         BoardSyncWire.FieldTo(changes, field) is { } to ? TryNormalize(to, normalize) : null;
 
-    /// <summary>Invalid remote values stop the cursor so they cannot silently disappear.</summary>
+    /// <summary>Content validation has already refused invalid values; the pull counts those entries as skipped, never silently.</summary>
     private static string? TryNormalize(JsonElement to, Func<string?, string?> normalize)
     {
         if (to.ValueKind != JsonValueKind.String)
@@ -548,7 +588,11 @@ public sealed class BoardSyncService(
         return normalize(to.GetString());
     }
 
-    private static void ValidatePulledEntry(BoardSyncPulledEntryWire entry)
+    /// <summary>
+    /// The page-level checks: identity, author and size bounds. A failure here is a malformed server
+    /// response, so the whole page is refused and retried rather than any of it applied.
+    /// </summary>
+    private static void ValidatePulledEntryShape(BoardSyncPulledEntryWire entry)
     {
         if (!IsOpaqueId(entry.Id) || entry.CardId is null
             || entry.CardId.Length != 17 || !entry.CardId.StartsWith("card_", StringComparison.Ordinal)
@@ -561,14 +605,22 @@ public sealed class BoardSyncService(
             || entry.Body is null || entry.Body.Length > (entry.Kind is BoardSyncWire.KindComment or BoardSyncWire.KindNote
                 ? BoardService.MaxCommentLength : BoardSyncWire.MaxOtherBodyLength))
             throw new BoardValidationException("The server returned an invalid entry identity or body.");
+        if (entry.Changes is { } raw && Encoding.UTF8.GetByteCount(raw.GetRawText()) > BoardSyncWire.MaxChangesBytes)
+            throw new BoardValidationException("The remote field changes exceed the sync size limit.");
+    }
+
+    /// <summary>
+    /// What this version can apply: a known kind, and field values it accepts. A failure is permanent
+    /// for this version (a kind or value added after it), so the pull records the entry and passes it.
+    /// </summary>
+    private static void ValidatePulledEntryContent(BoardSyncPulledEntryWire entry)
+    {
         if (entry.Kind is not (BoardSyncWire.KindCreated or BoardSyncWire.KindChange or BoardSyncWire.KindDeleted
             or BoardSyncWire.KindComment or BoardSyncWire.KindNote))
-            throw new BoardValidationException("This version cannot apply the remote entry kind.");
+            throw new BoardValidationException("This version cannot apply remote entry kind: " + SkippedKind(entry.Kind));
         if (entry.Kind is not (BoardSyncWire.KindCreated or BoardSyncWire.KindChange)) return;
         if (entry.Changes is not { ValueKind: JsonValueKind.Object } changes)
             throw new BoardValidationException("A remote field change is missing its values.");
-        if (Encoding.UTF8.GetByteCount(changes.GetRawText()) > BoardSyncWire.MaxChangesBytes)
-            throw new BoardValidationException("The remote field changes exceed the sync size limit.");
         if (entry.Kind == BoardSyncWire.KindCreated
             && (!changes.TryGetProperty(BoardSyncWire.FieldTitle, out _) || !changes.TryGetProperty(BoardSyncWire.FieldLane, out _)))
             throw new BoardValidationException("A remote creation requires title and lane changes.");
@@ -614,6 +666,8 @@ public sealed class BoardSyncService(
         var unsent = link is null ? 0 : await store.CountUnsentLogEntriesAsync(boardId, cancellationToken);
         var rejected = link is null ? 0 : await store.CountRejectedLogEntriesAsync(boardId, cancellationToken);
         var rejectedEntries = rejected == 0 ? [] : await store.GetRejectedLogEntriesAsync(boardId, 50, cancellationToken);
+        var skipped = link is null ? 0 : await store.CountSkippedSyncEntriesAsync(boardId, cancellationToken);
+        var skippedEntries = skipped == 0 ? [] : await store.GetSkippedSyncEntriesAsync(boardId, 50, cancellationToken);
         return new BoardSyncStatus(
             boardId,
             Published: link is not null,
@@ -626,7 +680,9 @@ public sealed class BoardSyncService(
             link?.LastError,
             client.IsConfigured,
             rejected,
-            rejectedEntries);
+            rejectedEntries,
+            skipped,
+            skippedEntries);
     }
 
     private static string Trim(string value) => value.Length <= MaxErrorLength ? value : value[..MaxErrorLength];

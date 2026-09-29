@@ -14,10 +14,12 @@ public sealed class BoardSyncServiceTests : IDisposable
     private readonly BoardSyncService service;
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 
+    private readonly string cs;
+
     public BoardSyncServiceTests()
     {
         Directory.CreateDirectory(root);
-        var cs = $"Data Source={Path.Combine(root, "board.db")};Pooling=False";
+        cs = $"Data Source={Path.Combine(root, "board.db")};Pooling=False";
         store = new BoardStore(cs, cs);
         service = new(store, client, new BoardSyncLock(Path.Combine(root, "sync.lock")), NullFeatureLog.Instance);
     }
@@ -269,30 +271,66 @@ public sealed class BoardSyncServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task EmptyPageDoesNotSkipUnseenEntries_AndUnknownKindsStopTheCursor()
+    public async Task EmptyPageDoesNotSkipToTheAdvertisedSequence_AndUnknownKindsArePassedOverAndCounted()
     {
         var card = await Card();
         await service.SetPublishedAsync(root, card.BoardId, true, Ct);
         client.AdvertisedLastSeq = 99;
         var empty = await service.SyncNowAsync(root, card.BoardId, Ct);
-        Assert.NotNull(empty!.LastError);
+        Assert.Null(empty!.LastError);
         Assert.Equal(1, empty.Cursor);
         client.AdvertisedLastSeq = null;
+        client.Web(card, "restored", "Declared but not applied by this version", null);
         client.Web(card, "future_kind", "Unsupported", null);
+        client.Web(card, "comment", "After the unsupported entries", null);
         var status = await service.SyncNowAsync(root, card.BoardId, Ct);
-        Assert.NotNull(status!.LastError);
-        Assert.Equal(1, status.Cursor);
+        Assert.Null(status!.LastError);
+        Assert.Equal(4, status.Cursor);
+        Assert.Equal("After the unsupported entries", Assert.Single((await store.GetCardDetailAsync(root, card.Id, Ct))!.Comments).Body);
+        Assert.Equal(2, status.Skipped);
+        Assert.Equal(["future_kind", "restored"], status.SkippedEntries!.Select(e => e.Kind));
+        Assert.All(status.SkippedEntries!, e => Assert.Contains("cannot apply remote entry kind", e.Reason));
+        Assert.Equal(client.Entries[2].Id, status.SkippedEntries![0].EntryId);
+        Assert.Equal(card.Key, status.SkippedEntries![0].CardKey);
+
+        // A skipped entry is recorded once and never retried at the same cursor.
+        var calls = client.PullAfters.Count;
+        var again = await service.SyncNowAsync(root, card.BoardId, Ct);
+        Assert.Equal(4, Assert.Single(client.PullAfters.Skip(calls)));
+        Assert.Equal(2, again!.Skipped);
     }
 
     [Theory]
     [InlineData("first-gap")]
     [InlineData("later-gap")]
+    [InlineData("missing-tail")]
+    public async Task SequenceGapsArePassedOverInsteadOfStoppingEveryLaterTick(string gap)
+    {
+        var card = await Card();
+        await service.SetPublishedAsync(root, card.BoardId, true, Ct);
+        client.Web(card, "change", "First", """{"title":{"to":"First"}}""");
+        client.Web(card, "change", "Second", """{"title":{"to":"Second"}}""");
+        client.Web(card, "change", "Third", """{"title":{"to":"Third"}}""");
+        // The server no longer serves one sequence: the first after the cursor, one in the middle, or the newest.
+        var missing = gap switch { "first-gap" => 2, "later-gap" => 3, "missing-tail" => 4, _ => throw new InvalidOperationException() };
+        client.Entries.RemoveAll(e => e.Seq == missing);
+        client.AdvertisedLastSeq = 4;
+        var status = await service.SyncNowAsync(root, card.BoardId, Ct);
+        Assert.Null(status!.LastError);
+        Assert.Equal(missing == 4 ? 3 : 4, status.Cursor);
+        Assert.Equal(missing == 4 ? "Second" : "Third", (await store.FindCardAsync(root, card.Id, Ct))!.Title);
+        Assert.Equal(0, status.Skipped);
+        var again = await service.SyncNowAsync(root, card.BoardId, Ct);
+        Assert.Null(again!.LastError);
+        Assert.Equal(status.Cursor, again.Cursor);
+    }
+
+    [Theory]
     [InlineData("beyond-snapshot")]
     [InlineData("gap-beyond-snapshot")]
     [InlineData("duplicate")]
     [InlineData("out-of-order")]
     [InlineData("regressed-snapshot")]
-    [InlineData("missing-tail")]
     [InlineData("false-has-more")]
     [InlineData("empty-has-more")]
     [InlineData("null-entry")]
@@ -304,14 +342,11 @@ public sealed class BoardSyncServiceTests : IDisposable
         client.Web(card, "change", "Second", """{"title":{"to":"Second"}}""");
         client.TransformPull = response => invalid switch
         {
-            "first-gap" => response with { Entries = [response.Entries[1]] },
-            "later-gap" => response with { Entries = [response.Entries[0], response.Entries[1] with { Seq = 4 }], LastSeq = 4 },
             "beyond-snapshot" => response with { LastSeq = 2 },
             "gap-beyond-snapshot" => response with { Entries = [response.Entries[0] with { Seq = 100 }], LastSeq = 2 },
             "duplicate" => response with { Entries = [response.Entries[0], response.Entries[1] with { Seq = 2 }] },
             "out-of-order" => response with { Entries = [response.Entries[1], response.Entries[0]] },
             "regressed-snapshot" => response with { Entries = [], LastSeq = 0 },
-            "missing-tail" => response with { LastSeq = 4 },
             "false-has-more" => response with { HasMore = true },
             "empty-has-more" => response with { Entries = [], HasMore = true },
             "null-entry" => response with { Entries = [null!] },
@@ -337,8 +372,9 @@ public sealed class BoardSyncServiceTests : IDisposable
         await service.SetPublishedAsync(root, card.BoardId, true, Ct);
         for (var index = 0; index < 20; index++)
             client.Web(card, "comment", "Web " + index, null);
-        client.Web(card, "future_kind", "Unsupported", null);
-        client.Web(card, "comment", "After the unsupported entry", null);
+        client.Web(card, "comment", "Malformed", null);
+        client.Entries[^1] = client.Entries[^1] with { Author = client.Entries[^1].Author with { Kind = "unknown" } };
+        client.Web(card, "comment", "After the malformed entry", null);
 
         // Page one (sequences 2..21) applies and persists its cursor; page two fails validation.
         var status = await service.SyncNowAsync(root, card.BoardId, Ct);
@@ -409,8 +445,9 @@ public sealed class BoardSyncServiceTests : IDisposable
         var entry = client.Entries[^1] with { CardId = "card_000000000099", CardKey = "VB-ABCDE-99" };
         client.Entries[^1] = entry;
         var status = await service.SyncNowAsync(root, card.BoardId, Ct);
-        Assert.Contains("requires title and lane", status!.LastError);
-        Assert.Equal(1, status.Cursor);
+        Assert.Null(status!.LastError);
+        Assert.Equal(2, status.Cursor);
+        Assert.Contains("requires title and lane", Assert.Single(status.SkippedEntries!).Reason);
         Assert.Null(await store.FindCardAsync(root, entry.CardId, Ct));
         Assert.False(await store.HasLogEntryAsync(entry.Id, Ct));
     }
@@ -443,8 +480,10 @@ public sealed class BoardSyncServiceTests : IDisposable
         var entry = client.Entries[^1];
         if (kind == "created") client.Entries[^1] = entry = entry with { CardId = "card_000000000099", CardKey = "VB-ABCDE-99" };
         var status = await service.SyncNowAsync(root, card.BoardId, Ct);
-        Assert.NotNull(status!.LastError);
-        Assert.Equal(1, status.Cursor);
+        // A value this version does not accept is passed over and counted, never applied.
+        Assert.Null(status!.LastError);
+        Assert.Equal(2, status.Cursor);
+        Assert.Equal(entry.Id, Assert.Single(status.SkippedEntries!).EntryId);
         Assert.False(await store.HasLogEntryAsync(entry.Id, Ct));
         Assert.Equal("Local", (await store.FindCardAsync(root, card.Id, Ct))!.Title);
         if (kind == "created") Assert.Null(await store.FindCardAsync(root, entry.CardId, Ct));
@@ -493,14 +532,18 @@ public sealed class BoardSyncServiceTests : IDisposable
         var entry = client.Entries[^1] with { CardId = "card_000000000099", CardKey = "VB-99" };
         client.Entries[^1] = entry;
         var status = await service.SyncNowAsync(root, card.BoardId, Ct);
-        Assert.Contains("stored random key", status!.LastError);
-        Assert.Equal(1, status.Cursor);
+        // A legacy wire key the pull admits but a new card may not have: permanent, so passed over.
+        Assert.Null(status!.LastError);
+        Assert.Equal(2, status.Cursor);
+        Assert.Contains("stored random key", Assert.Single(status.SkippedEntries!).Reason);
         Assert.Null(await store.FindCardAsync(root, entry.CardId, Ct));
         Assert.False(await store.HasLogEntryAsync(entry.Id, Ct));
-        client.Entries[^1] = entry with { CardKey = "VB-ABCDE-99" };
+        client.Web(card, "created", "Created", $$"""{"title":{"to":"Remote"},"lane":{"to":"{{card.ColumnId}}"},"type":{"to":"research-spike"},"priority":{"to":"critical"},"future":[1,2]}""");
+        entry = client.Entries[^1] with { CardId = "card_000000000098", CardKey = "VB-ABCDE-99" };
+        client.Entries[^1] = entry;
         var retried = await service.SyncNowAsync(root, card.BoardId, Ct);
         Assert.Null(retried!.LastError);
-        Assert.Equal(2, retried.Cursor);
+        Assert.Equal(3, retried.Cursor);
         var imported = await store.FindCardAsync(root, entry.CardId, Ct);
         Assert.Equal("Remote", imported!.Title);
         Assert.Equal(card.ColumnId, imported.ColumnId);
@@ -509,6 +552,94 @@ public sealed class BoardSyncServiceTests : IDisposable
         Assert.Equal("VB-ABCDE-99", imported.Key);
         Assert.Contains("\"future\":[1,2]", Assert.Single((await store.GetHistoryAsync(root, card.BoardId, imported.Id, 0, Ct))!).Changes);
         Assert.Equal(0, retried.Unsent);
+    }
+
+    [Fact]
+    public async Task EntriesThatCanNeverApplyArePassedOverAndCounted_WhileLaterEntriesStillApply()
+    {
+        var card = await Card();
+        await service.SetPublishedAsync(root, card.BoardId, true, Ct);
+        var sprint = await store.CreateBoardAsync(root, "Sprint", Ct);
+        var elsewhere = await store.CreateCardAsync(root, new(null, "Other board", "", null, "medium", null, [], false, BoardId: sprint.Id), Ct);
+
+        // A comment on a card this machine never received.
+        client.Web(card, "comment", "On a missing card", null);
+        client.Entries[^1] = client.Entries[^1] with { CardId = "card_00000000beef", CardKey = "VB-ZZZZZ-77" };
+        // A creation under a key a local card already holds.
+        client.Web(card, "created", "Created", $$$"""{"title":{"to":"Clash"},"lane":{"to":"{{{card.ColumnId}}}"}}""");
+        client.Entries[^1] = client.Entries[^1] with { CardId = "card_00000000cafe" };
+        // A change aimed at a card of another local board.
+        client.Web(elsewhere, "change", "Wrong board", """{"title":{"to":"Moved in from the web"}}""");
+        client.Web(card, "comment", "Still applies", null);
+
+        var status = await service.SyncNowAsync(root, card.BoardId, Ct);
+        Assert.Null(status!.LastError);
+        Assert.Equal(5, status.Cursor);
+        Assert.Equal("Still applies", Assert.Single((await store.GetCardDetailAsync(root, card.Id, Ct))!.Comments).Body);
+        Assert.Equal("Other board", (await store.FindCardAsync(root, elsewhere.Id, Ct))!.Title);
+        Assert.Null(await store.FindCardAsync(root, "card_00000000cafe", Ct));
+        Assert.Equal(3, status.Skipped);
+        var reasons = status.SkippedEntries!.ToDictionary(e => e.Seq, e => e.Reason);
+        Assert.Contains("card this machine does not have", reasons[2]);
+        Assert.Contains("conflicts with a local card", reasons[3]);
+        Assert.Contains("different local board", reasons[4]);
+        Assert.Equal(3, (await service.GetStatusAsync(root, card.BoardId, Ct))!.Skipped);
+    }
+
+    [Fact]
+    public async Task CardsAnOlderBinaryCreatesAfterPublishingGetABaseline_SoTheyAndTheirCommentsAreSent()
+    {
+        var card = await Card();
+        await service.SetPublishedAsync(root, card.BoardId, true, Ct);
+        // An older binary writes the card and its comment and no Card Log entry at all.
+        await using (var db = new Microsoft.Data.Sqlite.SqliteConnection(cs))
+        {
+            await db.OpenAsync(Ct);
+            var sql = db.CreateCommand();
+            sql.CommandText = """
+                INSERT INTO BoardCards (Id, ProjectPath, Number, ColumnId, Position, Title, Description, Priority, Tags, Blocked, CreatedUTC, UpdatedUTC)
+                SELECT 'card_0123456789ab', ProjectPath, 900, ColumnId, 0, 'Older writer', '', 'medium', '[]', 0, CreatedUTC, UpdatedUTC FROM BoardCards WHERE Id = $id;
+                INSERT INTO BoardComments (Id, CardId, AuthorKind, AuthorLabel, Body, CreatedUTC)
+                VALUES ('cm_olderwriter', 'card_0123456789ab', 'user', 'You', 'Written by an older binary', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+                """;
+            sql.Parameters.AddWithValue("$id", card.Id);
+            await sql.ExecuteNonQueryAsync(Ct);
+        }
+
+        var status = await service.SyncNowAsync(root, card.BoardId, Ct);
+        Assert.Null(status!.LastError);
+        Assert.Equal(0, status.Unsent);
+        var created = Assert.Single(client.Entries, e => e.CardId == "card_0123456789ab" && e.Kind == "created");
+        Assert.Equal("Older writer", created.Changes!.Value.GetProperty("title").GetProperty("to").GetString());
+        var comment = Assert.Single(client.Entries, e => e.Id == "cm_olderwriter");
+        Assert.True(created.Seq < comment.Seq);
+        // Nothing left to baseline: the next push only reads.
+        Assert.Equal(0, await store.WriteSyncBaselineAsync(root, card.BoardId, Ct));
+    }
+
+    [Fact]
+    public async Task UnsentPublicationBaselineLocksNoField_WhileAFreshLocalCreationStillDoes()
+    {
+        var card = await Card();
+        await using (var db = new Microsoft.Data.Sqlite.SqliteConnection(cs))
+        {
+            // A card from before board/14: no created entry until Publish writes the baseline.
+            await db.OpenAsync(Ct);
+            var sql = db.CreateCommand();
+            sql.CommandText = "DELETE FROM BoardComments WHERE CardId = $id;";
+            sql.Parameters.AddWithValue("$id", card.Id);
+            await sql.ExecuteNonQueryAsync(Ct);
+        }
+        Assert.Equal(1, await store.WriteSyncBaselineAsync(root, card.BoardId, Ct));
+        Assert.Empty(await store.GetFieldsChangedAfterAsync(card.Id, 0, Ct));
+
+        var fresh = await Card();
+        Assert.Contains("title", await store.GetFieldsChangedAfterAsync(fresh.Id, 0, Ct));
+
+        // A web edit pulled while the baseline is still queued applies to the card.
+        var applied = await store.UpdateSyncedCardAsync(root, card.Id, new(Title: "Colleague's title"), BoardAuthor.User(),
+            new("log_web_title", 7, DateTime.UtcNow, "Changed: title", """{"title":{"to":"Colleague's title"}}""", card.BoardId), Ct);
+        Assert.Equal("Colleague's title", applied!.Title);
     }
 
     [Fact]

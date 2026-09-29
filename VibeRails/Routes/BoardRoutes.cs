@@ -319,7 +319,8 @@ public static class BoardRoutes
         status is null
             ? null
             : new BoardSyncStatusResponse(status.BoardId, status.Published, status.Enabled, status.RemoteBoardId, status.RemoteUrl,
-                status.Cursor, status.Unsent, status.LastSyncUtc, status.LastError, status.Configured, status.Rejected, status.RejectedEntries);
+                status.Cursor, status.Unsent, status.LastSyncUtc, status.LastError, status.Configured, status.Rejected, status.RejectedEntries,
+                status.Skipped, status.SkippedEntries);
 
     private static JiraConnectionResponse ToResponse(BoardJiraConnectionRecord? connection, string boardId) =>
         connection is null

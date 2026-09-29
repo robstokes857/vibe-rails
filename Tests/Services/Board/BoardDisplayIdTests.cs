@@ -49,15 +49,88 @@ public sealed class BoardDisplayIdTests : IDisposable
         await store.EnsureDefaultColumnsAsync(project, Ct);
         var first = await store.CreateCardAsync(project, Card(), Ct);
         var board = (await store.GetBoardsAsync(project, Ct))[0];
-        await store.RenameBoardAsync(project, board.Id, board.Name, Ct, "vb");
+        await store.RenameBoardAsync(project, board.Id, board.Name, "vb", Ct);
         var custom = await store.CreateCardAsync(project, Card(), Ct);
-        Assert.Equal("VB-1", custom.DisplayId);
+        // Every project's keys answer to the VB alias: VB-1 is the first card's short key, so the
+        // new label numbers from the card high-water mark and is the new card's own short key.
+        Assert.Equal("VB-2", custom.DisplayId);
+        Assert.Equal(first.Id, (await store.FindCardAsync(project, "VB-1", Ct))!.Id);
         Assert.Equal("VIBE-1", (await store.FindCardAsync(project, first.Id, Ct))!.DisplayId);
         await store.DeleteCardAsync(project, custom.Id, Ct);
         var token = Ct;
         var cards = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() => store.CreateCardAsync(project, Card(), token), token)));
         Assert.Equal(8, cards.Select(c => c.DisplayId).Distinct().Count());
-        Assert.DoesNotContain(cards, c => c.DisplayId == "VB-1");
+        Assert.DoesNotContain(cards, c => c.DisplayId is "VB-1" or "VB-2");
+        Assert.All(cards, c => Assert.Equal(BoardKeys.Format("VB", c.Number), c.DisplayId));
+    }
+
+    [Fact]
+    public async Task LabelsNeverSpellAnotherCardsShortKey_WhenTheLabelPrefixIsTheKeyPrefix()
+    {
+        // A one-word repository name gives the same prefix to keys and labels.
+        var single = Path.Combine(root, "frontend");
+        await store.EnsureDefaultColumnsAsync(single, Ct);
+        var cards = new List<BoardCardRecord>();
+        for (var i = 0; i < 3; i++) cards.Add(await store.CreateCardAsync(single, Card(), Ct));
+        Assert.All(cards, c => Assert.StartsWith("FRON-", c.Key));
+        Assert.Equal(["FRON-1", "FRON-2", "FRON-3"], cards.Select(c => c.DisplayId));
+
+        // Upgraded cards show their full keys and the label sequence starts empty, as after board/20.
+        await Sql("UPDATE BoardCards SET DisplayId = CardKey; DELETE FROM BoardDisplaySequences;");
+        var next = await store.CreateCardAsync(single, Card(), Ct);
+        Assert.Equal(4, next.Number);
+        Assert.Equal("FRON-4", next.DisplayId);
+        Assert.Equal(cards[0].Id, (await store.FindCardAsync(single, "FRON-1", Ct))!.Id);
+        Assert.Equal(cards[0].Id, (await store.FindCardAsync(single, "vb-1", Ct))!.Id);
+
+        // A manual label may not take another card's short key (either alias), nor its full key.
+        var taken = await Assert.ThrowsAsync<BoardConflictException>(() => store.UpdateCardAsync(single, next.Id, new(DisplayId: "FRON-2"), Ct));
+        Assert.Contains("another card's key", taken.Message);
+        await Assert.ThrowsAsync<BoardConflictException>(() => store.UpdateCardAsync(single, next.Id, new(DisplayId: "VB-3"), Ct));
+        await Assert.ThrowsAsync<BoardConflictException>(() => store.UpdateCardAsync(single, next.Id, new(DisplayId: cards[1].Key), Ct));
+        await Assert.ThrowsAsync<BoardConflictException>(() => store.CreateCardAsync(single, Card() with { DisplayId = "FRON-1" }, Ct));
+        // Its own short key is fine.
+        Assert.Equal("FRON-4", (await store.UpdateCardAsync(single, next.Id, new(DisplayId: "fron-4"), Ct))!.DisplayId);
+        Assert.Equal(cards[1].Id, (await store.FindCardAsync(single, "FRON-2", Ct))!.Id);
+    }
+
+    [Fact]
+    public async Task IncomingLabelThatSpellsAKeyGetsANewLabel_AndLocalKeysSkipNumbersALabelHolds()
+    {
+        var single = Path.Combine(root, "frontend");
+        await store.EnsureDefaultColumnsAsync(single, Ct);
+        var first = await store.CreateCardAsync(single, Card(), Ct);
+        var second = await store.CreateCardAsync(single, Card(), Ct);
+
+        // The server's label spells the second card's short key; keys never move, so the incoming card moves.
+        var incoming = (await store.CreateSyncedCardAsync(single, "card_00000000abcd", "FRON-QWERT-3",
+            Card("Remote") with { BoardId = first.BoardId, DisplayId = "FRON-2" }, BoardAuthor.User(),
+            new("log_remote_label", 1, DateTime.UtcNow, BoardId: first.BoardId), Ct))!;
+        Assert.NotEqual("FRON-2", incoming.DisplayId);
+        Assert.Equal("FRON-2", (await store.FindCardAsync(single, second.Id, Ct))!.DisplayId);
+        Assert.Equal(second.Id, (await store.FindCardAsync(single, "FRON-2", Ct))!.Id);
+        Assert.Equal(incoming.Id, (await store.FindCardAsync(single, incoming.DisplayId, Ct))!.Id);
+
+        // A label ahead of the key sequence: the key that would have spelled it is never minted.
+        var ahead = incoming.Number + 2;
+        await store.UpdateCardAsync(single, first.Id, new(DisplayId: $"FRON-{ahead}"), Ct);
+        var a = await store.CreateCardAsync(single, Card(), Ct);
+        var b = await store.CreateCardAsync(single, Card(), Ct);
+        Assert.Equal(ahead - 1, a.Number);
+        Assert.Equal(ahead + 1, b.Number);
+        // Even with the label sequence ahead, a card's free short key is its label.
+        Assert.Equal($"FRON-{a.Number}", a.DisplayId);
+        Assert.Equal($"FRON-{b.Number}", b.DisplayId);
+        Assert.Equal(first.Id, (await store.FindCardAsync(single, $"FRON-{ahead}", Ct))!.Id);
+    }
+
+    private async Task Sql(string commandText)
+    {
+        await using var db = new SqliteConnection(cs);
+        await db.OpenAsync(Ct);
+        var sql = db.CreateCommand();
+        sql.CommandText = commandText;
+        await sql.ExecuteNonQueryAsync(Ct);
     }
 
     [Fact]

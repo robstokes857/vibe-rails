@@ -775,8 +775,8 @@ public sealed class BoardStoreTests : IDisposable
         Assert.Equal(sprintIds, (await _store.ReorderColumnsAsync(_project, sprintIds, Ct)).Select(c => c.Id));
         await Assert.ThrowsAsync<BoardValidationException>(() => _store.ReorderColumnsAsync(_project, sprintIds, Ct, main.Id));
 
-        Assert.Equal("Sprint 2 (closed)", (await _store.RenameBoardAsync(_project, sprint.Id, "Sprint 2 (closed)", Ct))!.Name);
-        Assert.Null(await _store.RenameBoardAsync(_project, "brd_missing", "x", Ct));
+        Assert.Equal("Sprint 2 (closed)", (await _store.RenameBoardAsync(_project, sprint.Id, "Sprint 2 (closed)", null, Ct))!.Name);
+        Assert.Null(await _store.RenameBoardAsync(_project, "brd_missing", "x", null, Ct));
 
         var deleted = await _store.DeleteBoardAsync(_project, sprint.Id, Ct);
         Assert.Equal(1, deleted!.DeletedCards);

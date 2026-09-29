@@ -146,6 +146,12 @@ export function mountBoardSync(app, element, boardId, { confirm = confirmDialog 
                 <ul class="mb-1">${(status.rejectedEntries || []).map(entry => `<li>${escapeHtml(entry.cardKey)} · ${escapeHtml(entry.kind)} · <code>${escapeHtml(entry.entryId)}</code></li>`).join('')}</ul>
                 ${status.rejected > (status.rejectedEntries || []).length ? '<p class="mb-0">Showing the latest 50 rejected entries.</p>' : ''}
                 </div>` : ''}
+            ${status.skipped ? `<div class="text-warning small mb-2" role="alert" data-board-sync-skipped>
+                <p class="mb-1">${Number(status.skipped)} changes from viberails.ai could not be applied on this machine and were passed over,
+                so later changes keep syncing. They stay on viberails.ai; a newer VibeRails may be able to apply them.</p>
+                <ul class="mb-1">${(status.skippedEntries || []).map(entry => `<li>${escapeHtml(entry.cardKey)} · ${escapeHtml(entry.kind)} · ${escapeHtml(entry.reason)} · <code>${escapeHtml(entry.entryId)}</code></li>`).join('')}</ul>
+                ${status.skipped > (status.skippedEntries || []).length ? '<p class="mb-0">Showing the latest 50 skipped changes.</p>' : ''}
+                </div>` : ''}
             ${status.enabled ? '<button type="button" class="btn btn-sm btn-outline-secondary" data-board-sync-action="now">Sync now</button>' : ''}`;
     };
     async function reload() {

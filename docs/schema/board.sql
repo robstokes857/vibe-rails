@@ -134,6 +134,9 @@ CREATE TABLE BoardSyncLinks ( BoardId TEXT PRIMARY KEY REFERENCES Boards(Id) ON 
 -- table BoardSyncRejectedFields
 CREATE TABLE BoardSyncRejectedFields ( EntryId TEXT NOT NULL REFERENCES BoardComments(Id) ON DELETE CASCADE, Field TEXT NOT NULL, PRIMARY KEY (EntryId, Field) );
 
+-- table BoardSyncSkippedEntries
+CREATE TABLE BoardSyncSkippedEntries ( BoardId TEXT NOT NULL REFERENCES Boards(Id) ON DELETE CASCADE, EntryId TEXT NOT NULL, Seq INTEGER NOT NULL, CardKey TEXT NOT NULL, Kind TEXT NOT NULL, Reason TEXT NOT NULL, SkippedUTC TEXT NOT NULL, PRIMARY KEY (BoardId, EntryId) );
+
 -- table Boards
 CREATE TABLE Boards ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Name TEXT NOT NULL, Position INTEGER NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL , DisplayPrefix TEXT);
 

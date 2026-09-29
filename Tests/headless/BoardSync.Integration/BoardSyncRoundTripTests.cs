@@ -195,7 +195,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
     {
         var baseline = await LocalCard();
         var board = (await store.GetBoardAsync(root, baseline.BoardId, Ct))!;
-        await store.RenameBoardAsync(root, board.Id, board.Name, Ct, "VIBE");
+        await store.RenameBoardAsync(root, board.Id, board.Name, "VIBE", Ct);
         var remoteId = await Publish(baseline);
         var local = await store.CreateCardAsync(root, new(null, "Offline", "", null, "medium", null, [], false, DisplayId: "VIBE-1"), Ct);
         WebWriteResult web;

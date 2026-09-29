@@ -27,6 +27,23 @@ test('successful sync still shows retained rejection identities and repair guida
     dispose();
 });
 
+test('skipped remote entries are counted and listed safely, with the latest-50 note', async () => {
+    const content = { innerHTML: '' };
+    const element = { isConnected: true, querySelector: () => content, addEventListener() {}, removeEventListener() {} };
+    const status = { published: true, enabled: true, configured: true, unsent: 0, lastError: null, rejected: 0,
+        skipped: 51, skippedEntries: [{ cardKey: 'VB-ABCDE-7', kind: 'restored', reason: '<b>cannot apply</b>', entryId: 'web_1', seq: 9 }] };
+    BoardApi.attach({ apiCall: async () => status });
+    const dispose = mountBoardSync({ showToast() {} }, element, 'board_a');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.match(content.innerHTML, /data-board-sync-skipped/);
+    assert.match(content.innerHTML, /51 changes from viberails\.ai could not be applied/);
+    assert.match(content.innerHTML, /VB-ABCDE-7 · restored · &lt;b&gt;cannot apply&lt;\/b&gt;/);
+    assert.match(content.innerHTML, /latest 50 skipped changes/);
+    assert.doesNotMatch(content.innerHTML, /<b>cannot/);
+    assert.doesNotMatch(content.innerHTML, /data-board-sync-rejected/);
+    dispose();
+});
+
 test('switching publishing on asks what leaves the machine; cancel sends nothing and pausing asks nothing', async () => {
     const handlers = {};
     const content = { innerHTML: '' };

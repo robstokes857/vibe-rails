@@ -37,6 +37,13 @@ public sealed record BoardSyncOutboundEntry(BoardCommentRecord Entry, string Car
 public sealed record BoardSyncRejectedEntry(string EntryId, string CardKey, string Kind);
 
 /// <summary>
+/// A pulled entry this version can never apply (an unknown kind, a conflicting identity, a card of
+/// another board). The pull moves past it and the status view lists it. <see cref="Reason"/> is the
+/// desktop's own wording, never remote text.
+/// </summary>
+public sealed record BoardSyncSkippedEntry(string EntryId, long Seq, string CardKey, string Kind, string Reason);
+
+/// <summary>
 /// The remote identity of a pulled Card Log entry. A stamped write stores its log row under this
 /// id, at this time, with <c>RemoteSeq</c> already set, so the entry is never pushed back to the
 /// server it came from and a second pull of the same entry is recognised by id.

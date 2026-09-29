@@ -30,7 +30,8 @@ public partial interface IBoardStore
     /// <summary>
     /// Writes one <c>created</c> baseline entry, carrying the card's current state at the card's
     /// creation time, for every live card on the board that has no <c>created</c> entry (cards from
-    /// before board/14). Returns how many were written. Their comments and notes are already log rows.
+    /// before board/14, or cards an older binary created). Returns how many were written. Their
+    /// comments and notes are already log rows. Every push calls it; with nothing to write it only reads.
     /// </summary>
     Task<int> WriteSyncBaselineAsync(string projectPath, string boardId, CancellationToken cancellationToken = default);
 
@@ -55,12 +56,24 @@ public partial interface IBoardStore
     /// <summary>The latest rejected identities for this board's status view, capped at 50.</summary>
     Task<IReadOnlyList<BoardSyncRejectedEntry>> GetRejectedLogEntriesAsync(string boardId, int limit, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Records a pulled entry the pull moved past because this version can never apply it. False when
+    /// the board is gone or the entry was already recorded (the first record is kept).
+    /// </summary>
+    Task<bool> RecordSkippedSyncEntryAsync(string boardId, BoardSyncSkippedEntry entry, CancellationToken cancellationToken = default);
+
+    Task<int> CountSkippedSyncEntriesAsync(string boardId, CancellationToken cancellationToken = default);
+
+    /// <summary>The latest skipped entries by server sequence for the status view, capped at 50.</summary>
+    Task<IReadOnlyList<BoardSyncSkippedEntry>> GetSkippedSyncEntriesAsync(string boardId, int limit, CancellationToken cancellationToken = default);
+
     /// <summary>Records the sequence the server gave each entry; 0 sets an entry aside as local-only.</summary>
     Task MarkLogEntriesSentAsync(IReadOnlyList<KeyValuePair<string, long>> sent, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Forgets what was sent: every entry of the board's cards becomes unsent again. Used when a
-    /// re-publish lands on a different remote board (another account's key), which has none of it.
+    /// Forgets what was sent: every entry of the board's cards becomes unsent again, and remote
+    /// entries skipped on the old board are forgotten. Used when a re-publish lands on a different
+    /// remote board (another account's key), which has none of it.
     /// </summary>
     Task<int> ResetSentMarksAsync(string boardId, CancellationToken cancellationToken = default);
 
@@ -77,8 +90,9 @@ public partial interface IBoardStore
 
     /// <summary>
     /// Inserts a card minted elsewhere under its own id and key. The local number is the web
-    /// card's when it is above the project's high-water mark, else the next local number; the key
-    /// is stored exactly as minted. Returns null when a card with that id already exists.
+    /// card's when it is just above the project's high-water mark (a bounded gap, so a corrupt key
+    /// cannot jump or exhaust local numbering), else the next local number; the key is stored
+    /// exactly as minted. Returns null when a card with that id already exists.
     /// </summary>
     Task<BoardCardRecord?> CreateSyncedCardAsync(string projectPath, string cardId, string cardKey, NewBoardCard card, BoardAuthor author, BoardSyncStamp stamp, CancellationToken cancellationToken = default);
 

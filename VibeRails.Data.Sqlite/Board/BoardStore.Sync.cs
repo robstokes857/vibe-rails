@@ -22,6 +22,21 @@ public sealed partial class BoardStore
         CREATE INDEX IF NOT EXISTS IX_BoardComments_RemoteSeq ON BoardComments(RemoteSeq) WHERE RemoteSeq > 0;
         """;
 
+    // board/21: pulled entries this version can never apply (an unknown kind, an identity that
+    // conflicts, a card of another board). The cursor moves past them; the status view counts them.
+    private const string SkippedEntriesSchemaSql = """
+        CREATE TABLE IF NOT EXISTS BoardSyncSkippedEntries (
+            BoardId TEXT NOT NULL REFERENCES Boards(Id) ON DELETE CASCADE,
+            EntryId TEXT NOT NULL,
+            Seq INTEGER NOT NULL,
+            CardKey TEXT NOT NULL,
+            Kind TEXT NOT NULL,
+            Reason TEXT NOT NULL,
+            SkippedUTC TEXT NOT NULL,
+            PRIMARY KEY (BoardId, EntryId)
+        );
+        """;
+
     private const string SyncLinkSelectSql = """
         SELECT l.BoardId, l.RemoteBoardId, l.Cursor, l.Enabled, l.LayoutHash, l.LastSyncUTC, l.LastError,
                l.CreatedUTC, l.UpdatedUTC, b.ProjectPath, b.Name, l.DestinationKey
@@ -30,8 +45,10 @@ public sealed partial class BoardStore
         """;
 
     // Only cards the server has been told about take part: an entry about a card without a
-    // `created` entry (a pre-board/14 card the baseline never reached, or one deleted before the
-    // board was published) would be a comment on a card the web has never seen.
+    // `created` entry would be a comment on a card the web has never seen. Every push first writes
+    // a baseline for live cards that lack one (WriteSyncBaselineAsync), including cards an older
+    // binary created while the board was published, so only cards deleted before they were
+    // published stay local.
     private const string UnsentEntriesFromSql = """
         FROM BoardComments m
         JOIN BoardCards c ON c.Id = m.CardId
@@ -113,10 +130,23 @@ public sealed partial class BoardStore
         return prefix;
     }
 
+    // Live cards of the board that no `created` entry describes: cards from before board/14, and cards
+    // an older binary created (it writes no Card Log) while the board was published.
+    private static string CardsWithoutCreatedEntrySql => $"""
+         WHERE c.ProjectPath = $project{ProjectPathCollation}
+           AND c.ColumnId IN (SELECT k.Id FROM BoardColumns k WHERE k.BoardId = $board)
+           AND c.DeletedUTC IS NULL
+           AND NOT EXISTS (SELECT 1 FROM BoardComments x WHERE x.CardId = c.Id AND x.Kind = 'created')
+        """;
+
     public async Task<int> WriteSyncBaselineAsync(string projectPath, string boardId, CancellationToken cancellationToken = default)
     {
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
+        // Every push asks, so the usual answer (nothing to write) must not take the write lock.
+        if (await ScalarLongAsync(connection, null, $"SELECT EXISTS (SELECT 1 FROM BoardCards c {CardsWithoutCreatedEntrySql});",
+                ("$project", project), cancellationToken, ("$board", boardId)) == 0)
+            return 0;
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
         var lanes = (await ReadColumnsAsync(connection, transaction, project, boardId, cancellationToken))
             .ToDictionary(lane => lane.Id, lane => lane.Name, StringComparer.Ordinal);
@@ -125,13 +155,7 @@ public sealed partial class BoardStore
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
-            command.CommandText = CardSelectSql + $"""
-                 WHERE c.ProjectPath = $project{ProjectPathCollation}
-                   AND c.ColumnId IN (SELECT k.Id FROM BoardColumns k WHERE k.BoardId = $board)
-                   AND c.DeletedUTC IS NULL
-                   AND NOT EXISTS (SELECT 1 FROM BoardComments x WHERE x.CardId = c.Id AND x.Kind = 'created')
-                 ORDER BY c.CreatedUTC, c.Number;
-                """;
+            command.CommandText = CardSelectSql + CardsWithoutCreatedEntrySql + " ORDER BY c.CreatedUTC, c.Number;";
             command.Parameters.AddWithValue("$project", project);
             command.Parameters.AddWithValue("$board", boardId);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -255,6 +279,51 @@ public sealed partial class BoardStore
         return entries;
     }
 
+    public async Task<bool> RecordSkippedSyncEntryAsync(string boardId, BoardSyncSkippedEntry entry, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        // The board check and the write are one statement, like SaveSyncLinkAsync. A repeat keeps the first record.
+        command.CommandText = """
+            INSERT INTO BoardSyncSkippedEntries (BoardId, EntryId, Seq, CardKey, Kind, Reason, SkippedUTC)
+            SELECT $board, $entry, $seq, $key, $kind, $reason, $now
+            WHERE EXISTS (SELECT 1 FROM Boards WHERE Id = $board)
+            ON CONFLICT(BoardId, EntryId) DO NOTHING;
+            """;
+        command.Parameters.AddWithValue("$board", boardId);
+        command.Parameters.AddWithValue("$entry", entry.EntryId);
+        command.Parameters.AddWithValue("$seq", entry.Seq);
+        command.Parameters.AddWithValue("$key", entry.CardKey);
+        command.Parameters.AddWithValue("$kind", entry.Kind);
+        command.Parameters.AddWithValue("$reason", entry.Reason);
+        command.Parameters.AddWithValue("$now", ToDb(DateTime.UtcNow));
+        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+    }
+
+    public async Task<int> CountSkippedSyncEntriesAsync(string boardId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        return (int)await ScalarLongAsync(connection, null, "SELECT COUNT(*) FROM BoardSyncSkippedEntries WHERE BoardId = $board;",
+            ("$board", boardId), cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<BoardSyncSkippedEntry>> GetSkippedSyncEntriesAsync(string boardId, int limit, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT EntryId, Seq, CardKey, Kind, Reason FROM BoardSyncSkippedEntries
+            WHERE BoardId = $board ORDER BY Seq DESC LIMIT $limit;
+            """;
+        command.Parameters.AddWithValue("$board", boardId);
+        command.Parameters.AddWithValue("$limit", Math.Clamp(limit, 1, 50));
+        var entries = new List<BoardSyncSkippedEntry>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            entries.Add(new(reader.GetString(0), reader.GetInt64(1), reader.GetString(2), reader.GetString(3), reader.GetString(4)));
+        return entries;
+    }
+
     public async Task MarkLogEntriesSentAsync(IReadOnlyList<KeyValuePair<string, long>> sent, CancellationToken cancellationToken = default)
     {
         if (sent.Count == 0)
@@ -319,6 +388,9 @@ public sealed partial class BoardStore
             """;
         command.Parameters.AddWithValue("$board", boardId);
         await command.ExecuteNonQueryAsync(cancellationToken);
+        // Entries skipped on the old remote board say nothing about the new one.
+        command.CommandText = "DELETE FROM BoardSyncSkippedEntries WHERE BoardId = $board;";
+        await command.ExecuteNonQueryAsync(cancellationToken);
         command.CommandText = """
             UPDATE BoardComments SET RemoteSeq = NULL
             WHERE RemoteSeq IS NOT NULL
@@ -346,10 +418,14 @@ public sealed partial class BoardStore
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
+        // An unsent created entry by the system author is a publication baseline (WriteSyncBaselineAsync):
+        // state the card already had, sent so the web sees the card, not a local edit. It protects no
+        // field, so a web change pulled before a large board's baseline has all been pushed still applies.
         command.CommandText = """
             SELECT Changes FROM BoardComments
             WHERE CardId = $card AND (RemoteSeq IS NULL OR RemoteSeq > $seq)
-              AND Kind IN ('created', 'change') AND Changes IS NOT NULL;
+              AND Kind IN ('created', 'change') AND Changes IS NOT NULL
+              AND NOT (Kind = 'created' AND AuthorKind = 'system' AND RemoteSeq IS NULL);
             """;
         command.Parameters.AddWithValue("$card", cardId);
         command.Parameters.AddWithValue("$seq", remoteSeq);

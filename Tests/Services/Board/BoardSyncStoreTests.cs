@@ -151,7 +151,7 @@ public sealed class BoardSyncStoreTests : IDisposable
         var card = await store.CreateCardAsync(root, new(null, "History card", "", null, "medium", null, [], false), Ct);
         await store.AddCommentAsync(root, card.Id, BoardAuthor.User(), "Conversation only", Ct);
         await store.AddNoteAsync(root, card.Id, BoardAuthor.User(), "Scratchpad only", Ct);
-        await store.RenameBoardAsync(root, board.Id, "Renamed", Ct);
+        await store.RenameBoardAsync(root, board.Id, "Renamed", null, Ct);
         var detail = await store.GetCardDetailAsync(root, card.Id, Ct);
         Assert.Single(detail!.Comments);
         Assert.Single(detail.Notes);
@@ -179,6 +179,60 @@ public sealed class BoardSyncStoreTests : IDisposable
         await Assert.ThrowsAsync<BoardValidationException>(() => store.FindCardAsync(root, local.KeyPrefix + "-1", Ct));
         Assert.Null(await store.FindCardAsync(root, local.KeyPrefix + "-" + remote.Number, Ct));
         Assert.Equal(local.Id, (await store.FindCardAsync(root, local.Key, Ct))!.Id);
+    }
+
+    [Fact]
+    public async Task PulledNumbersNearTheMarkAreAdopted_WhileFarOrMaximalOnesNeverMoveLocalNumbering()
+    {
+        await store.EnsureDefaultColumnsAsync(root, Ct);
+        var local = await store.CreateCardAsync(root, new(null, "Local", "", null, "medium", null, [], false), Ct);
+        async Task<BoardCardRecord> Pull(string id, string key) => (await store.CreateSyncedCardAsync(root, id, key,
+            new(local.ColumnId, "Remote " + key, "", null, "medium", null, [], false, BoardId: local.BoardId),
+            BoardAuthor.User(), new("log_" + id, 1, DateTime.UtcNow, BoardId: local.BoardId), Ct))!;
+
+        Assert.Equal(5, (await Pull("card_000000000005", "XX-ABCDE-5")).Number);
+        var maximal = await Pull("card_0000000000ff", "XX-ABCDF-2147483647");
+        Assert.Equal(6, maximal.Number);
+        Assert.Equal("XX-ABCDF-2147483647", maximal.Key);
+        Assert.Equal(7, (await Pull("card_0000000000fe", "XX-ABCDG-900000000")).Number);
+        Assert.Equal(8, (await store.CreateCardAsync(root, new(null, "Next local", "", null, "medium", null, [], false), Ct)).Number);
+        Assert.Equal(maximal.Id, (await store.FindCardAsync(root, "XX-2147483647", Ct))!.Id);
+    }
+
+    [Fact]
+    public async Task AnExhaustedCardSequenceIsAValidationErrorThatLeavesTheMarkAlone()
+    {
+        await store.EnsureDefaultColumnsAsync(root, Ct);
+        await store.CreateCardAsync(root, new(null, "Local", "", null, "medium", null, [], false), Ct);
+        await ExecuteAsync("UPDATE BoardCardSequences SET LastNumber = 2147483647;");
+        var error = await Assert.ThrowsAsync<BoardValidationException>(() =>
+            store.CreateCardAsync(root, new(null, "One too many", "", null, "medium", null, [], false), Ct));
+        Assert.Contains("every card number", error.Message);
+        await using var connection = new SqliteConnection(cs);
+        await connection.OpenAsync(Ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT LastNumber FROM BoardCardSequences;";
+        Assert.Equal(2147483647L, (long)(await command.ExecuteScalarAsync(Ct))!);
+        Assert.Single(await store.GetCardsAsync(root, Ct));
+    }
+
+    [Fact]
+    public async Task SkippedRemoteEntriesAreBoardScoped_KeepTheFirstRecord_AndResetWithTheSentMarks()
+    {
+        await store.EnsureDefaultColumnsAsync(root, Ct);
+        var card = await store.CreateCardAsync(root, new(null, "Card", "", null, "medium", null, [], false), Ct);
+        var other = await store.CreateBoardAsync(root, "Other", Ct);
+        Assert.True(await store.RecordSkippedSyncEntryAsync(card.BoardId, new("web_1", 4, card.Key, "restored", "First reason"), Ct));
+        Assert.False(await store.RecordSkippedSyncEntryAsync(card.BoardId, new("web_1", 4, card.Key, "restored", "Second reason"), Ct));
+        Assert.True(await store.RecordSkippedSyncEntryAsync(card.BoardId, new("web_2", 9, card.Key, "change", "Later"), Ct));
+        Assert.False(await store.RecordSkippedSyncEntryAsync("brd_missing", new("web_3", 1, card.Key, "change", "No board"), Ct));
+        Assert.Equal(2, await store.CountSkippedSyncEntriesAsync(card.BoardId, Ct));
+        Assert.Equal(0, await store.CountSkippedSyncEntriesAsync(other.Id, Ct));
+        var listed = await store.GetSkippedSyncEntriesAsync(card.BoardId, 50, Ct);
+        Assert.Equal(["web_2", "web_1"], listed.Select(e => e.EntryId));
+        Assert.Equal("First reason", listed[1].Reason);
+        await store.ResetSentMarksAsync(card.BoardId, Ct);
+        Assert.Equal(0, await store.CountSkippedSyncEntriesAsync(card.BoardId, Ct));
     }
 
     [Fact]

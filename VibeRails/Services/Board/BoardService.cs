@@ -100,20 +100,22 @@ public sealed partial class BoardService(
     public async Task<BoardSummaryResponse> CreateBoardAsync(string projectPath, CreateBoardRequest request, CancellationToken cancellationToken = default)
     {
         var name = NormalizeBoardName(request.Name) ?? throw new BoardValidationException("A board needs a name.");
-        var prefix = request.DisplayPrefix is null ? null : BoardDisplayIds.NormalizePrefix(request.DisplayPrefix);
-        var board = await store.CreateBoardAsync(projectPath, name, cancellationToken);
-        if (prefix is not null) board = (await store.RenameBoardAsync(projectPath, board.Id, name, cancellationToken, prefix))!;
+        // Board and prefix are one write: a failure cannot leave the board without the prefix it was created with.
+        var prefix = string.IsNullOrWhiteSpace(request.DisplayPrefix) ? null : BoardDisplayIds.NormalizePrefix(request.DisplayPrefix);
+        var board = await store.CreateBoardAsync(projectPath, name, prefix, cancellationToken);
         var columns = await store.GetColumnsAsync(projectPath, cancellationToken, board.Id);
         return ToDto(board, columns, new Dictionary<string, int>());
     }
 
     public async Task<BoardSummaryResponse?> UpdateBoardAsync(string projectPath, string boardId, UpdateBoardRequest request, CancellationToken cancellationToken = default)
     {
-        var existing = await store.GetBoardAsync(projectPath, boardId, cancellationToken);
-        if (existing is null) return null;
-        var name = request.Name is null ? existing.Name : NormalizeBoardName(request.Name) ?? throw new BoardValidationException("A board needs a name.");
-        var prefix = request.DisplayPrefix is null ? null : BoardDisplayIds.NormalizePrefix(request.DisplayPrefix);
-        var board = await store.RenameBoardAsync(projectPath, boardId, name, cancellationToken, prefix);
+        // Omitted fields stay null so the store keeps them inside its transaction; a concurrent rename
+        // is not undone by a prefix-only save. An empty prefix resets the board to the repository default.
+        var name = request.Name is null ? null : NormalizeBoardName(request.Name) ?? throw new BoardValidationException("A board needs a name.");
+        var prefix = request.DisplayPrefix is null ? null
+            : request.DisplayPrefix.Trim().Length == 0 ? string.Empty
+            : BoardDisplayIds.NormalizePrefix(request.DisplayPrefix);
+        var board = await store.RenameBoardAsync(projectPath, boardId, name, prefix, cancellationToken);
         if (board is null)
             return null;
         var columns = await store.GetColumnsAsync(projectPath, cancellationToken, board.Id);

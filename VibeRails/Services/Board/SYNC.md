@@ -96,16 +96,38 @@ save, then restore and save it; only actual field changes create entries. Reject
 notes can be copied into a new comment or note. Pausing/resuming retains rejections; publishing
 to a different remote board resets their delivery marks and protection for the new destination.
 
-Pull validates each whole page before applying entries: sequences must be contiguous from the
-cursor, no entry may exceed the page's `LastSeq`, and `HasMore` must agree with whether the final
-sequence reaches `LastSeq`. Creation requires title and lane; known fields and entry metadata
-must meet the hosted wire bounds. A missing remote card requires a stored random key; an
-existing legacy card may still receive its baseline. Unknown fields remain history only.
-Local unsent edits and already acknowledged later
-edits protect only their changed fields. The complete remote event is retained even when a
-field loses. Application and conflict checks share a SQLite transaction. Missing cards,
-unsupported events and invalid pages stop the cursor for retry. An empty page cannot skip to
-an advertised sequence. Applied entries never echo back to the server.
+Pull validates each whole page's shape before applying entries: sequences must rise from the
+cursor (a gap, a sequence the server no longer serves, is passed over rather than waited on), no
+entry may exceed the page's `LastSeq`, `HasMore` needs a page that stopped short of `LastSeq`, and
+entry identity, author and sizes must meet the hosted wire bounds. A malformed page stops the
+cursor for retry, and an empty page cannot skip to an advertised sequence.
+
+Each entry is then checked for what this version can apply. Creation requires title and lane;
+known fields must hold values this version accepts. A missing remote card requires a stored
+random key; an existing legacy card may still receive its baseline. Unknown fields remain history
+only. An entry this version can never apply (an unknown kind such as the reserved `restored`, a
+value added after this version, a conflicting identity, a card of another board, or a card that
+never reached this machine) is recorded in `BoardSyncSkippedEntries` (board/21) and passed over,
+so it cannot hold back every later entry. Board settings count the skipped entries and list the
+latest 50 with the desktop's own reason; they stay on viberails.ai and a newer desktop could apply
+them. Transient failures, such as a busy database, still stop the cursor for retry. Publishing to a
+different remote board forgets the skipped records along with the delivery marks.
+
+Local unsent edits and already acknowledged later edits protect only their changed fields. A
+publication baseline (the system-authored `created` entry Publish, or a later push, writes for a
+card that had none) is not an edit: while unsent it protects no field, so a web change pulled
+before a large board's baselines have all been pushed still applies locally. The server applies
+entries in arrival order and a `created` entry overwrites the card's fields there, so if the
+server already knew such a card (a lost acknowledgement, or a board database copied to another
+machine), a web edit made before the baseline arrived is overwritten on viberails.ai while the
+desktop keeps it; the next local edit of that field brings the two copies together again.
+The complete remote event is retained even when a field loses. Application and conflict checks
+share a SQLite transaction. Applied entries never echo back to the server.
+
+Every push first writes a baseline for live cards of the board that have no `created` entry. Cards
+an older binary created while the board was published (older binaries write no Card Log) would
+otherwise never leave the queue, and neither would their comments. The check only reads when
+nothing needs a baseline.
 
 New cards have immutable `{PREFIX}-{5 random A-Z0-9}-{N}` keys; legacy keys stay unchanged.
 Full keys are case-insensitive on input. Short forms resolve only when unambiguous, using the
@@ -128,7 +150,9 @@ rejected log data, and the partial index `IX_BoardComments_RemoteSeq` over ackno
 unsent state, 0 is local-only, and a positive value is the server acknowledgement.
 `board/18` drops and recreates the board/15 history triggers with `COALESCE(BoardId, '')`, so a
 lane whose `BoardId` is still NULL (an older binary's write before adoption) never fails on
-`BoardHistory`'s NOT NULL; no row is rewritten. All are automatic additive migrations. Older binaries can still open the database but do not
+`BoardHistory`'s NOT NULL; no row is rewritten. `board/21` adds `BoardSyncSkippedEntries`, one row
+per pulled entry the desktop passed over (board, entry id, sequence, card key, kind and reason),
+cascading with the board. All are automatic additive migrations. Older binaries can still open the database but do not
 participate in sync reliably: they cannot emit change entries and may show soft-deleted cards.
 Use a current backend to edit a published board.
 

@@ -5,7 +5,7 @@ Read the cross-layer [Board contributor guide](../../VibeRails/Services/Board/AG
 [database migration policy](../DB/AGENTS.md), before changing this component.
 
 This directory owns `IBoardStore`'s SQLite implementation in `~/.vibe_rails/board.db`, including
-component migrations `board/1`–`board/20`. The historical `VibeRails.Services.Board` namespace
+component migrations `board/1`–`board/21`. The historical `VibeRails.Services.Board` namespace
 does not move this code back into the application project. Keep DTO/contracts in
 `VibeRails.Data.Abstractions/Board`; keep Git, live terminal state and UI policy in the host.
 
@@ -130,3 +130,13 @@ a case-insensitive project/display-ID unique index, and `BoardDisplaySequences`.
 DisplayId to the existing immutable/legacy key as requested. Allocation, local collision rename,
 Card Log corrections, and draft-link creation run inside the card write transaction. NULL values
 from older writers continue to display their immutable key. Nothing changes CardKey or row Id.
+A label may never spell another card's key or a short form of it (`ShortKeyMatchSql`, shared with
+lookup): the owner check reserves them, a manual collision is a 409 and an incoming label that
+spells a key goes to a new label. A label prefix that keys also answer to (the project's key
+prefix, or `VB`) numbers from the card high-water mark, and local key minting skips a number
+whose short form a label already holds. A pulled web card's number is adopted only within
+`MaxAdoptedCardNumberGap` of the high-water mark; an exhausted sequence is a validation error.
+
+`board/21` (additive) adds `BoardSyncSkippedEntries`: pulled sync entries the desktop can never
+apply, recorded so the cursor moves past them and the status view counts them. It cascades with
+the board and is cleared when a re-publish lands on a different remote board. No backfill.
