@@ -623,7 +623,7 @@ public sealed partial class BoardService(
     /// and never blocks Start work, which may launch an agent beside it. The card list, card detail, activity
     /// poll and launch gate all decide through this.
     /// </summary>
-    internal static bool IsAutomationSession(string origin, string sessionId, IReadOnlySet<string>? automationIds) =>
+    internal static bool IsAutomationSession(string? origin, string sessionId, IReadOnlySet<string>? automationIds) =>
         origin == BoardSessionRecord.AutomationOrigin || automationIds?.Contains(sessionId) == true;
 
     private async Task<List<BoardSessionDto>> SessionDtosAsync(string projectPath,

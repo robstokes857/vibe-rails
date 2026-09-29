@@ -24,7 +24,7 @@ public sealed class AtomicFileTests : IDisposable
     }
 
     [Fact]
-    public void AConcurrentReaderSeesTheOldOrTheNewContentsNeverATornFile()
+    public async Task AConcurrentReaderSeesTheOldOrTheNewContentsNeverATornFile()
     {
         var path = Path.Combine(_root, "settings.json");
         var small = "{\"v\":\"" + new string('a', 16) + "\"}";
@@ -57,13 +57,13 @@ public sealed class AtomicFileTests : IDisposable
         }, TestContext.Current.CancellationToken);
         for (var i = 0; i < 40; i++)
             AtomicFile.WriteAllText(path, i % 2 == 0 ? large : small);
-        stop.Cancel();
-        reader.Wait(TestContext.Current.CancellationToken);
+        await stop.CancelAsync();
+        await reader.WaitAsync(TestContext.Current.CancellationToken);
         Assert.Equal(0, torn);
     }
 
     [Fact]
-    public void WaitsOutABriefReaderOnWindowsInsteadOfFailingTheSave()
+    public async Task WaitsOutABriefReaderOnWindowsInsteadOfFailingTheSave()
     {
         if (!OperatingSystem.IsWindows()) return;
         var path = Path.Combine(_root, "settings.json");
@@ -75,7 +75,7 @@ public sealed class AtomicFileTests : IDisposable
             await open.DisposeAsync();
         }, TestContext.Current.CancellationToken);
         AtomicFile.WriteAllText(path, "new");
-        release.Wait(TestContext.Current.CancellationToken);
+        await release.WaitAsync(TestContext.Current.CancellationToken);
         Assert.Equal("new", File.ReadAllText(path));
     }
 
