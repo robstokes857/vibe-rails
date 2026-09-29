@@ -92,8 +92,8 @@ public record ChatHistoryItem(
     public IReadOnlyList<ChatHistoryCard> BoardCards { get; init; } = [];
 }
 
-/// <summary>Current Board identity and title shown in local chat history.</summary>
-public record ChatHistoryCard(string Id, string Key, string Title);
+/// <summary>Current Board identity, display label and title shown in local chat history. Show <see cref="DisplayId"/>; <see cref="Key"/> is the identity.</summary>
+public record ChatHistoryCard(string Id, string Key, string Title, string? DisplayId = null);
 
 public record BoardAuthorDto(string Kind, string Label, string? Cli, string? SessionId = null);
 

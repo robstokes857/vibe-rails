@@ -135,6 +135,38 @@ test('filters intersect provider, exact environment, attached card, folder and o
     assert.equal(sidebar._getFilteredItems().length, 7);
 });
 
+test('cards show their display ID, and both the display ID and the permanent key match', () => {
+    const sidebar = historySidebar();
+    const labelled = [{ id: 'card-a', key: 'VB-M66G2-64', displayId: 'VIBE-7', title: 'Better filters' }];
+    const item = session('a', { boardCards: labelled });
+    sidebar.allItems = [item];
+    assert.equal(sidebar._getDisplayName(item), 'VIBE-7 · Better filters');
+    for (const query of ['vibe-7', 'VB-M66G2-64', 'VB-64', 'better']) {
+        sidebar.cardFilter = query;
+        assert.deepEqual(sidebar._getFilteredItems().map(x => x.id), ['a'], `card filter ${query}`);
+    }
+    sidebar.cardFilter = '';
+    sidebar.filterText = 'vibe-7';
+    assert.deepEqual(sidebar._getFilteredItems().map(x => x.id), ['a']);
+    sidebar.filterText = 'VIBE-8';
+    assert.deepEqual(sidebar._getFilteredItems().map(x => x.id), []);
+});
+
+test('environment filter values are self-describing, and an open select is not rebuilt under the pointer', () => {
+    const sidebar = historySidebar();
+    assert.equal(sidebar._environmentKey('codex', ' Review '), 'env:codex:review');
+    const select = { innerHTML: '', value: '', selectedOptions: [], listeners: {},
+        addEventListener(type, handler) { this.listeners[type] = handler; } };
+    select.ownerDocument = { activeElement: select };
+    sidebar.environmentSelect = select;
+    sidebar.allItems = [session('a', { environmentName: 'Review' })];
+    sidebar._syncEnvironmentOptions();
+    assert.equal(select.innerHTML, '', 'no rebuild while focused');
+    select.ownerDocument.activeElement = null;
+    select.listeners.blur();
+    assert.match(select.innerHTML, /value="env:codex:review"/);
+});
+
 test('search finds card shorthand and metadata even after a chat is renamed', () => {
     const sidebar = historySidebar();
     sidebar.allItems = [session('a', { boardCards: cards, sessionDisplayName: 'Renamed', environmentName: 'Review' })];

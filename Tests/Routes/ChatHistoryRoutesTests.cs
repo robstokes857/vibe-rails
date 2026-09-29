@@ -35,7 +35,7 @@ public sealed class ChatHistoryRoutesTests
         repository.Setup(r => r.GetChatHistoryItemAsync("session", It.IsAny<CancellationToken>())).ReturnsAsync(item);
         repository.Setup(r => r.GetChatHistoryItemAsync("missing", It.IsAny<CancellationToken>())).ReturnsAsync((ChatHistoryItem?)null);
         board.Setup(s => s.GetSessionCardsAsync(It.Is<IReadOnlyList<string>>(ids => ids.Count == 1 && ids[0] == "session"), It.IsAny<CancellationToken>()))
-            .ReturnsAsync([new("session", "card", "VB-M66G2-64", "Filters <&>"), new("session", "second", "VB-OTHER-65", "Second card")]);
+            .ReturnsAsync([new("session", "card", "VB-M66G2-64", "Filters <&>", "VIBE-7"), new("session", "second", "VB-OTHER-65", "Second card")]);
 
         var builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
@@ -80,6 +80,7 @@ public sealed class ChatHistoryRoutesTests
                     Assert.Equal(2, cards.GetArrayLength());
                     Assert.Equal("VB-M66G2-64", cards[0].GetProperty("key").GetString());
                     Assert.Equal("Filters <&>", cards[0].GetProperty("title").GetString());
+                    Assert.Equal("VIBE-7", cards[0].GetProperty("displayId").GetString());
                 }
             }
             Assert.Null(await app.Services.GetRequiredService<IChatHistoryService>().GetSessionAsync("missing", ct));

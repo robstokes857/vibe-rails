@@ -41,7 +41,7 @@ public class ChatHistoryService(
             // remain intact. The client uses card labels as the automatic display default.
             items[i] = items[i] with
             {
-                BoardCards = cards[items[i].Id].Select(card => new ChatHistoryCard(card.CardId, card.Key, card.Title)).ToArray()
+                BoardCards = cards[items[i].Id].Select(card => new ChatHistoryCard(card.CardId, card.Key, card.Title, card.DisplayId)).ToArray()
             };
         }
     }

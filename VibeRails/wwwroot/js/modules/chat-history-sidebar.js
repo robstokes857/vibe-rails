@@ -6,6 +6,7 @@ import {
     escapeHtml
 } from './utils.js';
 import * as SessionDebug from './session-viewer.js';
+import { cardDisplayId, cardLabel, cardSearchText } from './board-card-label.js';
 
 const DEFAULT_PAGE_SIZE = 20;
 const SCROLL_LOAD_THRESHOLD_PX = 48;
@@ -544,18 +545,21 @@ export class ChatHistorySidebar {
 
             return false;
         } finally {
-            if (generation !== this._generation) return false;
-            this.isLoadingPage = false;
-            this._setRefreshButtonState();
-            this._renderItems();
+            // A superseded load leaves the new generation's state alone. No return here: a return in
+            // finally would replace whatever the try or catch returned.
+            if (generation === this._generation) {
+                this.isLoadingPage = false;
+                this._setRefreshButtonState();
+                this._renderItems();
 
-            if (this._hasActiveFilters() && this.hasMore && !this.isLoadingForSearch) {
-                void this._loadRemainingPagesForFilters();
-            }
+                if (this._hasActiveFilters() && this.hasMore && !this.isLoadingForSearch) {
+                    void this._loadRemainingPagesForFilters();
+                }
 
-            // If visible items don't fill the container, keep loading
-            if (this._shouldLoadNextPage()) {
-                void this._loadNextPage();
+                // If visible items don't fill the container, keep loading
+                if (this._shouldLoadNextPage()) {
+                    void this._loadNextPage();
+                }
             }
         }
     }
@@ -833,12 +837,25 @@ export class ChatHistorySidebar {
         this._filtersChanged();
     }
 
+    // A self-describing option value, beside the fixed 'base' and 'custom'. CLI names hold no ':'.
     _environmentKey(cli, name) {
-        return JSON.stringify([canonicalLlmCli(cli), (name || '').trim().toLowerCase()]);
+        return `env:${canonicalLlmCli(cli)}:${(name || '').trim().toLowerCase()}`;
     }
 
     _syncEnvironmentOptions() {
         if (!this.environmentSelect) return;
+        // Replacing the options of an open select closes it under the pointer while filter pages
+        // stream in; the list catches up once the select loses focus.
+        if (this.environmentSelect.ownerDocument?.activeElement === this.environmentSelect) {
+            if (!this._environmentSyncDeferred) {
+                this._environmentSyncDeferred = true;
+                this.environmentSelect.addEventListener('blur', () => {
+                    this._environmentSyncDeferred = false;
+                    this._syncEnvironmentOptions();
+                }, { once: true });
+            }
+            return;
+        }
         const choices = new Map();
         const add = (cli, name) => {
             if (!name?.trim()) return;
@@ -847,7 +864,7 @@ export class ChatHistorySidebar {
         for (const env of this.app.data?.environments || []) add(env.cli, env.name);
         for (const item of this.allItems) add(item.cli, item.environmentName);
         // Keep a selected historical environment even while a refresh replaces its rows.
-        if (this.environmentFilter.startsWith('[') && !choices.has(this.environmentFilter)) {
+        if (this.environmentFilter.startsWith('env:') && !choices.has(this.environmentFilter)) {
             choices.set(this.environmentFilter, this.environmentSelect.selectedOptions?.[0]?.textContent || 'Selected environment');
         }
         const options = [['', 'All environments'], ['base', 'Base CLI (no custom environment)'], ['custom', 'Any custom environment'],
@@ -869,7 +886,7 @@ export class ChatHistorySidebar {
         }
 
         const card = item.boardCards?.[0];
-        if (card) return `${card.key} · ${card.title}`;
+        if (card) return cardLabel(card);
         if (sessionName) return sessionName;
 
         const inputName = item.inputText?.trim().split('\n')[0]?.trim();
@@ -1110,7 +1127,9 @@ export class ChatHistorySidebar {
             const itemStyle = ` style="--ch-item-accent: ${escapeHtml(accent)}"`;
             const metaLines = [];
             for (const card of item.boardCards || []) {
-                metaLines.push(`<div class="ch-meta-row ch-card-meta" title="${escapeHtml(`${card.key} · ${card.title}`)}"><span class="ch-meta-label">Card</span> ${escapeHtml(card.key)}</div>`);
+                // The label is what the Board shows; the tooltip keeps the permanent key when they differ.
+                const tooltip = cardLabel(card) + (card.displayId && card.displayId !== card.key ? ` (${card.key})` : '');
+                metaLines.push(`<div class="ch-meta-row ch-card-meta" title="${escapeHtml(tooltip)}"><span class="ch-meta-label">Card</span> ${escapeHtml(cardDisplayId(card))}</div>`);
             }
             if (item.environmentName?.trim()) {
                 metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">Env</span> ${escapeHtml(item.environmentName.trim())}</div>`);
@@ -1536,7 +1555,7 @@ export class ChatHistorySidebar {
             const envName = item.environmentName?.trim() || '';
             if (this.environmentFilter === 'base' && envName) return false;
             if (this.environmentFilter === 'custom' && !envName) return false;
-            if (this.environmentFilter.startsWith('[') && this._environmentKey(item.cli, envName) !== this.environmentFilter) return false;
+            if (this.environmentFilter.startsWith('env:') && this._environmentKey(item.cli, envName) !== this.environmentFilter) return false;
             const cards = item.boardCards || [];
             if (this.boardFilter === 'linked' && !cards.length) return false;
             if (this.boardFilter === 'unlinked' && cards.length) return false;
@@ -1562,7 +1581,7 @@ export class ChatHistorySidebar {
                 this._getProjectDisplayName(item),
                 item.workingDirectory || '',
                 item.inputText || '',
-                ...cards.map(card => `${card.key}\n${this._shortCardKey(card.key)}\n${card.title}`),
+                ...cards.map(cardSearchText),
                 item.environmentName || '',
                 this.app.getCliBrand(item.cli)?.label || '',
                 this.app.getCliBrand(item.parentCli || '')?.label || ''
@@ -1573,13 +1592,9 @@ export class ChatHistorySidebar {
         });
     }
 
-    _shortCardKey(key) {
-        // The human shorthand omits the random middle component (VB-ABC12-64 → VB-64).
-        return (key || '').replace(/^([^-]+)-[A-Z0-9]{5}-(\d+)$/i, '$1-$2');
-    }
-
+    // Display ID, permanent key, its short form and title all match (wwwroot/AGENTS.md).
     _matchesCard(card, query) {
-        const text = `${card.key}\n${this._shortCardKey(card.key)}\n${card.title}`.toLowerCase();
+        const text = cardSearchText(card).toLowerCase();
         return query.toLowerCase().split(/\s+/).every(part => text.includes(part));
     }
 

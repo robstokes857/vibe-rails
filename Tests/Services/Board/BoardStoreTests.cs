@@ -46,6 +46,9 @@ public sealed class BoardStoreTests : IDisposable
         Assert.Equal(new[] { first.Id, second.Id, foreign.Id }, labels.Select(card => card.CardId));
         Assert.Equal(new[] { first.Key, second.Key, foreign.Key }, labels.Select(card => card.Key));
         Assert.Equal(new[] { "Primary", "Additional", "Another project" }, labels.Select(card => card.Title));
+        Assert.Equal(new[] { first.DisplayId, second.DisplayId, foreign.DisplayId }, labels.Select(card => card.DisplayId));
+        await _store.UpdateCardAsync(_project, second.Id, new(DisplayId: "LABEL-9"), Ct);
+        Assert.Equal("LABEL-9", (await _store.GetSessionCardsAsync(["shared"], Ct))[1].DisplayId);
         Assert.Empty(await _store.GetSessionCardsAsync(["unrelated"], Ct));
         Assert.Empty(await _store.GetSessionCardsAsync([], Ct));
 
