@@ -57,10 +57,20 @@ public partial interface IBoardStore
     Task<IReadOnlyList<BoardSyncRejectedEntry>> GetRejectedLogEntriesAsync(string boardId, int limit, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Records a pulled entry the pull moved past because this version can never apply it. False when
-    /// the board is gone or the entry was already recorded (the first record is kept).
+    /// Records a pulled entry the pull moved past because <paramref name="version"/>, the desktop
+    /// version that tried it, cannot apply it. A later attempt at the same entry records its own
+    /// version and reason. False when the board is gone. A stamped write that applies the entry later
+    /// removes the record in the same transaction.
     /// </summary>
-    Task<bool> RecordSkippedSyncEntryAsync(string boardId, BoardSyncSkippedEntry entry, CancellationToken cancellationToken = default);
+    Task<bool> RecordSkippedSyncEntryAsync(string boardId, BoardSyncSkippedEntry entry, string version, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gives the entries an earlier desktop version skipped one attempt by <paramref name="version"/>:
+    /// moves the board's pull cursor back to just before the earliest of them and records this version
+    /// as having tried them, in one transaction. Returns the new cursor, or null when no entry was last
+    /// tried by an earlier version (the usual answer, which only reads).
+    /// </summary>
+    Task<long?> RetrySkippedSyncEntriesAsync(string boardId, string version, CancellationToken cancellationToken = default);
 
     Task<int> CountSkippedSyncEntriesAsync(string boardId, CancellationToken cancellationToken = default);
 

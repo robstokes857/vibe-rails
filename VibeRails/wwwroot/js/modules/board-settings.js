@@ -148,7 +148,7 @@ export function mountBoardSync(app, element, boardId, { confirm = confirmDialog 
                 </div>` : ''}
             ${status.skipped ? `<div class="text-warning small mb-2" role="alert" data-board-sync-skipped>
                 <p class="mb-1">${Number(status.skipped)} changes from viberails.ai could not be applied on this machine and were passed over,
-                so later changes keep syncing. They stay on viberails.ai; a newer VibeRails may be able to apply them.</p>
+                so later changes keep syncing. They stay on viberails.ai, and the first sync after a VibeRails update tries them again.</p>
                 <ul class="mb-1">${(status.skippedEntries || []).map(entry => `<li>${escapeHtml(entry.cardKey)} · ${escapeHtml(entry.kind)} · ${escapeHtml(entry.reason)} · <code>${escapeHtml(entry.entryId)}</code></li>`).join('')}</ul>
                 ${status.skipped > (status.skippedEntries || []).length ? '<p class="mb-0">Showing the latest 50 skipped changes.</p>' : ''}
                 </div>` : ''}

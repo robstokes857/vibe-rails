@@ -854,6 +854,7 @@ public sealed partial class BoardStore : IBoardStore
             insert.Parameters.AddWithValue("$rowKind", kind);
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
+        if (stamp is not null) await ForgetSkippedEntryAsync(connection, transaction, stamp, cancellationToken);
         if (!await IsDeletedAsync(connection, transaction, card.Id, cancellationToken))
             await TouchCardAsync(connection, transaction, card.Id, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -1721,6 +1722,11 @@ public sealed partial class BoardStore : IBoardStore
         // the status view counts them (BoardStore.Sync.cs). Additive; an older binary ignores the table.
         SqliteMigrationRunner.Apply(connection, "board", 21, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, SkippedEntriesSchemaSql));
+        // board/22: the desktop version that last tried each skipped entry, so the first sync of a newer
+        // version tries it again (BoardStore.Sync.cs). Additive and nullable: a row from before it counts
+        // as tried by an earlier version, and an older binary never names the column.
+        SqliteMigrationRunner.Apply(connection, "board", 22, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardSyncSkippedEntries ADD COLUMN Version TEXT"));
         ReconcileDerivedRows(connection);
     }
 

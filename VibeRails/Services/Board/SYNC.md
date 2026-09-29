@@ -111,9 +111,20 @@ only. An entry this version can never apply (an unknown kind such as the reserve
 value added after this version, a conflicting identity, a card of another board, or a card that
 never reached this machine) is recorded in `BoardSyncSkippedEntries` (board/21) and passed over,
 so it cannot hold back every later entry. Board settings count the skipped entries and list the
-latest 50 with the desktop's own reason; they stay on viberails.ai and a newer desktop could apply
-them. Transient failures, such as a busy database, still stop the cursor for retry. Publishing to a
-different remote board forgets the skipped records along with the delivery marks.
+latest 50 with the desktop's own reason. Transient failures, such as a busy database, still stop
+the cursor for retry. Publishing to a different remote board forgets the skipped records along with
+the delivery marks.
+
+Skipped entries stay on viberails.ai, and each record names the desktop version that last tried it
+(board/22; a record from before it names none and counts as earlier). The first pull of a newer
+version moves the cursor back to just before the earliest entry an earlier version skipped and marks
+those records as tried by itself, in one transaction, then pulls on from there. Entries already
+applied are recognised by id and passed again. A skipped entry that now applies has its record
+removed in the same transaction as the write; one that still cannot keeps its record, with the new
+reason. A replayed change is an older server sequence, so it leaves alone every field that a later
+entry changed. An older version never retries a record a newer one wrote, and an entry the server
+no longer serves stays recorded until a later version looks again. The rewind costs one pass over
+the entries since the earliest skipped one, so newer web changes can wait a few ticks behind it.
 
 Local unsent edits and already acknowledged later edits protect only their changed fields. A
 publication baseline (the system-authored `created` entry Publish, or a later push, writes for a
@@ -154,7 +165,8 @@ unsent state, 0 is local-only, and a positive value is the server acknowledgemen
 lane whose `BoardId` is still NULL (an older binary's write before adoption) never fails on
 `BoardHistory`'s NOT NULL; no row is rewritten. `board/21` adds `BoardSyncSkippedEntries`, one row
 per pulled entry the desktop passed over (board, entry id, sequence, card key, kind and reason),
-cascading with the board. All are automatic additive migrations. Older binaries can still open the database but do not
+cascading with the board. `board/22` adds its nullable `Version`, the desktop version that last tried
+the entry. All are automatic additive migrations. Older binaries can still open the database but do not
 participate in sync reliably: they cannot emit change entries and may show soft-deleted cards.
 Use a current backend to edit a published board.
 

@@ -66,6 +66,7 @@ public sealed partial class BoardStore
         insert.Parameters.AddWithValue("$changes", (object?)(stamp is null ? changes : stamp.Changes ?? changes) ?? DBNull.Value);
         insert.Parameters.AddWithValue("$remoteSeq", stamp is null ? DBNull.Value : stamp.RemoteSeq);
         await insert.ExecuteNonQueryAsync(cancellationToken);
+        if (stamp is not null) await ForgetSkippedEntryAsync(connection, transaction, stamp, cancellationToken);
     }
 
     private static string TruncateLogBody(string body) =>

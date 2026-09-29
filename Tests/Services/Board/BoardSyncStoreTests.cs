@@ -217,22 +217,93 @@ public sealed class BoardSyncStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task SkippedRemoteEntriesAreBoardScoped_KeepTheFirstRecord_AndResetWithTheSentMarks()
+    public async Task SkippedRemoteEntriesAreBoardScoped_KeepTheLatestAttempt_AndResetWithTheSentMarks()
     {
         await store.EnsureDefaultColumnsAsync(root, Ct);
         var card = await store.CreateCardAsync(root, new(null, "Card", "", null, "medium", null, [], false), Ct);
         var other = await store.CreateBoardAsync(root, "Other", Ct);
-        Assert.True(await store.RecordSkippedSyncEntryAsync(card.BoardId, new("web_1", 4, card.Key, "restored", "First reason"), Ct));
-        Assert.False(await store.RecordSkippedSyncEntryAsync(card.BoardId, new("web_1", 4, card.Key, "restored", "Second reason"), Ct));
-        Assert.True(await store.RecordSkippedSyncEntryAsync(card.BoardId, new("web_2", 9, card.Key, "change", "Later"), Ct));
-        Assert.False(await store.RecordSkippedSyncEntryAsync("brd_missing", new("web_3", 1, card.Key, "change", "No board"), Ct));
+        Assert.True(await store.RecordSkippedSyncEntryAsync(card.BoardId, new("web_1", 4, card.Key, "restored", "First reason"), "10.11.2", Ct));
+        // A later attempt at the same entry records that attempt's version and reason.
+        Assert.True(await store.RecordSkippedSyncEntryAsync(card.BoardId, new("web_1", 4, card.Key, "restored", "Second reason"), "10.12.0", Ct));
+        Assert.True(await store.RecordSkippedSyncEntryAsync(card.BoardId, new("web_2", 9, card.Key, "change", "Later"), "10.12.0", Ct));
+        Assert.False(await store.RecordSkippedSyncEntryAsync("brd_missing", new("web_3", 1, card.Key, "change", "No board"), "10.12.0", Ct));
         Assert.Equal(2, await store.CountSkippedSyncEntriesAsync(card.BoardId, Ct));
         Assert.Equal(0, await store.CountSkippedSyncEntriesAsync(other.Id, Ct));
         var listed = await store.GetSkippedSyncEntriesAsync(card.BoardId, 50, Ct);
         Assert.Equal(["web_2", "web_1"], listed.Select(e => e.EntryId));
-        Assert.Equal("First reason", listed[1].Reason);
+        Assert.Equal("Second reason", listed[1].Reason);
+        Assert.Equal(["10.12.0", "10.12.0"], await SkippedVersionsAsync());
         await store.ResetSentMarksAsync(card.BoardId, Ct);
         Assert.Equal(0, await store.CountSkippedSyncEntriesAsync(card.BoardId, Ct));
+    }
+
+    [Fact]
+    public async Task ARetryMovesTheCursorBackOncePerNewerVersion_AndNeverForward()
+    {
+        await store.EnsureDefaultColumnsAsync(root, Ct);
+        var card = await store.CreateCardAsync(root, new(null, "Card", "", null, "medium", null, [], false), Ct);
+        await store.SaveSyncLinkAsync(new(card.BoardId, "remote", 20, true, null, null, null, default, default, DestinationKey: "server"), Ct);
+        await store.RecordSkippedSyncEntryAsync(card.BoardId, new("web_newer", 4, card.Key, "future", "Unknown"), "10.12.0", Ct);
+        await store.RecordSkippedSyncEntryAsync(card.BoardId, new("web_older", 6, card.Key, "future", "Unknown"), "10.11.2", Ct);
+
+        // The version that last tried an entry, and every earlier one, leaves it alone; so does a build
+        // whose version does not parse, since it cannot tell that it is newer.
+        Assert.Null(await store.RetrySkippedSyncEntriesAsync(card.BoardId, "10.11.2", Ct));
+        Assert.Null(await store.RetrySkippedSyncEntriesAsync(card.BoardId, "dev", Ct));
+        Assert.Equal(20, (await store.GetSyncLinkAsync(root, card.BoardId, Ct))!.Cursor);
+
+        // 10.12.0 retries only what 10.11.2 tried, once.
+        Assert.Equal(5, await store.RetrySkippedSyncEntriesAsync(card.BoardId, "10.12.0", Ct));
+        Assert.Equal(["10.12.0", "10.12.0"], await SkippedVersionsAsync());
+        Assert.Null(await store.RetrySkippedSyncEntriesAsync(card.BoardId, "10.12.0", Ct));
+        Assert.Equal(5, (await store.GetSyncLinkAsync(root, card.BoardId, Ct))!.Cursor);
+
+        // A newer release retries both, going back to the earlier entry. Only release numbers order
+        // versions: 10.13.0 does not retry what 10.13.0-rc.1 tried.
+        Assert.Equal(3, await store.RetrySkippedSyncEntriesAsync(card.BoardId, "10.13.0-rc.1", Ct));
+        Assert.Null(await store.RetrySkippedSyncEntriesAsync(card.BoardId, "10.13.0", Ct));
+
+        // A record from before board/22 names no version and counts as earlier. The cursor never moves forward.
+        await store.RecordSkippedSyncEntryAsync(card.BoardId, new("web_legacy", 2, card.Key, "future", "Unknown"), "10.13.0", Ct);
+        await ExecuteAsync("UPDATE BoardSyncSkippedEntries SET Version = NULL WHERE EntryId = 'web_legacy';");
+        await store.SaveSyncLinkAsync((await store.GetSyncLinkAsync(root, card.BoardId, Ct))! with { Cursor = 0 }, Ct);
+        Assert.Equal(0, await store.RetrySkippedSyncEntriesAsync(card.BoardId, "10.13.0", Ct));
+        Assert.Equal(["10.13.0", "10.13.0-rc.1", "10.13.0-rc.1"], await SkippedVersionsAsync());
+
+        // Without a link there is no cursor to move, and nothing is marked as tried.
+        var other = await store.CreateBoardAsync(root, "Other", Ct);
+        await store.RecordSkippedSyncEntryAsync(other.Id, new("web_other", 3, card.Key, "future", "Unknown"), "10.11.2", Ct);
+        Assert.Null(await store.RetrySkippedSyncEntriesAsync(other.Id, "10.13.0", Ct));
+        Assert.Contains("10.11.2", await SkippedVersionsAsync());
+    }
+
+    [Fact]
+    public async Task ApplyingASkippedEntryRemovesItsRecordInTheSameWrite()
+    {
+        await store.EnsureDefaultColumnsAsync(root, Ct);
+        var card = await store.CreateCardAsync(root, new(null, "Card", "", null, "medium", null, [], false), Ct);
+        await store.RecordSkippedSyncEntryAsync(card.BoardId, new("web_change", 7, card.Key, "change", "Unknown"), "1.0.0", Ct);
+        await store.RecordSkippedSyncEntryAsync(card.BoardId, new("web_comment", 8, card.Key, "comment", "Unknown"), "1.0.0", Ct);
+        await store.RecordSkippedSyncEntryAsync(card.BoardId, new("web_other", 9, card.Key, "comment", "Unknown"), "1.0.0", Ct);
+
+        await store.UpdateSyncedCardAsync(root, card.Id, new(Title: "From the web"), BoardAuthor.User(),
+            new("web_change", 7, DateTime.UtcNow, "Changed: title", """{"title":{"to":"From the web"}}""", card.BoardId), Ct);
+        await store.AddSyncedCommentAsync(root, card.Id, BoardAuthor.User(), "Hello", "comment",
+            new("web_comment", 8, DateTime.UtcNow, BoardId: card.BoardId), Ct);
+
+        Assert.Equal("web_other", Assert.Single(await store.GetSkippedSyncEntriesAsync(card.BoardId, 50, Ct)).EntryId);
+    }
+
+    private async Task<List<string?>> SkippedVersionsAsync()
+    {
+        await using var connection = new SqliteConnection(cs);
+        await connection.OpenAsync(Ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Version FROM BoardSyncSkippedEntries ORDER BY Seq;";
+        var versions = new List<string?>();
+        await using var reader = await command.ExecuteReaderAsync(Ct);
+        while (await reader.ReadAsync(Ct)) versions.Add(reader.IsDBNull(0) ? null : reader.GetString(0));
+        return versions;
     }
 
     [Fact]

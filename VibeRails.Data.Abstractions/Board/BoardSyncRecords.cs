@@ -38,8 +38,8 @@ public sealed record BoardSyncRejectedEntry(string EntryId, string CardKey, stri
 
 /// <summary>
 /// A pulled entry this version can never apply (an unknown kind, a conflicting identity, a card of
-/// another board). The pull moves past it and the status view lists it. <see cref="Reason"/> is the
-/// desktop's own wording, never remote text.
+/// another board). The pull moves past it, the status view lists it, and the first sync of a newer
+/// version tries it again. <see cref="Reason"/> is the desktop's own wording, never remote text.
 /// </summary>
 public sealed record BoardSyncSkippedEntry(string EntryId, long Seq, string CardKey, string Kind, string Reason);
 

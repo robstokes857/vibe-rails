@@ -5,7 +5,7 @@ Read the cross-layer [Board contributor guide](../../VibeRails/Services/Board/AG
 [database migration policy](../DB/AGENTS.md), before changing this component.
 
 This directory owns `IBoardStore`'s SQLite implementation in `~/.vibe_rails/board.db`, including
-component migrations `board/1`–`board/21`. The historical `VibeRails.Services.Board` namespace
+component migrations `board/1`–`board/22`. The historical `VibeRails.Services.Board` namespace
 does not move this code back into the application project. Keep DTO/contracts in
 `VibeRails.Data.Abstractions/Board`; keep Git, live terminal state and UI policy in the host.
 
@@ -140,3 +140,9 @@ whose short form a label already holds. A pulled web card's number is adopted on
 `board/21` (additive) adds `BoardSyncSkippedEntries`: pulled sync entries the desktop can never
 apply, recorded so the cursor moves past them and the status view counts them. It cascades with
 the board and is cleared when a re-publish lands on a different remote board. No backfill.
+
+`board/22` (additive) adds the nullable `BoardSyncSkippedEntries.Version`: the desktop version that
+last tried the entry. `RetrySkippedSyncEntriesAsync` moves the link cursor back to just before the
+earliest entry an earlier version tried (NULL counts as earlier) and records the current version on
+those rows in the same transaction; the stamped Card Log writers delete an entry's row in the
+transaction that applies it. No backfill; older binaries never name the column.

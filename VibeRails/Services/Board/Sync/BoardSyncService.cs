@@ -286,6 +286,15 @@ public sealed class BoardSyncService(
 
     private async Task<BoardSyncLinkRecord> PullAsync(BoardSyncLinkRecord link, CancellationToken cancellationToken)
     {
+        // Each newer version gets one attempt at the entries an earlier one skipped: the pull goes back to
+        // just before the earliest of them. Entries already here are recognised by id and passed again,
+        // and a replayed change leaves alone every field a later entry changed (GetFieldsChangedAfterAsync).
+        if (await store.RetrySkippedSyncEntriesAsync(link.BoardId, VersionInfo.Version, cancellationToken) is long retryFrom)
+        {
+            featureLog.Write(FeatureName, "retry", $"Pulling again after sequence {retryFrom}: web entries an earlier version skipped get another attempt.",
+                link.BoardId, link.RemoteBoardId, "ok");
+            link = link with { Cursor = retryFrom };
+        }
         var applied = 0;
         var skipped = 0;
         for (var page = 0; page < MaxPullPagesPerSync; page++)
@@ -307,11 +316,13 @@ public sealed class BoardSyncService(
                     }
                     catch (BoardValidationException ex)
                     {
-                        // Permanent: no retry makes this version able to apply the entry, and waiting
-                        // on it would hold back everything after it. It is recorded, logged and counted
-                        // in the status view. Transient failures (a busy database) still throw and retry.
+                        // Permanent for this version: no retry makes it able to apply the entry, and waiting
+                        // on it would hold back everything after it. It is recorded with this version, logged
+                        // and counted in the status view; a newer version tries it again. Transient failures
+                        // (a busy database) still throw and retry.
                         await store.RecordSkippedSyncEntryAsync(link.BoardId,
-                            new BoardSyncSkippedEntry(entry.Id, entry.Seq, entry.CardKey, SkippedKind(entry.Kind), Trim(ex.Message)), cancellationToken);
+                            new BoardSyncSkippedEntry(entry.Id, entry.Seq, entry.CardKey, SkippedKind(entry.Kind), Trim(ex.Message)),
+                            VersionInfo.Version, cancellationToken);
                         featureLog.Write(FeatureName, "skip", $"Skipped remote entry {entry.Id} ({SkippedKind(entry.Kind)} on {entry.CardKey}): {Trim(ex.Message)}",
                             link.BoardId, link.RemoteBoardId, "skipped", LogLevel.Warning);
                         skipped++;
@@ -359,8 +370,9 @@ public sealed class BoardSyncService(
     /// <summary>
     /// Applies and retains one unseen entry. A <see cref="BoardValidationException"/> means this
     /// version can never apply it (unsupported kind or value, conflicting identity, a card of another
-    /// board or one that never reached this machine): the pull records and passes it. Losing field
-    /// edits are retained by the store without overwriting later local changes.
+    /// board or one that never reached this machine): the pull records and passes it, and a newer
+    /// version tries it again. Losing field edits are retained by the store without overwriting later
+    /// local changes.
     /// </summary>
     private async Task<bool> ApplyAsync(BoardSyncLinkRecord link, IReadOnlyList<BoardColumnRecord> columns, BoardSyncPulledEntryWire entry, CancellationToken cancellationToken)
     {

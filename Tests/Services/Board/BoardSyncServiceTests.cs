@@ -293,7 +293,7 @@ public sealed class BoardSyncServiceTests : IDisposable
         Assert.Equal(client.Entries[2].Id, status.SkippedEntries![0].EntryId);
         Assert.Equal(card.Key, status.SkippedEntries![0].CardKey);
 
-        // A skipped entry is recorded once and never retried at the same cursor.
+        // The version that skipped an entry does not try it again: the next sync pulls from the cursor.
         var calls = client.PullAfters.Count;
         var again = await service.SyncNowAsync(root, card.BoardId, Ct);
         Assert.Equal(4, Assert.Single(client.PullAfters.Skip(calls)));
@@ -587,6 +587,68 @@ public sealed class BoardSyncServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ANewerVersionAppliesWhatAnEarlierOneSkipped_WithoutUndoingALaterEdit()
+    {
+        var card = await Card();
+        await service.SetPublishedAsync(root, card.BoardId, true, Ct);
+        client.Web(card, "change", "Changed: title, priority", """{"title":{"to":"Older"},"priority":{"to":"high"}}""");
+        client.Web(card, "comment", "Missed by the earlier version", null);
+        client.Web(card, "change", "Changed: title", """{"title":{"to":"Newer"}}""");
+        // An earlier version could not apply the first two web entries: it passed them over and recorded that it tried.
+        var unknown = client.Entries.Skip(1).Take(2).Select(e => e.Id).ToHashSet();
+        client.TransformPull = page => page with { Entries = page.Entries.Select(e => unknown.Contains(e.Id) ? e with { Kind = "future_kind" } : e).ToList() };
+        Assert.Equal(2, (await service.SyncNowAsync(root, card.BoardId, Ct))!.Skipped);
+        await ExecuteAsync("UPDATE BoardSyncSkippedEntries SET Version = '1.0.0';");
+        client.TransformPull = null;
+
+        var calls = client.PullAfters.Count;
+        var retried = await service.SyncNowAsync(root, card.BoardId, Ct);
+        Assert.Null(retried!.LastError);
+        Assert.Equal(1, client.PullAfters[calls]);
+        Assert.Equal(4, retried.Cursor);
+        Assert.Equal(0, retried.Skipped);
+        // The replayed change is older than the title edit after it: it sets the priority, not the title.
+        var current = (await store.FindCardAsync(root, card.Id, Ct))!;
+        Assert.Equal("Newer", current.Title);
+        Assert.Equal("high", current.Priority);
+        Assert.Equal("Missed by the earlier version", Assert.Single((await store.GetCardDetailAsync(root, card.Id, Ct))!.Comments).Body);
+
+        // Once: the next sync pulls from the cursor again.
+        calls = client.PullAfters.Count;
+        await service.SyncNowAsync(root, card.BoardId, Ct);
+        Assert.Equal(4, Assert.Single(client.PullAfters.Skip(calls)));
+    }
+
+    [Fact]
+    public async Task AnEntryThisVersionStillCannotApplyIsTriedOnce_AndANewerVersionsRecordIsLeftAlone()
+    {
+        var card = await Card();
+        await service.SetPublishedAsync(root, card.BoardId, true, Ct);
+        client.Web(card, "restored", "Declared but not applied by this version", null);
+        Assert.Equal(1, (await service.SyncNowAsync(root, card.BoardId, Ct))!.Skipped);
+        Assert.Equal(VibeRails.VersionInfo.Version, await SkippedVersionAsync());
+
+        // Last tried by an earlier version: tried again, still skipped, and recorded under this version and reason.
+        await ExecuteAsync("UPDATE BoardSyncSkippedEntries SET Version = '1.0.0', Reason = 'Earlier wording';");
+        var calls = client.PullAfters.Count;
+        var retried = await service.SyncNowAsync(root, card.BoardId, Ct);
+        Assert.Equal(1, client.PullAfters[calls]);
+        Assert.Equal(2, retried!.Cursor);
+        Assert.Contains("cannot apply remote entry kind", Assert.Single(retried.SkippedEntries!).Reason);
+        Assert.Equal(VibeRails.VersionInfo.Version, await SkippedVersionAsync());
+        calls = client.PullAfters.Count;
+        await service.SyncNowAsync(root, card.BoardId, Ct);
+        Assert.Equal(2, Assert.Single(client.PullAfters.Skip(calls)));
+
+        // Last tried by a newer version: this one cannot do better, so it neither rewinds nor rewrites the record.
+        await ExecuteAsync("UPDATE BoardSyncSkippedEntries SET Version = '999.0.0';");
+        calls = client.PullAfters.Count;
+        await service.SyncNowAsync(root, card.BoardId, Ct);
+        Assert.Equal(2, Assert.Single(client.PullAfters.Skip(calls)));
+        Assert.Equal("999.0.0", await SkippedVersionAsync());
+    }
+
+    [Fact]
     public async Task CardsAnOlderBinaryCreatesAfterPublishingGetABaseline_SoTheyAndTheirCommentsAreSent()
     {
         var card = await Card();
@@ -664,6 +726,24 @@ public sealed class BoardSyncServiceTests : IDisposable
         await Assert.ThrowsAsync<BoardValidationException>(() => service.SyncNowAsync(root, card.BoardId, Ct));
         await service.SyncDueAsync(Ct);
         Assert.Equal(0, client.Calls);
+    }
+
+    private async Task ExecuteAsync(string sql)
+    {
+        await using var db = new Microsoft.Data.Sqlite.SqliteConnection(cs);
+        await db.OpenAsync(Ct);
+        await using var command = db.CreateCommand();
+        command.CommandText = sql;
+        await command.ExecuteNonQueryAsync(Ct);
+    }
+
+    private async Task<string?> SkippedVersionAsync()
+    {
+        await using var db = new Microsoft.Data.Sqlite.SqliteConnection(cs);
+        await db.OpenAsync(Ct);
+        await using var command = db.CreateCommand();
+        command.CommandText = "SELECT Version FROM BoardSyncSkippedEntries;";
+        return await command.ExecuteScalarAsync(Ct) as string;
     }
 
     private sealed class FakeClient : IBoardSyncClient

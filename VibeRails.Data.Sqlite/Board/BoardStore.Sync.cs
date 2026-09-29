@@ -24,6 +24,7 @@ public sealed partial class BoardStore
 
     // board/21: pulled entries this version can never apply (an unknown kind, an identity that
     // conflicts, a card of another board). The cursor moves past them; the status view counts them.
+    // board/22 adds Version, the desktop version that last tried the entry: a newer one tries again.
     private const string SkippedEntriesSchemaSql = """
         CREATE TABLE IF NOT EXISTS BoardSyncSkippedEntries (
             BoardId TEXT NOT NULL REFERENCES Boards(Id) ON DELETE CASCADE,
@@ -279,16 +280,17 @@ public sealed partial class BoardStore
         return entries;
     }
 
-    public async Task<bool> RecordSkippedSyncEntryAsync(string boardId, BoardSyncSkippedEntry entry, CancellationToken cancellationToken = default)
+    public async Task<bool> RecordSkippedSyncEntryAsync(string boardId, BoardSyncSkippedEntry entry, string version, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
-        // The board check and the write are one statement, like SaveSyncLinkAsync. A repeat keeps the first record.
+        // The board check and the write are one statement, like SaveSyncLinkAsync. A repeat is a later
+        // attempt at the same entry: it records that attempt's version and reason and keeps the rest.
         command.CommandText = """
-            INSERT INTO BoardSyncSkippedEntries (BoardId, EntryId, Seq, CardKey, Kind, Reason, SkippedUTC)
-            SELECT $board, $entry, $seq, $key, $kind, $reason, $now
+            INSERT INTO BoardSyncSkippedEntries (BoardId, EntryId, Seq, CardKey, Kind, Reason, SkippedUTC, Version)
+            SELECT $board, $entry, $seq, $key, $kind, $reason, $now, $version
             WHERE EXISTS (SELECT 1 FROM Boards WHERE Id = $board)
-            ON CONFLICT(BoardId, EntryId) DO NOTHING;
+            ON CONFLICT(BoardId, EntryId) DO UPDATE SET Reason = excluded.Reason, Version = excluded.Version;
             """;
         command.Parameters.AddWithValue("$board", boardId);
         command.Parameters.AddWithValue("$entry", entry.EntryId);
@@ -297,7 +299,92 @@ public sealed partial class BoardStore
         command.Parameters.AddWithValue("$kind", entry.Kind);
         command.Parameters.AddWithValue("$reason", entry.Reason);
         command.Parameters.AddWithValue("$now", ToDb(DateTime.UtcNow));
+        command.Parameters.AddWithValue("$version", version);
         return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+    }
+
+    public async Task<long?> RetrySkippedSyncEntriesAsync(string boardId, string version, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        // Every pull asks and the answer is almost always no, which must not take the write lock.
+        if (EarliestToRetry(await ReadSkippedAttemptsAsync(connection, null, boardId, cancellationToken), version) is null)
+            return null;
+        await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
+        var attempts = await ReadSkippedAttemptsAsync(connection, transaction, boardId, cancellationToken);
+        if (EarliestToRetry(attempts, version) is not long earliest)
+            return null;
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        // Only ever back: the pull moves the cursor forward, entry by entry.
+        command.CommandText = "UPDATE BoardSyncLinks SET Cursor = MIN(Cursor, $cursor) WHERE BoardId = $board RETURNING Cursor;";
+        command.Parameters.AddWithValue("$board", boardId);
+        command.Parameters.AddWithValue("$cursor", earliest - 1);
+        if (await command.ExecuteScalarAsync(cancellationToken) is not long cursor)
+            return null;
+        // Marked as tried by this version in the rewind's own transaction: the pull that follows gives each
+        // entry its attempt, and one that is interrupted resumes from the cursor, which is already back.
+        command.CommandText = "UPDATE BoardSyncSkippedEntries SET Version = $version WHERE BoardId = $board AND Version IS $tried;";
+        command.Parameters.Clear();
+        command.Parameters.AddWithValue("$board", boardId);
+        command.Parameters.AddWithValue("$version", version);
+        var tried = command.Parameters.Add("$tried", SqliteType.Text);
+        foreach (var attempt in attempts.Where(a => TriedByEarlierVersion(a.Version, version)))
+        {
+            tried.Value = (object?)attempt.Version ?? DBNull.Value;
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await transaction.CommitAsync(cancellationToken);
+        return cursor;
+    }
+
+    /// <summary>Each version that last tried some of the board's skipped entries, with the first sequence it tried.</summary>
+    private static async Task<List<(string? Version, long FirstSeq)>> ReadSkippedAttemptsAsync(SqliteConnection connection,
+        SqliteTransaction? transaction, string boardId, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT Version, MIN(Seq) FROM BoardSyncSkippedEntries WHERE BoardId = $board GROUP BY Version;";
+        command.Parameters.AddWithValue("$board", boardId);
+        var attempts = new List<(string?, long)>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            attempts.Add((reader.IsDBNull(0) ? null : reader.GetString(0), reader.GetInt64(1)));
+        return attempts;
+    }
+
+    private static long? EarliestToRetry(IEnumerable<(string? Version, long FirstSeq)> attempts, string version) =>
+        attempts.Where(a => TriedByEarlierVersion(a.Version, version)).Select(a => (long?)a.FirstSeq).Min();
+
+    /// <summary>
+    /// True when <paramref name="tried"/>, the version that last tried an entry, is earlier than
+    /// <paramref name="current"/>. No version (a row from before board/22) or one that does not parse
+    /// counts as earlier; the retry then records the current version, so that happens once. A current
+    /// version that does not parse retries nothing, because it cannot tell that it is newer.
+    /// </summary>
+    private static bool TriedByEarlierVersion(string? tried, string current) =>
+        ReleaseOf(current) is { } now && (tried is null || ReleaseOf(tried) is not { } then || then < now);
+
+    // 10.11.2, 10.11.2-rc.1 or 10.11.2+abc: only the release numbers order versions here.
+    private static Version? ReleaseOf(string value)
+    {
+        var end = value.IndexOfAny(['-', '+']);
+        return Version.TryParse(end < 0 ? value : value[..end], out var release) ? release : null;
+    }
+
+    /// <summary>
+    /// An entry a stamped write applies is no longer skipped: removed in the write's own transaction,
+    /// which is how a newer version's retry of an entry an earlier one passed over is recorded.
+    /// </summary>
+    private static async Task ForgetSkippedEntryAsync(SqliteConnection connection, SqliteTransaction transaction,
+        BoardSyncStamp stamp, CancellationToken cancellationToken)
+    {
+        if (stamp.BoardId is null) return;
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "DELETE FROM BoardSyncSkippedEntries WHERE BoardId = $board AND EntryId = $entry;";
+        command.Parameters.AddWithValue("$board", stamp.BoardId);
+        command.Parameters.AddWithValue("$entry", stamp.EntryId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public async Task<int> CountSkippedSyncEntriesAsync(string boardId, CancellationToken cancellationToken = default)
