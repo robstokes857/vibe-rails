@@ -31,7 +31,7 @@ export class CodeReportViewer {
                         <div data-code-map><p class="load-error" role="status">Preparing repository map…</p></div>
                         <div class="graph-note" data-graph-note>Hover a domain to trace its connections. Select a report file to explore it in the map.</div>
                         <div class="graph-options">
-                            <label><input type="checkbox" data-map-dependencies> Include vendor and node_modules sources</label>
+                            <label><input type="checkbox" data-map-dependencies> Include vendor, node_modules and assets sources</label>
                             <details data-map-diagnostics hidden><summary>Map coverage and filters</summary><div data-map-diagnostics-body></div></details>
                         </div>
                     </section>

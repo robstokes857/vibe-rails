@@ -195,6 +195,48 @@ public class RepositoryModuleResolverTests
     }
 
     [Fact]
+    public void RustImports_ResolveABareChildPathInTheModuleThatDeclaresIt()
+    {
+        // Rust 2018: `use child::Item;` beside `mod child;` names this module's child, even when the
+        // crate root has a module of the same name.
+        var files = Sources(
+            ("src/lib.rs", "mod parent; mod child; use child::Item;"),
+            ("src/parent.rs", "mod child; use child::Item; use missing::Thing;"),
+            ("src/parent/child.rs", "pub struct Item {}"),
+            ("src/child.rs", "pub struct Item {}"));
+        var resolver = new RepositoryModuleResolver(files, ["Cargo.toml"]);
+        Assert.Equal(["src/parent/child.rs", "src/parent/child.rs"], Targets(resolver, files, "src/parent.rs"));
+        Assert.Equal(["src/parent.rs", "src/child.rs", "src/child.rs"], Targets(resolver, files, "src/lib.rs"));
+    }
+
+    [Fact]
+    public void RustImports_TreatCargoBinTestExampleAndBenchFilesAsCrateRoots()
+    {
+        var files = Sources(
+            ("src/lib.rs", "pub mod api;"),
+            ("src/api.rs", ""),
+            ("src/bin/tool.rs", "mod cli; use cli::run;"),
+            ("src/bin/cli.rs", "pub fn run() {}"),
+            ("tests/integration.rs", "mod common; use common::setup;"),
+            ("tests/common/mod.rs", "pub fn setup() {}"),
+            ("examples/demo.rs", "mod util; use crate::util::helper;"),
+            ("examples/demo/util.rs", ""),
+            ("benches/speed.rs", "mod data; use self::data::load;"),
+            ("benches/data/mod.rs", ""),
+            ("docs/tests/snippet.rs", "mod part; use part::Thing;"),
+            ("docs/tests/part.rs", ""));
+        var resolver = new RepositoryModuleResolver(files, ["Cargo.toml"]);
+        Assert.Equal(["src/bin/cli.rs", "src/bin/cli.rs"], Targets(resolver, files, "src/bin/tool.rs"));
+        Assert.Equal(["tests/common/mod.rs", "tests/common/mod.rs"], Targets(resolver, files, "tests/integration.rs"));
+        Assert.Equal(["benches/data/mod.rs", "benches/data/mod.rs"], Targets(resolver, files, "benches/speed.rs"));
+        // A root file's modules sit beside it (examples/util.rs), not in a directory named after it.
+        Assert.Empty(Targets(resolver, files, "examples/demo.rs"));
+        // docs/ is not a package, so its tests/ files are not crate roots: as an ordinary file, its
+        // modules would live in docs/tests/snippet/, and the sibling part.rs is not one of them.
+        Assert.Empty(Targets(resolver, files, "docs/tests/snippet.rs"));
+    }
+
+    [Fact]
     public void RustImports_RejectAmbiguousModuleFileLayouts()
     {
         var files = Sources(("src/lib.rs", "mod foo; use crate::foo::Thing;"),

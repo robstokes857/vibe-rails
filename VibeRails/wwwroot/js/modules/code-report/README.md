@@ -67,12 +67,16 @@ declarations within the node budget.
 Files beyond source-read limits retain structure without declarations. An entry the path guard
 refuses is omitted and marks the map truncated; a catalog read that exceeds its character bound
 or its timeout is reported as that bound, not as a server fault. Dependency directories
-(`node_modules`, `vendor`) and C# `bin`/`obj` output are excluded (segment names matched
-case-insensitively) unless explicitly in the report. The map's **Include vendor and node_modules
-sources** checkbox sends `includeDependencies: true`, making those cataloged files eligible
-under the same containment and read bounds; C# build output remains filtered. No excluded or
-ignored file is discovered outside Git's catalog. Source files in `assets` and non-C#
-`bin`/`obj` remain eligible. A local JS/TS import that names a known file extension
+(`node_modules`, `vendor`, `assets`) and C# `bin`/`obj` output are excluded (segment names matched
+case-insensitively) unless explicitly in the report. `assets` is on that list because it holds
+vendored bundles far more often than first-party code: this repository's `wwwroot/assets` Bootstrap
+bundle alone marked every map partial and its minified names created bogus references. The map's
+**Include vendor, node_modules and assets sources** checkbox sends `includeDependencies: true`,
+making those cataloged files eligible under the same containment and read bounds; C# build output
+remains filtered. No excluded or ignored file is discovered outside Git's catalog. Non-C#
+`bin`/`obj` sources remain eligible. Rust crate maps start at `main.rs`/`lib.rs` and at Cargo's
+auto-discovered `src/bin`, `tests`, `examples` and `benches` files, and a bare `use child::…`
+resolves against the current module first, as Rust 2018 does. A local JS/TS import that names a known file extension
 (`.js`, `.ts`, `.json`, `.vue`, …) resolves only to that file; any other dotted tail
 (`./user.service`, `./app.module`) is a module stem and still probes the source extensions and
 `index` files. When the graph exceeds the

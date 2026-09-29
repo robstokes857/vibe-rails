@@ -61,17 +61,18 @@ public sealed class CodeGraphDiagnosticsTests
             await Git("add", "--force", "--all");
 
             var graph = await new RepositoryCodeGraph().ReadAsync(root, [], TestContext.Current.CancellationToken);
-            Assert.Equal(4, graph.FileCount);
+            Assert.Equal(3, graph.FileCount);
             Assert.Equal(7, graph.Diagnostics!.SupportedFiles);
-            Assert.Equal(2, graph.Diagnostics.ExcludedDependencyFiles);
+            Assert.Equal(3, graph.Diagnostics.ExcludedDependencyFiles);
             Assert.Equal(1, graph.Diagnostics.ExcludedBuildOutputFiles);
             Assert.Equal(1, Assert.Single(graph.Diagnostics.Omissions, item => item.Code == "file-size").Count);
             Assert.Equal(1, Assert.Single(graph.Diagnostics.Omissions, item => item.Code == "binary-source").Count);
-            Assert.Contains(graph.Nodes, node => node.Path == "assets/library.js");
+            Assert.DoesNotContain(graph.Nodes, node => node.Path == "assets/library.js");
             Assert.Contains(graph.Nodes, node => node.Path == "large.rs");
 
             var included = await new RepositoryCodeGraph().ReadAsync(root, [], TestContext.Current.CancellationToken, includeDependencies: true);
             Assert.Equal(6, included.FileCount);
+            Assert.Contains(included.Nodes, node => node.Path == "assets/library.js");
             Assert.Equal(0, included.Diagnostics!.ExcludedDependencyFiles);
             Assert.True(included.Diagnostics.IncludesDependencies);
             Assert.DoesNotContain(included.Nodes, node => node.Path == "obj/Generated.cs");

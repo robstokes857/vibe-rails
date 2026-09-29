@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -20,6 +21,21 @@ public sealed class RepositoryCodeGraph
     private const int MaxFileBytes = 128 * 1024;
     private const long MaxSourceBytes = 16 * 1024 * 1024;
     private const int MaxCatalogChars = 4 * 1024 * 1024;
+    private const int MaxDeclarationsPerFile = 12;
+    private const int MaxDirectoryDepth = 32;
+    // Diagnostic prose names the limits from the constants above, so a changed limit cannot leave a stale number behind.
+    private static readonly string FileLimitText = Text($"source files omitted by the {MaxFiles:N0}-file limit. Prioritize a report file to include it.");
+    private static readonly string NodeLimitText = Text($"source files omitted because their directory ancestry exceeds the {MaxNodes:N0}-node limit.");
+    private static readonly string FileSizeText = Text($"files kept without outlines: source exceeds {MaxFileBytes / 1024} KiB.");
+    private static readonly string SourceBudgetText = Text($"files kept without outlines: the {MaxSourceBytes / (1024 * 1024)} MiB source-read budget was reached.");
+    private static readonly string DepthText = Text($"files have ancestry shortened to {MaxDirectoryDepth} directory levels.");
+    private static readonly string DeclarationLimitText = Text($"declarations omitted by the {MaxDeclarationsPerFile}-declarations-per-file limit. Open the source for the full outline.");
+    private static readonly string DeclarationNodeLimitText = Text($"declarations omitted by the {MaxNodes:N0}-node limit; file structure takes priority.");
+    private static readonly string EvidenceLengthText = Text($"reference descriptions shortened to {MaxEvidenceLength} characters.");
+    private static readonly string EdgeLimitText = Text($"references omitted by the {MaxEdges:N0}-edge limit.");
+    private static readonly string SerializedSizeText = Text($"map exceeded {MaxSerializedBytes / (1024 * 1024)} MiB; references, then declarations, then file structure were trimmed.");
+    private static readonly string SerializedNodesText = Text($"nodes omitted to keep the map below {MaxSerializedBytes / (1024 * 1024)} MiB.");
+    private static readonly string SerializedEdgesText = Text($"edges omitted to keep the map below {MaxSerializedBytes / (1024 * 1024)} MiB.");
     private const string GraphDescription = "Working-tree directories, declarations, local module imports and namespace-scoped "
         + "type-name mentions. References are source evidence, not resolved calls or runtime dependencies.";
     // Large repositories with a cold Git index can take a while to enumerate; this is a bound, not a target.
@@ -49,9 +65,7 @@ public sealed class RepositoryCodeGraph
         // Fewer selected than eligible means the file or node budget left some out: say the map is partial.
         var truncated = selected.Length < candidates.Length;
         diagnostics.Add(selected.Length == MaxFiles ? "file-limit" : "file-node-limit",
-            candidates.Length - selected.Length, selected.Length == MaxFiles
-                ? "source files omitted by the 2,000-file limit. Prioritize a report file to include it."
-                : "source files omitted because their directory ancestry exceeds the 2,800-node limit.");
+            candidates.Length - selected.Length, selected.Length == MaxFiles ? FileLimitText : NodeLimitText);
         var guard = new GitStagedSnapshotProvider.WorkingTreePathGuard(root);
         var files = new List<(string Path, SourceOutline? Outline)>();
         long bytesRead = 0;
@@ -85,16 +99,14 @@ public sealed class RepositoryCodeGraph
                     {
                         truncated = true;
                         diagnostics.Add(length > MaxFileBytes ? "file-size" : "binary-source", 1,
-                            length > MaxFileBytes ? "files kept without outlines: source exceeds 128 KiB."
-                                : "files kept without outlines: source contains NUL bytes.");
+                            length > MaxFileBytes ? FileSizeText : "files kept without outlines: source contains NUL bytes.");
                     }
                 }
                 else
                 {
                     truncated = true;
                     diagnostics.Add(stream.Length > MaxFileBytes ? "file-size" : "source-budget", 1,
-                        stream.Length > MaxFileBytes ? "files kept without outlines: source exceeds 128 KiB."
-                            : "files kept without outlines: the 16 MiB source-read budget was reached.");
+                        stream.Length > MaxFileBytes ? FileSizeText : SourceBudgetText);
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -153,14 +165,14 @@ public sealed class RepositoryCodeGraph
     }
 
     // The directory nodes a file introduces: the repository root for a top-level file, else each
-    // prefix of its directory, at most 32 levels deep. Shared by SelectPaths and Build so the
+    // prefix of its directory, at most MaxDirectoryDepth levels deep. Shared by SelectPaths and Build so the
     // selection budget and the node budget count the same nodes.
     private static string[] Ancestors(string path)
     {
         var directory = Path.GetDirectoryName(path)?.Replace('\\', '/') ?? "";
         if (directory.Length == 0) return [""];
         var segments = directory.Split('/');
-        return segments.Take(32).Select((_, index) => string.Join('/', segments.Take(index + 1))).ToArray();
+        return segments.Take(MaxDirectoryDepth).Select((_, index) => string.Join('/', segments.Take(index + 1))).ToArray();
     }
 
     internal static string RepositoryName(string root)
@@ -202,15 +214,14 @@ public sealed class RepositoryCodeGraph
             if (nodes.Count + ancestors.Count(ancestor => !domains.ContainsKey(ancestor)) + 1 > MaxNodes)
             {
                 truncated = true;
-                diagnostics.Add("file-node-limit", files.Count - fileNodes.Count,
-                    "source files omitted because their directory ancestry exceeds the 2,800-node limit.");
+                diagnostics.Add("file-node-limit", files.Count - fileNodes.Count, NodeLimitText);
                 break;
             }
-            // Ancestors stops at 32 levels; a deeper path loses the rest of its ancestry.
-            if (path.AsSpan().Count('/') > 32)
+            // Ancestors stops at MaxDirectoryDepth levels; a deeper path loses the rest of its ancestry.
+            if (path.AsSpan().Count('/') > MaxDirectoryDepth)
             {
                 truncated = true;
-                diagnostics.Add("directory-depth", 1, "files have ancestry shortened to 32 directory levels.");
+                diagnostics.Add("directory-depth", 1, DepthText);
             }
             string? domainId = null;
             foreach (var ancestor in ancestors)
@@ -240,12 +251,10 @@ public sealed class RepositoryCodeGraph
             if (outline is null || !fileNodes.TryGetValue(path, out var file)) continue;
             var declarationsForFile = outline.Declarations.Distinct().ToArray();
             // The flag and the omission count describe the same distinct list.
-            if (declarationsForFile.Length > 12) truncated = true;
-            diagnostics.Add("declaration-limit", Math.Max(0, declarationsForFile.Length - 12),
-                "declarations omitted by the 12-declarations-per-file limit. Open the source for the full outline.");
-            var declarationsToKeep = declarationsForFile.Take(12).ToArray();
-            diagnostics.Add("declaration-node-limit", Math.Max(0, declarationsToKeep.Length - (MaxNodes - nodes.Count)),
-                "declarations omitted by the 2,800-node limit; file structure takes priority.");
+            if (declarationsForFile.Length > MaxDeclarationsPerFile) truncated = true;
+            diagnostics.Add("declaration-limit", Math.Max(0, declarationsForFile.Length - MaxDeclarationsPerFile), DeclarationLimitText);
+            var declarationsToKeep = declarationsForFile.Take(MaxDeclarationsPerFile).ToArray();
+            diagnostics.Add("declaration-node-limit", Math.Max(0, declarationsToKeep.Length - (MaxNodes - nodes.Count)), DeclarationNodeLimitText);
             foreach (var declaration in declarationsToKeep)
             {
                 if (nodes.Count == MaxNodes) { truncated = true; break; }
@@ -267,13 +276,18 @@ public sealed class RepositoryCodeGraph
             // Explicit module evidence wins over a weaker type mention for the same file pair.
             foreach (var reference in moduleResolver.Resolve(path, outline))
             {
+                var target = fileNodes[reference.Path];
+                if (!Admit(source, target)) continue;
                 var import = reference.Import;
                 var verb = import.Kind == "rust-mod" ? "declares module" : "imports";
                 var importedName = import.ImportedName is null ? "" : $" ({import.ImportedName})";
-                AddReference(source, fileNodes[reference.Path], $"{path}:{import.Line} {verb} {import.Path}{importedName}");
+                AddReference(source, target, $"{path}:{import.Line} {verb} {import.Path}{importedName}");
             }
             foreach (var reference in referenceResolver.Resolve(path, outline, cancellationToken))
-                AddReference(source, fileNodes[reference.Path], reference.Evidence);
+            {
+                var target = fileNodes[reference.Path];
+                if (Admit(source, target)) AddReference(source, target, reference.Evidence);
+            }
             foreach (var import in outline.Imports.Where(value =>
                 outline.Language is "JavaScript" or "TypeScript" && (value.StartsWith("./") || value.StartsWith("../"))))
             {
@@ -283,7 +297,7 @@ public sealed class RepositoryCodeGraph
                 foreach (var candidate in ImportCandidates(relative, outline.Language))
                 {
                     if (!fileNodes.TryGetValue(candidate, out var target)) continue;
-                    AddReference(source, target, $"{path} imports {import}");
+                    if (Admit(source, target)) AddReference(source, target, $"{path} imports {import}");
                     break;
                 }
             }
@@ -306,24 +320,27 @@ public sealed class RepositoryCodeGraph
 
         return FitAtlasByteLimit(name.Length > 200 ? name[..200] : name, nodes, edges, truncated, diagnostics, cancellationToken);
 
+        // Decided before a caller builds any evidence text: a repeated pair or one past the edge
+        // budget costs nothing more. Every pair is remembered, so an omitted file pair counts once
+        // even when several imported names target it; the resolvers' work budgets bound the set.
+        bool Admit(CodeGraphNode source, CodeGraphNode target)
+        {
+            if (source.Id == target.Id || !relations.Add((source.Id, target.Id))) return false;
+            var newDomainRelation = source.ParentId != target.ParentId
+                && !domainRelations.ContainsKey((source.ParentId!, target.ParentId!));
+            if (edges.Count + domainRelations.Count + (newDomainRelation ? 2 : 1) <= MaxEdges) return true;
+            truncated = true;
+            diagnostics.Add("edge-limit", 1, EdgeLimitText);
+            return false;
+        }
+
         void AddReference(CodeGraphNode source, CodeGraphNode target, string evidence)
         {
-            if (source.Id == target.Id || relations.Contains((source.Id, target.Id))) return;
             if (evidence.Length > MaxEvidenceLength)
             {
                 evidence = evidence[..256] + "…" + evidence[^(MaxEvidenceLength - 257)..];
                 truncated = true;
-                diagnostics.Add("evidence-length", 1, "reference descriptions shortened to 512 characters.");
-            }
-            var newDomainRelation = source.ParentId != target.ParentId
-                && !domainRelations.ContainsKey((source.ParentId!, target.ParentId!));
-            // Count an omitted file pair once even when several imported names target it.
-            relations.Add((source.Id, target.Id));
-            if (edges.Count + domainRelations.Count + (newDomainRelation ? 2 : 1) > MaxEdges)
-            {
-                truncated = true;
-                diagnostics.Add("edge-limit", 1, "references omitted by the 10,000-edge limit.");
-                return;
+                diagnostics.Add("evidence-length", 1, EvidenceLengthText);
             }
             edges.Add(new(Id("reference", source.Id + target.Id), source.Id, target.Id, "references", evidence));
             if (source.ParentId != target.ParentId)
@@ -371,7 +388,7 @@ public sealed class RepositoryCodeGraph
         var bytes = JsonSerializer.SerializeToUtf8Bytes(response, AppJsonSerializerContext.Default.CodeGraphResponse).Length;
         if (bytes <= MaxSerializedBytes) return response;
 
-        diagnostics.Add("serialized-size", 1, "map exceeded 8 MiB; references, then declarations, then file structure were trimmed.");
+        diagnostics.Add("serialized-size", 1, SerializedSizeText);
 
         bytes = JsonSerializer.SerializeToUtf8Bytes(Compose(true), AppJsonSerializerContext.Default.CodeGraphResponse).Length;
         // Preserve the file hierarchy before optional connections and declarations. If unusually
@@ -393,17 +410,25 @@ public sealed class RepositoryCodeGraph
         }
 
         // Diagnostic counts and the file count can change the final JSON length slightly.
-        // Recheck the actual wire payload rather than relying solely on subtraction estimates.
-        while (JsonSerializer.SerializeToUtf8Bytes(Compose(true), AppJsonSerializerContext.Default.CodeGraphResponse).Length > MaxSerializedBytes
-            && nodes.Count > 0)
+        // Recheck the actual wire payload rather than relying solely on subtraction estimates. Each
+        // pass removes at least the measured overshoot by those estimates before measuring again,
+        // so an estimate error costs a few full serializations, not one per removed item.
+        long overshoot;
+        while ((overshoot = JsonSerializer.SerializeToUtf8Bytes(Compose(true), AppJsonSerializerContext.Default.CodeGraphResponse).Length
+            - MaxSerializedBytes) > 0 && nodes.Count > 0)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var referenceIndex = edges.FindLastIndex(edge => edge.Kind == "references");
-            if (referenceIndex >= 0) RemoveEdgeAt(referenceIndex);
-            else
+            for (var removed = 0L; removed < overshoot && nodes.Count > 0;)
             {
-                var declarationIndex = nodes.FindLastIndex(node => node.Kind is not ("file" or "module"));
-                RemoveNodeAt(declarationIndex >= 0 ? declarationIndex : nodes.Count - 1);
+                cancellationToken.ThrowIfCancellationRequested();
+                var before = bytes;
+                var referenceIndex = edges.FindLastIndex(edge => edge.Kind == "references");
+                if (referenceIndex >= 0) RemoveEdgeAt(referenceIndex);
+                else
+                {
+                    var declarationIndex = nodes.FindLastIndex(node => node.Kind is not ("file" or "module"));
+                    RemoveNodeAt(declarationIndex >= 0 ? declarationIndex : nodes.Count - 1);
+                }
+                removed += Math.Max(1, before - bytes);
             }
         }
         var bounded = Compose(true);
@@ -420,7 +445,7 @@ public sealed class RepositoryCodeGraph
             bytes -= JsonSerializer.SerializeToUtf8Bytes(nodes[index], AppJsonSerializerContext.Default.CodeGraphNode).Length
                 + (nodes.Count > 1 ? 1 : 0);
             nodes.RemoveAt(index);
-            diagnostics.Add("serialized-nodes", 1, "nodes omitted to keep the map below 8 MiB.");
+            diagnostics.Add("serialized-nodes", 1, SerializedNodesText);
         }
 
         void RemoveEdgeAt(int index)
@@ -428,7 +453,7 @@ public sealed class RepositoryCodeGraph
             bytes -= JsonSerializer.SerializeToUtf8Bytes(edges[index], AppJsonSerializerContext.Default.CodeGraphEdge).Length
                 + (edges.Count > 1 ? 1 : 0);
             edges.RemoveAt(index);
-            diagnostics.Add("serialized-edges", 1, "edges omitted to keep the map below 8 MiB.");
+            diagnostics.Add("serialized-edges", 1, SerializedEdgesText);
         }
     }
 
@@ -473,14 +498,20 @@ public sealed class RepositoryCodeGraph
         Path.GetExtension(path).Equals(".cs", StringComparison.OrdinalIgnoreCase)
         && path.Split('/').Any(IsBuildOutputDirectory);
 
+    // `assets` holds vendored bundles far more often than first-party code (Bootstrap, PDF.js and
+    // xterm here): one minified bundle over 128 KiB marks every map partial, and its one-letter
+    // names create bogus references. A project whose own code lives there opts in like any dependency.
     private static bool IsDependencyDirectory(string part) =>
         part.Equals(".git", StringComparison.OrdinalIgnoreCase)
         || part.Equals("node_modules", StringComparison.OrdinalIgnoreCase)
-        || part.Equals("vendor", StringComparison.OrdinalIgnoreCase);
+        || part.Equals("vendor", StringComparison.OrdinalIgnoreCase)
+        || part.Equals("assets", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsBuildOutputDirectory(string part) =>
         part.Equals("bin", StringComparison.OrdinalIgnoreCase)
         || part.Equals("obj", StringComparison.OrdinalIgnoreCase);
+
+    private static string Text(FormattableString text) => text.ToString(CultureInfo.InvariantCulture);
 
     private static string Id(string kind, string path) => kind + ":" + Convert.ToHexStringLower(
         SHA256.HashData(Encoding.UTF8.GetBytes(path)))[..24];

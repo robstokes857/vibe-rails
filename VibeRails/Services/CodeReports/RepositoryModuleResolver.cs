@@ -198,11 +198,12 @@ internal sealed class RepositoryModuleResolver
     private void BuildRustModules()
     {
         // The catalog, including Cargo.toml paths when available, establishes workspace boundaries.
-        // Conventional crate roots cover src/{lib,main}.rs and custom-layout main.rs/lib.rs targets.
+        // Conventional crate roots cover src/{lib,main}.rs, custom-layout main.rs/lib.rs targets and
+        // Cargo's auto-discovered bin, test, example and bench targets (IsCargoTargetRoot).
         // Cargo aliases, generated modules and #[path] modules deliberately remain unresolved.
         // Shallow roots first, so a budget cut leaves the conventional top-level crates complete.
         var roots = paths.Where(path => path.EndsWith(".rs", StringComparison.Ordinal)
-                && Path.GetFileName(path) is "main.rs" or "lib.rs")
+                && (Path.GetFileName(path) is "main.rs" or "lib.rs" || IsCargoTargetRoot(path)))
             .OrderBy(path => path.AsSpan().Count('/')).ThenBy(path => path, StringComparer.Ordinal).ToArray();
         foreach (var root in roots)
         {
@@ -267,7 +268,10 @@ internal sealed class RepositoryModuleResolver
         var explicitlyLocal = parts[0] is "crate" or "self" or "super";
         if (parts[0] == "crate") { module = ""; cursor++; }
         else if (parts[0] == "self") cursor++;
-        else if (parts[0] != "super") module = "";
+        // A bare first name starts in the current module when that module declares it (Rust 2018:
+        // `use child::Item;` beside `mod child;`); otherwise it is a crate-root module (2015) or an
+        // external crate, which the root lookup below leaves unresolved.
+        else if (parts[0] != "super" && !location.Crate.ContainsKey(RustJoin(module, parts[0]))) module = "";
         while (cursor < parts.Length && parts[cursor] == "super")
         {
             if (module.Length == 0) return null;
@@ -302,6 +306,27 @@ internal sealed class RepositoryModuleResolver
         }
         cargoOwners[directory] = owner;
         return owner;
+    }
+
+    private static readonly string[] CargoTargetDirectories = ["src/bin", "tests", "examples", "benches"];
+
+    /// <summary>
+    /// Cargo compiles every .rs file directly inside a package's src/bin, tests, examples or benches
+    /// directory as its own crate (their subdirectory main.rs form is already a main.rs root). With
+    /// no Cargo.toml in the catalog, the repository root stands in for the package.
+    /// </summary>
+    private bool IsCargoTargetRoot(string path)
+    {
+        var directory = Directory(path);
+        foreach (var target in CargoTargetDirectories)
+        {
+            if (directory == target) return cargoRoots.Count == 0 || cargoRoots.Contains("");
+            if (directory.Length > target.Length && directory[^(target.Length + 1)] == '/'
+                && directory.EndsWith(target, StringComparison.Ordinal)
+                && cargoRoots.Contains(directory[..^(target.Length + 1)]))
+                return true;
+        }
+        return false;
     }
 
     private string? UniqueExisting(string first, string second) => paths.Contains(first)

@@ -430,7 +430,7 @@ test('map coverage explains omissions and dependency filtering refreshes one map
     await expect(coverage).toContainText('128 KiB source limit');
     await expect(coverage).toContainText('Search covers this snapshot');
     const originalFrame = await report.locator('iframe').elementHandle();
-    await report.getByLabel('Include vendor and node_modules sources').check();
+    await report.getByLabel('Include vendor, node_modules and assets sources').check();
     await expect(report.locator('[data-graph-note]')).toContainText('3 source files mapped');
     await expect(coverage).toContainText('0 vendor/node_modules files');
     expect(requests.map(request => request.includeDependencies)).toEqual([false, true]);

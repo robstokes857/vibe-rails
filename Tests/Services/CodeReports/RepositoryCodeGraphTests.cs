@@ -111,16 +111,18 @@ public sealed class RepositoryCodeGraphTests
     }
 
     [Fact]
-    public async Task ReadAsync_IncludesSourceAssetsAndCliDirectoriesAcrossLanguages()
+    public async Task ReadAsync_IncludesCliDirectoriesAcrossLanguages_AndLeavesVendoredAssetsOut()
     {
         var root = Path.Combine(Path.GetTempPath(), "viberails-graph-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try
         {
             await Git(root, "init");
-            var sources = new[] { "bin/cli.js", "bin/task.py", "bin/cli.php", "src/bin/main.rs", "assets/main.ts" };
-            // `tools/Bin` spells the segment the other way: the exclusion is case-insensitive.
-            var excluded = new[] { "bin/Debug/Generated.cs", "obj/Generated.cs", "tools/Bin/Generated.cs", "node_modules/package/main.js", "vendor/package/main.php" };
+            var sources = new[] { "bin/cli.js", "bin/task.py", "bin/cli.php", "src/bin/main.rs" };
+            // `tools/Bin` spells the segment the other way: the exclusion is case-insensitive. `assets`
+            // is where vendored bundles live (this repository's own wwwroot/assets), so it needs the opt-in.
+            var excluded = new[] { "bin/Debug/Generated.cs", "obj/Generated.cs", "tools/Bin/Generated.cs", "node_modules/package/main.js",
+                "vendor/package/main.php", "assets/main.ts", "web/wwwroot/Assets/bootstrap.bundle.js" };
             foreach (var path in sources.Concat(excluded))
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(root, path))!);
