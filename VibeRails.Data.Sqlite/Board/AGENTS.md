@@ -148,7 +148,9 @@ those rows in the same transaction; the stamped Card Log writers delete an entry
 transaction that applies it. No backfill; older binaries never name the column.
 
 `board/23` adds `BoardSyncLinks.ActivitySchema` (default 0) and `ActivityAfter`. Old publications
-keep their original data scope; the current publish dialog explicitly enables linked activity.
+keep these columns for compatibility; VIBE-13 upgrades publications automatically when an API
+key is configured. `GetBoardsForSyncAsync` enumerates board metadata for the root scheduler;
+activity and card reads still use each board's project scope.
 The cursor makes bounded card refresh fair across root processes/restarts under the sync lock.
 Activity reads remain behind `IBoardStore`, with SQL row/actual-content bounds before loading
 payloads. Existing stored snapshots and unlimited local attachment uploads are unchanged.

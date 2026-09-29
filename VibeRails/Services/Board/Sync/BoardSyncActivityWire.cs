@@ -6,7 +6,7 @@ public sealed record BoardSyncActivityWire(int Schema,
     List<BoardSyncAttachmentWire> Attachments, List<BoardSyncLinkedCardWire> LinkedCards,
     List<string> Warnings);
 public sealed record BoardSyncSessionWire(string Id, string DisplayName, string Cli, string Origin,
-    DateTime CreatedUtc, bool IsAutomation);
+    DateTime CreatedUtc, bool IsAutomation, DateTime? EndedUtc = null, int? ExitCode = null, string? Summary = null);
 public sealed record BoardSyncCommitWire(string Sha, string Author, string Message, DateTime CommittedUtc,
     List<BoardSyncCommitFileWire> Files);
 public sealed record BoardSyncCommitFileWire(string Path, string Status, string? Before, string? After);

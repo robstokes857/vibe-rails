@@ -8,6 +8,8 @@ namespace VibeRails.Services.Board;
 /// </summary>
 public partial interface IBoardStore
 {
+    /// <summary>Local board identities for automatic account sync. Scheduler only; no card content.</summary>
+    Task<IReadOnlyList<BoardRecord>> GetBoardsForSyncAsync(CancellationToken cancellationToken = default);
     /// <summary>Bounded live-card identities for the activity refresh, ordered after an opaque cursor.</summary>
     Task<IReadOnlyList<string>> GetSyncActivityCardIdsAsync(string projectPath, string boardId, string? after, int limit, CancellationToken cancellationToken = default);
     /// <summary>Activity metadata only: no discussions, attachment data URLs or file content.</summary>

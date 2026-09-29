@@ -207,9 +207,11 @@ the header displays the full card count. Tests should use realistic asynchronous
 ## Storage changes
 
 Read [database migration instructions](../../../VibeRails.Data.Sqlite/DB/AGENTS.md).
-`board/1`–`board/23` already exist. `board/23` (additive) adds the linked-activity consent version
-and durable rotation cursor on `BoardSyncLinks`; existing publications keep their old scope until
-**Sync linked activity** is enabled. See [SYNC.md](SYNC.md) for the bounded activity transfer.
+`board/1`–`board/23` already exist. `board/23` adds the activity schema version and durable rotation
+cursor on `BoardSyncLinks`. VIBE-13 automatically publishes all local boards and activity whenever
+an API key is configured; the old switch columns remain for compatibility. The scheduler-only
+`GetBoardsForSyncAsync` reads board identity metadata across projects through `IBoardStore`.
+See [SYNC.md](SYNC.md) for the bounded activity transfer and automatic recovery.
 `board/22` (additive) adds `BoardSyncSkippedEntries.Version`, so
 a newer version retries what an earlier one skipped; `board/21` (additive) adds `BoardSyncSkippedEntries` (see
 [SYNC.md](SYNC.md)); `board/20` (VB-69) adds display IDs. `board/19` (VB-63, additive) adds `BoardContextSamples`. `board/12` adds the Jira connection and issue-link tables; `board/13` adds the trigger that deletes a board's Jira connection with the board. `board/8` is a breaking retirement (generation 3)

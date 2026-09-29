@@ -131,6 +131,9 @@
         </div>
 
         <div class="app-subnav-actions d-flex align-items-center ms-auto">
+            <button type="button" class="app-subnav-link" data-action="remote-account" title="Your viberails.ai account">
+                <i class="fa-solid fa-user-circle" aria-hidden="true"></i><span data-account-label>Sign in</span>
+            </button>
             <button class="nav-exit-btn-sm" title="Close VibeRails and stop backend">
                 <svg class="nav-exit-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
                     fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -157,6 +160,9 @@
             </div>
 
             <nav class="sidebar-nav">
+                <button type="button" class="app-subnav-link" data-action="remote-account" title="Your viberails.ai account">
+                    <i class="fa-solid fa-user-circle nav-icon" aria-hidden="true"></i><span class="nav-label" data-account-label>Sign in</span>
+                </button>
                 <button class="app-subnav-link" data-action="navigate" data-view="terminal-focus"
                     title="Full-screen Terminal Workspace">
                     <img src="assets/img/icons/terminal-solid-full.svg" alt="" class="nav-icon icon-light">
@@ -212,6 +218,7 @@
                     <i class="fa-solid fa-window-maximize nav-icon" aria-hidden="true"></i>
                     <span class="nav-label">Top nav</span>
                 </button>
+
                 <button id="exit-btn" class="nav-exit-btn-sm" title="Close VibeRails and stop backend">
                     <svg class="nav-exit-icon nav-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
                         fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -244,6 +251,30 @@
     </div>
 
     <!-- Templates -->
+    <template id="remote-account-template">
+        <div class="mb-3" data-remote-account-link>
+            <div class="d-flex gap-2 flex-wrap mb-2">
+                <button type="button" class="btn btn-outline-primary btn-sm"
+                    data-remote-link-start>Sign in to viberails.ai</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm"
+                    data-remote-link-cancel hidden>Cancel</button>
+            </div>
+            <p class="small text-muted text-break mb-2" data-remote-link-status role="status" aria-live="polite"></p>
+            <div class="border rounded p-3" data-remote-link-pending hidden>
+                <div class="d-flex gap-2 flex-wrap align-items-center mb-2">
+                    <code class="fs-5 user-select-all" data-remote-link-code></code>
+                    <button type="button" class="btn btn-outline-secondary btn-sm"
+                        data-remote-link-copy>Copy code</button>
+                    <span class="small text-muted" data-remote-link-copy-status role="status"></span>
+                </div>
+                <a class="btn btn-outline-primary btn-sm" data-remote-link-open
+                    target="_blank" rel="noopener noreferrer">Open sign-in page</a>
+                <p class="small text-muted mt-2 mb-1">You can also open <span class="user-select-all">https://viberails.ai/link</span> in any browser and enter the code.</p>
+                <p class="small text-muted mb-0" data-remote-link-countdown></p>
+            </div>
+        </div>
+    </template>
+
     <template id="dashboard-template">
         <div class="dashboard" data-dashboard="unified">
             <!-- DashboardController mounts the unified, terminal-free Project health view here. -->
@@ -1413,27 +1444,6 @@
                                     usage</small>
                             </div>
                             <div class="mb-4">
-                                <div class="mb-3" data-remote-account-link>
-                                    <div class="d-flex gap-2 flex-wrap mb-2">
-                                        <button type="button" class="btn btn-outline-primary btn-sm"
-                                            data-remote-link-start>Sign in to viberails.ai</button>
-                                        <button type="button" class="btn btn-outline-secondary btn-sm"
-                                            data-remote-link-cancel hidden>Cancel</button>
-                                    </div>
-                                    <p class="small text-muted text-break mb-2" data-remote-link-status role="status" aria-live="polite"></p>
-                                    <div class="border rounded p-3" data-remote-link-pending hidden>
-                                        <div class="d-flex gap-2 flex-wrap align-items-center mb-2">
-                                            <code class="fs-5 user-select-all" data-remote-link-code></code>
-                                            <button type="button" class="btn btn-outline-secondary btn-sm"
-                                                data-remote-link-copy>Copy code</button>
-                                            <span class="small text-muted" data-remote-link-copy-status role="status"></span>
-                                        </div>
-                                        <a class="btn btn-outline-primary btn-sm" data-remote-link-open
-                                            target="_blank" rel="noopener noreferrer">Open sign-in page</a>
-                                        <p class="small text-muted mt-2 mb-1">You can also open <span class="user-select-all">https://viberails.ai/link</span> in any browser and enter the code.</p>
-                                        <p class="small text-muted mb-0" data-remote-link-countdown></p>
-                                    </div>
-                                </div>
                                 <label class="form-label" for="setting-api-key">API Key</label>
                                 <input type="text" class="form-control" id="setting-api-key"
                                     placeholder="Enter API key">

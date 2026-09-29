@@ -131,7 +131,7 @@ public sealed class BoardSyncHttpClientTests
     }
 
     [Theory]
-    [InlineData(HttpStatusCode.NotFound, "board_not_found", "board_not_found", "off and on")]
+    [InlineData(HttpStatusCode.NotFound, "board_not_found", "board_not_found", "Automatic publication")]
     [InlineData(HttpStatusCode.Conflict, "write_conflict", "write_conflict", "retry")]
     [InlineData(HttpStatusCode.BadRequest, "invalid_request", "invalid_request", "invalid")]
     [InlineData(HttpStatusCode.NotFound, "write_conflict", "http_404", "HTTP 404")]

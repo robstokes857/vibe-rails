@@ -191,7 +191,7 @@ test('terminal failures use local messages and keep the retry and paste workflow
     panel._apply({ status: 'denied', error: 'key_limit' });
     assert.match(field('status').textContent, /key limit/);
     panel._apply({ status: 'unavailable' });
-    assert.match(field('status').textContent, /paste an API key/);
+    assert.match(field('status').textContent, /add an API key in Settings/);
 });
 
 test('approved links awaiting a local save keep polling beyond device expiry without another approval', async t => {

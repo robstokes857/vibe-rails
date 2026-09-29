@@ -184,7 +184,7 @@ export class RemoteAccountLinkPanel {
         }
         this.root.querySelector('[data-remote-link-copy-status]').textContent = '';
         const messages = {
-            idle: 'Sign in to connect this VibeRails instance to your account, or paste an API key below.',
+            idle: 'Sign in to connect this VibeRails instance to your account, or add an API key in Settings.',
             pending: this.state.error === 'save_failed'
                 ? 'Sign-in approved. VibeRails could not save the key yet and will retry automatically.'
                 : this.state.preparing ? 'Preparing sign-in…'
@@ -194,12 +194,12 @@ export class RemoteAccountLinkPanel {
             linked: `Connected${this.state.account?.email ? ` as ${this.state.account.email}` : ''}${this.state.keyHint ? ` (key …${this.state.keyHint.slice(-4)})` : ''}. Your API key is saved.`,
             denied: this.state.error === 'key_limit' ? 'Your account has reached its API key limit. Manage your keys on viberails.ai, then try again.' : 'The sign-in request was denied on viberails.ai.',
             expired: 'This sign-in code expired. Start again to get a new code.',
-            unavailable: 'Sign-in is not available on viberails.ai yet. You can paste an API key below.',
+            unavailable: 'Sign-in is not available on viberails.ai yet. You can add an API key in Settings.',
             error: this.state.error === 'cancel_failed'
                 ? 'Could not confirm cancellation. Check your connection before trying again.'
                 : this.state.error === 'key_changed'
                     ? 'Your saved API key changed during sign-in. Start again if you want to connect another account.'
-                    : 'Could not complete sign-in. Check your connection and try again, or paste an API key below.',
+                    : 'Could not complete sign-in. Check your connection and try again, or add an API key in Settings.',
             cancelled: 'Sign-in cancelled. Your saved API key has not changed.',
             cancelling: 'Cancelling sign-in…'
         };
@@ -242,6 +242,6 @@ export class RemoteAccountLinkPanel {
         this.unsubscribe?.();
         window.removeEventListener('pagehide', this.onPageHide);
         window.removeEventListener('pageshow', this.onPageShow);
-        // Leave the shared backend attempt available to other tabs and a later Settings visit.
+        // Leave the shared backend attempt available to other tabs and a later account visit.
     }
 }

@@ -23,8 +23,7 @@ public interface IBoardSyncClient
 
 /// <summary>
 /// HTTPS client for the desktop Board sync API. The endpoint and the API key are both resolved on
-/// every call (so a rotated key or a changed frontend URL applies at the next tick, and a changed
-/// destination stops uploads until publishing is approved again), the key is sent in
+/// every call (a changed destination interrupts this exchange and is republished next tick), the key is sent in
 /// <c>X-Api-Key</c>, and the named client follows no redirects: a redirect would replay the key and
 /// body to wherever it pointed.
 /// </summary>
@@ -92,7 +91,7 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Fu
         if (string.IsNullOrWhiteSpace(key))
             throw new BoardSyncClientException("Add your viberails.ai API key in Settings before publishing a board.", "no_api_key");
         if (expectedDestination is not null && expectedDestination != Identity(target, key))
-            throw new BoardSyncClientException("The server or API key changed. Turn publishing off and on to approve this destination.", "destination_changed");
+            throw new BoardSyncClientException("The server or API key changed during sync. Retrying with the configured account next minute.", "destination_changed");
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(ExchangeTimeout);
@@ -121,7 +120,7 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Fu
                     throw new BoardSyncClientException("viberails.ai rejected the request as invalid; entries remain queued. Check the board and lane names, then retry.",
                         BoardSyncWire.CodeInvalidRequest, status);
                 if (response.StatusCode == HttpStatusCode.NotFound && code == BoardSyncWire.CodeBoardNotFound)
-                    throw new BoardSyncClientException("viberails.ai no longer has this board's published copy. Turn publishing off and on to publish it again.",
+                    throw new BoardSyncClientException("viberails.ai no longer has this board's published copy. Automatic publication will retry next minute.",
                         BoardSyncWire.CodeBoardNotFound, status);
                 if (response.StatusCode == HttpStatusCode.Conflict && code == BoardSyncWire.CodeWriteConflict)
                     throw new BoardSyncClientException("viberails.ai was updating this board at the same time; the sync will retry.",

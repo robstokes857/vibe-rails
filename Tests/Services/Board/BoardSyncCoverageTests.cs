@@ -82,33 +82,19 @@ public sealed class BoardSyncCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task ChangedDestinationStopsUploads_UntilPublishingIsSwitchedOffAndOnAgain()
+    public async Task ConfiguredDestinationChangeAutomaticallyResumesSync()
     {
         var card = await Card();
         await service.SetPublishedAsync(root, card.BoardId, true, Ct);
         client.DestinationKey = "rotated-key-or-other-server";
         await store.UpdateCardAsync(root, card.Id, new(Title: "Edited after the rotation"), Ct);
-
-        var calls = client.Calls;
         await service.SyncDueAsync(Ct);
-        var stopped = (await service.GetStatusAsync(root, card.BoardId, Ct))!;
-        Assert.Contains("server or API key changed", stopped.LastError);
-        Assert.True(stopped.Enabled);
-        Assert.Equal(1, stopped.Unsent);
-        Assert.Equal(calls, client.Calls);
-        Assert.Single(client.Entries);
-
-        // Off and on again is the consent step; nothing else re-approves.
-        var paused = (await service.SetPublishedAsync(root, card.BoardId, false, Ct))!;
-        Assert.False(paused.Enabled);
-        Assert.Equal(calls, client.Calls);
-        var approved = (await service.SetPublishedAsync(root, card.BoardId, true, Ct))!;
-        Assert.True(approved.Enabled);
-        Assert.Null(approved.LastError);
-        Assert.Equal(0, approved.Unsent);
+        var status = (await service.GetStatusAsync(root, card.BoardId, Ct))!;
+        Assert.Null(status.LastError);
+        Assert.True(status.Enabled);
+        Assert.Equal(0, status.Unsent);
         Assert.Equal(2, client.Entries.Count);
-        Assert.Equal("rotated-key-or-other-server", (await store.GetSyncLinkAsync(root, card.BoardId, Ct))!.DestinationKey);
-        Assert.Null((await service.SyncNowAsync(root, card.BoardId, Ct))!.LastError);
+        Assert.Equal(client.DestinationKey, (await store.GetSyncLinkAsync(root, card.BoardId, Ct))!.DestinationKey);
     }
 
     [Fact]
@@ -123,6 +109,7 @@ public sealed class BoardSyncCoverageTests : IDisposable
 
         // The key now names a different account or board on the server, whose copy is empty.
         client.RemoteId = Guid.NewGuid();
+        client.DestinationKey = "another-account";
         client.Entries.Clear();
         var second = (await service.SetPublishedAsync(root, card.BoardId, true, Ct))!;
         Assert.Equal(client.RemoteId.ToString("D"), second.RemoteBoardId);
@@ -135,7 +122,7 @@ public sealed class BoardSyncCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task PausingRetainsTheRejectedCountAndIdentities_AndResumingKeepsThem()
+    public async Task RetiredPauseRetainsRejectedCountAndIdentities()
     {
         var card = await Card();
         var creation = Assert.Single(await store.GetUnsentLogEntriesAsync(card.BoardId, 20, Ct));
@@ -146,7 +133,7 @@ public sealed class BoardSyncCoverageTests : IDisposable
         Assert.Equal(creation.Entry.Id, Assert.Single(published.RejectedEntries!).EntryId);
 
         var paused = (await service.SetPublishedAsync(root, card.BoardId, false, Ct))!;
-        Assert.False(paused.Enabled);
+        Assert.True(paused.Enabled);
         Assert.True(paused.Published);
         Assert.Equal(1, paused.Rejected);
         var identity = Assert.Single(paused.RejectedEntries!);
@@ -180,7 +167,8 @@ public sealed class BoardSyncCoverageTests : IDisposable
 
         var calls = client.Calls;
         await service.SyncDueAsync(Ct);
-        Assert.Equal(calls, client.Calls);
+        Assert.True(client.Calls > calls); // The surviving board now publishes automatically.
+        Assert.DoesNotContain(await store.GetSyncLinksAsync(Ct), link => link.BoardId == card.BoardId);
         Assert.Equal(remoteEntries, client.Entries.Count);
     }
 

@@ -235,18 +235,42 @@ public sealed class BoardSyncRoundTripTests : IDisposable
         var card = await LocalCard();
         var related = await LocalCard();
         var session = Guid.NewGuid().ToString("D");
+        var agentSession = Guid.NewGuid().ToString("D");
         var sha = new string('a', 40);
         await store.LinkSessionAsync(root, card.Id, session, "private-tab", "env:7:codex", "codex", "Implementation", "launch", Ct);
+        await store.LinkSessionAsync(root, card.Id, agentSession, "private-agent-tab", "env:7:codex", "codex", "Code review", BoardSessionRecord.AutomationOrigin, Ct);
+        await using (var connection = new SqliteConnection(connectionString))
+        {
+            await connection.OpenAsync(Ct);
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE Sessions(Id TEXT PRIMARY KEY, EndedUTC TEXT, ExitCode INTEGER);
+                CREATE TABLE ChatSummary(SessionId TEXT PRIMARY KEY, SummaryText TEXT);
+                INSERT INTO Sessions VALUES($session, '2026-09-29T12:00:00Z', 0);
+                INSERT INTO ChatSummary VALUES($session, 'Reviewed the saved code.');
+                """;
+            command.Parameters.AddWithValue("$session", agentSession);
+            await command.ExecuteNonQueryAsync(Ct);
+        }
         await store.AddCommitAsync(root, card.Id, sha, "Fixture author", "Fixture change", DateTime.UtcNow,
             new([new("src/file.cs", "csharp", "original", "saved replacement")], 1), Ct);
         var attachment = (await store.AddAttachmentContentAsync(root, card.Id, "result.txt", "text/plain", "saved attachment"u8.ToArray(), Ct))!;
         await store.LinkCardAsync(root, card.Id, related.Id, Ct);
-        var remoteId = await Publish(card);
+        await sync.SyncDueAsync(Ct);
+        var status = (await sync.GetStatusAsync(root, card.BoardId, Ct))!;
+        Assert.Null(status.LastError);
+        var remoteId = Guid.Parse(status.RemoteBoardId!);
         await using (var db = Db())
         {
             var row = await db.SyncedCardActivities.SingleAsync(a => a.BoardId == remoteId && a.CardId == card.Id, Ct);
             var snapshot = BoardActivityContract.Parse(Encoding.UTF8.GetBytes(row.SnapshotJson));
-            Assert.Equal(session, Assert.Single(snapshot.Sessions).Id);
+            Assert.Equal(2, snapshot.Sessions.Count);
+            Assert.Contains(snapshot.Sessions, s => s.Id == session && !s.IsAutomation);
+            var agent = Assert.Single(snapshot.Sessions, s => s.Id == agentSession);
+            Assert.True(agent.IsAutomation);
+            Assert.Equal(0, agent.ExitCode);
+            Assert.NotNull(agent.EndedUtc);
+            Assert.Equal("Reviewed the saved code.", agent.Summary);
             Assert.Equal("saved replacement", Assert.Single(Assert.Single(snapshot.Commits).Files).After);
             Assert.Equal("saved attachment", Encoding.UTF8.GetString(Convert.FromBase64String(Assert.Single(snapshot.Attachments).ContentBase64!)));
             Assert.Equal(related.Key, Assert.Single(snapshot.LinkedCards).Key);
@@ -254,6 +278,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
         Assert.DoesNotContain("private-tab", string.Join("\n", transport.Bodies));
         Assert.DoesNotContain("env:7", string.Join("\n", transport.Bodies));
         await store.UnlinkSessionAsync(root, card.Id, session, Ct);
+        await store.UnlinkSessionAsync(root, card.Id, agentSession, Ct);
         await store.RemoveCommitAsync(root, card.Id, sha, Ct);
         await store.DeleteAttachmentAsync(root, card.Id, attachment.Id, Ct);
         await store.UnlinkCardAsync(root, card.Id, related.Id, Ct);

@@ -13,6 +13,7 @@ import { CliLauncher } from './js/modules/cli-launcher.js';
 import { TerminalController } from './js/modules/terminal-multitab.js';
 import { SandboxController } from './js/modules/sandbox-controller.js';
 import { SettingsController } from './js/modules/settings-controller.js';
+import { RemoteAccountLinkPanel } from './js/modules/remote-account-link.js';
 import { VibeRailsAiController } from './js/modules/vibe-rails-ai-controller.js';
 import { McpController } from './js/modules/mcp-controller.js';
 import { JobController } from './js/modules/jobs-controller.js';
@@ -87,6 +88,7 @@ export class VibeControlApp {
         await this.fetchConfigs();
         this.applyDocumentTitle();
         await this.applyInitialSettings();
+        this.updateAccountNav();
         await llmPickerPreferencesReady;
         this.terminalController.bindSessionEvents(this.appEventClient);
 
@@ -424,6 +426,12 @@ export class VibeControlApp {
                 void this.automationNavLauncher.toggle(launchAutomation);
             }
 
+            const account = e.target.closest('[data-action="remote-account"]');
+            if (account) {
+                e.preventDefault();
+                this.openRemoteAccount();
+                return;
+            }
             const goSettings = e.target.closest('[data-action="navigate-settings"]');
             if (goSettings) {
                 e.preventDefault();
@@ -524,6 +532,7 @@ export class VibeControlApp {
             ...settings
         });
         this.applyVsCodeThemePreference();
+        this.updateAccountNav();
         this.terminalTokenCompression?.setEnabledSources(getTokenSaverEnabledSources(this.appSettings));
     }
 
@@ -1161,6 +1170,32 @@ export class VibeControlApp {
 
     pickFileSystemEntry(options = {}) {
         return openFileExplorer(this, options);
+    }
+
+    updateAccountNav() {
+        for (const label of document.querySelectorAll('[data-account-label]')) {
+            label.textContent = this.appSettings?.apiKey ? 'Account' : 'Sign in';
+        }
+    }
+
+    openRemoteAccount() {
+        const template = document.getElementById('remote-account-template');
+        if (!template) return;
+        let panel;
+        this.showModal('viberails.ai account', template.innerHTML, { onClose: () => panel?.unload() });
+        const root = document.querySelector('#modal-container [data-remote-account-link]');
+        if (!root) return;
+        panel = new RemoteAccountLinkPanel(this, root, {
+            onLinked: state => {
+                this.setAppSettings({ apiKey: state.keyHint });
+                // Sign-in may finish while Settings has an unrelated unsaved draft.
+                // Update only the saved credential and its dirty-tracking baseline.
+                const settings = this.settingsController;
+                if (settings._settingsRoot) settings._applyLinkedApiKey(settings._settingsRoot, state.keyHint);
+                this.updateAccountNav();
+            }
+        });
+        void panel.mount();
     }
 
     showModal(title, content, { onClose = null } = {}) {

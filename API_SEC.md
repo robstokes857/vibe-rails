@@ -1,5 +1,30 @@
 # API authentication coverage
 
+## VIBE-13 automatic Board publication (2026-09-29, scoped amendment)
+
+At the owner's request, a configured API key now enables publication and linked activity for
+every local board. This supersedes VIBE-12's publication/activity consent switches below. Old
+switch fields remain accepted by the existing protected route but cannot disable sync. No
+schema, route, listener or authentication bypass is added. Navigation sign-in uses the existing
+device-link endpoints; Settings retains manual key management.
+
+The root scheduler enumerates board identity metadata across projects through the dedicated
+`IBoardStore.GetBoardsForSyncAsync` method. Card/activity reads still use each board's stored
+project scope. One board's failure cannot stop later boards. Transport continues to require
+HTTPS (loopback test exceptions only), no redirects, per-call destination fingerprints, and
+the existing deadlines/bounds. A changed configured destination is republished next tick;
+in-flight requests reject a fingerprint mismatch. A missing hosted board gets one bounded
+republish/retry, resetting delivery marks for a new remote identity.
+
+Activity also includes session outcome time, exit code and summary (up to 16,000 characters).
+All VIBE-12 content limits and exclusions remain. Hosted replay requires the same authenticated
+owner's existing uploaded recording and Sessions preview access. Linking Git code still
+captures the durable snapshot in the desktop checkout; the website reads that saved snapshot.
+
+Route enumeration confirms no route changes in this amendment. Repeated listener discovery
+finds the main Kestrel host, the non-serving port probe and isolated test hosts only; the
+cross-runtime search has no matches.
+
 ## VIBE-12 published Board activity (2026-09-29, scoped amendment)
 
 Boards explicitly enabled for linked activity send snapshots to the same pinned website/account

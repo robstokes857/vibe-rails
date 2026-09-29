@@ -81,9 +81,16 @@ internal static class BoardSyncActivity
         void Warn(string message) { if (warnings.Count < 20 && !warnings.Contains(message)) warnings.Add(Clip(message, 500)); }
         var sessions = metadata.Sessions.OrderByDescending(s => s.CreatedUtc).Take(200).ToList();
         var automations = await store.GetAutomationSessionIdsAsync(projectPath, sessions.Select(s => s.SessionId).ToList(), ct);
-        var result = new BoardSyncActivityWire(1,
-            sessions.Select(s => new BoardSyncSessionWire(s.SessionId, Clip(s.DisplayName, 500), Clip(s.Cli, 100),
-                Clip(s.Origin, 100), s.CreatedUtc, s.Origin == BoardSessionRecord.AutomationOrigin || automations.Contains(s.SessionId))).ToList(),
+        var sessionViews = new List<BoardSyncSessionWire>();
+        foreach (var session in sessions)
+        {
+            var outcome = await store.FindSessionOutcomeAsync(session.SessionId, ct);
+            sessionViews.Add(new BoardSyncSessionWire(session.SessionId, Clip(session.DisplayName, 500), Clip(session.Cli, 100),
+                Clip(session.Origin, 100), session.CreatedUtc,
+                session.Origin == BoardSessionRecord.AutomationOrigin || automations.Contains(session.SessionId),
+                outcome?.EndedUtc, outcome?.ExitCode, outcome?.Summary is { } summary ? Clip(summary, 16000) : null));
+        }
+        var result = new BoardSyncActivityWire(1, sessionViews,
             [], [], metadata.LinkedCards.Take(100).Select(c => new BoardSyncLinkedCardWire(c.Id, c.Key,
                 c.DisplayId, Clip(c.Title, 500), c.BoardId)).ToList(), warnings);
         if (metadata.Sessions.Count > 200) Warn("Only the newest 200 linked sessions are included in this hosted snapshot.");

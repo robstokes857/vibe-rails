@@ -1,14 +1,5 @@
-import { escapeHtml, confirmDialog } from './utils.js';
+import { escapeHtml } from './utils.js';
 import { BoardApi } from './board-api.js';
-
-// Shown before publishing switches on: what leaves the machine (SYNC.md "What leaves the machine").
-const PUBLISH_CONSENT = 'Publishing uploads this board to your viberails.ai account now and about every minute '
-    + 'while VibeRails is open: the board name and key prefix; lane names, colours and order; every card\'s '
-    + 'title, description, type, priority, points, tags, flags, lane and assignee; and its comments, agent '
-    + 'notes and change history. Linked sessions, saved commit code, linked cards and attachments also '
-    + 'appear remotely. Files over 1 MiB keep metadata only, and large code snapshots may be shortened. '
-    + 'Session recordings use the existing session upload. Launch options, Automation settings and '
-    + 'environment definitions stay on this machine. File references travel as text, without reading files.';
 
 const TYPES = [
     ['task', 'Task'], ['bug', 'Bug'], ['feature', 'Feature'],
@@ -25,7 +16,7 @@ export const boardContextSection = () => `
 export const boardSyncSection = () => `
     <section class="mt-3 border-top pt-3" data-board-sync>
         <h6>viberails.ai</h6>
-        <p class="board-editor-muted">Publish this board to your viberails.ai account. Cards, comments, agent notes and history sync about every minute while VibeRails is open. The last field change received by the server wins; earlier changes remain in History. Lane names, colours and order come from this machine. Linked sessions, saved commit code, attachments and linked cards refresh in groups of ten cards. Files over 1 MiB keep metadata only; large code snapshots may be shortened. Launch options and Automation settings stay local. File references travel as text, without reading files. Web card creation and lane moves run your local lane Automations. Pausing sync keeps the published copy on your account.</p>
+        <p class="board-editor-muted">Boards sync automatically to your viberails.ai account while an API key is configured. Cards, discussion, linked sessions, saved commit code and attachments refresh while VibeRails is open. Large files may be available only on the desktop. Lane moves can run your configured local Automations.</p>
         <div data-board-settings-content>Loading sync status…</div>
     </section>`;
 
@@ -117,10 +108,8 @@ export function mountBoardContext(app, element, boardId) {
     });
 }
 
-// The Publish switch and "Sync now" (VB-51). Not mountSettings: there is no revision to save, each
-// action returns the fresh status, and the switch itself is the action. `confirm` is the consent
-// dialog before switching publishing on; tests inject a stand-in for the DOM overlay.
-export function mountBoardSync(app, element, boardId, { confirm = confirmDialog } = {}) {
+// Automatic account sync status and an immediate retry.
+export function mountBoardSync(app, element, boardId) {
     if (!element) return () => {};
     const abort = new AbortController();
     let disposed = false;
@@ -129,17 +118,9 @@ export function mountBoardSync(app, element, boardId, { confirm = confirmDialog 
     const alive = () => !disposed && element.isConnected !== false;
     const render = status => {
         const stamp = status.lastSyncUtc ? new Date(status.lastSyncUtc).toLocaleString() : 'never';
-        const label = status.enabled ? 'Published · syncs every 60 seconds'
-            : status.published ? 'Sync paused' : 'Publish to viberails.ai';
         content.innerHTML = `
-            ${status.configured || status.published ? '' : '<p class="board-editor-muted" data-board-sync-unconfigured>Add your viberails.ai API key in Settings to publish this board.</p>'}
-            <div class="form-check form-switch mb-2">
-                <input class="form-check-input" type="checkbox" role="switch" id="board-sync-enabled"
-                    data-board-sync-action="${status.enabled ? 'unpublish' : 'publish'}" ${status.enabled ? 'checked' : ''} ${status.configured || status.enabled ? '' : 'disabled'}>
-                <label class="form-check-label" for="board-sync-enabled">${label}</label>
-            </div>
+            <p class="board-editor-muted" data-board-sync-policy>${status.configured ? 'Automatic sync is on · cards, sessions and code' : 'Sign in from the navigation or add an API key in Settings to sync your boards.'}</p>
             ${status.published ? `<p class="board-editor-muted mb-2" data-board-sync-status>${status.remoteUrl ? `<a href="${escapeHtml(status.remoteUrl)}" target="_blank" rel="noopener">Open on viberails.ai</a> · ` : ''}Last sync: ${escapeHtml(stamp)}${status.unsent ? ` · ${Number(status.unsent)} waiting to send` : ''}</p>` : ''}
-            ${status.enabled && !status.activityEnabled ? `<p class="board-editor-muted">This board currently syncs card fields and discussion. Add linked sessions, saved code and attachments to its hosted copy.</p><button type="button" class="btn btn-sm btn-outline-primary mb-2" data-board-sync-action="activity">Sync linked activity</button>` : ''}
             ${status.lastError ? `<p class="text-danger small mb-2" role="alert" data-board-sync-error>${escapeHtml(status.lastError)}</p>` : ''}
             ${status.rejected ? `<div class="text-warning small mb-2" role="alert" data-board-sync-rejected>
                 <p class="mb-1">${Number(status.rejected)} rejected entries are kept on this machine. Other entries continue syncing.
@@ -155,7 +136,7 @@ export function mountBoardSync(app, element, boardId, { confirm = confirmDialog 
                 <ul class="mb-1">${(status.skippedEntries || []).map(entry => `<li>${escapeHtml(entry.cardKey)} · ${escapeHtml(entry.kind)} · ${escapeHtml(entry.reason)} · <code>${escapeHtml(entry.entryId)}</code></li>`).join('')}</ul>
                 ${status.skipped > (status.skippedEntries || []).length ? '<p class="mb-0">Showing the latest 50 skipped changes.</p>' : ''}
                 </div>` : ''}
-            ${status.enabled ? '<button type="button" class="btn btn-sm btn-outline-secondary" data-board-sync-action="now">Sync now</button>' : ''}`;
+            ${status.configured ? '<button type="button" class="btn btn-sm btn-outline-secondary" data-board-sync-action="now">Sync now</button>' : ''}`;
     };
     async function reload() {
         try {
@@ -171,32 +152,17 @@ export function mountBoardSync(app, element, boardId, { confirm = confirmDialog 
         if (event.target.closest('[data-settings-retry]')) { void reload(); return; }
         const control = event.target.closest('[data-board-sync-action]');
         if (!control) return;
-        // A click while an action is in flight must not flip the switch away from the server state.
+        // Keep manual retries from overlapping.
         if (busy) { event.preventDefault(); return; }
         const action = control.dataset.boardSyncAction;
-        // Switching on uploads the board at once, so the switch stays off until the dialog is
-        // confirmed; the status render after success paints it on. Pausing asks nothing.
-        if (action === 'publish' || action === 'activity') event.preventDefault();
+        if (action !== 'now') return;
         busy = true;
         control.disabled = true;
         try {
-            if ((action === 'publish' || action === 'activity') && !await confirm({
-                title: action === 'activity' ? 'Sync linked activity to viberails.ai?' : 'Publish this board to viberails.ai?',
-                message: PUBLISH_CONSENT,
-                confirmLabel: action === 'activity' ? 'Sync linked activity' : 'Publish'
-            })) {
-                control.disabled = false;
-                return;
-            }
-            const status = action === 'now'
-                ? await BoardApi.syncBoardNowAsync(boardId)
-                : await BoardApi.setBoardSyncAsync(boardId, action === 'publish' || action === 'activity', action === 'publish' || action === 'activity');
+            const status = await BoardApi.syncBoardNowAsync(boardId);
             if (!alive()) return;
             render(status);
-            const message = action === 'activity' ? 'Linked activity enabled for this board.'
-                : action === 'publish' ? 'Board published to viberails.ai.'
-                : action === 'now' ? (status.lastError || status.rejected ? 'Sync finished with entries needing attention.' : 'Board synced.')
-                : 'Sync switched off. Switch it back on to resume where it stopped.';
+            const message = status.lastError || status.rejected ? 'Sync finished with entries needing attention.' : 'Board synced.';
             app.showToast('Board', message, status.lastError || status.rejected ? 'warning' : 'success');
         } catch (error) {
             if (!alive()) return;

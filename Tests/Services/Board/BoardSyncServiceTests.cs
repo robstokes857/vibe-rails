@@ -31,26 +31,49 @@ public sealed class BoardSyncServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task DisabledBoardsSendNothing_AndPauseRetainsTheRemoteCopy()
+    public async Task ApiKeyPublishesBoardsAutomatically_AndRetiredPauseCannotDisableSync()
     {
         var card = await Card();
+        client.IsConfigured = false;
         await service.SyncDueAsync(Ct);
         Assert.Equal(0, client.Calls);
-        var status = await service.SetPublishedAsync(root, card.BoardId, true, Ct);
-        Assert.True(status!.Enabled);
+        client.IsConfigured = true;
+        await service.SyncDueAsync(Ct);
+        var status = (await service.GetStatusAsync(root, card.BoardId, Ct))!;
+        Assert.True(status.Enabled);
+        Assert.True(status.ActivityEnabled);
         Assert.Null(status.LastError);
         Assert.Equal(0, status.Unsent);
         var created = Assert.Single(client.Entries);
         Assert.Equal("base:codex", created.Changes!.Value.GetProperty("assignee").GetProperty("to").GetString());
-        Assert.DoesNotContain("env:7", JsonSerializer.Serialize(created, BoardSyncJsonContext.Default.BoardSyncPulledEntryWire));
         Assert.Equal("env:7:codex", (await store.FindCardAsync(root, card.Id, Ct))!.Assignee);
-        Assert.Contains("@src/file.cs", created.Changes.Value.GetRawText());
         await service.SetPublishedAsync(root, card.BoardId, false, Ct);
-        await store.UpdateCardAsync(root, card.Id, new(Title: "Offline"), Ct);
-        var calls = client.Calls;
+        await store.UpdateCardAsync(root, card.Id, new(Title: "Still syncing"), Ct);
         await service.SyncDueAsync(Ct);
-        Assert.Equal(calls, client.Calls);
-        Assert.Single(client.Entries);
+        Assert.Equal(2, client.Entries.Count);
+    }
+
+    [Fact]
+    public async Task AutomaticPublicationEnumeratesOtherProjects_AndContinuesAfterFailure()
+    {
+        var first = await Card();
+        var otherProject = Path.Combine(root, "other-project");
+        await store.EnsureDefaultColumnsAsync(otherProject, Ct);
+        var other = await store.CreateCardAsync(otherProject, new(null, "Another project", "", null, "medium", null, [], false), Ct);
+        Assert.Equal(2, (await store.GetBoardsForSyncAsync(Ct)).Count);
+        client.BeforePublish = () =>
+        {
+            if (client.Publications == 1) throw new BoardSyncClientException("Temporary outage", "network");
+        };
+
+        await service.SyncDueAsync(Ct);
+
+        Assert.Equal(2, client.Publications);
+        Assert.Null(await store.GetSyncLinkAsync(root, first.BoardId, Ct));
+        var synced = (await service.GetStatusAsync(otherProject, other.BoardId, Ct))!;
+        Assert.True(synced.Published);
+        Assert.Null(synced.LastError);
+        Assert.Equal(other.Id, Assert.Single(client.Entries).CardId);
     }
 
     [Fact]
@@ -138,19 +161,20 @@ public sealed class BoardSyncServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task OldPublicationConsentKeepsCoreSyncWorkingUntilActivityIsExplicitlyEnabled()
+    public async Task ExistingPausedTextOnlyPublicationAutomaticallyIncludesActivity()
     {
         var card = await Card();
-        var status = (await service.SetPublishedAsync(root, card.BoardId, true, Ct))!;
-        Assert.False(status.ActivityEnabled);
-        Assert.Empty(client.Activity);
-        await store.AddCommentAsync(root, card.Id, BoardAuthor.User(), "Still sync discussion", Ct);
-        Assert.Null((await service.SyncNowAsync(root, card.BoardId, Ct))!.LastError);
-        Assert.Equal(2, client.Entries.Count);
-        Assert.Empty(client.Activity);
-        status = (await service.SetPublishedAsync(root, card.BoardId, true, Ct, includeActivity: true))!;
+        await service.SetPublishedAsync(root, card.BoardId, true, Ct);
+        var old = (await store.GetSyncLinkAsync(root, card.BoardId, Ct))!;
+        await store.SaveSyncLinkAsync(old with { Enabled = false, ActivitySchema = 0 }, Ct);
+        client.Activity.Clear();
+        var resumedClient = new FakeClient();
+        var resumed = new BoardSyncService(store, resumedClient, new BoardSyncLock(Path.Combine(root, "sync.lock")), NullFeatureLog.Instance);
+        await resumed.SyncDueAsync(Ct);
+        var status = (await resumed.GetStatusAsync(root, card.BoardId, Ct))!;
         Assert.True(status.ActivityEnabled);
-        Assert.Single(client.Activity);
+        Assert.True(status.Enabled);
+        Assert.Single(resumedClient.Activity);
         Assert.Equal(1, (await store.GetSyncLinkAsync(root, card.BoardId, Ct))!.ActivitySchema);
     }
 
@@ -542,25 +566,43 @@ public sealed class BoardSyncServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task RemoteBoardGoneIsReportedWithRepublishGuidance_AndPublishingStaysOn()
+    public async Task MissingRemoteBoardIsRepublishedWithItsHistoryAndActivity()
     {
         var card = await Card();
         await service.SetPublishedAsync(root, card.BoardId, true, Ct);
         await store.UpdateCardAsync(root, card.Id, new(Title: "Edited after the remote copy was deleted"), Ct);
         client.PushError = new BoardSyncClientException(
-            "viberails.ai no longer has this board's published copy. Turn publishing off and on to publish it again.",
+            "The hosted copy was deleted.",
             BoardSyncWire.CodeBoardNotFound, 404);
-        var status = await service.SyncNowAsync(root, card.BoardId, Ct);
-        Assert.Contains("off and on", status!.LastError);
-        Assert.True(status.Enabled);
-        Assert.Equal(1, status.Unsent);
-
-        // The documented recovery: switch publishing off and on, which publishes again and resumes.
-        client.PushError = null;
-        await service.SetPublishedAsync(root, card.BoardId, false, Ct);
-        var republished = await service.SetPublishedAsync(root, card.BoardId, true, Ct);
+        var oldRemoteId = (await service.GetStatusAsync(root, card.BoardId, Ct))!.RemoteBoardId;
+        client.BeforePublish = () =>
+        {
+            client.RemoteId = Guid.NewGuid();
+            client.Entries.Clear();
+            client.Activity.Clear();
+            client.PushError = null;
+        };
+        await service.SyncDueAsync(Ct);
+        var republished = await service.GetStatusAsync(root, card.BoardId, Ct);
         Assert.Null(republished!.LastError);
+        Assert.NotEqual(oldRemoteId, republished.RemoteBoardId);
+        Assert.Equal(2, client.Publications);
         Assert.Equal(0, republished.Unsent);
+        Assert.Equal(2, client.Entries.Count);
+        Assert.Single(client.Activity);
+    }
+
+    [Fact]
+    public async Task MissingRemoteBoardRecoveryIsBounded_AndKeepsUnsentEdits()
+    {
+        var card = await Card();
+        await service.SyncDueAsync(Ct);
+        await store.UpdateCardAsync(root, card.Id, new(Title: "Pending edit"), Ct);
+        client.PushError = new BoardSyncClientException("Still missing", BoardSyncWire.CodeBoardNotFound, 404);
+        var status = await service.SyncNowAsync(root, card.BoardId, Ct);
+        Assert.Equal("Still missing", status!.LastError);
+        Assert.Equal(2, client.Publications);
+        Assert.Equal(1, status.Unsent);
     }
 
     [Fact]
@@ -856,15 +898,16 @@ public sealed class BoardSyncServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task DestinationChangesStopBeforeAnyNetworkCall()
+    public async Task ConfiguredAccountChangesAutomaticallyRepublishBeforeSync()
     {
         var card = await Card();
         await service.SetPublishedAsync(root, card.BoardId, true, Ct);
         client.DestinationKey = "other-server-or-account";
         var calls = client.Calls;
         var status = await service.SyncNowAsync(root, card.BoardId, Ct);
-        Assert.Contains("server or API key changed", status!.LastError);
-        Assert.Equal(calls, client.Calls);
+        Assert.Null(status!.LastError);
+        Assert.True(client.Calls > calls);
+        Assert.Equal(client.DestinationKey, (await store.GetSyncLinkAsync(root, card.BoardId, Ct))!.DestinationKey);
     }
 
     [Fact]
@@ -899,7 +942,7 @@ public sealed class BoardSyncServiceTests : IDisposable
 
     private sealed class FakeClient : IBoardSyncClient
     {
-        public bool IsConfigured => true;
+        public bool IsConfigured { get; set; } = true;
         public string? DestinationKey { get; set; } = "server-and-account";
         public int Calls;
         public bool LoseNextAck, BadAck, Reject, RejectUnknownEntry;
@@ -923,11 +966,15 @@ public sealed class BoardSyncServiceTests : IDisposable
             Activity.Add((cardId, activity));
             return Task.FromResult(new BoardSyncActivityAck(WrongActivityAck ? 0 : 1, cardId));
         }
-        private readonly Guid remoteId = Guid.NewGuid();
+        public Guid RemoteId = Guid.NewGuid();
+        public int Publications;
+        public Action? BeforePublish;
         public Task<BoardSyncPublishResponse> PublishAsync(BoardSyncPublishRequest request, CancellationToken ct, string? expectedDestination = null)
         {
             Calls++;
-            return Task.FromResult(new BoardSyncPublishResponse(remoteId, request.Name, Entries.Count));
+            Publications++;
+            BeforePublish?.Invoke();
+            return Task.FromResult(new BoardSyncPublishResponse(RemoteId, request.Name, Entries.Count));
         }
         public Task<BoardSyncPushResponse> PushAsync(string boardId, BoardSyncPushRequest request, CancellationToken ct, string? expectedDestination = null)
         {

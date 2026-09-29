@@ -32,16 +32,15 @@ public interface IBoardSyncService
     Task<BoardSyncStatus?> GetStatusAsync(string projectPath, string boardId, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Publishes the board (creating or refreshing its copy on viberails.ai, writing the baseline
-    /// and running a first sync) or switches its sync off. Switching off keeps the link and the
-    /// cursor, so switching back on resumes where it stopped.
+    /// Compatibility entry point: ensures publication and syncs with the configured account.
+    /// The retired enabled/includeActivity switches no longer disable publication or activity.
     /// </summary>
     Task<BoardSyncStatus?> SetPublishedAsync(string projectPath, string boardId, bool enabled, CancellationToken cancellationToken, bool includeActivity = false);
 
     /// <summary>One push-then-pull for this board now; errors land in the status, not the caller.</summary>
     Task<BoardSyncStatus?> SyncNowAsync(string projectPath, string boardId, CancellationToken cancellationToken);
 
-    /// <summary>Every enabled board, for the root scheduler. One board's failure never stops the next.</summary>
+    /// <summary>Every local board when an account is configured. One failure never stops the next.</summary>
     Task SyncDueAsync(CancellationToken cancellationToken);
 }
 
@@ -84,20 +83,22 @@ public sealed class BoardSyncService(
         var board = await store.GetBoardAsync(projectPath, boardId, cancellationToken);
         if (board is null)
             return null;
+        // Legacy callers may still send the retired switches. A configured account now
+        // always includes its boards and linked activity; stored switches remain intact.
+        var link = await EnsurePublishedAsync(board, cancellationToken);
+        if (link is not null && client.IsConfigured) link = await SyncLinkAsync(link, cancellationToken);
+        return await StatusAsync(board.Id, link, cancellationToken);
+    }
+
+    private async Task<BoardSyncLinkRecord?> EnsurePublishedAsync(BoardRecord board, CancellationToken cancellationToken, bool force = false)
+    {
+        var projectPath = board.ProjectPath;
+        var boardId = board.Id;
         var existing = await store.GetSyncLinkAsync(projectPath, boardId, cancellationToken);
-
-        if (!enabled)
-        {
-            if (existing is not null && existing.Enabled)
-            {
-                existing = await store.SaveSyncLinkAsync(existing with { Enabled = false }, cancellationToken) ?? existing;
-                featureLog.Write(FeatureName, "unpublish", $"Sync switched off for board \"{board.Name}\".", board.Id, existing.RemoteBoardId, "ok");
-            }
-            return await StatusAsync(board.Id, existing, cancellationToken);
-        }
-
         if (!client.IsConfigured)
-            throw new BoardValidationException("Add your viberails.ai API key in Settings before publishing a board.");
+            return existing;
+        if (!force && existing is { Enabled: true, ActivitySchema: >= 1 } && existing.DestinationKey == client.DestinationKey)
+            return existing;
 
         var layout = await ReadLayoutAsync(projectPath, board, cancellationToken);
         var destination = client.DestinationKey ?? throw new BoardValidationException("Board sync is not configured.");
@@ -130,14 +131,13 @@ public sealed class BoardSyncService(
             UpdatedUtc: DateTime.UtcNow,
             projectPath,
             board.Name, destination,
-            ActivitySchema: includeActivity ? 1 : existing?.DestinationKey == destination && !remoteChanged ? existing.ActivitySchema : 0,
+            ActivitySchema: 1,
             ActivityAfter: remoteChanged ? null : existing?.ActivityAfter), cancellationToken)
             ?? throw new BoardValidationException("That board no longer exists. Open the board again and retry.");
 
         var baseline = await store.WriteSyncBaselineAsync(projectPath, board.Id, cancellationToken);
         featureLog.Write(FeatureName, "publish", $"Published board \"{board.Name}\"; {baseline} card(s) given a baseline entry.", board.Id, remoteBoardId, "ok");
-        link = await SyncLinkAsync(link, cancellationToken);
-        return await StatusAsync(board.Id, link, cancellationToken);
+        return link;
     }
 
     public async Task<BoardSyncStatus?> SyncNowAsync(string projectPath, string boardId, CancellationToken cancellationToken)
@@ -147,8 +147,8 @@ public sealed class BoardSyncService(
         var board = await store.GetBoardAsync(projectPath, boardId, cancellationToken);
         if (board is null)
             return null;
-        var link = await store.GetSyncLinkAsync(projectPath, boardId, cancellationToken);
-        if (link is { Enabled: true })
+        var link = await EnsurePublishedAsync(board, cancellationToken);
+        if (link is not null && client.IsConfigured)
             link = await SyncLinkAsync(link, cancellationToken);
         return await StatusAsync(board.Id, link, cancellationToken);
     }
@@ -163,12 +163,22 @@ public sealed class BoardSyncService(
         using var held = syncLock.TryAcquire();
         if (held is null)
             return;
-        foreach (var link in await store.GetSyncLinksAsync(cancellationToken))
+        foreach (var board in await store.GetBoardsForSyncAsync(cancellationToken))
         {
-            if (!link.Enabled)
-                continue;
             cancellationToken.ThrowIfCancellationRequested();
-            await SyncLinkAsync(link, cancellationToken);
+            try
+            {
+                var link = await EnsurePublishedAsync(board, cancellationToken);
+                if (link is not null) await SyncLinkAsync(link, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                var message = ex is BoardValidationException or BoardSyncClientException ? Trim(ex.Message) : "Automatic board publication failed; retrying next minute.";
+                var link = await store.GetSyncLinkAsync(board.ProjectPath, board.Id, cancellationToken);
+                if (link is not null) await store.SaveSyncLinkAsync(link with { LastError = message }, cancellationToken);
+                featureLog.Write(FeatureName, "publish", message, board.Id, link?.RemoteBoardId, "failed", LogLevel.Warning);
+            }
         }
     }
 
@@ -180,11 +190,20 @@ public sealed class BoardSyncService(
         try
         {
             if (link.DestinationKey is null || link.DestinationKey != client.DestinationKey)
-                throw new BoardValidationException("The server or API key changed. Turn publishing off and on to approve this destination.");
-            link = await PushAsync(link, cancellationToken);
-            link = await PullAsync(link, cancellationToken);
-            if (link.ActivitySchema >= 1)
-                link = await BoardSyncActivity.RefreshAsync(store, client, link, cancellationToken);
+                throw new BoardValidationException("The account changed during sync. Retrying with the configured account next minute.");
+            try
+            {
+                link = await SyncOnceAsync(link, cancellationToken);
+            }
+            catch (BoardSyncClientException ex) when (ex.Code == BoardSyncWire.CodeBoardNotFound)
+            {
+                // The hosted copy may have been deleted. Recreate it once, then let any
+                // further failure reach the normal status path instead of retrying forever.
+                var board = await store.GetBoardAsync(link.ProjectPath, link.BoardId, cancellationToken)
+                    ?? throw new BoardValidationException("The board no longer exists.");
+                link = await EnsurePublishedAsync(board, cancellationToken, force: true) ?? link;
+                link = await SyncOnceAsync(link, cancellationToken);
+            }
             return await store.SaveSyncLinkAsync(link with { LastSyncUtc = DateTime.UtcNow, LastError = null }, cancellationToken) ?? link;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -205,6 +224,13 @@ public sealed class BoardSyncService(
             var failed = current with { LastError = Trim(message) };
             return await store.SaveSyncLinkAsync(failed, CancellationToken.None) ?? failed;
         }
+    }
+
+    private async Task<BoardSyncLinkRecord> SyncOnceAsync(BoardSyncLinkRecord link, CancellationToken cancellationToken)
+    {
+        link = await PushAsync(link, cancellationToken);
+        link = await PullAsync(link, cancellationToken);
+        return await BoardSyncActivity.RefreshAsync(store, client, link, cancellationToken);
     }
 
     private async Task<BoardSyncLinkRecord> PushAsync(BoardSyncLinkRecord link, CancellationToken cancellationToken)
@@ -687,7 +713,7 @@ public sealed class BoardSyncService(
         return new BoardSyncStatus(
             boardId,
             Published: link is not null,
-            Enabled: link?.Enabled ?? false,
+            Enabled: client.IsConfigured,
             link?.RemoteBoardId,
             BoardSyncEndpoint.BoardPage(ParserConfigs.GetFrontendUrl(), link?.RemoteBoardId),
             link?.Cursor ?? 0,
@@ -699,7 +725,7 @@ public sealed class BoardSyncService(
             rejectedEntries,
             skipped,
             skippedEntries,
-            ActivityEnabled: link is { ActivitySchema: >= 1 });
+            ActivityEnabled: client.IsConfigured);
     }
 
     private static string Trim(string value) => value.Length <= MaxErrorLength ? value : value[..MaxErrorLength];
