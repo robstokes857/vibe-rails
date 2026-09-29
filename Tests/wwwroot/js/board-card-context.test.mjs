@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { formatTokens, contextSectionMarkup, renderContext } from '../../../VibeRails/wwwroot/js/modules/board-card-context.js';
+import { formatTokens, contextSectionMarkup, renderContext, bindCardContext } from '../../../VibeRails/wwwroot/js/modules/board-card-context.js';
+import { BoardApi } from '../../../VibeRails/wwwroot/js/modules/board-api.js';
+import { BoardController } from '../../../VibeRails/wwwroot/js/modules/board-controller.js';
 
 const controllerPath = path.resolve('VibeRails/wwwroot/js/modules/board-controller.js');
 const apiPath = path.resolve('VibeRails/wwwroot/js/modules/board-api.js');
@@ -24,15 +26,12 @@ test('formatTokens uses the k/M shape agents see in their status lines', () => {
     assert.equal(formatTokens(-5), '0');
 });
 
-test('the section markup waits for a saved card and exposes the hooks the binder needs', () => {
-    const unsaved = contextSectionMarkup(false);
-    assert.match(unsaved, /data-board-context-section/);
-    assert.match(unsaved, /Save the card to measure/);
-    assert.doesNotMatch(unsaved, /data-board-context>/);
-    const saved = contextSectionMarkup(true);
-    assert.match(saved, /data-board-context-total/);
-    assert.match(saved, /data-board-context>/);
-    assert.match(saved, /data-board-context-message/);
+test('the block exposes the hooks the binder needs', () => {
+    const markup = contextSectionMarkup();
+    assert.match(markup, /data-board-context-section/);
+    assert.match(markup, /data-board-context-total/);
+    assert.match(markup, /data-board-context>/);
+    assert.match(markup, /data-board-context-message/);
 });
 
 test('renderContext shows the total, each source, the breakdown groups and the last launch, escaped', () => {
@@ -70,27 +69,84 @@ test('renderContext shows the total, each source, the breakdown groups and the l
     assert.doesNotMatch(empty.innerHTML, /Available, not sent/);
 });
 
-test('the card editor mounts the section, refreshes it after every rail change and disposes it on close', () => {
+// Behaviour, not source text: a fake editor around the real hooks, and a <details> stand-in.
+function disclosure(open = false) {
+    const listeners = new Map();
+    return {
+        open,
+        addEventListener(type, handler) { listeners.set(type, handler); },
+        removeEventListener(type, handler) { if (listeners.get(type) === handler) listeners.delete(type); },
+        toggle(value) { this.open = value; listeners.get('toggle')?.(); },
+        get listening() { return listeners.has('toggle'); }
+    };
+}
+
+function contextEditor(details) {
+    const nodes = {
+        '[data-board-context]': { innerHTML: '' },
+        '[data-board-context-total]': { textContent: '', title: '' },
+        '[data-board-context-message]': { textContent: '' }
+    };
+    const section = { isConnected: true, closest: selector => selector === 'details' ? details : null, querySelector: selector => nodes[selector] ?? null };
+    return { nodes, editor: { querySelector: selector => selector === '[data-board-context-section]' ? section : null } };
+}
+
+const settle = () => new Promise(resolve => setImmediate(resolve));
+const estimate = { tokens: 1200, chars: 4800, method: 'chars/4', sources: [], contents: [], extras: [], lastLaunch: null };
+
+test('inside the closed Advanced section the context is measured once it is opened, then after rail changes', async () => {
+    const requests = [];
+    BoardApi.attach({ apiCall: async url => { requests.push(url); return estimate; } });
+    const details = disclosure(false);
+    const { editor, nodes } = contextEditor(details);
+    const context = bindCardContext(editor, { id: 'card_a' });
+    await context.refresh();
+    await context.refresh();
+    assert.equal(requests.length, 0, 'rail changes while closed only mark the numbers stale');
+    details.toggle(true);
+    await settle();
+    assert.deepEqual(requests, ['/api/v1/board/cards/card_a/context']);
+    assert.equal(nodes['[data-board-context-total]'].textContent, '≈1.2k');
+    await context.refresh();
+    assert.equal(requests.length, 2, 'open: a rail change re-measures');
+    details.toggle(false);
+    details.toggle(true);
+    await settle();
+    assert.equal(requests.length, 2, 'nothing changed while it was closed');
+    context.dispose();
+    assert.equal(details.listening, false);
+    await context.refresh();
+    assert.equal(requests.length, 2);
+});
+
+test('a failed measurement reports inline, never as a toast', async () => {
+    BoardApi.attach({ apiCall: async () => { throw new Error('Card was deleted'); } });
+    const { editor, nodes } = contextEditor(disclosure(true));
+    const context = bindCardContext(editor, { id: 'card_a' });
+    await settle();
+    await context.refresh();
+    assert.equal(nodes['[data-board-context-total]'].textContent, '?');
+    assert.equal(nodes['[data-board-context-message]'].textContent, 'Card was deleted');
+    assert.equal(bindCardContext.length, 2, 'the binder takes no app, so it has no toast to raise');
+    context.dispose();
+    assert.equal(bindCardContext({ querySelector: () => null }, { id: 'card_a' }), null);
+});
+
+test('reloading the editing card re-measures its context', async () => {
+    const controller = new BoardController({ apiCall: async () => ({ id: 'card_a', key: 'VB-1', title: 'Card' }) });
+    BoardApi.attach(controller.app);
+    let refreshed = 0;
+    const editor = { dataset: { cardId: 'card_a' }, _boardContext: { refresh() { refreshed++; } } };
+    await controller.reloadEditingCard(editor);
+    assert.equal(refreshed, 1);
+});
+
+test('the Advanced section holds the display ID, the agent context and History; a new card has none', () => {
     const source = readFileSync(controllerPath, 'utf8');
-    assert.match(source, /import \{ contextSectionMarkup, bindCardContext \} from '\.\/board-card-context\.js'/);
     const open = source.slice(source.indexOf('async openCardEditor'), source.indexOf('bindCardEditor(editor, card)'));
-    // Right after the fields, before the linked-cards rail: the size is the first thing about the card.
-    assert.match(open, /\$\{contextSectionMarkup\(Boolean\(card\)\)\}\s*\$\{renderCardLinksSection\(card\)\}/);
-    assert.match(source, /this\.cardContextDispose\?\.\(\);\s*const cardContext = bindCardContext\(editor, card, \{ app: this\.app \}\);/);
-    assert.match(source, /editor\._boardContext = cardContext;/);
-    // One refresh point for comments, commits and sessions (they all reload the card), plus the
-    // paths that mutate a rail without reloading: attachment add/delete and linked cards.
-    const reload = source.slice(source.indexOf('async reloadEditingCard'), source.indexOf('async reloadEditingCard') + 600);
-    assert.match(reload, /editor\._boardContext\?\.refresh\(\);/);
-    const attach = source.slice(source.indexOf('async attachImages'), source.indexOf('async attachImages') + 2200);
-    assert.match(attach, /addCardAttachmentAsync[\s\S]*_boardContext\?\.refresh\(\)/);
-    assert.match(source, /deleteCardAttachmentAsync[\s\S]{0,600}_boardContext\?\.refresh\(\)/);
-    assert.match(source, /onChanged: \(\) => editor\._boardContext\?\.refresh\(\)/);
-    const links = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/board-card-links.js'), 'utf8');
-    assert.match(links, /\{ openCard, showError, onChanged \}/);
-    assert.match(links, /renderLinks\(\);\s*onChanged\?\.\(\);/);
-    const close = source.slice(source.indexOf('onClose: () => {'), source.indexOf('onClose: () => {') + 400);
-    assert.match(close, /this\.cardContextDispose\?\.\(\);/);
+    assert.match(open, /<summary class="board-side-label">Advanced<\/summary>[\s\S]*board-card-display-id[\s\S]*\$\{contextSectionMarkup\(\)\}\$\{historySection\(\)\}/);
+    assert.doesNotMatch(open, /Card settings/);
+    assert.equal((open.match(/contextSectionMarkup\(/g) || []).length, 1);
     assert.match(readFileSync(apiPath, 'utf8'), /getCardContextAsync[\s\S]*\/context`, 'GET'/);
 });
 

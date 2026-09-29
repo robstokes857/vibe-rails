@@ -425,3 +425,37 @@ test('Card edits omit retired fields so existing priority, points and tags survi
     await h.controller.saveCard(h.editor);
     for (const field of ['priority', 'points', 'tags']) assert.equal(Object.hasOwn(h.calls[0].body, field), false);
 });
+
+function boardEditorHarness(values) {
+    const calls = [];
+    const app = {
+        async apiCall(url, method, body) { calls.push({ url, method, body: JSON.parse(JSON.stringify(body ?? null)) }); return { id: 'brd_new', name: body?.name }; },
+        showToast() {},
+        closeModal() {}
+    };
+    const controller = new BoardController(app);
+    controller.refresh = async () => {};
+    controller.persistBoardSelection = () => {};
+    const editor = { querySelector: selector => selector in values ? { value: values[selector], focus() {} } : null };
+    return { controller, editor, calls };
+}
+
+test('board settings send only changed fields, and an emptied prefix resets to the default', async () => {
+    const board = { id: 'brd_main', name: 'Main', displayPrefix: 'VIBE' };
+
+    let h = boardEditorHarness({ '#board-board-name': 'Main', '#board-display-prefix': 'vibe' });
+    await h.controller.saveBoard(h.editor, board);
+    assert.deepEqual(h.calls, [{ url: '/api/v1/board/boards/brd_main', method: 'PUT', body: {} }]);
+
+    h = boardEditorHarness({ '#board-board-name': 'Main', '#board-display-prefix': '' });
+    await h.controller.saveBoard(h.editor, board);
+    assert.deepEqual(h.calls[0].body, { displayPrefix: '' });
+
+    h = boardEditorHarness({ '#board-board-name': 'Sprint', '#board-display-prefix': 'SPR' });
+    await h.controller.saveBoard(h.editor, board);
+    assert.deepEqual(h.calls[0].body, { name: 'Sprint', displayPrefix: 'SPR' });
+
+    h = boardEditorHarness({ '#board-board-name': 'New', '#board-display-prefix': '' });
+    await h.controller.saveBoard(h.editor, null);
+    assert.deepEqual(h.calls[0], { url: '/api/v1/board/boards', method: 'POST', body: { name: 'New' } });
+});

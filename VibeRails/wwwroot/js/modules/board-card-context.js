@@ -1,7 +1,8 @@
-// Agent context (VB-63): the right-rail section that says how much a card puts in front of an
-// agent at launch. The server measures it (GET /api/v1/board/cards/{id}/context) by rendering the
-// real launch prompt and the first Board tool reads; this module only formats the answer. Tokens
-// are an estimate (characters over four) and every number carries the ≈ to say so.
+// Agent context (VB-63): the block in a saved card's collapsed Advanced section that says how much
+// the card puts in front of an agent at launch. The server measures it (GET
+// /api/v1/board/cards/{id}/context) by rendering the real launch prompt and the first Board tool
+// reads; this module only formats the answer. Tokens are an estimate (characters over four) and
+// every number carries the ≈ to say so.
 import { BoardApi } from './board-api.js';
 import { escapeHtml } from './utils.js';
 
@@ -17,17 +18,16 @@ export function formatTokens(tokens) {
     return String(n);
 }
 
-export function contextSectionMarkup(saved) {
-    return `<section class="board-side-section" data-board-context-section>
-        <h3 class="board-side-label">
+// Only a saved card has something to measure, so only its Advanced section carries this block.
+export function contextSectionMarkup() {
+    return `<div class="mt-3" data-board-context-section>
+        <h4 class="board-editor-label">
             <i class="fa-solid fa-gauge-high" aria-hidden="true"></i>
             Agent context <span class="board-count" data-board-context-total title="Estimated tokens an agent starts with">…</span>
-        </h3>
-        ${saved
-            ? `<div class="board-side-list board-context" data-board-context></div>
-        <p class="board-side-empty" data-board-context-message role="status" aria-live="polite"></p>`
-            : '<p class="board-side-empty">Save the card to measure what an agent would read.</p>'}
-    </section>`;
+        </h4>
+        <div class="board-side-list board-context" data-board-context></div>
+        <p class="board-side-empty" data-board-context-message role="status" aria-live="polite"></p>
+    </div>`;
 }
 
 function row(part, strong = false) {
@@ -62,19 +62,29 @@ export function renderContext(host, total, estimate) {
         <p class="board-side-empty">${lastLine} Tokens are an estimate (${escapeHtml(estimate.method || 'chars/4')}).</p>`;
 }
 
-export function bindCardContext(editor, card, { app } = {}) {
+// refresh() is called after every rail change. While the enclosing disclosure is closed nobody can
+// read the numbers, so a refresh only marks them stale and opening the disclosure measures once.
+export function bindCardContext(editor, card) {
     const section = editor.querySelector('[data-board-context-section]');
     const host = section?.querySelector('[data-board-context]');
     const total = section?.querySelector('[data-board-context-total]');
     const message = section?.querySelector('[data-board-context-message]');
     if (!section || !host || !total || !card?.id) return null;
+    const disclosure = section.closest?.('details') || null;
     let disposed = false;
     let generation = 0;
+    let stale = true;
     let request;
     const current = () => !disposed && section.isConnected;
+    const shown = () => !disclosure || disclosure.open;
 
     async function refresh() {
         if (!current()) return;
+        if (!shown()) {
+            stale = true;
+            return;
+        }
+        stale = false;
         const version = ++generation;
         request?.abort();
         const abort = request = new AbortController();
@@ -85,12 +95,16 @@ export function bindCardContext(editor, card, { app } = {}) {
             if (message) message.textContent = '';
         } catch (error) {
             if (!current() || generation !== version || abort.signal.aborted || error?.name === 'AbortError') return;
+            // Inline only: the rail refreshes after every change, so a toast would repeat each time.
             total.textContent = '?';
             if (message) message.textContent = error?.message || 'Could not measure the agent context.';
-            app?.showToast?.('Board', error?.message || 'Could not measure the agent context.', 'error');
         }
     }
 
+    const onToggle = () => {
+        if (shown() && stale) void refresh();
+    };
+    disclosure?.addEventListener('toggle', onToggle);
     void refresh();
     return {
         refresh,
@@ -98,6 +112,7 @@ export function bindCardContext(editor, card, { app } = {}) {
             disposed = true;
             ++generation;
             request?.abort();
+            disclosure?.removeEventListener('toggle', onToggle);
         }
     };
 }

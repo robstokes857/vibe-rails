@@ -70,7 +70,7 @@ serialization or tool discovery into the Native AOT path.
   (`BoardContextEstimator`) renders the real launch prompt (`BoardLaunchService.ComposePromptAsync`)
   and the real `get_board_card` / `list_board_columns` output (`BoardTool.RenderCardAsync`,
   `RenderLanesAsync`) and counts them with `ContextTokenEstimator` (characters ÷ 4, always shown
-  as ≈); the card editor's **Agent context** section shows the result. Every Start work / Chat
+  as ≈); the **Agent context** block in the card editor's collapsed **Advanced** section shows the result. Every Start work / Chat
   launch records a `BoardContextSamples` row (board/19) and, in the same transaction, a Card Log
   `change` entry whose `Changes` is `{"context":{"to":{…}}}`, so the number syncs (the `context`
   field is in `PortableChanges`; the hosted contract keeps unknown fields verbatim) and shows in
@@ -81,8 +81,9 @@ serialization or tool discovery into the Native AOT path.
   become one-line previews with ids. `before=<comment/note id>` (the reply names it; an ISO-8601
   timestamp also works, time-only) pages a window back without skipping entries that share an
   instant, `activity=all` lifts the budget, `get_board_notes` lists every note; sessions/commits
-  list the newest 10/30. The card editor re-measures after every rail mutation (comment, commit,
-  session, attachment, linked card).
+  list the newest 10/30. The card editor measures when Advanced is opened and re-measures after every rail mutation
+  (comment, commit, session, attachment, linked card) while it stays open; a closed section only
+  marks the numbers stale.
   Change the numbers in one place and update the plan in `vibe-books/vibe_board_context_rot`.
 - **Deleting a card is a soft delete (VB-51).** It sets `BoardCards.DeletedUTC` and writes a
   `deleted` log entry; every read, count, lookup, pull and lane Automation skips it, and its rows

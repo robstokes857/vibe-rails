@@ -1,5 +1,6 @@
 import { escapeHtml } from './utils.js';
 import { BoardApi } from './board-api.js';
+import { cardLabel } from './board-card-label.js';
 
 export function renderCardLinksSection(card) {
     return `<section class="board-side-section" data-board-card-links>
@@ -17,10 +18,6 @@ export function renderCardLinksSection(card) {
         </details>
         <p class="board-editor-muted mt-2">${card?.id ? 'Links save immediately and appear on both cards.' : 'Links will be saved when you create this card.'}</p>
     </section>`;
-}
-
-function cardLabel(card) {
-    return `${card.displayId || card.key} · ${card.title}`;
 }
 
 function cardText(card) {

@@ -39,7 +39,22 @@ test('display IDs are visible and editable while permanent IDs remain available'
     expect(await picker.evaluate((element, other) => Boolean(element.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING), await chat.elementHandle())).toBe(true);
     await editor.locator('.board-discussion').scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath('display-id-discussion.png') });
-    await editor.getByText('Card settings', { exact: true }).click();
+    // Agent context lives in the collapsed Advanced section and is only measured once that opens.
+    let contextRequests = 0;
+    await page.route('**/api/v1/board/cards/card_test/context', route => {
+        contextRequests++;
+        return route.fulfill({ json: { cardId: 'card_test', key: 'VB-ABCDE-42', tokens: 3100, chars: 12400, method: 'chars/4',
+            sources: [{ key: 'prompt', label: 'Launch prompt', chars: 4000, tokens: 1000 }], contents: [], extras: [], lastLaunch: null } });
+    });
+    await expect(editor.locator('[data-board-advanced] [data-board-context-section]')).toHaveCount(1);
+    await expect(editor.locator('[data-board-context-section]')).toHaveCount(1);
+    await expect(editor.locator('[data-board-context-section]')).not.toBeVisible();
+    expect(contextRequests).toBe(0);
+    await editor.getByText('Advanced', { exact: true }).click();
+    await expect(editor.locator('[data-board-context-total]')).toHaveText('≈3.1k');
+    expect(contextRequests).toBe(1);
+    await editor.locator('[data-board-advanced]').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath('advanced-section.png') });
     await expect(editor.locator('#board-card-display-id')).toHaveValue('VIBE-7');
     await expect(editor).toContainText('Permanent ID: VB-ABCDE-42');
     await editor.locator('#board-card-display-id').fill('VIBE-88');
@@ -198,7 +213,7 @@ test('comments and notes stay separate and History loads only from card settings
     expect(historyRequests).toBe(0);
     await editor.locator('[data-board-notes-details] > summary').click();
     await expect(editor.locator('[data-board-notes]')).toContainText('Agent scratchpad');
-    await editor.getByText('Card settings', { exact: true }).click();
+    await editor.getByText('Advanced', { exact: true }).click();
     expect(historyRequests).toBe(0);
     await editor.locator('[data-board-history-view] > summary').click();
     await expect(editor.locator('[data-history-entries]')).toContainText('Title edited');

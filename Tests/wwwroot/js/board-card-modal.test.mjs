@@ -101,7 +101,7 @@ test('comments and agent notes stay separate and history is tucked into settings
     const source = readFileSync(controllerPath, 'utf8');
     assert.match(source, /data-board-comments/);
     assert.match(source, /data-board-notes-details/);
-    assert.match(source, /Card settings/);
+    assert.match(source, /<summary class="board-side-label">Advanced<\/summary>/);
     assert.match(source, /mountHistory/);
     assert.doesNotMatch(source, /data-board-log-filter|cardLogFilter|cardLogEntries/);
     const render = source.slice(source.indexOf('renderCardDiscussion(editor, card) {'), source.indexOf('applyCommentClamps(host) {'));

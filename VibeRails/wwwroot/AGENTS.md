@@ -32,7 +32,8 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | [js/modules/board-card-links.js](js/modules/board-card-links.js) | Linked cards rail: project-wide key/title search, immediate link/unlink, and navigation through the card editor's unsaved-edit guard |
 | [js/modules/board-text.js](js/modules/board-text.js) | Renders a comment/description body. **Escape-first**: the input is escaped before any transform, so no sanitizer is needed and none is present |
 | [js/modules/board-file-refs.js](js/modules/board-file-refs.js) | The composer's `@` typeahead over `GET /api/v1/board/files`: inserts `@path` / `@"path"` text, "Browse for a file…" fallback through the shared file explorer; pure helpers are node-tested |
-| [js/modules/board-card-context.js](js/modules/board-card-context.js) | The card editor's **Agent context** rail section (VB-63): fetches `GET /api/v1/board/cards/{id}/context` and shows ≈tokens for the launch prompt, `get_board_card` and `list_board_columns`, a by-content breakdown, what is available but not sent, and the last recorded launch; refreshed after a comment is posted; `formatTokens`/`renderContext` are node-tested |
+| [js/modules/board-card-context.js](js/modules/board-card-context.js) | The card editor's **Agent context** block (VB-63), inside the saved card's collapsed **Advanced** section: fetches `GET /api/v1/board/cards/{id}/context` when Advanced is opened and after rail changes while it stays open, and shows ≈tokens for the launch prompt, `get_board_card` and `list_board_columns`, a by-content breakdown, what is available but not sent, and the last recorded launch; a failed measurement reports inline only; node-tested |
+| [js/modules/board-card-label.js](js/modules/board-card-label.js) | The one card-naming rule: `cardDisplayId` (display ID, else key), `cardLabel` (`ID · Title`), `shortCardKey` and `cardSearchText`. Board, linked cards and chat history import it rather than composing labels themselves |
 | [js/modules/diff-modal.js](js/modules/diff-modal.js) | Shared Monaco diff viewer as a nested modal layer. Used by Board commits and the sandbox "View Diff" |
 
 ## Settings signing keys
@@ -852,7 +853,10 @@ are discarded after navigation/editor replacement. Unload disposes subscriptions
 The editor no longer shows the YOLO warning text or Priority, Points and Tags fields. Saves omit
 those retired fields so stored values survive; YOLO remains an explicit checkbox.
 
-Card labels use `displayId || key`; `key` remains the immutable identity. Board settings edit
-`displayPrefix` for future cards, while Card settings edit the individual display ID and show
-the permanent key. Both IDs remain searchable. New-card links live on the editor's draft card
+Card labels use `displayId || key` through `board-card-label.js`; `key` remains the immutable
+identity. Board settings edit `displayPrefix` for future cards (only a changed value is sent; an
+emptied field sends `''`, which returns the board to the repository default). A saved card's
+collapsed **Advanced** section (formerly Card settings) edits the individual display ID, shows the
+permanent key, and holds the Agent context measurement and History. Both IDs remain searchable,
+including in chat history, which shows the display ID and keeps the key in the tooltip. New-card links live on the editor's draft card
 and are sent as `linkedCardIds` only on Create; link search and disposal retain generation guards.
