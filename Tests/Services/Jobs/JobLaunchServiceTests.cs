@@ -36,7 +36,7 @@ public sealed class JobLaunchServiceTests
         var run = BoardRun(@"C:\source\app", Now);
 
         Assert.True(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: false, @"C:\source\app", Now, NoOpenProjects));
-        Assert.True(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: false, @"C:\source\app\", Now, NoOpenProjects));
+        Assert.True(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: false, @"C:\source\app" + Path.DirectorySeparatorChar, Now, NoOpenProjects));
         Assert.True(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, @"C:\source\app", Now, NoOpenProjects));
         Assert.False(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: false, @"C:\source\other", Now.AddMinutes(5), NoOpenProjects));
     }
@@ -60,9 +60,22 @@ public sealed class JobLaunchServiceTests
         var run = BoardRun(@"C:\source\app", Now);
         var later = Now + JobLaunchService.ForeignProjectBoardRunGrace + TimeSpan.FromMinutes(10);
 
-        Assert.False(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, @"C:\source\other", later, [@"C:\source\app\"]));
-        Assert.False(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, @"C:\source\other", later, [@"c:\SOURCE\app", @"C:\source\other"]));
+        Assert.False(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, @"C:\source\other", later, [@"C:\source\app" + Path.DirectorySeparatorChar]));
+        Assert.False(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, @"C:\source\other", later, [@"C:\source\other", @"C:\source\app"]));
         Assert.True(JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, @"C:\source\other", later, [@"C:\source\other"]));
+    }
+
+    [Fact]
+    public void LaunchesHere_PresenceFollowsTheHostFilesystemForCase()
+    {
+        // Another root may record the same project in a different case (a lowercase drive letter
+        // from VS Code). Windows and the default macOS filesystem fold case, so that window still
+        // counts as alive there; on Linux it is a different directory and nobody owns the run.
+        var run = BoardRun(@"C:\source\app", Now);
+        var later = Now + JobLaunchService.ForeignProjectBoardRunGrace + TimeSpan.FromMinutes(10);
+        var foldsCase = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS();
+
+        Assert.Equal(!foldsCase, JobLaunchService.LaunchesHere(run, ownsSchedulerLease: true, @"C:\source\other", later, [@"c:\SOURCE\app", @"C:\source\other"]));
     }
 
     [Fact]
