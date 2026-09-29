@@ -1423,11 +1423,12 @@ public sealed partial class BoardStore : IBoardStore
         return comments;
     }
 
-    private static async Task<IReadOnlyList<BoardSessionRecord>> ReadSessionsAsync(SqliteConnection connection, string cardId, CancellationToken cancellationToken)
+    private static async Task<IReadOnlyList<BoardSessionRecord>> ReadSessionsAsync(SqliteConnection connection, string cardId, CancellationToken cancellationToken, int limit = int.MaxValue, bool newestFirst = false)
     {
         await using var command = connection.CreateCommand();
-        command.CommandText = SessionSelectSql + " WHERE s.CardId = $card ORDER BY s.CreatedUTC;";
+        command.CommandText = SessionSelectSql + " WHERE s.CardId = $card ORDER BY s.CreatedUTC" + (newestFirst ? " DESC" : "") + ", s.SessionId LIMIT $limit;";
         command.Parameters.AddWithValue("$card", cardId);
+        command.Parameters.AddWithValue("$limit", limit);
         var sessions = new List<BoardSessionRecord>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
@@ -1461,12 +1462,13 @@ public sealed partial class BoardStore : IBoardStore
         return attachments;
     }
 
-    private static async Task<IReadOnlyList<BoardCommitRecord>> ReadCommitsAsync(SqliteConnection connection, string cardId, CancellationToken cancellationToken, SqliteTransaction? transaction = null)
+    private static async Task<IReadOnlyList<BoardCommitRecord>> ReadCommitsAsync(SqliteConnection connection, string cardId, CancellationToken cancellationToken, SqliteTransaction? transaction = null, int limit = int.MaxValue)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT CardId, Sha, Author, Message, CommittedUTC, LinkedUTC FROM BoardCommits WHERE CardId = $card ORDER BY CommittedUTC DESC, Sha;";
+        command.CommandText = "SELECT CardId, Sha, Author, Message, CommittedUTC, LinkedUTC FROM BoardCommits WHERE CardId = $card ORDER BY CommittedUTC DESC, Sha LIMIT $limit;";
         command.Parameters.AddWithValue("$card", cardId);
+        command.Parameters.AddWithValue("$limit", limit);
         var commits = new List<BoardCommitRecord>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
@@ -1745,6 +1747,13 @@ public sealed partial class BoardStore : IBoardStore
         // as tried by an earlier version, and an older binary never names the column.
         SqliteMigrationRunner.Apply(connection, "board", 22, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardSyncSkippedEntries ADD COLUMN Version TEXT"));
+        // Existing publication consent covered card text only. Activity remains off until the
+        // owner enables it through the updated publish dialog; the cursor survives root restarts.
+        SqliteMigrationRunner.Apply(connection, "board", 23, MigrationKind.Additive, (db, transaction) =>
+        {
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardSyncLinks ADD COLUMN ActivitySchema INTEGER NOT NULL DEFAULT 0");
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardSyncLinks ADD COLUMN ActivityAfter TEXT");
+        });
         ReconcileDerivedRows(connection);
     }
 

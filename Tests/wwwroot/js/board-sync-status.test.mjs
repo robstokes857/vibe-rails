@@ -69,7 +69,9 @@ test('switching publishing on asks what leaves the machine; cancel sends nothing
     await handlers.click(event);
     assert.equal(event.defaultPrevented, true, 'the switch stays off until the dialog is confirmed');
     assert.equal(prompts.length, 1);
-    assert.match(prompts[0].message, /Attachments.*stay on this machine/);
+    assert.match(prompts[0].message, /Linked sessions, saved commit code, linked cards and attachments.*appear remotely/);
+    assert.match(prompts[0].message, /Files over 1 MiB keep metadata only/);
+    assert.match(prompts[0].message, /Launch options, Automation settings and environment definitions stay on this machine/);
     assert.match(prompts[0].message, /comments, agent notes and change history/);
     assert.deepEqual(writes, []);
     assert.equal(control.disabled, false);
@@ -77,13 +79,41 @@ test('switching publishing on asks what leaves the machine; cancel sends nothing
     answer = true;
     event = clickOn(control);
     await handlers.click(event);
-    assert.deepEqual(writes, [{ enabled: true }]);
+    assert.deepEqual(writes, [{ enabled: true, includeActivity: true }]);
     assert.match(content.innerHTML, /data-board-sync-action="unpublish" checked/);
 
     event = clickOn({ dataset: { boardSyncAction: 'unpublish' } });
     await handlers.click(event);
     assert.equal(event.defaultPrevented, false, 'pausing needs no confirmation');
     assert.equal(prompts.length, 2);
-    assert.deepEqual(writes, [{ enabled: true }, { enabled: false }]);
+    assert.deepEqual(writes, [{ enabled: true, includeActivity: true }, { enabled: false, includeActivity: false }]);
+    dispose();
+});
+
+test('an existing publication can enable linked activity after consent without pausing core sync', async () => {
+    const handlers = {};
+    const content = { innerHTML: '' };
+    const element = { isConnected: true, querySelector: () => content,
+        addEventListener: (name, action) => { handlers[name] = action; }, removeEventListener() {} };
+    let status = { published: true, enabled: true, configured: true, activityEnabled: false };
+    const writes = [];
+    BoardApi.attach({ apiCall: async (path, method, body) => {
+        if (method === 'PUT') { writes.push(body); status = { ...status, activityEnabled: body.includeActivity }; }
+        return status;
+    } });
+    let consent = false;
+    const dispose = mountBoardSync({ showToast() {} }, element, 'board_a', { confirm: async () => consent });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.match(content.innerHTML, /Sync linked activity/);
+    const control = { dataset: { boardSyncAction: 'activity' }, disabled: false };
+    const event = () => ({ preventDefault() {}, target: { closest: selector => selector === '[data-board-sync-action]' ? control : null } });
+    await handlers.click(event());
+    assert.deepEqual(writes, []);
+    assert.equal(status.enabled, true);
+    consent = true;
+    await handlers.click(event());
+    assert.deepEqual(writes, [{ enabled: true, includeActivity: true }]);
+    assert.equal(status.enabled, true);
+    assert.doesNotMatch(content.innerHTML, /data-board-sync-action="activity"/);
     dispose();
 });

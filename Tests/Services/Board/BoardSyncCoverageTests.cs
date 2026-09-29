@@ -192,6 +192,11 @@ public sealed class BoardSyncCoverageTests : IDisposable
         public string? RejectEntryId;
         public Guid RemoteId = Guid.NewGuid();
         public List<BoardSyncPulledEntryWire> Entries { get; } = [];
+        public Task<BoardSyncActivityAck> PutActivityAsync(string boardId, string cardId, BoardSyncActivityWire activity, CancellationToken ct, string? expectedDestination = null)
+        {
+            Calls++;
+            return Task.FromResult(new BoardSyncActivityAck(1, cardId));
+        }
 
         public Task<BoardSyncPublishResponse> PublishAsync(BoardSyncPublishRequest request, CancellationToken ct, string? expectedDestination = null)
         {

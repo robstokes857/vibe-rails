@@ -43,10 +43,43 @@ sent as an ordinary `change` entry. The hosted contract stores unknown change fi
 and never applies them, so no server change was needed; the desktop's pull side retains them
 the same way. Session ids stay out of it.
 
-Attachment bytes/metadata, commit snapshots, linked-card relationships, terminal sessions,
-launch options, environment definitions, lane Automations, and agent-context settings remain
-local. `@path` travels as text; no referenced file is read or uploaded by sync. User-written
-text is uploaded verbatim and can itself contain paths or other private information.
+Boards published with linked activity enabled also send a desktop-owned snapshot per card (VIBE-12): linked session
+IDs, names, CLI, creation time and Automation classification; linked commit metadata and saved
+before/after file contents; current attachment metadata/content; and linked card identities and
+labels. The snapshot never reads the current checkout or follows a file reference. Session replay
+bytes use the existing completed-session upload pipeline; the website enables replay only when
+that same owner's uploaded session is available. These rails are read-only on the hosted board.
+
+Launch options, tab IDs, project paths, environment definitions/IDs, lane Automation definitions
+and agent-context settings remain local. `@path` travels as text; no referenced file is read or
+uploaded by sync. User-written text and saved code can themselves contain private information.
+
+Existing publications keep syncing their original card fields/discussion. The **Sync linked
+activity** action in Board settings describes the added data and enables it directly, without
+pausing the board. New publication dialogs include the same scope. The request must explicitly
+carry `includeActivity:true`; an old client or an omitted field never enables the extra upload.
+Additive automatic migration `board/23` records `ActivitySchema` (default 0) and the rotation's
+`ActivityAfter` cursor on `BoardSyncLinks`. Older binaries keep working and retain these columns.
+
+After each successful push/pull of an enabled publication, `PUT /api/v1/boards/{board}/cards/{card}/activity` replaces the
+activity of up to ten cards. A bounded identity query rotates through the board across scheduler
+scopes and processes using its stored cursor and the existing cross-process sync lock. Identical
+snapshots are skipped for up to an hour in this process; changed/removal snapshots are sent on
+that card's next turn. The server must acknowledge `{schema:1,cardId}` before its hash is accepted.
+A failed card does not stop the bounded rotation; it retries on its next turn. Older servers,
+failures and invalid acknowledgements stay visible in sync status; completed Card Log progress
+is preserved. Pausing publication stops both protocols.
+
+Each JSON snapshot is capped at 8 MiB, with 200 recent sessions, 200 recent commits, 100 linked
+cards and 40 attachments. Commit file text is capped at 256 Ki characters per side and a shared
+content budget; warnings/truncation markers explain omitted content. Attachment content is sent
+only up to 1 MiB per file and when it fits the snapshot. Larger files keep their original size and
+metadata with an explanation directing the reader to the desktop. Metadata is selected before
+reading attachment content. SQL also checks actual BLOB/data URL size and stored commit JSON
+length before materialization; a saved snapshot over 8 Mi characters keeps commit metadata with
+an availability warning. Metadata queries fetch only the row limit plus one for truncation
+reporting. Local upload/storage limits are unchanged. No live session control, remote launch
+endpoint or new local listener is introduced.
 
 The desktop uses `X-Api-Key` over HTTPS; plain HTTP is accepted only for a loopback test server.
 Redirects, URL credentials, query strings and fragments in the configured endpoint are rejected.

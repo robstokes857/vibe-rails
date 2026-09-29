@@ -18,6 +18,7 @@ public interface IBoardSyncClient
     Task<BoardSyncPublishResponse> PublishAsync(BoardSyncPublishRequest request, CancellationToken cancellationToken, string? expectedDestination = null);
     Task<BoardSyncPushResponse> PushAsync(string remoteBoardId, BoardSyncPushRequest request, CancellationToken cancellationToken, string? expectedDestination = null);
     Task<BoardSyncPullResponse> PullAsync(string remoteBoardId, long after, int limit, CancellationToken cancellationToken, string? expectedDestination = null);
+    Task<BoardSyncActivityAck> PutActivityAsync(string remoteBoardId, string cardId, BoardSyncActivityWire activity, CancellationToken cancellationToken, string? expectedDestination = null);
 }
 
 /// <summary>
@@ -48,6 +49,20 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Fu
     public static readonly TimeSpan ExchangeTimeout = TimeSpan.FromSeconds(30);
 
     public Uri? Endpoint => endpoint();
+
+    public async Task<BoardSyncActivityAck> PutActivityAsync(string remoteBoardId, string cardId, BoardSyncActivityWire activity,
+        CancellationToken cancellationToken, string? expectedDestination = null)
+    {
+        if (JsonSerializer.SerializeToUtf8Bytes(activity, BoardSyncJsonContext.Default.BoardSyncActivityWire).Length > BoardSyncActivity.MaxSnapshotBytes)
+            throw new BoardSyncClientException("The card activity exceeds the upload limit; its data remains local.", "activity_too_large");
+        var ack = await SendAsync(HttpMethod.Put,
+            Uri.EscapeDataString(remoteBoardId) + "/cards/" + Uri.EscapeDataString(cardId) + "/activity",
+            activity, BoardSyncJsonContext.Default.BoardSyncActivityWire, BoardSyncJsonContext.Default.BoardSyncActivityAck,
+            cancellationToken, expectedDestination);
+        if (ack.Schema != 1 || !string.Equals(ack.CardId, cardId, StringComparison.Ordinal))
+            throw new BoardSyncClientException("The server did not acknowledge this card's activity; the upload will retry.", "invalid_response");
+        return ack;
+    }
 
     public Task<BoardSyncPublishResponse> PublishAsync(BoardSyncPublishRequest request, CancellationToken cancellationToken, string? expectedDestination = null) =>
         SendAsync(HttpMethod.Post, "publish", request, BoardSyncJsonContext.Default.BoardSyncPublishRequest,

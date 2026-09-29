@@ -1,5 +1,31 @@
 # API authentication coverage
 
+## VIBE-12 published Board activity (2026-09-29, scoped amendment)
+
+Boards explicitly enabled for linked activity send snapshots to the same pinned website/account
+through `PUT /api/v1/boards/{remoteBoard}/cards/{card}/activity`, after normal Card Log push/pull.
+The outbound contract adds linked session identifiers/labels, saved commit before/after code,
+attachment metadata/bounded content and linked card identities. See
+[SYNC.md](VibeRails/Services/Board/SYNC.md#what-leaves-the-machine) for the bounds and exclusions.
+This extends the older VB-51 scope only after the updated publish consent. Existing publications
+keep the old scope until the user chooses **Sync linked activity**. `includeActivity:true` is
+required on the existing authenticated, project-scoped publish action; old/omitted requests do
+not enable it. Additive automatic board/23 stores the consent version (default 0) and durable
+rotation cursor; older binaries preserve both. No project path, tab id, environment id, launch setting or Automation definition is
+added. Session replay uses the existing completed-session export and same-owner hosted manifest.
+
+The existing `X-Api-Key`, endpoint/key fingerprint, HTTPS policy (loopback-only HTTP fixtures),
+redirect prohibition, 30-second deadline and bounded response reader apply unchanged. Every
+activity acknowledgement must name schema 1 and the requested card. An older or incompatible
+server cannot silently acknowledge activity; failures retry without undoing Card Log progress.
+The snapshot caps transfer content, not local human uploads or storage. The store reads scoped
+metadata before attachment bytes and reads durable code snapshots, never the current checkout.
+No local route, listener or authentication bypass is added. The existing route retains session
+and tab credentials, root-only mapping and server-derived project scope.
+
+Both mandatory listener searches were repeated: only the existing main Kestrel host, non-serving
+port probe and isolated test hosts matched; the cross-runtime search had no matches.
+
 ## VB-VF336-66 account linking (2026-09-29, scoped amendment)
 
 Added `POST`, `GET`, and `DELETE /api/v1/settings/remote-link`, mapped only by an active

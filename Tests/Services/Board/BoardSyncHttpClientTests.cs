@@ -46,6 +46,23 @@ public sealed class BoardSyncHttpClientTests
         Assert.Equal("destination_changed", error.Code);
     }
 
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"schema\":1,\"cardId\":\"another\"}")]
+    [InlineData("{\"schema\":2,\"cardId\":\"card_1\"}")]
+    public async Task ActivityRequiresAnExplicitMatchingAcknowledgement(string body)
+    {
+        var client = Client(new Handler(request =>
+        {
+            Assert.Equal(HttpMethod.Put, request.Method);
+            Assert.EndsWith("/remote/cards/card_1/activity", request.RequestUri!.AbsoluteUri);
+            Assert.Equal("test-key", Assert.Single(request.Headers.GetValues("X-Api-Key")));
+            return new(HttpStatusCode.OK) { Content = new StringContent(body) };
+        }));
+        var error = await Assert.ThrowsAsync<BoardSyncClientException>(() => client.PutActivityAsync("remote", "card_1", new(1, [], [], [], [], []), Ct, client.DestinationKey));
+        Assert.Equal("invalid_response", error.Code);
+    }
+
     [Fact]
     public async Task AChangedEndpointIsNeverUsedUnderTheOldApproval_AndIsUsedOnceApprovedAgain()
     {

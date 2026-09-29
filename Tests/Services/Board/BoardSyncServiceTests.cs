@@ -68,6 +68,157 @@ public sealed class BoardSyncServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ActivityIncludesSavedCodeSessionsAttachmentsAndLinks_AndReflectsRemoval()
+    {
+        var card = await Card();
+        var other = await Card();
+        var sessionId = Guid.NewGuid().ToString("D");
+        await store.LinkSessionAsync(root, card.Id, sessionId, "private-tab", "env:7:codex", "codex", "Implementation", "launch", Ct);
+        var attachment = (await store.AddAttachmentContentAsync(root, card.Id, "readme.txt", "text/plain", "saved bytes"u8.ToArray(), Ct))!;
+        await store.AddCommitAsync(root, card.Id, new string('a', 40), "Author", "Saved change", DateTime.UtcNow,
+            new([new("src/file.cs", "csharp", "before", "after")], 1), Ct);
+        await store.LinkCardAsync(root, card.Id, other.Id, Ct);
+        Assert.Null((await service.SetPublishedAsync(root, card.BoardId, true, Ct, includeActivity: true))!.LastError);
+        var snapshot = Assert.Single(client.Activity, a => a.CardId == card.Id).Snapshot;
+        Assert.Equal(sessionId, Assert.Single(snapshot.Sessions).Id);
+        Assert.Equal("before", Assert.Single(Assert.Single(snapshot.Commits).Files).Before);
+        Assert.Equal("saved bytes", System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(Assert.Single(snapshot.Attachments).ContentBase64!)));
+        Assert.Equal(other.Key, Assert.Single(snapshot.LinkedCards).Key);
+        var wire = JsonSerializer.Serialize(snapshot, BoardSyncJsonContext.Default.BoardSyncActivityWire);
+        Assert.DoesNotContain("env:7", wire);
+        Assert.DoesNotContain("private-tab", wire);
+        Assert.DoesNotContain(root, wire);
+        await store.UnlinkSessionAsync(root, card.Id, sessionId, Ct);
+        await store.RemoveCommitAsync(root, card.Id, new string('a', 40), Ct);
+        await store.DeleteAttachmentAsync(root, card.Id, attachment.Id, Ct);
+        await store.UnlinkCardAsync(root, card.Id, other.Id, Ct);
+        Assert.Null((await service.SyncNowAsync(root, card.BoardId, Ct))!.LastError);
+        var cleared = client.Activity.Last(a => a.CardId == card.Id).Snapshot;
+        Assert.Empty(cleared.Sessions);
+        Assert.Empty(cleared.Commits);
+        Assert.Empty(cleared.Attachments);
+        Assert.Empty(cleared.LinkedCards);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FailedOrUnrecognizedActivityAcknowledgementRetriesWithoutLosingCardLogProgress(bool wrongAck)
+    {
+        var card = await Card();
+        client.FailActivity = !wrongAck;
+        client.WrongActivityAck = wrongAck;
+        var first = (await service.SetPublishedAsync(root, card.BoardId, true, Ct, includeActivity: true))!;
+        Assert.NotNull(first.LastError);
+        Assert.Equal(0, first.Unsent);
+        Assert.Equal(1, first.Cursor);
+        client.FailActivity = client.WrongActivityAck = false;
+        Assert.Null((await service.SyncNowAsync(root, card.BoardId, Ct))!.LastError);
+        Assert.Single(client.Entries);
+        Assert.Equal(wrongAck ? 2 : 1, client.Activity.Count);
+    }
+
+    [Fact]
+    public async Task ActivityRefreshRotatesAcrossScopedServiceInstances_AndOmitsOversizedAttachmentContent()
+    {
+        var cards = new List<BoardCardRecord>();
+        for (var i = 0; i < 12; i++) cards.Add(await Card());
+        var oversized = (await store.AddAttachmentContentAsync(root, cards[0].Id, "big.txt", "text/plain", new byte[1024 * 1024 + 1], Ct))!;
+        await service.SetPublishedAsync(root, cards[0].BoardId, true, Ct, includeActivity: true);
+        Assert.Equal(10, client.Activity.Count);
+        var nextScope = new BoardSyncService(store, client, new BoardSyncLock(Path.Combine(root, "sync.lock")), NullFeatureLog.Instance);
+        Assert.Null((await nextScope.SyncNowAsync(root, cards[0].BoardId, Ct))!.LastError);
+        Assert.Equal(12, client.Activity.Select(a => a.CardId).Distinct().Count());
+        var file = Assert.Single(client.Activity.First(a => a.CardId == cards[0].Id).Snapshot.Attachments);
+        Assert.Equal(oversized.Bytes, file.Bytes);
+        Assert.Null(file.ContentBase64);
+        Assert.Contains("1 MiB", file.UnavailableReason);
+        Assert.Null(await store.GetSyncActivityAsync(root + "-other", cards[0].BoardId, cards[0].Id, Ct));
+        Assert.Null(await store.GetSyncActivityAsync(root, "other-board", cards[0].Id, Ct));
+    }
+
+    [Fact]
+    public async Task OldPublicationConsentKeepsCoreSyncWorkingUntilActivityIsExplicitlyEnabled()
+    {
+        var card = await Card();
+        var status = (await service.SetPublishedAsync(root, card.BoardId, true, Ct))!;
+        Assert.False(status.ActivityEnabled);
+        Assert.Empty(client.Activity);
+        await store.AddCommentAsync(root, card.Id, BoardAuthor.User(), "Still sync discussion", Ct);
+        Assert.Null((await service.SyncNowAsync(root, card.BoardId, Ct))!.LastError);
+        Assert.Equal(2, client.Entries.Count);
+        Assert.Empty(client.Activity);
+        status = (await service.SetPublishedAsync(root, card.BoardId, true, Ct, includeActivity: true))!;
+        Assert.True(status.ActivityEnabled);
+        Assert.Single(client.Activity);
+        Assert.Equal(1, (await store.GetSyncLinkAsync(root, card.BoardId, Ct))!.ActivitySchema);
+    }
+
+    [Fact]
+    public async Task FailedCardDoesNotStarveRotation_AndNewProcessResumesTheDurableCursor()
+    {
+        var cards = new List<BoardCardRecord>();
+        for (var i = 0; i < 12; i++) cards.Add(await Card());
+        client.FailActivityCardId = cards.MinBy(c => c.Id, StringComparer.Ordinal)!.Id;
+        Assert.NotNull((await service.SetPublishedAsync(root, cards[0].BoardId, true, Ct, includeActivity: true))!.LastError);
+        Assert.Equal(9, client.Activity.Count);
+        var persisted = (await store.GetSyncLinkAsync(root, cards[0].BoardId, Ct))!.ActivityAfter;
+        Assert.NotNull(persisted);
+        var nextClient = new FakeClient();
+        nextClient.Entries.AddRange(client.Entries);
+        var otherProcess = new BoardSyncService(new BoardStore(cs, cs), nextClient,
+            new BoardSyncLock(Path.Combine(root, "sync.lock")), NullFeatureLog.Instance);
+        Assert.Null((await otherProcess.SyncNowAsync(root, cards[0].BoardId, Ct))!.LastError);
+        Assert.Equal(2, nextClient.Activity.Count);
+        Assert.All(nextClient.Activity, a => Assert.True(StringComparer.Ordinal.Compare(a.CardId, persisted) > 0));
+        Assert.Null((await otherProcess.SyncNowAsync(root, cards[0].BoardId, Ct))!.LastError);
+        Assert.Contains(nextClient.Activity, a => a.CardId == client.FailActivityCardId);
+    }
+
+    [Fact]
+    public async Task ContentReadsEnforceActualStoredSize_AndTruncatedCodeIsLabeled()
+    {
+        var card = await Card();
+        var file = (await store.AddAttachmentContentAsync(root, card.Id, "big.txt", "text/plain", new byte[1024 * 1024 + 1], Ct))!;
+        await ExecuteAsync("UPDATE BoardAttachments SET Bytes=1;"); // corrupt legacy size metadata
+        Assert.Null(await store.GetSyncAttachmentContentAsync(root, card.Id, file.Id, 1024 * 1024, Ct));
+        var sha = new string('b', 40);
+        var large = new string('x', 300000);
+        await store.AddCommitAsync(root, card.Id, sha, "Fixture", "Large saved file", DateTime.UtcNow,
+            new([new("large.cs", "csharp", large, large)], 1), Ct);
+        Assert.Null(await store.GetSyncCommitSnapshotAsync(root, card.Id, sha, 100, Ct));
+        Assert.Null(await store.GetSyncCommitSnapshotAsync(root + "-other", card.Id, sha, 8 * 1024 * 1024, Ct));
+        Assert.Null((await service.SetPublishedAsync(root, card.BoardId, true, Ct, includeActivity: true))!.LastError);
+        var snapshot = Assert.Single(client.Activity).Snapshot;
+        var code = Assert.Single(Assert.Single(snapshot.Commits).Files);
+        Assert.Equal("truncated", code.Status);
+        Assert.Contains("truncated", code.Before);
+        Assert.Contains("truncated", code.After);
+        Assert.Null(Assert.Single(snapshot.Attachments).ContentBase64);
+        Assert.NotEmpty(snapshot.Warnings);
+        Assert.Equal(large, Assert.Single((await store.GetCommitSnapshotAsync(root, card.Id, sha, Ct))!.Files).OriginalContent);
+    }
+
+    [Fact]
+    public async Task ActivityMetadataQueryBoundsLongSessionHistoriesBeforeProjection()
+    {
+        var card = await Card();
+        await ExecuteAsync("""
+            WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<250)
+            INSERT INTO BoardCardSessions(SessionId,CardId,TabId,Selection,Cli,DisplayName,Origin,CreatedUTC)
+            SELECT 'session_'||x,c.Id,NULL,'base:codex','codex','Session '||x,'manual',c.CreatedUTC
+            FROM n CROSS JOIN BoardCards c;
+            """);
+        var metadata = (await store.GetSyncActivityAsync(root, card.BoardId, card.Id, Ct))!;
+        Assert.Equal(201, metadata.Sessions.Count);
+        Assert.Null((await service.SetPublishedAsync(root, card.BoardId, true, Ct, includeActivity: true))!.LastError);
+        var snapshot = Assert.Single(client.Activity).Snapshot;
+        Assert.Equal(200, snapshot.Sessions.Count);
+        Assert.Contains(snapshot.Warnings, w => w.Contains("200 linked sessions"));
+        Assert.Equal(250, (await store.GetCardDetailAsync(root, card.Id, Ct))!.Sessions.Count);
+    }
+
+    [Fact]
     public async Task ServerArrivalWinsPerField_AndHistoryRetainsTheLosingEdit()
     {
         var card = await Card();
@@ -760,6 +911,18 @@ public sealed class BoardSyncServiceTests : IDisposable
         public Func<Task>? BeforePull;
         public List<long> PullAfters { get; } = [];
         public List<BoardSyncPulledEntryWire> Entries { get; } = [];
+        public List<(string CardId, BoardSyncActivityWire Snapshot)> Activity { get; } = [];
+        public bool FailActivity;
+        public bool WrongActivityAck;
+        public string? FailActivityCardId;
+        public Task<BoardSyncActivityAck> PutActivityAsync(string boardId, string cardId, BoardSyncActivityWire activity, CancellationToken ct, string? expectedDestination = null)
+        {
+            Calls++;
+            Assert.Equal(DestinationKey, expectedDestination);
+            if (FailActivity || FailActivityCardId == cardId) throw new BoardSyncClientException("Activity upload failed", "network");
+            Activity.Add((cardId, activity));
+            return Task.FromResult(new BoardSyncActivityAck(WrongActivityAck ? 0 : 1, cardId));
+        }
         private readonly Guid remoteId = Guid.NewGuid();
         public Task<BoardSyncPublishResponse> PublishAsync(BoardSyncPublishRequest request, CancellationToken ct, string? expectedDestination = null)
         {

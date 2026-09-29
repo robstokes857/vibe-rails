@@ -5,8 +5,10 @@ import { BoardApi } from './board-api.js';
 const PUBLISH_CONSENT = 'Publishing uploads this board to your viberails.ai account now and about every minute '
     + 'while VibeRails is open: the board name and key prefix; lane names, colours and order; every card\'s '
     + 'title, description, type, priority, points, tags, flags, lane and assignee; and its comments, agent '
-    + 'notes and change history. Attachments, linked commits, terminal sessions, Automation settings and '
-    + 'environment definitions stay on this machine. File references travel as text, without file contents.';
+    + 'notes and change history. Linked sessions, saved commit code, linked cards and attachments also '
+    + 'appear remotely. Files over 1 MiB keep metadata only, and large code snapshots may be shortened. '
+    + 'Session recordings use the existing session upload. Launch options, Automation settings and '
+    + 'environment definitions stay on this machine. File references travel as text, without reading files.';
 
 const TYPES = [
     ['task', 'Task'], ['bug', 'Bug'], ['feature', 'Feature'],
@@ -23,7 +25,7 @@ export const boardContextSection = () => `
 export const boardSyncSection = () => `
     <section class="mt-3 border-top pt-3" data-board-sync>
         <h6>viberails.ai</h6>
-        <p class="board-editor-muted">Publish this board to your viberails.ai account. Cards, comments, agent notes and history sync about every minute while VibeRails is open. The last field change received by the server wins; earlier changes remain in History. Lane names, colours and order come from this machine. Attachments, linked commits, sessions and Automation settings stay local. File references travel as text, without file contents. Web card creation and lane moves run your local lane Automations. Pausing sync keeps the published copy on your account.</p>
+        <p class="board-editor-muted">Publish this board to your viberails.ai account. Cards, comments, agent notes and history sync about every minute while VibeRails is open. The last field change received by the server wins; earlier changes remain in History. Lane names, colours and order come from this machine. Linked sessions, saved commit code, attachments and linked cards refresh in groups of ten cards. Files over 1 MiB keep metadata only; large code snapshots may be shortened. Launch options and Automation settings stay local. File references travel as text, without reading files. Web card creation and lane moves run your local lane Automations. Pausing sync keeps the published copy on your account.</p>
         <div data-board-settings-content>Loading sync status…</div>
     </section>`;
 
@@ -137,6 +139,7 @@ export function mountBoardSync(app, element, boardId, { confirm = confirmDialog 
                 <label class="form-check-label" for="board-sync-enabled">${label}</label>
             </div>
             ${status.published ? `<p class="board-editor-muted mb-2" data-board-sync-status>${status.remoteUrl ? `<a href="${escapeHtml(status.remoteUrl)}" target="_blank" rel="noopener">Open on viberails.ai</a> · ` : ''}Last sync: ${escapeHtml(stamp)}${status.unsent ? ` · ${Number(status.unsent)} waiting to send` : ''}</p>` : ''}
+            ${status.enabled && !status.activityEnabled ? `<p class="board-editor-muted">This board currently syncs card fields and discussion. Add linked sessions, saved code and attachments to its hosted copy.</p><button type="button" class="btn btn-sm btn-outline-primary mb-2" data-board-sync-action="activity">Sync linked activity</button>` : ''}
             ${status.lastError ? `<p class="text-danger small mb-2" role="alert" data-board-sync-error>${escapeHtml(status.lastError)}</p>` : ''}
             ${status.rejected ? `<div class="text-warning small mb-2" role="alert" data-board-sync-rejected>
                 <p class="mb-1">${Number(status.rejected)} rejected entries are kept on this machine. Other entries continue syncing.
@@ -173,24 +176,25 @@ export function mountBoardSync(app, element, boardId, { confirm = confirmDialog 
         const action = control.dataset.boardSyncAction;
         // Switching on uploads the board at once, so the switch stays off until the dialog is
         // confirmed; the status render after success paints it on. Pausing asks nothing.
-        if (action === 'publish') event.preventDefault();
+        if (action === 'publish' || action === 'activity') event.preventDefault();
         busy = true;
         control.disabled = true;
         try {
-            if (action === 'publish' && !await confirm({
-                title: 'Publish this board to viberails.ai?',
+            if ((action === 'publish' || action === 'activity') && !await confirm({
+                title: action === 'activity' ? 'Sync linked activity to viberails.ai?' : 'Publish this board to viberails.ai?',
                 message: PUBLISH_CONSENT,
-                confirmLabel: 'Publish'
+                confirmLabel: action === 'activity' ? 'Sync linked activity' : 'Publish'
             })) {
                 control.disabled = false;
                 return;
             }
             const status = action === 'now'
                 ? await BoardApi.syncBoardNowAsync(boardId)
-                : await BoardApi.setBoardSyncAsync(boardId, action === 'publish');
+                : await BoardApi.setBoardSyncAsync(boardId, action === 'publish' || action === 'activity', action === 'publish' || action === 'activity');
             if (!alive()) return;
             render(status);
-            const message = action === 'publish' ? 'Board published to viberails.ai.'
+            const message = action === 'activity' ? 'Linked activity enabled for this board.'
+                : action === 'publish' ? 'Board published to viberails.ai.'
                 : action === 'now' ? (status.lastError || status.rejected ? 'Sync finished with entries needing attention.' : 'Board synced.')
                 : 'Sync switched off. Switch it back on to resume where it stopped.';
             app.showToast('Board', message, status.lastError || status.rejected ? 'warning' : 'success');

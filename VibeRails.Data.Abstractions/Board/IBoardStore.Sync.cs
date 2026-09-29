@@ -8,6 +8,14 @@ namespace VibeRails.Services.Board;
 /// </summary>
 public partial interface IBoardStore
 {
+    /// <summary>Bounded live-card identities for the activity refresh, ordered after an opaque cursor.</summary>
+    Task<IReadOnlyList<string>> GetSyncActivityCardIdsAsync(string projectPath, string boardId, string? after, int limit, CancellationToken cancellationToken = default);
+    /// <summary>Activity metadata only: no discussions, attachment data URLs or file content.</summary>
+    Task<BoardSyncActivityRecord?> GetSyncActivityAsync(string projectPath, string boardId, string cardId, CancellationToken cancellationToken = default);
+    /// <summary>Returns stored content only if its actual size fits the bound, before materializing it.</summary>
+    Task<byte[]?> GetSyncAttachmentContentAsync(string projectPath, string cardId, string attachmentId, int maxBytes, CancellationToken cancellationToken = default);
+    /// <summary>Returns a durable snapshot only if its stored JSON fits the read bound.</summary>
+    Task<VibeRails.DTOs.SandboxDiffResponse?> GetSyncCommitSnapshotAsync(string projectPath, string cardId, string sha, int maxChars, CancellationToken cancellationToken = default);
     /// <summary>Explicit history reads for the settings UI and verification, never normal card context.</summary>
     Task<IReadOnlyList<BoardCommentRecord>> GetCardHistoryAsync(string projectPath, string cardId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<BoardHistoryRecord>?> GetHistoryAsync(string projectPath, string boardId, string? cardId, int offset, CancellationToken cancellationToken = default);

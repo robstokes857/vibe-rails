@@ -23,7 +23,8 @@ public sealed record BoardSyncStatus(
     int Rejected = 0,
     IReadOnlyList<BoardSyncRejectedEntry>? RejectedEntries = null,
     int Skipped = 0,
-    IReadOnlyList<BoardSyncSkippedEntry>? SkippedEntries = null);
+    IReadOnlyList<BoardSyncSkippedEntry>? SkippedEntries = null,
+    bool ActivityEnabled = false);
 
 public interface IBoardSyncService
 {
@@ -35,7 +36,7 @@ public interface IBoardSyncService
     /// and running a first sync) or switches its sync off. Switching off keeps the link and the
     /// cursor, so switching back on resumes where it stopped.
     /// </summary>
-    Task<BoardSyncStatus?> SetPublishedAsync(string projectPath, string boardId, bool enabled, CancellationToken cancellationToken);
+    Task<BoardSyncStatus?> SetPublishedAsync(string projectPath, string boardId, bool enabled, CancellationToken cancellationToken, bool includeActivity = false);
 
     /// <summary>One push-then-pull for this board now; errors land in the status, not the caller.</summary>
     Task<BoardSyncStatus?> SyncNowAsync(string projectPath, string boardId, CancellationToken cancellationToken);
@@ -76,7 +77,7 @@ public sealed class BoardSyncService(
         return await StatusAsync(board.Id, await store.GetSyncLinkAsync(projectPath, boardId, cancellationToken), cancellationToken);
     }
 
-    public async Task<BoardSyncStatus?> SetPublishedAsync(string projectPath, string boardId, bool enabled, CancellationToken cancellationToken)
+    public async Task<BoardSyncStatus?> SetPublishedAsync(string projectPath, string boardId, bool enabled, CancellationToken cancellationToken, bool includeActivity = false)
     {
         using var held = syncLock.TryAcquire()
             ?? throw new BoardValidationException("A Board sync is already running. Try again when it finishes.");
@@ -128,7 +129,9 @@ public sealed class BoardSyncService(
             CreatedUtc: existing?.CreatedUtc ?? default,
             UpdatedUtc: DateTime.UtcNow,
             projectPath,
-            board.Name, destination), cancellationToken)
+            board.Name, destination,
+            ActivitySchema: includeActivity ? 1 : existing?.DestinationKey == destination && !remoteChanged ? existing.ActivitySchema : 0,
+            ActivityAfter: remoteChanged ? null : existing?.ActivityAfter), cancellationToken)
             ?? throw new BoardValidationException("That board no longer exists. Open the board again and retry.");
 
         var baseline = await store.WriteSyncBaselineAsync(projectPath, board.Id, cancellationToken);
@@ -180,6 +183,8 @@ public sealed class BoardSyncService(
                 throw new BoardValidationException("The server or API key changed. Turn publishing off and on to approve this destination.");
             link = await PushAsync(link, cancellationToken);
             link = await PullAsync(link, cancellationToken);
+            if (link.ActivitySchema >= 1)
+                link = await BoardSyncActivity.RefreshAsync(store, client, link, cancellationToken);
             return await store.SaveSyncLinkAsync(link with { LastSyncUtc = DateTime.UtcNow, LastError = null }, cancellationToken) ?? link;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -693,7 +698,8 @@ public sealed class BoardSyncService(
             rejected,
             rejectedEntries,
             skipped,
-            skippedEntries);
+            skippedEntries,
+            ActivityEnabled: link is { ActivitySchema: >= 1 });
     }
 
     private static string Trim(string value) => value.Length <= MaxErrorLength ? value : value[..MaxErrorLength];

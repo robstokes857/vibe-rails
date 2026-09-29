@@ -40,7 +40,7 @@ public sealed partial class BoardStore
 
     private const string SyncLinkSelectSql = """
         SELECT l.BoardId, l.RemoteBoardId, l.Cursor, l.Enabled, l.LayoutHash, l.LastSyncUTC, l.LastError,
-               l.CreatedUTC, l.UpdatedUTC, b.ProjectPath, b.Name, l.DestinationKey
+               l.CreatedUTC, l.UpdatedUTC, b.ProjectPath, b.Name, l.DestinationKey, l.ActivitySchema, l.ActivityAfter
         FROM BoardSyncLinks l
         JOIN Boards b ON b.Id = l.BoardId
         """;
@@ -93,13 +93,14 @@ public sealed partial class BoardStore
             // The board check and the write are one statement, so a board deleted concurrently
             // cannot be left with a link. CreatedUTC is kept from the first save.
             command.CommandText = """
-                INSERT INTO BoardSyncLinks (BoardId, RemoteBoardId, Cursor, Enabled, LayoutHash, LastSyncUTC, LastError, CreatedUTC, UpdatedUTC, DestinationKey)
-                SELECT $board, $remote, $cursor, $enabled, $layout, $lastSync, $lastError, $created, $updated, $destination
+                INSERT INTO BoardSyncLinks (BoardId, RemoteBoardId, Cursor, Enabled, LayoutHash, LastSyncUTC, LastError, CreatedUTC, UpdatedUTC, DestinationKey, ActivitySchema, ActivityAfter)
+                SELECT $board, $remote, $cursor, $enabled, $layout, $lastSync, $lastError, $created, $updated, $destination, $activitySchema, $activityAfter
                 WHERE EXISTS (SELECT 1 FROM Boards WHERE Id = $board)
                 ON CONFLICT(BoardId) DO UPDATE SET
                     RemoteBoardId = excluded.RemoteBoardId, Cursor = excluded.Cursor, Enabled = excluded.Enabled,
                     LayoutHash = excluded.LayoutHash, LastSyncUTC = excluded.LastSyncUTC, LastError = excluded.LastError,
-                    UpdatedUTC = excluded.UpdatedUTC, DestinationKey = excluded.DestinationKey;
+                    UpdatedUTC = excluded.UpdatedUTC, DestinationKey = excluded.DestinationKey,
+                    ActivitySchema = excluded.ActivitySchema, ActivityAfter = excluded.ActivityAfter;
                 """;
             command.Parameters.AddWithValue("$board", link.BoardId);
             command.Parameters.AddWithValue("$remote", link.RemoteBoardId);
@@ -107,6 +108,8 @@ public sealed partial class BoardStore
             command.Parameters.AddWithValue("$enabled", link.Enabled ? 1 : 0);
             command.Parameters.AddWithValue("$layout", (object?)link.LayoutHash ?? DBNull.Value);
             command.Parameters.AddWithValue("$destination", (object?)link.DestinationKey ?? DBNull.Value);
+            command.Parameters.AddWithValue("$activitySchema", link.ActivitySchema);
+            command.Parameters.AddWithValue("$activityAfter", (object?)link.ActivityAfter ?? DBNull.Value);
             command.Parameters.AddWithValue("$lastSync", link.LastSyncUtc is DateTime sync ? ToDb(sync) : DBNull.Value);
             command.Parameters.AddWithValue("$lastError", (object?)link.LastError ?? DBNull.Value);
             command.Parameters.AddWithValue("$created", ToDb(link.CreatedUtc == default ? now : link.CreatedUtc));
@@ -662,5 +665,7 @@ public sealed partial class BoardStore
         ParseDb(reader.GetString(8)),
         reader.GetString(9),
         reader.GetString(10),
-        reader.IsDBNull(11) ? null : reader.GetString(11));
+        reader.IsDBNull(11) ? null : reader.GetString(11),
+        reader.GetInt32(12),
+        reader.IsDBNull(13) ? null : reader.GetString(13));
 }
