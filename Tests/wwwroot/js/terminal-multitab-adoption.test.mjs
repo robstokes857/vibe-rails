@@ -4,7 +4,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const modulePath = path.resolve('VibeRails/wwwroot/js/modules/terminal-multitab.js');
-const { TerminalController, shouldCreateFreshTab, selectBlankPlaceholderTabIds } = await import(pathToFileURL(modulePath).href);
+const { TerminalController, TerminalManager, shouldCreateFreshTab, selectBlankPlaceholderTabIds } = await import(pathToFileURL(modulePath).href);
 
 function createManager({ selection = 'env:7:opencode', rememberedCli = 'opencode' } = {}) {
     const added = [];
@@ -222,4 +222,61 @@ test('adoptLaunchedTab leaves the placeholder alone for a sessionless tab or a b
     assert.equal(await background.controller.adoptLaunchedTab('card-tab', { focus: false }), true);
     assert.deepEqual(background.focused, []);
     assert.deepEqual(background.pruned, []);
+});
+
+// The real _removeTab/pruneBlankPlaceholderTabs over a manager with just the state they touch.
+function pruneManager({ failWith = null } = {}) {
+    const manager = Object.create(TerminalManager.prototype);
+    const log = { deletes: [], disposed: [], errors: [], warnings: [] };
+    Object.assign(manager, {
+        _destroyed: false, tabs: new Map(), tabOrder: [], activeTabId: 'live',
+        _pendingCloses: new Map(), _removingTabs: new Set(),
+        app: {
+            async apiCall(url, method) {
+                log.deletes.push(`${method} ${url}`);
+                await new Promise((resolve) => setImmediate(resolve));
+                if (failWith) throw new Error(failWith);
+                return {};
+            },
+            showError(message) { log.errors.push(message); }
+        },
+        settings: { unbindTab() {} },
+        getSelectionMeta: (selection) => ({ cli: selection ? 'claude' : null }),
+        clearTabSelection() {}, clearTabTitle() {}, clearTabMeta() {},
+        updateAddButtonState() {}, _updateTabScrollArrows() {}, _touchHistory() {}
+    });
+    const add = (id, state = {}) => {
+        const ui = { item: { style: {}, classList: { remove() {} }, remove() {} }, panel: { style: {}, remove() {} } };
+        manager.tabs.set(id, { state: { id, ui, ...state }, instance: { setActive() {}, dispose() { log.disposed.push(id); } } });
+        manager.tabOrder.push(id);
+    };
+    add('live', { hasActiveSession: true, selection: 'base:claude' });
+    return { manager, add, log };
+}
+
+test('overlapping automatic prunes delete and dispose each placeholder once', async () => {
+    const { manager, add, log } = pruneManager();
+    add('blank-a');
+    add('blank-b');
+    const [first, second] = await Promise.all([manager.pruneBlankPlaceholderTabs(), manager.pruneBlankPlaceholderTabs()]);
+    assert.deepEqual([...first, ...second].sort(), ['blank-a', 'blank-b']);
+    assert.deepEqual(log.disposed.sort(), ['blank-a', 'blank-b']);
+    assert.equal(log.deletes.length, 2);
+    assert.deepEqual(manager.tabOrder, ['live']);
+    assert.equal(manager._removingTabs.size, 0);
+});
+
+test('a refused automatic prune stays off screen, while a close the user asked for still reports', async (t) => {
+    const warn = t.mock.method(console, 'warn', () => {});
+    const { manager, add, log } = pruneManager({ failWith: 'API call failed: Internal Server Error' });
+    add('blank');
+    add('stopped', { selection: 'base:claude' });
+    assert.deepEqual(await manager.pruneBlankPlaceholderTabs(), ['blank']);
+    assert.deepEqual(log.errors, []);
+    assert.equal(warn.mock.callCount(), 1);
+    assert.equal(manager.tabs.has('blank'), false, 'the local chip still goes');
+
+    assert.equal(await manager._removeTab('stopped'), true);
+    assert.deepEqual(log.errors, ['Failed to close terminal tab: API call failed: Internal Server Error']);
+    assert.equal(await manager._removeTab('stopped'), false, 'an already removed tab is a no-op');
 });

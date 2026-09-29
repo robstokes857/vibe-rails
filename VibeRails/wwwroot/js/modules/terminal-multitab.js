@@ -115,6 +115,9 @@ export class TerminalManager {
 
         this._pendingCloses = new Map();
         this._pendingCloseMs = PENDING_CLOSE_MS;
+        // Tabs whose DELETE is in flight. A tab stays in this.tabs until it returns, so without
+        // this two overlapping prunes would both pick it and dispose it twice.
+        this._removingTabs = new Set();
         this._undoBtn = null;
         this._undoCount = null;
         this._undoWrapper = null;
@@ -1142,44 +1145,51 @@ export class TerminalManager {
 
     // Backend DELETE plus local teardown for one tab. Shared by the undo-window
     // commit and the placeholder prune; what shows next (the next tab, or a
-    // fresh placeholder for an empty strip) is the caller's decision.
-    async _removeTab(tabId) {
+    // fresh placeholder for an empty strip) is the caller's decision. `quiet` is
+    // for removals nobody asked for (the automatic prune): a failed DELETE is
+    // logged instead of shown. A tab already being removed is left to that call.
+    async _removeTab(tabId, { quiet = false } = {}) {
         const tab = this.tabs.get(tabId);
-        if (!tab) {
+        if (!tab || this._removingTabs.has(tabId)) {
             return false;
         }
-
-        const endingSessionId = tab.state.hasActiveSession ? tab.state.sessionId : null;
+        this._removingTabs.add(tabId);
         try {
-            await this.app.apiCall(`/api/v1/terminal/tabs/${encodeURIComponent(tabId)}`, 'DELETE');
-        } catch (error) {
-            // 404 means tab already expired server-side (e.g. LLM never selected) — close silently
-            if (error.message !== 'API call failed: Not Found') {
-                this.app.showError(`Failed to close terminal tab: ${error.message}`);
+            const endingSessionId = tab.state.hasActiveSession ? tab.state.sessionId : null;
+            try {
+                await this.app.apiCall(`/api/v1/terminal/tabs/${encodeURIComponent(tabId)}`, 'DELETE');
+            } catch (error) {
+                // 404 means tab already expired server-side (e.g. LLM never selected) — close silently
+                if (error.message !== 'API call failed: Not Found') {
+                    if (quiet) console.warn('[Terminal] Could not close a placeholder tab on the server:', error);
+                    else this.app.showError(`Failed to close terminal tab: ${error.message}`);
+                }
+                // Always fall through to local cleanup so the tab is removed from the UI
             }
-            // Always fall through to local cleanup so the tab is removed from the UI
-        }
-        if (endingSessionId) {
-            // The child's own session_completed event is lost here: the DELETE cancels the
-            // event relay before the graceful stop lands, so ask the sidebar directly.
-            this._touchHistory(endingSessionId, { settleMs: 3000 });
-        }
+            if (endingSessionId) {
+                // The child's own session_completed event is lost here: the DELETE cancels the
+                // event relay before the graceful stop lands, so ask the sidebar directly.
+                this._touchHistory(endingSessionId, { settleMs: 3000 });
+            }
 
-        this.settings?.unbindTab(tabId);
-        tab.instance.dispose();
-        tab.state.ui.item.remove();
-        tab.state.ui.panel.remove();
+            this.settings?.unbindTab(tabId);
+            tab.instance.dispose();
+            tab.state.ui.item.remove();
+            tab.state.ui.panel.remove();
 
-        this.tabs.delete(tabId);
-        this.tabOrder = this.tabOrder.filter((id) => id !== tabId);
-        this.clearTabSelection(tabId);
-        this.clearTabTitle(tabId);
-        this.clearTabMeta(tabId);
+            this.tabs.delete(tabId);
+            this.tabOrder = this.tabOrder.filter((id) => id !== tabId);
+            this.clearTabSelection(tabId);
+            this.clearTabTitle(tabId);
+            this.clearTabMeta(tabId);
 
-        if (this.activeTabId === tabId) {
-            this.activeTabId = null;
+            if (this.activeTabId === tabId) {
+                this.activeTabId = null;
+            }
+            return true;
+        } finally {
+            this._removingTabs.delete(tabId);
         }
-        return true;
     }
 
     // Closes every blank "Select LLM to launch." placeholder once an ordinary
@@ -1195,9 +1205,10 @@ export class TerminalManager {
         }
 
         const states = this.tabOrder.map((id) => this.tabs.get(id)?.state);
+        // A tab an overlapping prune (or a commit) is already removing is not picked again.
         const doomed = selectBlankPlaceholderTabIds(states, {
             hasCli: (selection) => !!this.getSelectionMeta(selection).cli,
-            isPendingClose: (id) => this._pendingCloses.has(id)
+            isPendingClose: (id) => this._pendingCloses.has(id) || this._removingTabs.has(id)
         });
         if (doomed.length === 0) {
             return [];
@@ -1213,10 +1224,13 @@ export class TerminalManager {
             tab.state.ui.item.classList.remove('active');
             tab.instance.setActive(false);
         }
+        const removed = [];
         for (const tabId of doomed) {
-            await this._removeTab(tabId);
+            // Nobody asked for this close, so a refusal is logged rather than toasted. A tab an
+            // overlapping call removed meanwhile returns false and is not counted here.
+            if (await this._removeTab(tabId, { quiet: true })) removed.push(tabId);
             if (this._destroyed) {
-                return doomed;
+                return removed;
             }
         }
         // Chrome-only refresh, deliberately not updateUi(): the strip is
@@ -1226,7 +1240,7 @@ export class TerminalManager {
         // vibe-books TERMINAL.md, tab-activation resize shred).
         this.updateAddButtonState();
         this._updateTabScrollArrows();
-        return doomed;
+        return removed;
     }
 
     _nextVisibleTabId() {

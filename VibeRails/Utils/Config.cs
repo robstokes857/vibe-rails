@@ -88,7 +88,8 @@ public static class Config
     // All settings.json reads/writes go through this gate. settings.json is shared mutable
     // state: a terminal launch re-reads it (LoadFresh) on a request thread while the settings
     // route may be writing it (Save). Serializing in-process turns "torn read of a half-written
-    // file" into "wait for the write to finish, then read it whole".
+    // file" into "wait for the write to finish, then read it whole"; across processes the
+    // temp-file-and-rename write in SaveCore does the same.
     private static readonly object _gate = new();
 
     static Config()
@@ -123,7 +124,7 @@ public static class Config
             return _settings;
         }
 
-        var json = File.ReadAllText(_settingsPath);
+        var json = AtomicFile.ReadAllText(_settingsPath);
         var settings = JsonSerializer.Deserialize(json, ConfigJsonContext.Default.Settings)
             ?? throw new InvalidOperationException($"Failed to deserialize {_settingsPath}");
 
@@ -140,11 +141,13 @@ public static class Config
         }
     }
 
-    // Caller must hold _gate.
+    // Caller must hold _gate. The gate only serializes this process; every VibeRails process
+    // rewrites settings.json at startup, so the write is atomic for readers in other processes
+    // (a tab child starting during a save used to read a torn file and die in LoadCore).
     private static void SaveCore(Settings settings)
     {
         var json = JsonSerializer.Serialize(settings, ConfigJsonContext.Default.Settings);
-        File.WriteAllText(_settingsPath, json);
+        AtomicFile.WriteAllText(_settingsPath, json);
         PrivateFilePermissions.EnsureFile(_settingsPath);
         _settings = settings;
     }
