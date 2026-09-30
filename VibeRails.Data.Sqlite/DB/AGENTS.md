@@ -101,6 +101,14 @@ forcing an incompatible cleanup. Never require database administration to use an
 Input recording and Git capture are orchestrated by `VibeRails/Services/UserInputRecordingService.cs`.
 Session export schema v2 includes a nested proxy-exchange archive. Retention uses the existing
 export acknowledgement, preserving open/unexported sessions and unattributed proxy records.
+Every retention write transaction touches one database file. SQLite's `BEGIN IMMEDIATE` also
+write-locks every `ATTACH`ed database, so a cross-file join inside a write transaction held the
+state.db writer lock for a 7-11 s proxy scan every 5 minutes per root backend (VB-U2CEM-80).
+Attach another file only for a read, and detach it before any write. The proxy pass is driven by
+the acknowledged sessions through `IX_ProxyExchanges_SessionId`, never by a date range that has to
+read `SessionId` (the last column of ~1 MB rows) out of every old row, and `DataRetentionJob`
+defers the pass for up to 8 hours (`ProxyRetentionSchedule`, global cache key
+`retention.proxy.nextCheckUtc`) once a completed pass finds nothing.
 
 
 This document describes the database layer: Environments, Sandboxes, AgentMetadata, Sessions, UserInputs, and supporting tables.

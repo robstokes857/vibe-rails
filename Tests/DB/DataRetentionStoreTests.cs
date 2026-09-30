@@ -235,6 +235,95 @@ public sealed class DataRetentionStoreTests : IDisposable
         Assert.Equal(0, again.ProxyExchangesDeleted);
     }
 
+    [Fact]
+    public async Task ProxyPruneNeverTakesTheStateWriteLock()
+    {
+        Directory.CreateDirectory(_directory);
+        var repository = new Repository(State);
+        // Ended 10 days ago: its exchanges are past the 7-day window, the session itself is not.
+        var session = await Session(repository, "proxy-only", _now.AddDays(-10), exported: true);
+        SeedProxy(("old", session, _now.AddDays(-10)));
+
+        // Another process is writing state.db. The proxy pass must never need its write lock:
+        // BEGIN IMMEDIATE with state.db ATTACHed used to take it for the whole scan (VB-U2CEM-80).
+        using var writer = SqliteConnectionFactory.Open(State);
+        using var hold = writer.CreateCommand();
+        hold.CommandText = "BEGIN IMMEDIATE;";
+        hold.ExecuteNonQuery();
+
+        var result = await new SqliteDataRetentionStore(State, Proxy).PruneAsync(_now, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, result.ProxyExchangesDeleted);
+        Assert.True(result.ProxyPruneComplete);
+    }
+
+    [Fact]
+    public async Task StateDeletesNeverTakeTheProxyWriteLock()
+    {
+        Directory.CreateDirectory(_directory);
+        var repository = new Repository(State);
+        var expired = await Session(repository, "expired", _now.AddMonths(-2), exported: true);
+        await repository.InsertUserInputAsync(expired, 1, "old input", null);
+        // A proxy file exists, so the candidate lookup attaches it, but nothing in it is eligible.
+        SeedProxy(("unattributed", null, _now.AddDays(-10)));
+
+        // The TokenSaver proxy in a tab child is writing proxy_exchanges.db. Neither the no-op
+        // proxy pass nor the state batches may wait on it.
+        using var writer = SqliteConnectionFactory.Open(new SqliteConnectionStringBuilder { DataSource = Proxy, Pooling = false }.ToString());
+        using var hold = writer.CreateCommand();
+        hold.CommandText = "BEGIN IMMEDIATE;";
+        hold.ExecuteNonQuery();
+
+        var result = await new SqliteDataRetentionStore(State, Proxy).PruneAsync(_now, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, result.SessionsDeleted);
+        Assert.Null(await repository.GetSessionByIdAsync(expired, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task ProxyPassReportsCompletionAndCanBeSkipped()
+    {
+        Directory.CreateDirectory(_directory);
+        var repository = new Repository(State);
+        var session = await Session(repository, "busy", _now.AddDays(-10), exported: true);
+        var cap = SqliteDataRetentionStore.ProxyBatchSize * SqliteDataRetentionStore.MaxProxyBatches;
+        SeedProxy(Enumerable.Range(0, cap + 1).Select(i => ($"ex-{i}", (string?)session, _now.AddDays(-10))).ToArray());
+        var store = new SqliteDataRetentionStore(State, Proxy);
+
+        var skipped = await store.PruneAsync(_now, includeProxy: false, TestContext.Current.CancellationToken);
+        Assert.Equal(0, skipped.ProxyExchangesDeleted);
+        Assert.False(skipped.ProxyPruneComplete);
+
+        var capped = await store.PruneAsync(_now, TestContext.Current.CancellationToken);
+        Assert.Equal(cap, capped.ProxyExchangesDeleted);
+        Assert.False(capped.ProxyPruneComplete);
+
+        var drained = await store.PruneAsync(_now, TestContext.Current.CancellationToken);
+        Assert.Equal(1, drained.ProxyExchangesDeleted);
+        Assert.True(drained.ProxyPruneComplete);
+
+        var idle = await store.PruneAsync(_now, TestContext.Current.CancellationToken);
+        Assert.Equal(0, idle.ProxyExchangesDeleted);
+        Assert.True(idle.ProxyPruneComplete);
+    }
+
+    private void SeedProxy(params (string Id, string? Session, DateTime Time)[] rows)
+    {
+        using var proxy = SqliteConnectionFactory.Open(new SqliteConnectionStringBuilder { DataSource = Proxy, Pooling = false }.ToString());
+        using var create = proxy.CreateCommand();
+        create.CommandText = "CREATE TABLE IF NOT EXISTS ProxyExchanges(Id TEXT PRIMARY KEY,SessionId TEXT,CreatedUTC TEXT);";
+        create.ExecuteNonQuery();
+        foreach (var (id, session, time) in rows)
+        {
+            using var insert = proxy.CreateCommand();
+            insert.CommandText = "INSERT INTO ProxyExchanges VALUES ($id,$session,$utc);";
+            insert.Parameters.AddWithValue("$id", id);
+            insert.Parameters.AddWithValue("$session", (object?)session ?? DBNull.Value);
+            insert.Parameters.AddWithValue("$utc", time.ToString("O"));
+            insert.ExecuteNonQuery();
+        }
+    }
+
     /// <param name="proxyCoverage">
     /// The acknowledged envelope's proxy coverage. "included" is the ordinary v2 result; null
     /// models a historical or v1 acknowledgement, which is NOT proof the proxy rows were backed up.

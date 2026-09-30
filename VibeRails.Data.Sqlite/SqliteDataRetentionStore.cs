@@ -9,6 +9,14 @@ namespace VibeRails.Data.Sqlite;
 /// Resumable, bounded retention. Acknowledged completed sessions are the deletion boundary;
 /// open/unexported sessions and unattributed proxy records are never inferred or removed.
 /// </summary>
+/// <remarks>
+/// Every write transaction here touches exactly one database file. SQLite's BEGIN IMMEDIATE takes
+/// the write lock on every ATTACHed database as well as the main one, so a cross-file join inside a
+/// write transaction held state.db's writer lock for the whole proxy scan and blocked every other
+/// process for 7-15 s per tick (VB-U2CEM-80). The proxy database is attached only for the read-only
+/// candidate lookup and detached before any state.db write; the proxy prune reads its proof from
+/// state.db on a separate connection and attaches nothing.
+/// </remarks>
 public sealed class SqliteDataRetentionStore(
     string stateConnectionString,
     string proxyDatabasePath,
@@ -20,29 +28,21 @@ public sealed class SqliteDataRetentionStore(
     internal const int MaxProxyBatches = 10;
     internal const int VectorBatchSize = 500;
 
-    public async Task<DataRetentionResult> PruneAsync(DateTime nowUtc, CancellationToken cancellationToken)
+    public Task<DataRetentionResult> PruneAsync(DateTime nowUtc, CancellationToken cancellationToken)
+        => PruneAsync(nowUtc, includeProxy: true, cancellationToken);
+
+    public async Task<DataRetentionResult> PruneAsync(DateTime nowUtc, bool includeProxy, CancellationToken cancellationToken)
     {
         if (nowUtc.Kind != DateTimeKind.Utc)
             throw new ArgumentException("Retention requires UTC.", nameof(nowUtc));
         try
         {
-            var proxyDeleted = await PruneProxyAsync(nowUtc.AddDays(-7), cancellationToken);
+            var (proxyDeleted, proxyComplete) = includeProxy
+                ? await PruneProxyAsync(nowUtc.AddDays(-7), cancellationToken)
+                : (0L, false);
             await using var state = await SqliteConnectionFactory.OpenAsync(
                 new SqliteConnectionStringBuilder(stateConnectionString) { Pooling = false }.ToString(), cancellationToken);
-            var proxyAttached = await AttachProxyAsync(state, cancellationToken);
-            var candidates = new List<string>();
-            using (var select = state.CreateCommand())
-            {
-                select.CommandText = """
-                    SELECT s.Id FROM Sessions s
-                    WHERE s.EndedUTC IS NOT NULL AND s.EndedUTC < $cutoff AND s.ExportedUTC IS NOT NULL
-                    """ + (proxyAttached ? " AND NOT EXISTS (SELECT 1 FROM retention_proxy.ProxyExchanges p WHERE p.SessionId=s.Id)" : "")
-                    + " ORDER BY s.EndedUTC, s.Id LIMIT 20;";
-                select.Parameters.AddWithValue("$cutoff", ToDb(nowUtc.AddMonths(-1)));
-                await using var reader = await select.ExecuteReaderAsync(cancellationToken);
-                while (await reader.ReadAsync(cancellationToken))
-                    candidates.Add(reader.GetString(0));
-            }
+            var candidates = await ReadCandidatesAsync(state, nowUtc, cancellationToken);
 
             var tables = await ReadTablesAsync(state, cancellationToken);
             var hasLegacyCleanedReference = tables.Contains("CleanedUserInput")
@@ -78,7 +78,7 @@ public sealed class SqliteDataRetentionStore(
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         if (batches >= MaxStateBatches)
-                            return new(sessionsDeleted, stateDeleted, proxyDeleted, embeddingsDeleted);
+                            return new(sessionsDeleted, stateDeleted, proxyDeleted, embeddingsDeleted, proxyComplete);
                         await using var transaction = state.BeginTransaction(deferred: false);
                         using var delete = state.CreateCommand();
                         delete.Transaction = transaction;
@@ -128,7 +128,7 @@ public sealed class SqliteDataRetentionStore(
                 }
                 Checkpoint(state);
             }
-            return new(sessionsDeleted, stateDeleted, proxyDeleted, embeddingsDeleted);
+            return new(sessionsDeleted, stateDeleted, proxyDeleted, embeddingsDeleted, proxyComplete);
         }
         catch (SqliteException ex)
         {
@@ -136,58 +136,144 @@ public sealed class SqliteDataRetentionStore(
         }
     }
 
-    private async Task<long> PruneProxyAsync(DateTime cutoff, CancellationToken cancellationToken)
+    /// <summary>
+    /// The oldest acknowledged completed sessions whose proxy exchanges are all gone. The proxy
+    /// database is attached for this read only and detached again before any write transaction:
+    /// a BEGIN IMMEDIATE would otherwise lock proxy_exchanges.db for every state batch.
+    /// </summary>
+    private async Task<List<string>> ReadCandidatesAsync(SqliteConnection state, DateTime nowUtc, CancellationToken cancellationToken)
+    {
+        var (proxyAttached, proxyUsable) = await AttachProxyAsync(state, cancellationToken);
+        try
+        {
+            var candidates = new List<string>();
+            using var select = state.CreateCommand();
+            select.CommandText = """
+                SELECT s.Id FROM Sessions s
+                WHERE s.EndedUTC IS NOT NULL AND s.EndedUTC < $cutoff AND s.ExportedUTC IS NOT NULL
+                """ + (proxyUsable ? " AND NOT EXISTS (SELECT 1 FROM retention_proxy.ProxyExchanges p WHERE p.SessionId=s.Id)" : "")
+                + " ORDER BY s.EndedUTC, s.Id LIMIT 20;";
+            select.Parameters.AddWithValue("$cutoff", ToDb(nowUtc.AddMonths(-1)));
+            await using (var reader = await select.ExecuteReaderAsync(cancellationToken))
+            {
+                while (await reader.ReadAsync(cancellationToken))
+                    candidates.Add(reader.GetString(0));
+            }
+            return candidates;
+        }
+        finally
+        {
+            if (proxyAttached)
+                await DetachProxyAsync(state, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Deletes exchanges the acknowledged envelope provably contained, one session at a time.
+    /// The proof (each session's rowid high-water mark) is read from state.db on its own connection
+    /// first, so the proxy connection attaches nothing and its write transactions lock only
+    /// proxy_exchanges.db. Per-session lookups use IX_ProxyExchanges_SessionId and read CreatedUTC,
+    /// an early column. The former date-range scan read SessionId, the LAST column of ~1 MB rows,
+    /// which walks each row's overflow chain: 7-11 s per tick on a 40 GB file that had nothing to delete.
+    /// </summary>
+    /// <returns>
+    /// Rows deleted, and whether nothing eligible remains. Complete is false when the batch cap
+    /// stopped the pass, so the caller must not defer the next check.
+    /// </returns>
+    private async Task<(long Deleted, bool Complete)> PruneProxyAsync(DateTime cutoff, CancellationToken cancellationToken)
     {
         if (!File.Exists(proxyDatabasePath))
-            return 0;
+            return (0, true);
+        var proofs = await ReadProxyProofsAsync(cancellationToken);
+        if (proofs.Count == 0)
+            return (0, true);
         await using var proxy = await SqliteConnectionFactory.OpenAsync(
             new SqliteConnectionStringBuilder { DataSource = proxyDatabasePath, Mode = SqliteOpenMode.ReadWrite, Pooling = false }.ToString(), cancellationToken);
         using (var check = proxy.CreateCommand())
         {
             check.CommandText = "SELECT 1 FROM pragma_table_info('ProxyExchanges') WHERE name='SessionId';";
             if (await check.ExecuteScalarAsync(cancellationToken) is null)
-                return 0;
-            check.CommandText = "ATTACH DATABASE $path AS retention_state;";
-            check.Parameters.AddWithValue("$path", new SqliteConnectionStringBuilder(stateConnectionString).DataSource);
-            await check.ExecuteNonQueryAsync(cancellationToken);
-            // State migrations 3 and 4 add the coverage proof and its rowid boundary. A state
-            // database that predates them cannot prove anything was backed up, so prune nothing
-            // rather than fall back to ExportedUTC.
-            check.CommandText = "SELECT 1 FROM pragma_table_info('Sessions', 'retention_state') WHERE name='ExportedProxyMaxRowId';";
-            if (await check.ExecuteScalarAsync(cancellationToken) is null)
-                return 0;
+                return (0, true);
         }
+        // Only rows the acknowledged envelope actually contained: coverage "included" up to the
+        // snapshot's largest rowid. An "empty" snapshot contained nothing, so every row present
+        // now arrived after it. CreatedUTC cannot decide this on its own -- the proxy queues an
+        // exchange stamped with it and may write the row after the snapshot was taken.
+        const string eligible = "SessionId=$id AND rowid <= $maxRowId AND CreatedUTC < $cutoff";
         long total = 0;
-        for (var batch = 0; batch < MaxProxyBatches; batch++)
+        var batches = 0;
+        foreach (var (sessionId, maxRowId) in proofs)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            await using var transaction = proxy.BeginTransaction(deferred: false);
-            using var delete = proxy.CreateCommand();
-            delete.Transaction = transaction;
-            // Only rows the acknowledged envelope actually contained: coverage "included" up to the
-            // snapshot's largest rowid. An "empty" snapshot contained nothing, so every row present
-            // now arrived after it. CreatedUTC cannot decide this on its own -- the proxy queues an
-            // exchange stamped with it and may write the row after the snapshot was taken.
-            delete.CommandText = """
-                DELETE FROM ProxyExchanges WHERE rowid IN (
-                    SELECT p.rowid FROM ProxyExchanges p
-                    JOIN retention_state.Sessions s ON s.Id=p.SessionId
-                    WHERE p.CreatedUTC < $cutoff AND s.EndedUTC IS NOT NULL AND s.ExportedUTC IS NOT NULL
-                      AND s.ExportedProxyCoverage='included'
-                      AND s.ExportedProxyMaxRowId IS NOT NULL AND p.rowid <= s.ExportedProxyMaxRowId
-                    ORDER BY p.CreatedUTC, p.rowid LIMIT $limit
-                );
-                """;
-            delete.Parameters.AddWithValue("$cutoff", ToDb(cutoff));
-            delete.Parameters.AddWithValue("$limit", ProxyBatchSize);
-            var removed = await delete.ExecuteNonQueryAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
-            total += removed;
-            Checkpoint(proxy);
-            if (removed < ProxyBatchSize)
-                break;
+            // A plain read first: a session with nothing to delete, the common case, never takes
+            // the write lock that the TokenSaver proxy in every tab child needs.
+            using (var probe = proxy.CreateCommand())
+            {
+                probe.CommandText = $"SELECT 1 FROM ProxyExchanges WHERE {eligible} LIMIT 1;";
+                AddProofParameters(probe, sessionId, maxRowId, cutoff);
+                if (await probe.ExecuteScalarAsync(cancellationToken) is null)
+                    continue;
+            }
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (batches >= MaxProxyBatches)
+                    return (total, false);
+                await using var transaction = proxy.BeginTransaction(deferred: false);
+                using var delete = proxy.CreateCommand();
+                delete.Transaction = transaction;
+                delete.CommandText = $"""
+                    DELETE FROM ProxyExchanges WHERE rowid IN (
+                        SELECT rowid FROM ProxyExchanges WHERE {eligible}
+                        ORDER BY CreatedUTC, rowid LIMIT $limit
+                    );
+                    """;
+                AddProofParameters(delete, sessionId, maxRowId, cutoff);
+                delete.Parameters.AddWithValue("$limit", ProxyBatchSize);
+                var removed = await delete.ExecuteNonQueryAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                total += removed;
+                if (removed == 0)
+                    break;
+                batches++;
+                Checkpoint(proxy);
+                if (removed < ProxyBatchSize)
+                    break;
+            }
         }
-        return total;
+        return (total, true);
+    }
+
+    /// <summary>
+    /// Sessions whose acknowledged envelope proves which proxy rows were backed up, oldest first.
+    /// State migrations 3 and 4 add the coverage proof and its rowid boundary. A state database
+    /// that predates them cannot prove anything was backed up, so prune nothing rather than fall
+    /// back to ExportedUTC.
+    /// </summary>
+    private async Task<List<(string SessionId, long MaxRowId)>> ReadProxyProofsAsync(CancellationToken cancellationToken)
+    {
+        await using var state = await SqliteConnectionFactory.OpenAsync(
+            new SqliteConnectionStringBuilder(stateConnectionString) { Pooling = false }.ToString(), cancellationToken);
+        var proofs = new List<(string, long)>();
+        if (!SqliteSchema.HasColumn(state, null, "Sessions", "ExportedProxyMaxRowId"))
+            return proofs;
+        using var select = state.CreateCommand();
+        select.CommandText = """
+            SELECT Id, ExportedProxyMaxRowId FROM Sessions
+            WHERE EndedUTC IS NOT NULL AND ExportedUTC IS NOT NULL
+              AND ExportedProxyCoverage='included' AND ExportedProxyMaxRowId IS NOT NULL
+            ORDER BY EndedUTC, Id;
+            """;
+        await using var reader = await select.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            proofs.Add((reader.GetString(0), reader.GetInt64(1)));
+        return proofs;
+    }
+
+    private static void AddProofParameters(SqliteCommand command, string sessionId, long maxRowId, DateTime cutoff)
+    {
+        command.Parameters.AddWithValue("$id", sessionId);
+        command.Parameters.AddWithValue("$maxRowId", maxRowId);
+        command.Parameters.AddWithValue("$cutoff", ToDb(cutoff));
     }
 
     /// <summary>
@@ -264,17 +350,25 @@ public sealed class SqliteDataRetentionStore(
     private static string EscapeLike(string value) => value
         .Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
 
-    private async Task<bool> AttachProxyAsync(SqliteConnection state, CancellationToken cancellationToken)
+    /// <returns>Whether the proxy file was attached at all, and whether it has a usable schema.</returns>
+    private async Task<(bool Attached, bool Usable)> AttachProxyAsync(SqliteConnection state, CancellationToken cancellationToken)
     {
         if (!File.Exists(proxyDatabasePath))
-            return false;
+            return (false, false);
         using var command = state.CreateCommand();
         command.CommandText = "ATTACH DATABASE $path AS retention_proxy;";
         command.Parameters.AddWithValue("$path", proxyDatabasePath);
         await command.ExecuteNonQueryAsync(cancellationToken);
         // pragma_table_info's schema argument avoids selecting a same-named main table.
         command.CommandText = "SELECT 1 FROM pragma_table_info('ProxyExchanges', 'retention_proxy') WHERE name='SessionId';";
-        return await command.ExecuteScalarAsync(cancellationToken) is not null;
+        return (true, await command.ExecuteScalarAsync(cancellationToken) is not null);
+    }
+
+    private static async Task DetachProxyAsync(SqliteConnection state, CancellationToken cancellationToken)
+    {
+        using var command = state.CreateCommand();
+        command.CommandText = "DETACH DATABASE retention_proxy;";
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static async Task<HashSet<string>> ReadTablesAsync(SqliteConnection state, CancellationToken cancellationToken)

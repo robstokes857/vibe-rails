@@ -14,8 +14,11 @@ public sealed class DataRetentionJob(
     ILogger<DataRetentionJob> logger,
     ISystemResourceService resources,
     IDataRetentionStore store,
-    IFeatureLog featureLog) : JobBase(logger, resources)
+    IFeatureLog featureLog,
+    IServiceScopeFactory scopeFactory) : JobBase(logger, resources)
 {
+    private readonly ProxyRetentionSchedule _proxySchedule = new();
+
     protected override TimeSpan Interval => TimeSpan.FromMinutes(5);
     protected override JobPriority Priority => JobPriority.Low;
 
@@ -27,7 +30,14 @@ public sealed class DataRetentionJob(
             ParserConfigs.GetStatePath(), SessionDataExportService.LockFileName));
         if (lease is null)
             return;
-        var result = await store.PruneAsync(DateTime.UtcNow, cancellationToken);
+        var nowUtc = DateTime.UtcNow;
+        // IGlobalCache is scoped; the schedule keeps this process's in-memory copy of the deferral.
+        using var scope = scopeFactory.CreateScope();
+        var cache = scope.ServiceProvider.GetRequiredService<IGlobalCache>();
+        var includeProxy = await _proxySchedule.IsDueAsync(cache, nowUtc);
+        var result = await store.PruneAsync(nowUtc, includeProxy, cancellationToken);
+        if (includeProxy && result.ProxyPruneComplete && result.ProxyExchangesDeleted == 0)
+            await _proxySchedule.DeferAsync(cache, nowUtc);
         if (result.SessionsDeleted == 0 && result.StateRowsDeleted == 0
             && result.ProxyExchangesDeleted == 0 && result.EmbeddingRowsDeleted == 0)
             return;
