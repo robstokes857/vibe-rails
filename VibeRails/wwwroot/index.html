@@ -3332,7 +3332,9 @@
                     align-items: stretch;
                     gap: 0.6rem;
                     flex: 1 1 auto;
-                    min-width: 0;
+                    /* Keep the trailing Add lane button beyond every lane when
+                       the canvas scrolls; overflowing lanes must not cover it. */
+                    min-width: min-content;
                     height: 100%;
                 }
 

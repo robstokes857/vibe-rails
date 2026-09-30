@@ -120,7 +120,8 @@ The `board` nav destination (`board-template` in index.html, `BoardController`) 
 for the current project. It rides the `.vb-rules-workspace-active` flowing shell, so the lanes
 fill the viewport height and the board scrolls sideways while the page itself does not. Lanes are
 `flex: 1 1 0` with a 232px floor: they share the width evenly and only start scrolling once they
-cannot all fit.
+cannot all fit. The lane group's `min-width: min-content` keeps its trailing Add lane button
+after all lanes, including on empty boards with more lanes than fit in the viewport.
 
 Completed lanes (names containing Done, Complete or Ship) initially fetch 30 cards through
 `GET /api/v1/board/cards?pageSize=30`. Scroll near the lane bottom to load another batch, or use

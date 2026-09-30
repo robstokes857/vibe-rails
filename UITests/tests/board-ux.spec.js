@@ -210,7 +210,7 @@ test('display IDs are visible and editable while permanent IDs remain available'
     await expect(page.locator('.board-key')).toContainText('VIBE-88');
 });
 
-async function openBoard(page, { active = false, assignee = null, relatedCards = false,
+async function openBoard(page, { active = false, assignee = null, relatedCards = false, empty = false,
     onCard = () => {},
     columns = [{ id: 'col_ready', name: 'Ready', position: 0, color: '#3b82f6', boardId: 'brd_main' }] } = {}) {
     if (process.env.VIBERAILS_BOARD_STATIC === '1') {
@@ -327,18 +327,59 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
                 { key: 'env:7:claude', kind: 'environment', group: 'Custom Environments', label: 'Card review (claude)',
                     cli: 'claude', environmentId: 7, enabled: true, order: 2 }
             ] },
-            '/api/v1/board/boards': { boards: [{ id: 'brd_main', name: 'Main', position: 0, cardCount: 1,
+            '/api/v1/board/boards': { boards: [{ id: 'brd_main', name: 'Main', position: 0, cardCount: empty ? 0 : 1,
                 columns },
                 ...(relatedCards ? [{ id: 'brd_sprint', name: 'Sprint 2', position: 1, cardCount: 2,
                     columns: [{ id: 'col_build', name: 'Build', position: 0, color: '#06b6d4', boardId: 'brd_sprint' }] }] : [])] },
             '/api/v1/board/columns': { columns },
-            '/api/v1/board/cards': { cards: [card] }
+            '/api/v1/board/cards': { cards: empty ? [] : [card] }
         };
         return route.fulfill({ json: payloads[path] || {} });
     });
     await page.goto('/?view=board', { waitUntil: 'domcontentloaded' });
     await expect(page.locator('#app-content [data-view="board"]')).toBeVisible();
     return requests;
+}
+
+for (const width of [1440, 900, 390]) {
+    test(`empty board can add lanes beyond six at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 900 });
+        const columns = ['Needs refinement', 'Ready', 'Build', 'Agent Code Review', 'PR', 'Build And Deploy']
+            .map((name, position) => ({ id: `col_${position}`, name, position, boardId: 'brd_main', color: '#64748b' }));
+        await openBoard(page, { columns, empty: true });
+        const created = [];
+        await page.route('**/api/v1/board/columns', route => {
+            if (route.request().method() !== 'POST') return route.fulfill({ json: { columns } });
+            const body = route.request().postDataJSON();
+            created.push(body);
+            const column = { ...body, id: `col_${columns.length}`, position: columns.length };
+            columns.push(column);
+            return route.fulfill({ json: column });
+        });
+
+        const canvas = page.locator('[data-board-canvas]');
+        const addLane = page.locator('[data-board-action="add-lane"]');
+        for (const count of [6, 7, 8]) {
+            await expect(page.locator('.board-lane')).toHaveCount(count);
+            await expect(page.locator('.board-card')).toHaveCount(0);
+            await canvas.evaluate(element => { element.scrollLeft = element.scrollWidth; });
+            const lastLane = await page.locator('.board-lane').last().boundingBox();
+            const button = await addLane.boundingBox();
+            expect(button.x, 'Add lane must sit after the last lane, without overlap').toBeGreaterThanOrEqual(lastLane.x + lastLane.width);
+            // Scroll offsets round to whole pixels while the flex gaps can be fractional.
+            await expect(addLane).toBeInViewport({ ratio: 0.99 });
+            expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+            if (count === 8) break;
+            await addLane.click({ timeout: 3000 });
+            await page.locator('#board-lane-name').fill(`Lane ${count + 1}`);
+            await page.locator('[data-board-save-lane]').click();
+            await expect(page.locator('[data-board-lane-editor]')).toHaveCount(0);
+        }
+        expect(created.map(({ name, boardId }) => ({ name, boardId }))).toEqual([
+            { name: 'Lane 7', boardId: 'brd_main' }, { name: 'Lane 8', boardId: 'brd_main' }
+        ]);
+        await page.screenshot({ path: testInfo.outputPath('eight-empty-lanes.png') });
+    });
 }
 
 test('legacy notes join Comments and History loads only from card settings', async ({ page }) => {
