@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using VibeRails.Services.HttpRelay;
 using VibeRails.Utils;
 
@@ -11,7 +13,7 @@ public interface IRemoteAccountKeyStore
     /// <summary>Returns the display name sent with a link request.</summary>
     string ComputerName { get; }
     /// <summary>Saves and activates the new credential, or rejects a concurrent key edit.</summary>
-    bool TrySave(string apiKey, string expectedApiKey);
+    bool TrySave(string apiKey, string expectedApiKey, string? accountEmail = null);
 }
 
 /// <summary>Uses the same settings file and runtime credential as a manually pasted key.</summary>
@@ -44,7 +46,7 @@ public sealed class ApiKeyStore : IRemoteAccountKeyStore
     }
 
     /// <inheritdoc />
-    public bool TrySave(string apiKey, string expectedApiKey)
+    public bool TrySave(string apiKey, string expectedApiKey, string? accountEmail = null)
     {
         using (_settings.AcquireWriteLock())
         {
@@ -52,10 +54,22 @@ public sealed class ApiKeyStore : IRemoteAccountKeyStore
             if (!string.Equals(settings.ApiKey, expectedApiKey, StringComparison.Ordinal))
                 return false;
             settings.ApiKey = apiKey;
+            settings.RemoteAccountEmail = accountEmail;
+            settings.RemoteAccountKeyFingerprint = Fingerprint(apiKey);
             _settings.Save(settings);
             ParserConfigs.SetApiKey(apiKey);
             _relay.Reset();
             return true;
         }
     }
+
+    // Older versions/manual edits can replace the key without clearing the display metadata.
+    // Compare the full credential, never its masked suffix, before returning an identity.
+    internal static string? GetAccountEmail(Settings settings) =>
+        !string.IsNullOrWhiteSpace(settings.ApiKey)
+        && settings.RemoteAccountKeyFingerprint == Fingerprint(settings.ApiKey)
+            ? settings.RemoteAccountEmail : null;
+
+    private static string Fingerprint(string apiKey) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(apiKey)));
 }

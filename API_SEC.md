@@ -1,5 +1,20 @@
 # API authentication coverage
 
+## VIBE-15 account display (2026-09-30, scoped amendment)
+
+The existing settings responses now include response-only `remoteAccountEmail`. Only device
+approval writes this display value, atomically with the credential and its SHA-256 fingerprint
+in the existing private settings file. Requests cannot set the email; a full-key fingerprint
+mismatch suppresses it, including after older-version or manual key changes. No raw credential
+or fingerprint is added to a response. The dashboard renders the email with `textContent`.
+
+The settings and device-link routes retain the existing session-plus-tab gate; no route,
+authentication exception, external-link destination or production listener was added. Scoped
+route enumeration and both mandatory repository-wide listener searches found only the existing
+main Kestrel host, non-serving PortFinder probe and test-only Kestrel hosts; the cross-runtime
+search had no matches. No new security violation was found. This is a scoped addition, not a
+full route re-audit.
+
 ## Route and authentication reconciliation (2026-09-30)
 
 Reconciled the active inventory against the current working tree in both directions,

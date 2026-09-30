@@ -137,7 +137,7 @@ public sealed class RemoteAccountLinkRoutesTests
         public int ComputerNameReads { get; private set; }
         public string ComputerName { get { ComputerNameReads++; return "Route test"; } }
         public string Read() { ReadCalls++; return Value; }
-        public bool TrySave(string apiKey, string expectedApiKey)
+        public bool TrySave(string apiKey, string expectedApiKey, string? accountEmail = null)
         {
             SaveCalls++;
             if (Value != expectedApiKey) return false;

@@ -184,6 +184,7 @@ public sealed class RemoteAccountLinkServiceTests
 
         Assert.Equal("linked", status.Status);
         Assert.Equal("test@example.test", status.Account?.Email);
+        Assert.Equal("test@example.test", fixture.Keys.AccountEmail);
         Assert.NotNull(status.KeyHint);
         AssertNoSecrets(JsonSerializer.Serialize(status));
         Assert.Equal(ApiKey, fixture.Keys.Value);
@@ -519,11 +520,12 @@ public sealed class RemoteAccountLinkServiceTests
     private sealed class KeyStore : IRemoteAccountKeyStore
     {
         public string Value { get; set; } = "";
+        public string? AccountEmail { get; private set; }
         public bool FailNextSave { get; set; }
         public int SaveCalls { get; private set; }
         public string Read() => Value;
         public string ComputerName => "Test workstation";
-        public bool TrySave(string apiKey, string expectedApiKey)
+        public bool TrySave(string apiKey, string expectedApiKey, string? accountEmail = null)
         {
             SaveCalls++;
             if (FailNextSave)
@@ -533,6 +535,7 @@ public sealed class RemoteAccountLinkServiceTests
             }
             if (!string.Equals(Value, expectedApiKey, StringComparison.Ordinal)) return false;
             Value = apiKey;
+            AccountEmail = accountEmail;
             return true;
         }
     }

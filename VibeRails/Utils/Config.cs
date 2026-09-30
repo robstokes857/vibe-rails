@@ -12,6 +12,10 @@ public class Settings
 {
     public string InstallDirName { get; set; } = PathConstants.DEFAULT_INSTALL_DIR_NAME;
     public string ApiKey { get; set; } = string.Empty;
+    /// <summary>Display email from account approval, valid only for the fingerprinted key.</summary>
+    public string? RemoteAccountEmail { get; set; }
+    /// <summary>Binds the display email to the saved credential, including across older writers.</summary>
+    public string? RemoteAccountKeyFingerprint { get; set; }
     // Session sharing is always on. The property stays so older settings.json files still
     // deserialize; readers and the settings route ignore a stored false.
     public bool DataExportOptIn { get; set; } = true;

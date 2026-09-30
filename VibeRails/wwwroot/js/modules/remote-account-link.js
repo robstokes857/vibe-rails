@@ -159,7 +159,10 @@ export class RemoteAccountLinkPanel {
     }
 
     _render() {
-        const { status } = this.state;
+        // A saved account survives the temporary device-link attempt and backend restarts.
+        const savedAccount = this.state.status === 'idle' && this.app.appSettings?.apiKey;
+        const status = savedAccount ? 'linked' : this.state.status;
+        const email = savedAccount ? this.app.appSettings.remoteAccountEmail : this.state.account?.email;
         const pending = status === 'pending';
         const needsApproval = pending && !this.state.awaitingSave && !this.state.preparing;
         const start = this.root.querySelector('[data-remote-link-start]');
@@ -167,7 +170,7 @@ export class RemoteAccountLinkPanel {
         start.hidden = pending;
         start.textContent = this.busy && !pending ? 'Connecting…'
             : status === 'idle' ? 'Sign in to viberails.ai'
-                : status === 'linked' ? 'Sign in to another account' : 'Try sign-in again';
+                : status === 'linked' ? 'Switch account' : 'Try sign-in again';
         const cancel = this.root.querySelector('[data-remote-link-cancel]');
         cancel.hidden = !pending && !this.busy;
         cancel.disabled = status === 'cancelling';
@@ -191,7 +194,7 @@ export class RemoteAccountLinkPanel {
                 : this.state.error === 'remote_error'
                     ? 'Waiting for viberails.ai to respond. VibeRails will retry automatically while this code is valid.'
                     : 'Enter this code on viberails.ai, then approve the request you started here. VibeRails will finish connecting automatically.',
-            linked: `Connected${this.state.account?.email ? ` as ${this.state.account.email}` : ''}${this.state.keyHint ? ` (key …${this.state.keyHint.slice(-4)})` : ''}. Your API key is saved.`,
+            linked: email ? `Logged in ${email}` : 'API key configured',
             denied: this.state.error === 'key_limit' ? 'Your account has reached its API key limit. Manage your keys on viberails.ai, then try again.' : 'The sign-in request was denied on viberails.ai.',
             expired: 'This sign-in code expired. Start again to get a new code.',
             unavailable: 'Sign-in is not available on viberails.ai yet. You can add an API key in Settings.',

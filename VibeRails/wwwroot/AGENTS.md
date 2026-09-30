@@ -5,7 +5,7 @@
 `board-card-organize.js` renders the saved card's **Move or merge** section. It offers project
 boards/lanes and a card search, confirms the destination and lane Automation count, and refuses
 to replace an editor with unsaved drafts. Dispose it on close/replacement/unload. The existing
-navbar **Sign in / Account** opens the device approval flow in both layouts.
+navbar **Sign in** opens the device approval flow in both layouts when signed out.
 
 Comments now renders agent checkpoints and legacy note rows in the same chronological stream.
 Each entry has a confirmed human Delete action; deletion refreshes only discussion and preserves
@@ -52,9 +52,15 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 
 ## Navigation account sign-in
 
-The top navigation and sidebar offer **Sign in** / **Account**, opening a shared modal mounted
-from `remote-account-template`. Settings retains the manual API-key field. `app.js` owns modal
-creation, panel disposal and navigation state; Settings no longer mounts a second sign-in panel.
+The top navigation and sidebar offer **Sign in** only when no API key is saved. General Settings
+always has an **Account** card: **Sign in** when signed out, or **Logged in {email}** and
+**Switch account** when linked. Manual/older keys without an approved email say **API key
+configured**. Both entry points open the shared modal from `remote-account-template`.
+Settings retains the manual API-key field. `app.js` owns modal creation, panel disposal and
+navigation state; Settings does not mount a second polling panel. Email is rendered as text.
+The approved email is saved with a full-key fingerprint and returned as response-only
+`remoteAccountEmail` in settings. It survives restarts; replacing/clearing the key invalidates it.
+An account event refreshes authoritative settings even when the modal is closed.
 Start, status and cancel use `POST`, `GET` and `DELETE /api/v1/settings/remote-link` through
 `app.apiCall`; only the backend sees the device secret and API key. The UI displays the user
 code and opens the exact `https://viberails.ai/link` URL from a separate **Open sign-in page**

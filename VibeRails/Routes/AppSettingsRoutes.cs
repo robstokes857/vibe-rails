@@ -77,6 +77,11 @@ public static class AppSettingsRoutes
                 settings.ApiKey = "";
             else if (apiKeyProvided)
                 settings.ApiKey = settingsDto.ApiKey!;
+            if (!string.Equals(previousApiKey, settings.ApiKey, StringComparison.Ordinal))
+            {
+                settings.RemoteAccountEmail = null;
+                settings.RemoteAccountKeyFingerprint = null;
+            }
             settings.UseVsCodeTheme = settingsDto.UseVsCodeTheme;
             // MCP registration is always on. Keep the field true for old clients/settings files.
             settings.McpEnabled = true;
@@ -209,7 +214,8 @@ public static class AppSettingsRoutes
             settings.GrokLlmProxyEnabled,
             LlmProxyCliChatConfig.NormalizeMode(settings.GrokLlmProxyMode),
             settings.GrokTokenSaverEnabled ?? settings.OpenCodeTokenSaverEnabled ?? settings.ClaudeTokenSaverEnabled,
-            DataExportOptIn: true
+            DataExportOptIn: true,
+            RemoteAccountEmail: ApiKeyStore.GetAccountEmail(settings)
         );
     }
 

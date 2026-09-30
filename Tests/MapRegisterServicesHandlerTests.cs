@@ -95,7 +95,7 @@ public sealed class MapRegisterServicesHandlerTests
     {
         public string Read() => "";
         public string ComputerName => "Registration fixture";
-        public bool TrySave(string apiKey, string expectedApiKey) => throw new InvalidOperationException("The fixture must not save credentials.");
+        public bool TrySave(string apiKey, string expectedApiKey, string? accountEmail = null) => throw new InvalidOperationException("The fixture must not save credentials.");
     }
 
     private sealed class AccountLinkHandler : HttpMessageHandler

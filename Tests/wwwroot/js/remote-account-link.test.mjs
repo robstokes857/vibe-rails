@@ -65,7 +65,7 @@ test('start displays a code and waits the server interval, with at most one outs
     assert.ok(calls[1][3].signal instanceof AbortSignal);
     poll.resolve({ status: 'linked', keyHint: '••••••••abcd', account: { email: 'rob@example.com' } });
     await Promise.resolve();
-    assert.match(field('status').textContent, /Connected as rob@example.com/);
+    assert.equal(field('status').textContent, 'Logged in rob@example.com');
     assert.equal(field('pending').hidden, true);
     assert.equal(field('open').href, undefined);
     t.mock.timers.tick(30_000);
@@ -122,7 +122,7 @@ test('countdown expiry waits for an in-flight poll that may already have receive
     poll.resolve({ status: 'linked', keyHint: '••••••••late' });
     await Promise.resolve();
     assert.equal(linked.length, 1);
-    assert.match(field('status').textContent, /Connected/);
+    assert.equal(field('status').textContent, 'API key configured');
 });
 
 test('unload aborts pending requests, unsubscribes events and leaves shared backend state alone', async t => {

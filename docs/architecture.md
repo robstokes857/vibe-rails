@@ -363,7 +363,16 @@ OS mutex, so a key change through Settings during approval prevents overwrite. O
 binaries and external file editors do not participate in that mutex. Failed local writes
 retain the received key in memory for retry until cancellation, replacement or shutdown.
 The masked `remote-account-linked` event updates open Settings views without replacing
-their unrelated drafts. Navigating away stops UI polling; reopening Settings resumes it.
+their unrelated drafts. Closing the account modal stops UI polling; reopening it resumes the attempt.
+
+The top and side navigation show **Sign in** only without a saved API key. General Settings
+has an Account card with **Sign in**, or **Logged in {email}** and **Switch account**.
+Both open the shared device-approval modal. `ApiKeyStore` saves the approved display email
+and a SHA-256 fingerprint alongside the key in the existing settings file. The settings
+response includes `remoteAccountEmail` only when the full current key matches that fingerprint;
+request values for that field are ignored. This preserves the email across restarts and avoids
+showing an old identity after a manual key replacement, including by older writers. Keys without
+email metadata show **API key configured**. No account identity is inferred from a masked suffix.
 
 Existing keys remain valid; the site lists a linked key with its computer name so it can be
 revoked. If a one-time response is lost in transit, the user starts again and can revoke
@@ -398,7 +407,7 @@ comment deletion. `BoardStore.CardActions.cs` keeps merge/transfer/tombstone wri
 `board-card-organize.js` owns destination selection and draft protection. A merge preserves
 source rows under soft deletion. Transfers keep immutable card identity and scope sync delivery
 marks per board (`board/25`). The former Board sync settings section is removed; publication
-still runs automatically. Navbar Sign in / Account uses the existing device approval flow.
+still runs automatically. Navbar Sign in and the Settings Account card use the existing device approval flow.
 
 For Board UI, API, SQLite, launch and MCP work, start with the
 [Board contributor guide](../VibeRails/Services/Board/AGENTS.md) and

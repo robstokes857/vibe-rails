@@ -131,7 +131,7 @@
         </div>
 
         <div class="app-subnav-actions d-flex align-items-center ms-auto">
-            <button type="button" class="app-subnav-link" data-action="remote-account" title="Your viberails.ai account">
+            <button type="button" class="app-subnav-link" data-action="remote-account" data-account-nav hidden title="Sign in to viberails.ai">
                 <i class="fa-solid fa-user-circle" aria-hidden="true"></i><span data-account-label>Sign in</span>
             </button>
             <button class="nav-exit-btn-sm" title="Close VibeRails and stop backend">
@@ -160,7 +160,7 @@
             </div>
 
             <nav class="sidebar-nav">
-                <button type="button" class="app-subnav-link" data-action="remote-account" title="Your viberails.ai account">
+                <button type="button" class="app-subnav-link" data-action="remote-account" data-account-nav hidden title="Sign in to viberails.ai">
                     <i class="fa-solid fa-user-circle nav-icon" aria-hidden="true"></i><span class="nav-label" data-account-label>Sign in</span>
                 </button>
                 <button class="app-subnav-link" data-action="navigate" data-view="terminal-focus"
@@ -1353,6 +1353,16 @@
             </div>
             <div class="settings-panel" id="settings-panel-general" role="tabpanel" aria-labelledby="settings-tab-general"
                 tabindex="0">
+            <div class="row justify-content-center">
+                <div class="col-md-8 col-lg-6 mb-4">
+                    <section class="sandbox-item-card text-start" aria-labelledby="settings-account-heading">
+                        <h5 class="sandbox-item-name mb-2" id="settings-account-heading">Account</h5>
+                        <p class="text-break mb-3" data-account-status role="status" aria-live="polite">Sign in to your viberails.ai account.</p>
+                        <button type="button" class="btn btn-outline-primary btn-sm" data-action="remote-account"
+                            data-account-settings-action>Sign in</button>
+                    </section>
+                </div>
+            </div>
             <div class="row justify-content-center">
                 <div class="col-md-8 col-lg-6 mb-4">
                     <div class="sandbox-item-card mb-3 text-start">

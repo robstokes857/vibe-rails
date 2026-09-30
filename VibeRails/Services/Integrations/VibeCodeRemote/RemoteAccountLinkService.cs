@@ -169,7 +169,7 @@ public sealed class RemoteAccountLinkService : IDisposable
         if (!Current(attempt)) return _status;
         var token = attempt.Token!;
         bool saved;
-        try { saved = _keys.TrySave(token.ApiKey, attempt.OriginalKey); }
+        try { saved = _keys.TrySave(token.ApiKey, attempt.OriginalKey, token.Account?.Email); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             _status = _status with { Error = "save_failed", ExpiresAt = null };

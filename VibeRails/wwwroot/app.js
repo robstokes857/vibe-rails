@@ -63,6 +63,7 @@ export class VibeControlApp {
         this.boardController = new BoardController(this);
         this.automationNavLauncher = new AutomationNavLauncher(this);
         this.appEventClient = new AppEventClient(this);
+        this.appEventClient.on('remote-account-linked', () => void this.refreshAccountSettings());
         this.lifecycleHeartbeatTimer = null;
         this.lifecycleClientId = this.getOrCreateLifecycleClientId();
         this.navbarsCollapsed = false;
@@ -527,6 +528,7 @@ export class VibeControlApp {
     }
 
     setAppSettings(settings = {}) {
+        this.accountSettingsVersion = (this.accountSettingsVersion || 0) + 1;
         this.appSettings = this._normalizeAppSettings({
             ...this.appSettings,
             ...settings
@@ -1173,8 +1175,34 @@ export class VibeControlApp {
     }
 
     updateAccountNav() {
-        for (const label of document.querySelectorAll('[data-account-label]')) {
-            label.textContent = this.appSettings?.apiKey ? 'Account' : 'Sign in';
+        const hasKey = !!this.appSettings?.apiKey;
+        const email = hasKey ? this.appSettings.remoteAccountEmail : null;
+        for (const link of document.querySelectorAll('[data-account-nav]')) {
+            link.hidden = hasKey;
+        }
+        for (const status of document.querySelectorAll('[data-account-status]')) {
+            status.textContent = email ? `Logged in ${email}`
+                : hasKey ? 'API key configured' : 'Sign in to your viberails.ai account.';
+        }
+        for (const action of document.querySelectorAll('[data-account-settings-action]')) {
+            action.textContent = hasKey ? 'Switch account' : 'Sign in';
+        }
+    }
+
+    async refreshAccountSettings() {
+        const generation = this.accountRefreshGeneration = (this.accountRefreshGeneration || 0) + 1;
+        const version = this.accountSettingsVersion;
+        try {
+            const settings = await this.apiCall('/api/v1/settings', 'GET', null, { showLoading: false });
+            if (generation !== this.accountRefreshGeneration || version !== this.accountSettingsVersion) return;
+            this.setAppSettings({ apiKey: settings.apiKey, remoteAccountEmail: settings.remoteAccountEmail });
+            const controller = this.settingsController;
+            const root = controller._settingsRoot;
+            if (root && settings.apiKey && root.querySelector('#setting-api-key')?.dataset.originalValue !== settings.apiKey) {
+                controller._applyLinkedApiKey(root, settings.apiKey);
+            }
+        } catch {
+            // The next Settings visit reads authoritative state again.
         }
     }
 
@@ -1187,7 +1215,7 @@ export class VibeControlApp {
         if (!root) return;
         panel = new RemoteAccountLinkPanel(this, root, {
             onLinked: state => {
-                this.setAppSettings({ apiKey: state.keyHint });
+                this.setAppSettings({ apiKey: state.keyHint, remoteAccountEmail: state.account?.email });
                 // Sign-in may finish while Settings has an unrelated unsaved draft.
                 // Update only the saved credential and its dirty-tracking baseline.
                 const settings = this.settingsController;

@@ -93,7 +93,9 @@ It opens no application database and launches no CLI.
 From `UITests`, run `npx playwright test --config playwright.remote-link.config.js`.
 This serves the real frontend with local API fixtures and an intercepted sign-in page. It covers
 browser popup behavior, copy code, the VS Code bridge, narrow layout, completion alongside unsaved
-settings, cancellation, and unavailable/denied/expired requests. It opens no application database
+settings, cancellation, and unavailable/denied/expired requests. It also checks signed-out nav
+links in both layouts, the Settings account summary after reload, cross-tab completion and escaped
+emails. It opens no application database
 and creates no account or API key.
 
 ### View Report

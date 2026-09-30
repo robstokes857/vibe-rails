@@ -254,7 +254,7 @@ export class SettingsController {
                         if (savedSettings) {
                             await this._reconcileSavedApiKey(savedSettings, linkedKeyVersion);
                             if (this._settingsRoot !== root) return;
-                            this.app.setAppSettings({ apiKey: savedSettings.apiKey });
+                            this.app.setAppSettings({ apiKey: savedSettings.apiKey, remoteAccountEmail: savedSettings.remoteAccountEmail });
                             this._applySavedSettingsToControls(root, savedSettings);
                             this._markSettingsClean(root);
                             // A pasted key or clear can supersede the linked identity.
@@ -276,6 +276,7 @@ export class SettingsController {
         // full RTT on every Settings visit. The PIN section just pops in when its
         // status lands.
         content.appendChild(fragment);
+        this.app.updateAccountNav?.();
 
         if (root) {
             await this._initPinSection(root);
@@ -480,6 +481,7 @@ export class SettingsController {
                 latest = await this.app.apiCall('/api/v1/settings', 'GET', null, { showLoading: false });
             } while (this._settingsRoot && linkedKeyVersion !== this._linkedKeyVersion);
             savedSettings.apiKey = latest.apiKey || '';
+            savedSettings.remoteAccountEmail = latest.remoteAccountEmail;
         } catch {
             this.app.showToast('Settings', 'Settings saved. Reopen Settings when your connection is available to refresh the account details.', 'warning');
         }
