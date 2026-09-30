@@ -52,7 +52,7 @@ async function openSettings(page, { bridge = false } = {}) {
     await page.goto('/?view=settings', { waitUntil: 'domcontentloaded' });
     const root = page.locator('#app-content [data-view="settings"]');
     await expect(root).toBeVisible();
-    await expect(root.locator('[data-remote-link-start]')).toBeEnabled();
+    await expect(page.locator('[data-action=remote-account]:visible')).toBeVisible();
     return {
         root, calls,
         approve: () => {
@@ -68,16 +68,17 @@ test('browser sign-in opens from an explicit click and saves only the linked key
     await context.route(LINK_URL, route => route.fulfill({ contentType: 'text/html', body: '<h1>Enter your VibeRails code</h1>' }));
     const { root, calls, approve } = await openSettings(page);
     await root.locator('#setting-computer-name').fill('Unsaved laptop name');
-    await root.locator('[data-remote-link-start]').click();
-    await expect(root.locator('[data-remote-link-code]')).toHaveText('BXQK-2M7T');
+    await page.locator('[data-action=remote-account]:visible').click();
+    await page.locator('[data-remote-link-start]').click();
+    await expect(page.locator('[data-remote-link-code]')).toHaveText('BXQK-2M7T');
     expect(context.pages()).toHaveLength(1);
-    const link = root.getByRole('link', { name: 'Open sign-in page' });
+    const link = page.getByRole('link', { name: 'Open sign-in page' });
     await expect(link).toHaveAttribute('href', LINK_URL);
     await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
-    await root.getByRole('button', { name: 'Copy code', exact: true }).click();
-    await expect(root.locator('[data-remote-link-copy-status]')).toHaveText('Code copied.');
+    await page.getByRole('button', { name: 'Copy code', exact: true }).click();
+    await expect(page.locator('[data-remote-link-copy-status]')).toHaveText('Code copied.');
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('BXQK-2M7T');
-    await root.locator('[data-remote-account-link]').scrollIntoViewIfNeeded();
+    await page.locator('[data-remote-account-link]').scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath('browser-sign-in.png') });
     const popupPromise = page.waitForEvent('popup');
     await link.click();
@@ -85,7 +86,8 @@ test('browser sign-in opens from an explicit click and saves only the linked key
     await expect(popup).toHaveURL(LINK_URL);
     await popup.close();
     approve();
-    await expect(root.locator('[data-remote-link-status]')).toContainText('Connected as rob@example.com', { timeout: 7000 });
+    await expect(page.locator('[data-remote-link-status]')).toContainText('Connected as rob@example.com', { timeout: 7000 });
+    await page.getByRole('button', { name: 'Close dialog' }).click();
     const key = root.locator('#setting-api-key');
     await expect(key).toHaveValue(MASK);
     expect(await key.getAttribute('data-original-value')).toBe(MASK);
@@ -99,30 +101,33 @@ test('browser sign-in opens from an explicit click and saves only the linked key
     expect(save.body.clearApiKey).toBe(false);
     await key.fill('');
     await root.locator('#settings-save-button').click();
-    await expect(root.locator('[data-remote-link-status]')).toContainText('Sign in to connect');
+    await page.locator('[data-action=remote-account]:visible').click();
+    await expect(page.locator('[data-remote-link-status]')).toContainText('Sign in to connect');
     await page.evaluate(mask => window.app.appEventClient._handleMessage(JSON.stringify({
         type: 'remote-account-linked', payload: { keyHint: mask, account: { email: 'old@example.com' } }
     })), MASK);
-    await expect(root.locator('[data-remote-link-start]')).toBeEnabled();
+    await expect(page.locator('[data-remote-link-start]')).toBeEnabled();
     await expect(key).toHaveValue('');
-    await expect(root.locator('[data-remote-link-status]')).not.toContainText('Connected');
+    await expect(page.locator('[data-remote-link-status]')).not.toContainText('Connected');
 });
 
 test('VS Code bridge opens the same code-free page on a narrow panel, and Cancel leaves paste usable', async ({ page, context }, testInfo) => {
     await page.setViewportSize({ width: 420, height: 900 });
     const { root, calls } = await openSettings(page, { bridge: true });
-    await root.locator('[data-remote-link-start]').click();
-    await expect(root.locator('[data-remote-link-code]')).toHaveText('BXQK-2M7T');
-    await root.getByRole('link', { name: 'Open sign-in page' }).click();
+    await page.locator('[data-action=remote-account]:visible').click();
+    await page.locator('[data-remote-link-start]').click();
+    await expect(page.locator('[data-remote-link-code]')).toHaveText('BXQK-2M7T');
+    await page.getByRole('link', { name: 'Open sign-in page' }).click();
     expect(await page.evaluate(() => window.__openedSignInPages)).toEqual([LINK_URL]);
     expect(context.pages()).toHaveLength(1);
-    const panel = root.locator('[data-remote-account-link]');
+    const panel = page.locator('[data-remote-account-link]');
     await panel.scrollIntoViewIfNeeded();
     expect(await panel.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath('vscode-sign-in-narrow.png') });
-    await root.locator('[data-remote-link-cancel]').click();
-    await expect(root.locator('[data-remote-link-status]')).toContainText('Sign-in cancelled');
-    await expect(root.locator('[data-remote-link-pending]')).not.toBeVisible();
+    await page.locator('[data-remote-link-cancel]').click();
+    await expect(page.locator('[data-remote-link-status]')).toContainText('Sign-in cancelled');
+    await expect(page.locator('[data-remote-link-pending]')).not.toBeVisible();
+    await page.getByRole('button', { name: 'Close dialog' }).click();
     await root.locator('#setting-api-key').fill('manually-pasted-key');
     await expect(root.locator('#settings-save-button')).toBeEnabled();
     expect(calls.filter(call => call.pathname.endsWith('/remote-link') && call.method === 'DELETE')).toHaveLength(1);
@@ -132,12 +137,13 @@ test('VS Code bridge opens the same code-free page on a narrow panel, and Cancel
 test('unavailable site and denied or expired requests offer retry while preserving the paste box', async ({ page }) => {
     const { root, nextStart } = await openSettings(page);
     await root.locator('#setting-api-key').fill('draft-key');
+    await page.locator('[data-action=remote-account]:visible').click();
     for (const [status, message] of [['unavailable', 'not available'], ['denied', 'denied'], ['expired', 'expired']]) {
         nextStart({ status });
-        await root.locator('[data-remote-link-start]').click();
-        await expect(root.locator('[data-remote-link-status]')).toContainText(message);
-        await expect(root.locator('[data-remote-link-start]')).toBeEnabled();
+        await page.locator('[data-remote-link-start]').click();
+        await expect(page.locator('[data-remote-link-status]')).toContainText(message);
+        await expect(page.locator('[data-remote-link-start]')).toBeEnabled();
         await expect(root.locator('#setting-api-key')).toHaveValue('draft-key');
-        await expect(root.locator('[data-remote-link-pending]')).not.toBeVisible();
+        await expect(page.locator('[data-remote-link-pending]')).not.toBeVisible();
     }
 });

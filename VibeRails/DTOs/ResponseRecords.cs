@@ -194,9 +194,10 @@ namespace VibeRails.DTOs
         int Rejected = 0,
         IReadOnlyList<BoardSyncRejectedEntry>? RejectedEntries = null,
         int Skipped = 0,
-        IReadOnlyList<BoardSyncSkippedEntry>? SkippedEntries = null);
+        IReadOnlyList<BoardSyncSkippedEntry>? SkippedEntries = null,
+        bool ActivityEnabled = false);
 
-    public record SetBoardSyncRequest(bool Enabled = false);
+    public record SetBoardSyncRequest(bool Enabled = false, bool IncludeActivity = false);
     public record UpdateBoardRequest(string? Name = null, string? DisplayPrefix = null);
     public record UpdateBoardContextRequest(BoardContextSettings? Context = null, int? ExpectedRevision = null);
     public record BoardAutomationOption(long Id, string Name, bool Enabled);

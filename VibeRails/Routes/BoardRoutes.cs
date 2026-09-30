@@ -307,7 +307,7 @@ public static class BoardRoutes
             .WithName("GetBoardSyncStatus");
 
         app.MapPut("/api/v1/board/boards/{boardId}/sync", (IBoardSyncService sync, string boardId, SetBoardSyncRequest request, CancellationToken cancellationToken) =>
-            RunAsync(async () => OkOrNotFound(ToResponse(await sync.SetPublishedAsync(Project(), boardId, request.Enabled, cancellationToken)), "Board")))
+            RunAsync(async () => OkOrNotFound(ToResponse(await sync.SetPublishedAsync(Project(), boardId, request.Enabled, cancellationToken, request.IncludeActivity)), "Board")))
             .WithName("SetBoardSync");
 
         app.MapPost("/api/v1/board/boards/{boardId}/sync/now", (IBoardSyncService sync, string boardId, CancellationToken cancellationToken) =>
@@ -320,7 +320,7 @@ public static class BoardRoutes
             ? null
             : new BoardSyncStatusResponse(status.BoardId, status.Published, status.Enabled, status.RemoteBoardId, status.RemoteUrl,
                 status.Cursor, status.Unsent, status.LastSyncUtc, status.LastError, status.Configured, status.Rejected, status.RejectedEntries,
-                status.Skipped, status.SkippedEntries);
+                status.Skipped, status.SkippedEntries, status.ActivityEnabled);
 
     private static JiraConnectionResponse ToResponse(BoardJiraConnectionRecord? connection, string boardId) =>
         connection is null

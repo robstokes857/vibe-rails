@@ -186,6 +186,7 @@ namespace VibeRails
                 Services.Board.Sync.BoardSyncHttpClient.FromConfiguration(
                     sp.GetRequiredService<IHttpClientFactory>(), sp.GetRequiredService<IConfiguration>()));
             serviceCollection.AddSingleton(_ => Services.Board.Sync.BoardSyncLock.BesideStateDatabase());
+            serviceCollection.AddSingleton<Services.Board.Sync.BoardSyncActivityCache>();
             serviceCollection.AddScoped<Services.Board.Sync.IBoardSyncService, Services.Board.Sync.BoardSyncService>();
             serviceCollection.AddSingleton<Services.Board.Sync.IBoardSyncScheduler, Services.Board.Sync.BoardSyncScheduler>();
             serviceCollection.AddScoped<Services.Board.BoardAutomationService>();

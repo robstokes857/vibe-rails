@@ -2,7 +2,6 @@ import { showDataExportModal } from './data-export-modal.js';
 import { confirmDialog } from './utils.js';
 import { SettingsKeysPanel } from './settings-keys.js';
 import { SettingsJiraPanel } from './settings-jira.js';
-import { RemoteAccountLinkPanel } from './remote-account-link.js';
 import { getToastTheme, setToastTheme } from './toast-service.js';
 
 export class SettingsController {
@@ -21,7 +20,6 @@ export class SettingsController {
         this._settingsRoot = null;
         this._keysPanel = null;
         this._jiraPanel = null;
-        this._remoteLinkPanel = null;
         this._linkedKeyVersion = 0;
         // In-app leave-confirm (window.confirm is a silent no-op in the VS Code
         // webview). A field so tests can substitute a resolved value.
@@ -260,7 +258,7 @@ export class SettingsController {
                             this._applySavedSettingsToControls(root, savedSettings);
                             this._markSettingsClean(root);
                             // A pasted key or clear can supersede the linked identity.
-                            void this._remoteLinkPanel?.refresh();
+                            this.app.updateAccountNav?.();
                         }
                     } finally {
                         this._settingsSaving = false;
@@ -270,13 +268,7 @@ export class SettingsController {
             }
 
             this._initSettingsDirtyTracking(root);
-            const remoteLinkRoot = root.querySelector('[data-remote-account-link]');
-            if (remoteLinkRoot) {
-                this._remoteLinkPanel = new RemoteAccountLinkPanel(this.app, remoteLinkRoot, {
-                    onLinked: state => this._applyLinkedApiKey(root, state.keyHint)
-                });
-                void this._remoteLinkPanel.mount();
-            }
+
         }
 
         // Attach before the PIN status round-trip: #app-content was blanked above,
@@ -323,8 +315,6 @@ export class SettingsController {
     }
 
     unload() {
-        this._remoteLinkPanel?.unload();
-        this._remoteLinkPanel = null;
         this._keysPanel?.unload();
         this._keysPanel = null;
         this._jiraPanel?.clearSecrets();

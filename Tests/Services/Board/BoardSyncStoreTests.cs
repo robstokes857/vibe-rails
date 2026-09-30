@@ -33,6 +33,29 @@ public sealed class BoardSyncStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task ActivityMigrationPreservesOldPublicationScopeAndLegacyWrites()
+    {
+        await store.EnsureDefaultColumnsAsync(root, Ct);
+        var card = await store.CreateCardAsync(root, new(null, "Before activity", "", null, "medium", null, [], false), Ct);
+        await store.SaveSyncLinkAsync(new(card.BoardId, "remote", 7, true, null, null, null, default, default, DestinationKey: "server"), Ct);
+        await ExecuteAsync("ALTER TABLE BoardSyncLinks DROP COLUMN ActivityAfter; ALTER TABLE BoardSyncLinks DROP COLUMN ActivitySchema; DELETE FROM SchemaMigrations WHERE Component='board' AND Version=23;");
+        var upgraded = new BoardStore(cs, cs);
+        var existing = (await upgraded.GetSyncLinkAsync(root, card.BoardId, Ct))!;
+        Assert.Equal(0, existing.ActivitySchema);
+        Assert.Null(existing.ActivityAfter);
+        Assert.True(existing.Enabled);
+        Assert.Equal(7, existing.Cursor);
+        await upgraded.SaveSyncLinkAsync(existing with { ActivitySchema = 1, ActivityAfter = card.Id }, Ct);
+        await ExecuteAsync("UPDATE BoardSyncLinks SET Cursor=8, Enabled=0;"); // old-column-only writer
+        var preserved = (await new BoardStore(cs, cs).GetSyncLinkAsync(root, card.BoardId, Ct))!;
+        Assert.Equal(1, preserved.ActivitySchema);
+        Assert.Equal(card.Id, preserved.ActivityAfter);
+        Assert.Equal(8, preserved.Cursor);
+        Assert.False(preserved.Enabled);
+        Assert.Equal("Before activity", (await upgraded.FindCardAsync(root, card.Id, Ct))!.Title);
+    }
+
+    [Fact]
     public async Task RejectionsAreBoardScoped_SurviveReopeningTheStore_AndResetOnlyWithTheSentMarks()
     {
         await store.EnsureDefaultColumnsAsync(root, Ct);

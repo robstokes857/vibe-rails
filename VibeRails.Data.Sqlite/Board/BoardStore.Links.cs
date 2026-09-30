@@ -133,7 +133,7 @@ public sealed partial class BoardStore
     }
 
     private static async Task<IReadOnlyList<BoardLinkedCardRecord>> ReadLinkedCardsAsync(
-        SqliteConnection connection, string project, string cardId, CancellationToken cancellationToken)
+        SqliteConnection connection, string project, string cardId, CancellationToken cancellationToken, int limit = int.MaxValue)
     {
         await using var command = connection.CreateCommand();
         command.CommandText = LinkedCardSelect + $"""
@@ -141,10 +141,11 @@ public sealed partial class BoardStore
             WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.DeletedUTC IS NULL AND c.Id IN (
                 SELECT LinkedCardId FROM BoardCardLinks WHERE CardId = $card
                 UNION ALL SELECT CardId FROM BoardCardLinks WHERE LinkedCardId = $card)
-            ORDER BY c.Number;
+            ORDER BY c.Number LIMIT $limit;
             """;
         command.Parameters.AddWithValue("$project", project);
         command.Parameters.AddWithValue("$card", cardId);
+        command.Parameters.AddWithValue("$limit", limit);
         return await ReadLinkedCardRowsAsync(command, cancellationToken);
     }
 

@@ -11,7 +11,7 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | [app.js](app.js) | Central controller, routing, API layer |
 | [js/modules/internal-tools-modal.js](js/modules/internal-tools-modal.js) | Triple-click the brand icon to open Internal tools: About/version, retained upload attempts, and filterable application/Demon logs and feature journal; lazy loaded with bounded pages and no polling |
 | [js/modules/settings-controller.js](js/modules/settings-controller.js) | App settings, split into General / LLMs / Git / KEYS section tabs (panels stay in the DOM so dirty tracking and the save bar keep reading hidden-tab controls; `_initSettingsTabs` owns click + arrow-key switching). Completed-session sharing is always on (no switch). The legacy one-shot **Export Data** button and progress modal remain ([js/modules/data-export-modal.js](js/modules/data-export-modal.js)) |
-| [js/modules/remote-account-link.js](js/modules/remote-account-link.js) | Settings account sign-in: user code, external browser link, countdown, polling and cancellation over the protected local `settings/remote-link` API. |
+| [js/modules/remote-account-link.js](js/modules/remote-account-link.js) | Navigation account modal: user code, external browser link, countdown, polling and cancellation over the protected local `settings/remote-link` API. |
 | [js/modules/settings-keys.js](js/modules/settings-keys.js) | Lazy KEYS panel: create password-protected RSA-4096 keys, sync public keys to the saved API-key account, download public/encrypted private PEMs, and sign a message/file into public-verification JSON. Independent of the settings save bar. |
 | [js/modules/terminal-multitab.js](js/modules/terminal-multitab.js) | Reusable xterm.js terminal manager with per-tab lifecycle and environment picker |
 | [js/modules/llm-picker-controller.js](js/modules/llm-picker-controller.js) | Shared launch-picker catalog, Tom Select lifecycle, customization modal, and live preference refresh |
@@ -37,9 +37,11 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | [js/modules/board-card-label.js](js/modules/board-card-label.js) | The one card-naming rule: `cardDisplayId` (display ID, else key), `cardLabel` (`ID · Title`), `shortCardKey` and `cardSearchText`. Board, linked cards and chat history import it rather than composing labels themselves |
 | [js/modules/diff-modal.js](js/modules/diff-modal.js) | Shared Monaco diff viewer as a nested modal layer. Used by Board commits and the sandbox "View Diff" |
 
-## Settings account sign-in
+## Navigation account sign-in
 
-The General panel offers **Sign in to viberails.ai** beside the existing API-key paste box.
+The top navigation and sidebar offer **Sign in** / **Account**, opening a shared modal mounted
+from `remote-account-template`. Settings retains the manual API-key field. `app.js` owns modal
+creation, panel disposal and navigation state; Settings no longer mounts a second sign-in panel.
 Start, status and cancel use `POST`, `GET` and `DELETE /api/v1/settings/remote-link` through
 `app.apiCall`; only the backend sees the device secret and API key. The UI displays the user
 code and opens the exact `https://viberails.ai/link` URL from a separate **Open sign-in page**
@@ -54,7 +56,7 @@ fixtures, but their verification pages are not allowed by this UI. Never silentl
 the production origin for a configured override or broaden the external-link allowlist as a fix.
 
 Requests never overlap within a panel. Generations and abort signals discard superseded results;
-Cancel supersedes an unfinished start or poll. Leaving Settings stops polling without cancelling
+Cancel supersedes an unfinished start or poll. Closing the modal stops polling without cancelling
 the shared backend attempt, so another tab or a later visit can resume it. Pagehide suspends and
 pageshow refreshes. The server decides expiry even when the displayed countdown has reached zero.
 An approved link awaiting a local save has no expiry and keeps polling without displaying the code.

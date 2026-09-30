@@ -5,7 +5,7 @@ Read the cross-layer [Board contributor guide](../../VibeRails/Services/Board/AG
 [database migration policy](../DB/AGENTS.md), before changing this component.
 
 This directory owns `IBoardStore`'s SQLite implementation in `~/.vibe_rails/board.db`, including
-component migrations `board/1`–`board/22`. The historical `VibeRails.Services.Board` namespace
+component migrations `board/1`–`board/23`. The historical `VibeRails.Services.Board` namespace
 does not move this code back into the application project. Keep DTO/contracts in
 `VibeRails.Data.Abstractions/Board`; keep Git, live terminal state and UI policy in the host.
 
@@ -146,3 +146,14 @@ last tried the entry. `RetrySkippedSyncEntriesAsync` moves the link cursor back 
 earliest entry an earlier version tried (NULL counts as earlier) and records the current version on
 those rows in the same transaction; the stamped Card Log writers delete an entry's row in the
 transaction that applies it. No backfill; older binaries never name the column.
+
+`board/23` adds `BoardSyncLinks.ActivitySchema` (default 0) and `ActivityAfter`. Old publications
+keep these columns for compatibility; VIBE-13 upgrades publications automatically when an API
+key is configured. `GetBoardsForSyncAsync` enumerates board metadata for the root scheduler;
+activity and card reads still use each board's project scope.
+The cursor makes bounded card refresh fair across root processes/restarts under the sync lock.
+Activity reads remain behind `IBoardStore`, with SQL row/actual-content bounds before loading
+payloads. Existing stored snapshots and unlimited local attachment uploads are unchanged.
+`GetSyncSessionOutcomesAsync` accepts at most 200 IDs obtained from scoped linked-session metadata.
+It uses one state-database connection and a joined query after one batch of schema checks; summaries
+are bounded before materialization. The single-session reader still serves ordinary card context.

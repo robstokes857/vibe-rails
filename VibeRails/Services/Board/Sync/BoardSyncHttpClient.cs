@@ -18,12 +18,12 @@ public interface IBoardSyncClient
     Task<BoardSyncPublishResponse> PublishAsync(BoardSyncPublishRequest request, CancellationToken cancellationToken, string? expectedDestination = null);
     Task<BoardSyncPushResponse> PushAsync(string remoteBoardId, BoardSyncPushRequest request, CancellationToken cancellationToken, string? expectedDestination = null);
     Task<BoardSyncPullResponse> PullAsync(string remoteBoardId, long after, int limit, CancellationToken cancellationToken, string? expectedDestination = null);
+    Task<BoardSyncActivityAck> PutActivityAsync(string remoteBoardId, string cardId, BoardSyncActivityWire activity, CancellationToken cancellationToken, string? expectedDestination = null);
 }
 
 /// <summary>
 /// HTTPS client for the desktop Board sync API. The endpoint and the API key are both resolved on
-/// every call (so a rotated key or a changed frontend URL applies at the next tick, and a changed
-/// destination stops uploads until publishing is approved again), the key is sent in
+/// every call (a changed destination interrupts this exchange and is republished next tick), the key is sent in
 /// <c>X-Api-Key</c>, and the named client follows no redirects: a redirect would replay the key and
 /// body to wherever it pointed.
 /// </summary>
@@ -48,6 +48,20 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Fu
     public static readonly TimeSpan ExchangeTimeout = TimeSpan.FromSeconds(30);
 
     public Uri? Endpoint => endpoint();
+
+    public async Task<BoardSyncActivityAck> PutActivityAsync(string remoteBoardId, string cardId, BoardSyncActivityWire activity,
+        CancellationToken cancellationToken, string? expectedDestination = null)
+    {
+        if (JsonSerializer.SerializeToUtf8Bytes(activity, BoardSyncJsonContext.Default.BoardSyncActivityWire).Length > BoardSyncActivity.MaxSnapshotBytes)
+            throw new BoardSyncClientException("The card activity exceeds the upload limit; its data remains local.", "activity_too_large");
+        var ack = await SendAsync(HttpMethod.Put,
+            Uri.EscapeDataString(remoteBoardId) + "/cards/" + Uri.EscapeDataString(cardId) + "/activity",
+            activity, BoardSyncJsonContext.Default.BoardSyncActivityWire, BoardSyncJsonContext.Default.BoardSyncActivityAck,
+            cancellationToken, expectedDestination);
+        if (ack.Schema != 1 || !string.Equals(ack.CardId, cardId, StringComparison.Ordinal))
+            throw new BoardSyncClientException("The server did not acknowledge this card's activity; the upload will retry.", "invalid_response");
+        return ack;
+    }
 
     public Task<BoardSyncPublishResponse> PublishAsync(BoardSyncPublishRequest request, CancellationToken cancellationToken, string? expectedDestination = null) =>
         SendAsync(HttpMethod.Post, "publish", request, BoardSyncJsonContext.Default.BoardSyncPublishRequest,
@@ -77,7 +91,7 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Fu
         if (string.IsNullOrWhiteSpace(key))
             throw new BoardSyncClientException("Add your viberails.ai API key in Settings before publishing a board.", "no_api_key");
         if (expectedDestination is not null && expectedDestination != Identity(target, key))
-            throw new BoardSyncClientException("The server or API key changed. Turn publishing off and on to approve this destination.", "destination_changed");
+            throw new BoardSyncClientException("The server or API key changed during sync. Retrying with the configured account next minute.", "destination_changed");
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(ExchangeTimeout);
@@ -106,7 +120,7 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Fu
                     throw new BoardSyncClientException("viberails.ai rejected the request as invalid; entries remain queued. Check the board and lane names, then retry.",
                         BoardSyncWire.CodeInvalidRequest, status);
                 if (response.StatusCode == HttpStatusCode.NotFound && code == BoardSyncWire.CodeBoardNotFound)
-                    throw new BoardSyncClientException("viberails.ai no longer has this board's published copy. Turn publishing off and on to publish it again.",
+                    throw new BoardSyncClientException("viberails.ai no longer has this board's published copy. Automatic publication will retry next minute.",
                         BoardSyncWire.CodeBoardNotFound, status);
                 if (response.StatusCode == HttpStatusCode.Conflict && code == BoardSyncWire.CodeWriteConflict)
                     throw new BoardSyncClientException("viberails.ai was updating this board at the same time; the sync will retry.",

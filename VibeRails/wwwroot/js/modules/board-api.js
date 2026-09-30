@@ -86,8 +86,8 @@ async function getBoardSyncAsync(boardId, extra = {}) {
     return call(`/boards/${enc(boardId)}/sync`, 'GET', null, extra);
 }
 
-async function setBoardSyncAsync(boardId, enabled) {
-    return call(`/boards/${enc(boardId)}/sync`, 'PUT', { enabled: !!enabled });
+async function setBoardSyncAsync(boardId, enabled, includeActivity = false) {
+    return call(`/boards/${enc(boardId)}/sync`, 'PUT', { enabled: !!enabled, includeActivity: !!includeActivity });
 }
 
 async function syncBoardNowAsync(boardId) {

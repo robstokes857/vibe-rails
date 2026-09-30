@@ -1,8 +1,8 @@
 # Board sync (VB-51)
 
-A board owner can publish a local board to their viberails.ai account. Publishing is off by
-default. The root backend pushes and pulls every 60 seconds while open, with a manual sync
-button in Board settings. Pausing retains the remote copy and queues subsequent local edits.
+A configured viberails.ai API key automatically publishes all local boards and their linked
+activity (VIBE-13). The root backend pushes and pulls every 60 seconds while open, with a manual
+sync button in Board settings. Without a key, local edits wait for a configured account.
 There are no invitations, shared editing, or multi-user permissions in this slice.
 
 ## Conversation and history
@@ -28,7 +28,7 @@ The website groups board layout changes first and then card events in descending
 sequence. A snapshot pins the two streams while paging. SQL selects at most 101 metadata
 rows before loading the selected payloads; History and sync pull responses use a conservative
 8 MiB budget. Hosted comments/notes load in pages of 20 with a sequence cursor. Board polling
-reads summaries without loading card descriptions.
+reads summaries with at most 180 description characters per card.
 
 ## What leaves the machine
 
@@ -43,16 +43,59 @@ sent as an ordinary `change` entry. The hosted contract stores unknown change fi
 and never applies them, so no server change was needed; the desktop's pull side retains them
 the same way. Session ids stay out of it.
 
-Attachment bytes/metadata, commit snapshots, linked-card relationships, terminal sessions,
-launch options, environment definitions, lane Automations, and agent-context settings remain
-local. `@path` travels as text; no referenced file is read or uploaded by sync. User-written
-text is uploaded verbatim and can itself contain paths or other private information.
+Configured boards also send a desktop-owned snapshot per card: linked session
+IDs, names, CLI, creation/end time, exit code, bounded summary and Automation classification; linked commit metadata and saved
+before/after file contents; current attachment metadata/content; and linked card identities and
+labels. The snapshot never reads the current checkout or follows a file reference. Session replay
+bytes use the existing completed-session upload pipeline; the website enables replay only when
+that same owner's uploaded session is available. These rails are read-only on the hosted board.
+
+Launch options, tab IDs, project paths, environment definitions/IDs, lane Automation definitions
+and agent-context settings remain local. `@path` travels as text; no referenced file is read or
+uploaded by sync. User-written text and saved code can themselves contain private information.
+
+VIBE-13 replaces the old publication and linked-activity switches. Existing paused or text-only
+publications upgrade on the next scheduler tick. The legacy publish route accepts its old fields
+for compatibility but they cannot disable sync. Existing `board/23` columns `ActivitySchema` and
+`ActivityAfter` remain; no migration or stored-data removal is required. Older binaries retain
+their old behavior. The website and desktop may ship separately; complete automatic activity
+publication requires the updated desktop as well as a compatible website.
+
+After each successful push/pull of an enabled publication, `PUT /api/v1/boards/{board}/cards/{card}/activity` replaces the
+activity of up to ten cards. A bounded identity query rotates through the board across scheduler
+scopes and processes using its stored cursor and the existing cross-process sync lock. A bounded
+singleton .NET MemoryCache holds at most 10,000 successful check hashes/timestamps, partitioned
+by destination, board and card. A repeat check within 60 seconds skips capture before any state,
+saved-code or attachment reads; Sync now bypasses this window. Failed acknowledgements are never
+cached. No recording or code payloads are retained in memory. Identical snapshots are skipped for
+upload for up to an hour in this process; changed/removal snapshots are sent on that card's next
+turn. The server must acknowledge `{schema:1,cardId}` before its hash is accepted.
+A failed card does not stop the bounded rotation; it retries on its next turn. Older servers,
+failures and invalid acknowledgements stay visible in sync status; completed Card Log progress
+is preserved. Removing the configured API key stops both protocols. A large board's first activity
+pass takes multiple ticks (ten cards per minute); **Sync now** advances another batch.
+
+Each JSON snapshot is capped at 8 MiB, with 200 recent sessions, 200 recent commits, 100 linked
+cards and 40 attachments. Commit file text is capped at 256 Ki characters per side and a shared
+content budget; warnings/truncation markers explain omitted content. Attachment content is sent
+only up to 1 MiB per file and when it fits the snapshot. Larger files keep their original size and
+metadata with an explanation directing the reader to the desktop. Metadata is selected before
+reading attachment content. Up to 200 linked session outcomes come from one state connection
+and one joined SELECT, with schema checks once per batch and bounded summary text selected in
+SQL. Session summaries, code and attachment content share the transfer budget; newest summaries
+take priority over older summaries. If verbose metadata still exceeds the limit, trimming uses
+individual encoded item sizes rather than repeatedly serializing the entire snapshot. No stored
+summary or code is changed. SQL also checks actual BLOB/data URL size and stored commit JSON
+length before materialization; a saved snapshot over 8 Mi characters keeps commit metadata with
+an availability warning. Metadata queries fetch only the row limit plus one for truncation
+reporting. Local upload/storage limits are unchanged. No live session control, remote launch
+endpoint or new local listener is introduced.
 
 The desktop uses `X-Api-Key` over HTTPS; plain HTTP is accepted only for a loopback test server.
 Redirects, URL credentials, query strings and fragments in the configured endpoint are rejected.
-Publication consent is bound to a hash of the endpoint and API key. Both are resolved on every
-call, so changing either (including the frontend URL after startup) stops automatic uploads until
-the user switches publishing off and on; nothing keeps uploading to the old host. No credential is
+Each exchange is bound to a hash of the endpoint and API key. Both are resolved on every
+call, so changing either interrupts an in-flight exchange. The next tick republishes against the
+configured destination and resets delivery marks when the remote identity changes. No credential is
 returned by status routes. Requests have a full 30-second timeout and responses have a 16 MiB
 ceiling, twice the hosted 8 MiB pull-page budget.
 Push/pull pages contain at most 20 entries; a tick handles at most 25 pages in each direction.
@@ -83,8 +126,8 @@ sets that entry aside, keeps its complete local row, and continues with later el
 Arbitrary remote error text, unknown codes, malformed IDs and IDs outside the batch cannot change
 the outbox. The same bounded parser recognises three other codes, each reported in the desktop's
 own wording: `invalid_request` (400) keeps entries queued and asks the user to check board and
-lane names; `board_not_found` (404) means the published copy was deleted on the website and asks
-the user to switch publishing off and on, which publishes it again; `write_conflict` (409) simply
+lane names; `board_not_found` (404) recreates the deleted hosted copy and retries once, preserving
+local history and restarting delivery for its new remote identity; `write_conflict` (409) simply
 retries on the next tick. Publishing is never switched off automatically.
 Board settings keep a rejected-entry count and the latest 50 identities visible even
 after subsequent syncs succeed. Comments and notes remain in their normal rails; field changes
@@ -95,7 +138,7 @@ Rejected fields stay protected from incoming edits until a later local edit to t
 acknowledged. Corrections release protection per field, without deleting the rejected record.
 Incoming web history cannot release this protection. To resubmit an unchanged value, edit it and
 save, then restore and save it; only actual field changes create entries. Rejected comments or
-notes can be copied into a new comment or note. Pausing/resuming retains rejections; publishing
+notes can be copied into a new comment or note. Removing/re-adding a key retains rejections; publishing
 to a different remote board resets their delivery marks and protection for the new destination.
 
 Pull validates each whole page's shape before applying entries: sequences must rise from the

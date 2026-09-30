@@ -29,6 +29,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
     private readonly InMemoryDatabaseRoot remoteRoot = new();
     private readonly string remoteName = "vb51-coupled-" + Guid.NewGuid().ToString("N");
     private readonly BoardStore store;
+    private readonly BoardSyncActivityCache activityCache = new();
     private readonly DesktopSync sync;
     private readonly BoardSyncHttpClient client;
     private readonly ControllerTransport transport;
@@ -43,7 +44,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
         transport = new ControllerTransport(this);
         client = new BoardSyncHttpClient(new ClientFactory(transport),
             new Uri("https://board-sync.invalid/api/v1/boards"), () => "fixture-owner-key");
-        sync = new DesktopSync(store, client, new BoardSyncLock(Path.Combine(root, "sync.lock")), NullFeatureLog.Instance);
+        sync = new DesktopSync(store, client, new BoardSyncLock(Path.Combine(root, "sync.lock")), NullFeatureLog.Instance, activityCache);
         using var db = Db();
         db.Users.Add(new User { Id = Owner, Auth0Id = "auth0|fixture-owner" });
         db.SaveChanges();
@@ -99,7 +100,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
         Assert.DoesNotContain("private-session-id", payload);
         Assert.DoesNotContain("fixture-owner-key", payload);
         Assert.DoesNotContain("projectPath", payload, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("attachments", payload, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("attachments", payload, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("automations", payload, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("terminalSessions", payload, StringComparison.OrdinalIgnoreCase);
     }
@@ -229,9 +230,74 @@ public sealed class BoardSyncRoundTripTests : IDisposable
             new(null, "Desktop title", "Read @src/file.cs", "env:7:codex", "medium", null, [], false), Ct);
     }
 
+    [Fact]
+    public async Task ActivitySnapshotCrossesRealWireWithSavedCodeAndAttachmentBytes_ThenReplacesRemovedLinks()
+    {
+        var card = await LocalCard();
+        var related = await LocalCard();
+        var session = Guid.NewGuid().ToString("D");
+        var agentSession = Guid.NewGuid().ToString("D");
+        var sha = new string('a', 40);
+        await store.LinkSessionAsync(root, card.Id, session, "private-tab", "env:7:codex", "codex", "Implementation", "launch", Ct);
+        await store.LinkSessionAsync(root, card.Id, agentSession, "private-agent-tab", "env:7:codex", "codex", "Code review", BoardSessionRecord.AutomationOrigin, Ct);
+        await using (var connection = new SqliteConnection(connectionString))
+        {
+            await connection.OpenAsync(Ct);
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE Sessions(Id TEXT PRIMARY KEY, EndedUTC TEXT, ExitCode INTEGER);
+                CREATE TABLE ChatSummary(SessionId TEXT PRIMARY KEY, SummaryText TEXT);
+                INSERT INTO Sessions VALUES($session, '2026-09-29T12:00:00Z', 0);
+                INSERT INTO ChatSummary VALUES($session, 'Reviewed the saved code.');
+                """;
+            command.Parameters.AddWithValue("$session", agentSession);
+            await command.ExecuteNonQueryAsync(Ct);
+        }
+        await store.AddCommitAsync(root, card.Id, sha, "Fixture author", "Fixture change", DateTime.UtcNow,
+            new([new("src/file.cs", "csharp", "original", "saved replacement")], 1), Ct);
+        var attachment = (await store.AddAttachmentContentAsync(root, card.Id, "result.txt", "text/plain", "saved attachment"u8.ToArray(), Ct))!;
+        await store.LinkCardAsync(root, card.Id, related.Id, Ct);
+        await sync.SyncDueAsync(Ct);
+        var status = (await sync.GetStatusAsync(root, card.BoardId, Ct))!;
+        Assert.Null(status.LastError);
+        var remoteId = Guid.Parse(status.RemoteBoardId!);
+        await using (var db = Db())
+        {
+            var row = await db.SyncedCardActivities.SingleAsync(a => a.BoardId == remoteId && a.CardId == card.Id, Ct);
+            var snapshot = BoardActivityContract.Parse(Encoding.UTF8.GetBytes(row.SnapshotJson));
+            Assert.Equal(2, snapshot.Sessions.Count);
+            Assert.Contains(snapshot.Sessions, s => s.Id == session && !s.IsAutomation);
+            var agent = Assert.Single(snapshot.Sessions, s => s.Id == agentSession);
+            Assert.True(agent.IsAutomation);
+            Assert.Equal(0, agent.ExitCode);
+            Assert.NotNull(agent.EndedUtc);
+            Assert.Equal("Reviewed the saved code.", agent.Summary);
+            Assert.Equal("saved replacement", Assert.Single(Assert.Single(snapshot.Commits).Files).After);
+            Assert.Equal("saved attachment", Encoding.UTF8.GetString(Convert.FromBase64String(Assert.Single(snapshot.Attachments).ContentBase64!)));
+            Assert.Equal(related.Key, Assert.Single(snapshot.LinkedCards).Key);
+        }
+        Assert.DoesNotContain("private-tab", string.Join("\n", transport.Bodies));
+        Assert.DoesNotContain("env:7", string.Join("\n", transport.Bodies));
+        await store.UnlinkSessionAsync(root, card.Id, session, Ct);
+        await store.UnlinkSessionAsync(root, card.Id, agentSession, Ct);
+        await store.RemoveCommitAsync(root, card.Id, sha, Ct);
+        await store.DeleteAttachmentAsync(root, card.Id, attachment.Id, Ct);
+        await store.UnlinkCardAsync(root, card.Id, related.Id, Ct);
+        await Sync(card);
+        await using (var db = Db())
+        {
+            var row = await db.SyncedCardActivities.SingleAsync(a => a.BoardId == remoteId && a.CardId == card.Id, Ct);
+            var snapshot = BoardActivityContract.Parse(Encoding.UTF8.GetBytes(row.SnapshotJson));
+            Assert.Empty(snapshot.Sessions);
+            Assert.Empty(snapshot.Commits);
+            Assert.Empty(snapshot.Attachments);
+            Assert.Empty(snapshot.LinkedCards);
+        }
+    }
+
     private async Task<Guid> Publish(BoardCardRecord card)
     {
-        var status = (await sync.SetPublishedAsync(root, card.BoardId, true, Ct))!;
+        var status = (await sync.SetPublishedAsync(root, card.BoardId, true, Ct, includeActivity: true))!;
         Assert.Null(status.LastError);
         Assert.Equal(0, status.Unsent);
         return Guid.Parse(status.RemoteBoardId!);
@@ -300,6 +366,15 @@ public sealed class BoardSyncRoundTripTests : IDisposable
                     throw new HttpRequestException("Fixture drops an acknowledgement after the server commit.");
                 }
             }
+            else if (path[^1] == "activity")
+            {
+                Assert.Equal(HttpMethod.Put, request.Method);
+                var activity = new BoardActivityApiController(db)
+                {
+                    ControllerContext = new ControllerContext { HttpContext = http }
+                };
+                result = await activity.Replace(Guid.Parse(path[^4]), path[^2], ct);
+            }
             else
             {
                 Assert.Equal("entries", path[^1]);
@@ -316,6 +391,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
 
     public void Dispose()
     {
+        activityCache.Dispose();
         transport.Dispose();
         // root is the unique directory allocated by this fixture, never an application directory.
         Directory.Delete(root, recursive: true);
