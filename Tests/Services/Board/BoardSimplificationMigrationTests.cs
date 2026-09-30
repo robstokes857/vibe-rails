@@ -38,8 +38,8 @@ public sealed class BoardSimplificationMigrationTests : IDisposable
         var card = (await store.GetCardDetailAsync(_root, "VB-1", Ct))!;
         Assert.Equal("Current description", card.Card.Description);
         Assert.False(card.Card.Flagged);
-        Assert.Single(card.Comments);
-        Assert.Single(card.Notes);
+        Assert.Equal(2, card.Comments.Count);
+        Assert.Empty(card.Notes);
         Assert.Single(card.Sessions);
         Assert.Single(card.Attachments);
         Assert.Equal("current.txt", card.Attachments[0].Name);
@@ -75,6 +75,15 @@ public sealed class BoardSimplificationMigrationTests : IDisposable
         using var db = SqliteConnectionFactory.Open(seed);
         using var command = db.CreateCommand();
         command.CommandText = """
+            -- Remove newer-only objects before reconstructing the old installed schema.
+            DROP VIEW BoardSyncLog;
+            DROP TRIGGER TR_BoardComments_KeepTransferLocal;
+            DROP INDEX IX_BoardComments_TransferRemoteSeq;
+            DROP TABLE BoardDeletedComments;
+            ALTER TABLE BoardComments DROP COLUMN SyncBoardId;
+            ALTER TABLE BoardComments DROP COLUMN DiscussionHidden;
+            ALTER TABLE BoardComments DROP COLUMN TransferRemoteSeq;
+            UPDATE BoardComments SET Kind = 'note' WHERE Body = 'Note' AND CardId = $card;
             ALTER TABLE BoardColumns ADD COLUMN WipLimit INTEGER;
             UPDATE BoardColumns SET WipLimit=1;
             ALTER TABLE BoardAttachments ADD COLUMN DeletedUTC TEXT;

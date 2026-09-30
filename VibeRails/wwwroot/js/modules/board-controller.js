@@ -31,7 +31,8 @@ import { escapeHtml, confirmDialog, parseLlmSelection, getCliBrand, canonicalLlm
 import { mountLlmPicker, setLlmPickerValue, getEnabledLlmItems } from './pickers/llm-picker.js';
 import { BoardApi } from './board-api.js';
 import { BOARD_SELECTION_STORAGE_KEY } from './board-selection.js';
-import { boardContextSection, boardSyncSection, laneAutomationSection, mountBoardContext, mountBoardSync, mountLaneAutomation } from './board-settings.js';
+import { boardContextSection, laneAutomationSection, mountBoardContext, mountLaneAutomation } from './board-settings.js';
+import { cardOrganizeSection, bindCardOrganization } from './board-card-organize.js';
 import { renderCardLinksSection, bindCardLinks } from './board-card-links.js';
 import { cardAutomationControls, bindCardAutomations } from './board-card-automations.js';
 import { contextSectionMarkup, bindCardContext } from './board-card-context.js';
@@ -281,6 +282,8 @@ export class BoardController {
     // are wired (to reset the assignee/chat pickers), which would tear the `@` popups down before
     // they ever opened. Composers live exactly as long as the editor: close or replacement.
     disposeComposers() {
+        this.cardOrganizeDispose?.();
+        this.cardOrganizeDispose = null;
         this.cardHistoryDispose?.();
         this.cardHistoryDispose = null;
         for (const dispose of this.composerDisposers.splice(0)) {
@@ -1150,6 +1153,7 @@ export class BoardController {
                         <p class="board-editor-muted mt-2" id="board-chat-help">Chat with an agent about the card without starting it.</p>
                     </section>` : ''}
 
+                    ${card ? cardOrganizeSection() : ''}
                     ${renderCardLinksSection(card)}
 
                     <section class="board-side-section">
@@ -1195,12 +1199,6 @@ export class BoardController {
                         <div class="board-side-list" data-board-automations></div>
                     </section>
 
-                    ${card ? `<section class="board-side-section">
-                        <details data-board-notes-details>
-                            <summary class="board-side-label"><i class="fa-solid fa-pen-ruler" aria-hidden="true"></i> Agent notes <span class="board-count" data-board-count="notes">${card?.notes?.length || 0}</span></summary>
-                            <div data-board-notes class="board-notes-list"></div>
-                        </details>
-                    </section>` : ''}
                     ${card ? `<section class="board-side-section"><details data-board-advanced>
                         <summary class="board-side-label">Advanced</summary>
                         <label class="board-editor-label mt-2" for="board-card-display-id">Display ID</label>
@@ -1269,6 +1267,18 @@ export class BoardController {
     bindCardEditor(editor, card) {
         card = card || { id: null, attachments: [], pendingAttachments: [] };
         editor._boardCard = card;
+        this.cardOrganizeDispose?.();
+        this.cardOrganizeDispose = bindCardOrganization(editor, card, {
+            hasDraft: () => editor._boardSaving || editor._boardUploading || editor._boardStarting
+                || Object.keys(this.cardChanges(editor, this.readCardForm(editor))).length > 0
+                || Boolean(editor.querySelector('[data-board-composer="comment"] [data-board-composer-input]')?.value.trim()),
+            onChanged: async result => {
+                this.app.closeModal();
+                if (result.boardId !== this.state.boardId) await this.switchBoard(result.boardId);
+                else await this.refresh();
+                await this.openCardEditor(result.id);
+            }
+        });
         this.cardLinksDispose = bindCardLinks(editor, card, {
             openCard: id => this.openLinkedCard(editor, id),
             showError: message => this.app.showToast('Board', message, 'error'),
@@ -1299,13 +1309,6 @@ export class BoardController {
             this.attachImages(editor.querySelector('[data-board-composer="description"]'),
                 editor.querySelector('[data-board-composer="description"] [data-board-composer-input]'), card, files, { inline: false });
         });
-        editor.querySelector('[data-board-notes-details]')?.addEventListener('toggle', event => {
-            // Notes are rendered with the comments; clamps just cannot be measured while the
-            // section is closed, so opening is the only time to redo them. Closing changes nothing.
-            const notesHost = editor.querySelector('[data-board-notes]');
-            if (event.target.open && notesHost) this.applyCommentClamps(notesHost);
-        });
-
         this.bindComposer(editor.querySelector('[data-board-composer="description"]'), { card });
         this.bindComposer(editor.querySelector('[data-board-composer="comment"]'), {
             card,
@@ -1654,29 +1657,24 @@ export class BoardController {
     }
 
     // ============================================
-    // Comments and agent notes
+    // Comments
     // ============================================
 
-    // Comments and notes ride on the card response and render in separate sections.
+    // Legacy note rows join the shared comment stream.
     // History has an explicit settings request and never enters this response.
     renderCardDiscussion(editor, card) {
         const host = editor.querySelector('[data-board-comments]');
         if (!host) return;
         const attachments = card?.attachments || [];
-        const comments = card?.comments || [];
-        const notes = card?.notes || [];
+        const comments = [...new Map([...(card?.comments || []), ...(card?.notes || [])].map(entry => [entry.id, entry])).values()]
+            .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)) || String(a.id).localeCompare(String(b.id)));
         this.updateSectionCount(editor, 'comments', comments.length);
-        this.updateSectionCount(editor, 'notes', notes.length);
         host.innerHTML = comments.length
             ? comments.map(entry => this.cardLogCommentHtml(entry, attachments)).join('')
             : '<p class="board-editor-muted">No comments yet.</p>';
-        const notesHost = editor.querySelector('[data-board-notes]');
-        if (notesHost) {
-            notesHost.innerHTML = notes.length
-                ? notes.map(entry => this.cardLogCommentHtml({ ...entry, group: 'notes' }, attachments)).join('')
-                : '<p class="board-editor-muted">No agent notes yet.</p>';
-            this.applyCommentClamps(notesHost);
-        }
+        host.querySelectorAll('[data-board-delete-comment]').forEach(button => {
+            button.addEventListener('click', () => this.deleteComment(editor, button.dataset.boardDeleteComment));
+        });
 
         editor.querySelectorAll('[data-board-comment-jump]').forEach(button => {
             button.addEventListener('click', event => {
@@ -1696,11 +1694,9 @@ export class BoardController {
         requestAnimationFrame(() => this.applyCommentClamps(host));
     }
 
-    // A comment or an agent note. A note is dashed and tagged, so the scratchpad never reads as
-    // part of the conversation.
+    // Human and agent entries share the same discussion.
     cardLogCommentHtml(entry, attachments) {
         const author = this.authorInfo(entry.author);
-        const note = entry.group === 'notes';
         // An agent entry knows the terminal session that wrote it and when: the link replays
         // that session seeked to this moment (session-viewer.js seekToUtc).
         const sessionId = entry.author?.kind === 'agent' ? String(entry.author.sessionId || '') : '';
@@ -1711,12 +1707,12 @@ export class BoardController {
                 <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> in session</button>`
             : '';
         return `
-            <article class="board-comment${note ? ' board-note' : ''}${entry.author?.kind === 'agent' ? ' is-agent' : ''}">
+            <article class="board-comment${entry.author?.kind === 'agent' ? ' is-agent' : ''}">
                 ${this.avatarHtml(author, 28, { filterable: false })}
                 <div class="board-comment-content">
                     <div class="board-comment-meta">
-                        <span class="board-comment-author">${escapeHtml(author?.label || 'Someone')}${note ? ' <span class="board-log-tag">note</span>' : ''}</span>
-                        <span class="board-comment-when">${jump}${escapeHtml(this.formatDateTime(entry.createdAt))}</span>
+                        <span class="board-comment-author">${escapeHtml(author?.label || 'Someone')}</span>
+                        <span class="board-comment-when">${jump}${escapeHtml(this.formatDateTime(entry.createdAt))}<button type="button" class="btn btn-link btn-sm text-danger" data-board-delete-comment="${escapeHtml(entry.id)}" aria-label="Delete comment" title="Delete comment"><i class="fa-solid fa-trash" aria-hidden="true"></i></button></span>
                     </div>
                     <div class="board-comment-body" data-board-comment-body>${renderCommentHtml(entry.body, { attachments })}</div>
                     <button type="button" class="board-comment-more" data-board-comment-more hidden>Show more</button>
@@ -1747,6 +1743,21 @@ export class BoardController {
                 more.textContent = expanded ? 'Show less' : 'Show more';
             };
         });
+    }
+
+    async deleteComment(editor, commentId) {
+        if (editor._boardDeletingComment || editor._boardSaving || editor._boardStarting) return;
+        editor._boardDeletingComment = true;
+        try {
+            if (!await confirmDialog({ title: 'Delete comment', message: 'Delete this comment from the discussion?', confirmLabel: 'Delete', danger: true })) return;
+            if (editor.isConnected === false) return;
+            await BoardApi.deleteBoardCommentAsync(this.cardIdFromEditor(editor), commentId);
+            const card = await this.reloadEditingCard(editor);
+            if (card && editor.isConnected !== false) this.renderCardDiscussion(editor, card);
+            await this.refresh();
+        } catch (error) {
+            this.app.showToast('Board', error?.message || 'Failed to delete the comment.', 'error');
+        } finally { editor._boardDeletingComment = false; }
     }
 
     async postComment(editor, body) {
@@ -2026,6 +2037,7 @@ export class BoardController {
         if (index >= 0) this.state.cards[index] = card;
         // Every rail mutation that reloads the card (comment, commit, session) changed what an
         // agent would read; the Agent context section re-measures rather than going stale.
+        if (editor._boardCard) { editor._boardCard.comments = card.comments; editor._boardCard.notes = card.notes; }
         editor._boardContext?.refresh();
         return card;
     }
@@ -2062,7 +2074,7 @@ export class BoardController {
     }
 
     async saveCard(editor) {
-        if (editor._boardSaving || editor._boardUploading || editor._boardStarting) return;
+        if (editor._boardSaving || editor._boardUploading || editor._boardStarting || editor._boardOrganizing) return;
         const payload = this.readCardForm(editor);
         if (!this.validateCardTitle(editor, payload)) return;
         editor._boardSaving = true;
@@ -2154,7 +2166,7 @@ export class BoardController {
 
     async startWork(editor, card, intent = 'work') {
         if (!card?.id) return;
-        if (editor._boardSaving || editor._boardUploading || editor._boardStarting) return;
+        if (editor._boardSaving || editor._boardUploading || editor._boardStarting || editor._boardOrganizing) return;
         if (this.hasRunningSession(card)) {
             this.updateStartWorkButton(editor, card);
             if (intent === 'work') {
@@ -2265,7 +2277,7 @@ export class BoardController {
                     </button>` : '<span></span>'}
                     <button type="button" class="btn btn-sm btn-outline-primary" data-board-save-board>${board ? 'Save board' : 'Create'}</button>
                 </div>
-                ${board ? boardContextSection() + boardSyncSection() + historySection() : '<p class="board-editor-muted">Save the board to configure agent context.</p>'}
+                ${board ? boardContextSection() + historySection() : '<p class="board-editor-muted">Save the board to configure agent context.</p>'}
             </div>
         `, { onClose: () => { this.boardSettingsDispose?.(); this.boardSettingsDispose = null; } });
 
@@ -2274,9 +2286,8 @@ export class BoardController {
         if (!editor) return;
         if (board) {
             const disposeContext = mountBoardContext(this.app, editor.querySelector('[data-board-context]'), board.id);
-            const disposeSync = mountBoardSync(this.app, editor.querySelector('[data-board-sync]'), board.id);
             const disposeHistory = mountHistory(editor.querySelector('[data-board-history-view]'), board.id);
-            this.boardSettingsDispose = () => { disposeContext(); disposeSync(); disposeHistory(); };
+            this.boardSettingsDispose = () => { disposeContext(); disposeHistory(); };
         }
         editor.querySelector('[data-board-save-board]')?.addEventListener('click', () => this.saveBoard(editor, board));
         editor.querySelector('[data-board-delete-board]')?.addEventListener('click', () => this.deleteBoard(board));

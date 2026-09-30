@@ -410,11 +410,11 @@ public sealed partial class BoardStore : IBoardStore
 
         return new BoardCardDetailRecord(
             card,
-            await ReadCommentsAsync(connection, card.Id, BoardCommentKinds.Comment, cancellationToken),
+            await ReadCommentsAsync(connection, card.Id, cancellationToken),
             await ReadSessionsAsync(connection, card.Id, cancellationToken),
             await ReadAttachmentsAsync(connection, card.Id, cancellationToken),
             await ReadCommitsAsync(connection, card.Id, cancellationToken),
-            await ReadCommentsAsync(connection, card.Id, BoardCommentKinds.Note, cancellationToken))
+            [])
         {
             LinkedCards = await ReadLinkedCardsAsync(connection, project, card.Id, cancellationToken)
         };
@@ -590,7 +590,7 @@ public sealed partial class BoardStore : IBoardStore
                 ?? throw new BoardValidationException($"Lane not found: {patch.ColumnId}");
             columnId = column.Id;
             boardId = column.BoardId;
-            RequireLocalBoardTransfer(existing.BoardId, column.BoardId);
+
             if (stamp?.BoardId is { } syncBoard && column.BoardId != syncBoard)
                 throw new BoardValidationException("A synced move must stay on its published board.");
             toLaneName = column.Name;
@@ -662,6 +662,7 @@ public sealed partial class BoardStore : IBoardStore
         if (moving)
             await RenumberColumnAsync(connection, transaction, existing.ColumnId, cancellationToken);
         await PromoteCardAsync(connection, transaction, updated.Id, cancellationToken);
+        await TransferCardLogAsync(connection, transaction, existing, updated, author, cancellationToken);
         await LogCardChangedAsync(connection, transaction, existing, updated, fromLaneName, toLaneName,
             author, cancellationToken, stamp);
         await ReconcileMissingSyncedLaneAsync(connection, transaction, updated, stamp, cancellationToken);
@@ -724,8 +725,6 @@ public sealed partial class BoardStore : IBoardStore
         var column = await ReadColumnAsync(connection, transaction, project, columnId, cancellationToken)
             ?? throw new BoardValidationException($"Lane not found: {columnId}");
 
-        RequireLocalBoardTransfer(existing.BoardId, column.BoardId);
-
         var sourceIds = (await ReadColumnCardIdsAsync(connection, transaction, existing.ColumnId, cancellationToken))
             .Where(id => id != existing.Id).ToList();
         var sameColumn = string.Equals(column.Id, existing.ColumnId, StringComparison.Ordinal);
@@ -745,6 +744,7 @@ public sealed partial class BoardStore : IBoardStore
             move.Parameters.AddWithValue("$id", existing.Id);
             await move.ExecuteNonQueryAsync(cancellationToken);
         }
+        await TransferCardLogAsync(connection, transaction, existing, existing with { ColumnId = column.Id, BoardId = column.BoardId, UpdatedUtc = nowUtc }, author ?? BoardAuthor.User(), cancellationToken);
         // A reorder within the lane is not history; only a lane change is logged.
         if (!sameColumn && await ReadColumnAsync(connection, transaction, project, existing.ColumnId, cancellationToken) is { } source)
             await LogCardMovedAsync(connection, transaction, existing.Id, source, column, author ?? BoardAuthor.User(), nowUtc, cancellationToken);
@@ -820,7 +820,7 @@ public sealed partial class BoardStore : IBoardStore
         => InsertCommentRowAsync(projectPath, cardId, author, body, BoardCommentKinds.Comment, cancellationToken);
 
     public Task<BoardCommentRecord?> AddNoteAsync(string projectPath, string cardId, BoardAuthor author, string body, CancellationToken cancellationToken = default)
-        => InsertCommentRowAsync(projectPath, cardId, author, body, BoardCommentKinds.Note, cancellationToken);
+        => AddCommentAsync(projectPath, cardId, author, body, cancellationToken);
 
     private async Task<BoardCommentRecord?> InsertCommentRowAsync(string projectPath, string cardId, BoardAuthor author, string body, string kind, CancellationToken cancellationToken, BoardSyncStamp? stamp = null)
     {
@@ -867,7 +867,7 @@ public sealed partial class BoardStore : IBoardStore
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
         var card = await ReadCardAsync(connection, null, project, idOrKey, cancellationToken);
-        return card is null ? [] : await ReadCommentsAsync(connection, card.Id, BoardCommentKinds.Note, cancellationToken);
+        return card is null ? [] : await ReadCommentsAsync(connection, card.Id, cancellationToken);
     }
 
     /// <summary>
@@ -1202,7 +1202,7 @@ public sealed partial class BoardStore : IBoardStore
     private static string CardSelectSql => $"""
         SELECT c.Id, c.ProjectPath, c.Number, c.ColumnId, c.Position, c.Title, c.Description, c.Assignee, c.Priority,
                c.Points, c.Tags, c.Blocked, c.CreatedUTC, c.UpdatedUTC,
-               (SELECT COUNT(*) FROM BoardComments m WHERE m.CardId = c.Id AND m.Kind = 'comment') AS CommentCount,
+               (SELECT COUNT(*) FROM BoardComments m WHERE m.CardId = c.Id AND m.Kind IN ('comment', 'note') AND m.DiscussionHidden = 0 AND NOT EXISTS (SELECT 1 FROM BoardDeletedComments d WHERE d.CommentId = m.Id)) AS CommentCount,
                (SELECT o.OptionsJson FROM BoardCardOptions o WHERE o.CardId = c.Id),
                c.Type,
                (SELECT k.BoardId FROM BoardColumns k WHERE k.Id = c.ColumnId), c.Flagged,
@@ -1397,15 +1397,15 @@ public sealed partial class BoardStore : IBoardStore
         StoredDisplayId: reader.IsDBNull(21) ? null : reader.GetString(21),
         AgentMade: !reader.IsDBNull(22) && reader.GetInt32(22) != 0);
 
-    private static async Task<IReadOnlyList<BoardCommentRecord>> ReadCommentsAsync(SqliteConnection connection, string cardId, string kind, CancellationToken cancellationToken)
+    private static async Task<IReadOnlyList<BoardCommentRecord>> ReadCommentsAsync(SqliteConnection connection, string cardId, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT Id, CardId, AuthorKind, AuthorLabel, AuthorCli, SessionId, Body, CreatedUTC, Kind
-            FROM BoardComments WHERE CardId = $card AND Kind = $kind ORDER BY CreatedUTC, Id;
+            FROM BoardComments WHERE CardId = $card AND Kind IN ('comment', 'note') AND DiscussionHidden = 0
+              AND NOT EXISTS (SELECT 1 FROM BoardDeletedComments d WHERE d.CommentId = BoardComments.Id) ORDER BY CreatedUTC, Id;
             """;
         command.Parameters.AddWithValue("$card", cardId);
-        command.Parameters.AddWithValue("$kind", kind);
         var comments = new List<BoardCommentRecord>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
@@ -1763,6 +1763,14 @@ public sealed partial class BoardStore : IBoardStore
         // human-made, and an older binary never names the column.
         SqliteMigrationRunner.Apply(connection, "board", 24, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardCards ADD COLUMN AgentMade INTEGER NOT NULL DEFAULT 0"));
+        SqliteMigrationRunner.Apply(connection, "board", 25, MigrationKind.Additive, (db, transaction) =>
+        {
+            SqliteSchema.Execute(db, transaction, CardActionsSchemaSql);
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardComments ADD COLUMN SyncBoardId TEXT");
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardComments ADD COLUMN DiscussionHidden INTEGER NOT NULL DEFAULT 0");
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardComments ADD COLUMN TransferRemoteSeq INTEGER");
+            SqliteSchema.Execute(db, transaction, TransferDeliverySchemaSql);
+        });
         ReconcileDerivedRows(connection);
     }
 

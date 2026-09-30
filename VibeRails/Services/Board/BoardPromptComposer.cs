@@ -174,11 +174,11 @@ public static class BoardPromptComposer
                 .Append(" before project work only if the description is truncated, the activity line is unknown, or any activity count is greater than zero. ")
                 .Append("Read that activity and resume from the latest state; otherwise begin with the repository instructions and task.\n\n");
 
-        builder.Append("Use append_board_note to checkpoint findings and working state as you go; add_board_comment for progress and decisions the user should read. ")
+        builder.Append("Use add_board_comment for checkpoints, progress, decisions and the final handoff. All discussion belongs in Comments. ")
             .Append("For relevant listed attachments, use read_board_attachment to view attached images or read Markdown/TXT using their ids. ")
             .Append("If the list says there are more attachments and you need them, get_board_card lists the rest. ")
             .Append("get_board_card lists comments and notes newest first and, on a large card, previews older entries: read them with before=<the id the reply names> or activity=all before repeating work an earlier session may have recorded. ")
-            .Append("Use get_board_notes for every note. ");
+            .Append("Legacy agent notes are included in Comments. ");
         if (intent == "work")
             builder.Append("Use move_board_card when the card changes state. ");
         builder.Append("Before moving a card, call list_board_columns to check which Automations (jobs) may run on entry. ")

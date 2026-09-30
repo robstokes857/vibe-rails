@@ -497,7 +497,7 @@ public sealed class BoardSyncService(
         // "context" is not a card field: it is the agent-context sample a launch records (VB-63,
         // BoardStore.ContextSamples.cs). The hosted contract stores unknown change fields verbatim
         // and never applies them, so the numbers reach viberails.ai without a server change.
-        foreach (var field in new[] { "displayId", "title", "description", "type", "priority", "points", "assignee", "tags", "blocked", "flagged", "lane", BoardStore.ContextChangeField })
+        foreach (var field in new[] { "displayId", "title", "description", "type", "priority", "points", "assignee", "tags", "blocked", "flagged", "lane", "deletedComment", BoardStore.ContextChangeField })
         {
             if (source[field] is not JsonObject values) continue;
             var copy = new JsonObject();

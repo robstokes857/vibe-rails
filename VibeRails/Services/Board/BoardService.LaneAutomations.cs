@@ -76,7 +76,7 @@ public sealed partial class BoardService
         if (existing is null)
             return null;
         // A lane name means a lane on the card's own board. An id is resolved project-wide, but the
-        // store rejects a lane on another board: cards stay on their board (VB-51).
+        // store validates both ends in the same project, including cross-board transfers.
         var column = await FindColumnAsync(projectPath, move.ColumnIdOrName, cancellationToken, NormalizeBoardId(existing.BoardId))
             ?? throw new BoardValidationException($"Lane not found: {move.ColumnIdOrName}");
         if (move.Position is < 0)

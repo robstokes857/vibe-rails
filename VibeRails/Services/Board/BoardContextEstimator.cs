@@ -84,7 +84,6 @@ public sealed class BoardContextEstimator(
             Part("description", "Description", promptParts.DescriptionChars + stats.DescriptionChars, null,
                 promptParts.DescriptionChars < card.Description.Trim().Length ? "excerpt in the prompt, full text in the card read" : "in the prompt and again in the card read"),
             Part("comments", "Comments", stats.Comments.Chars, detail.Comments.Count, TrimNote(stats.Comments)),
-            Part("notes", "Agent notes", stats.Notes.Chars, detail.Notes?.Count ?? 0, TrimNote(stats.Notes)),
             Part("sessions", "Sessions", stats.SessionsChars, detail.Sessions.Count, stats.SessionsOmitted > 0 ? $"newest {stats.SessionsListed} listed" : null),
             Part("commits", "Linked commits", stats.CommitsChars, detail.Commits.Count, stats.CommitsOmitted > 0 ? $"newest {stats.CommitsListed} listed" : null),
         };

@@ -29,6 +29,9 @@ CREATE INDEX IX_BoardComments_Card ON BoardComments(CardId, CreatedUTC);
 -- index IX_BoardComments_RemoteSeq
 CREATE INDEX IX_BoardComments_RemoteSeq ON BoardComments(RemoteSeq) WHERE RemoteSeq > 0;
 
+-- index IX_BoardComments_TransferRemoteSeq
+CREATE INDEX IX_BoardComments_TransferRemoteSeq ON BoardComments(TransferRemoteSeq) WHERE SyncBoardId IS NOT NULL;
+
 -- index IX_BoardComments_Unsent
 CREATE INDEX IX_BoardComments_Unsent ON BoardComments(CardId) WHERE RemoteSeq IS NULL;
 
@@ -90,7 +93,7 @@ CREATE TABLE BoardCards ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Number
 CREATE TABLE BoardColumns ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Name TEXT NOT NULL, Position INTEGER NOT NULL, Color TEXT NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, BoardId TEXT NULL );
 
 -- table BoardComments
-CREATE TABLE BoardComments ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, AuthorKind TEXT NOT NULL, AuthorLabel TEXT NOT NULL, AuthorCli TEXT NULL, SessionId TEXT NULL, Body TEXT NOT NULL, CreatedUTC TEXT NOT NULL, Kind TEXT NOT NULL DEFAULT 'comment' , Changes TEXT, RemoteSeq INTEGER);
+CREATE TABLE BoardComments ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, AuthorKind TEXT NOT NULL, AuthorLabel TEXT NOT NULL, AuthorCli TEXT NULL, SessionId TEXT NULL, Body TEXT NOT NULL, CreatedUTC TEXT NOT NULL, Kind TEXT NOT NULL DEFAULT 'comment' , Changes TEXT, RemoteSeq INTEGER, SyncBoardId TEXT, DiscussionHidden INTEGER NOT NULL DEFAULT 0, TransferRemoteSeq INTEGER);
 
 -- table BoardCommitSnapshots
 CREATE TABLE BoardCommitSnapshots ( CardId TEXT NOT NULL, Sha TEXT NOT NULL, SnapshotJson TEXT NOT NULL, PRIMARY KEY (CardId, Sha), FOREIGN KEY (CardId, Sha) REFERENCES BoardCommits(CardId, Sha) ON DELETE CASCADE );
@@ -103,6 +106,9 @@ CREATE TABLE BoardContextSamples ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REF
 
 -- table BoardContextSettings
 CREATE TABLE BoardContextSettings ( BoardId TEXT PRIMARY KEY REFERENCES Boards(Id) ON DELETE CASCADE, ContextJson TEXT NOT NULL, Revision INTEGER NOT NULL );
+
+-- table BoardDeletedComments
+CREATE TABLE BoardDeletedComments ( CommentId TEXT PRIMARY KEY REFERENCES BoardComments(Id) ON DELETE CASCADE, DeletedUTC TEXT NOT NULL );
 
 -- table BoardDisplaySequences
 CREATE TABLE BoardDisplaySequences ( ProjectPath TEXT NOT NULL COLLATE NOCASE, Prefix TEXT NOT NULL COLLATE NOCASE, LastNumber INTEGER NOT NULL, PRIMARY KEY (ProjectPath, Prefix) );
@@ -178,4 +184,10 @@ CREATE TRIGGER Boards_HistoryCreated AFTER INSERT ON Boards BEGIN INSERT INTO Bo
 
 -- trigger Boards_HistoryName
 CREATE TRIGGER Boards_HistoryName AFTER UPDATE OF Name ON Boards WHEN OLD.Name IS NOT NEW.Name BEGIN INSERT INTO BoardHistory VALUES ('bh_' || lower(hex(randomblob(16))), NEW.Id, NEW.ProjectPath, 'change', 'Board name: ' || OLD.Name || ' → ' || NEW.Name, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')); END;
+
+-- trigger TR_BoardComments_KeepTransferLocal
+CREATE TRIGGER TR_BoardComments_KeepTransferLocal AFTER UPDATE OF RemoteSeq ON BoardComments WHEN NEW.SyncBoardId IS NOT NULL AND NEW.RemoteSeq IS NOT 0 BEGIN UPDATE BoardComments SET RemoteSeq = 0 WHERE Id = NEW.Id; END;
+
+-- view BoardSyncLog
+CREATE VIEW BoardSyncLog AS SELECT rowid, Id, CardId, AuthorKind, AuthorLabel, AuthorCli, SessionId, Body, CreatedUTC, Kind, Changes, SyncBoardId, DiscussionHidden, CASE WHEN SyncBoardId IS NULL THEN RemoteSeq ELSE TransferRemoteSeq END AS RemoteSeq FROM BoardComments;
 

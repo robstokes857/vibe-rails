@@ -15,7 +15,7 @@
 //   card+rails { ...card, comments[], commits[], sessions[], attachments[], notes[], linkedCards[] }  (getBoardCardAsync)
 //   linkedCard { id, key, title, boardId, boardName, columnId, columnName }
 //   comment    { id, author: { kind: 'user'|'agent', label, cli }, body, createdAt }
-//   note       same shape as a comment (id 'note_…'); the agent scratchpad, never in comments[]
+//   note       same shape as a comment (id 'note_…'); legacy compatibility; new card reads include these in comments[]
 //   session    { id, tabId, displayName, cli, selection, origin, createdAt, active }
 //   attachment { id, name, url (data: URL), mimeType, bytes, createdAt }
 //   commit     { sha, shortSha, author, message, committedAt, linkedAt }
@@ -329,7 +329,17 @@ async function removeCardSessionAsync(cardId, sessionId) {
     return { ok: true };
 }
 
+async function deleteBoardCommentAsync(cardId, commentId) {
+    return call(`/cards/${enc(cardId)}/comments/${enc(commentId)}`, 'DELETE');
+}
+
+async function mergeBoardCardsAsync(cardId, targetCard) {
+    return call(`/cards/${enc(cardId)}/merge`, 'POST', { targetCard });
+}
+
 export const BoardApi = {
+    deleteBoardCommentAsync,
+    mergeBoardCardsAsync,
     attach,
     getBoardHistoryAsync,
     getBoardsAsync,

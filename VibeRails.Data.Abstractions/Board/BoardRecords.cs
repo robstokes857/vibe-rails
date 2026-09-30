@@ -93,12 +93,9 @@ public sealed record BoardLinkedCardRecord(
 }
 
 /// <summary>
-/// The kinds of BoardComments row. A <em>note</em> is the agent scratchpad: same shape and
-/// attribution as a comment, but kept out of the comment stream and the comment count so an agent
-/// can checkpoint findings as it goes without spamming the human-facing thread. The change kinds
-/// (board/14) are the rest of the Card Log: written by the store in the same transaction as the
-/// card write they describe, never posted by a caller, and never shown by older binaries, which
-/// read comment and note rows only.
+/// Discussion uses comments. Retained legacy note rows are read in that same stream; new
+/// checkpoint writes use Comment. The change kinds are History, written transactionally by
+/// the store and excluded from ordinary card reads and agent prompts.
 /// </summary>
 public static class BoardCommentKinds
 {

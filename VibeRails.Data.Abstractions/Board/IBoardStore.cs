@@ -50,8 +50,12 @@ public partial interface IBoardStore
     Task<bool> DeleteCardAsync(string projectPath, string cardId, CancellationToken cancellationToken = default, BoardAuthor? author = null);
     Task<BoardCardRecord?> MoveCardAsync(string projectPath, string cardId, string columnId, int? position, CancellationToken cancellationToken = default, BoardAuthor? author = null);
 
+    /// <summary>Deletes a discussion entry from the human UI; agent authors are rejected.</summary>
+    Task<bool> DeleteCommentAsync(string projectPath, string cardId, string commentId, BoardAuthor author, CancellationToken cancellationToken = default);
+    /// <summary>Merges source content and activity into the target, then soft deletes the source atomically.</summary>
+    Task<BoardCardRecord?> MergeCardsAsync(string projectPath, string sourceId, string targetId, CancellationToken cancellationToken = default);
     Task<BoardCommentRecord?> AddCommentAsync(string projectPath, string cardId, BoardAuthor author, string body, CancellationToken cancellationToken = default);
-    /// <summary>Appends an agent-scratchpad entry (<see cref="BoardCommentKinds.Note"/>); never part of the comment stream.</summary>
+    /// <summary>Compatibility alias: appends to the shared comment stream.</summary>
     Task<BoardCommentRecord?> AddNoteAsync(string projectPath, string cardId, BoardAuthor author, string body, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<BoardCommentRecord>> GetNotesAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
     /// <summary>Ended time, exit code and chat summary for a session, when the Sessions / ChatSummary tables exist in this host; null otherwise.</summary>

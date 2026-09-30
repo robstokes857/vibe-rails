@@ -5,6 +5,69 @@ const { test, expect } = process.env.VIBERAILS_BOARD_STATIC === '1'
 const IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=';
 const DESCRIPTION = 'Repro screenshot\n![Screenshot.png](attachment:att_image)\n<img src=x onerror="window.__injected=true">';
 
+test('move and merge use explicit destinations and preserve drafts until saved', async ({ page }, testInfo) => {
+    let current;
+    await openBoard(page, { relatedCards: true, onCard: card => { current = card; } });
+    let moved, merged;
+    let finishMove;
+    const moveResponse = new Promise(resolve => { finishMove = resolve; });
+    await page.route('**/api/v1/board/columns/col_build/automation', route => route.fulfill({ json: { jobIds: [7] } }));
+    await page.route('**/api/v1/board/cards/card_test/move', async route => {
+        moved = route.request().postDataJSON();
+        current.boardId = 'brd_sprint'; current.columnId = moved.columnId;
+        await moveResponse;
+        return route.fulfill({ json: current });
+    });
+    await page.route('**/api/v1/board/cards/card_test/merge', route => {
+        merged = route.request().postDataJSON();
+        return route.fulfill({ json: { ...current, id: 'card_related', title: 'Related work' } });
+    });
+    await page.getByText('Description images', { exact: true }).click();
+    const editor = page.locator('[data-board-card-editor]');
+    await editor.getByText('Move or merge', { exact: true }).click();
+    await editor.locator('[data-move-board]').selectOption('brd_sprint');
+    await expect(editor.locator('[data-move-lane]')).toHaveValue('col_build');
+    await editor.locator('#board-card-title').fill('Unsaved title');
+    await editor.locator('[data-move-card]').click();
+    await expect(editor.locator('[data-organize-status]')).toContainText('Save your card edits');
+    expect(moved).toBeUndefined();
+    await editor.locator('#board-card-title').fill('Description images');
+    await editor.locator('[data-move-card]').click();
+    const confirmation = page.getByRole('alertdialog');
+    await expect(confirmation).toContainText('1 configured Automation');
+    await confirmation.getByRole('button', { name: 'Move', exact: true }).click();
+    await expect.poll(() => moved).toEqual({ columnId: 'col_build' });
+    await expect(editor.locator('#board-card-title')).toBeDisabled();
+    finishMove();
+    await expect(editor.locator('[data-board-organize] details')).not.toHaveAttribute('open', '');
+    await editor.getByText('Move or merge', { exact: true }).click();
+    await editor.locator('[data-merge-target]').selectOption('card_related');
+    await page.screenshot({ path: testInfo.outputPath('move-and-merge.png') });
+    await editor.locator('[data-merge-card]').click();
+    await expect(confirmation).toContainText("destination's settings are kept");
+    await confirmation.getByRole('button', { name: 'Merge', exact: true }).click();
+    await expect.poll(() => merged).toEqual({ targetCard: 'card_related' });
+    await expect(editor).toHaveAttribute('data-card-id', 'card_related');
+});
+
+test('human can delete an agent comment without discarding a draft', async ({ page }) => {
+    let current;
+    await openBoard(page, { onCard: card => { current = card; card.comments[0].author = { kind: 'agent', label: 'Codex' }; } });
+    let deleted = false;
+    await page.route('**/api/v1/board/cards/card_test/comments/comment_1', route => {
+        deleted = route.request().method() === 'DELETE'; current.comments = [];
+        return route.fulfill({ json: { ok: true } });
+    });
+    await page.getByText('Description images', { exact: true }).click();
+    const editor = page.locator('[data-board-card-editor]');
+    await editor.locator('#board-card-title').fill('Keep my draft');
+    await editor.getByRole('button', { name: 'Delete comment', exact: true }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(editor.locator('[data-board-comments]')).toContainText('No comments yet');
+    await expect(editor.locator('#board-card-title')).toHaveValue('Keep my draft');
+    expect(deleted).toBe(true);
+});
+
 test('new-card links stay in the draft and are submitted with creation', async ({ page }) => {
     const requests = await openBoard(page, { relatedCards: true });
     await page.getByRole('button', { name: 'New card', exact: true }).click();
@@ -71,7 +134,7 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
         await page.addInitScript(() => sessionStorage.setItem('viberails_tab', 'board-fixture'));
     }
     let card = {
-        id: 'card_test', key: 'VB-1', columnId: 'col_ready', position: 0,
+        id: 'card_test', key: 'VB-1', boardId: 'brd_main', columnId: 'col_ready', position: 0,
         title: 'Description images', description: DESCRIPTION, type: 'feature', priority: 'high',
         assignee, points: null, tags: [], blocked: false, flagged: false, commentCount: 1,
         activeSessionId: active ? 'session_test' : null,
@@ -195,7 +258,7 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
     return requests;
 }
 
-test('comments and notes stay separate and History loads only from card settings', async ({ page }) => {
+test('legacy notes join Comments and History loads only from card settings', async ({ page }) => {
     await openBoard(page, { onCard: card => {
         card.boardId = 'brd_main';
         card.notes = [{ id: 'note_one', author: { kind: 'agent', label: 'Codex' }, body: 'Agent scratchpad', createdAt: card.createdAt }];
@@ -208,11 +271,10 @@ test('comments and notes stay separate and History loads only from card settings
     await page.getByText('Description images', { exact: true }).click();
     const editor = page.locator('[data-board-card-editor]');
     await expect(editor).toBeVisible();
-    await expect(editor.locator('[data-board-comments]')).not.toContainText('Agent scratchpad');
+    await expect(editor.locator('[data-board-comments]')).toContainText('Agent scratchpad');
     await expect(editor.locator('[data-board-history-view]')).not.toBeVisible();
     expect(historyRequests).toBe(0);
-    await editor.locator('[data-board-notes-details] > summary').click();
-    await expect(editor.locator('[data-board-notes]')).toContainText('Agent scratchpad');
+    await expect(editor.locator('[data-board-notes-details]')).toHaveCount(0);
     await editor.getByText('Advanced', { exact: true }).click();
     expect(historyRequests).toBe(0);
     await editor.locator('[data-board-history-view] > summary').click();

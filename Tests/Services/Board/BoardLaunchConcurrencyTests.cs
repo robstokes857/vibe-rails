@@ -83,7 +83,7 @@ public sealed class BoardLaunchConcurrencyTests : IDisposable
 
         var count = withPriorActivity ? 1 : 0;
         Assert.NotNull(request);
-        Assert.Contains($"Card activity before this session: {count} comments · {count} agent notes · {count} earlier sessions · 0 linked commits.", request.InitialPrompt);
+        Assert.Contains($"Card activity before this session: {count * 2} comments · 0 agent notes · {count} earlier sessions · 0 linked commits.", request.InitialPrompt);
         Assert.Contains("otherwise begin with the repository instructions and task", request.InitialPrompt);
         Assert.DoesNotContain("Begin now by reading the card", request.InitialPrompt);
         Assert.Equal(count + 1, (await _store.GetCardDetailAsync(_root, card.Id, Ct))!.Sessions.Count);

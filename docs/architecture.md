@@ -388,6 +388,13 @@ for data limits, vendor provenance, themes/CSP, lifecycle and regression tests.
 
 ### Vibe Board
 
+VIBE-1 adds the card editor's **Move or merge** actions, one Comments stream and human-only
+comment deletion. `BoardStore.CardActions.cs` keeps merge/transfer/tombstone writes atomic;
+`board-card-organize.js` owns destination selection and draft protection. A merge preserves
+source rows under soft deletion. Transfers keep immutable card identity and scope sync delivery
+marks per board (`board/25`). The former Board sync settings section is removed; publication
+still runs automatically. Navbar Sign in / Account uses the existing device approval flow.
+
 For Board UI, API, SQLite, launch and MCP work, start with the
 [Board contributor guide](../VibeRails/Services/Board/AGENTS.md) and
 [architecture and VB-18 review](../VibeRails/Services/Board/ARCHITECTURE.md).

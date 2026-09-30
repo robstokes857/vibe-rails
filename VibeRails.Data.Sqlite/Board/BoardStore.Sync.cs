@@ -51,13 +51,13 @@ public sealed partial class BoardStore
     // binary created while the board was published, so only cards deleted before they were
     // published stay local.
     private const string UnsentEntriesFromSql = """
-        FROM BoardComments m
+        FROM BoardSyncLog m
         JOIN BoardCards c ON c.Id = m.CardId
         JOIN BoardColumns k ON k.Id = c.ColumnId
         LEFT JOIN BoardProjectKeys pk ON pk.ProjectPath = c.ProjectPath
-        WHERE k.BoardId = $board AND m.RemoteSeq IS NULL
-          AND EXISTS (SELECT 1 FROM BoardComments x WHERE x.CardId = c.Id AND x.Kind = 'created')
-          AND NOT EXISTS (SELECT 1 FROM BoardComments x WHERE x.CardId = c.Id AND x.Kind = 'created' AND x.RemoteSeq = -1)
+        WHERE COALESCE(m.SyncBoardId, k.BoardId) = $board AND m.RemoteSeq IS NULL
+          AND EXISTS (SELECT 1 FROM BoardSyncLog x WHERE x.CardId = c.Id AND COALESCE(x.SyncBoardId, k.BoardId) = $board AND x.Kind = 'created')
+          AND NOT EXISTS (SELECT 1 FROM BoardSyncLog x WHERE x.CardId = c.Id AND COALESCE(x.SyncBoardId, k.BoardId) = $board AND x.Kind = 'created' AND x.RemoteSeq = -1)
         """;
 
     public async Task<BoardSyncLinkRecord?> GetSyncLinkAsync(string projectPath, string boardId, CancellationToken cancellationToken = default)
@@ -151,7 +151,7 @@ public sealed partial class BoardStore
          WHERE c.ProjectPath = $project{ProjectPathCollation}
            AND c.ColumnId IN (SELECT k.Id FROM BoardColumns k WHERE k.BoardId = $board)
            AND c.DeletedUTC IS NULL
-           AND NOT EXISTS (SELECT 1 FROM BoardComments x WHERE x.CardId = c.Id AND x.Kind = 'created')
+           AND NOT EXISTS (SELECT 1 FROM BoardSyncLog x WHERE x.CardId = c.Id AND COALESCE(x.SyncBoardId, $board) = $board AND x.Kind = 'created')
         """;
 
     public async Task<int> WriteSyncBaselineAsync(string projectPath, string boardId, CancellationToken cancellationToken = default)
@@ -238,16 +238,18 @@ public sealed partial class BoardStore
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            UPDATE BoardComments SET RemoteSeq = -1
-            WHERE Id = $entry AND RemoteSeq IS NULL
-              AND CardId IN (SELECT c.Id FROM BoardCards c JOIN BoardColumns k ON k.Id = c.ColumnId WHERE k.BoardId = $board);
+            UPDATE BoardComments SET
+                RemoteSeq = CASE WHEN SyncBoardId IS NULL THEN -1 ELSE 0 END,
+                TransferRemoteSeq = CASE WHEN SyncBoardId IS NOT NULL THEN -1 ELSE TransferRemoteSeq END
+            WHERE Id = $entry AND (CASE WHEN SyncBoardId IS NULL THEN RemoteSeq ELSE TransferRemoteSeq END) IS NULL
+              AND COALESCE(SyncBoardId, (SELECT k.BoardId FROM BoardCards c JOIN BoardColumns k ON k.Id = c.ColumnId WHERE c.Id = BoardComments.CardId)) = $board;
             """;
         command.Parameters.AddWithValue("$entry", entryId);
         command.Parameters.AddWithValue("$board", boardId);
         if (await command.ExecuteNonQueryAsync(cancellationToken) == 0) return false;
         command.CommandText = """
             INSERT OR IGNORE INTO BoardSyncRejectedFields (EntryId, Field)
-            SELECT m.Id, j.key FROM BoardComments m,
+            SELECT m.Id, j.key FROM BoardSyncLog m,
                  json_each(CASE WHEN json_valid(m.Changes) THEN m.Changes ELSE '{}' END) j
             WHERE m.Id = $entry AND m.Kind IN ('created', 'change');
             """;
@@ -260,9 +262,9 @@ public sealed partial class BoardStore
     {
         await using var connection = await OpenAsync(cancellationToken);
         return await ScalarLongAsync(connection, null, """
-            SELECT COALESCE(MAX(m.RemoteSeq), 0) FROM BoardComments m
+            SELECT COALESCE(MAX(m.RemoteSeq), 0) FROM BoardSyncLog m
             JOIN BoardCards c ON c.Id = m.CardId JOIN BoardColumns k ON k.Id = c.ColumnId
-            WHERE k.BoardId = $board AND m.RemoteSeq > 0;
+            WHERE COALESCE(m.SyncBoardId, k.BoardId) = $board AND m.RemoteSeq > 0;
             """, ("$board", boardId), cancellationToken);
     }
 
@@ -270,8 +272,8 @@ public sealed partial class BoardStore
     {
         await using var connection = await OpenAsync(cancellationToken);
         return (int)await ScalarLongAsync(connection, null, """
-            SELECT COUNT(*) FROM BoardComments m JOIN BoardCards c ON c.Id = m.CardId
-            JOIN BoardColumns k ON k.Id = c.ColumnId WHERE k.BoardId = $board AND m.RemoteSeq = -1;
+            SELECT COUNT(*) FROM BoardSyncLog m JOIN BoardCards c ON c.Id = m.CardId
+            JOIN BoardColumns k ON k.Id = c.ColumnId WHERE COALESCE(m.SyncBoardId, k.BoardId) = $board AND m.RemoteSeq = -1;
             """, ("$board", boardId), cancellationToken);
     }
 
@@ -281,10 +283,10 @@ public sealed partial class BoardStore
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
             SELECT m.Id, COALESCE(c.CardKey, {CardPrefixSql} || '-' || c.Number), m.Kind
-            FROM BoardComments m JOIN BoardCards c ON c.Id = m.CardId
+            FROM BoardSyncLog m JOIN BoardCards c ON c.Id = m.CardId
             JOIN BoardColumns k ON k.Id = c.ColumnId
             LEFT JOIN BoardProjectKeys pk ON pk.ProjectPath = c.ProjectPath
-            WHERE k.BoardId = $board AND m.RemoteSeq = -1 ORDER BY m.rowid DESC LIMIT $limit;
+            WHERE COALESCE(m.SyncBoardId, k.BoardId) = $board AND m.RemoteSeq = -1 ORDER BY m.rowid DESC LIMIT $limit;
             """;
         command.Parameters.AddWithValue("$board", boardId);
         command.Parameters.AddWithValue("$limit", Math.Clamp(limit, 1, 50));
@@ -433,22 +435,26 @@ public sealed partial class BoardStore
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "UPDATE BoardComments SET RemoteSeq = $seq WHERE Id = $id;";
+        command.CommandText = """
+            UPDATE BoardComments SET
+                RemoteSeq = CASE WHEN SyncBoardId IS NULL THEN $seq ELSE 0 END,
+                TransferRemoteSeq = CASE WHEN SyncBoardId IS NOT NULL THEN $seq ELSE TransferRemoteSeq END
+            WHERE Id = $id;
+            """;
         var id = command.Parameters.Add("$id", SqliteType.Text);
         var seq = command.Parameters.Add("$seq", SqliteType.Integer);
         foreach (var (entryId, remoteSeq) in sent)
         {
             if (remoteSeq > 0)
             {
-                // The explicit `RemoteSeq > 0` beside `= $seq` lets SQLite use the partial index
-                // IX_BoardComments_RemoteSeq; a bound parameter alone cannot prove the index's
-                // WHERE clause, and without it every acknowledgement scans the whole table.
+                // Compare the effective ledger: transferred entries have a separate sequence
+                // while their legacy RemoteSeq stays local-only for older backends.
                 if (await ScalarLongAsync(connection, transaction, """
-                    SELECT COUNT(*) FROM BoardComments existing
+                    SELECT COUNT(*) FROM BoardSyncLog existing
                     JOIN BoardCards c ON c.Id = existing.CardId JOIN BoardColumns k ON k.Id = c.ColumnId
                     WHERE (existing.Id = $id AND existing.RemoteSeq > 0 AND existing.RemoteSeq <> $seq)
-                       OR (existing.Id <> $id AND existing.RemoteSeq > 0 AND existing.RemoteSeq = $seq AND k.BoardId = (
-                           SELECT sourceColumn.BoardId FROM BoardComments source
+                       OR (existing.Id <> $id AND existing.RemoteSeq > 0 AND existing.RemoteSeq = $seq AND COALESCE(existing.SyncBoardId, k.BoardId) = (
+                           SELECT COALESCE(source.SyncBoardId, sourceColumn.BoardId) FROM BoardSyncLog source
                            JOIN BoardCards sourceCard ON sourceCard.Id = source.CardId
                            JOIN BoardColumns sourceColumn ON sourceColumn.Id = sourceCard.ColumnId WHERE source.Id = $id));
                     """, ("$id", entryId), cancellationToken, ("$seq", remoteSeq)) > 0)
@@ -460,7 +466,7 @@ public sealed partial class BoardStore
                 resolved.CommandText = """
                     DELETE FROM BoardSyncRejectedFields
                     WHERE EXISTS (
-                        SELECT 1 FROM BoardComments rejected JOIN BoardComments accepted ON accepted.CardId = rejected.CardId
+                        SELECT 1 FROM BoardSyncLog rejected JOIN BoardSyncLog accepted ON accepted.CardId = rejected.CardId
                         JOIN json_each(CASE WHEN json_valid(accepted.Changes) THEN accepted.Changes ELSE '{}' END) j
                         WHERE rejected.Id = BoardSyncRejectedFields.EntryId AND accepted.Id = $id
                           AND accepted.RemoteSeq IS NULL AND accepted.rowid > rejected.rowid
@@ -484,8 +490,8 @@ public sealed partial class BoardStore
         command.Transaction = transaction;
         command.CommandText = """
             DELETE FROM BoardSyncRejectedFields WHERE EntryId IN (
-                SELECT m.Id FROM BoardComments m JOIN BoardCards c ON c.Id = m.CardId
-                JOIN BoardColumns k ON k.Id = c.ColumnId WHERE k.BoardId = $board);
+                SELECT m.Id FROM BoardSyncLog m JOIN BoardCards c ON c.Id = m.CardId
+                JOIN BoardColumns k ON k.Id = c.ColumnId WHERE COALESCE(m.SyncBoardId, k.BoardId) = $board);
             """;
         command.Parameters.AddWithValue("$board", boardId);
         await command.ExecuteNonQueryAsync(cancellationToken);
@@ -493,9 +499,11 @@ public sealed partial class BoardStore
         command.CommandText = "DELETE FROM BoardSyncSkippedEntries WHERE BoardId = $board;";
         await command.ExecuteNonQueryAsync(cancellationToken);
         command.CommandText = """
-            UPDATE BoardComments SET RemoteSeq = NULL
-            WHERE RemoteSeq IS NOT NULL
-              AND CardId IN (SELECT c.Id FROM BoardCards c JOIN BoardColumns k ON k.Id = c.ColumnId WHERE k.BoardId = $board);
+            UPDATE BoardComments SET
+                RemoteSeq = CASE WHEN SyncBoardId IS NULL THEN NULL ELSE 0 END,
+                TransferRemoteSeq = NULL
+            WHERE (CASE WHEN SyncBoardId IS NULL THEN RemoteSeq ELSE TransferRemoteSeq END) IS NOT NULL
+              AND COALESCE(SyncBoardId, (SELECT k.BoardId FROM BoardCards c JOIN BoardColumns k ON k.Id = c.ColumnId WHERE c.Id = BoardComments.CardId)) = $board;
             """;
         var count = await command.ExecuteNonQueryAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -505,7 +513,7 @@ public sealed partial class BoardStore
     public async Task<bool> HasLogEntryAsync(string entryId, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);
-        return await ScalarLongAsync(connection, null, "SELECT COUNT(*) FROM BoardComments WHERE Id = $id;", ("$id", entryId), cancellationToken) > 0;
+        return await ScalarLongAsync(connection, null, "SELECT COUNT(*) FROM BoardSyncLog WHERE Id = $id;", ("$id", entryId), cancellationToken) > 0;
     }
 
     public async Task<IReadOnlySet<string>> GetFieldsChangedAfterAsync(string cardId, long remoteSeq, CancellationToken cancellationToken = default)
@@ -523,8 +531,8 @@ public sealed partial class BoardStore
         // state the card already had, sent so the web sees the card, not a local edit. It protects no
         // field, so a web change pulled before a large board's baseline has all been pushed still applies.
         command.CommandText = """
-            SELECT Changes FROM BoardComments
-            WHERE CardId = $card AND (RemoteSeq IS NULL OR RemoteSeq > $seq)
+            SELECT Changes FROM BoardSyncLog
+            WHERE CardId = $card AND (SyncBoardId IS NULL OR SyncBoardId = (SELECT k.BoardId FROM BoardCards c JOIN BoardColumns k ON k.Id = c.ColumnId WHERE c.Id = $card)) AND (RemoteSeq IS NULL OR RemoteSeq > $seq)
               AND Kind IN ('created', 'change') AND Changes IS NOT NULL
               AND NOT (Kind = 'created' AND AuthorKind = 'system' AND RemoteSeq IS NULL);
             """;
@@ -549,8 +557,8 @@ public sealed partial class BoardStore
         }
         await reader.DisposeAsync();
         command.CommandText = """
-            SELECT r.Field FROM BoardSyncRejectedFields r JOIN BoardComments m ON m.Id = r.EntryId
-            WHERE m.CardId = $card;
+            SELECT r.Field FROM BoardSyncRejectedFields r JOIN BoardSyncLog m ON m.Id = r.EntryId
+            WHERE m.CardId = $card AND (m.SyncBoardId IS NULL OR m.SyncBoardId = (SELECT k.BoardId FROM BoardCards c JOIN BoardColumns k ON k.Id = c.ColumnId WHERE c.Id = $card));
             """;
         await using var rejected = await command.ExecuteReaderAsync(cancellationToken);
         while (await rejected.ReadAsync(cancellationToken)) fields.Add(rejected.GetString(0));
@@ -609,12 +617,6 @@ public sealed partial class BoardStore
             throw new BoardValidationException("The remote card belongs to a different local board.");
     }
 
-    private static void RequireLocalBoardTransfer(string source, string destination)
-    {
-        if (source != destination)
-            throw new BoardValidationException("Cards can move between lanes on the same board. Create a new card to work on another board.");
-    }
-
     private static async Task ReconcileMissingSyncedLaneAsync(SqliteConnection connection, SqliteTransaction transaction,
         BoardCardRecord card, BoardSyncStamp? stamp, CancellationToken ct)
     {
@@ -633,7 +635,7 @@ public sealed partial class BoardStore
 
     private static async Task<bool> HasSyncStampAsync(SqliteConnection connection, SqliteTransaction transaction,
         BoardSyncStamp stamp, CancellationToken ct) =>
-        await ScalarLongAsync(connection, transaction, "SELECT COUNT(*) FROM BoardComments WHERE Id = $id;", ("$id", stamp.EntryId), ct) > 0;
+        await ScalarLongAsync(connection, transaction, "SELECT COUNT(*) FROM BoardSyncLog WHERE Id = $id;", ("$id", stamp.EntryId), ct) > 0;
 
     private static async Task<bool> IsDeletedAsync(SqliteConnection connection, SqliteTransaction transaction, string cardId, CancellationToken ct) =>
         await ScalarLongAsync(connection, transaction, "SELECT COUNT(*) FROM BoardCards WHERE Id = $id AND DeletedUTC IS NOT NULL;", ("$id", cardId), ct) > 0;

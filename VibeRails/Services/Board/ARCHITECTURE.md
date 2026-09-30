@@ -1,5 +1,16 @@
 # Vibe Board architecture and review
 
+## VIBE-1: card organization and unified discussion (2026-09-30)
+
+`BoardStore.CardActions.cs` adds transactional merge and user-only discussion deletion.
+`board/25` adds tombstones and per-event board delivery metadata without changing old rows at
+startup. `BoardService.CardActions.cs` and two protected REST routes expose these actions to the
+editor; no MCP delete or merge capability is added. `board-card-organize.js` owns the destination
+pickers, draft guard, confirmation and teardown. Cross-board moves reuse the normal lane event
+queue. A merge appends source content and copies its rails before soft deletion; destination
+metadata wins. Legacy notes are read with Comments, and new notes are comments. See SYNC.md for
+source/destination delivery, return moves and the companion hosted deletion projection.
+
 ## VIBE-9: agent completion and Automation lifecycle (2026-09-29)
 
 `complete_board_agent(summary, outcome, card?)` records the current linked session's first final

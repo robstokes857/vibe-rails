@@ -654,23 +654,25 @@ public sealed class BoardStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task Notes_ShareTheCommentsTable_ButNeverTheCommentStream()
+    public async Task Notes_AreCompatibilityAliasesForComments()
     {
         await _store.EnsureDefaultColumnsAsync(_project, Ct);
         var card = await _store.CreateCardAsync(_project, NewCard("A"), Ct);
         var note = await _store.AddNoteAsync(_project, card.Id, BoardAuthor.Agent("Codex", "codex", "sess-1"), "scratch", Ct);
         var comment = await _store.AddCommentAsync(_project, card.Id, BoardAuthor.User(), "visible", Ct);
 
-        Assert.StartsWith("note_", note!.Id);
-        Assert.Equal(BoardCommentKinds.Note, note.Kind);
+        Assert.StartsWith("cm_", note!.Id);
+        Assert.Equal(BoardCommentKinds.Comment, note.Kind);
         Assert.StartsWith("cm_", comment!.Id);
         Assert.Equal(BoardCommentKinds.Comment, comment.Kind);
 
         var detail = (await _store.GetCardDetailAsync(_project, card.Id, Ct))!;
-        Assert.Equal("visible", Assert.Single(detail.Comments).Body);
-        Assert.Equal("scratch", Assert.Single(detail.Notes).Body);
-        Assert.Equal(1, detail.Card.CommentCount);
-        Assert.Equal("scratch", Assert.Single(await _store.GetNotesAsync(_project, card.Key, Ct)).Body);
+        Assert.Equal(2, detail.Comments.Count);
+        Assert.Contains(detail.Comments, c => c.Body == "visible");
+        Assert.Contains(detail.Comments, c => c.Body == "scratch");
+        Assert.Empty(detail.Notes);
+        Assert.Equal(2, detail.Card.CommentCount);
+        Assert.Equal(2, (await _store.GetNotesAsync(_project, card.Key, Ct)).Count);
         Assert.Empty(await _store.GetNotesAsync(_project, "PA-99", Ct));
 
         // A soft delete keeps both kinds, and a hidden card's notes are not served.
@@ -769,10 +771,11 @@ public sealed class BoardStoreTests : IDisposable
         Assert.Equal(1, counts[main.Id]);
         Assert.Equal(1, counts[sprint.Id]);
 
-        // Cards remain on their board; another board needs a new card.
+        // Cards retain their identity when moving to another board.
         var sprintDone = (await _store.GetColumnsAsync(_project, Ct, sprint.Id)).Last();
-        await Assert.ThrowsAsync<BoardValidationException>(() => _store.UpdateCardAsync(_project, onMain.Id, new BoardCardPatch(ColumnId: sprintDone.Id), Ct));
-        Assert.Single(await _store.GetCardsAsync(_project, Ct, main.Id));
+        await _store.UpdateCardAsync(_project, onMain.Id, new BoardCardPatch(ColumnId: sprintDone.Id), Ct);
+        Assert.Empty(await _store.GetCardsAsync(_project, Ct, main.Id));
+        Assert.Equal(onMain.Key, (await _store.FindCardAsync(_project, onMain.Id, Ct))!.Key);
 
         // Lane operations stay on their board: a new lane appends to its board, a reorder names its board's lanes.
         var extra = await _store.CreateColumnAsync(_project, "QA", "#ffffff", Ct, sprint.Id);
@@ -787,7 +790,7 @@ public sealed class BoardStoreTests : IDisposable
         Assert.Null(await _store.RenameBoardAsync(_project, "brd_missing", "x", null, Ct));
 
         var deleted = await _store.DeleteBoardAsync(_project, sprint.Id, Ct);
-        Assert.Equal(1, deleted!.DeletedCards);
+        Assert.Equal(2, deleted!.DeletedCards);
         Assert.Equal(6, deleted.DeletedColumns);
         Assert.Null(await _store.FindCardAsync(_project, "PA-2", Ct));
         Assert.Equal(main.Id, Assert.Single(await _store.GetBoardsAsync(_project, Ct)).Id);

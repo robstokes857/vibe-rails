@@ -1,5 +1,26 @@
 # Working on Vibe Board
 
+## Unified discussion and card organization (VIBE-1)
+
+Comments is the one discussion stream, including retained legacy `note` rows. New
+`append_board_note` calls are compatibility aliases for comments; `get_board_notes` reads the
+whole discussion. The old `notes[]` response remains empty for older clients. Checkpoints and
+handoffs both use `add_board_comment`. History stays separate and absent from agent context.
+
+The card editor's **Move or merge** section can move to any lane in this project, or merge into
+another project card. Both ends are checked transactionally. Moving keeps identity, attachments,
+sessions and commits; the destination's normal lane Automations still apply. Merge keeps the
+destination fields, appends the source description, copies discussion/files/sessions/commits/links,
+then soft deletes the source and clears its pending lane events. Duplicate sessions/commits/links
+are deduplicated; attachment IDs are copied and references rewritten. Over-limit merges fail
+before writing. Source rows remain retained. New destructive MCP tools are not exposed.
+
+Only the human REST/UI path can delete discussion entries, including agent entries; the store
+rejects agent authors. `board/25` adds comment tombstones plus `SyncBoardId`, `TransferRemoteSeq`
+and `DiscussionHidden` on log rows. No startup backfill or historical rewrite. Older binaries can
+still show deleted discussion. See SYNC.md for transfer delivery and hosted comment deletion.
+The Board settings sync section is removed; automatic background publication continues.
+
 Read [ARCHITECTURE.md](ARCHITECTURE.md) for the component map, wire contracts, data model,
 security boundaries and open VB-18 findings. This file is the contributor guide for Board work
 across UI, REST, MCP and storage. The root [AGENTS.md](../../../AGENTS.md),

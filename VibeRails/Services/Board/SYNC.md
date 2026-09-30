@@ -1,13 +1,40 @@
 # Board sync (VB-51)
 
+## VIBE-1: transfers and one discussion stream
+
+The Board settings sync section has been removed. Automatic publication and protected sync APIs
+remain. Comments includes retained legacy notes; new notes are written as comments.
+
+Cards can move between boards while keeping their immutable identity. In the move transaction,
+existing log rows receive their source `SyncBoardId`, a departure is queued there, and a new
+baseline, full current-state change, `restored` event and discussion copies are queued for the
+destination. Superseded discussion remains stored but hidden. Outbox queries, rejections, resets,
+conflict checks and acknowledgements use each event's board, so sequence numbers from different
+boards cannot collide. Returning to an earlier board restores that hosted projection and reapplies
+the current fields. Both boards synchronize independently; an offline transfer can appear on both
+hosted boards until the departure is delivered.
+
+Transferred events keep delivery marks in `TransferRemoteSeq`, exposed through `BoardSyncLog`.
+Their legacy `RemoteSeq` stays 0 (local-only); a conditional trigger preserves that value even
+when an older backend resets the destination's marks. An older outbox therefore cannot send a
+source-board deletion or stale field change to the destination. Untransferred cards keep the
+original ledger and write behavior. No historical rows are converted during schema setup.
+
+`deletedComment: {to: entryId}` is an additive portable change. Desktop tombstones and the hosted
+indexed `SyncedCardLogEntries.DeletedCommentId` projection hide only discussion on the same card
+and board. Event bodies remain retained, retries remain idempotent and pull carries the original
+change. The companion VibeRails-Front migration must ship for hosted hiding; older hosts retain
+the unknown field but continue showing the comment. Merging uses ordinary destination changes,
+copied comments/activity and source soft deletion. No additional listener or credential is used.
+
 A configured viberails.ai API key automatically publishes all local boards and their linked
-activity (VIBE-13). The root backend pushes and pulls every 60 seconds while open, with a manual
-sync button in Board settings. Without a key, local edits wait for a configured account.
+activity (VIBE-13). The root backend pushes and pulls every 60 seconds while open. Without a key,
+local edits wait for a configured account. Protected APIs retain the manual sync action.
 There are no invitations, shared editing, or multi-user permissions in this slice.
 
 ## Conversation and history
 
-Comments and Agent notes remain separate. Card settings and Board settings each have a
+Comments includes agent checkpoints and legacy notes. Card settings and Board settings each have a
 collapsed History view, fetched only when opened and paged in groups of 100. History includes
 card creation, supported field changes, deletion, and board/lane layout changes. Recorded field
 values can be expanded for inspection. Routine card reads, MCP tools, and launch prompts never
@@ -129,8 +156,8 @@ own wording: `invalid_request` (400) keeps entries queued and asks the user to c
 lane names; `board_not_found` (404) recreates the deleted hosted copy and retries once, preserving
 local history and restarting delivery for its new remote identity; `write_conflict` (409) simply
 retries on the next tick. Publishing is never switched off automatically.
-Board settings keep a rejected-entry count and the latest 50 identities visible even
-after subsequent syncs succeed. Comments and notes remain in their normal rails; field changes
+The sync status API retains a rejected-entry count and the latest 50 identities even
+after subsequent syncs succeed. Comments and notes appear in Comments; field changes
 remain in History. Rejected creation entries keep that card and its dependent edits local; create
 a replacement card with corrected data to publish it. Other cards continue syncing.
 
@@ -188,8 +215,8 @@ nothing needs a baseline.
 New cards have immutable `{PREFIX}-{5 random A-Z0-9}-{N}` keys; legacy keys stay unchanged.
 Full keys are case-insensitive on input. Short forms resolve only when unambiguous, using the
 stored key's number rather than an imported card's local sequence number. Unique indexes and
-identity checks reject collisions. Cards stay on their board, whether published or local.
-Create a new card to work on another board; moves between lanes remain supported.
+identity checks reject collisions.
+Moves between boards retain that identity and use the transfer protocol above.
 
 Web creation and lane moves queue the normal local lane Automations, including their existing
 60-second settling time. A web edit aimed at a lane deleted locally is retained in history;

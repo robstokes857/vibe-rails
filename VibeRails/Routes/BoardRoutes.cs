@@ -150,6 +150,15 @@ public static class BoardRoutes
                 new BoardCardMoveRequest(request.ColumnId ?? string.Empty, request.Position, request.SkipAutomations, BoardAuthor.User()), cancellationToken))?.Card, "Card")))
             .WithName("MoveBoardCard");
 
+        app.MapPost("/api/v1/board/cards/{card}/merge", (IBoardService board, string card, MergeBoardCardsRequest request, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(await board.MergeCardsAsync(Project(), card, request.TargetCard ?? string.Empty, cancellationToken), "Card")))
+            .WithName("MergeBoardCards");
+
+        app.MapDelete("/api/v1/board/cards/{card}/comments/{commentId}", (IBoardService board, string card, string commentId, CancellationToken cancellationToken) =>
+            RunAsync(async () => await board.DeleteCommentAsync(Project(), card, commentId, BoardAuthor.User(), cancellationToken)
+                ? Results.Ok(new OK("Comment deleted")) : NotFound("Comment", commentId)))
+            .WithName("DeleteBoardComment");
+
         app.MapPost("/api/v1/board/cards/{card}/launch", (IBoardLaunchService launcher, string card, LaunchBoardCardRequest? request, CancellationToken cancellationToken) =>
             RunAsync(async () => OkOrNotFound(await launcher.LaunchAsync(Project(), card, request?.Selection, cancellationToken, request?.Intent ?? "work"), "Card")))
             .WithName("LaunchBoardCard");

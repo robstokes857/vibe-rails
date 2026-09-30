@@ -211,7 +211,7 @@ public sealed class BoardPromptComposerTests
         Assert.Contains("Linked commits: 1f79d45 Codex/db storage refactor (#47)\n", prompt);
         Assert.Contains("Attachments: att_7f7ada2a8968 css_cleanup.md\n", prompt);
         Assert.Contains("Card activity before this session: 0 comments · 0 agent notes · 0 earlier sessions · 1 linked commits.", prompt);
-        Assert.Contains("append_board_note", prompt);
+        Assert.Contains("Use add_board_comment for checkpoints", prompt);
         Assert.DoesNotContain("get_board_card_history", prompt);
         // Board-supplied lists are data: they sit INSIDE the fence, after the title, never in the
         // app's preamble where a hostile lane name or commit subject would read as an instruction.

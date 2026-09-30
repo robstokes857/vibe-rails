@@ -347,38 +347,37 @@ public sealed class BoardToolTests : IDisposable
     // ------------------------------------------------------------------ agent-workflow additions (2026-09-17)
 
     [Fact]
-    public async Task GetBoardCard_ListsTheLanes_AndTheAgentNotesTail()
+    public async Task GetBoardCard_ListsTheLanes_AndOneDiscussionStream()
     {
         await _tool.CreateBoardCard("A", cancellationToken: Ct);
         var card = await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct);
         Assert.Contains("\nLanes: Backlog → Ready → Build → Review → Done\n", card);
-        Assert.Contains("Agent notes (0):\n(none — use append_board_note to checkpoint findings as you work)", card);
+        Assert.DoesNotContain("Agent notes", card);
     }
 
     [Fact]
-    public async Task Notes_AreAScratchpad_OutsideTheCommentStream()
+    public async Task NoteCompatibilityTool_AppendsToComments()
     {
         await _tool.CreateBoardCard("A", cancellationToken: Ct);
         _resolver.CurrentSessionId = "sess-notes";
 
         var added = await _tool.AppendBoardNote("checkpoint: found 3 candidates", "PROJ-1", Ct);
-        Assert.Matches(@"^Note note_[0-9a-f]{12} added to PROJ-1 as Agent at ", BoardKeyText.Short(added));
+        Assert.Matches(@"^Comment cm_[0-9a-f]{12} added to PROJ-1 as Agent at ", BoardKeyText.Short(added));
         Assert.StartsWith("FAIL: Note cannot be empty.", await _tool.AppendBoardNote("  ", "PROJ-1", Ct));
         await _tool.AddBoardComment("visible progress", "PROJ-1", Ct);
 
         // The comment stream and its count ignore notes; the notes section shows them.
         var card = await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct);
-        Assert.Contains("Comments (1):\n", card);
-        Assert.DoesNotContain("Comments (2)", card);
-        Assert.Contains("Agent notes (1):\n", card);
-        Assert.Matches(@"\] Agent \(note_[0-9a-f]{12}\): checkpoint: found 3 candidates", card);
-        Assert.Equal(1, (await _store.FindCardAsync(_project, "PROJ-1", Ct))!.CommentCount);
-        Assert.Equal("PROJ-1 (PROJ-1) [Backlog] [Task] (medium) A — agent-made — 1 comment", BoardKeyText.Short(await _tool.ListBoardCards(cancellationToken: Ct)));
+        Assert.Contains("Comments (2):\n", card);
+        Assert.DoesNotContain("Agent notes", card);
+        Assert.Matches(@"\] Agent \(cm_[0-9a-f]{12}\): checkpoint: found 3 candidates", card);
+        Assert.Equal(2, (await _store.FindCardAsync(_project, "PROJ-1", Ct))!.CommentCount);
+        Assert.Equal("PROJ-1 (PROJ-1) [Backlog] [Task] (medium) A — agent-made — 2 comments", BoardKeyText.Short(await _tool.ListBoardCards(cancellationToken: Ct)));
 
         var notes = await _tool.GetBoardNotes("PROJ-1", cancellationToken: Ct);
-        Assert.StartsWith("Agent notes on PROJ-1 (1):\n", BoardKeyText.Short(notes));
+        Assert.StartsWith("Comments on PROJ-1 (2):\n", BoardKeyText.Short(notes));
         Assert.Contains("checkpoint: found 3 candidates", notes);
-        Assert.DoesNotContain("visible progress", notes);
+        Assert.Contains("visible progress", notes);
 
         // Writing a note links the session like any other write.
         Assert.NotNull(await _store.FindSessionLinkAsync("sess-notes", Ct));
@@ -399,8 +398,8 @@ public sealed class BoardToolTests : IDisposable
         }
 
         var card = await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct);
-        Assert.Contains("Comments and notes are listed newest first.", card);
-        Assert.Contains("Agent notes (6):\n", card);
+        Assert.Contains("Comments are listed newest first.", card);
+        Assert.Contains("Comments (8):\n", card);
         Assert.Contains("note 0 ", card);
         Assert.Contains("note 5 ", card);
         Assert.DoesNotContain("previews only", card);
@@ -428,7 +427,7 @@ public sealed class BoardToolTests : IDisposable
 
         var card = await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct);
         // 10 × ~3k comments exceed the 24k budget; notes (3k) keep their share, so 21k of comments fit: the newest seven.
-        Assert.Contains("Comments (10):\n", card);
+        Assert.Contains("Comments (13):\n", card);
         Assert.Contains("END9", card);
         Assert.Contains("END3", card);
         Assert.DoesNotContain("END2", card);
@@ -444,7 +443,7 @@ public sealed class BoardToolTests : IDisposable
         var before = System.Text.RegularExpressions.Regex.Match(card, @"before=(\S+),").Groups[1].Value;
         var older = await _tool.GetBoardCard("PROJ-1", before: before, cancellationToken: Ct);
         Assert.Contains("Showing activity before ", older);
-        Assert.Contains("Comments (3, 7 newer hidden):\n", older);
+        Assert.Contains("Comments (3, 10 newer hidden):\n", older);
         Assert.Contains("END2", older);
         Assert.Contains("END0", older);
         Assert.DoesNotContain("END3", older);
@@ -514,7 +513,7 @@ public sealed class BoardToolTests : IDisposable
 
         var older = await _tool.GetBoardCard("PROJ-1", before: before, cancellationToken: Ct);
         Assert.Contains("Showing activity before " + before + " (", older);
-        Assert.Contains("Comments (3, 7 newer hidden):\n", older);
+        Assert.Contains("Comments (3, 10 newer hidden):\n", older);
         Assert.Contains(previewedTwin, older);
         Assert.DoesNotContain(shownTwin, older);
         Assert.Contains("END0", older);
@@ -523,7 +522,7 @@ public sealed class BoardToolTests : IDisposable
         var detail = await _service.GetCardAsync(_project, "PROJ-1", Ct);
         var cursorAt = detail!.Comments.Single(c => c.Id == before).CreatedAt;
         var byTime = await _tool.GetBoardCard("PROJ-1", before: cursorAt.ToString("O"), cancellationToken: Ct);
-        Assert.Contains("Comments (2, 8 newer hidden):\n", byTime);
+        Assert.Contains("Comments (2, 11 newer hidden):\n", byTime);
         Assert.DoesNotContain(previewedTwin, byTime);
 
         Assert.StartsWith("FAIL: before=cm_000000000000 is not a comment or note on", BoardKeyText.Short(await _tool.GetBoardCard("PROJ-1", before: "cm_000000000000", cancellationToken: Ct)));
@@ -540,7 +539,7 @@ public sealed class BoardToolTests : IDisposable
 
     // VB-63: a long comment thread cannot starve the notes; they keep their reserve and point at get_board_notes.
     [Fact]
-    public async Task GetBoardCard_NotesKeepTheirReserveWhenCommentsAreLarge()
+    public async Task GetBoardCard_CheckpointsShareTheDiscussionBudget()
     {
         await _tool.CreateBoardCard("A", cancellationToken: Ct);
         for (var i = 0; i < 10; i++)
@@ -555,17 +554,14 @@ public sealed class BoardToolTests : IDisposable
         }
 
         var card = await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct);
-        // Comments may use 24k − 8k = 16k (five entries); notes then get the remaining ~8.7k (eight entries).
+        // One newest-first budget includes all checkpoints before older discussion.
+        Assert.Contains("Comments (22):\n", card);
         Assert.Contains("END9", card);
-        Assert.Contains("END5", card);
-        Assert.DoesNotContain("END4", card);
-        Assert.Contains("Agent notes (12):\n", card);
+        Assert.DoesNotContain("END5", card);
+        Assert.Contains("ENDN0", card);
         Assert.Contains("ENDN11", card);
-        Assert.Contains("ENDN4", card);
-        Assert.DoesNotContain("ENDN3", card);
-        Assert.Contains("note 3 nnn", card);
-        Assert.Contains("Older notes (previews only; read a window in full with get_board_card before=", card);
-        Assert.Contains("every note with get_board_notes", card);
+        Assert.Contains("Older comments (previews only", card);
+        Assert.DoesNotContain("Agent notes", card);
         var all = await _tool.GetBoardNotes("PROJ-1", cancellationToken: Ct);
         Assert.Contains("ENDN0", all);
         Assert.Contains("ENDN11", all);
@@ -640,15 +636,15 @@ public sealed class BoardToolTests : IDisposable
 
         var card = await _tool.GetBoardCard("PROJ-1", since: cutoff.ToString("O"), cancellationToken: Ct);
         Assert.Contains("Showing activity since ", card);
-        Assert.Contains("Comments (1, 1 earlier hidden):\n", card);
+        Assert.Contains("Comments (1, 2 earlier hidden):\n", card);
         Assert.DoesNotContain("): old\n", card);
         Assert.Contains("): new", card);
         Assert.Contains("Linked commits (1, 1 earlier hidden):\n- 01d1234 Ancient fix (Rob)\n", card);
         Assert.DoesNotContain("abc1234 Fix the race", card);
-        Assert.Contains("Agent notes (0, 1 earlier hidden):\n", card);
+        Assert.DoesNotContain("Agent notes", card);
 
         Assert.StartsWith("FAIL: since must be an ISO-8601 timestamp", BoardKeyText.Short(await _tool.GetBoardCard("PROJ-1", since: "yesterday", cancellationToken: Ct)));
-        Assert.Contains("(0 of 1 since ", await _tool.GetBoardNotes("PROJ-1", since: cutoff.ToString("O"), cancellationToken: Ct));
+        Assert.Contains("(1 of 3 since ", await _tool.GetBoardNotes("PROJ-1", since: cutoff.ToString("O"), cancellationToken: Ct));
     }
 
     [Fact]
@@ -677,7 +673,7 @@ public sealed class BoardToolTests : IDisposable
         Assert.Contains($" · ended 2026-09-17 12:49:28Z (exit 137) · session {sessionId}\n", card);
         Assert.Contains("    last comment [", card);
         Assert.Contains("]: Revision 2 audit completed.\n", card);
-        Assert.Contains("    summary: Audited the card and moved it to Review.\n", card);
+        Assert.Contains("    summary: Audited the card and moved it to Review.", card);
     }
 
     [Fact]

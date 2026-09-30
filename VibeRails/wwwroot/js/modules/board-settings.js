@@ -13,13 +13,6 @@ export const boardContextSection = () => `
         <div data-board-settings-content>Loading context…</div>
     </section>`;
 
-export const boardSyncSection = () => `
-    <section class="mt-3 border-top pt-3" data-board-sync>
-        <h6>viberails.ai</h6>
-        <p class="board-editor-muted">Boards sync automatically to your viberails.ai account while an API key is configured. Cards, discussion, linked sessions, saved commit code and attachments refresh while VibeRails is open. Large files may be available only on the desktop. Lane moves can run your configured local Automations.</p>
-        <div data-board-settings-content>Loading sync status…</div>
-    </section>`;
-
 export const laneAutomationSection = () => `
     <section class="mt-3 border-top pt-3" data-lane-automation>
         <h6>Automations</h6>
@@ -109,78 +102,6 @@ export function mountBoardContext(app, element, boardId) {
 }
 
 // Automatic account sync status and an immediate retry.
-export function mountBoardSync(app, element, boardId) {
-    if (!element) return () => {};
-    const abort = new AbortController();
-    let disposed = false;
-    let busy = false;
-    const content = element.querySelector('[data-board-settings-content]');
-    const alive = () => !disposed && element.isConnected !== false;
-    const render = status => {
-        const stamp = status.lastSyncUtc ? new Date(status.lastSyncUtc).toLocaleString() : 'never';
-        content.innerHTML = `
-            <p class="board-editor-muted" data-board-sync-policy>${status.configured ? 'Automatic sync is on · cards, sessions and code' : 'Sign in from the navigation or add an API key in Settings to sync your boards.'}</p>
-            ${status.published ? `<p class="board-editor-muted mb-2" data-board-sync-status>${status.remoteUrl ? `<a href="${escapeHtml(status.remoteUrl)}" target="_blank" rel="noopener">Open on viberails.ai</a> · ` : ''}Last sync: ${escapeHtml(stamp)}${status.unsent ? ` · ${Number(status.unsent)} waiting to send` : ''}</p>` : ''}
-            ${status.lastError ? `<p class="text-danger small mb-2" role="alert" data-board-sync-error>${escapeHtml(status.lastError)}</p>` : ''}
-            ${status.rejected ? `<div class="text-warning small mb-2" role="alert" data-board-sync-rejected>
-                <p class="mb-1">${Number(status.rejected)} rejected entries are kept on this machine. Other entries continue syncing.
-                Inspect the affected cards' History, Comments, or Agent notes. Edit rejected fields again to send a correction;
-                rejected values stay protected until that correction syncs. A card with a rejected creation keeps later edits local;
-                create a replacement card to publish its corrected state. These records remain here after corrections sync.</p>
-                <ul class="mb-1">${(status.rejectedEntries || []).map(entry => `<li>${escapeHtml(entry.cardKey)} · ${escapeHtml(entry.kind)} · <code>${escapeHtml(entry.entryId)}</code></li>`).join('')}</ul>
-                ${status.rejected > (status.rejectedEntries || []).length ? '<p class="mb-0">Showing the latest 50 rejected entries.</p>' : ''}
-                </div>` : ''}
-            ${status.skipped ? `<div class="text-warning small mb-2" role="alert" data-board-sync-skipped>
-                <p class="mb-1">${Number(status.skipped)} changes from viberails.ai could not be applied on this machine and were passed over,
-                so later changes keep syncing. They stay on viberails.ai, and the first sync after a VibeRails update tries them again.</p>
-                <ul class="mb-1">${(status.skippedEntries || []).map(entry => `<li>${escapeHtml(entry.cardKey)} · ${escapeHtml(entry.kind)} · ${escapeHtml(entry.reason)} · <code>${escapeHtml(entry.entryId)}</code></li>`).join('')}</ul>
-                ${status.skipped > (status.skippedEntries || []).length ? '<p class="mb-0">Showing the latest 50 skipped changes.</p>' : ''}
-                </div>` : ''}
-            ${status.configured ? '<button type="button" class="btn btn-sm btn-outline-secondary" data-board-sync-action="now">Sync now</button>' : ''}`;
-    };
-    async function reload() {
-        try {
-            const status = await BoardApi.getBoardSyncAsync(boardId, { signal: abort.signal });
-            if (!alive()) return;
-            render(status);
-        } catch (error) {
-            if (!alive() || error?.name === 'AbortError') return;
-            content.innerHTML = `<p role="alert">${escapeHtml(error?.message || 'Sync status could not be loaded.')}</p><button type="button" class="btn btn-sm btn-outline-secondary" data-settings-retry>Retry</button>`;
-        }
-    }
-    const click = async event => {
-        if (event.target.closest('[data-settings-retry]')) { void reload(); return; }
-        const control = event.target.closest('[data-board-sync-action]');
-        if (!control) return;
-        // Keep manual retries from overlapping.
-        if (busy) { event.preventDefault(); return; }
-        const action = control.dataset.boardSyncAction;
-        if (action !== 'now') return;
-        busy = true;
-        control.disabled = true;
-        try {
-            const status = await BoardApi.syncBoardNowAsync(boardId);
-            if (!alive()) return;
-            render(status);
-            const message = status.lastError || status.rejected ? 'Sync finished with entries needing attention.' : 'Board synced.';
-            app.showToast('Board', message, status.lastError || status.rejected ? 'warning' : 'success');
-        } catch (error) {
-            if (!alive()) return;
-            app.showToast('Board', error?.message || 'Sync change failed.', 'error');
-            void reload();
-        } finally {
-            busy = false;
-        }
-    };
-    element.addEventListener('click', click);
-    void reload();
-    return () => {
-        disposed = true;
-        abort.abort();
-        element.removeEventListener('click', click);
-    };
-}
-
 export function mountLaneAutomation(app, element, columnId) {
     return mountSettings(app, element, {
         load: extra => BoardApi.getLaneAutomationAsync(columnId, extra),

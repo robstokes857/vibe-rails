@@ -88,7 +88,7 @@ public sealed partial class BoardStore
                 SELECT m.Id, {CardKeySql}, m.Kind, m.AuthorLabel AS Author, m.Body, m.CreatedUTC, m.Changes,
                     m.AuthorKind, m.SessionId,
                     CASE WHEN m.RemoteSeq > 0 THEN 0 ELSE 1 END, COALESCE(m.RemoteSeq, 0), m.rowid
-                FROM BoardComments m JOIN BoardCards c ON c.Id = m.CardId
+                FROM BoardSyncLog m JOIN BoardCards c ON c.Id = m.CardId
                 JOIN BoardColumns k ON k.Id = c.ColumnId {CardPrefixJoinSql}
                 WHERE k.BoardId = $board AND c.ProjectPath = $project{ProjectPathCollation}
                     AND ($card IS NULL OR c.Id = $card) AND m.Kind IN ('created', 'change', 'deleted')

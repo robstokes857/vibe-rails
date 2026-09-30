@@ -199,11 +199,11 @@ public sealed partial class BoardCardLogTests : IDisposable
         await _store.AddNoteAsync(_project, card.Id, BoardAuthor.Agent("Codex", "codex", null), "A note", Ct);
 
         var detail = (await _store.GetCardDetailAsync(_project, card.Id, Ct))!;
-        Assert.Equal("A real comment", Assert.Single(detail.Comments).Body);
-        Assert.Equal("A note", Assert.Single(detail.Notes).Body);
+        Assert.Equal(2, detail.Comments.Count);
+        Assert.Empty(detail.Notes);
         Assert.Equal(2, (await _store.GetCardHistoryAsync(_project, card.Id, Ct)).Count);
-        Assert.Equal(1, detail.Card.CommentCount);
-        Assert.Equal(1, Assert.Single(await _store.GetCardsAsync(_project, Ct)).CommentCount);
+        Assert.Equal(2, detail.Card.CommentCount);
+        Assert.Equal(2, Assert.Single(await _store.GetCardsAsync(_project, Ct)).CommentCount);
     }
 
     [Fact]

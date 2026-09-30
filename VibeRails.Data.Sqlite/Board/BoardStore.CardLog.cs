@@ -44,16 +44,19 @@ public sealed partial class BoardStore
     /// </summary>
     private static async Task InsertLogEntryAsync(SqliteConnection connection, SqliteTransaction transaction,
         string cardId, BoardAuthor author, string kind, string body, string? changes, DateTime createdUtc,
-        CancellationToken cancellationToken, BoardSyncStamp? stamp = null)
+        CancellationToken cancellationToken, BoardSyncStamp? stamp = null, string? syncBoardId = null)
     {
         // A stamped entry was pulled from viberails.ai: it keeps its remote id and time, and its
         // RemoteSeq is already known, so the push never sends it back.
         await using var insert = connection.CreateCommand();
         insert.Transaction = transaction;
         insert.CommandText = """
-            INSERT INTO BoardComments (Id, CardId, AuthorKind, AuthorLabel, AuthorCli, SessionId, Body, CreatedUTC, Kind, Changes, RemoteSeq)
-            VALUES ($id, $card, $kind, $label, $cli, $session, $body, $created, $rowKind, $changes, $remoteSeq);
+            INSERT INTO BoardComments (Id, CardId, AuthorKind, AuthorLabel, AuthorCli, SessionId, Body, CreatedUTC, Kind, Changes, RemoteSeq, SyncBoardId, TransferRemoteSeq)
+            VALUES ($id, $card, $kind, $label, $cli, $session, $body, $created, $rowKind, $changes,
+                CASE WHEN $syncBoard IS NULL THEN $remoteSeq ELSE 0 END, $syncBoard,
+                CASE WHEN $syncBoard IS NOT NULL THEN $remoteSeq END);
             """;
+        insert.Parameters.AddWithValue("$syncBoard", (object?)syncBoardId ?? DBNull.Value);
         insert.Parameters.AddWithValue("$id", stamp?.EntryId ?? NewId("log"));
         insert.Parameters.AddWithValue("$card", cardId);
         insert.Parameters.AddWithValue("$kind", author.Kind);
@@ -66,6 +69,7 @@ public sealed partial class BoardStore
         insert.Parameters.AddWithValue("$changes", (object?)(stamp is null ? changes : stamp.Changes ?? changes) ?? DBNull.Value);
         insert.Parameters.AddWithValue("$remoteSeq", stamp is null ? DBNull.Value : stamp.RemoteSeq);
         await insert.ExecuteNonQueryAsync(cancellationToken);
+        await ApplyCommentDeletionAsync(connection, transaction, cardId, stamp?.Changes ?? changes, stamp?.CreatedUtc ?? createdUtc, cancellationToken);
         if (stamp is not null) await ForgetSkippedEntryAsync(connection, transaction, stamp, cancellationToken);
     }
 
@@ -121,7 +125,7 @@ public sealed partial class BoardStore
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
             SELECT Id, CardId, AuthorKind, AuthorLabel, AuthorCli, SessionId, Body, CreatedUTC, Kind, Changes
-            FROM BoardComments
+            FROM BoardSyncLog
             WHERE CardId = $card AND Kind IN ('{BoardCommentKinds.Created}', '{BoardCommentKinds.Change}', '{BoardCommentKinds.Deleted}')
             ORDER BY CASE WHEN RemoteSeq > 0 THEN 0 ELSE 1 END,
                 CASE WHEN RemoteSeq > 0 THEN RemoteSeq END, rowid;

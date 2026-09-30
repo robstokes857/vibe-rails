@@ -1,5 +1,18 @@
 # Web UI Frontend
 
+## VIBE-1 card actions
+
+`board-card-organize.js` renders the saved card's **Move or merge** section. It offers project
+boards/lanes and a card search, confirms the destination and lane Automation count, and refuses
+to replace an editor with unsaved drafts. Dispose it on close/replacement/unload. The existing
+navbar **Sign in / Account** opens the device approval flow in both layouts.
+
+Comments now renders agent checkpoints and legacy note rows in the same chronological stream.
+Each entry has a confirmed human Delete action; deletion refreshes only discussion and preserves
+drafts. Agent notes no longer has a separate rail. `append_board_note` is a compatibility alias.
+The complete viberails.ai settings section is removed; the backend still publishes automatically.
+These rules supersede the older separate-notes and no-cross-board-transfer descriptions below.
+
 Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 
 **Terminology:** "Web UI Chat" refers to the xterm.js-based terminal, NOT a separate chat UI.

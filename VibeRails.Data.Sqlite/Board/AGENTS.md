@@ -1,5 +1,18 @@
 # Board persistence
 
+## Card actions (board/25, VIBE-1)
+
+`BoardStore.CardActions.cs` owns atomic merging, user-only discussion tombstones and cross-board
+log delivery. `BoardDeletedComments` retains removed entries; `BoardComments.SyncBoardId` pins
+each transferred event to its original board; `DiscussionHidden` hides superseded discussion
+copies while leaving stored rows intact. `TransferRemoteSeq` holds transferred delivery marks;
+`BoardSyncLog` reads the effective ledger. A conditional trigger keeps those rows local-only in
+the legacy ledger even after an older sync backend resets it. Only moves bind existing rows;
+schema setup is automatic and has no backfill.
+Discussion reads/counts include legacy notes and exclude both deletion markers and superseded
+copies. New notes are comments. Move and merge operations validate both endpoints in the project
+inside the writer transaction. Do not expose merge or comment deletion as MCP tools.
+
 Read the cross-layer [Board contributor guide](../../VibeRails/Services/Board/AGENTS.md) and
 [architecture/data model](../../VibeRails/Services/Board/ARCHITECTURE.md), plus the
 [database migration policy](../DB/AGENTS.md), before changing this component.

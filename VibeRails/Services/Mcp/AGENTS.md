@@ -1,5 +1,14 @@
 # MCP Server (in-process)
 
+## VIBE-1 discussion update
+
+Use `add_board_comment` for checkpoints, progress and handoffs. `append_board_note` is retained
+as a compatibility alias that now writes comments; `get_board_notes` reads all discussion.
+Legacy note data appears in Comments without a backfill. Card reads show one discussion stream;
+History remains excluded. There is no merge or comment-delete tool. `move_board_card` accepts a
+destination lane ID on another board in the same project; names still resolve on the current board.
+Use `list_boards` and `list_board_columns` to discover the destination and its Automations.
+
 VibeRails hosts a Model Context Protocol (MCP) server **inside `vb.exe`** — no separate binary to
 build or ship. The same tools are exposed over **two transports** so each consumer gets its
 natural one:

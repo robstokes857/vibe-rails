@@ -18,6 +18,22 @@ cross-runtime search had no matches. The new route regression covers all seven r
 missing/session-only/tab-only credentials, authorized reads, no-store and absent details.
 The existing middleware suite also passes. This is a scoped addition, not a new full inventory audit.
 
+## VIBE-1 card organization (2026-09-30, scoped amendment)
+
+Added active-root `POST /api/v1/board/cards/{card}/merge` and
+`DELETE /api/v1/board/cards/{card}/comments/{commentId}`. Both use the existing session-plus-tab
+middleware. Project identity is derived server-side; merge scopes both source and destination
+inside one transaction; deletion scopes the entry to a live card and accepts only a user author.
+No delete/merge MCP tool or launch grant was added. Lane moves now accept another board's lane
+within the same project. Navbar login reuses the protected device approval flow already listed.
+
+The additive `deletedComment` sync field carries an entry ID, scoped to the owning board/card;
+the hosted projection uses the existing owner-filtered sync service. There are no new hosted
+endpoints. No credential or listener boundary changes. Both required repository listener searches
+were repeated: approved main Kestrel, non-serving PortFinder and test-only Kestrel fixtures;
+no cross-runtime listener matches. Scoped Board enumeration found 54 route mappings. Authentication
+and wrong-project/wrong-card regression tests cover both new routes. No violation was found.
+
 ## VIBE-9 agent coordination (2026-09-29, scoped amendment)
 
 Added `complete_board_agent` and `get_board_agent_status` to the existing `BoardTool` HTTP and

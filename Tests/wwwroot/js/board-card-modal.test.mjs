@@ -97,16 +97,16 @@ test('card type is present in the editor, filters, tiles and save payload', () =
     assert.match(html, /\.board-type-chip\[data-type="bug"\]/);
 });
 
-test('comments and agent notes stay separate and history is tucked into settings', () => {
+test('comments include legacy notes and history stays in settings', () => {
     const source = readFileSync(controllerPath, 'utf8');
     assert.match(source, /data-board-comments/);
-    assert.match(source, /data-board-notes-details/);
+    assert.doesNotMatch(source, /data-board-notes-details/);
     assert.match(source, /<summary class="board-side-label">Advanced<\/summary>/);
     assert.match(source, /mountHistory/);
     assert.doesNotMatch(source, /data-board-log-filter|cardLogFilter|cardLogEntries/);
     const render = source.slice(source.indexOf('renderCardDiscussion(editor, card) {'), source.indexOf('applyCommentClamps(host) {'));
-    assert.match(render, /const comments = card\?\.comments \|\| \[\];/);
-    assert.match(render, /const notes = card\?\.notes \|\| \[\];/);
+    assert.match(render, /card\?\.comments/);
+    assert.match(render, /card\?\.notes/);
     assert.doesNotMatch(render, /card\?\.history/);
     assert.match(render, /renderCommentHtml\(entry\.body, \{ attachments \}\)/);
     assert.match(render, /this\.applyCommentClamps\(host\)/);

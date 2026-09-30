@@ -28,7 +28,8 @@ public sealed partial class BoardStore
             LEFT JOIN BoardAgentCompletions a ON a.SessionId = s.SessionId AND a.ProjectPath = c.ProjectPath{ProjectPathCollation}
             LEFT JOIN BoardComments u ON u.Id = (
                 SELECT Id FROM BoardComments WHERE CardId = s.CardId AND SessionId = s.SessionId
-                  AND Kind IN ('comment', 'note') ORDER BY CreatedUTC DESC, Id DESC LIMIT 1)
+                  AND Kind IN ('comment', 'note') AND DiscussionHidden = 0
+                  AND NOT EXISTS (SELECT 1 FROM BoardDeletedComments d WHERE d.CommentId = BoardComments.Id) ORDER BY CreatedUTC DESC, Id DESC LIMIT 1)
             WHERE c.Id = $card AND c.ProjectPath = $project{ProjectPathCollation} AND c.DeletedUTC IS NULL
               AND ($session IS NULL OR s.SessionId = $session)
             ORDER BY s.CreatedUTC DESC, s.SessionId LIMIT 10;

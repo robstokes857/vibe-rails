@@ -176,8 +176,8 @@ public sealed class BoardSyncStoreTests : IDisposable
         await store.AddNoteAsync(root, card.Id, BoardAuthor.User(), "Scratchpad only", Ct);
         await store.RenameBoardAsync(root, board.Id, "Renamed", null, Ct);
         var detail = await store.GetCardDetailAsync(root, card.Id, Ct);
-        Assert.Single(detail!.Comments);
-        Assert.Single(detail.Notes);
+        Assert.Equal(2, detail!.Comments.Count);
+        Assert.Empty(detail.Notes);
         var history = await store.GetHistoryAsync(root, board.Id, null, 0, Ct);
         Assert.Contains(history!, e => e.Body.Contains("Renamed"));
         Assert.Contains(history!, e => e.CardKey == card.Key && e.Kind == "created");
@@ -330,7 +330,7 @@ public sealed class BoardSyncStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task CardsStayOnTheirBoard_MoveAndUpdateBothRejectAnotherBoardsLane()
+    public async Task MoveAndUpdateAllowProjectScopedBoardTransfers()
     {
         // Rejected for every board, published or not: a card's key names it on viberails.ai, so it
         // cannot change boards underneath that identity. Another board needs a new card.
@@ -338,9 +338,8 @@ public sealed class BoardSyncStoreTests : IDisposable
         var card = await store.CreateCardAsync(root, new(null, "Card", "", null, "medium", null, [], false), Ct);
         var other = await store.CreateBoardAsync(root, "Other", Ct);
         var lane = (await store.GetColumnsAsync(root, Ct, other.Id))[0];
-        await Assert.ThrowsAsync<BoardValidationException>(() => store.MoveCardAsync(root, card.Id, lane.Id, null, Ct));
-        await Assert.ThrowsAsync<BoardValidationException>(() => store.UpdateCardAsync(root, card.Id, new(ColumnId: lane.Id), Ct));
-        Assert.Equal(card.BoardId, (await store.FindCardAsync(root, card.Id, Ct))!.BoardId);
+        Assert.Equal(other.Id, (await store.MoveCardAsync(root, card.Id, lane.Id, null, Ct))!.BoardId);
+        Assert.Equal(card.BoardId, (await store.UpdateCardAsync(root, card.Id, new(ColumnId: card.ColumnId), Ct))!.BoardId);
     }
 
     [Fact]

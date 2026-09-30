@@ -33,6 +33,43 @@ namespace Tests.Routes;
 [Collection("ProcessEnvIsolation")] // mutates ParserConfigs.SetGitState (process-global), like AutomationNavPreferenceServiceTests
 public sealed class BoardRoutesTests : IAsyncLifetime
 {
+    [Fact]
+    public async Task MergeAndCommentDeletionRequireBothCredentialsAndScopeBothCards()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var store = _app.Services.GetRequiredService<IBoardStore>();
+        await store.EnsureDefaultColumnsAsync(_project, ct);
+        await store.EnsureDefaultColumnsAsync(_project + "-foreign", ct);
+        var source = await store.CreateCardAsync(_project, new(null, "Source", "source body", null, "medium", null, [], false), ct);
+        var target = await store.CreateCardAsync(_project, new(null, "Target", "target body", null, "medium", null, [], false), ct);
+        var foreign = await store.CreateCardAsync(_project + "-foreign", new(null, "Foreign", "private", null, "medium", null, [], false), ct);
+        var comment = (await store.AddCommentAsync(_project, source.Id, BoardAuthor.Agent("Codex", "codex", null), "Progress", ct))!;
+        var mergePath = $"/api/v1/board/cards/{source.Id}/merge";
+        var deletePath = $"/api/v1/board/cards/{source.Id}/comments/{comment.Id}";
+        foreach (var (method, path) in new[] { (HttpMethod.Post, mergePath), (HttpMethod.Delete, deletePath) })
+        {
+            using var none = await SendAsync(method, path);
+            using var sessionOnly = await SendAsync(method, path, "test-session");
+            using var tabOnly = await SendAsync(method, path, tab: "test-tab");
+            Assert.Equal(HttpStatusCode.Unauthorized, none.StatusCode);
+            Assert.Equal(HttpStatusCode.Unauthorized, sessionOnly.StatusCode);
+            Assert.Equal(HttpStatusCode.Unauthorized, tabOnly.StatusCode);
+        }
+        using var wrongTarget = await PostJsonAsync(mergePath, new { targetCard = foreign.Id });
+        Assert.Equal(HttpStatusCode.NotFound, wrongTarget.StatusCode);
+        using var wrongComment = await SendAsync(HttpMethod.Delete, $"/api/v1/board/cards/{target.Id}/comments/{comment.Id}", "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.NotFound, wrongComment.StatusCode);
+        using var deleted = await SendAsync(HttpMethod.Delete, deletePath, "test-session", "test-tab");
+        deleted.EnsureSuccessStatusCode();
+        using var merged = await PostJsonAsync(mergePath, new { targetCard = target.Id });
+        merged.EnsureSuccessStatusCode();
+        using var result = await ReadJsonAsync(merged);
+        Assert.Equal(target.Id, result.RootElement.GetProperty("id").GetString());
+        Assert.Contains("source body", result.RootElement.GetProperty("description").GetString());
+        Assert.Null(await store.FindCardAsync(_project, source.Id, ct));
+        Assert.Equal("private", (await store.FindCardAsync(_project + "-foreign", foreign.Id, ct))!.Description);
+    }
+
     // One client for the whole class: a per-test HttpClient leaves sockets in TIME_WAIT.
     private static readonly HttpClient SharedClient = new();
 
@@ -450,21 +487,21 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         Assert.Equal("old", changedFile.GetProperty("originalContent").GetString());
         Assert.Equal("new", changedFile.GetProperty("modifiedContent").GetString());
 
-        // Notes are the agent scratchpad: their own rail and routes, never counted as comments.
+        // The legacy notes routes now read and write the shared Comments stream.
         using var noted = await PostJsonAsync($"/api/v1/board/cards/{cardId}/notes", new { body = "scratch" });
         using var noteDocument = await ReadJsonAsync(noted);
-        Assert.StartsWith("note_", noteDocument.RootElement.GetProperty("id").GetString());
+        Assert.StartsWith("cm_", noteDocument.RootElement.GetProperty("id").GetString());
         using var notes = await GetJsonAsync($"/api/v1/board/cards/{cardId}/notes");
-        Assert.Equal("scratch", Assert.Single(notes.RootElement.GetProperty("notes").EnumerateArray()).GetProperty("body").GetString());
+        Assert.Contains(notes.RootElement.GetProperty("notes").EnumerateArray(), entry => entry.GetProperty("body").GetString() == "scratch");
         using var withNotes = await GetJsonAsync($"/api/v1/board/cards/{cardId}");
-        Assert.Equal(1, withNotes.RootElement.GetProperty("comments").GetArrayLength());
-        Assert.Equal(1, withNotes.RootElement.GetProperty("notes").GetArrayLength());
+        Assert.Equal(2, withNotes.RootElement.GetProperty("comments").GetArrayLength());
+        Assert.Equal(0, withNotes.RootElement.GetProperty("notes").GetArrayLength());
         using var emptyNote = await PostJsonAsync($"/api/v1/board/cards/{cardId}/notes", new { body = "  " });
         Assert.Equal(HttpStatusCode.BadRequest, emptyNote.StatusCode);
 
         using var list = await GetJsonAsync("/api/v1/board/cards");
         var summary = Assert.Single(list.RootElement.GetProperty("cards").EnumerateArray());
-        Assert.Equal(1, summary.GetProperty("commentCount").GetInt32());
+        Assert.Equal(2, summary.GetProperty("commentCount").GetInt32());
         Assert.False(summary.TryGetProperty("comments", out _)); // summaries carry no rails
 
         using var missing = await SendAsync(HttpMethod.Get, "/api/v1/board/cards/PROJ-42", "test-session", "test-tab");

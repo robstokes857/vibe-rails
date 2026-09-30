@@ -495,7 +495,7 @@ public sealed partial class BoardTool(
         }
     }
 
-    [McpServerTool, Description("Append an entry to the card's agent notes: a scratchpad for checkpointing findings, partial results and working state as you go, so nothing is lost if the session ends or runs out of context. Notes are kept out of the comment stream; use add_board_comment for progress the user should read. Omit the card to use the card this terminal was launched for.")]
+    [McpServerTool, Description("Compatibility alias for add_board_comment. Checkpoints, findings and progress all go to Comments. Omit the card to use the card this terminal was launched for.")]
     public async Task<string> AppendBoardNote(
         [Description("Note text.")] string body,
         [Description("Card key like VB-12 (or the card id). Optional when this terminal was launched for a card.")] string? card = null,
@@ -511,7 +511,7 @@ public sealed partial class BoardTool(
             if (note is null)
                 return $"FAIL: card not found: {card}";
             await AutoLinkSessionAsync(target.Project, target.CardId!, cancellationToken);
-            return $"Note {note.Id} added to {target.CardKey} as {author.Label} at {note.CreatedAt:HH:mm:ss}Z.";
+            return $"Comment {note.Id} added to {target.CardKey} as {author.Label} at {note.CreatedAt:HH:mm:ss}Z.";
         }
         catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
         catch (BoardConflictException ex) { return "FAIL: " + ex.Message; }
@@ -521,7 +521,7 @@ public sealed partial class BoardTool(
         }
     }
 
-    [McpServerTool, Description("Read all of a card's agent notes, oldest first (get_board_card shows only the most recent tail). Pass since to read only notes added after a point in time. Omit the card to use the card this terminal was launched for.")]
+    [McpServerTool, Description("Compatibility reader for all card comments, including legacy notes, oldest first. Pass since to read comments added after a point in time. Omit the card to use the card this terminal was launched for.")]
     public async Task<string> GetBoardNotes(
         [Description("Card key like VB-12 (or the card id). Optional when this terminal was launched for a card.")] string? card = null,
         [Description("ISO-8601 UTC timestamp; only notes at or after it are returned. Optional.")] string? since = null,
@@ -539,7 +539,7 @@ public sealed partial class BoardTool(
                 return $"FAIL: card not found: {card}";
             var visible = sinceUtc is DateTime s ? notes.Where(n => n.CreatedAt >= s).ToList() : notes;
             var builder = new StringBuilder();
-            builder.Append("Agent notes on ").Append(target.CardKey).Append(" (").Append(visible.Count);
+            builder.Append("Comments on ").Append(target.CardKey).Append(" (").Append(visible.Count);
             if (visible.Count != notes.Count) builder.Append(" of ").Append(notes.Count).Append(" since ").Append(sinceUtc!.Value.ToString("u", CultureInfo.InvariantCulture));
             builder.Append("):\n");
             if (visible.Count == 0) builder.Append("(none)\n");
@@ -739,7 +739,7 @@ public sealed partial class BoardTool(
     }
 
     /// <summary>
-    /// Activity budget (VB-63). Comments and notes are listed newest first. When everything fits
+    /// Activity budget (VB-63). Comments are listed newest first. When everything fits
     /// in <see cref="ActivityBudgetCharacters"/> nothing is hidden; a small card never loses a
     /// clue. When it does not fit, comments (the user's decisions) fill first, notes keep at least
     /// <see cref="NotesReservedCharacters"/> so a long thread cannot hide the agent's own latest
@@ -912,7 +912,7 @@ public sealed partial class BoardTool(
         var budgeted = !options.AllActivity && commentTotal + noteTotal > ActivityBudgetCharacters;
         var commentAllowance = budgeted ? ActivityBudgetCharacters - Math.Min(noteTotal, NotesReservedCharacters) : int.MaxValue;
         if (comments.Count + notes.Count > 0)
-            builder.Append("Comments and notes are listed newest first.\n");
+            builder.Append("Comments are listed newest first.\n");
 
         var commentsUsed = AppendActivity(builder, "Comments", "comments", comments, commentLines, earlierComments, laterComments, commentAllowance,
             "(none)", oldest => $"read a window in full with get_board_card before={Before(oldest)}, or everything with activity=all", stats.Comments);
@@ -973,7 +973,7 @@ public sealed partial class BoardTool(
         stats.SessionsChars = builder.Length - sessionsStart;
 
         builder.Append('\n');
-        AppendActivity(builder, "Agent notes", "notes", notes, noteLines, earlierNotes, laterNotes, noteAllowance,
+        if (notes.Count > 0) AppendActivity(builder, "Agent notes", "notes", notes, noteLines, earlierNotes, laterNotes, noteAllowance,
             "(none — use append_board_note to checkpoint findings as you work)",
             oldest => $"read a window in full with get_board_card before={Before(oldest)}, every note with get_board_notes, or everything with activity=all", stats.Notes);
 

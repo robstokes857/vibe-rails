@@ -66,7 +66,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
             Assert.Equal("base:codex", remote.Card.Assignee);
             Assert.Equal("Read @src/file.cs", remote.Card.Description);
             Assert.Contains(remote.Log, entry => entry.Kind == "comment" && entry.Body == "Desktop comment");
-            Assert.Contains(remote.Log, entry => entry.Kind == "note" && entry.Body == "Desktop note");
+            Assert.Contains(remote.Log, entry => entry.Kind == "comment" && entry.Body == "Desktop note");
             await hosted.EditCardAsync(Owner, published, card.Id, "Owner", Json("""{"title":"Hosted title","priority":"high","points":3,"tags":["web"],"blocked":true,"flagged":true}"""), Ct);
             await hosted.CommentAsync(Owner, published, card.Id, "Owner", "Web comment", Ct);
         }
@@ -89,9 +89,9 @@ public sealed class BoardSyncRoundTripTests : IDisposable
         Assert.True(local.Card.Blocked);
         Assert.True(local.Card.Flagged);
         Assert.Equal("env:7:codex", local.Card.Assignee);
-        Assert.Equal(2, local.Comments.Count);
-        Assert.Equal(2, local.Notes.Count);
-        Assert.Contains(local.Notes, entry => entry.Body == "Remote owner note");
+        Assert.Equal(4, local.Comments.Count);
+        Assert.Empty(local.Notes);
+        Assert.Contains(local.Comments, entry => entry.Body == "Remote owner note");
         Assert.Contains(local.Comments, entry => entry.Body == "Web comment");
 
         var payload = string.Join("\n", transport.Bodies);
@@ -221,6 +221,57 @@ public sealed class BoardSyncRoundTripTests : IDisposable
         await Sync(baseline);
         Assert.Equal(webAfter.Id, (await store.FindCardAsync(root, "pretty-55", Ct))!.Id);
         Assert.Equal(0, await store.CountUnsentLogEntriesAsync(board.Id, Ct));
+    }
+
+    [Fact]
+    public async Task MoveReturnMergeAndDeleteCommentsRoundTripWithoutDuplicates()
+    {
+        var card = await LocalCard();
+        await store.AddCommentAsync(root, card.Id, BoardAuthor.User(), "Keep discussion", Ct);
+        var firstRemote = await Publish(card);
+        var destination = await store.CreateBoardAsync(root, "Another board", Ct);
+        var lane = (await store.GetColumnsAsync(root, Ct, destination.Id))[0];
+        var moved = (await store.MoveCardAsync(root, card.Id, lane.Id, null, Ct))!;
+        await Sync(card); // Publish the old board's departure independently.
+        var secondRemote = await Publish(moved);
+        await using (var db = Db())
+        {
+            var hosted = new HostedSync(db, TimeProvider.System);
+            Assert.True((await hosted.GetCardAsync(Owner, firstRemote, card.Id, Ct))!.Card.Deleted);
+            var visible = (await hosted.GetCardAsync(Owner, secondRemote, card.Id, Ct))!;
+            Assert.False(visible.Card.Deleted);
+            Assert.Equal("Keep discussion", Assert.Single(visible.Log).Body);
+        }
+        await store.UpdateCardAsync(root, card.Id, new(Description: "Changed away from the first board"), Ct);
+        await Sync(moved);
+        await store.MoveCardAsync(root, card.Id, card.ColumnId, null, Ct);
+        await Sync(moved);
+        await Sync(card);
+        await using (var db = Db())
+        {
+            var visible = (await new HostedSync(db, TimeProvider.System).GetCardAsync(Owner, firstRemote, card.Id, Ct))!;
+            Assert.False(visible.Card.Deleted);
+            Assert.Equal("Changed away from the first board", visible.Card.Description);
+            Assert.Equal("Keep discussion", Assert.Single(visible.Log).Body);
+        }
+        var comment = Assert.Single((await store.GetCardDetailAsync(root, card.Id, Ct))!.Comments);
+        await store.DeleteCommentAsync(root, card.Id, comment.Id, BoardAuthor.User(), Ct);
+        await Sync(card);
+        await using (var db = Db())
+            Assert.Empty((await new HostedSync(db, TimeProvider.System).GetCardAsync(Owner, firstRemote, card.Id, Ct))!.Log);
+
+        var target = await LocalCard();
+        await store.AddCommentAsync(root, card.Id, BoardAuthor.Agent("Codex", "codex", null), "Merged discussion", Ct);
+        await store.MergeCardsAsync(root, card.Id, target.Id, Ct);
+        await Sync(target);
+        await using (var db = Db())
+        {
+            var hosted = new HostedSync(db, TimeProvider.System);
+            Assert.True((await hosted.GetCardAsync(Owner, firstRemote, card.Id, Ct))!.Card.Deleted);
+            var visible = (await hosted.GetCardAsync(Owner, firstRemote, target.Id, Ct))!;
+            Assert.Contains(visible.Log, e => e.Body == "Merged discussion");
+            Assert.DoesNotContain(visible.Log, e => e.Body == "Keep discussion");
+        }
     }
 
     private async Task<BoardCardRecord> LocalCard()

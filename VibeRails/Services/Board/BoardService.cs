@@ -38,8 +38,12 @@ public partial interface IBoardService
     Task<bool> DeleteCardAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default, BoardAuthor? author = null);
     Task<BoardCardResponse?> MoveCardAsync(string projectPath, string idOrKey, string columnIdOrName, int? position, CancellationToken cancellationToken = default, BoardAuthor? author = null);
 
+    /// <summary>Hides a discussion entry from the user UI; rejects agent authors.</summary>
+    Task<bool> DeleteCommentAsync(string projectPath, string idOrKey, string commentId, BoardAuthor author, CancellationToken cancellationToken = default);
+    /// <summary>Atomically combines source content and activity into a destination card.</summary>
+    Task<BoardCardResponse?> MergeCardsAsync(string projectPath, string sourceId, string targetId, CancellationToken cancellationToken = default);
     Task<BoardCommentDto?> AddCommentAsync(string projectPath, string idOrKey, BoardAuthor author, string body, CancellationToken cancellationToken = default);
-    /// <summary>Agent scratchpad entry: same validation as a comment, never shown in the comment stream.</summary>
+    /// <summary>Compatibility alias for the shared Comments stream.</summary>
     Task<BoardCommentDto?> AddNoteAsync(string projectPath, string idOrKey, BoardAuthor author, string body, CancellationToken cancellationToken = default);
     Task<List<BoardCommentDto>?> GetNotesAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
     Task<BoardAttachmentDto?> AddAttachmentAsync(string projectPath, string idOrKey, AddBoardAttachmentRequest request, CancellationToken cancellationToken = default);
