@@ -375,7 +375,8 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         var ct = TestContext.Current.CancellationToken;
         var boards = _app.Services.GetRequiredService<IBoardStore>();
         await boards.EnsureDefaultColumnsAsync(_project, ct);
-        var boardId = (await boards.GetBoardsAsync(_project, ct))[0].Id;
+        var board = Assert.Single(await boards.GetBoardsAsync(_project, ct));
+        var boardId = board.Id;
         var lanes = await boards.GetColumnsAsync(_project, ct);
 
         using var negative = await SendAsync(HttpMethod.Get, $"/api/v1/board/boards/{boardId}/history?offset=-1", "test-session", "test-tab");
@@ -393,7 +394,7 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         using var fresh = await GetJsonAsync($"/api/v1/board/boards/{boardId}/history");
         var entries = fresh.RootElement.GetProperty("entries").EnumerateArray().ToList();
         Assert.Equal(lanes.Count + 1, entries.Count);
-        Assert.Contains(entries, entry => entry.GetProperty("body").GetString() == "Created board: Main");
+        Assert.Contains(entries, entry => entry.GetProperty("body").GetString() == $"Created board: {board.Name}");
         Assert.All(entries, entry => Assert.Equal(JsonValueKind.Null, entry.GetProperty("cardKey").ValueKind));
         Assert.False(fresh.RootElement.GetProperty("hasMore").GetBoolean());
         Assert.Equal(entries.Count, fresh.RootElement.GetProperty("nextOffset").GetInt32());

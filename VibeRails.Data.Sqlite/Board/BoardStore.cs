@@ -182,8 +182,7 @@ public sealed partial class BoardStore : IBoardStore
         string? custom = null;
         try
         {
-            await using var state = new SqliteConnection(_stateConnectionString);
-            await state.OpenAsync(cancellationToken);
+            await using var state = await OpenStateAsync(cancellationToken);
             await using var command = state.CreateCommand();
             command.CommandText = SqlStrings.SelectLatestProjectDisplayNameByWorkingDirectory;
             command.Parameters.AddWithValue("$workingDirectory", project);

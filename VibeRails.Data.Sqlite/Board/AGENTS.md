@@ -54,6 +54,8 @@ A project's first board is named by `BoardStore.ChooseDefaultBoardName`: the cus
 name (latest `Sessions.ProjectDisplayName` for the working directory), otherwise the repository
 folder name, never the retired `"Main"`. Existing boards are left as they are. Lane adoption
 during schema reconcile uses the folder name, since that pass cannot read the custom name.
+The custom-name lookup uses `OpenStateAsync`, retaining the shared SQLite configuration and
+five-second timeout used by other state reads.
 
 `board/6` adds revisioned board context, lane Automation settings and a durable debounced
 lane-entry queue. SQL card-insert/lane-change triggers write only to these new tables, so older
