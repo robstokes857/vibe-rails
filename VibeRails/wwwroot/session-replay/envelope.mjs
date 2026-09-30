@@ -1,5 +1,6 @@
 // Uploaded envelopes expose fewer capture sources than the local recording API.
 // Normalize them to the same read-only contract without inventing missing events.
+import { parseResponseTools } from './tools.mjs';
 function time(value, fallback = 0) {
     if (typeof value !== 'string' || !value) return fallback;
     const stamp = value.replace(/(\.\d{3})\d+/, '$1');
@@ -28,7 +29,25 @@ export function createEnvelopeSource(envelope) {
         cols: dimension(row.cols, 500, 120), rows: dimension(row.rows, 300, 30) }));
     const frames = frameSource === 'raw' ? raw.map((row,i) => ({ id:i+1, at:time(row.timestampUtc,started), data:bytes(row.rawBytes), cols:0, rows:0 })) : terminal;
     const inputs = [...(envelope.userInputs || [])].sort((a,b) => a.sequence-b.sequence || a.id-b.id);
+    const proxies = (Array.isArray(envelope.proxyExchanges) ? envelope.proxyExchanges : [])
+        .filter(row => row.sessionId === id);
+    const summaries = new Map();
+    const bodyLimit = 2000000;
+    const bodyText = value => typeof value === 'string' ? value : '';
+    const summarize = (row, index) => {
+        if (summaries.has(index)) return summaries.get(index);
+        let request = {};
+        try { request = JSON.parse(bodyText(row.requestBefore).slice(0,bodyLimit)) || {}; } catch { /* Optional metadata. */ }
+        const parsed = parseResponseTools(bodyText(row.responseBody).slice(0,bodyLimit));
+        const result = { cursor:index+1, id:row.id, at:time(row.createdUtc,started), provider:row.provider || '', method:row.method || '',
+            path:row.path || '', status:row.statusCode, elapsedMs:row.elapsedMs,
+            truncated:!!row.responseTruncated, model:request.model || '',
+            effort:request.reasoning?.effort || request.output_config?.effort || request.thinking?.type || '',
+            tools:parsed.tools, parseNote:bodyText(row.responseBody).length>bodyLimit?'Tool parsing is limited to the first 2,000,000 characters.':parsed.note };
+        summaries.set(index,result); return result;
+    };
     let end = Math.max(started, ended || 0);
+    for (const row of proxies) end = Math.max(end, time(row.createdUtc, started));
     for (const row of inputs) end = Math.max(end, time(row.timestampUtc, started));
     for (const frame of frames) end = Math.max(end, frame.at);
     const changes = [], patches = new Map();
@@ -47,11 +66,12 @@ export function createEnvelopeSource(envelope) {
     const session = { id, cli:source.cli || '', environment:source.environmentName || '', directory:source.workingDirectory || '',
         project:source.projectDisplayName || '', title:source.sessionDisplayName || '', started, ended,
         exitCode:source.exitCode, hasTerminal:frames.length>0, changes:changes.length };
-    const notes = ['Uploaded recording. Board context and proxy request/tool details are not available in this viewer.',
+    const notes = ['Uploaded recording. Board context is not included.',
+        proxies.length ? 'Proxy captures are included; tool timestamps mark response completion.' : 'No proxy request/tool captures are included in this upload.',
         'Saved patches describe prompt windows, not complete file snapshots.'];
     const manifest = { session, cards:[], prompts:inputs.map(row => ({id:row.id,sequence:row.sequence,at:time(row.timestampUtc,started),text:row.inputText || ''})),
         changes, geometry:terminal.map(({data,...row}) => ({...row,bytes:data.length})), frameSource, frameMaxId:frames.length,
-        proxyMaxId:0, frameCount:frames.length, frameBytes:frames.reduce((n,row)=>n+row.data.length,0), end, notes };
+        proxyMaxId:proxies.length, frameCount:frames.length, frameBytes:frames.reduce((n,row)=>n+row.data.length,0), end, notes };
     if (raw.length && terminal.reduce((n,row)=>n+row.data.length,0) !== manifest.frameBytes)
         notes.push('Raw and buffered terminal byte totals differ. Resize alignment may be incomplete.');
     return async (path, { signal } = {}) => {
@@ -67,7 +87,18 @@ export function createEnvelopeSource(envelope) {
             const page = frames.slice(after, after+2000);
             return { items:structuredClone(page), next:after+page.length, done:after+page.length>=frames.length };
         }
-        if (parts[3] === 'exchanges') return {items:[],next:0,done:true};
+        if (parts[3] === 'exchanges') {
+            if (parts.length === 5) {
+                const row = proxies.find(row=>row.id===parts[4]);
+                if (!row) throw new Error('Capture not found');
+                const bodies=[row.requestBefore,row.requestAfter,row.responseBody].map(bodyText);
+                return {id:row.id,before:bodies[0].slice(0,bodyLimit),after:bodies[1].slice(0,bodyLimit),response:bodies[2].slice(0,bodyLimit),
+                    displayTruncated:bodies.some(body=>body.length>bodyLimit),captureTruncated:!!row.responseTruncated};
+            }
+            const after=Math.max(0,Number(url.searchParams.get('after')) || 0);
+            const page=proxies.slice(after,after+30).map((row,index)=>summarize(row,after+index));
+            return {items:structuredClone(page),next:after+page.length,done:after+page.length>=proxies.length};
+        }
         if (parts[3] === 'changes' && patches.has(parts[4])) return patches.get(parts[4]);
         throw new Error('Capture not found');
     };

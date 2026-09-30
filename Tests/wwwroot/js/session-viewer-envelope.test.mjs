@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createEnvelopeSource} from '../../../VibeRails/wwwroot/session-replay/envelope.mjs';
 import {prepareFrames} from '../../../VibeRails/wwwroot/session-replay/timeline.mjs';
+import {parseResponseTools} from '../../../VibeRails/wwwroot/session-replay/tools.mjs';
 const stamp = '2026-09-30T00:00:00.1234567';
 const b64 = value => Buffer.from(value).toString('base64');
 const base = () => ({session:{id:'one',startedUtc:stamp},userInputs:[],sessionLogs:[],terminalSessionLogs:[]});
@@ -42,4 +43,35 @@ test('malformed frames fail and invalid grids stay bounded',async()=>{
     assert.equal(frame.cols,120);assert.equal(frame.rows,30);
     envelope.terminalSessionLogs[0].rawBytes='!invalid!';
     assert.throws(()=>createEnvelopeSource(envelope));
+});
+test('optional proxy captures retain exact identity, model, tools, bodies and display limits',async()=>{
+    const envelope=base();
+    const call={type:'function_call',call_id:'call-1',name:'read_file',arguments:'{"path":"a.js"}'};
+    const row={id:'exchange',sessionId:'one',createdUtc:stamp,provider:'openai',method:'POST',path:'/responses',statusCode:200,
+        requestBefore:'{"model":"fixture-model","reasoning":{"effort":"high"}}',requestAfter:'after',
+        responseBody:JSON.stringify({output:[call,call]}),responseTruncated:true};
+    envelope.proxyExchanges=[{...row,id:'foreign',sessionId:'two'},row];
+    const source=createEnvelopeSource(envelope);
+    assert.equal((await source('/api/sessions/one')).proxyMaxId,1);
+    const exchange=(await source('/api/sessions/one/exchanges?after=0')).items[0];
+    assert.equal(exchange.model,'fixture-model');assert.equal(exchange.effort,'high');
+    assert.equal(exchange.tools.length,1);assert.equal(exchange.tools[0].name,'read_file');
+    assert.equal((await source('/api/sessions/one/exchanges/exchange')).after,'after');
+    await assert.rejects(source('/api/sessions/one/exchanges/foreign'),/Capture not found/);
+    row.responseBody='x'.repeat(2000001);
+    const detail=await source('/api/sessions/one/exchanges/exchange');
+    assert.equal(detail.response.length,2000000);assert.equal(detail.displayTruncated,true);assert.equal(detail.captureTruncated,true);
+});
+test('streamed Anthropic and Chat Completions tools assemble argument fragments',()=>{
+    const sse=events=>events.map(item=>'data: '+JSON.stringify(item)+'\n\n').join('')+'data: [DONE]\n\n';
+    const anthropic=parseResponseTools(sse([
+        {type:'content_block_start',index:0,content_block:{type:'tool_use',id:'a',name:'edit',input:{}}},
+        {type:'content_block_delta',index:0,delta:{partial_json:'{"ok":'}},
+        {type:'content_block_delta',index:0,delta:{partial_json:'true}'}}
+    ]));
+    assert.deepEqual(anthropic.tools,[{id:'a',name:'edit',arguments:'{"ok":true}'}]);
+    const chat=parseResponseTools(sse([{choices:[{delta:{tool_calls:[{index:0,id:'b',function:{name:'read',arguments:'{"path":'}}]}}]},
+        {choices:[{delta:{tool_calls:[{index:0,function:{arguments:'"a"}'}}]}}]}]));
+    assert.deepEqual(chat.tools,[{id:'b',name:'read',arguments:'{"path":"a"}'}]);
+    assert.match(parseResponseTools('data: {bad}\n\n').note,/incomplete/);
 });

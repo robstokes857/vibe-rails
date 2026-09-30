@@ -142,3 +142,24 @@ test('desktop entry point carries tab auth, honors comment seek past end and clo
     await page.keyboard.press('Escape');
     await expect(page.locator('iframe')).toHaveCount(0);
 });
+test('newer uploads expose their captured model, tool arguments and request/response bodies',async({page})=>{
+    await shell(page);
+    await page.evaluate(async envelope=>{
+        const {mountSessionViewer}=await import('/session-replay/viewer.mjs');
+        const {createEnvelopeSource}=await import('/session-replay/envelope.mjs');
+        envelope.proxyExchanges=[{id:'capture',sessionId:'fixture',createdUtc:new Date(envelope.session.startedUtc).toISOString(),
+            provider:'openai',method:'POST',path:'/responses',statusCode:200,elapsedMs:123,
+            requestBefore:'{"model":"uploaded-model","reasoning":{"effort":"high"}}',requestAfter:'{"model":"uploaded-model"}',
+            responseBody:JSON.stringify({output:[{type:'function_call',call_id:'call',name:'read_file',arguments:'{"path":"example.js"}'}]})}];
+        window.viewer=mountSessionViewer(document.getElementById('host'),{request:createEnvelopeSource(envelope),sessionId:'fixture',view:'advanced'});
+        await viewer.ready;
+    },envelope);
+    const frame=page.frameLocator('#host iframe');
+    await expect(frame.locator('#model')).toHaveText('uploaded-model');
+    await expect(frame.locator('#effort')).toHaveText('high');
+    await frame.locator('#events-tab').click();
+    await frame.locator('.activity-row').filter({hasText:'read_file'}).click();
+    await expect(frame.locator('#event-body')).toContainText('example.js');
+    await frame.getByRole('button',{name:'Response',exact:true}).click();
+    await expect(frame.locator('#event-body')).toContainText('function_call');
+});

@@ -77,7 +77,8 @@ Desktop maps these paths to `/api/v1/session-replay` using its existing session/
 credentials. IReplayStore reads SQLite in ReadOnly/query_only mode. Board metadata comes
 from IBoardStore. The API adds no migrations or diagnostic writes. Hosted replay uses
 `createEnvelopeSource(envelope)` and the envelope already fetched by its owner-authenticated
-session page. It shows prompts and saved patches; Board and proxy/tool details are unavailable.
+session page. It shows prompts and saved patches, plus proxy/model/tool details when the upload
+includes them. Older uploads have no proxy captures. Board context is not included in envelopes.
 Missing metadata/patches/output have explicit empty states.
 
 ## Mobile
