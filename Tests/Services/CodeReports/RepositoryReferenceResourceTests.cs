@@ -138,7 +138,11 @@ public sealed class RepositoryReferenceResourceTests
         var outline = SourceOutline.Read("unterminated.cs", source);
         stopwatch.Stop();
 
-        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(3), $"Reading took {stopwatch.Elapsed}.");
+        // A timing budget on linear work: the guarded read is ~9 ms for this input (measured
+        // 2026-09-29), so even heavy parallel starvation stays far below 1 s. A reintroduced
+        // per-keyword rescan is quadratic and takes ~1.3 s unloaded (4-6 s in parallel runs),
+        // so it fails this budget deterministically, not only under load.
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(1), $"Reading took {stopwatch.Elapsed}.");
         Assert.False(outline.ReferenceScope!.Truncated);
     }
 

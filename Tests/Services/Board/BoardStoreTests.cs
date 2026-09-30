@@ -22,7 +22,12 @@ public sealed class BoardStoreTests : IDisposable
         Directory.CreateDirectory(_root);
         _project = Path.Combine(_root, "project-a");
         _otherProject = Path.Combine(_root, "project-b");
-        _connectionString = $"Data Source={Path.Combine(_root, "state.db")};Mode=ReadWriteCreate;Cache=Shared";
+        // Pooling=False gives this fixture connections no other test class can disturb: several
+        // parallel fixtures call the process-wide SqliteConnection.ClearAllPools() from Dispose,
+        // which closes pooled handles out from under concurrently running database tests. Every
+        // connection here is opened, used and closed within one call, so an unpooled handle costs
+        // nothing and leaves the shared pool out of this class entirely.
+        _connectionString = $"Data Source={Path.Combine(_root, "state.db")};Mode=ReadWriteCreate;Cache=Shared;Pooling=False";
         _store = new BoardStore(_connectionString, _connectionString);
     }
 
@@ -685,7 +690,8 @@ public sealed class BoardStoreTests : IDisposable
         // A file the previous build left behind: board/1 applied, BoardComments without Kind.
         var legacyRoot = Path.Combine(_root, "legacy");
         Directory.CreateDirectory(legacyRoot);
-        var connectionString = $"Data Source={Path.Combine(legacyRoot, "state.db")};Mode=ReadWriteCreate;Cache=Shared";
+        // Pooling=False like the fixture string: no parallel ClearAllPools() can touch it.
+        var connectionString = $"Data Source={Path.Combine(legacyRoot, "state.db")};Mode=ReadWriteCreate;Cache=Shared;Pooling=False";
         await using (var connection = new SqliteConnection(connectionString))
         {
             await connection.OpenAsync(Ct);
@@ -731,7 +737,6 @@ public sealed class BoardStoreTests : IDisposable
             ledger.CommandText = "SELECT COUNT(*) FROM SchemaMigrations WHERE Component = 'board' AND Version = 2;";
             Assert.Equal(1L, (long)(await ledger.ExecuteScalarAsync(Ct))!);
         }
-        SqliteConnection.ClearPool(new SqliteConnection(connectionString));
     }
 
     [Fact]
@@ -920,7 +925,8 @@ public sealed class BoardStoreTests : IDisposable
 
     public void Dispose()
     {
-        SqliteConnection.ClearPool(new SqliteConnection(_connectionString));
+        // Connections are unpooled (see the constructor), so nothing is left to clear before
+        // deleting the directory.
         try
         {
             Directory.Delete(_root, recursive: true);
