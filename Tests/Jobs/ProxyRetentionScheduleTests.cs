@@ -50,6 +50,20 @@ public sealed class ProxyRetentionScheduleTests
         Assert.True(await new ProxyRetentionSchedule().IsDueAsync(cache, Now));
     }
 
+    [Fact]
+    public async Task ClockRolledBackAfterDeferralDiscardsImplausibleInMemoryDue()
+    {
+        var cache = new FakeGlobalCache();
+        var schedule = new ProxyRetentionSchedule();
+        // The host clock is wrong (a year ahead) when the deferral is recorded...
+        await schedule.DeferAsync(cache, Now.AddYears(1));
+        // ...then corrected backward while the process stays alive: the stale in-memory
+        // deferral is beyond the cap, so retention is due instead of silenced for a year.
+        Assert.True(await schedule.IsDueAsync(cache, Now));
+        // The implausible value is discarded, not reused on the next call.
+        Assert.True(await schedule.IsDueAsync(cache, Now.AddMinutes(1)));
+    }
+
     private sealed class FakeGlobalCache : IGlobalCache
     {
         private readonly Dictionary<string, string> _values = new();
