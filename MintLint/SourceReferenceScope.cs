@@ -38,8 +38,9 @@ public sealed record SourceReferenceScope(IReadOnlyList<SourceOutlineSymbol> Dec
         var truncated = false;
         var depth = 0;
         // A statement scan that found no terminator stops here; later keywords before this
-        // index would rescan the same tokens and fail the same way.
-        var unterminatedBefore = int.MaxValue;
+        // index would rescan the same tokens and fail the same way, so they are skipped.
+        // The index starts at zero: until a scan fails, every keyword is a new statement.
+        var unterminatedBefore = 0;
         for (var i = 0; i < tokens.Count; i++)
         {
             if (truncated) return new([], []) { Truncated = true };
@@ -65,7 +66,7 @@ public sealed record SourceReferenceScope(IReadOnlyList<SourceOutlineSymbol> Dec
                 }
             }
             // Top-level imports only. C# using statements and PHP closure/trait uses have different semantics.
-            if (depth == scope.Depth && tokens[i].Text == (php ? "use" : "using") && i < unterminatedBefore)
+            if (depth == scope.Depth && tokens[i].Text == (php ? "use" : "using") && i >= unterminatedBefore)
             {
                 var end = i + 1;
                 while (end < tokens.Count && tokens[end].Text is not (";" or "(" or "=")) end++;
