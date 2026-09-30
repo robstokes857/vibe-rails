@@ -8,6 +8,7 @@ namespace VibeRails.Data.Sqlite.Replay;
 // Deliberately independent of the product repository's initialization/migration services.
 public sealed class ReplayStore : IReplayStore
 {
+    internal const int MaxExchangePageBytes = 1_048_576;
     private readonly string state;
     private readonly string proxy;
     public ReplayStore(SqliteStoragePaths paths)
@@ -120,20 +121,41 @@ public sealed class ReplayStore : IReplayStore
         if(!File.Exists(proxy)) return new([],after,true);
         using var db=Open(proxy);
         using var c=Query(db,"""
-            SELECT rowid,Id,CreatedUTC,Provider,Method,Path,StatusCode,ElapsedMs,ResponseTruncated,ResponseBody,
-            CASE WHEN json_valid(RequestBefore) THEN coalesce(json_extract(RequestBefore,'$.model'),'') ELSE '' END,
-            CASE WHEN json_valid(RequestBefore) THEN coalesce(json_extract(RequestBefore,'$.reasoning.effort'),json_extract(RequestBefore,'$.output_config.effort'),json_extract(RequestBefore,'$.thinking.type'),'') ELSE '' END
+            SELECT rowid,substr(Id,1,256),CreatedUTC,substr(Provider,1,64),substr(Method,1,16),substr(Path,1,2048),
+            StatusCode,ElapsedMs,ResponseTruncated,substr(ResponseBody,1,$bodyLimit),
+            CASE WHEN json_valid(substr(RequestBefore,1,$bodyLimit))
+                THEN substr(coalesce(json_extract(substr(RequestBefore,1,$bodyLimit),'$.model'),''),1,256) ELSE '' END,
+            CASE WHEN json_valid(substr(RequestBefore,1,$bodyLimit))
+                THEN substr(coalesce(json_extract(substr(RequestBefore,1,$bodyLimit),'$.reasoning.effort'),
+                    json_extract(substr(RequestBefore,1,$bodyLimit),'$.output_config.effort'),
+                    json_extract(substr(RequestBefore,1,$bodyLimit),'$.thinking.type'),''),1,128) ELSE '' END,
+            coalesce(length(ResponseBody),0)>$bodyLimit
             FROM ProxyExchanges WHERE SessionId=$id AND rowid>$after AND rowid<=$max ORDER BY rowid LIMIT 30
-            """,("$id",id),("$after",after),("$max",max));
+            """,("$id",id),("$after",after),("$max",max),("$bodyLimit",ToolParser.MaxResponseCharacters));
         using var r=c.ExecuteReader(); List<Exchange> exchanges=[];
+        long pageBytes = 128; // Envelope, cursor, done and item separators.
         while(r.Read())
         {
-            var parsed=ToolParser.Parse(S(r,9));
-            exchanges.Add(new(r.GetInt64(0),S(r,1),Time(S(r,2)),S(r,3),S(r,4),S(r,5),r.GetInt32(6),r.GetInt32(7),r.GetBoolean(8),S(r,10),S(r,11),parsed.Tools,parsed.Note));
+            var parsed=ToolParser.Parse(S(r,9),r.GetBoolean(12));
+            var exchange = new Exchange(r.GetInt64(0),S(r,1),Time(S(r,2)),S(r,3),S(r,4),S(r,5),r.GetInt32(6),r.GetInt32(7),r.GetBoolean(8),S(r,10),S(r,11),parsed.Tools,parsed.Note);
+            var bytes = SummaryByteUpperBound(exchange);
+            // Each bounded summary fits on an empty page. Leave a non-fitting row for the
+            // next cursor page; never advance past an exchange that was not returned.
+            if (exchanges.Count > 0 && pageBytes + bytes > MaxExchangePageBytes) break;
+            exchanges.Add(exchange);
+            pageBytes += bytes;
         }
         var next=exchanges.Count>0?exchanges[^1].Cursor:after;
         return new(exchanges,next,exchanges.Count==0||next>=max);
     }
+
+    // JSON escapes need at most six bytes per UTF-16 code unit. Structural allowances cover
+    // field names, punctuation, booleans and maximum-width numeric values without serializing
+    // a second copy just to measure it. Keep this in step with Exchange and ToolCall.
+    private static long SummaryByteUpperBound(Exchange exchange) => 512L + 6L *
+        (exchange.Id.Length + exchange.Provider.Length + exchange.Method.Length + exchange.Path.Length
+            + exchange.Model.Length + exchange.Effort.Length + (exchange.ParseNote?.Length ?? 0))
+        + exchange.Tools.Sum(tool => 64L + 6L * (tool.Id.Length + tool.Name.Length + tool.Arguments.Length));
     public DiffDetail? Diff(string id,long changeId)
     {
         using var db=Open(state);
