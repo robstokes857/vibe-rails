@@ -43,10 +43,12 @@ scripts section uses it instead of its in-app Monaco editor), and `__viberails_o
 (opens the account sign-in page in the user's browser). The dashboard
 feature-detects each one, so an older extension host degrades instead of breaking.
 
-`external-sign-in.ts` accepts only the exact `https://viberails.ai/link` URL before calling
+`external-sign-in.ts` accepts only `https://viberails.ai/link`, optionally followed by the strict
+public user-code fragment `#code=ABCD-EFGH`, before calling
 `vscode.env.openExternal`. Reject other schemes, hosts, paths, explicit ports, credentials,
-queries and fragments. The dashboard stays in its webview; account authentication runs in
-the external browser. Users type or paste the short code there; API keys and device secrets
+queries and any other fragments. The dashboard stays in its webview; account authentication runs in
+the external browser. The website clears the fragment before login and automatically POSTs the
+public code with its antiforgery token. Users still approve the request; API keys and device secrets
 remain in the backend and never enter bridge messages. No URI callback handler is needed.
 
 ### Backend Server

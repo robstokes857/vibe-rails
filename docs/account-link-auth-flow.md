@@ -1,7 +1,7 @@
 # VibeRails account-link authentication flow
 
 This describes the implemented browser and VS Code account-link protocol as of
-2026-09-29. It follows the shape of [OAuth Device Authorization (RFC 8628)](https://www.rfc-editor.org/rfc/rfc8628).
+2026-09-30. It follows the shape of [OAuth Device Authorization (RFC 8628)](https://www.rfc-editor.org/rfc/rfc8628).
 It is a custom API-key issuance protocol: its camelCase JSON, endpoints and HTTP
 statuses are not a drop-in implementation of an OAuth token endpoint.
 
@@ -40,10 +40,11 @@ request. In an authorization-code flow, a redirect URI returns the result to the
 client. Here, polling with the secret `deviceCode` is the return channel. The
 `userCode` provides the correlation on the browser side.
 
-The current flow uses a typed code. The verification URL is exactly
-`https://viberails.ai/link`; it does not include the user code, device secret or API
-key. RFC 8628 also allows a completed verification URI as a convenience; this
-implementation does not use one.
+The backend verification URL is exactly `https://viberails.ai/link`. The UI adds only
+the validated public user code as `#code=ABCD-EFGH`. The website clears this fragment
+before login, retains the code in same-tab session storage for at most ten minutes,
+and submits the normal authenticated form by POST with a fresh antiforgery token.
+The device secret and API key never enter the browser URL. Manual entry is a fallback.
 
 ## Sequence
 
@@ -59,10 +60,11 @@ sequenceDiagram
     Local->>Site: POST /api/v1/device-links (computerName, clientVersion)
     Site-->>Local: deviceCode, userCode, verificationUri, expiresIn, interval
     Local-->>UI: userCode, verificationUri, expiry, interval
-    UI->>Browser: User opens /link
+    UI->>Browser: User opens /link#code=ABCD-EFGH
     Browser->>Site: GET /link
     opt Website login required
-        Site-->>Browser: Redirect through /Account/Login to Auth0
+        Site-->>Browser: Login handoff clears fragment, retains public code in tab storage
+        Browser->>Site: GET /Account/Login?returnUrl=/link
         Browser->>Auth0: Authenticate / authorize website login
         Auth0-->>Browser: Redirect to website /callback with authorization code
         Browser->>Site: GET /callback
@@ -70,12 +72,12 @@ sequenceDiagram
         Auth0-->>Site: OIDC tokens
         Site-->>Browser: Set website auth cookie, return to /link
     end
-    Browser->>Site: POST /link (typed userCode + antiforgery)
+    Browser->>Site: POST /link (automatic userCode + antiforgery)
     Site-->>Browser: Computer/account confirmation + owner-bound approvalCode
     Browser->>Site: POST /link/approve (approvalCode + antiforgery)
     Note over Site: Create API key; persist hash; retain plaintext for pickup
     Site-->>Browser: Approved (no API key)
-    loop While Settings is open and request is pending
+    loop While account modal is open and request is pending
         UI->>Local: GET /api/v1/settings/remote-link (session + tab)
         Local->>Site: POST /api/v1/device-links/token (deviceCode)
         Site-->>Local: Pending, denied, expired, or one-time API key
@@ -115,12 +117,14 @@ computer name is display context, not proof of device identity.
 
 ### 2. Authenticate the browser and approve
 
-`GET /link` redirects an unauthenticated browser to
+`GET /link` serves a minimal login handoff to an unauthenticated browser. Its first-party
+script removes the fragment, retains the public code in tab storage, and navigates to
 `/Account/Login?returnUrl=%2Flink`. The website challenges Auth0, which returns its
 authorization code to the website's `/callback`. After login, browser requests
 must resolve to a positive local account ID.
 
-`POST /link` accepts the typed `userCode` with antiforgery validation. It binds
+After login, the page consumes the retained code and automatically submits it using
+the existing form. `POST /link` accepts this public `userCode` with antiforgery validation. It binds
 the pending request to the reviewing account and creates an `approvalCode` for
 that account. The confirmation shows the account, requester-supplied computer
 details and requester IP, with a warning to approve only a request the user started.
@@ -177,7 +181,7 @@ revoke an issued API key.
 - A lost successful token response cannot be replayed. The user must start a new
   request and can revoke the named unused key on the website. Cancellation after
   approval can also leave an issued key that was never collected.
-- Closing Settings stops UI-driven polling; reopening it resumes the backend's
+- Closing the account modal stops UI-driven polling; reopening it resumes the backend's
   pending attempt. No background daemon is introduced.
 
 ## Boundaries and source references

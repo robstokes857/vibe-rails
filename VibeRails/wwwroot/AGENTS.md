@@ -63,10 +63,14 @@ The approved email is saved with a full-key fingerprint and returned as response
 An account event refreshes authoritative settings even when the modal is closed.
 Start, status and cancel use `POST`, `GET` and `DELETE /api/v1/settings/remote-link` through
 `app.apiCall`; only the backend sees the device secret and API key. The UI displays the user
-code and opens the exact `https://viberails.ai/link` URL from a separate **Open sign-in page**
+code and opens `https://viberails.ai/link#code=ABCD-EFGH` from a separate **Open sign-in page**
 click, so browser popup blockers do not swallow an asynchronous launch. Feature-detect
 `window.__viberails_openExternal__` for VS Code; an anchor remains the browser/older-host fallback.
-Do not add a code, key, callback URL or secret to the link.
+Only the strict public eight-character user code may enter that fragment. The website clears
+it before login, retains it in same-tab session storage for at most ten minutes, and submits
+the authenticated `/link` form with its antiforgery token. Approval remains a separate click.
+Never put a device secret, key, callback URL or arbitrary query in the link. The backend's
+verification URI must still equal the fixed, fragment-free `/link` page.
 
 Account sign-in currently supports the production `https://viberails.ai` origin in both the
 dashboard and VS Code bridge. The backend reads `VibeRails:FrontendUrl` (the same nested key
@@ -153,7 +157,9 @@ call to the open workspace, so the client never sends a project path. The list e
 card **summaries** (including the canonical `type`, but no comments/commits/sessions/attachments,
 plus `commentCount`, `activeSessionId`, `activeTabId`); `getBoardCardAsync` returns the full card, which is why
 `openCardEditor` always re-fetches — an LLM may have commented on or moved the card since the
-board loaded. There is no "Reset sample" any more; a new project starts with five empty lanes.
+board loaded. There is no "Reset sample" any more; a new project starts with five empty lanes on a board
+named after the custom project name, or the repository folder when none is set. The retired
+`"Main"` default is no longer written.
 
 **Cards are work items for LLMs.** `card.assignee` is an LLM picker key (`base:claude`,
 `env:7:codex`), never a person: the editor's Assignee field is `mountLlmPicker(app, select,

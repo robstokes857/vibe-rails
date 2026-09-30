@@ -351,8 +351,9 @@ Settings can create and save a new VibeRails API key through typed-code browser 
 `RemoteAccountLinkService` owns one temporary attempt per root backend; authenticated
 `POST`/`GET`/`DELETE /api/v1/settings/remote-link` start, poll and cancel it. The root calls
 the hosted `/api/v1/device-links` contract over HTTPS; only the short user code and display
-state reach the dashboard. The browser opens `https://viberails.ai/link`, signs in through
-the site's existing Auth0 flow, enters the code and approves. VS Code uses the narrow
+state reach the dashboard. The browser opens `https://viberails.ai/link#code=ABCD-EFGH`; the
+website clears the fragment before its Auth0 flow and automatically POSTs the public code
+with its antiforgery token. The user checks the computer/account and approves. VS Code uses the narrow
 `__viberails_openExternal__` bridge to open that same page in the system browser.
 
 The hosted service keeps pending requests in memory for ten minutes and delivers the

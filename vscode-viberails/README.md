@@ -67,8 +67,8 @@ Install options for Windows, Linux, and Mac are available at https://viberails.a
 
 ### Connect your viberails.ai account
 
-Open **Settings → General**, then select **Sign in to viberails.ai**. Copy the displayed code
-and choose **Open sign-in page**. Sign in through your browser, enter the code, and approve
+Open **Settings → General → Account**, select **Sign in**, and choose **Open sign-in page**.
+Sign in through your browser; the code is submitted automatically. Check the computer and approve
 the request. VibeRails saves the connection automatically. The API-key field also accepts a
 key from your account if you prefer to paste one.
 

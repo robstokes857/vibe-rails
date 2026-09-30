@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { RemoteAccountLinkPanel, SIGN_IN_URL, isSignInUrl } from '../../../VibeRails/wwwroot/js/modules/remote-account-link.js';
+import { RemoteAccountLinkPanel, SIGN_IN_URL, isSignInUrl, signInUrlForCode } from '../../../VibeRails/wwwroot/js/modules/remote-account-link.js';
 import { SettingsController } from '../../../VibeRails/wwwroot/js/modules/settings-controller.js';
 
 function deferred() {
@@ -53,7 +53,7 @@ test('start displays a code and waits the server interval, with at most one outs
     const { panel, field, calls } = harness(t, (_url, method) => method === 'POST' ? Promise.resolve(pending({ interval: 6 })) : poll.promise);
     await panel.start();
     assert.equal(field('code').textContent, 'BXQK-2M7T');
-    assert.equal(field('open').href, SIGN_IN_URL);
+    assert.equal(field('open').href, `${SIGN_IN_URL}#code=BXQK-2M7T`);
     assert.equal(field('countdown').textContent, 'Code expires in 10:00');
     t.mock.timers.tick(5999);
     assert.equal(calls.length, 1);
@@ -247,7 +247,7 @@ test('opening requires a live code and a click; feature-detected VS Code bridge 
     await panel.start();
     assert.deepEqual(opened, [], 'start never opens a delayed popup');
     panel.openSignInPage(click);
-    assert.deepEqual(opened, [SIGN_IN_URL]);
+    assert.deepEqual(opened, [`${SIGN_IN_URL}#code=BXQK-2M7T`]);
     assert.equal(prevented, 1);
     delete window.__viberails_openExternal__;
     panel.openSignInPage(click);
@@ -258,6 +258,13 @@ test('opening requires a live code and a click; feature-detected VS Code bridge 
     panel.unload();
     panel.openSignInPage(click);
     assert.equal(prevented, 2);
+});
+
+test('only a validated public code may be carried to the website for automatic POST', () => {
+    assert.equal(signInUrlForCode('ABCD-2345'), `${SIGN_IN_URL}#code=ABCD-2345`);
+    for (const code of [null, undefined, {}, 'secret-device-capability', 'ABCD-2345&redirect=evil', 'ABCD-2345\n']) {
+        assert.equal(signInUrlForCode(code), SIGN_IN_URL);
+    }
 });
 
 test('clipboard copies only the user code and a late copy cannot repaint a cancelled attempt', async t => {

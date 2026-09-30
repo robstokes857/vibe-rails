@@ -4,6 +4,7 @@ const { test, expect } = process.env.VIBERAILS_REMOTE_LINK_STATIC === '1'
 
 const MASK = '••••••••abcd';
 const LINK_URL = 'https://viberails.ai/link';
+const COMPLETE_LINK_URL = `${LINK_URL}#code=BXQK-2M7T`;
 
 async function openSettings(page, { bridge = false, signedIn = false, email = 'rob@example.com' } = {}) {
     await page.addInitScript(({ bridge }) => {
@@ -78,7 +79,7 @@ test('browser sign-in opens from an explicit click and saves only the linked key
     await expect(page.locator('[data-remote-link-code]')).toHaveText('BXQK-2M7T');
     expect(context.pages()).toHaveLength(1);
     const link = page.getByRole('link', { name: 'Open sign-in page' });
-    await expect(link).toHaveAttribute('href', LINK_URL);
+    await expect(link).toHaveAttribute('href', COMPLETE_LINK_URL);
     await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
     await page.getByRole('button', { name: 'Copy code', exact: true }).click();
     await expect(page.locator('[data-remote-link-copy-status]')).toHaveText('Code copied.');
@@ -88,7 +89,7 @@ test('browser sign-in opens from an explicit click and saves only the linked key
     const popupPromise = page.waitForEvent('popup');
     await link.click();
     const popup = await popupPromise;
-    await expect(popup).toHaveURL(LINK_URL);
+    await expect(popup).toHaveURL(COMPLETE_LINK_URL);
     await popup.close();
     approve();
     await expect(page.locator('[data-remote-link-status]')).toHaveText('Logged in rob@example.com', { timeout: 7000 });
@@ -120,14 +121,14 @@ test('browser sign-in opens from an explicit click and saves only the linked key
     await expect(root.locator('[data-account-status]')).toHaveText('Sign in to your viberails.ai account.');
 });
 
-test('VS Code bridge opens the same code-free page on a narrow panel, and Cancel leaves paste usable', async ({ page, context }, testInfo) => {
+test('VS Code bridge carries the public code on a narrow panel, and Cancel leaves paste usable', async ({ page, context }, testInfo) => {
     await page.setViewportSize({ width: 420, height: 900 });
     const { root, calls } = await openSettings(page, { bridge: true });
     await root.locator('[data-account-settings-action]').click();
     await page.locator('[data-remote-link-start]').click();
     await expect(page.locator('[data-remote-link-code]')).toHaveText('BXQK-2M7T');
     await page.getByRole('link', { name: 'Open sign-in page' }).click();
-    expect(await page.evaluate(() => window.__openedSignInPages)).toEqual([LINK_URL]);
+    expect(await page.evaluate(() => window.__openedSignInPages)).toEqual([COMPLETE_LINK_URL]);
     expect(context.pages()).toHaveLength(1);
     const panel = page.locator('[data-remote-account-link]');
     await panel.scrollIntoViewIfNeeded();

@@ -2,7 +2,7 @@ import * as assert from 'assert/strict';
 import { isAllowedSignInUrl, openExternalSignIn } from '../../external-sign-in';
 
 suite('External sign-in bridge', () => {
-    test('opens only the exact HTTPS code-entry page, never URI credentials or arbitrary commands', async () => {
+    test('opens only the fixed page and a strict public-code fragment', async () => {
         const opened: string[] = [];
         const open = async (url: string) => { opened.push(url); return true; };
         for (const url of [undefined, null, 3, {},
@@ -10,6 +10,9 @@ suite('External sign-in bridge', () => {
             'javascript:alert(1)', 'https://viberails.ai.evil.example/link', 'https://evil.example/link',
             'https://user:secret@viberails.ai/link', 'https://viberails.ai:443/link',
             'https://viberails.ai/link?code=ABCD-1234', 'https://viberails.ai/link#secret',
+            'https://viberails.ai/link#code=secret-device-capability',
+            'https://viberails.ai/link#code=ABCD-1234&redirect=evil',
+            'https://viberails.ai/link#code=ABCD-1234\n',
             'http://viberails.ai/link', 'http://localhost:5000/link', 'https://viberails.ai/link/',
             ' https://viberails.ai/link', 'https://viberails.ai/other/../link']) {
             assert.equal(isAllowedSignInUrl(url), false, String(url));
@@ -18,6 +21,8 @@ suite('External sign-in bridge', () => {
         assert.deepEqual(opened, []);
         assert.equal(await openExternalSignIn('https://viberails.ai/link', open), true);
         assert.deepEqual(opened, ['https://viberails.ai/link']);
+        assert.equal(await openExternalSignIn('https://viberails.ai/link#code=ABCD-2345', open), true);
+        assert.equal(opened[1], 'https://viberails.ai/link#code=ABCD-2345');
     });
 
     test('reports browser refusal and propagates launch failure for the host to display', async () => {

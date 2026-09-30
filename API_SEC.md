@@ -2,6 +2,15 @@
 
 ## VIBE-15 account display (2026-09-30, scoped amendment)
 
+The requested follow-up carries only the public `userCode` in a strict
+`https://viberails.ai/link#code=ABCD-EFGH` fragment. The backend still accepts only the
+fixed fragment-free verification URI. The VS Code bridge permits that optional exact-format
+fragment and rejects other hosts, paths, queries, credentials and arbitrary fragments. The
+hosted first-party script removes the fragment before Auth0, retains the code in same-tab
+session storage for at most ten minutes, and submits the existing authenticated `/link` POST
+with a fresh antiforgery token. Final approval remains explicit; secret `deviceCode` and API
+keys stay backend-only. This supersedes the earlier code-free UI-link restriction below.
+
 The existing settings responses now include response-only `remoteAccountEmail`. Only device
 approval writes this display value, atomically with the credential and its SHA-256 fingerprint
 in the existing private settings file. Requests cannot set the email; a full-key fingerprint

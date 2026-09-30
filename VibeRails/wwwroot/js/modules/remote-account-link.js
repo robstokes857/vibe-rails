@@ -2,10 +2,15 @@ const LINK_API = '/api/v1/settings/remote-link';
 export const SIGN_IN_URL = 'https://viberails.ai/link';
 const TERMINAL_STATUSES = new Set(['idle', 'linked', 'denied', 'expired', 'unavailable', 'error', 'cancelled']);
 
-// Keep the browser and extension on the same fixed, code-free sign-in page. In particular,
-// never turn a server-provided query, credential, or arbitrary URL into an external link.
+// The server must supply the fixed verification page. Only the validated public user code
+// may be added locally as a fragment; the website submits it in an antiforgery-protected POST.
 export function isSignInUrl(value) {
     return value === SIGN_IN_URL;
+}
+
+export function signInUrlForCode(userCode) {
+    return typeof userCode === 'string' && userCode.length === 9 && /^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(userCode)
+        ? `${SIGN_IN_URL}#code=${userCode}` : SIGN_IN_URL;
 }
 
 export class RemoteAccountLinkPanel {
@@ -100,7 +105,7 @@ export class RemoteAccountLinkPanel {
                 // Another dashboard can observe the shared attempt before its start completes.
                 this.state = { status: 'pending', preparing: true, interval };
             } else if (!isSignInUrl(response.verificationUri)
-                || typeof response.userCode !== 'string' || !/^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(response.userCode)
+                || typeof response.userCode !== 'string' || response.userCode.length !== 9 || !/^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(response.userCode)
                 || !Number.isFinite(expiresAt)) {
                 this.state = { status: 'error' };
             } else {
@@ -179,7 +184,7 @@ export class RemoteAccountLinkPanel {
         this.root.querySelector('[data-remote-link-code]').textContent = needsApproval ? this.state.userCode : '';
         const open = this.root.querySelector('[data-remote-link-open]');
         if (needsApproval) {
-            open.href = SIGN_IN_URL;
+            open.href = signInUrlForCode(this.state.userCode);
             this._renderCountdown();
         } else {
             open.removeAttribute('href');
@@ -193,7 +198,7 @@ export class RemoteAccountLinkPanel {
                 : this.state.preparing ? 'Preparing sign-in…'
                 : this.state.error === 'remote_error'
                     ? 'Waiting for viberails.ai to respond. VibeRails will retry automatically while this code is valid.'
-                    : 'Enter this code on viberails.ai, then approve the request you started here. VibeRails will finish connecting automatically.',
+                    : 'Open the sign-in page to continue. Your code is filled in automatically; check the account and computer before approving.',
             linked: email ? `Logged in ${email}` : 'API key configured',
             denied: this.state.error === 'key_limit' ? 'Your account has reached its API key limit. Manage your keys on viberails.ai, then try again.' : 'The sign-in request was denied on viberails.ai.',
             expired: 'This sign-in code expired. Start again to get a new code.',
@@ -219,7 +224,7 @@ export class RemoteAccountLinkPanel {
         // by this second click, never after awaiting the start request (popup blockers).
         if (typeof window.__viberails_openExternal__ === 'function') {
             try {
-                window.__viberails_openExternal__(SIGN_IN_URL);
+                window.__viberails_openExternal__(signInUrlForCode(this.state.userCode));
                 event.preventDefault();
             } catch {
                 // Let the same user click follow the anchor if the bridge is unavailable.

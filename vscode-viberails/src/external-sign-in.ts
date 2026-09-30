@@ -1,6 +1,7 @@
-/** The webview may open only the code-entry page, with no URL-carried credentials. */
+/** Only the fixed verification page and its optional public user-code fragment may open. */
 export function isAllowedSignInUrl(value: unknown): value is string {
-    return value === 'https://viberails.ai/link';
+    return typeof value === 'string' && value.trim() === value
+        && /^https:\/\/viberails\.ai\/link(?:#code=[A-Z0-9]{4}-[A-Z0-9]{4})?$/.test(value);
 }
 
 /** Validate before crossing from the sandboxed webview to the user's browser. */
