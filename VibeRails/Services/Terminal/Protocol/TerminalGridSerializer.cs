@@ -81,6 +81,15 @@ internal static class TerminalGridSerializer
                 SerializeRow(sb, row, Math.Min(row.Length, cols));
                 sb.Append("\r\n");
             }
+
+            // The last history rows are still in the viewport. Advance a full
+            // screen (including the newline above) before CUP paints over it.
+            // This puts exactly scrollbackCount rows into history, even when
+            // there were fewer history rows than the viewport can hold.
+            if (scrollbackCount > 0)
+            {
+                for (int r = 1; r < rows; r++) sb.Append("\r\n");
+            }
         }
 
         // Current screen rows — use absolute CUP addressing per row to prevent

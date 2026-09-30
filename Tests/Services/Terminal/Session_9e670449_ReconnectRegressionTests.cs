@@ -49,7 +49,7 @@ public sealed class Session_9e670449_ReconnectRegressionTests(Xunit.ITestOutputH
     }
 
     [Fact]
-    public void SnapshotReconnect_FollowedByOneCapturedPtyRedraw_DoesNotDuplicateStartupCard()
+    public void SnapshotReconnect_FollowedByOneCapturedPtyRedraw_MatchesUninterruptedSession()
     {
         var beforeRepaintBytes = File.ReadAllBytes(BeforeRepaintFixturePath);
         var repaintBytes = File.ReadAllBytes(RepaintAfterSnapshotFixturePath);
@@ -70,9 +70,18 @@ public sealed class Session_9e670449_ReconnectRegressionTests(Xunit.ITestOutputH
 
         var client = new TerminalEmulator.Terminal(cols: 123, rows: 23, scrollbackSize: 20000);
         client.Write(reconnectSnapshot.AsSpan());
+        Assert.Equal(GetRenderedLines(server).ToArray(), GetRenderedLines(client).ToArray());
+
+        // The captured redraw itself leaves two banner copies in an uninterrupted
+        // session. The old <= 1 assertion passed only because snapshot painting
+        // discarded the newest history rows. A reconnect must preserve the stream's
+        // actual content, including those rows, without adding or removing anything.
+        server.Write(repaintBytes.AsSpan());
         client.Write(repaintBytes.AsSpan());
 
-        AssertStartupCardIsNotDuplicated(client);
+        Assert.Equal(GetRenderedLines(server).ToArray(), GetRenderedLines(client).ToArray());
+        Assert.Equal(server.CursorRow, client.CursorRow);
+        Assert.Equal(server.CursorCol, client.CursorCol);
     }
 
     [Theory]

@@ -38,6 +38,17 @@ Live PTY bytes and live snapshot semantics remain intact. CLI-private full-scree
 never entered terminal scrollback cannot be reconstructed from this snapshot; Replay remains
 the durable recording path after a host is dismissed or the app restarts.
 
+Snapshot serialization must move every retained history row out of the viewport before using
+absolute cursor positions to paint the final screen. Verify the rendered history and screen
+row by row; finding the text in the raw ANSI bytes does not prove xterm retained it. The same
+serializer serves live reconnects, so preserve its mode restoration and cursor behavior.
+`UITests/tests/terminal-snapshot-fixtures.cjs` generates synthetic snapshots through production
+capture code for the headless xterm and browser tests; it requires the .NET SDK.
+
+Completed-viewer disposal invalidates its pending snapshot request even during `writeAsync`.
+Each activation owns its request; an older write/fetch/finally must not complete or clear a
+newer activation. Check session identity and liveness after both asynchronous boundaries.
+
 ### Native script Automation recordings (VB-29)
 
 `JobScriptSessionRecorder` creates a normal Shell session for a native script-only workflow;
@@ -492,10 +503,10 @@ Flow:
 The root supports 100 terminal hosts. Automation hosts carry server-owned run/name metadata and
 appear in the robot/count menu, outside the ordinary tab strip. The browser restores metadata
 without attaching an xterm or WebSocket for each Automation; opening a running entry attaches it,
-and opening a finished entry replays its retained recording.
+and opening a finished entry renders its retained read-only snapshot with scrollback.
 
-Every two seconds, the root checks and closes finished Automation hosts. Capacity reclamation
-remains a fallback. Both paths require a terminal
+Finished Automation hosts stay available until dismissal, root exit or capacity reclamation.
+Capacity reclamation requires a terminal
 JobRun state, a successful inactive child-status response, and a finalized recording. Starting or
 active sessions, ordinary tabs, unavailable status, and unfinished recordings cannot be reclaimed.
 Closure removes only the host; saved sessions, Job history, and Board links remain intact.

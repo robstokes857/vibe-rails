@@ -21,6 +21,30 @@ const assert = require('node:assert');
 const { Terminal } = require('@xterm/headless');
 const fs = require('node:fs');
 const path = require('node:path');
+const snapshotFixtures = require('./terminal-snapshot-fixtures.cjs');
+
+test('production snapshots preserve every row, cursor and reporting mode in xterm', async () => {
+    for (const fixture of snapshotFixtures()) {
+        const term = new Terminal({ cols: fixture.cols, rows: fixture.rows, scrollback: 20000, allowProposedApi: true });
+        try {
+            await feed(term, '\x1b[?1049hstale alternate screen\x1b[?1000;2004h');
+            await feed(term, Buffer.from(fixture.base64, 'base64'));
+            const buffer = term.buffer.active;
+            const lines = Array.from({ length: buffer.length }, (_, i) => buffer.getLine(i).translateToString(true).trimEnd());
+            const label = JSON.stringify({ rows: fixture.rows, completed: fixture.completed, alternate: fixture.alternate });
+            assert.deepStrictEqual(lines, fixture.expected, label);
+            assert.strictEqual(buffer.type, fixture.alternate ? 'alternate' : 'normal', label);
+            assert.strictEqual(buffer.cursorY, fixture.cursorRow, label);
+            assert.strictEqual(buffer.cursorX, fixture.cursorCol, label);
+            assert.strictEqual(term.modes.mouseTrackingMode, fixture.completed ? 'none' : 'any', label);
+            assert.strictEqual(term.modes.bracketedPasteMode, !fixture.completed, label);
+            // Reattaching the same snapshot replaces history without duplicating it.
+            await feed(term, Buffer.from(fixture.base64, 'base64'));
+            assert.deepStrictEqual(Array.from({ length: term.buffer.active.length }, (_, i) =>
+                term.buffer.active.getLine(i).translateToString(true).trimEnd()), fixture.expected, label);
+        } finally { term.dispose(); }
+    }
+});
 
 const FIXTURE_PATH = path.resolve(
     __dirname, '..', '..', 'TerminalEmulator.Tests', 'fixtures',

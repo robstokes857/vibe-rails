@@ -7,6 +7,38 @@ namespace Tests.Services.Terminal;
 
 public sealed class TerminalGridSerializerTests
 {
+    [Theory]
+    [InlineData(1, 0)]
+    [InlineData(1, 3)]
+    [InlineData(5, 0)]
+    [InlineData(5, 1)]
+    [InlineData(5, 4)]
+    [InlineData(5, 25)]
+    [InlineData(24, 1)]
+    [InlineData(24, 30)]
+    public void SnapshotReplay_PreservesEveryHistoryAndScreenRow(int rows, int historyRows)
+    {
+        var server = new TerminalEmulator.Terminal(cols: 40, rows: rows, scrollbackSize: 100);
+        var expected = Enumerable.Range(0, rows + historyRows)
+            .Select(i => $"review line {i}".PadRight(40, '.')).ToArray();
+        server.Write(string.Join("\r\n", expected));
+        server.Write("\x1b[2;3H");
+
+        var client = new TerminalEmulator.Terminal(cols: 40, rows: rows, scrollbackSize: 100);
+        client.Write("stale history\r\nold screen");
+        client.Write(Serialize(server).AsSpan());
+
+        var history = client.GetScrollback().Select(row =>
+        {
+            var text = new StringBuilder();
+            foreach (var cell in row) cell.AppendText(text);
+            return text.ToString();
+        });
+        Assert.Equal(expected, history.Concat(client.GetScreenText()));
+        Assert.Equal(server.CursorRow, client.CursorRow);
+        Assert.Equal(server.CursorCol, client.CursorCol);
+    }
+
     [Fact]
     public void SnapshotReplay_ExitsStaleViewerAlternateScreen_WhenServerIsMainScreen()
     {

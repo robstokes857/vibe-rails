@@ -501,6 +501,9 @@ export class TerminalTab {
 
     disposeTerminalInstance() {
         this._completedOutputSessionId = null;
+        // A fetch or xterm write may still be pending. A later activation must
+        // own a new request even if the disposed xterm never completes its write.
+        this._completedOutputRequest = null;
         if (!this.vibeTerminal) {
             return;
         }
@@ -995,16 +998,20 @@ export class TerminalTab {
         const sessionId = this.state.sessionId;
         if (!sessionId || this.state.hasActiveSession || this._disposed) return false;
         if (this._completedOutputSessionId === sessionId && this.vibeTerminal) return true;
-        if (this._completedOutputRequest) return this._completedOutputRequest;
+        if (this._completedOutputRequest?.sessionId === sessionId) return this._completedOutputRequest.promise;
 
         this.autoReconnect?.cancel();
         this.disconnect({ preserveStatus: true });
-        this._completedOutputRequest = (async () => {
+        const request = { sessionId, promise: null };
+        const isCurrent = () => this._completedOutputRequest === request
+            && !this._disposed && !this.manager._destroyed && this.isActive
+            && !this.state.hasActiveSession && this.state.sessionId === sessionId;
+        this._completedOutputRequest = request;
+        request.promise = (async () => {
             const snapshot = await this.manager.app.apiCall(
                 `/api/v1/agent-tools/terminal/${encodeURIComponent(this.state.id)}/snapshot`,
                 'GET', null, { showLoading: false });
-            if (this._disposed || this.manager._destroyed || !this.isActive
-                || this.state.hasActiveSession || this.state.sessionId !== sessionId) return false;
+            if (!isCurrent()) return false;
             const payload = snapshot?.xterm_ui_bytes;
             if (snapshot?.sessionId !== sessionId || !payload?.base64 || payload.includes_scrollback !== true)
                 throw new Error('Completed output is not available yet. Try opening the terminal again.');
@@ -1016,7 +1023,7 @@ export class TerminalTab {
             terminal.resetForSnapshotReplay();
             const bytes = Uint8Array.from(atob(payload.base64), char => char.charCodeAt(0));
             await terminal.writeAsync(bytes);
-            if (this._disposed || this.vibeTerminal !== terminal || !this.isActive) return false;
+            if (!isCurrent() || this.vibeTerminal !== terminal) return false;
             terminal.fit({ notify: false });
             terminal.scrollToBottom();
             this.setupResizeHandling();
@@ -1024,8 +1031,10 @@ export class TerminalTab {
             this.state.status = 'finished';
             this.manager.updateUi();
             return true;
-        })().finally(() => { this._completedOutputRequest = null; });
-        return this._completedOutputRequest;
+        })().finally(() => {
+            if (this._completedOutputRequest === request) this._completedOutputRequest = null;
+        });
+        return request.promise;
     }
 
     async startSession(body) {

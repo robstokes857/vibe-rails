@@ -8,24 +8,99 @@ const snapshot = {
     xterm_ui_bytes: { base64: btoa('final output'), includes_scrollback: true }
 };
 
-function viewer(apiCall = async () => snapshot) {
+function viewer(apiCall = async () => snapshot, writeAsync) {
     const calls = [];
-    const terminal = {
+    const terminals = [];
+    const createTerminal = () => ({
         resize: (...args) => calls.push(['resize', ...args]),
         resetForSnapshotReplay: () => calls.push(['reset']),
-        writeAsync: async bytes => calls.push(['write', new TextDecoder().decode(bytes)]),
+        async writeAsync(bytes) {
+            calls.push(['write', new TextDecoder().decode(bytes)]);
+            await writeAsync?.(this);
+        },
+        dispose() { this.disposed = true; },
         fit: () => calls.push(['fit']), scrollToBottom: () => calls.push(['scroll'])
-    };
+    });
     const tab = Object.assign(Object.create(TerminalTab.prototype), {
         state: { id: 'auto', sessionId: 'recording', hasActiveSession: false },
         isActive: true,
         manager: { app: { apiCall }, updateUi() {} },
         autoReconnect: { cancel: () => calls.push(['cancel']) },
         disconnect: () => calls.push(['disconnect']),
-        ensureTerminal() { this.vibeTerminal = terminal; this.terminal = { options: {} }; },
+        ensureTerminal() {
+            if (this.vibeTerminal) return;
+            this.vibeTerminal = createTerminal();
+            terminals.push(this.vibeTerminal);
+            this.terminal = { options: {} };
+        },
         setupResizeHandling: () => calls.push(['resize-handling'])
     });
-    return { tab, calls };
+    return { tab, calls, terminals };
+}
+
+test('switching away and back during a completed write renders a fresh viewer', async () => {
+    const writes = [];
+    let fetches = 0;
+    const { tab, calls, terminals } = viewer(async () => { fetches++; return snapshot; },
+        () => new Promise(resolve => writes.push(resolve)));
+    const first = tab.showCompletedOutput();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(writes.length, 1);
+    tab.isActive = false;
+    tab.disposeTerminalInstance();
+    tab.isActive = true;
+    const second = tab.showCompletedOutput();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(writes.length, 2);
+    assert.equal(terminals[0].disposed, true);
+
+    // An old write finishing must not release the newer request's deduplication guard.
+    writes[0]();
+    assert.equal(await first, false);
+    const refresh = tab.showCompletedOutput();
+    assert.equal(fetches, 2);
+    writes[1]();
+    assert.equal(await second, true);
+    assert.equal(await refresh, true);
+    assert.equal(tab.vibeTerminal, terminals[1]);
+    assert.equal(calls.filter(([name]) => name === 'fit').length, 1);
+});
+
+test('switching away and back during snapshot fetch ignores the old activation', async () => {
+    const fetches = [];
+    const { tab, calls } = viewer(() => new Promise(resolve => fetches.push(resolve)));
+    const first = tab.showCompletedOutput();
+    tab.isActive = false;
+    tab.disposeTerminalInstance();
+    tab.isActive = true;
+    const second = tab.showCompletedOutput();
+    assert.equal(fetches.length, 2);
+    fetches[0](snapshot);
+    assert.equal(await first, false);
+    const refresh = tab.showCompletedOutput();
+    assert.equal(fetches.length, 2);
+    fetches[1](snapshot);
+    assert.equal(await second, true);
+    assert.equal(await refresh, true);
+    assert.equal(calls.filter(([name]) => name === 'write').length, 1);
+});
+
+for (const change of ['disposed', 'navigated', 'restarted', 'session-replaced', 'manager-destroyed']) {
+    test(`completed write cannot finalize after the viewer is ${change}`, async () => {
+        let finish;
+        const { tab, calls } = viewer(undefined, () => new Promise(resolve => { finish = resolve; }));
+        const pending = tab.showCompletedOutput();
+        await new Promise(resolve => setImmediate(resolve));
+        if (change === 'disposed') tab.disposeTerminalInstance();
+        if (change === 'navigated') tab.isActive = false;
+        if (change === 'restarted') tab.state.hasActiveSession = true;
+        if (change === 'session-replaced') tab.state.sessionId = 'new';
+        if (change === 'manager-destroyed') tab.manager._destroyed = true;
+        finish();
+        assert.equal(await pending, false);
+        assert.equal(calls.some(([name]) => name === 'fit'), false);
+        assert.notEqual(tab.state.status, 'finished');
+    });
 }
 
 test('finished output renders without a socket, disables typing and preserves scroll on repeat refresh', async () => {

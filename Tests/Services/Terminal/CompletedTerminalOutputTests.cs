@@ -34,9 +34,16 @@ public sealed class CompletedTerminalOutputTests
             Assert.NotNull(snapshot);
             Assert.Equal("completed", snapshot.SessionId);
             Assert.True(snapshot.XtermUiBytes!.IncludesScrollback);
-            var output = Encoding.UTF8.GetString(Convert.FromBase64String(snapshot.XtermUiBytes.Base64));
-            Assert.Contains("review line 0", output);
-            Assert.Contains("review line 29", output);
+            var viewer = new TerminalEmulator.Terminal(cols: 40, rows: 5, scrollbackSize: 100);
+            viewer.Write(Convert.FromBase64String(snapshot.XtermUiBytes.Base64).AsSpan());
+            var history = viewer.GetScrollback().Select(row =>
+            {
+                var text = new StringBuilder();
+                foreach (var cell in row) cell.AppendText(text);
+                return text.ToString().TrimEnd();
+            });
+            Assert.Equal(Enumerable.Range(0, 30).Select(i => $"review line {i}"),
+                history.Concat(viewer.GetScreenText()));
             Assert.False((await service.SendInputAsync(new("ignored"), TestContext.Current.CancellationToken)).Success);
 
             await using var next = new TerminalPty(Mock.Of<IPtyConnection>(), 40, 5);

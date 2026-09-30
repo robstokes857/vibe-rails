@@ -1,4 +1,11 @@
 const { test, expect } = require('@playwright/test');
+const snapshotFixtures = require('./terminal-snapshot-fixtures.cjs');
+
+let completedSnapshot;
+test.beforeAll(() => {
+    test.setTimeout(120000);
+    completedSnapshot = snapshotFixtures().find(value => value.completed && value.rows === 24);
+});
 
 const button = '#vb-terminal-automations-btn';
 const count = '#vb-terminal-automations-count';
@@ -34,10 +41,9 @@ async function openFixture(page, total = 35) {
         const snapshotMatch = path.match(/^\/api\/v1\/agent-tools\/terminal\/([^/]+)\/snapshot$/);
         if (snapshotMatch) {
             const tab = tabs.get(snapshotMatch[1]);
-            const output = '\x1b[?1049;1047;47l\x1b[?1000;1002;1003;1006;2004l\x1b[?25l'
-                + Array.from({ length: 100 }, (_, i) => `Review finding ${i + 1}\r\n`).join('');
-            return route.fulfill({ json: { sessionId: tab.sessionId, cols: 80, rows: 24,
-                xterm_ui_bytes: { base64: Buffer.from(output).toString('base64'), includes_scrollback: true } } });
+            return route.fulfill({ json: { sessionId: tab.sessionId,
+                cols: completedSnapshot.cols, rows: completedSnapshot.rows,
+                xterm_ui_bytes: { base64: completedSnapshot.base64, includes_scrollback: true } } });
         }
         const match = path.match(/^\/api\/v1\/terminal\/tabs\/([^/]+)(?:\/status)?$/);
         if (match) {
@@ -108,6 +114,8 @@ test('completed Automations keep scrollable output through switching and reload 
     await page.locator('[data-automation-open="automation-2"]').click();
     const readOutput = () => page.evaluate(() => window.app?.terminalController?.manager?.getActiveTab()?.instance?.vibeTerminal?.getPlainText());
     await expect.poll(readOutput).toContain('Review finding 100');
+    expect((await readOutput()).split('\n').map(line => line.trimEnd()).filter(Boolean))
+        .toEqual(completedSnapshot.expected);
     await expect(page.locator('#vb-terminal-window-title')).toContainText('Nightly workflow 2');
     expect(await page.evaluate(() => window.app.terminalController.manager.getActiveTab().instance.terminal.options.disableStdin)).toBe(true);
     const viewport = page.locator('.vb-terminal-tab-panel:visible .xterm');
@@ -125,6 +133,37 @@ test('completed Automations keep scrollable output through switching and reload 
     await page.reload();
     await expect.poll(readOutput).toContain('Review finding 100');
     await expect(page.locator('iframe[data-session-replay]')).toHaveCount(0);
+    expect(fixture.connections).toEqual(['ordinary']);
+});
+
+test('switching away and back during a completed write opens a usable replacement viewer', async ({ page }) => {
+    const fixture = await openFixture(page, 2);
+    await page.evaluate(async () => {
+        const { VibeTerminal } = await import('/js/modules/vibe-terminal.js');
+        const writeAsync = VibeTerminal.prototype.writeAsync;
+        let held = false;
+        VibeTerminal.prototype.writeAsync = function (bytes) {
+            const write = writeAsync.call(this, bytes);
+            if (held) return write;
+            held = true;
+            return write.then(() => new Promise(resolve => { window.releaseCompletedWrite = resolve; }));
+        };
+        window.firstCompletedOpen = window.app.terminalController.manager.openAutomationTab('automation-2');
+    });
+    await expect.poll(() => page.evaluate(() => typeof window.releaseCompletedWrite)).toBe('function');
+    await page.locator('.vb-terminal-tab-item[data-tab-id="ordinary"] .vb-terminal-tab-button').click();
+    await page.locator(button).click();
+    await page.locator('[data-automation-open="automation-2"]').click();
+    await expect.poll(() => page.evaluate(() =>
+        window.app.terminalController.manager.getActiveTab().instance._completedOutputSessionId
+    )).toBe(fixture.tabs.get('automation-2').sessionId);
+    await page.evaluate(async () => {
+        window.releaseCompletedWrite();
+        await window.firstCompletedOpen;
+    });
+    const output = await page.evaluate(() =>
+        window.app.terminalController.manager.getActiveTab().instance.vibeTerminal.getPlainText());
+    expect(output.split('\n').map(line => line.trimEnd()).filter(Boolean)).toEqual(completedSnapshot.expected);
     expect(fixture.connections).toEqual(['ordinary']);
 });
 

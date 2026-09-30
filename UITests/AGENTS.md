@@ -5,6 +5,7 @@ This directory contains the [Playwright](https://playwright.dev/) end-to-end tes
 ## Prerequisites
 
 - [Node.js](https://nodejs.org/) installed on your system.
+- .NET 10 SDK for the production snapshot fixtures used by the scrollback and Automation tests.
 
 ## Setup
 
@@ -80,6 +81,10 @@ npx playwright test --config playwright.terminal-automations.config.js
 Uses real terminal UI/xterm with intercepted API and WebSocket fixtures. Covers a long robot
 menu, lazy live attachment, scrollable finished output and reload, launch events/remount, independent close/undo,
 and narrow-window keyboard access. Does not launch a CLI or touch application state.
+Snapshot fixtures are generated from current backend capture/serialization code by
+`Tests/headless/TerminalSnapshots`. The headless xterm tests check every history/screen row,
+repeat attach, cursor position and live input modes; browser tests use those same bytes and
+cover switching away and back while a completed write is pending.
 
 ### Focused chat history tests (No Backend Required)
 
