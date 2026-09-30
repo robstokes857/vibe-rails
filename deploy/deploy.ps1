@@ -28,6 +28,109 @@ function Assert-NativeCommandSucceeded {
     }
 }
 
+function Get-GitIndexLockPath {
+    $gitDir = (git rev-parse --absolute-git-dir).Trim()
+    Assert-NativeCommandSucceeded -ExitCode $LASTEXITCODE -Operation "Locating the git directory"
+    return Join-Path $gitDir "index.lock"
+}
+
+function Test-GitIndexLockAbandoned {
+    param(
+        [Parameter(Mandatory = $true)][string]$LockPath,
+        [int]$MinimumAgeSeconds = 30
+    )
+
+    $lock = Get-Item -LiteralPath $LockPath -ErrorAction SilentlyContinue
+    if (-not $lock -or ((Get-Date) - $lock.LastWriteTime).TotalSeconds -lt $MinimumAgeSeconds) {
+        return $false
+    }
+
+    # Only Windows can name the running git commands; elsewhere never treat a lock as abandoned.
+    if (-not $IsWindows) {
+        return $false
+    }
+
+    # The fsmonitor daemon is long-lived and never holds the index lock.
+    $activeGit = @(Get-CimInstance Win32_Process -Filter "Name='git.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -notmatch 'fsmonitor--daemon' })
+    if ($activeGit.Count -gt 0) {
+        return $false
+    }
+
+    # A lock some other tool still has open (for example a libgit2 client) cannot be reopened exclusively.
+    try {
+        $stream = [System.IO.File]::Open($LockPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+        $stream.Dispose()
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Wait-GitIndexLockRelease {
+    param([int]$TimeoutSeconds = 120)
+
+    $lockPath = Get-GitIndexLockPath
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $announced = $false
+
+    while (Test-Path -LiteralPath $lockPath) {
+        if (Test-GitIndexLockAbandoned -LockPath $lockPath) {
+            Write-Host "  Removing stale $lockPath (no git process is using it)" -ForegroundColor Yellow
+            Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+            return
+        }
+
+        if ((Get-Date) -ge $deadline) {
+            throw "The git index is still locked after $TimeoutSeconds seconds: $lockPath. Another tool (an editor, VibeRails, a stuck git command) is holding it; close it, or delete the file if no git process is running."
+        }
+
+        if (-not $announced) {
+            Write-Host "  Waiting for another process to release .git/index.lock..." -ForegroundColor Yellow
+            $announced = $true
+        }
+        Start-Sleep -Milliseconds 500
+    }
+}
+
+# Editors, VibeRails and other watchers refresh the index the moment the version files change, so
+# a git command that writes the index can lose the race for index.lock. Wait, then retry.
+function Invoke-GitIndexWrite {
+    param(
+        [Parameter(Mandatory = $true)][string]$Operation,
+        [Parameter(Mandatory = $true)][string[]]$GitArguments,
+        [int]$MaxAttempts = 5
+    )
+
+    $lockPath = Get-GitIndexLockPath
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        Wait-GitIndexLockRelease
+        & git @GitArguments
+        $exitCode = $LASTEXITCODE
+
+        # Exit 128 with the lock present again means another process took it between our check and
+        # git's own attempt, so nothing was written and the command is safe to repeat.
+        if ($exitCode -ne 128 -or -not (Test-Path -LiteralPath $lockPath) -or $attempt -eq $MaxAttempts) {
+            break
+        }
+        Write-Host "  git lost a race for .git/index.lock; retrying ($attempt/$MaxAttempts)..." -ForegroundColor Yellow
+    }
+
+    Assert-NativeCommandSucceeded -ExitCode $exitCode -Operation $Operation
+}
+
+function Restore-VersionFiles {
+    param([Parameter(Mandatory = $true)][hashtable]$OriginalContent)
+
+    foreach ($entry in $OriginalContent.GetEnumerator()) {
+        [System.IO.File]::WriteAllBytes($entry.Key, $entry.Value)
+    }
+
+    # Best effort: unstage whatever the failed run staged so HEAD, index and files agree again.
+    git reset --quiet -- @($OriginalContent.Keys) 2>$null
+    Write-Host "Restored the version files to their pre-release contents." -ForegroundColor Yellow
+}
+
 function Test-PreFlightChecks {
     Write-Host "`nRunning pre-flight checks..." -ForegroundColor Cyan
 
@@ -470,28 +573,45 @@ if ($confirm -and $confirm.ToLower() -ne "y") {
     exit 0
 }
 
-Update-AppSettingsVersion -Version $newVersion
-Update-DotNetProjectVersion -Version $newVersion
-Sync-ExtensionVersion -Version $newVersion
-Assert-VersionSynchronization -Version $newVersion
-
-Write-Host "`nCommitting version changes..." -ForegroundColor Cyan
 $versionFiles = @($AppSettingsFile, $ProjectFile, $PackageJsonFile)
 if (Test-Path $PackageLockFile) {
     $versionFiles += $PackageLockFile
 }
-git add -- $versionFiles
-Assert-NativeCommandSucceeded -ExitCode $LASTEXITCODE -Operation "Staging version files"
 
-git diff --cached --quiet --exit-code
-$stagedVersionExitCode = $LASTEXITCODE
-if ($stagedVersionExitCode -eq 1) {
-    git commit -m "Bump version to $newVersion"
-    Assert-NativeCommandSucceeded -ExitCode $LASTEXITCODE -Operation "Committing version $newVersion (release stopped before push/tag)"
-} elseif ($stagedVersionExitCode -eq 0) {
-    Write-Host "Version metadata was already committed; using the current HEAD." -ForegroundColor Yellow
-} else {
-    throw "Could not inspect staged version changes (git diff exit code $stagedVersionExitCode)."
+# The pre-flight checks proved the tree clean, so these bytes are what HEAD holds. Keep them so a
+# failure before the version commit exists leaves the tree as found instead of dirty, which the
+# next run's pre-flight would reject.
+$originalVersionFiles = @{}
+foreach ($versionFile in $versionFiles) {
+    $originalVersionFiles[$versionFile] = [System.IO.File]::ReadAllBytes($versionFile)
+}
+
+try {
+    Update-AppSettingsVersion -Version $newVersion
+    Update-DotNetProjectVersion -Version $newVersion
+    Sync-ExtensionVersion -Version $newVersion
+    Assert-VersionSynchronization -Version $newVersion
+
+    Write-Host "`nCommitting version changes..." -ForegroundColor Cyan
+    Invoke-GitIndexWrite -Operation "Staging version files" -GitArguments (@("add", "--") + $versionFiles)
+
+    git diff --cached --quiet --exit-code
+    $stagedVersionExitCode = $LASTEXITCODE
+    if ($stagedVersionExitCode -eq 1) {
+        Invoke-GitIndexWrite -Operation "Committing version $newVersion (release stopped before push/tag)" -GitArguments @("commit", "-m", "Bump version to $newVersion")
+    } elseif ($stagedVersionExitCode -eq 0) {
+        Write-Host "Version metadata was already committed; using the current HEAD." -ForegroundColor Yellow
+    } else {
+        throw "Could not inspect staged version changes (git diff exit code $stagedVersionExitCode)."
+    }
+} catch {
+    $releaseError = $_
+    try {
+        Restore-VersionFiles -OriginalContent $originalVersionFiles
+    } catch {
+        Write-Host "Could not restore the version files: $_" -ForegroundColor Red
+    }
+    throw $releaseError
 }
 
 $remainingChanges = git status --porcelain
