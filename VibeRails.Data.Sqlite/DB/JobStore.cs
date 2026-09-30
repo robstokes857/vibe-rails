@@ -83,10 +83,10 @@ public sealed partial class JobStore : IJobStore
         command.CommandText = """
             INSERT INTO Jobs
                 (Name, ProjectPath, EnvironmentId, TimeoutMinutes, Enabled, CreatedUTC, UpdatedUTC, LaunchMinimized,
-                 ImportedFromJobId, LaunchInTerminalTab)
+                 ImportedFromJobId, LaunchInTerminalTab, Description)
             VALUES
                 ($name, $projectPath, $environmentId, $timeoutMinutes, $enabled, $now, $now, $launchMinimized,
-                 $importedFromJobId, $launchInTerminalTab)
+                 $importedFromJobId, $launchInTerminalTab, $description)
             RETURNING Id;
             """;
         BindJob(
@@ -98,6 +98,7 @@ public sealed partial class JobStore : IJobStore
             request.Enabled,
             request.LaunchMinimized,
             now);
+        command.Parameters.AddWithValue("$description", (object?)request.Description ?? DBNull.Value);
         command.Parameters.AddWithValue("$launchInTerminalTab", request.LaunchInTerminalTab == true ? 1 : 0);
         // Provenance is written once at creation; UpdateJobAsync never touches it.
         command.Parameters.AddWithValue(
@@ -126,7 +127,7 @@ public sealed partial class JobStore : IJobStore
         command.Transaction = transaction;
         command.CommandText = """
             UPDATE Jobs SET
-                Name = $name, ProjectPath = $projectPath, EnvironmentId = $environmentId,
+                Name = $name, Description = COALESCE($description, Description), ProjectPath = $projectPath, EnvironmentId = $environmentId,
                 TimeoutMinutes = $timeoutMinutes, Enabled = $enabled,
                 LaunchMinimized = $launchMinimized, LaunchInTerminalTab = COALESCE($launchInTerminalTab, LaunchInTerminalTab), UpdatedUTC = $now
             WHERE Id = $id AND DeletedUTC IS NULL;
@@ -140,6 +141,7 @@ public sealed partial class JobStore : IJobStore
             request.Enabled,
             request.LaunchMinimized,
             now);
+        command.Parameters.AddWithValue("$description", (object?)request.Description ?? DBNull.Value);
         command.Parameters.AddWithValue("$launchInTerminalTab", request.LaunchInTerminalTab is null ? DBNull.Value : request.LaunchInTerminalTab.Value ? 1 : 0);
         command.Parameters.AddWithValue("$id", id);
         if (await command.ExecuteNonQueryAsync(cancellationToken) == 0)
@@ -1643,7 +1645,8 @@ public sealed partial class JobStore : IJobStore
         [],
         reader.GetInt32(12) != 0,
         ImportedFromJobId: reader.IsDBNull(13) ? null : reader.GetInt64(13),
-        LaunchInTerminalTab: reader.GetInt32(14) != 0);
+        LaunchInTerminalTab: reader.GetInt32(14) != 0,
+        Description: reader.IsDBNull(15) ? null : reader.GetString(15));
 
     private static async Task<IReadOnlyList<JobTriggerDto>> ReadTriggersAsync(SqliteConnection connection, long jobId, CancellationToken cancellationToken)
     {
@@ -1752,6 +1755,8 @@ public sealed partial class JobStore : IJobStore
         SqliteMigrationRunner.RequireGenerationAtMost(connection, StateDatabaseSchema.Generation, "state.db");
         SqliteMigrationRunner.Apply(connection, "jobs", 1, MigrationKind.Additive, AdoptSchema);
         SqliteMigrationRunner.Apply(connection, "jobs-import-origin", 1, MigrationKind.Additive, AdoptImportOrigin);
+        SqliteMigrationRunner.Apply(connection, "jobs-description", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE Jobs ADD COLUMN Description TEXT"));
         SqliteMigrationRunner.Apply(connection, "jobs-terminal-tabs", 1, MigrationKind.Additive, (db, transaction) =>
         {
             foreach (var table in new[] { "Jobs", "JobRuns" })
@@ -1995,7 +2000,7 @@ public sealed partial class JobStore : IJobStore
     private const string JobSelectSql = """
         SELECT j.Id, j.Name, j.ProjectPath, e.LLM, j.EnvironmentId, e.CustomName,
                COALESCE(NULLIF(TRIM(e.CustomPrompt), ''), ''), j.TimeoutMinutes, j.Enabled,
-               j.CreatedUTC, j.UpdatedUTC, j.DeletedUTC, j.LaunchMinimized, j.ImportedFromJobId, j.LaunchInTerminalTab
+               j.CreatedUTC, j.UpdatedUTC, j.DeletedUTC, j.LaunchMinimized, j.ImportedFromJobId, j.LaunchInTerminalTab, j.Description
         FROM Jobs j LEFT JOIN Environments e ON e.Id = j.EnvironmentId
         """;
 

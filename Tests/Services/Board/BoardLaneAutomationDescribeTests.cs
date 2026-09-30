@@ -10,6 +10,15 @@ namespace Tests.Services.Board;
 /// </summary>
 public sealed class BoardLaneAutomationDescribeTests
 {
+    [Fact]
+    public void OptionalDescriptionIsIncludedAsBoundedPlainTextAlongsideTheWorkflow()
+    {
+        var described = BoardService.Describe(Definition() with { Description = "Check security\nthen tests\u202e" });
+        Assert.StartsWith("Check security then tests + Worker", described.Summary);
+        Assert.DoesNotContain('\u202e', described.Summary);
+        Assert.DoesNotContain('\n', described.Summary);
+    }
+
     private static BoardLaneAutomationDefinition Definition(
         string? name = "Automated code review", bool enabled = true, bool deleted = false, bool inProject = true, bool hasActions = true,
         string? worker = "Reviewer", string cli = "Claude", string prompt = "Review the linked commits.\nPost findings as a comment.",

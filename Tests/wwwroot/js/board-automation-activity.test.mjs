@@ -14,6 +14,48 @@ function harness() {
     return { controller, requests };
 }
 
+test('the running robot opens its Automation, and never opens the card or the working agent', async () => {
+    const { controller, requests } = harness();
+    const focused = [];
+    controller.focusSessionTab = async (card, session) => focused.push(session.id);
+    controller.openCardEditor = () => assert.fail('robot click must not open the editor');
+    const trigger = { dataset: { boardAction: 'go-to-automation' } };
+    const tile = { dataset: { cardId: 'card' } };
+    controller.onClick({
+        target: { closest: selector => selector === '[data-board-action]' ? trigger : selector === '.board-card' ? tile : null },
+        stopPropagation() {}
+    });
+    assert.equal(requests.length, 1);
+    requests[0].resolve({ id: 'card', sessions: [
+        { id: 'working', tabId: 'working-tab', active: true },
+        { id: 'old-review', tabId: 'old', active: false, isAutomation: true },
+        { id: 'review', tabId: 'review-tab', active: true, isAutomation: true }
+    ] });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(focused, ['review']);
+    assert.match(controller.automationIndicator(), /<button.*data-board-action="go-to-automation"/);
+});
+
+test('a late robot lookup cannot navigate after switching boards', async () => {
+    const { controller, requests } = harness();
+    controller.focusSessionTab = () => assert.fail('stale response navigated');
+    const pending = controller.goToCardAutomation('card');
+    controller.state.boardId = 'other';
+    requests[0].resolve({ sessions: [{ id: 'review', tabId: 'tab', active: true, isAutomation: true }] });
+    await pending;
+});
+
+test('a finished Automation reports its recording location without reopening the card', async () => {
+    const { controller, requests } = harness();
+    const messages = [];
+    controller.app.showToast = (...args) => messages.push(args.join(' '));
+    controller.focusSessionTab = () => assert.fail('finished session was focused');
+    const pending = controller.goToCardAutomation('card');
+    requests[0].resolve({ sessions: [] });
+    await pending;
+    assert.match(messages[0], /finished.*recording/);
+});
+
 test('activity refresh preserves loaded pages and ignores results after a board switch or unload', async () => {
     const original = globalThis.document;
     globalThis.document = { querySelector: () => null };

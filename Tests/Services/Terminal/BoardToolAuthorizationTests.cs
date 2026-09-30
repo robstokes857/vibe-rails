@@ -27,9 +27,11 @@ public sealed class BoardToolAuthorizationTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task SessionAndRunner_ForwardAuthorizationIntoCommandPreparation(bool authorized)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task SessionAndRunner_ForwardAuthorizationIntoCommandPreparation(bool authorized, bool nativeWorker)
     {
         var state = new Mock<ITerminalStateService>();
         state.Setup(s => s.CreateSessionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(),
@@ -47,8 +49,11 @@ public sealed class BoardToolAuthorizationTests
 
         // Stop at command preparation: this exercises both concrete forwarding layers without
         // spawning a PTY or making any CLI/configuration changes.
-        var thrown = await Assert.ThrowsAsync<ReachedPreparation>(() => session.StartSessionAsync(LLM.Claude, Path.GetTempPath(),
-            environmentName: "saved-environment", resolveInitialPrompt: () => Task.FromResult<string?>("card prompt"), authorizeBoardTools: authorized));
+        var thrown = await Assert.ThrowsAsync<ReachedPreparation>(() => nativeWorker
+            ? runner.RunCliWithWebAsync(LLM.Claude, Path.GetTempPath(), "saved-environment", [], session,
+                ct: TestContext.Current.CancellationToken, initialPrompt: "card prompt", authorizeBoardTools: authorized)
+            : (Task)session.StartSessionAsync(LLM.Claude, Path.GetTempPath(),
+                environmentName: "saved-environment", resolveInitialPrompt: () => Task.FromResult<string?>("card prompt"), authorizeBoardTools: authorized));
         Assert.Same(reachedPreparation, thrown);
         command.VerifyAll();
         state.Verify(s => s.CompleteSessionAsync("board-authorization-session", -1), Times.Once);

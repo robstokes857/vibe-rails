@@ -11,6 +11,45 @@ namespace Tests.Services.Terminal;
 
 public sealed class AutomationTabStateTests
 {
+    [Fact]
+    public async Task MonitorRetriesUntilTheRecordingIsFlushedThenClosesOnceWithoutACapacityRequest()
+    {
+        var state = Started();
+        var jobs = Jobs(JobRunStatus.Succeeded);
+        var sessions = Sessions(null);
+        var closed = 0;
+        var checks = 0;
+        await TerminalTabHostService.MonitorAutomationCompletionAsync(async ct =>
+        {
+            checks++;
+            if (checks == 1) throw new HttpRequestException("Temporary child disconnect");
+            if (checks == 3)
+                sessions.Setup(s => s.GetSessionByIdAsync("outer", It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(new SessionResponse("outer", "shell", null, "/project", DateTime.UtcNow, DateTime.UtcNow, 0));
+            if (!await state.TryReserveForReclamationAsync(jobs.Object, sessions.Object,
+                    _ => Task.FromResult<TerminalStatusResponse?>(new(false)), ct)) return false;
+            closed++;
+            return true;
+        }, TestContext.Current.CancellationToken, TimeSpan.FromMilliseconds(1))
+            .WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        Assert.Equal(3, checks);
+        Assert.Equal(1, closed);
+    }
+
+    [Fact]
+    public async Task DisposingTheHostCancelsItsCompletionMonitor()
+    {
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var checks = 0;
+        await TerminalTabHostService.MonitorAutomationCompletionAsync(_ =>
+        {
+            checks++;
+            cancellation.Cancel();
+            return Task.FromResult(false);
+        }, cancellation.Token, TimeSpan.FromMilliseconds(1));
+        Assert.Equal(1, checks);
+    }
+
     [Theory]
     [InlineData(JobRunStatus.Succeeded)]
     [InlineData(JobRunStatus.Failed)]

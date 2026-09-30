@@ -145,15 +145,17 @@ public static class CliLoop
         // at the top on purpose: {{git_branch}} and step commands must see the workspace-resolved
         // directory.
         string? initialPrompt = null;
-        if (environment is not null && !string.IsNullOrWhiteSpace(environment.CustomPrompt))
+        var promptTemplate = boardCardKey is null ? environment?.CustomPrompt
+            : Services.Board.BoardPromptComposer.ComposeAutomationPrompt(boardCardKey, environment?.CustomPrompt);
+        if (!string.IsNullOrWhiteSpace(promptTemplate))
         {
             var promptPlaceholders = scopedServices.GetRequiredService<IPromptPlaceholderService>();
             initialPrompt = await promptPlaceholders.ResolveAsync(
-                environment.CustomPrompt,
+                promptTemplate,
                 new PromptPlaceholderContext(
                     workingDirectory,
-                    environment.Id,
-                    environment.CustomName,
+                    environment?.Id,
+                    environment?.CustomName,
                     boardCardKey),
                 cancellationToken);
         }
@@ -168,7 +170,8 @@ public static class CliLoop
             cancellationToken,
             initialPrompt: initialPrompt,
             jobRunId: jobRunId,
-            onSessionCreated: onSessionCreated);
+            onSessionCreated: onSessionCreated,
+            authorizeBoardTools: boardCardKey is not null);
         Environment.ExitCode = exitCode;
         return exitCode;
     }

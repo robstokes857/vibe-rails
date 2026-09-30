@@ -1467,6 +1467,7 @@ namespace VibeRails.DTOs
     // Session state event payloads
     public record SessionStartedPayload(string SessionId, string Cli);
     public record AutomationTerminalStartedPayload(string TabId, string SessionId, string JobName, string WorkingDirectory);
+    public record AutomationTerminalClosedPayload(string TabId);
     public record SessionIdlePayload(string SessionId, string Cli, double IdleForSeconds);
     public record SessionBusyPayload(string SessionId, string Cli);
     public record SessionInputPayload(string SessionId, string Kind, string Source);
@@ -1703,6 +1704,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(TerminalStatusResponse))]
     [JsonSerializable(typeof(TerminalTabStatusResponse))]
     [JsonSerializable(typeof(AutomationTerminalStartedPayload))]
+    [JsonSerializable(typeof(AutomationTerminalClosedPayload))]
     [JsonSerializable(typeof(List<TerminalTabStatusResponse>))]
     [JsonSerializable(typeof(TerminalTabListResponse))]
     [JsonSerializable(typeof(StartTerminalRequest))]

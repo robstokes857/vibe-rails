@@ -145,7 +145,8 @@ public sealed record JobResponse(
     bool LaunchMinimized = false,
     List<JobActionDto>? Actions = null,
     long? ImportedFromJobId = null,
-    bool LaunchInTerminalTab = false);
+    bool LaunchInTerminalTab = false,
+    string? Description = null);
 
 public sealed record JobListResponse(List<JobResponse> Jobs);
 
@@ -171,7 +172,8 @@ public sealed record CreateJobRequest(
     bool LaunchMinimized = false,
     List<JobActionRequest>? Actions = null,
     long? ImportedFromJobId = null,
-    bool LaunchInTerminalTab = false);
+    bool LaunchInTerminalTab = false,
+    string? Description = null);
 
 public sealed record UpdateJobRequest(
     string Name,
@@ -184,7 +186,8 @@ public sealed record UpdateJobRequest(
     List<JobTriggerRequest> Triggers,
     bool LaunchMinimized = false,
     List<JobActionRequest>? Actions = null,
-    bool? LaunchInTerminalTab = null);
+    bool? LaunchInTerminalTab = null,
+    string? Description = null);
 
 /// <summary>
 /// Client-supplied action shape. Script paths and working directories may arrive absolute from
@@ -334,7 +337,8 @@ public sealed record JobDefinitionRecord(
     bool LaunchMinimized = false,
     IReadOnlyList<JobActionRecord>? Actions = null,
     long? ImportedFromJobId = null,
-    bool LaunchInTerminalTab = false);
+    bool LaunchInTerminalTab = false,
+    string? Description = null);
 
 public sealed record JobActionRecord(
     string Id,

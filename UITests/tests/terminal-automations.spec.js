@@ -160,6 +160,21 @@ test('completion switches a live Automation to replay and an unavailable host st
     expect(fixture.connections).toEqual(['ordinary']);
 });
 
+test('confirmed Automation closure removes its selected viewer and returns to the ordinary terminal', async ({ page }) => {
+    const fixture = await openFixture(page, 2);
+    await page.locator(button).click();
+    await page.locator('[data-automation-open="automation-1"]').click();
+    await expect.poll(() => page.evaluate(() => window.app.terminalController.manager.activeTabId)).toBe('automation-1');
+    fixture.tabs.delete('automation-1');
+    fixture.emit('automation_terminal_closed', { tabId: 'automation-1' });
+    await expect.poll(() => page.evaluate(() => window.app.terminalController.manager.activeTabId)).toBe('ordinary');
+    await expect.poll(() => page.evaluate(() => window.app.terminalController.manager.tabs.has('automation-1'))).toBe(false);
+    await expect(page.locator(normalTabs)).toHaveCount(1);
+    await page.locator(button).click();
+    await expect(page.locator('[data-automation-open="automation-1"]')).toHaveCount(0);
+    expect(fixture.deleted).toEqual([]); // The server already removed the host; no second DELETE.
+});
+
 test('reloading a selected Automation still lets ordinary terminals reconnect on selection', async ({ page }) => {
     await openFixture(page, 2);
     await page.locator(button).click();

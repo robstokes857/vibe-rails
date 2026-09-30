@@ -1,5 +1,36 @@
 # Vibe Board architecture and review
 
+## VIBE-9: agent completion and Automation lifecycle (2026-09-29)
+
+`complete_board_agent(summary, outcome, card?)` records the current linked session's first final
+report. The report is independent of process exit and of a workflow's remaining script actions;
+it neither stops a terminal nor moves the card. `get_board_agent_status(card?, sessionId?)` reads
+up to ten recent linked agents (or the requested linked session), their report, bounded latest
+comment/note and process exit outcome, plus pending lane entries and the newest twenty card
+Automation runs. Unknown process liveness stays unknown in stdio; persisted run status still
+works across roots. Agent polling reads bounded session context, not the full card activity.
+Both tools use the existing BoardTool registrations and exact launch grant allowlist.
+Board-triggered Workers now receive that grant and completion guidance, and their own session is
+linked even when an outer shell records the workflow. This preserves the original card default
+for a Worker in a cloned workspace. Ordinary native launches retain their existing permissions.
+
+The additive `board-agent-completion/1` component creates `BoardAgentCompletions` in `board.db`.
+Reports stay behind `IBoardStore`, are scoped by project and linked session, and do not rewrite
+terminal history or existing links. They are local coordination state; the final handoff comment
+continues to carry the user-facing result into the Board's existing activity sync.
+
+Automations have an optional description (2,000 characters). `jobs-description/1` adds nullable
+`Jobs.Description` in `state.db`; an omitted update preserves it and an empty string clears it.
+The editor, recipes and repository imports retain it. Lane discovery and move reports include it;
+launch prompts include up to five descriptions of 300 characters inside the task-data fence.
+
+The running robot on a card opens its active Automation terminal without opening the editor.
+The root checks each Automation host every two seconds and closes it after the run is terminal,
+the PTY is inactive, the recording is finalized, and no session start raced those checks. A
+browser disconnect alone never closes a host. `automation_terminal_closed` removes the viewer
+and menu entry; late browser list responses cannot restore a closed ID. Child process exits also
+announce closure. Recordings and Board links remain available from the card and Automation history.
+
 ## VB-69: display IDs and creation links (2026-09-28)
 
 See [the contributor contract](AGENTS.md#display-ids-and-draft-links-vb-69) for mutable labels,

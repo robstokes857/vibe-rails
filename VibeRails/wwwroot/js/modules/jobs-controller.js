@@ -885,6 +885,7 @@ export class JobController {
                 </div>
                 <div class="job-form-fields">
                     <div><label class="form-label" for="job-name">Name</label><input class="form-control" id="job-name" maxlength="100" required value="${this.escape(source.name || '')}" placeholder="Security review after commit"></div>
+                    <div><label class="form-label" for="job-description">Description <span class="text-muted">(optional)</span></label><textarea class="form-control" id="job-description" maxlength="2000" rows="3" placeholder="Tell agents what this automation does when a card enters its lane.">${this.escape(source.description || '')}</textarea></div>
                 </div>
 
                 <fieldset class="job-actions-fieldset">
@@ -1494,6 +1495,7 @@ export class JobController {
 
         return {
             name: form.querySelector('#job-name').value.trim(),
+            description: form.querySelector('#job-description')?.value.trim() || '',
             projectPath,
             llm,
             environmentId: selectedEnvironment ? Number(selectedEnvironment.id) : null,
@@ -1863,6 +1865,7 @@ export class JobController {
         const recipe = {
             recipeVersion: 'V2',
             name: job.name,
+            description: job.description || '',
             worker: environment ? {
                 name: environment.name,
                 llm: getLlmName(Number(getJobLlmForCli(cli) ?? job.llm)),
@@ -2103,6 +2106,7 @@ viberails-recipe -->
         return {
             recipeVersion: 'V2',
             name: entry.name,
+            description: entry.description || '',
             worker: worker ? {
                 name: worker.name,
                 llm: getLlmName(Number(worker.llm)),
@@ -2377,6 +2381,7 @@ viberails-recipe -->
                     });
                 await this.app.apiCall('/api/v1/jobs', 'POST', {
                     name: recipe.name,
+                    description: recipe.description || '',
                     projectPath: this.currentProjectPath(),
                     llm,
                     environmentId: environment ? Number(environment.id) : null,

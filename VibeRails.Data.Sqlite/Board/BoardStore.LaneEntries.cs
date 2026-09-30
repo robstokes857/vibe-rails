@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.Data.Sqlite;
 using VibeRails.DTOs;
+using VibeRails.Data.Sqlite;
 
 namespace VibeRails.Services.Board;
 
@@ -104,6 +105,7 @@ public sealed partial class BoardStore
             var jobEnvironment = hasEnvironments
                 ? "e.CustomName, COALESCE(e.LLM, 0), COALESCE(NULLIF(TRIM(e.CustomPrompt), ''), '')"
                 : "NULL, 0, ''";
+            var description = SqliteSchema.HasColumn(state, null, "Jobs", "Description") ? "j.Description" : "NULL";
             var jobJoin = hasEnvironments ? "LEFT JOIN Environments e ON e.Id = j.EnvironmentId" : string.Empty;
             await using (var jobs = state.CreateCommand())
             {
@@ -111,7 +113,7 @@ public sealed partial class BoardStore
                     SELECT j.Id, j.Name, j.Enabled, j.DeletedUTC IS NOT NULL,
                            j.ProjectPath = $project{ProjectPathCollation},
                            EXISTS (SELECT 1 FROM JobActions a WHERE a.JobId = j.Id),
-                           {jobEnvironment}
+                           {jobEnvironment}, {description}
                     FROM Jobs j {jobJoin}
                     WHERE j.Id IN ({ids});
                     """;
@@ -136,7 +138,8 @@ public sealed partial class BoardStore
                         reader.GetString(8),
                         scripts.TryGetValue(jobId, out var paths) ? paths : [],
                         run.Id,
-                        run.Running);
+                        run.Running,
+                        reader.IsDBNull(9) ? null : reader.GetString(9));
                 }
             }
         }

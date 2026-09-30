@@ -30,7 +30,8 @@ public sealed class StoreSchemaAdoptionTests : IDisposable
         Assert.Equal(version, Scalar("PRAGMA schema_version;"));
         Assert.Equal(migrations, Scalar("SELECT COUNT(*) FROM SchemaMigrations;"));
         Assert.Equal(24L, Scalar("SELECT COUNT(*) FROM SchemaMigrations WHERE Component='board';"));
-        Assert.Equal(5L, Scalar("SELECT COUNT(*) FROM SchemaMigrations WHERE Component LIKE 'jobs%';"));
+        Assert.Equal(6L, Scalar("SELECT COUNT(*) FROM SchemaMigrations WHERE Component LIKE 'jobs%';"));
+        Assert.Equal(1L, Scalar("SELECT COUNT(*) FROM SchemaMigrations WHERE Component='board-agent-completion';"));
     }
 
     [Fact]

@@ -523,6 +523,22 @@ public sealed class JobServiceTests : IDisposable
         _scheduler.Verify(candidate => candidate.Kick(), Times.Once);
     }
 
+    [Fact]
+    public async Task OptionalDescriptionIsTrimmedAndOverlongDescriptionsAreRejected()
+    {
+        WithEnvironment();
+        CreateJobRequest? saved = null;
+        _store.Setup(s => s.CreateJobAsync(It.IsAny<CreateJobRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<CreateJobRequest, CancellationToken>((request, _) => saved = request)
+            .ReturnsAsync(Record());
+        await Service().CreateJobAsync(Request() with { Description = "  Review security.  " }, TestContext.Current.CancellationToken);
+        Assert.Equal("Review security.", saved!.Description);
+        var error = await Assert.ThrowsAsync<JobServiceException>(() => Service().CreateJobAsync(
+            Request() with { Description = new string('x', 2001) }, TestContext.Current.CancellationToken));
+        Assert.Equal(400, error.StatusCode);
+        _store.Verify(s => s.CreateJobAsync(It.IsAny<CreateJobRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     private JobService Service() => new(
         _store.Object,
         _repository.Object,

@@ -199,7 +199,9 @@ public sealed class BoardLaunchService(
             boardName,
             boardContext?.Context,
             orderedColumns.Select(c => (IReadOnlyList<string>)laneAutomations[c.Id].Select(a => a.Name).ToList()).ToList(),
-            detail is null ? null : new BoardPromptComposer.CardActivity(detail.Comments.Count, detail.Notes.Count, detail.Sessions.Count));
+            detail is null ? null : new BoardPromptComposer.CardActivity(detail.Comments.Count, detail.Notes.Count, detail.Sessions.Count),
+            orderedColumns.SelectMany(c => laneAutomations[c.Id].Where(a => !string.IsNullOrWhiteSpace(a.Description))
+                .Select(a => $"{c.Name} / {a.Name}: {a.Description}")).ToList());
         var prompt = BoardPromptComposer.Compose(card, column?.Name ?? "(no lane)", assigneeLabel, environmentPrompt, context, intent);
         return new BoardLaunchPrompt(prompt, environmentPrompt, boardContext?.Context, boardId, boardName, detail);
     }

@@ -1198,3 +1198,11 @@ nullable `JobRuns.TerminalSessionId` for the full workflow shell recording. Work
 and the existing `SessionId` trigger remain intact. Retry copies the original launch target; an
 older client omitting the target in an update preserves it. Setup runs automatically and leaves
 all existing rows and columns in place.
+
+### Agent coordination and Automation descriptions (VIBE-9)
+
+`jobs-description/1` adds nullable `Jobs.Description` with no backfill. An omitted update keeps
+the description; an empty string clears it. Older readers/writers do not name the column.
+`board-agent-completion/1` creates `BoardAgentCompletions` in `board.db`, keyed by the globally unique
+session ID and scoped to its project. Writes require current card membership, retain the first final report, and never alter
+Sessions or JobRuns outcomes. Both migrations are additive and automatic.

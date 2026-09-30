@@ -1209,3 +1209,11 @@ rename a label. Immutable CardKey and row Id remain the identity used by sync an
 The additive board/20 migration preserves existing displayed keys. See the Board contributor
 and sync contracts for collision correction. New-card link selections persist atomically with
 creation, and discussion launch controls are separate from Start work.
+
+## Agent completion and Automation lifecycle
+
+See [VIBE-9 in the Board architecture](../VibeRails/Services/Board/ARCHITECTURE.md#vibe-9-agent-completion-and-automation-lifecycle-2026-09-29)
+for `complete_board_agent`, `get_board_agent_status`, optional Automation descriptions, clickable
+running-agent indicators, and root-owned cleanup of finished Automation terminals. Final agent
+reports live behind `IBoardStore` in `board.db`; process/run outcomes and recordings stay in
+`state.db`. Completion reports never bypass remaining workflow actions or recording finalization.

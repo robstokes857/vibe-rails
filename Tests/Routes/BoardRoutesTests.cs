@@ -92,6 +92,7 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         builder.Services.AddSingleton(new Mock<IJiraCloudClient>(MockBehavior.Strict).Object);
         builder.Services.AddScoped<IJiraPullService, JiraPullService>();
         builder.Services.AddSingleton(new BoardSyncLock(Path.Combine(_root, "sync.lock")));
+        builder.Services.AddSingleton<BoardSyncActivityCache>();
         builder.Services.AddSingleton(new Mock<IBoardSyncClient>(MockBehavior.Loose).Object);
         builder.Services.AddSingleton<IFeatureLog>(NullFeatureLog.Instance);
         builder.Services.AddScoped<IBoardSyncService, BoardSyncService>();

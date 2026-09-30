@@ -360,7 +360,7 @@ public static class JobRunner
                         "[Jobs] Run {RunId} is recording Worker terminal session {SessionId}",
                         runId,
                         sessionId);
-                    if (run.TerminalSessionId is null && boardCardKey is not null)
+                    if (boardCardKey is not null)
                     {
                         try
                         {

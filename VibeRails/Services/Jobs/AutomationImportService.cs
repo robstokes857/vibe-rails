@@ -225,7 +225,7 @@ public sealed partial class AutomationImportService(
             // Always the root of the chain: importing a copy still points at the original, so
             // every copy of one Automation shares one origin however it travelled.
             ImportedFromJobId: job.ImportedFromJobId ?? job.Id,
-            LaunchInTerminalTab: job.LaunchInTerminalTab);
+            LaunchInTerminalTab: job.LaunchInTerminalTab, Description: job.Description);
 
         JobResponse created;
         try
@@ -366,7 +366,7 @@ public sealed partial class AutomationImportService(
             PortableTriggers(job.Triggers),
             blocker is null,
             blocker,
-            job.LaunchInTerminalTab);
+            job.LaunchInTerminalTab, job.Description);
     }
 
     private async Task<string> ResolveDisplayNameAsync(string projectPath, CancellationToken cancellationToken)

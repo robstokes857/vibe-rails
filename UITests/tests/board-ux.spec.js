@@ -883,8 +883,15 @@ test('Automation recordings have their own rail and live robot without overwriti
     await expect(tile).not.toContainText('keep-stored');
     await expect(page.locator('[data-board-filter-tag], .board-tag')).toHaveCount(0);
     await expect(tile).toHaveClass(/is-live/);
-    await expect(tile.getByRole('img', { name: 'Automation running' })).toBeVisible();
+    await expect(tile.getByRole('button', { name: 'Go to running Automation' })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath('board-automation-card.png'), fullPage: true });
+    await page.evaluate(() => {
+        window.__focusedAutomation = null;
+        window.app.boardController.focusSessionTab = async (_card, session) => { window.__focusedAutomation = session.id; };
+    });
+    await tile.getByRole('button', { name: 'Go to running Automation' }).click();
+    await expect.poll(() => page.evaluate(() => window.__focusedAutomation)).toBe('automation_session');
+    await expect(page.locator('[data-board-card-editor]')).toHaveCount(0);
     await tile.click();
     const editor = page.locator('[data-board-card-editor]');
     await expect(editor.locator('[data-board-sessions] [data-session-id]')).toHaveCount(1);
@@ -905,7 +912,7 @@ test('Automation recordings have their own rail and live robot without overwriti
     expect(requests.some(request => request.path === '/api/v1/board/cards')).toBe(false);
     expect(requests.find(request => request.path === '/api/v1/board/cards/activity')?.body)
         .toEqual({ boardId: 'brd_main', cardIds: ['card_test'] });
-    await expect(tile.getByRole('img', { name: 'Automation running' })).toHaveCount(0);
+    await expect(tile.getByRole('button', { name: 'Go to running Automation' })).toHaveCount(0);
     await expect(tile).not.toHaveClass(/is-live/);
     await expect(editor.locator('[data-board-automations] .board-automation-running')).toHaveCount(0);
     await expect(editor.locator('#board-card-title')).toHaveValue('My unsaved title');

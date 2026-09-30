@@ -296,6 +296,7 @@ public sealed class JobService(
         return request with
         {
             Name = request.Name.Trim(),
+            Description = NormalizeDescription(request.Description),
             ProjectPath = projectPath,
             Llm = llm,
             EnvironmentId = environmentId,
@@ -324,6 +325,7 @@ public sealed class JobService(
         return request with
         {
             Name = request.Name.Trim(),
+            Description = NormalizeDescription(request.Description),
             ProjectPath = projectPath,
             Llm = llm,
             EnvironmentId = environmentId,
@@ -331,6 +333,13 @@ public sealed class JobService(
             Triggers = request.Triggers?.ToList() ?? [],
             Actions = actions
         };
+    }
+
+    private static string? NormalizeDescription(string? description)
+    {
+        if (description?.Length > 2000)
+            throw JobServiceException.BadRequest("Description must be 2,000 characters or fewer.");
+        return description?.Trim();
     }
 
     private async Task<(LLM Llm, int? EnvironmentId, string Prompt, List<JobActionRequest> Actions)> ValidateCommonAsync(
@@ -563,7 +572,7 @@ public sealed class JobService(
         job.Prompt, job.TimeoutMinutes, job.Enabled, job.CreatedUtc, job.UpdatedUtc, job.DeletedUtc,
         job.Triggers.ToList(), job.LaunchMinimized,
         job.Actions?.Select(ToActionDto).ToList(),
-        job.ImportedFromJobId, job.LaunchInTerminalTab);
+        job.ImportedFromJobId, job.LaunchInTerminalTab, job.Description);
 
     private static JobRunResponse ToResponse(JobRunRecord run) => new(
         run.Id, run.JobId, run.JobName, run.TriggerKind, run.Status, run.ProjectPath, run.Llm,

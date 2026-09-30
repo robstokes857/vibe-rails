@@ -26,6 +26,16 @@ public static class BoardPromptComposer
     /// environment's own Initial Message is long (see <see cref="DescriptionBudget"/>).
     /// </summary>
     public const int MaxDescriptionChars = 4_000;
+    internal const string AgentCompletionGuidance =
+        "Before exiting, call complete_board_agent with your outcome and summary after the handoff and card moves. "
+        + "To wait for a triggered agent, poll get_board_agent_status every 10 seconds for pending entries, run outcomes and completion reports. ";
+
+    /// <summary>Adds the Board workflow to a card-triggered Worker without replacing its instructions.</summary>
+    internal static string ComposeAutomationPrompt(string cardKey, string? workerPrompt) =>
+        "This Automation was triggered for kanban card " + SanitizeLine(cardKey, 100) + ". "
+        + "The user has authorized the viberails-mcp Board tools for this card session. "
+        + "Read get_board_card for its task, linked commits and latest activity. Post your findings with add_board_comment. "
+        + AgentCompletionGuidance + "\n\n" + (workerPrompt ?? "");
     public const int MinDescriptionChars = 1_500;
     public const int MaxTitleChars = 200;
     public const int MaxLinkedCommits = 10;
@@ -44,7 +54,8 @@ public static class BoardPromptComposer
         BoardContextSettings? Settings = null,
         /// <summary>Per lane (same order as <see cref="LaneNames"/>): the names of the Automations that run when a card enters it.</summary>
         IReadOnlyList<IReadOnlyList<string>>? LaneAutomationNames = null,
-        CardActivity? Activity = null)
+        CardActivity? Activity = null,
+        IReadOnlyList<string>? AutomationDescriptions = null)
     {
         public static readonly LaunchContext Empty = new([], [], []);
     }
@@ -89,6 +100,13 @@ public static class BoardPromptComposer
             builder.Append("Board: ").Append(SanitizeLine(context.BoardName, 80)).Append('\n');
         if (context.LaneNames.Count > 0)
             builder.Append("Lanes: ").Append(string.Join(" → ", context.LaneNames.Select((name, index) => LaneLabel(context, name, index)))).Append('\n');
+        if (context.AutomationDescriptions is { Count: > 0 } descriptions)
+        {
+            builder.Append("Lane Automation descriptions:\n");
+            foreach (var automationDescription in descriptions.Take(5))
+                builder.Append("- ").Append(SanitizeLine(automationDescription, 300)).Append('\n');
+            if (descriptions.Count > 5) builder.Append("More descriptions available with list_board_columns.\n");
+        }
         if (context.LinkedCommits.Count > 0)
         {
             builder.Append("Linked commits: ");
@@ -168,6 +186,7 @@ public static class BoardPromptComposer
             .Append("Use link_board_commit once per commit; it links every card attached to this session. ")
             .Append("If you also work on another card, use attach_board_session with its key; the original card stays the default. ")
             .Append("Set flagged=true with update_board_card only for an important unresolved issue needing the user's decision or intervention, and explain what is needed in a comment. ")
+            .Append(AgentCompletionGuidance)
             .Append("Use the Board tools as the only access path for card data and attachments.");
 
         if (!string.IsNullOrWhiteSpace(environmentPrompt))

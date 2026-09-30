@@ -295,6 +295,7 @@ test('Automations accept a script-only workflow and do not retain legacy base-CL
         ['#job-trigger-precommit', { checked: false }],
         ['#job-trigger-commit', { checked: false }],
         ['#job-name', { value: 'Repository checks' }],
+        ['#job-description', { value: '  Review tests before moving the card.  ' }],
         ['#job-timeout', { value: '30' }],
         ['#job-enabled', { checked: true }],
         ['#job-launch-minimized', { checked: false }]
@@ -315,6 +316,7 @@ test('Automations accept a script-only workflow and do not retain legacy base-CL
     }];
 
     const payload = controller.captureEditorState(form, { validate: true });
+    assert.equal(payload.description, 'Review tests before moving the card.');
     assert.equal(payload.environmentId, null);
     assert.equal(payload.llm, 0);
     assert.equal(payload.prompt, '');

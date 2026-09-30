@@ -25,7 +25,7 @@ namespace VibeRails.Services.Mcp.Tools;
 /// stamps into the environment).
 /// </summary>
 [McpServerToolType]
-public sealed class BoardTool(
+public sealed partial class BoardTool(
     IBoardService service,
     IBoardProjectResolver projects,
     IBoardStore store)
@@ -764,6 +764,7 @@ public sealed class BoardTool(
     internal const string LaneAutomationGuidance =
         "Lanes with on-entry Automations run them about " + SettleSecondsText + " seconds after a card enters, while a VibeRails dashboard is open. "
         + "Link commits and post your summary comment before moving a card into such a lane, and move it once. "
+        + "Use get_board_agent_status to discover the run and poll for its result. "
         + "move_board_card reports what an entry queued or skipped; pass skipAutomations=true to move without running them, or preview=true to see what a move would trigger.";
 
     private const string SettleSecondsText = "60";

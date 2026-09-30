@@ -885,7 +885,7 @@ public class TerminalRunner
         LLM llm, string workDir, string? envName, string[]? extraArgs,
         ITerminalSessionService sessionService, bool makeRemote = false, CancellationToken ct = default,
         string? initialUserInput = null, string? initialPrompt = null, string? jobRunId = null,
-        Action<string>? onSessionCreated = null)
+        Action<string>? onSessionCreated = null, bool authorizeBoardTools = false)
     {
         var (terminal, sessionId, remoteConn) = await CreateSessionAsync(
             llm,
@@ -898,6 +898,7 @@ public class TerminalRunner
             initialPrompt: initialPrompt,
             initialUserInput: initialUserInput,
             jobRunId: jobRunId,
+            authorizeBoardTools: authorizeBoardTools,
             onRemoteTakeoverAuthorized: trigger =>
             {
                 // Native CLI coexists with remote viewer — both can run concurrently.

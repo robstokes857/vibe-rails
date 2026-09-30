@@ -892,3 +892,13 @@ collapsed **Advanced** section (formerly Card settings) edits the individual dis
 permanent key, and holds the Agent context measurement and History. Both IDs remain searchable,
 including in chat history, which shows the display ID and keeps the key in the tooltip. New-card links live on the editor's draft card
 and are sent as `linkedCardIds` only on Create; link search and disposal retain generation guards.
+
+### Agent completion and Automation navigation (VIBE-9)
+
+The blinking robot on a Board tile is a button that focuses the active Automation session.
+Its lookup ignores responses after navigation. Ordinary working-agent selection is unchanged.
+The terminal manager consumes `automation_terminal_closed`, disposes an open viewer, selects an
+ordinary tab if needed, and remembers closed IDs so an older list response cannot restore them.
+Completion is confirmed by the root; a viewer socket disconnect alone never removes a host.
+Automation descriptions are optional, escaped, limited to 2,000 characters, and included in
+editor saves, recipes and repository imports.

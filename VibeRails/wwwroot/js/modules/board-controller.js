@@ -247,7 +247,23 @@ export class BoardController {
     }
 
     automationIndicator() {
-        return '<span class="board-automation-running" title="Automation running" role="img" aria-label="Automation running"><i class="fa-solid fa-robot" aria-hidden="true"></i></span>';
+        return '<button type="button" class="board-icon-btn board-automation-running" data-board-action="go-to-automation" title="Go to running Automation" aria-label="Go to running Automation"><i class="fa-solid fa-robot" aria-hidden="true"></i></button>';
+    }
+
+    async goToCardAutomation(cardId) {
+        const root = this.root;
+        const boardId = this.state.boardId;
+        const generation = this._activityGeneration;
+        try {
+            const card = await BoardApi.getBoardCardAsync(cardId);
+            if (root !== this.root || !root?.isConnected || boardId !== this.state.boardId
+                || generation !== this._activityGeneration) return;
+            const session = card.sessions?.find(item => item.active && item.isAutomation && item.tabId);
+            if (session) await this.focusSessionTab(card, session);
+            else this.app.showToast('Board', 'This Automation has finished. Its recording is available on the card.', 'info');
+        } catch (error) {
+            if (root === this.root && root?.isConnected) this.app.showError(error.message);
+        }
     }
 
     disposeCardPickers() {
@@ -923,6 +939,10 @@ export class BoardController {
         }
 
         switch (action) {
+            case 'go-to-automation':
+                event.stopPropagation();
+                if (cardEl) void this.goToCardAutomation(cardEl.dataset.cardId);
+                break;
             case 'load-more':
                 void this.loadMoreCards(trigger.dataset.columnId);
                 break;

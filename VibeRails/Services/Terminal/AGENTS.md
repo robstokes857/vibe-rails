@@ -55,7 +55,7 @@ Start work also sets `StartTerminalRequest.AuthorizeBoardTools` for base and sav
 launches. It defaults to false everywhere else and travels through TerminalRoutes,
 TerminalSessionService, TerminalRunner and CommandService. The launch prompt explicitly
 authorizes the Board workflow for every provider. `Commands/BoardMcpAuthorization.cs` grants
-only the thirteen reviewed Board tools in `ToolNames`, using exact per-tool rules. Unrelated
+only the sixteen reviewed Board tools in `ToolNames`, using exact per-tool rules. Unrelated
 MCP tools retain their normal approval policy. Never add a server-wide grant: future tools must
 be reviewed individually before they enter this allowlist.
 
@@ -482,10 +482,13 @@ appear in the robot/count menu, outside the ordinary tab strip. The browser rest
 without attaching an xterm or WebSocket for each Automation; opening a running entry attaches it,
 and opening a finished entry replays its retained recording.
 
-At capacity, creation may reclaim the oldest finished Automation host. This requires a terminal
+Every two seconds, the root checks and closes finished Automation hosts. Capacity reclamation
+remains a fallback. Both paths require a terminal
 JobRun state, a successful inactive child-status response, and a finalized recording. Starting or
 active sessions, ordinary tabs, unavailable status, and unfinished recordings cannot be reclaimed.
-Reclamation removes only the host; saved sessions, Job history, and Board links remain intact.
+Closure removes only the host; saved sessions, Job history, and Board links remain intact.
+The root emits `automation_terminal_closed` after removal (including child exit); the browser
+disposes its viewer and removes its menu entry. A WebSocket disconnect alone is not completion.
 
 ### 4) Interactive signed Python script
 

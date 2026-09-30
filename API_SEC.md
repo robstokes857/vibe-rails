@@ -1,5 +1,27 @@
 # API authentication coverage
 
+## VIBE-9 agent coordination (2026-09-29, scoped amendment)
+
+Added `complete_board_agent` and `get_board_agent_status` to the existing `BoardTool` HTTP and
+stdio registrations and exact per-tool launch grants. Completion accepts no caller-selected
+session: it uses the current launch context and requires a live card/session link in the resolved
+project. Reads scope the card, session and Automation trigger to that project. Reports do not
+stop processes, change workflow outcomes, or move cards. Stdio liveness is explicitly unknown
+when there is no live probe or recorded exit. Polling bounds agent rows, latest update text and
+recent runs. Board-triggered Worker launches receive the same narrow grants; other launches
+remain default-off. As with existing Board tools, launch context is local process identity, not
+a per-card server ACL.
+
+The optional Automation description is bounded to 2,000 characters, rendered as escaped text
+and sanitized/fenced in launch prompts. Existing Jobs routes and `/mcp` remain behind both
+session and tab credentials; no route or authentication exception was added. The new closure
+event uses source-generated JSON on the existing authenticated event channel.
+
+Scoped route enumeration and both mandatory repository-wide listener searches found the existing
+main Kestrel host, non-serving PortFinder probe and test hosts only; the cross-runtime search had
+no matches. No new listener or security violation was found. Regression coverage includes HTTP
+MCP discovery/call boundaries, exact grants, project/session isolation and preserved recording data.
+
 ## VIBE-13 automatic Board publication (2026-09-29, scoped amendment)
 
 At the owner's request, a configured API key now enables publication and linked activity for

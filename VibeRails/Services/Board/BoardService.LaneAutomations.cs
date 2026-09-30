@@ -18,7 +18,8 @@ public sealed record BoardLaneAutomationInfo(
     string Output,
     string? Unavailable,
     string? ActiveRunId,
-    bool ActiveRunIsRunning)
+    bool ActiveRunIsRunning,
+    string? Description = null)
 {
     public bool WouldQueue => Unavailable is null && ActiveRunId is null;
 }
@@ -200,7 +201,9 @@ public sealed partial class BoardService
             : !definition.HasActions ? "has no actions"
             : null;
 
-        var parts = new List<string>(2);
+        var parts = new List<string>(3);
+        if (!string.IsNullOrWhiteSpace(definition.Description))
+            parts.Add(BoardPromptComposer.SanitizeLine(definition.Description, 2000));
         if (definition.WorkerName is not null)
         {
             var worker = new StringBuilder("Worker \"").Append(OneLine(definition.WorkerName, AutomationNameChars)).Append('"');
@@ -219,7 +222,7 @@ public sealed partial class BoardService
         var output = definition.WorkerName is not null ? "a Worker terminal run linked to the card's Sessions rail"
             : definition.ScriptPaths.Count > 0 ? "script output recorded on the card's Sessions rail"
             : "nothing";
-        return new BoardLaneAutomationInfo(definition.JobId, name, summary, output, unavailable, definition.ActiveRunId, definition.ActiveRunIsRunning);
+        return new BoardLaneAutomationInfo(definition.JobId, name, summary, output, unavailable, definition.ActiveRunId, definition.ActiveRunIsRunning, definition.Description);
     }
 
     internal static string SkipComment(string laneName, IReadOnlyList<BoardLaneAutomationInfo> automations) =>

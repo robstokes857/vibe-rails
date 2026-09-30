@@ -62,6 +62,9 @@ CREATE UNIQUE INDEX UX_BoardCards_DisplayId ON BoardCards(ProjectPath, DisplayId
 -- table BoardAdditionalCardSessions
 CREATE TABLE BoardAdditionalCardSessions ( SessionId TEXT NOT NULL, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, TabId TEXT NULL, Selection TEXT NOT NULL, Cli TEXT NOT NULL, DisplayName TEXT NOT NULL, Origin TEXT NOT NULL, CreatedUTC TEXT NOT NULL, PRIMARY KEY (SessionId, CardId) );
 
+-- table BoardAgentCompletions
+CREATE TABLE BoardAgentCompletions ( ProjectPath TEXT NOT NULL, SessionId TEXT NOT NULL, Outcome TEXT NOT NULL, Summary TEXT NOT NULL, CompletedUTC TEXT NOT NULL, PRIMARY KEY (SessionId) );
+
 -- table BoardAttachmentContents
 CREATE TABLE BoardAttachmentContents ( AttachmentId TEXT PRIMARY KEY REFERENCES BoardAttachments(Id) ON DELETE CASCADE, Content BLOB NOT NULL );
 

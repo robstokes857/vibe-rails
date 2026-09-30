@@ -184,6 +184,15 @@ public class McpServerHttpTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CompleteBoardAgent_RequiresLaunchingSessionContextOverHttpToo()
+    {
+        await using var client = await ConnectAsync(TestContext.Current.CancellationToken);
+        var result = await client.CallToolAsync("complete_board_agent", new Dictionary<string, object?>
+            { ["summary"] = "Reviewed", ["card"] = "VB-2" }, TestContext.Current.CancellationToken);
+        Assert.Contains("FAIL: this tool requires a current VibeRails agent session", result.Text);
+    }
+
+    [Fact]
     public async Task CallTool_MissingRequiredArgument_ReportsToolError()
     {
         // Regression: the Explorer used to send {} and report "Call succeeded" because IsError was

@@ -1662,6 +1662,8 @@ public sealed partial class BoardStore : IBoardStore
         });
         // board/2: BoardComments.Kind separates agent scratchpad notes from the comment stream.
         // A fresh file already has the column from SchemaSql; adoption is guarded either way.
+        SqliteMigrationRunner.Apply(connection, "board-agent-completion", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, AgentCompletionSchemaSql));
         SqliteMigrationRunner.Apply(connection, "board", 2, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.AdoptStatement(db, transaction, CommentKindColumnSql));
         // board/3: classify cards. Existing rows are deliberately neutral rather than guessed.

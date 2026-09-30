@@ -70,6 +70,8 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 | `add_board_attachment` | `BoardTool.AddBoardAttachment` | Attach an agent-written `*.md` / `*.txt` file (UTF-8 text, ≤ 500,000 characters). |
 | `link_board_commit` | `BoardTool.LinkBoardCommit` | Capture a commit once from the terminal's checkout and atomically link its snapshot to the target and every card attached to the calling session in the project. Repeat session calls preserve existing links/snapshots. Without a session, links only the target. |
 | `attach_board_session` | `BoardTool.AttachBoardSession` | Explicitly attach the current VibeRails session to another card in the same project. Idempotent; preserves the original default. Future commit-link calls share with all attachments. No session-id argument or card move. |
+| `complete_board_agent` | `BoardTool.CompleteBoardAgent` | Current linked agent's first final report: required summary (≤ 4,000 characters), outcome `succeeded` / `failed` / `cancelled`, optional card. Does not stop its process or complete remaining workflow actions. |
+| `get_board_agent_status` | `BoardTool.GetBoardAgentStatus` | Poll a card's ten newest agents or a specific linked session, completion reports, latest updates, recorded exits, pending lane entries and twenty recent card-triggered runs. Unknown liveness is explicit. |
 > The wire names are what tool callers use. Calling `SearchHistory` (PascalCase) returns "Unknown tool".
 
 ### Kanban board tools (`BoardTool`)
@@ -155,7 +157,7 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
 - **Board launch authorization (2026-09-14)**: Start work sets the typed, false-by-default
   `AuthorizeBoardTools` marker for that session and explicitly authorizes the Board workflow in
   the prompt for every provider. `Terminal/Commands/BoardMcpAuthorization.cs` grants only the
-  fourteen Board tools for that session through an explicit `ToolNames` allowlist. No server
+  sixteen Board tools for that session through an explicit `ToolNames` allowlist. No server
   wildcard or unrelated MCP tool is authorized. Tests pin both the reviewed allowlist and exact
   provider grants.
   Antigravity receives only the narrow authorization prompt because its native switch is a global

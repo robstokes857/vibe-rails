@@ -107,6 +107,7 @@ export class TerminalManager {
         this.maxTabs = 100;
         this.tabs = new Map();
         this.automationTabs = new Map();
+        this.closedAutomationTabs = new Set();
         this.automationMenu = new TerminalAutomationMenu(this);
         this._automationRefresh = null;
         this.tabOrder = [];
@@ -567,6 +568,7 @@ export class TerminalManager {
 
         const tabs = Array.isArray(response?.tabs) ? response.tabs : [];
         tabs.forEach((tabInfo) => {
+            if (this.closedAutomationTabs.has(tabInfo.tabId)) return;
             if (isAutomationTab(tabInfo)) {
                 this.automationTabs.set(tabInfo.tabId, tabInfo);
                 return;
@@ -610,7 +612,7 @@ export class TerminalManager {
             try {
                 const response = await this.app.apiCall('/api/v1/terminal/tabs', 'GET', null, { showLoading: false });
                 if (this._destroyed || !Array.isArray(response?.tabs)) return;
-                const current = new Map(response.tabs.filter(isAutomationTab).map(tab => [tab.tabId, tab]));
+                const current = new Map(response.tabs.filter(tab => isAutomationTab(tab) && !this.closedAutomationTabs.has(tab.tabId)).map(tab => [tab.tabId, tab]));
                 if (Number.isFinite(response.maxTabs)) this.maxTabs = response.maxTabs;
                 for (const id of this.automationTabs.keys()) {
                     if (!current.has(id)) this.removeAutomationTab(id);
@@ -636,6 +638,7 @@ export class TerminalManager {
     }
 
     removeAutomationTab(tabId) {
+        this.closedAutomationTabs.add(tabId);
         this.automationTabs.delete(tabId);
         const tab = this.tabs.get(tabId);
         if (tab) {
@@ -695,7 +698,7 @@ export class TerminalManager {
     }
 
     addLocalTab(tabInfo, options = {}) {
-        if (this._destroyed) {
+        if (this._destroyed || this.closedAutomationTabs?.has(tabInfo?.tabId)) {
             return null;
         }
 
@@ -3119,6 +3122,7 @@ export class TerminalController {
         }
         manager = this.manager;
         if (!manager || manager.isDestroyed() || !manager.container?.isConnected) return false;
+        if (manager.closedAutomationTabs?.has(id)) return false;
         if (manager.automationTabs?.has(id)) return focus ? manager.openAutomationTab(id) : true;
         if (!manager.tabs.has(id)) {
             // Backend-created tabs already have a real session by the time their launch
@@ -3142,6 +3146,7 @@ export class TerminalController {
             // have populated the new manager while the request was in flight.
             manager = this.manager;
             if (!manager || manager.isDestroyed() || !manager.container?.isConnected) return false;
+            if (manager.closedAutomationTabs?.has(id)) return false;
             if (manager.tabs.has(id)) return focus ? manager.focusTab(id, { connectIfNeeded: true }) : true;
 
             const metadata = manager.getTabMetaFromStorage(id);
@@ -3264,6 +3269,13 @@ export class TerminalController {
      * Safe to call before the manager is created — handlers null-check this.manager.
      */
     bindSessionEvents(appEventClient) {
+        appEventClient.on('automation_terminal_closed', payload => {
+            const tabId = cleanString(payload?.tabId);
+            if (!tabId) return;
+            this.manager?.removeAutomationTab(tabId);
+            this.manager?.automationMenu.refresh();
+            this.manager?.updateUi();
+        });
         appEventClient.on('automation_terminal_started', payload => {
             const tabId = cleanString(payload?.tabId);
             if (!tabId) return;
