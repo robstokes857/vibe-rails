@@ -10,6 +10,7 @@ public sealed class BoardSyncServiceTests : IDisposable
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "board-sync-service-" + Guid.NewGuid().ToString("N"));
     private readonly BoardStore store;
+    private readonly BoardSyncActivityCache activityCache = new();
     private readonly FakeClient client = new();
     private readonly BoardSyncService service;
     private CancellationToken Ct => TestContext.Current.CancellationToken;
@@ -21,7 +22,7 @@ public sealed class BoardSyncServiceTests : IDisposable
         Directory.CreateDirectory(root);
         cs = $"Data Source={Path.Combine(root, "board.db")};Pooling=False";
         store = new BoardStore(cs, cs);
-        service = new(store, client, new BoardSyncLock(Path.Combine(root, "sync.lock")), NullFeatureLog.Instance);
+        service = new(store, client, new BoardSyncLock(Path.Combine(root, "sync.lock")), NullFeatureLog.Instance, activityCache);
     }
 
     private async Task<BoardCardRecord> Card()
@@ -149,7 +150,7 @@ public sealed class BoardSyncServiceTests : IDisposable
         var oversized = (await store.AddAttachmentContentAsync(root, cards[0].Id, "big.txt", "text/plain", new byte[1024 * 1024 + 1], Ct))!;
         await service.SetPublishedAsync(root, cards[0].BoardId, true, Ct, includeActivity: true);
         Assert.Equal(10, client.Activity.Count);
-        var nextScope = new BoardSyncService(store, client, new BoardSyncLock(Path.Combine(root, "sync.lock")), NullFeatureLog.Instance);
+        var nextScope = new BoardSyncService(store, client, new BoardSyncLock(Path.Combine(root, "sync.lock")), NullFeatureLog.Instance, activityCache);
         Assert.Null((await nextScope.SyncNowAsync(root, cards[0].BoardId, Ct))!.LastError);
         Assert.Equal(12, client.Activity.Select(a => a.CardId).Distinct().Count());
         var file = Assert.Single(client.Activity.First(a => a.CardId == cards[0].Id).Snapshot.Attachments);
@@ -169,7 +170,7 @@ public sealed class BoardSyncServiceTests : IDisposable
         await store.SaveSyncLinkAsync(old with { Enabled = false, ActivitySchema = 0 }, Ct);
         client.Activity.Clear();
         var resumedClient = new FakeClient();
-        var resumed = new BoardSyncService(store, resumedClient, new BoardSyncLock(Path.Combine(root, "sync.lock")), NullFeatureLog.Instance);
+        var resumed = new BoardSyncService(store, resumedClient, new BoardSyncLock(Path.Combine(root, "sync.lock")), NullFeatureLog.Instance, activityCache);
         await resumed.SyncDueAsync(Ct);
         var status = (await resumed.GetStatusAsync(root, card.BoardId, Ct))!;
         Assert.True(status.ActivityEnabled);
@@ -191,7 +192,7 @@ public sealed class BoardSyncServiceTests : IDisposable
         var nextClient = new FakeClient();
         nextClient.Entries.AddRange(client.Entries);
         var otherProcess = new BoardSyncService(new BoardStore(cs, cs), nextClient,
-            new BoardSyncLock(Path.Combine(root, "sync.lock")), NullFeatureLog.Instance);
+            new BoardSyncLock(Path.Combine(root, "sync.lock")), NullFeatureLog.Instance, activityCache);
         Assert.Null((await otherProcess.SyncNowAsync(root, cards[0].BoardId, Ct))!.LastError);
         Assert.Equal(2, nextClient.Activity.Count);
         Assert.All(nextClient.Activity, a => Assert.True(StringComparer.Ordinal.Compare(a.CardId, persisted) > 0));
@@ -221,6 +222,45 @@ public sealed class BoardSyncServiceTests : IDisposable
         Assert.Null(Assert.Single(snapshot.Attachments).ContentBase64);
         Assert.NotEmpty(snapshot.Warnings);
         Assert.Equal(large, Assert.Single((await store.GetCommitSnapshotAsync(root, card.Id, sha, Ct))!.Files).OriginalContent);
+    }
+
+    [Fact]
+    public async Task OutcomeBatchHandlesMissingLegacyAndPartialStateSchemas()
+    {
+        Assert.Empty(await store.GetSyncSessionOutcomesAsync([], Ct));
+        Assert.Empty(await store.GetSyncSessionOutcomesAsync(["first"], Ct));
+        await ExecuteAsync("CREATE TABLE Sessions(Id TEXT PRIMARY KEY);");
+        Assert.Empty(await store.GetSyncSessionOutcomesAsync(["first"], Ct));
+        await ExecuteAsync("""
+            ALTER TABLE Sessions ADD COLUMN EndedUTC TEXT;
+            ALTER TABLE Sessions ADD COLUMN ExitCode INTEGER;
+            INSERT INTO Sessions VALUES('first','2026-09-29T12:00:00Z',0),('not-requested',NULL,NULL);
+            """);
+        var withoutSummary = await store.GetSyncSessionOutcomesAsync(["first", "first", "missing"], Ct);
+        var outcome = Assert.Single(withoutSummary).Value;
+        Assert.Equal("first", outcome.SessionId);
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.NotNull(outcome.EndedUtc);
+        Assert.Null(outcome.Summary);
+        await ExecuteAsync("CREATE TABLE ChatSummary(SessionId TEXT PRIMARY KEY, SummaryText TEXT); INSERT INTO ChatSummary VALUES('first','Finished');");
+        Assert.Equal("Finished", (await store.GetSyncSessionOutcomesAsync(["first"], Ct))["first"].Summary);
+    }
+
+    [Fact]
+    public async Task OutcomeBatchBoundsTwoHundredUnicodeSummariesAndRejectsLargerRequests()
+    {
+        await ExecuteAsync("""
+            CREATE TABLE Sessions(Id TEXT PRIMARY KEY, EndedUTC TEXT, ExitCode INTEGER);
+            CREATE TABLE ChatSummary(SessionId TEXT PRIMARY KEY, SummaryText TEXT);
+            WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<200)
+            INSERT INTO Sessions SELECT 'session_'||x,NULL,NULL FROM n;
+            INSERT INTO ChatSummary SELECT Id,replace(hex(zeroblob(10000)),'0','🙂') FROM Sessions;
+            """);
+        var ids = Enumerable.Range(1, 200).Select(i => "session_" + i).ToArray();
+        var outcomes = await store.GetSyncSessionOutcomesAsync(ids, Ct);
+        Assert.Equal(200, outcomes.Count);
+        Assert.All(outcomes.Values, o => Assert.Equal(16000, o.Summary!.Length));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => store.GetSyncSessionOutcomesAsync([.. ids, "one-too-many"], Ct));
     }
 
     [Fact]
@@ -1012,5 +1052,5 @@ public sealed class BoardSyncServiceTests : IDisposable
             changes is null ? null : JsonDocument.Parse(changes).RootElement.Clone(), DateTime.UtcNow, Entries.Count + 1, "web"));
     }
 
-    public void Dispose() => Directory.Delete(root, true);
+    public void Dispose() { activityCache.Dispose(); Directory.Delete(root, true); }
 }

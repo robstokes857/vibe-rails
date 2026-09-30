@@ -154,3 +154,6 @@ activity and card reads still use each board's project scope.
 The cursor makes bounded card refresh fair across root processes/restarts under the sync lock.
 Activity reads remain behind `IBoardStore`, with SQL row/actual-content bounds before loading
 payloads. Existing stored snapshots and unlimited local attachment uploads are unchanged.
+`GetSyncSessionOutcomesAsync` accepts at most 200 IDs obtained from scoped linked-session metadata.
+It uses one state-database connection and a joined query after one batch of schema checks; summaries
+are bounded before materialization. The single-session reader still serves ordinary card context.

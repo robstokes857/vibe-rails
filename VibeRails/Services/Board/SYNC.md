@@ -58,13 +58,18 @@ VIBE-13 replaces the old publication and linked-activity switches. Existing paus
 publications upgrade on the next scheduler tick. The legacy publish route accepts its old fields
 for compatibility but they cannot disable sync. Existing `board/23` columns `ActivitySchema` and
 `ActivityAfter` remain; no migration or stored-data removal is required. Older binaries retain
-their old behavior, so the desktop companion must be updated along with the website.
+their old behavior. The website and desktop may ship separately; complete automatic activity
+publication requires the updated desktop as well as a compatible website.
 
 After each successful push/pull of an enabled publication, `PUT /api/v1/boards/{board}/cards/{card}/activity` replaces the
 activity of up to ten cards. A bounded identity query rotates through the board across scheduler
-scopes and processes using its stored cursor and the existing cross-process sync lock. Identical
-snapshots are skipped for up to an hour in this process; changed/removal snapshots are sent on
-that card's next turn. The server must acknowledge `{schema:1,cardId}` before its hash is accepted.
+scopes and processes using its stored cursor and the existing cross-process sync lock. A bounded
+singleton .NET MemoryCache holds at most 10,000 successful check hashes/timestamps, partitioned
+by destination, board and card. A repeat check within 60 seconds skips capture before any state,
+saved-code or attachment reads; Sync now bypasses this window. Failed acknowledgements are never
+cached. No recording or code payloads are retained in memory. Identical snapshots are skipped for
+upload for up to an hour in this process; changed/removal snapshots are sent on that card's next
+turn. The server must acknowledge `{schema:1,cardId}` before its hash is accepted.
 A failed card does not stop the bounded rotation; it retries on its next turn. Older servers,
 failures and invalid acknowledgements stay visible in sync status; completed Card Log progress
 is preserved. Removing the configured API key stops both protocols. A large board's first activity
@@ -75,7 +80,12 @@ cards and 40 attachments. Commit file text is capped at 256 Ki characters per si
 content budget; warnings/truncation markers explain omitted content. Attachment content is sent
 only up to 1 MiB per file and when it fits the snapshot. Larger files keep their original size and
 metadata with an explanation directing the reader to the desktop. Metadata is selected before
-reading attachment content. SQL also checks actual BLOB/data URL size and stored commit JSON
+reading attachment content. Up to 200 linked session outcomes come from one state connection
+and one joined SELECT, with schema checks once per batch and bounded summary text selected in
+SQL. Session summaries, code and attachment content share the transfer budget; newest summaries
+take priority over older summaries. If verbose metadata still exceeds the limit, trimming uses
+individual encoded item sizes rather than repeatedly serializing the entire snapshot. No stored
+summary or code is changed. SQL also checks actual BLOB/data URL size and stored commit JSON
 length before materialization; a saved snapshot over 8 Mi characters keeps commit metadata with
 an availability warning. Metadata queries fetch only the row limit plus one for truncation
 reporting. Local upload/storage limits are unchanged. No live session control, remote launch

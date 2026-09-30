@@ -14,6 +14,8 @@ public partial interface IBoardStore
     Task<IReadOnlyList<string>> GetSyncActivityCardIdsAsync(string projectPath, string boardId, string? after, int limit, CancellationToken cancellationToken = default);
     /// <summary>Activity metadata only: no discussions, attachment data URLs or file content.</summary>
     Task<BoardSyncActivityRecord?> GetSyncActivityAsync(string projectPath, string boardId, string cardId, CancellationToken cancellationToken = default);
+    /// <summary>Outcomes for at most 200 already-linked session IDs, with bounded summaries. One state-database batch; missing/legacy tables return no outcomes.</summary>
+    Task<IReadOnlyDictionary<string, BoardSessionOutcomeRecord>> GetSyncSessionOutcomesAsync(IReadOnlyList<string> sessionIds, CancellationToken cancellationToken = default);
     /// <summary>Returns stored content only if its actual size fits the bound, before materializing it.</summary>
     Task<byte[]?> GetSyncAttachmentContentAsync(string projectPath, string cardId, string attachmentId, int maxBytes, CancellationToken cancellationToken = default);
     /// <summary>Returns a durable snapshot only if its stored JSON fits the read bound.</summary>

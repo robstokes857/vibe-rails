@@ -16,6 +16,7 @@ public sealed class BoardSyncCoverageTests : IDisposable
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "board-sync-coverage-" + Guid.NewGuid().ToString("N"));
     private readonly BoardStore store;
+    private readonly BoardSyncActivityCache activityCache = new();
     private readonly FakeClient client = new();
     private readonly BoardSyncService service;
     private CancellationToken Ct => TestContext.Current.CancellationToken;
@@ -25,7 +26,7 @@ public sealed class BoardSyncCoverageTests : IDisposable
         Directory.CreateDirectory(root);
         var cs = $"Data Source={Path.Combine(root, "board.db")};Pooling=False";
         store = new BoardStore(cs, cs);
-        service = new(store, client, new BoardSyncLock(Path.Combine(root, "sync.lock")), NullFeatureLog.Instance);
+        service = new(store, client, new BoardSyncLock(Path.Combine(root, "sync.lock")), NullFeatureLog.Instance, activityCache);
     }
 
     private async Task<BoardCardRecord> Card()
@@ -227,6 +228,7 @@ public sealed class BoardSyncCoverageTests : IDisposable
 
     public void Dispose()
     {
+        activityCache.Dispose();
         // A failed test can leave the lock file open briefly; never mask the failure with an IOException.
         try { Directory.Delete(root, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Globalization;
 using VibeRails.Data.Sqlite;
 using VibeRails.DTOs;
 
@@ -6,6 +7,50 @@ namespace VibeRails.Services.Board;
 
 public sealed partial class BoardStore
 {
+    public async Task<IReadOnlyDictionary<string, BoardSessionOutcomeRecord>> GetSyncSessionOutcomesAsync(
+        IReadOnlyList<string> sessionIds, CancellationToken cancellationToken = default)
+    {
+        if (sessionIds.Count > 200) throw new ArgumentOutOfRangeException(nameof(sessionIds));
+        var outcomes = new Dictionary<string, BoardSessionOutcomeRecord>(StringComparer.Ordinal);
+        var ids = sessionIds.Distinct(StringComparer.Ordinal).ToArray();
+        if (ids.Length == 0) return outcomes;
+
+        await using var connection = await OpenStateAsync(cancellationToken);
+        var tables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using (var probe = connection.CreateCommand())
+        {
+            probe.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('Sessions','ChatSummary');";
+            await using var reader = await probe.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken)) tables.Add(reader.GetString(0));
+        }
+        if (!tables.Contains("Sessions")
+            || !SqliteSchema.HasColumn(connection, null, "Sessions", "EndedUTC")
+            || !SqliteSchema.HasColumn(connection, null, "Sessions", "ExitCode")) return outcomes;
+
+        await using var command = connection.CreateCommand();
+        var parameters = ids.Select((id, index) => "$session" + index).ToArray();
+        for (var i = 0; i < ids.Length; i++) command.Parameters.AddWithValue(parameters[i], ids[i]);
+        var hasSummary = tables.Contains("ChatSummary");
+        command.CommandText = $"""
+            SELECT s.Id, s.EndedUTC, s.ExitCode, {(hasSummary ? "substr(c.SummaryText,1,16000)" : "NULL")}
+            FROM Sessions s {(hasSummary ? "LEFT JOIN ChatSummary c ON c.SessionId=s.Id" : "")}
+            WHERE s.Id IN ({string.Join(',', parameters)});
+            """;
+        await using var rows = await command.ExecuteReaderAsync(cancellationToken);
+        while (await rows.ReadAsync(cancellationToken))
+        {
+            DateTime? ended = !rows.IsDBNull(1) && DateTime.TryParse(rows.GetString(1), CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind, out var parsed) ? parsed.ToUniversalTime() : null;
+            var summary = rows.IsDBNull(3) ? null : rows.GetString(3);
+            if (string.IsNullOrWhiteSpace(summary)) summary = null;
+            // SQLite substr counts Unicode characters; the wire limit counts UTF-16 units.
+            if (summary?.Length > 16000) summary = summary[..16000];
+            var id = rows.GetString(0);
+            outcomes[id] = new(id, ended, rows.IsDBNull(2) ? null : rows.GetInt32(2), summary);
+        }
+        return outcomes;
+    }
+
     public async Task<IReadOnlyList<string>> GetSyncActivityCardIdsAsync(string projectPath, string boardId,
         string? after, int limit, CancellationToken cancellationToken = default)
     {

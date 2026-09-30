@@ -57,7 +57,8 @@ public sealed class BoardSyncService(
     IBoardStore store,
     IBoardSyncClient client,
     BoardSyncLock syncLock,
-    IFeatureLog featureLog) : IBoardSyncService
+    IFeatureLog featureLog,
+    BoardSyncActivityCache activityCache) : IBoardSyncService
 {
     public const string FeatureName = "board-sync";
 
@@ -86,7 +87,7 @@ public sealed class BoardSyncService(
         // Legacy callers may still send the retired switches. A configured account now
         // always includes its boards and linked activity; stored switches remain intact.
         var link = await EnsurePublishedAsync(board, cancellationToken);
-        if (link is not null && client.IsConfigured) link = await SyncLinkAsync(link, cancellationToken);
+        if (link is not null && client.IsConfigured) link = await SyncLinkAsync(link, cancellationToken, forceActivity: true);
         return await StatusAsync(board.Id, link, cancellationToken);
     }
 
@@ -149,7 +150,7 @@ public sealed class BoardSyncService(
             return null;
         var link = await EnsurePublishedAsync(board, cancellationToken);
         if (link is not null && client.IsConfigured)
-            link = await SyncLinkAsync(link, cancellationToken);
+            link = await SyncLinkAsync(link, cancellationToken, forceActivity: true);
         return await StatusAsync(board.Id, link, cancellationToken);
     }
 
@@ -185,7 +186,7 @@ public sealed class BoardSyncService(
     // ------------------------------------------------------------------ one board
 
     /// <summary>Push then pull. Every failure is recorded on the link and never thrown, except cancellation.</summary>
-    private async Task<BoardSyncLinkRecord> SyncLinkAsync(BoardSyncLinkRecord link, CancellationToken cancellationToken)
+    private async Task<BoardSyncLinkRecord> SyncLinkAsync(BoardSyncLinkRecord link, CancellationToken cancellationToken, bool forceActivity = false)
     {
         try
         {
@@ -193,7 +194,7 @@ public sealed class BoardSyncService(
                 throw new BoardValidationException("The account changed during sync. Retrying with the configured account next minute.");
             try
             {
-                link = await SyncOnceAsync(link, cancellationToken);
+                link = await SyncOnceAsync(link, cancellationToken, forceActivity);
             }
             catch (BoardSyncClientException ex) when (ex.Code == BoardSyncWire.CodeBoardNotFound)
             {
@@ -202,7 +203,7 @@ public sealed class BoardSyncService(
                 var board = await store.GetBoardAsync(link.ProjectPath, link.BoardId, cancellationToken)
                     ?? throw new BoardValidationException("The board no longer exists.");
                 link = await EnsurePublishedAsync(board, cancellationToken, force: true) ?? link;
-                link = await SyncOnceAsync(link, cancellationToken);
+                link = await SyncOnceAsync(link, cancellationToken, forceActivity: true);
             }
             return await store.SaveSyncLinkAsync(link with { LastSyncUtc = DateTime.UtcNow, LastError = null }, cancellationToken) ?? link;
         }
@@ -226,11 +227,11 @@ public sealed class BoardSyncService(
         }
     }
 
-    private async Task<BoardSyncLinkRecord> SyncOnceAsync(BoardSyncLinkRecord link, CancellationToken cancellationToken)
+    private async Task<BoardSyncLinkRecord> SyncOnceAsync(BoardSyncLinkRecord link, CancellationToken cancellationToken, bool forceActivity)
     {
         link = await PushAsync(link, cancellationToken);
         link = await PullAsync(link, cancellationToken);
-        return await BoardSyncActivity.RefreshAsync(store, client, link, cancellationToken);
+        return await BoardSyncActivity.RefreshAsync(store, client, activityCache, link, cancellationToken, forceActivity);
     }
 
     private async Task<BoardSyncLinkRecord> PushAsync(BoardSyncLinkRecord link, CancellationToken cancellationToken)

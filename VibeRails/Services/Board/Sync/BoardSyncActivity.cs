@@ -1,12 +1,11 @@
-using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace VibeRails.Services.Board.Sync;
 
 /// <summary>
-/// Refreshes a bounded, rotating slice of published cards. The singleton transport owns the weak
-/// cache across scoped sync services; the database cursor survives restarts. The existing
+/// Refreshes a bounded, rotating slice of published cards. The singleton activity cache persists
+/// across scoped sync services; the database cursor survives restarts. The existing
 /// cross-process sync lock serializes calls. No cache entry is an acknowledgement until the server
 /// names the schema and card it accepted.
 /// </summary>
@@ -17,23 +16,10 @@ internal static class BoardSyncActivity
     internal const int CardsPerTick = 10;
     private const int MaxCodeChars = 256 * 1024;
     private const int ContentBudget = 5 * 1024 * 1024;
-    private static readonly ConditionalWeakTable<IBoardSyncClient, Dictionary<string, RefreshState>> States = new();
-
-    private sealed class RefreshState
-    {
-        public Dictionary<string, (string Hash, DateTime Uploaded)> Accepted { get; } = new(StringComparer.Ordinal);
-    }
-
     internal static async Task<BoardSyncLinkRecord> RefreshAsync(IBoardStore store, IBoardSyncClient client,
-        BoardSyncLinkRecord link, CancellationToken ct)
+        BoardSyncActivityCache cache, BoardSyncLinkRecord link, CancellationToken ct, bool force = false)
     {
-        var states = States.GetOrCreateValue(client);
         var identity = link.DestinationKey + ":" + link.RemoteBoardId + ":" + link.BoardId;
-        if (!states.TryGetValue(identity, out var state))
-        {
-            if (states.Count >= 1000) states.Clear();
-            states[identity] = state = new();
-        }
         var ids = await store.GetSyncActivityCardIdsAsync(link.ProjectPath, link.BoardId, link.ActivityAfter, CardsPerTick, ct);
         if (ids.Count == 0 && link.ActivityAfter is not null)
         {
@@ -46,21 +32,31 @@ internal static class BoardSyncActivity
             ct.ThrowIfCancellationRequested();
             try
             {
+                var key = identity + ":" + id;
+                var previous = cache.Get(key);
+                var now = cache.UtcNow;
+                // Check before reading activity, state outcomes, file snapshots or attachments.
+                // Manual Sync now bypasses this short freshness window.
+                if (!force && previous is not null && now - previous.CheckedUtc < BoardSyncActivityCache.RefreshInterval)
+                {
+                    link = link with { ActivityAfter = id };
+                    continue;
+                }
                 var metadata = await store.GetSyncActivityAsync(link.ProjectPath, link.BoardId, id, ct);
                 if (metadata is not null)
                 {
                     var activity = await CaptureAsync(store, link.ProjectPath, id, metadata, ct);
                     var json = JsonSerializer.SerializeToUtf8Bytes(activity, BoardSyncJsonContext.Default.BoardSyncActivityWire);
                     var hash = Convert.ToHexString(SHA256.HashData(json));
-                    if (!state.Accepted.TryGetValue(id, out var previous) || previous.Hash != hash
-                        || previous.Uploaded < DateTime.UtcNow.AddHours(-1))
+                    var uploaded = previous?.UploadedUtc;
+                    if (previous is null || previous.Hash != hash || previous.UploadedUtc < now.AddHours(-1))
                     {
                         var ack = await client.PutActivityAsync(link.RemoteBoardId, id, activity, ct, link.DestinationKey);
                         if (ack.Schema != 1 || ack.CardId != id)
                             throw new BoardSyncClientException("The server did not acknowledge this card's activity; the upload will retry.", "invalid_response");
-                        if (state.Accepted.Count >= 10000) state.Accepted.Clear();
-                        state.Accepted[id] = (hash, DateTime.UtcNow);
+                        uploaded = now;
                     }
+                    cache.Set(key, new(hash, now, uploaded!.Value));
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
@@ -80,15 +76,27 @@ internal static class BoardSyncActivity
         var warnings = new List<string>();
         void Warn(string message) { if (warnings.Count < 20 && !warnings.Contains(message)) warnings.Add(Clip(message, 500)); }
         var sessions = metadata.Sessions.OrderByDescending(s => s.CreatedUtc).Take(200).ToList();
-        var automations = await store.GetAutomationSessionIdsAsync(projectPath, sessions.Select(s => s.SessionId).ToList(), ct);
+        var sessionIds = sessions.Select(s => s.SessionId).ToList();
+        var automations = await store.GetAutomationSessionIdsAsync(projectPath, sessionIds, ct);
+        var outcomes = await store.GetSyncSessionOutcomesAsync(sessionIds, ct);
+        var remaining = ContentBudget;
         var sessionViews = new List<BoardSyncSessionWire>();
         foreach (var session in sessions)
         {
-            var outcome = await store.FindSessionOutcomeAsync(session.SessionId, ct);
+            var outcome = outcomes.GetValueOrDefault(session.SessionId);
+            var summary = outcome?.Summary;
+            if (summary is not null)
+            {
+                var limit = Math.Min(16000, remaining / 6);
+                if (summary.Length > limit)
+                    Warn("Some older session summaries were shortened or omitted to fit the hosted snapshot; full summaries remain on the desktop.");
+                summary = limit == 0 ? null : Clip(summary, limit);
+                remaining -= (summary?.Length ?? 0) * 6;
+            }
             sessionViews.Add(new BoardSyncSessionWire(session.SessionId, Clip(session.DisplayName, 500), Clip(session.Cli, 100),
                 Clip(session.Origin, 100), session.CreatedUtc,
                 session.Origin == BoardSessionRecord.AutomationOrigin || automations.Contains(session.SessionId),
-                outcome?.EndedUtc, outcome?.ExitCode, outcome?.Summary is { } summary ? Clip(summary, 16000) : null));
+                outcome?.EndedUtc, outcome?.ExitCode, summary));
         }
         var result = new BoardSyncActivityWire(1, sessionViews,
             [], [], metadata.LinkedCards.Take(100).Select(c => new BoardSyncLinkedCardWire(c.Id, c.Key,
@@ -100,7 +108,6 @@ internal static class BoardSyncActivity
 
         // Budget the worst JSON expansion (six UTF-8 bytes per UTF-16 code unit), leaving room
         // for all metadata and warnings. Keep the saved local snapshot untouched.
-        var remaining = ContentBudget;
         foreach (var commit in metadata.Commits.OrderByDescending(c => c.CommittedUtc).Take(200))
         {
             var files = new List<BoardSyncCommitFileWire>();
@@ -157,15 +164,37 @@ internal static class BoardSyncActivity
                 Math.Max(0, attachment.Bytes), attachment.CreatedUtc, content, reason));
         }
         // Unusually verbose metadata can itself consume the budget. Drop content first, then
-        // oldest commit metadata, with a visible explanation; never mutate the stored data.
-        while (JsonSerializer.SerializeToUtf8Bytes(result, BoardSyncJsonContext.Default.BoardSyncActivityWire).Length > MaxSnapshotBytes - 1024 * 1024)
+        // oldest summaries/commit metadata, with a visible explanation. Measure the whole payload
+        // once, then subtract each changed item's encoded size instead of serializing it N times.
+        var size = JsonSerializer.SerializeToUtf8Bytes(result, BoardSyncJsonContext.Default.BoardSyncActivityWire).Length;
+        const int targetSize = MaxSnapshotBytes - 1024 * 1024;
+        if (size > targetSize)
         {
-            Warn("This activity snapshot was shortened to fit the hosted transfer limit. Full activity remains on the desktop.");
+            const string warning = "This activity snapshot was shortened to fit the hosted transfer limit. Full activity remains on the desktop.";
+            Warn(warning);
+            size += warning.Length * 6 + 3;
+        }
+        while (size > targetSize)
+        {
             var attachmentIndex = result.Attachments.FindLastIndex(a => a.ContentBase64 is not null);
             if (attachmentIndex >= 0)
+            {
+                var before = JsonSerializer.SerializeToUtf8Bytes(result.Attachments[attachmentIndex], BoardSyncJsonContext.Default.BoardSyncAttachmentWire).Length;
                 result.Attachments[attachmentIndex] = result.Attachments[attachmentIndex] with
                 { ContentBase64 = null, UnavailableReason = "Content exceeds the hosted snapshot transfer limit." };
-            else if (result.Commits.Count > 0) result.Commits.RemoveAt(result.Commits.Count - 1);
+                size -= before - JsonSerializer.SerializeToUtf8Bytes(result.Attachments[attachmentIndex], BoardSyncJsonContext.Default.BoardSyncAttachmentWire).Length;
+            }
+            else if (result.Sessions.FindLastIndex(s => s.Summary is not null) is var summaryIndex && summaryIndex >= 0)
+            {
+                var before = JsonSerializer.SerializeToUtf8Bytes(result.Sessions[summaryIndex], BoardSyncJsonContext.Default.BoardSyncSessionWire).Length;
+                result.Sessions[summaryIndex] = result.Sessions[summaryIndex] with { Summary = null };
+                size -= before - JsonSerializer.SerializeToUtf8Bytes(result.Sessions[summaryIndex], BoardSyncJsonContext.Default.BoardSyncSessionWire).Length;
+            }
+            else if (result.Commits.Count > 0)
+            {
+                size -= JsonSerializer.SerializeToUtf8Bytes(result.Commits[^1], BoardSyncJsonContext.Default.BoardSyncCommitWire).Length;
+                result.Commits.RemoveAt(result.Commits.Count - 1);
+            }
             else throw new BoardValidationException("The card activity metadata exceeds the hosted transfer limit.");
         }
         return result;

@@ -29,6 +29,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
     private readonly InMemoryDatabaseRoot remoteRoot = new();
     private readonly string remoteName = "vb51-coupled-" + Guid.NewGuid().ToString("N");
     private readonly BoardStore store;
+    private readonly BoardSyncActivityCache activityCache = new();
     private readonly DesktopSync sync;
     private readonly BoardSyncHttpClient client;
     private readonly ControllerTransport transport;
@@ -43,7 +44,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
         transport = new ControllerTransport(this);
         client = new BoardSyncHttpClient(new ClientFactory(transport),
             new Uri("https://board-sync.invalid/api/v1/boards"), () => "fixture-owner-key");
-        sync = new DesktopSync(store, client, new BoardSyncLock(Path.Combine(root, "sync.lock")), NullFeatureLog.Instance);
+        sync = new DesktopSync(store, client, new BoardSyncLock(Path.Combine(root, "sync.lock")), NullFeatureLog.Instance, activityCache);
         using var db = Db();
         db.Users.Add(new User { Id = Owner, Auth0Id = "auth0|fixture-owner" });
         db.SaveChanges();
@@ -390,6 +391,7 @@ public sealed class BoardSyncRoundTripTests : IDisposable
 
     public void Dispose()
     {
+        activityCache.Dispose();
         transport.Dispose();
         // root is the unique directory allocated by this fixture, never an application directory.
         Directory.Delete(root, recursive: true);
