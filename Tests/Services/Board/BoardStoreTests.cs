@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services.Board;
 using Xunit;
@@ -746,7 +747,7 @@ public sealed class BoardStoreTests : IDisposable
     {
         Assert.True(await _store.EnsureDefaultColumnsAsync(_project, Ct));
         var main = Assert.Single(await _store.GetBoardsAsync(_project, Ct));
-        Assert.Equal(BoardStore.DefaultBoardName, main.Name);
+        Assert.Equal("project-a", main.Name);
         Assert.All(await _store.GetColumnsAsync(_project, Ct), column => Assert.Equal(main.Id, column.BoardId));
 
         var sprint = await _store.CreateBoardAsync(_project, "Sprint 2", Ct);
@@ -816,12 +817,51 @@ public sealed class BoardStoreTests : IDisposable
 
         var reopened = new BoardStore(_connectionString, _connectionString);
         var board = Assert.Single(await reopened.GetBoardsAsync(_project, Ct));
-        Assert.Equal(BoardStore.DefaultBoardName, board.Name);
+        Assert.Equal("project-a", board.Name);
         Assert.StartsWith("brd_", board.Id);
         Assert.All(await reopened.GetColumnsAsync(_project, Ct), column => Assert.Equal(board.Id, column.BoardId));
         Assert.Equal(board.Id, (await reopened.FindCardAsync(_project, card.Key, Ct))!.BoardId);
         Assert.Equal([card.Id], (await reopened.GetCardsAsync(_project, Ct)).Select(c => c.Id));
         Assert.False(await reopened.EnsureDefaultColumnsAsync(_project, Ct));
+    }
+
+    [Fact]
+    public async Task FirstBoard_UsesTheCustomProjectName_ThenTheFolder_AndNeverMain()
+    {
+        Assert.Equal("Vibe Rails", BoardStore.ChooseDefaultBoardName("  Vibe Rails  ", "repo"));
+        Assert.Equal("repo", BoardStore.ChooseDefaultBoardName("   ", "repo"));
+        Assert.Equal("repo", BoardStore.ChooseDefaultBoardName("Main", "repo"));
+        Assert.Equal(BoardStore.FallbackBoardName, BoardStore.ChooseDefaultBoardName(null, "main"));
+        Assert.Equal(new string('n', 60), BoardStore.ChooseDefaultBoardName(new string('n', 80), "repo"));
+
+        var named = Path.Combine(_root, "named-repo");
+        await using (var state = new SqliteConnection(_connectionString))
+        {
+            await state.OpenAsync(Ct);
+            await using var sessions = state.CreateCommand();
+            sessions.CommandText = SqlStrings.CreateSessionsTable;
+            await sessions.ExecuteNonQueryAsync(Ct);
+            await using var insert = state.CreateCommand();
+            insert.CommandText = """
+                INSERT INTO Sessions (Id, Cli, WorkingDirectory, ProjectDisplayName, StartedUTC)
+                VALUES ('sess', 'grok', $dir, '  My Project  ', '2026-09-30T00:00:00.0000000Z');
+                """;
+            insert.Parameters.AddWithValue("$dir", BoardStore.NormalizeProjectPath(named));
+            await insert.ExecuteNonQueryAsync(Ct);
+        }
+
+        Assert.True(await _store.EnsureDefaultColumnsAsync(named, Ct));
+        Assert.Equal("My Project", Assert.Single(await _store.GetBoardsAsync(named, Ct)).Name);
+
+        // A board that already exists keeps the name it has, including one a person called Main.
+        var kept = Path.Combine(_root, "kept");
+        await _store.CreateBoardAsync(kept, "Main", Ct);
+        Assert.False(await _store.EnsureDefaultColumnsAsync(kept, Ct));
+        Assert.Equal("Main", Assert.Single(await _store.GetBoardsAsync(kept, Ct)).Name);
+
+        var calledMain = Path.Combine(_root, "Main");
+        Assert.True(await _store.EnsureDefaultColumnsAsync(calledMain, Ct));
+        Assert.Equal(BoardStore.FallbackBoardName, Assert.Single(await _store.GetBoardsAsync(calledMain, Ct)).Name);
     }
 
     [Fact]

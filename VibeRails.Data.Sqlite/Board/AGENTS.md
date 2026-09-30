@@ -50,6 +50,11 @@ columns, and data. Feature removal does not request destructive database cleanup
 is accepted technical debt. The owner accepted the already-shipped `board/8` retirement below
 for that release only. It is not a precedent for dropping other retired storage.
 
+A project's first board is named by `BoardStore.ChooseDefaultBoardName`: the custom project
+name (latest `Sessions.ProjectDisplayName` for the working directory), otherwise the repository
+folder name, never the retired `"Main"`. Existing boards are left as they are. Lane adoption
+during schema reconcile uses the folder name, since that pass cannot read the custom name.
+
 `board/6` adds revisioned board context, lane Automation settings and a durable debounced
 lane-entry queue. SQL card-insert/lane-change triggers write only to these new tables, so older
 card writers also participate. `DB/JobStore.Board.cs` reads settled entries through `IBoardStore`,

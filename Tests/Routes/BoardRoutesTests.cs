@@ -618,7 +618,7 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         Assert.True(started.AuthorizeBoardTools);
         Assert.StartsWith("You are working on kanban card PROJ-1", BoardKeyText.Short(started.InitialPrompt));
         // Board and lane names ride inside the fenced card block, between the title and the description.
-        Assert.Contains("Title: Ship the board\nBoard: Main\nLanes: Backlog → Ready → Build → Review → Done\nAll of it.", started.InitialPrompt);
+        Assert.Contains("Title: Ship the board\nBoard: project\nLanes: Backlog → Ready → Build → Review → Done\nAll of it.", started.InitialPrompt);
         // The environment's template is appended unresolved — resolution happens once, in the tab child.
         Assert.EndsWith("\n\nRead AGENTS.md. {{datetime}}", started.InitialPrompt);
 
@@ -651,7 +651,7 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         using var initial = await GetJsonAsync("/api/v1/board/boards");
         var main = Assert.Single(initial.RootElement.GetProperty("boards").EnumerateArray());
         var mainId = main.GetProperty("id").GetString()!;
-        Assert.Equal("Main", main.GetProperty("name").GetString());
+        Assert.Equal("project", main.GetProperty("name").GetString());
         Assert.Equal(5, main.GetProperty("columns").GetArrayLength());
         Assert.Equal(0, main.GetProperty("cardCount").GetInt32());
 
@@ -800,7 +800,7 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         linked.EnsureSuccessStatusCode();
         using var link = await ReadJsonAsync(linked);
         Assert.Equal("PROJ-2", BoardKeyText.Short(link.RootElement.GetProperty("key").GetString()));
-        Assert.Equal("Main", link.RootElement.GetProperty("boardName").GetString());
+        Assert.Equal("project", link.RootElement.GetProperty("boardName").GetString());
         using var repeated = await PostJsonAsync("/api/v1/board/cards/PROJ-2/links", new { card = "PROJ-1" });
         repeated.EnsureSuccessStatusCode();
         using var detail = await GetJsonAsync("/api/v1/board/cards/PROJ-2");

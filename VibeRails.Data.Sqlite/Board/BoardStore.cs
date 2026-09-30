@@ -2,6 +2,7 @@ using System.Data;
 using System.Globalization;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Data.Sqlite;
 
@@ -45,8 +46,11 @@ public sealed partial class BoardStore : IBoardStore
 
     // ------------------------------------------------------------------ boards
 
-    /// <summary>What the one board every project starts with is called.</summary>
-    public const string DefaultBoardName = "Main";
+    /// <summary>
+    /// Last-resort name for a project's first board, used only when both the custom project
+    /// name and the repository folder name are missing or are themselves "Main".
+    /// </summary>
+    public const string FallbackBoardName = "Board";
 
     public async Task<IReadOnlyList<BoardRecord>> GetBoardsAsync(string projectPath, CancellationToken cancellationToken = default)
     {
@@ -152,6 +156,9 @@ public sealed partial class BoardStore : IBoardStore
     public async Task<bool> EnsureDefaultColumnsAsync(string projectPath, CancellationToken cancellationToken = default)
     {
         var project = NormalizeProjectPath(projectPath);
+        // Read before the board transaction: this opens state.db, and holding board.db's write
+        // lock across that open is how the two files deadlock each other.
+        var name = await ResolveDefaultBoardNameAsync(project, cancellationToken);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
         var count = await ScalarLongAsync(connection, transaction,
@@ -160,9 +167,49 @@ public sealed partial class BoardStore : IBoardStore
         if (count > 0)
             return false;
 
-        await InsertBoardWithDefaultLanesAsync(connection, transaction, project, DefaultBoardName, 0, cancellationToken);
+        await InsertBoardWithDefaultLanesAsync(connection, transaction, project, name, 0, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return true;
+    }
+
+    /// <summary>
+    /// The name a project's first board gets: the custom project name the user set, otherwise
+    /// the repository folder name. "Main" is never used; a folder that is itself called Main
+    /// falls through to <see cref="FallbackBoardName"/>.
+    /// </summary>
+    private async Task<string> ResolveDefaultBoardNameAsync(string project, CancellationToken cancellationToken)
+    {
+        string? custom = null;
+        try
+        {
+            await using var state = new SqliteConnection(_stateConnectionString);
+            await state.OpenAsync(cancellationToken);
+            await using var command = state.CreateCommand();
+            command.CommandText = SqlStrings.SelectLatestProjectDisplayNameByWorkingDirectory;
+            command.Parameters.AddWithValue("$workingDirectory", project);
+            var value = await command.ExecuteScalarAsync(cancellationToken);
+            custom = value is string text ? text : null;
+        }
+        catch (SqliteException)
+        {
+            // A host whose state.db has no Sessions table yet still gets a board; the folder name covers it.
+        }
+
+        var folder = Path.GetFileName(project.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        return ChooseDefaultBoardName(custom, folder);
+    }
+
+    /// <summary>Custom name, then folder name, skipping blanks and the retired "Main" default.</summary>
+    internal static string ChooseDefaultBoardName(string? customName, string? folderName)
+    {
+        foreach (var candidate in new[] { customName, folderName })
+        {
+            var name = candidate?.Trim();
+            if (string.IsNullOrEmpty(name) || name.Equals("Main", StringComparison.OrdinalIgnoreCase))
+                continue;
+            return name.Length > 60 ? name[..60] : name;
+        }
+        return FallbackBoardName;
     }
 
     public async Task<IReadOnlyList<BoardColumnRecord>> GetColumnsAsync(string projectPath, CancellationToken cancellationToken = default, string? boardId = null)
@@ -1819,11 +1866,61 @@ public sealed partial class BoardStore : IBoardStore
         using (var repair = connection.CreateCommand())
         {
             repair.Transaction = transaction;
-            repair.CommandText = CardSequenceReseedSql + OrphanLaneAdoptionSql;
-            repair.Parameters.AddWithValue("$now", ToDb(DateTime.UtcNow));
+            repair.CommandText = CardSequenceReseedSql;
             repair.ExecuteNonQuery();
         }
+        AdoptOrphanLanes(connection, transaction);
         transaction.Commit();
+    }
+
+    /// <summary>
+    /// Lanes without a board (pre-board/4 rows, or rows an older binary added) join their
+    /// project's first board. A project that has none gets one, named after the repository
+    /// folder rather than "Main". Board ids follow the same <c>brd_</c> + 12 hex shape as NewId.
+    /// The custom project name is not available here: this runs inside schema setup.
+    /// </summary>
+    private static void AdoptOrphanLanes(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        var projects = new List<string>();
+        using (var orphans = connection.CreateCommand())
+        {
+            orphans.Transaction = transaction;
+            orphans.CommandText = $"""
+                SELECT MIN(ProjectPath) FROM BoardColumns
+                WHERE BoardId IS NULL
+                  AND NOT EXISTS (SELECT 1 FROM Boards b WHERE b.ProjectPath = BoardColumns.ProjectPath{ProjectPathCollation})
+                GROUP BY ProjectPath{ProjectPathCollation};
+                """;
+            using var reader = orphans.ExecuteReader();
+            while (reader.Read())
+                projects.Add(reader.GetString(0));
+        }
+
+        var now = ToDb(DateTime.UtcNow);
+        foreach (var project in projects)
+        {
+            using var insert = connection.CreateCommand();
+            insert.Transaction = transaction;
+            insert.CommandText = """
+                INSERT INTO Boards (Id, ProjectPath, Name, Position, CreatedUTC, UpdatedUTC)
+                VALUES ($id, $project, $name, 0, $now, $now);
+                """;
+            insert.Parameters.AddWithValue("$id", NewId("brd"));
+            insert.Parameters.AddWithValue("$project", project);
+            insert.Parameters.AddWithValue("$name", ChooseDefaultBoardName(null, Path.GetFileName(project)));
+            insert.Parameters.AddWithValue("$now", now);
+            insert.ExecuteNonQuery();
+        }
+
+        using var adopt = connection.CreateCommand();
+        adopt.Transaction = transaction;
+        adopt.CommandText = $"""
+            UPDATE BoardColumns SET BoardId = (
+                SELECT b.Id FROM Boards b WHERE b.ProjectPath = BoardColumns.ProjectPath{ProjectPathCollation}
+                ORDER BY b.Position, b.CreatedUTC LIMIT 1)
+            WHERE BoardId IS NULL;
+            """;
+        adopt.ExecuteNonQuery();
     }
 
     /// <summary>Idempotent: raises each project's high-water mark to its highest live card number.</summary>
@@ -1834,24 +1931,6 @@ public sealed partial class BoardStore : IBoardStore
             SELECT ProjectPath, MAX(Number) FROM BoardCards
             GROUP BY ProjectPath{ProjectPathCollation}
         ON CONFLICT(ProjectPath) DO UPDATE SET LastNumber = MAX(LastNumber, excluded.LastNumber);
-        """;
-
-    /// <summary>
-    /// Idempotent: lanes without a board (pre-board/4 rows, or rows an older binary added) join
-    /// their project's default board, which is created — named <see cref="DefaultBoardName"/> —
-    /// when the project has none. Board ids follow the same <c>brd_</c> + 12 hex shape as NewId.
-    /// </summary>
-    internal static string OrphanLaneAdoptionSql => $"""
-        INSERT INTO Boards (Id, ProjectPath, Name, Position, CreatedUTC, UpdatedUTC)
-            SELECT 'brd_' || lower(hex(randomblob(6))), MIN(k.ProjectPath), '{DefaultBoardName}', 0, $now, $now
-            FROM BoardColumns k
-            WHERE k.BoardId IS NULL
-              AND NOT EXISTS (SELECT 1 FROM Boards b WHERE b.ProjectPath = k.ProjectPath{ProjectPathCollation})
-            GROUP BY k.ProjectPath{ProjectPathCollation};
-        UPDATE BoardColumns SET BoardId = (
-            SELECT b.Id FROM Boards b WHERE b.ProjectPath = BoardColumns.ProjectPath{ProjectPathCollation}
-            ORDER BY b.Position, b.CreatedUTC LIMIT 1)
-        WHERE BoardId IS NULL;
         """;
 
     static partial void EnsureAttachmentSchema(SqliteConnection connection, SqliteTransaction transaction);

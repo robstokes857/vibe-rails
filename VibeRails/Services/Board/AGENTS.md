@@ -34,6 +34,15 @@ security boundaries and open VB-18 findings. This file is the contributor guide 
 across UI, REST, MCP and storage. The root [AGENTS.md](../../../AGENTS.md),
 [API_SEC.md](../../../API_SEC.md), and relevant directory instructions still apply.
 
+## First board name (VIBE-16)
+
+A project's first board takes the custom project name — the latest `Sessions.ProjectDisplayName`
+for that working directory — and otherwise the repository folder name. The retired `"Main"`
+default is never written; a folder that is itself called Main gets `Board`. Boards that already
+exist keep their names, and a board the user creates still uses the name they type.
+`BoardStore.ChooseDefaultBoardName` is the one rule. Lane adoption during schema setup uses the
+folder name only, because that pass has no custom-name lookup.
+
 ## Find the right layer
 
 | Change | Start here |
