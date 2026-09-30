@@ -287,7 +287,10 @@ public sealed partial class BoardService(
             NormalizeBaseOptions(NormalizeAssignee(request.Assignee), request.BaseLlmOptions),
             Type: NormalizeCardType(request.Type) ?? BoardCardTypes.Default,
             BoardId: NormalizeBoardId(request.BoardId), Flagged: request.Flagged ?? false,
-            DisplayId: request.DisplayId is null ? null : BoardDisplayIds.Normalize(request.DisplayId), LinkedCardIds: request.LinkedCardIds), cancellationToken, author);
+            DisplayId: request.DisplayId is null ? null : BoardDisplayIds.Normalize(request.DisplayId), LinkedCardIds: request.LinkedCardIds,
+            // The board UI and a synced pull omit this. Only the MCP create path sets it, and only
+            // when that call's author is an agent, so a later edit cannot relabel a human card.
+            AgentMade: request.AgentMade == true && author?.Kind == BoardAuthor.AgentKind), cancellationToken, author);
         return (await GetCardAsync(projectPath, card.Id, cancellationToken))!;
     }
 
@@ -557,7 +560,7 @@ public sealed partial class BoardService(
             sessions,
             detail.Attachments.Select(ToDto).ToList(),
             detail.Card.BaseLlmOptions,
-            notes, summary.Type, summary.BoardId, summary.Flagged, sessions.Any(s => s.Active && s.IsAutomation), summary.DisplayId)
+            notes, summary.Type, summary.BoardId, summary.Flagged, sessions.Any(s => s.Active && s.IsAutomation), summary.DisplayId, summary.AgentMade)
         {
             LinkedCards = detail.LinkedCards.Select(ToDto).ToList()
         };
@@ -587,7 +590,7 @@ public sealed partial class BoardService(
     internal static BoardCardSummaryResponse ToSummary(BoardCardRecord card, string? activeSessionId, string? activeTabId) => new(
         card.Id, card.Key, card.ColumnId, card.Position, card.Title, card.Description, PresentAssignee(card.Assignee), card.Priority,
         card.Points, card.Tags.ToList(), card.Blocked, card.CommentCount, activeSessionId, activeTabId, card.CreatedUtc, card.UpdatedUtc,
-        card.BaseLlmOptions, card.Type, card.BoardId, card.Flagged, DisplayId: card.DisplayId);
+        card.BaseLlmOptions, card.Type, card.BoardId, card.Flagged, DisplayId: card.DisplayId, AgentMade: card.AgentMade);
 
     internal static BoardColumnResponse ToDto(BoardColumnRecord column) =>
         new(column.Id, column.Name, column.Position, column.Color, column.BoardId);
@@ -710,6 +713,19 @@ public sealed partial class BoardService(
         return BoardCardTypes.IsValid(type)
             ? type
             : throw new BoardValidationException($"Type must be one of: {string.Join(", ", BoardCardTypes.All)}.");
+    }
+
+    /// <summary>
+    /// The board filter for who created the card. Blank means every card; <c>agent</c> and
+    /// <c>human</c> are the only stored origins. Anything else is a bad request rather than a
+    /// silent empty board.
+    /// </summary>
+    internal static string? NormalizeCardOrigin(string? value)
+    {
+        var origin = value?.Trim().ToLowerInvariant();
+        return string.IsNullOrEmpty(origin) ? null
+            : origin is "agent" or "human" ? origin
+            : throw new BoardValidationException("Origin must be agent or human.");
     }
 
     internal static bool IsClearValue(System.Text.Json.JsonElement element) =>

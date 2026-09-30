@@ -57,7 +57,7 @@ const FILTERS_STORAGE_KEY = 'viberails.board.filters.v1';
 const BOARD_STORAGE_KEY = BOARD_SELECTION_STORAGE_KEY;
 const RASTER_DATA_URL_RE = /^data:image\/(?:png|jpeg|gif|webp);base64,/i;
 
-const emptyFilters = () => ({ q: '', assignee: '', type: '', priority: '' });
+const emptyFilters = () => ({ q: '', assignee: '', type: '', priority: '', origin: '' });
 // Task-key namespace for the terminal tab that works a card (see wwwroot/AGENTS.md).
 const CARD_TASK_KEY = cardId => `board-card:${cardId}`;
 
@@ -398,6 +398,8 @@ export class BoardController {
         if (filters.assignee && canonicalLlmSelection(card.assignee) !== canonicalLlmSelection(filters.assignee)) return false;
         if (filters.type && cardType(card.type).value !== filters.type) return false;
         if (filters.priority && card.priority !== filters.priority) return false;
+        if (filters.origin === 'agent' && !card.agentMade) return false;
+        if (filters.origin === 'human' && card.agentMade) return false;
         return true;
     }
 
@@ -423,8 +425,8 @@ export class BoardController {
     }
 
     hasActiveFilters() {
-        const { q, assignee, type, priority } = this.state.filters;
-        return Boolean(q.trim() || assignee || type || priority);
+        const { q, assignee, type, priority, origin } = this.state.filters;
+        return Boolean(q.trim() || assignee || type || priority || origin);
     }
 
     stats() {
@@ -493,6 +495,7 @@ export class BoardController {
         bindSelect('[data-board-filter-assignee]', 'assignee');
         bindSelect('[data-board-filter-type]', 'type');
         bindSelect('[data-board-filter-priority]', 'priority');
+        bindSelect('[data-board-filter-origin]', 'origin');
 
         const picker = this.query('[data-board-select]');
         picker?.addEventListener('change', () => this.switchBoard(picker.value));
@@ -547,6 +550,9 @@ export class BoardController {
 
         const type = this.query('[data-board-filter-type]');
         if (type) type.value = this.state.filters.type;
+
+        const origin = this.query('[data-board-filter-origin]');
+        if (origin) origin.value = this.state.filters.origin || '';
 
         const search = this.query('[data-board-search]');
         if (search && document.activeElement !== search) search.value = this.state.filters.q;
@@ -605,12 +611,12 @@ export class BoardController {
         // is-live paints the marching "an agent is on this" border (see the template CSS).
         return `
             <article class="board-card${card.flagged ? ' is-flagged' : ''}${card.blocked ? ' is-blocked' : ''}${card.activeTabId ? ' is-live' : ''}" data-card-id="${escapeHtml(card.id)}"
-                tabindex="0" role="button" aria-label="${escapeHtml(cardDisplayId(card))}: ${escapeHtml(card.title)}${card.flagged ? ' — Needs your attention' : ''}">
+                tabindex="0" role="button" aria-label="${escapeHtml(cardDisplayId(card))}: ${escapeHtml(card.title)}${card.agentMade ? ' — Made by an agent' : ''}${card.flagged ? ' — Needs your attention' : ''}">
                 <span class="board-card-rail" data-priority="${escapeHtml(card.priority)}"
                     title="${escapeHtml(card.priority)} priority"></span>
                 <div class="board-card-body">
                     <div class="board-card-top">
-                        <span class="board-key">${card.flagged ? '<i class="fa-solid fa-flag board-attention-flag" title="Needs your attention" aria-hidden="true"></i> ' : ''}${escapeHtml(cardDisplayId(card))}</span>
+                        <span class="board-key">${card.flagged ? '<i class="fa-solid fa-flag board-attention-flag" title="Needs your attention" aria-hidden="true"></i> ' : ''}${card.agentMade ? '<i class="fa-solid fa-robot board-agent-mark" title="Made by an agent" aria-label="Made by an agent"></i> ' : ''}${escapeHtml(cardDisplayId(card))}</span>
                         <span class="board-card-top-right">
                             <span class="board-type-chip" data-type="${escapeHtml(type.value)}"
                                 title="${escapeHtml(type.label)}">${escapeHtml(type.label)}</span>
@@ -1100,6 +1106,7 @@ export class BoardController {
                             </div>
                         </div>
                         <div data-board-launch-options></div>
+                        ${card?.agentMade ? `<p class="board-editor-muted"><i class="fa-solid fa-robot board-agent-mark" aria-hidden="true"></i> Made by an agent</p>` : ''}
                         <div class="form-check">
                             <input class="form-check-input" type="checkbox" id="board-card-flagged"
                                 data-board-flagged${card?.flagged ? ' checked' : ''}>

@@ -3545,6 +3545,12 @@
                 }
                 .board-view .board-attention-flag { color: #ef4444; margin-right: 0.25rem; }
 
+                .board-view .board-agent-mark {
+                    color: #38bdf8;
+                    margin-right: 0.25rem;
+                    font-size: 0.72rem;
+                }
+
                 .board-view .board-card-rail {
                     background: var(--color-primary, #3b82f6);
                 }
@@ -4966,6 +4972,11 @@
                         <option value="high">High</option>
                         <option value="medium">Medium</option>
                         <option value="low">Low</option>
+                    </select>
+                    <select class="board-control" data-board-filter-origin aria-label="Filter by who made the card">
+                        <option value="">Agent or human</option>
+                        <option value="agent">Agent-made</option>
+                        <option value="human">Human-made</option>
                     </select>
                     <button type="button" class="board-clear-filters" data-board-clear-filters
                         data-board-action="clear-filters" hidden>

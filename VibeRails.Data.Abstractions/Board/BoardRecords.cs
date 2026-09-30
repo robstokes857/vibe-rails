@@ -62,7 +62,8 @@ public sealed record BoardCardRecord(
     bool Flagged = false,
     string KeyPrefix = BoardKeys.LegacyPrefix,
     string? StoredKey = null,
-    string? StoredDisplayId = null)
+    string? StoredDisplayId = null,
+    bool AgentMade = false)
 {
     /// <summary>The stored <c>PREFIX-RRRRR-n</c> key (cards created since board/14), else the
     /// computed legacy <c>PREFIX-n</c>.</summary>
@@ -211,7 +212,8 @@ public sealed record NewBoardCard(
     string? BoardId = null,
     bool Flagged = false,
     string? DisplayId = null,
-    IReadOnlyList<string>? LinkedCardIds = null);
+    IReadOnlyList<string>? LinkedCardIds = null,
+    bool AgentMade = false);
 
 /// <summary>Partial update. Null = leave untouched. <see cref="ClearAssignee"/> / <see cref="ClearPoints"/> express "set to null".</summary>
 public sealed record BoardCardPatch(

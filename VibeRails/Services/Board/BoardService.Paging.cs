@@ -28,6 +28,7 @@ public sealed partial class BoardService
             Type = NormalizeCardType(query.Type),
             Priority = NormalizePriority(query.Priority),
             Tag = query.Tag?.Trim(),
+            Origin = NormalizeCardOrigin(query.Origin),
             ContinuationToken = string.IsNullOrWhiteSpace(continuationToken) ? null : continuationToken
         }, cancellationToken, NormalizeBoardId(boardId));
         var response = await GetCardListResponseAsync(projectPath, page.Cards, cancellationToken);

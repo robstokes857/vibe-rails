@@ -91,6 +91,13 @@ serialization or tool discovery into the Native AOT path.
   Restore and the 30-day purge are VB-54. An older binary still shows soft-deleted cards.
 - Attachment removal deletes its row and cascades its bytes. Only current attachments are
   readable. Database backups can retain older data; removal is not secure erasure.
+- **Agent-made (VIBE-11).** `BoardCards.AgentMade` is set once, inside the create transaction, and
+  only when `create_board_card` runs with an agent author. The board UI, a Jira pull, a synced
+  card and every card that already exists stay human-made (`0`). No update path changes it, so an
+  agent editing a human card cannot relabel it, and the field is absent from `update_board_card`
+  and from the sync change set. The lane tile shows a robot mark beside the key; the toolbar's
+  origin filter (`agent` / `human`, query `origin`) applies to the whole board, including cards
+  the browser has not loaded. `get_board_card` says `Agent-made` or `Human-made`.
 - `Flagged` means **Needs your attention**, independently of `Blocked`. The editor saves it;
   the tile paints red with a flag icon. Agents set/clear `flagged` through `update_board_card`
   following the root [attention policy](../../../AGENTS.md#board-attention-flags). Reserve it for
@@ -207,7 +214,9 @@ the header displays the full card count. Tests should use realistic asynchronous
 ## Storage changes
 
 Read [database migration instructions](../../../VibeRails.Data.Sqlite/DB/AGENTS.md).
-`board/1`–`board/23` already exist. `board/23` adds the activity schema version and durable rotation
+`board/1`–`board/24` already exist. `board/24` (VIBE-11, additive) adds `BoardCards.AgentMade`
+(default 0, no backfill): set only when `create_board_card` runs as an agent, left alone by every
+later edit, and ignored by an older binary. `board/23` adds the activity schema version and durable rotation
 cursor on `BoardSyncLinks`. VIBE-13 automatically publishes all local boards and activity whenever
 an API key is configured; the old switch columns remain for compatibility. The scheduler-only
 `GetBoardsForSyncAsync` reads board identity metadata across projects through `IBoardStore`.

@@ -116,10 +116,10 @@ public static class BoardRoutes
 
         app.MapGet("/api/v1/board/cards", (IBoardService board, string? boardId, int? pageSize, string? columnId,
             int? offset, string? continuationToken, string? q, string? assignee, string? type, string? priority, string? tag,
-            CancellationToken cancellationToken) =>
+            string? origin, CancellationToken cancellationToken) =>
             RunAsync(async () => Results.Ok(pageSize is int size
                 ? await board.GetCardsPageAsync(Project(), new BoardCardPageQuery(size, columnId, offset ?? 0,
-                    q, assignee, type, priority, tag, continuationToken), cancellationToken, boardId)
+                    q, assignee, type, priority, tag, continuationToken, origin), cancellationToken, boardId)
                 : await board.GetCardsAsync(Project(), cancellationToken, boardId))))
             .WithName("GetBoardCards");
 

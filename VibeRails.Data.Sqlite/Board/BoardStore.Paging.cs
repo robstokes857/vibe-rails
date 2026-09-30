@@ -16,6 +16,7 @@ public sealed partial class BoardStore
         AND ($type = '' OR c.Type = $type)
         AND ($priority = '' OR c.Priority = $priority)
         AND ($tag = '' OR EXISTS (SELECT 1 FROM json_each(c.Tags) WHERE value = $tag))
+        AND ($origin = '' OR ($origin = 'agent' AND c.AgentMade <> 0) OR ($origin = 'human' AND c.AgentMade = 0))
         """;
 
     public async Task<BoardCardPage> GetCardsPageAsync(string projectPath, BoardCardPageQuery query,
@@ -113,6 +114,7 @@ public sealed partial class BoardStore
         command.Parameters.AddWithValue("$type", query.Type ?? "");
         command.Parameters.AddWithValue("$priority", query.Priority ?? "");
         command.Parameters.AddWithValue("$tag", query.Tag ?? "");
+        command.Parameters.AddWithValue("$origin", query.Origin ?? "");
     }
 
     private static async Task<string> ReadContinuationTokenAsync(SqliteConnection connection, SqliteTransaction transaction,

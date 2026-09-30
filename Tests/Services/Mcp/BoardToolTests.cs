@@ -73,7 +73,7 @@ public sealed class BoardToolTests : IDisposable
         Assert.Equal("Created PROJ-1: Fix the race", BoardKeyText.Short(created));
 
         var list = await _tool.ListBoardCards(cancellationToken: Ct);
-        Assert.Equal("PROJ-1 (PROJ-1) [Build] [Bug] (high) Fix the race", BoardKeyText.Short(list));
+        Assert.Equal("PROJ-1 (PROJ-1) [Build] [Bug] (high) Fix the race — agent-made", BoardKeyText.Short(list));
         Assert.Equal(list, await _tool.ListBoardCards(type: "bug", cancellationToken: Ct));
         Assert.Equal("No cards match.", await _tool.ListBoardCards(type: "feature", cancellationToken: Ct));
         Assert.Equal("No cards match.", await _tool.ListBoardCards(column: "Review", cancellationToken: Ct));
@@ -89,7 +89,7 @@ public sealed class BoardToolTests : IDisposable
         await _tool.CreateBoardCard("Fix the race", "Two 401s overlap.", cancellationToken: Ct);
 
         var card = await _tool.GetBoardCard("vb-1", cancellationToken: Ct);
-        Assert.StartsWith("PROJ-1: Fix the race\nDisplay ID: PROJ-1\nLane: Backlog · Type: Task · Priority: medium · Assignee: unassigned", BoardKeyText.Short(card));
+        Assert.StartsWith("PROJ-1: Fix the race\nDisplay ID: PROJ-1\nLane: Backlog · Type: Task · Priority: medium · Assignee: unassigned · Agent-made", BoardKeyText.Short(card));
         Assert.Contains("Description:\nTwo 401s overlap.", card);
         Assert.Contains("Comments (0):\n(none)", card);
 
@@ -373,7 +373,7 @@ public sealed class BoardToolTests : IDisposable
         Assert.Contains("Agent notes (1):\n", card);
         Assert.Matches(@"\] Agent \(note_[0-9a-f]{12}\): checkpoint: found 3 candidates", card);
         Assert.Equal(1, (await _store.FindCardAsync(_project, "PROJ-1", Ct))!.CommentCount);
-        Assert.Equal("PROJ-1 (PROJ-1) [Backlog] [Task] (medium) A — 1 comment", BoardKeyText.Short(await _tool.ListBoardCards(cancellationToken: Ct)));
+        Assert.Equal("PROJ-1 (PROJ-1) [Backlog] [Task] (medium) A — agent-made — 1 comment", BoardKeyText.Short(await _tool.ListBoardCards(cancellationToken: Ct)));
 
         var notes = await _tool.GetBoardNotes("PROJ-1", cancellationToken: Ct);
         Assert.StartsWith("Agent notes on PROJ-1 (1):\n", BoardKeyText.Short(notes));
@@ -782,8 +782,8 @@ public sealed class BoardToolTests : IDisposable
 
         // By name, case-insensitively, or by id; unknown boards fail readably.
         Assert.Equal("Created PROJ-2: On sprint", BoardKeyText.Short(await _tool.CreateBoardCard("On sprint", column: "build", board: "sprint 2", cancellationToken: Ct)));
-        Assert.Equal("PROJ-2 (PROJ-2) [Build] [Task] (medium) On sprint", BoardKeyText.Short(await _tool.ListBoardCards(board: sprint.Id, cancellationToken: Ct)));
-        Assert.Equal("PROJ-1 (PROJ-1) [Backlog] [Task] (medium) On main", BoardKeyText.Short(await _tool.ListBoardCards(cancellationToken: Ct)));
+        Assert.Equal("PROJ-2 (PROJ-2) [Build] [Task] (medium) On sprint — agent-made", BoardKeyText.Short(await _tool.ListBoardCards(board: sprint.Id, cancellationToken: Ct)));
+        Assert.Equal("PROJ-1 (PROJ-1) [Backlog] [Task] (medium) On main — agent-made", BoardKeyText.Short(await _tool.ListBoardCards(cancellationToken: Ct)));
         Assert.StartsWith("FAIL: board not found: Nowhere", await _tool.ListBoardCards(board: "Nowhere", cancellationToken: Ct));
         Assert.Contains("(board Sprint 2):", await _tool.ListBoardColumns("Sprint 2", Ct));
 
@@ -796,7 +796,7 @@ public sealed class BoardToolTests : IDisposable
         // A terminal launched for a card on the sprint board defaults to that board.
         _resolver.CurrentSessionId = "11111111-2222-3333-4444-555555555555";
         await _store.LinkSessionAsync(_project, (await _service.FindCardAsync(_project, "PROJ-2", Ct))!.Id, _resolver.CurrentSessionId!, null, "base:codex", "codex", "Codex", BoardSessionRecord.LaunchOrigin, Ct);
-        Assert.Equal("PROJ-2 (PROJ-2) [Review] [Task] (medium) On sprint", BoardKeyText.Short(await _tool.ListBoardCards(cancellationToken: Ct)));
+        Assert.Equal("PROJ-2 (PROJ-2) [Review] [Task] (medium) On sprint — agent-made", BoardKeyText.Short(await _tool.ListBoardCards(cancellationToken: Ct)));
         Assert.Equal("Created PROJ-3: Sibling", BoardKeyText.Short(await _tool.CreateBoardCard("Sibling", cancellationToken: Ct)));
         Assert.Equal(sprint.Id, (await _service.FindCardAsync(_project, "PROJ-3", Ct))!.BoardId);
         Assert.Contains("; current)", (await _tool.ListBoards(Ct)).Split('\n').Single(line => line.Contains("Sprint 2")));
@@ -1000,6 +1000,33 @@ public sealed class BoardToolTests : IDisposable
         Assert.StartsWith("FAIL: Lane not found: Nowhere", await _tool.MoveBoardCard("PROJ-1", "Nowhere", preview: true, cancellationToken: Ct));
         Assert.Equal("Moved PROJ-1 to Backlog (position 0).\nSame lane; no lane automations triggered.",
             BoardKeyText.Short(await _tool.MoveBoardCard("PROJ-1", "backlog", cancellationToken: Ct)));
+    }
+
+    [Fact]
+    public async Task CreateBoardCard_MarksTheCard_AndAnEditCannotChangeIt()
+    {
+        // The tool has no launching session here, which is the generic agent the tool attributes
+        // a create to. That card is agent-made; an update leaves the mark where creation put it.
+        var agent = await _tool.CreateBoardCard("From the agent", cancellationToken: Ct);
+        Assert.StartsWith("Created PROJ-", agent);
+        var agentCard = await _service.GetCardAsync(_project, "PROJ-1", Ct);
+        Assert.NotNull(agentCard);
+        Assert.True(agentCard.AgentMade);
+        Assert.Contains("· Agent-made", await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct));
+
+        await _tool.UpdateBoardCard("PROJ-1", title: "Still the agent's card", cancellationToken: Ct);
+        Assert.True((await _service.GetCardAsync(_project, "PROJ-1", Ct))!.AgentMade);
+
+        // The board UI cannot ask for the mark, even when an agent is the recorded author.
+        var fromUi = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "Typed in the board"), Ct,
+            BoardAuthor.Agent("Codex", "codex", "sess-1"));
+        Assert.False(fromUi.AgentMade);
+        Assert.Contains("· Human-made", await _tool.GetBoardCard(fromUi.Key, cancellationToken: Ct));
+
+        // A person driving the same service (the REST path, or a session that resolves to a user)
+        // stays unmarked even if the request asks.
+        var person = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "From a person", AgentMade: true), Ct, BoardAuthor.User());
+        Assert.False(person.AgentMade);
     }
 
     private sealed class FakeResolver(string project) : IBoardProjectResolver

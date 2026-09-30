@@ -137,6 +137,32 @@ public sealed class BoardCardPagingTests : IDisposable
     }
 
     [Fact]
+    public async Task OriginFilter_SeparatesAgentMadeCards_AndLeavesOlderCardsHuman()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var lane = (await _store.GetColumnsAsync(_project, Ct)).First();
+        var human = await _store.CreateCardAsync(_project, Card(lane.Id, "Typed by hand"), Ct);
+        var agent = await _store.CreateCardAsync(_project, Card(lane.Id, "Filed by an agent") with { AgentMade = true }, Ct,
+            BoardAuthor.Agent("Codex", "codex", null));
+
+        Assert.False(human.AgentMade);
+        Assert.True(agent.AgentMade);
+        Assert.False((await _store.FindCardAsync(_project, human.Key, Ct))!.AgentMade);
+        Assert.True((await _store.FindCardAsync(_project, agent.Key, Ct))!.AgentMade);
+
+        var agents = await _store.GetCardsPageAsync(_project, new(Origin: "agent"), Ct);
+        Assert.Equal(agent.Id, Assert.Single(agents.Cards).Id);
+        Assert.Equal(1, agents.FilteredCount);
+        Assert.Equal(2, agents.TotalCount);
+
+        var people = await _store.GetCardsPageAsync(_project, new(Origin: "human"), Ct);
+        Assert.Equal(human.Id, Assert.Single(people.Cards).Id);
+
+        var either = await _store.GetCardsPageAsync(_project, new(), Ct);
+        Assert.Equal(2, either.Cards.Count);
+    }
+
+    [Fact]
     public async Task SearchMatchesTheDisplayedCardTypeLabel()
     {
         await _store.EnsureDefaultColumnsAsync(_project, Ct);

@@ -169,6 +169,7 @@ public sealed class BoardTool(
                 if (!string.IsNullOrWhiteSpace(card.Assignee)) builder.Append(" — assignee ").Append(card.Assignee);
                 if (card.Blocked) builder.Append(" — BLOCKED");
                 if (card.Flagged) builder.Append(" — FLAGGED: needs your attention");
+                if (card.AgentMade) builder.Append(" — agent-made");
                 if (card.CommentCount > 0) builder.Append(" — ").Append(card.CommentCount).Append(" comment").Append(card.CommentCount == 1 ? "" : "s");
                 if (!string.IsNullOrWhiteSpace(card.ActiveTabId)) builder.Append(" — session open");
                 builder.Append('\n');
@@ -356,6 +357,7 @@ public sealed class BoardTool(
                     return $"FAIL: lane not found: {column}. Use list_board_columns to see the lanes.";
                 columnId = lane.Id;
             }
+            var author = await ResolveAuthorAsync(cancellationToken);
             var created = await service.CreateCardAsync(project, new CreateBoardCardRequest(
                 Title: title,
                 ColumnId: columnId,
@@ -363,7 +365,10 @@ public sealed class BoardTool(
                 Priority: priority,
                 Tags: SplitTags(tags),
                 Type: type,
-                BoardId: target.BoardId), cancellationToken, await ResolveAuthorAsync(cancellationToken));
+                BoardId: target.BoardId,
+                // The tool is the agent path. A session whose author resolves to a person
+                // (a hand-driven call) stays a human card.
+                AgentMade: author.Kind == BoardAuthor.AgentKind), cancellationToken, author);
             await AutoLinkSessionAsync(project, created.Id, cancellationToken);
             return $"Created {created.Key}: {created.Title}";
         }
@@ -853,6 +858,7 @@ public sealed class BoardTool(
         if (card.Points is int points) builder.Append(" · Points: ").Append(points);
         if (card.Blocked) builder.Append(" · BLOCKED");
         if (card.Flagged) builder.Append(" · FLAGGED: needs your attention");
+        builder.Append(card.AgentMade ? " · Agent-made" : " · Human-made");
         if (card.Tags.Count > 0) builder.Append(" · Tags: ").Append(string.Join(", ", card.Tags));
         builder.Append('\n');
         if (!string.IsNullOrWhiteSpace(boardName))

@@ -370,8 +370,10 @@ inside `.monaco-editor` belongs to Monaco's own widgets and must be left alone. 
 `monaco.editor.getDiffEditors()` accumulates and is never pruned on dispose — use
 `getModels().length` as the leak signal, which is what the e2e test asserts.
 
-Filters (search, assignee, type, priority, tag) persist per browser in
-`localStorage['viberails.board.filters.v1']`. Clicking a card's tag or avatar toggles that filter,
+Filters (search, assignee, type, priority, origin) persist per browser in
+`localStorage['viberails.board.filters.v1']`. Origin is `agent` or `human`: a card
+`create_board_card` made as an agent carries `agentMade` and shows a robot mark beside its key;
+every other card, including ones made before the mark existed, is human-made. Clicking a card's tag or avatar toggles that filter,
 which is why those two controls stop propagation before the card's own open handler runs.
 
 ## Chat history sidebar

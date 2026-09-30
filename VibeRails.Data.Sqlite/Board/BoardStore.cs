@@ -515,9 +515,9 @@ public sealed partial class BoardStore : IBoardStore
             insert.Transaction = transaction;
             insert.CommandText = """
                 INSERT INTO BoardCards
-                    (Id, ProjectPath, Number, ColumnId, Position, Title, Description, Assignee, Priority, Type, Points, Tags, Blocked, Flagged, CreatedUTC, UpdatedUTC, CardKey, DisplayId)
+                    (Id, ProjectPath, Number, ColumnId, Position, Title, Description, Assignee, Priority, Type, Points, Tags, Blocked, Flagged, CreatedUTC, UpdatedUTC, CardKey, DisplayId, AgentMade)
                 VALUES
-                    ($id, $project, $number, $column, $position, $title, $description, $assignee, $priority, $type, $points, $tags, $blocked, $flagged, $created, $updated, $cardKey, $displayId);
+                    ($id, $project, $number, $column, $position, $title, $description, $assignee, $priority, $type, $points, $tags, $blocked, $flagged, $created, $updated, $cardKey, $displayId, $agentMade);
                 """;
             insert.Parameters.AddWithValue("$id", id);
             insert.Parameters.AddWithValue("$cardKey", cardKey);
@@ -535,6 +535,7 @@ public sealed partial class BoardStore : IBoardStore
             insert.Parameters.AddWithValue("$tags", SerializeTags(card.Tags));
             insert.Parameters.AddWithValue("$blocked", card.Blocked ? 1 : 0);
             insert.Parameters.AddWithValue("$flagged", card.Flagged ? 1 : 0);
+            insert.Parameters.AddWithValue("$agentMade", card.AgentMade ? 1 : 0);
             insert.Parameters.AddWithValue("$created", ToDb(now));
             insert.Parameters.AddWithValue("$updated", ToDb(now));
             await insert.ExecuteNonQueryAsync(cancellationToken);
@@ -543,7 +544,7 @@ public sealed partial class BoardStore : IBoardStore
         await WriteBaseLlmOptionsAsync(connection, transaction, id, card.BaseLlmOptions, cancellationToken);
 
         var created = new BoardCardRecord(id, project, number, column.Id, position, card.Title, card.Description,
-            card.Assignee, card.Priority, card.Points, card.Tags, card.Blocked, 0, now, now, card.BaseLlmOptions, Type: card.Type, BoardId: column.BoardId, Flagged: card.Flagged, KeyPrefix: prefix, StoredKey: cardKey, StoredDisplayId: displayId);
+            card.Assignee, card.Priority, card.Points, card.Tags, card.Blocked, 0, now, now, card.BaseLlmOptions, Type: card.Type, BoardId: column.BoardId, Flagged: card.Flagged, KeyPrefix: prefix, StoredKey: cardKey, StoredDisplayId: displayId, AgentMade: card.AgentMade);
         await LogCardCreatedAsync(connection, transaction, created, column.Name, author, cancellationToken, stamp);
         if (synced is not null) await ReconcileSyncedDisplayIdAsync(connection, transaction, created, card.DisplayId, cancellationToken);
         await InsertDraftLinksAsync(connection, transaction, created, card.LinkedCardIds, cancellationToken);
@@ -1205,7 +1206,7 @@ public sealed partial class BoardStore : IBoardStore
                (SELECT o.OptionsJson FROM BoardCardOptions o WHERE o.CardId = c.Id),
                c.Type,
                (SELECT k.BoardId FROM BoardColumns k WHERE k.Id = c.ColumnId), c.Flagged,
-               {CardPrefixSql}, c.CardKey, c.DisplayId
+               {CardPrefixSql}, c.CardKey, c.DisplayId, c.AgentMade
         FROM BoardCards c
         {CardPrefixJoinSql}
         """;
@@ -1393,7 +1394,8 @@ public sealed partial class BoardStore : IBoardStore
         Flagged: reader.GetInt32(18) != 0,
         KeyPrefix: reader.GetString(19),
         StoredKey: reader.IsDBNull(20) ? null : reader.GetString(20),
-        StoredDisplayId: reader.IsDBNull(21) ? null : reader.GetString(21));
+        StoredDisplayId: reader.IsDBNull(21) ? null : reader.GetString(21),
+        AgentMade: !reader.IsDBNull(22) && reader.GetInt32(22) != 0);
 
     private static async Task<IReadOnlyList<BoardCommentRecord>> ReadCommentsAsync(SqliteConnection connection, string cardId, string kind, CancellationToken cancellationToken)
     {
@@ -1754,6 +1756,11 @@ public sealed partial class BoardStore : IBoardStore
             SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardSyncLinks ADD COLUMN ActivitySchema INTEGER NOT NULL DEFAULT 0");
             SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardSyncLinks ADD COLUMN ActivityAfter TEXT");
         });
+        // board/24 (VIBE-11): a card created by an agent through MCP is marked once, at insert.
+        // Additive and default 0, so every card an older binary or the board UI created stays
+        // human-made, and an older binary never names the column.
+        SqliteMigrationRunner.Apply(connection, "board", 24, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardCards ADD COLUMN AgentMade INTEGER NOT NULL DEFAULT 0"));
         ReconcileDerivedRows(connection);
     }
 

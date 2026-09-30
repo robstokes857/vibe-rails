@@ -249,7 +249,8 @@ namespace VibeRails.DTOs
         string Type = BoardCardTypes.Default,
         string BoardId = "",
         bool Flagged = false,
-        bool HasActiveAutomation = false, string? DisplayId = null);
+        bool HasActiveAutomation = false, string? DisplayId = null,
+        bool AgentMade = false);
     public record BoardCardListResponse(List<BoardCardSummaryResponse> Cards)
     {
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -298,7 +299,8 @@ namespace VibeRails.DTOs
         string Type = BoardCardTypes.Default,
         string BoardId = "",
         bool Flagged = false,
-        bool HasActiveAutomation = false, string? DisplayId = null)
+        bool HasActiveAutomation = false, string? DisplayId = null,
+        bool AgentMade = false)
     {
         public List<BoardLinkedCardDto> LinkedCards { get; init; } = [];
     }
@@ -315,7 +317,8 @@ namespace VibeRails.DTOs
         string? Type = null,
         // Which board's left-most lane takes the card when ColumnId is omitted; null = the first board.
         string? BoardId = null,
-        bool? Flagged = null, string? DisplayId = null, List<string>? LinkedCardIds = null);
+        bool? Flagged = null, string? DisplayId = null, List<string>? LinkedCardIds = null,
+        bool? AgentMade = null);
     public record UpdateBoardCardRequest(
         string? Title = null,
         string? ColumnId = null,
