@@ -81,20 +81,22 @@ session page. It shows prompts and saved patches, plus proxy/model/tool details 
 includes them. Older uploads have no proxy captures. Board context is not included in envelopes.
 Missing metadata/patches/output have explicit empty states.
 
-### Desktop exchange summary limits
+### Exchange summary limits
 
 Summary reads select at most 2,000,000 response characters in SQLite before materializing or
 parsing them. Request model/effort extraction uses the same prefix bound; an incomplete request
 prefix has no extracted metadata. Captured bodies stay unchanged and the existing detail view
 retains its separate display bound.
 
-Tool summaries retain at most 64 calls, 256 characters per id/name, 8,192 argument characters per
-call and 65,536 argument characters per exchange. The limits also apply while accumulating SSE
+Desktop and uploaded-envelope tool summaries retain at most 64 calls, 256 characters per id/name,
+8,192 argument characters per call and 65,536 argument characters per exchange. The limits also apply while accumulating SSE
 fragments. `ParseNote` identifies truncated summaries and malformed JSON/event shapes; valid
 events and subsequent exchanges still load. Invalid indexes, arrays, objects and escaped Unicode
-cannot abort the recording.
+cannot abort the recording. The uploaded parser applies the same two-million-character input
+bound itself, retains bounded generated IDs for calls without IDs, and reports both malformed
+data and display truncation when they occur together. Raw capture details remain available.
 
-An exchange page contains at most 30 entries and a conservative 1 MiB JSON budget, including
+A desktop exchange page contains at most 30 entries and a conservative 1 MiB JSON budget, including
 worst-case string escaping. The cursor advances only over returned entries, so a page stopped
 by the byte budget leaves its next exchange for the following request. The limits bound display
 and request memory; they are not capture quotas or retention rules.

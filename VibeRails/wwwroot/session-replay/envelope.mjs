@@ -38,12 +38,12 @@ export function createEnvelopeSource(envelope) {
         if (summaries.has(index)) return summaries.get(index);
         let request = {};
         try { request = JSON.parse(bodyText(row.requestBefore).slice(0,bodyLimit)) || {}; } catch { /* Optional metadata. */ }
-        const parsed = parseResponseTools(bodyText(row.responseBody).slice(0,bodyLimit));
+        const parsed = parseResponseTools(bodyText(row.responseBody));
         const result = { cursor:index+1, id:row.id, at:time(row.createdUtc,started), provider:row.provider || '', method:row.method || '',
             path:row.path || '', status:row.statusCode, elapsedMs:row.elapsedMs,
             truncated:!!row.responseTruncated, model:request.model || '',
             effort:request.reasoning?.effort || request.output_config?.effort || request.thinking?.type || '',
-            tools:parsed.tools, parseNote:bodyText(row.responseBody).length>bodyLimit?'Tool parsing is limited to the first 2,000,000 characters.':parsed.note };
+            tools:parsed.tools, parseNote:parsed.note };
         summaries.set(index,result); return result;
     };
     let end = Math.max(started, ended || 0);
