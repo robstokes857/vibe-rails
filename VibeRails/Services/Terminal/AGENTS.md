@@ -26,6 +26,18 @@ Remote relay server (other repo):
 
 ## Core Architecture
 
+### Completed Automation output (VB-60)
+
+Completed Automation tabs remain available until dismissed, the root exits, or the 100-tab
+capacity policy reclaims an older finished host. Do not delete them on completion. The PTY
+still exits and its recording finalizes normally; `TerminalSessionService` retains one final
+snapshot per owned tab session, including the emulator's bounded 20,000-line scrollback. The
+existing authenticated snapshot route returns it when inactive, and a new session clears it.
+The finished snapshot renders as a read-only main screen without mouse/input reporting modes.
+Live PTY bytes and live snapshot semantics remain intact. CLI-private full-screen history that
+never entered terminal scrollback cannot be reconstructed from this snapshot; Replay remains
+the durable recording path after a host is dismissed or the app restarts.
+
 ### Native script Automation recordings (VB-29)
 
 `JobScriptSessionRecorder` creates a normal Shell session for a native script-only workflow;

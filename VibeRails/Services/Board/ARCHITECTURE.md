@@ -44,11 +44,14 @@ The editor, recipes and repository imports retain it. Lane discovery and move re
 launch prompts include up to five descriptions of 300 characters inside the task-data fence.
 
 The running robot on a card opens its active Automation terminal without opening the editor.
-The root checks each Automation host every two seconds and closes it after the run is terminal,
-the PTY is inactive, the recording is finalized, and no session start raced those checks. A
-browser disconnect alone never closes a host. `automation_terminal_closed` removes the viewer
-and menu entry; late browser list responses cannot restore a closed ID. Child process exits also
-announce closure. Recordings and Board links remain available from the card and Automation history.
+VB-60 supersedes completion-time closure: finished Automation hosts retain a read-only final
+screen and up to 20,000 scrollback lines, opened directly from the robot menu. The worker and
+recording still finish normally. Hosts remain until dismissed, root shutdown, or capacity
+reclamation at 100 tabs. Reclamation still requires a terminal run, inactive PTY, finalized
+recording and no concurrent session start. A browser disconnect alone never closes a host.
+`automation_terminal_closed` removes explicitly closed, reclaimed or exited hosts and prevents
+late browser responses from restoring them. Recordings and Board links remain available from
+the card and Automation history. Full-screen history held only inside a CLI is not scrollback.
 
 ## VB-69: display IDs and creation links (2026-09-28)
 

@@ -210,8 +210,6 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             gateHeld = false;
 
             _ = RelayChildAppEventsAsync(child, relayToken);
-            if (child.Automation is not null)
-                _ = CloseAutomationWhenCompletedAsync(child, relayToken);
             return await BuildTabStatusAsync(child, cancellationToken);
         }
         catch
@@ -227,46 +225,6 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             if (gateHeld)
                 _createGate.Release();
         }
-    }
-
-    private Task CloseAutomationWhenCompletedAsync(TerminalChildProcess child, CancellationToken cancellationToken) =>
-        MonitorAutomationCompletionAsync(async token =>
-        {
-            // A disconnected browser is not a completed process. Reuse the run, PTY,
-            // recording-flush and concurrent-start checks used for capacity reclamation.
-            await using var scope = _scopeFactory.CreateAsyncScope();
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
-            timeout.CancelAfter(TimeSpan.FromSeconds(5));
-            if (!await child.Automation!.TryReserveForReclamationAsync(
-                    scope.ServiceProvider.GetRequiredService<IJobStore>(),
-                    scope.ServiceProvider.GetRequiredService<ISessionStore>(),
-                    ct => GetTerminalStatusFromChildAsync(child, ct), timeout.Token))
-                return false;
-
-            await DeleteTabAsync(child.TabId, CancellationToken.None);
-            return true;
-        }, cancellationToken);
-
-    internal static async Task MonitorAutomationCompletionAsync(Func<CancellationToken, Task<bool>> tryClose,
-        CancellationToken cancellationToken, TimeSpan? pollInterval = null)
-    {
-        try
-        {
-            using var timer = new PeriodicTimer(pollInterval ?? TimeSpan.FromSeconds(2));
-            while (await timer.WaitForNextTickAsync(cancellationToken))
-            {
-                try
-                {
-                    if (await tryClose(cancellationToken)) return;
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return; }
-                catch (Exception ex)
-                {
-                    Log.Debug(ex, "[TerminalTabs] Automation completion not confirmed; will retry");
-                }
-            }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
     }
 
     private async Task ReclaimCompletedAutomationTabIfFullAsync(CancellationToken cancellationToken)

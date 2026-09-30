@@ -86,6 +86,27 @@ public sealed class AutomationTabCapacityTests
     }
 
     [Fact]
+    public async Task FinishedAutomationIsRetainedWhileThereIsCapacity()
+    {
+        using var services = new ServiceCollection().BuildServiceProvider();
+        using var http = new StatusHandler(_ => throw new InvalidOperationException("No reclamation probes expected"));
+        var host = Host(services, http);
+        var registry = Registry(host);
+        using var placeholder = new Process();
+        try
+        {
+            AddChild(registry, "finished", placeholder, 1, Started("finished"));
+            await ReclaimIfFullAsync(host);
+            Assert.True(registry.Contains("finished"));
+        }
+        finally
+        {
+            registry.Clear();
+            await host.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task NinetyNineTabsAreRetainedAndFullOrdinaryHostRejectsCreationWithoutEviction()
     {
         using var services = new ServiceCollection().BuildServiceProvider();

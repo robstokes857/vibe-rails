@@ -111,7 +111,7 @@ export class TerminalAutomationMenu {
             detail.className = 'vb-terminal-automation-detail';
             detail.dataset.status = status.toLowerCase();
             const runId = String(tab.jobRunId);
-            detail.textContent = `${status} · ${runId.length > 12 ? runId.slice(0, 8) : runId}${status === 'Finished' ? ' · Replay' : ''}`;
+            detail.textContent = `${status} · ${runId.length > 12 ? runId.slice(0, 8) : runId}${status === 'Finished' ? ' · View output' : ''}`;
             detail.title = `Run ${runId}`;
             main.append(name, detail);
             open.append(icon, main);
@@ -129,7 +129,7 @@ export class TerminalAutomationMenu {
         this.popup.appendChild(list);
         const footer = document.createElement('div');
         footer.className = 'vb-terminal-automations-footer';
-        footer.textContent = 'Finished runs open replay. Recordings stay in History.';
+        footer.textContent = 'Finished output stays scrollable until dismissed. At 100 terminals, the oldest finished run makes room. Recordings stay in History.';
         this.popup.appendChild(footer);
         if (!entries.length) this.close();
         else if (focusId) {

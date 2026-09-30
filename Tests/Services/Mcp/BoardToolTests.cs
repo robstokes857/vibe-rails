@@ -772,7 +772,7 @@ public sealed class BoardToolTests : IDisposable
         var sprint = await _service.CreateBoardAsync(_project, new CreateBoardRequest("Sprint 2"), Ct);
 
         var boards = await _tool.ListBoards(Ct);
-        Assert.Contains("- Main (id brd_", boards);
+        Assert.Contains($"- {Path.GetFileName(_project)} (id brd_", boards);
         Assert.Contains("1 card; lanes: Backlog → Ready → Build → Review → Done; current)", boards);
         Assert.Contains($"- Sprint 2 (id {sprint.Id}, 0 cards; lanes:", boards);
 

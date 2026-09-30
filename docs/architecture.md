@@ -571,6 +571,11 @@ changing their behavior.
   first failure, and retains the existing global timeout, cancellation, overlap guard, scheduler,
   and Worker terminal-session replay behavior. Native script-only workflows also record their timed stdout/stderr
   into normal session history; Board recordings link to the originating card's Automations rail.
+- Finished Automation tabs retain their final screen and up to 20,000 terminal scrollback lines
+  for direct read-only viewing (VB-60). The PTY exits and recording finalizes normally. The
+  existing snapshot API serves retained output; live snapshots still contain only the screen.
+  Tabs remain until dismissed, root shutdown, or reclamation at the 100-tab cap. Replay remains
+  available from history after dismissal. CLI-private full-screen history is not scrollback.
 
 #### McpClientService ([Services/Mcp/McpClientService.cs](../VibeRails/Services/Mcp/McpClientService.cs))
 **Purpose**: Custom MCP client service layer built on ModelContextProtocol NuGet package

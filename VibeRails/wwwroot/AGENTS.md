@@ -711,7 +711,7 @@ copyable session ID and a full-workflow replay alongside individual Worker recor
 
 Automation terminals live in a separate **robot/count** menu beside recently closed terminals.
 The list retains running and recent completed hosts; live entries attach on selection, completed
-entries open replay. Restoring or receiving a launch event updates the menu without opening an
+entries open retained read-only output in the terminal, with scrolling and copying. Restoring or receiving a launch event updates the menu without opening an
 xterm/socket per run or stealing focus. Server-owned `jobRunId` and `automationName` classify the
 entries across reloads; unavailable status must not be treated as completed. Ordinary close/undo
 keeps its independent two-minute grace window. The root's cap is 100; at capacity it may reclaim
@@ -927,6 +927,9 @@ The blinking robot on a Board tile is a button that focuses the active Automatio
 Its lookup ignores responses after navigation. Ordinary working-agent selection is unchanged.
 The terminal manager consumes `automation_terminal_closed`, disposes an open viewer, selects an
 ordinary tab if needed, and remembers closed IDs so an older list response cannot restore them.
-Completion is confirmed by the root; a viewer socket disconnect alone never removes a host.
+VB-60 keeps completed hosts and opens their retained output through the existing authenticated
+snapshot API. Completion does not emit a closure event. Dismissal, capacity reclamation and
+child exits do; a viewer socket disconnect alone never removes a host. Snapshot loads are lazy,
+guarded against navigation/session changes, and never open a socket or enable terminal input.
 Automation descriptions are optional, escaped, limited to 2,000 characters, and included in
 editor saves, recipes and repository imports.

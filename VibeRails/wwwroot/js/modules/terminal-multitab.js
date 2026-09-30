@@ -277,8 +277,9 @@ export class TerminalManager {
         }
 
         const preferredTabId = this.options.preferredTabId || this.getActiveTabIdFromStorage();
-        if (preferredTabId && this.automationTabs.has(preferredTabId)
-            && this.automationTabs.get(preferredTabId).hasActiveSession) {
+        const preferredAutomation = this.automationTabs.get(preferredTabId);
+        if (preferredAutomation && preferredAutomation.statusAvailable !== false
+            && (preferredAutomation.hasActiveSession || preferredAutomation.sessionId)) {
             await this.openAutomationTab(preferredTabId);
         } else if (this.tabOrder.length === 0) {
             const initialSelection = this.getInitialSelection();
@@ -628,7 +629,11 @@ export class TerminalManager {
                     if (info.statusAvailable === false) continue;
                     local.state.hasActiveSession = info.hasActiveSession;
                     local.state.sessionId = info.sessionId;
-                    if (!info.hasActiveSession) local.instance.autoReconnect?.cancel();
+                    if (!info.hasActiveSession) {
+                        local.instance.autoReconnect?.cancel();
+                        if (info.sessionId && this.activeTabId === info.tabId)
+                            void local.instance.showCompletedOutput().catch(error => this.app.showError(error.message));
+                    }
                 }
                 this.automationMenu.refresh();
                 this.updateUi();
@@ -668,9 +673,8 @@ export class TerminalManager {
             this.app.showError('This Automation terminal is temporarily unavailable. Try again shortly.');
             return false;
         }
-        if (!info.hasActiveSession) {
-            if (info.sessionId) await showReplayModal(info.sessionId);
-            else this.app.showToast('Automation starting', 'The terminal will be ready shortly.', 'info');
+        if (!info.hasActiveSession && !info.sessionId) {
+            this.app.showToast('Automation starting', 'The terminal will be ready shortly.', 'info');
             return true;
         }
         if (!this.tabs.has(tabId)) this.addLocalTab(info, {
@@ -678,7 +682,7 @@ export class TerminalManager {
             title: `Automation: ${info.automationName || 'Workflow'}`
         });
         await this.activateTab(tabId, { connectIfNeeded: true });
-        this.focusActiveTerminalInput();
+        if (info.hasActiveSession) this.focusActiveTerminalInput();
         return true;
     }
 
@@ -986,6 +990,12 @@ export class TerminalManager {
             if (this._destroyed) {
                 return;
             }
+        }
+
+        if (isAutomationTab(target.state) && !target.state.hasActiveSession && target.state.sessionId) {
+            this.showTerminal();
+            await target.instance.showCompletedOutput();
+            if (this._destroyed) return;
         }
 
         this.applyPanelState();
@@ -2379,7 +2389,7 @@ export class TerminalManager {
     updateWindowTitleBar(state) {
         if (this.windowTitle) {
             this.windowTitle.textContent = isAutomationTab(state)
-                ? `Automation: ${state.automationName || state.label}${state.hasActiveSession ? '' : ' · Finished'}`
+                ? `Automation: ${state.automationName || state.label}${state.hasActiveSession ? '' : ' · Finished · Read only'}`
                 : 'Terminals run safely in the background even if you navigate away.';
         }
 

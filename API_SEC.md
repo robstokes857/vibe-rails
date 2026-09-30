@@ -1449,6 +1449,18 @@ requirement and the launch composition; `Tests/Services/Mcp/BoardToolTests.cs` p
 
 ### Terminal and terminal tabs (14)
 
+VB-60 retains an owned terminal's final screen and up to 20,000 scrollback lines in its host
+after the PTY exits. The existing snapshot routes (including the per-tab Agent tools route)
+return that read-only snapshot while inactive; a new session clears it. Live snapshots retain
+their screen-only behavior. No input route accepts completed sessions, and no route, grant,
+authentication exception or listener was added. Retained output ends when its host is dismissed,
+reclaimed at capacity or shut down; normal recordings remain available in History.
+
+Scoped route enumeration and both required repository-wide listener searches found only the
+existing main Kestrel host, non-serving PortFinder probe and test-only hosts; the cross-runtime
+search had no matches. Session and tab credentials still gate snapshot requests. No violation
+was found. This is a scoped behavior amendment, not a full API re-audit.
+
 - `GET /api/v1/terminal/status`
 - `POST /api/v1/terminal/start`
 - `POST /api/v1/terminal/stop`

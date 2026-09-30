@@ -462,9 +462,18 @@ public sealed class Terminal : IAsyncDisposable
     /// polling cannot stall the live read loop, which holds <see cref="_subscriberLock"/>
     /// to dispatch output.
     /// </summary>
-    public TerminalSnapshotData CaptureSnapshotData()
+    public TerminalSnapshotData CaptureSnapshotData() => CaptureSnapshotData(completed: false);
+
+    /// <summary>
+    /// Captures the final screen and bounded scrollback as a read-only main-screen view.
+    /// Mouse reporting, alternate-screen and input modes are not restored in this view.
+    /// </summary>
+    internal TerminalSnapshotData CaptureCompletedSnapshotData() => CaptureSnapshotData(completed: true);
+
+    private TerminalSnapshotData CaptureSnapshotData(bool completed)
     {
         TerminalEmulator.TerminalCell[,] snap;
+        TerminalEmulator.TerminalCell[][] scrollback;
         int rows, cols, cursorRow, cursorCol, cursorShape;
         bool cursorVisible, isAlternateScreen, bracketedPaste;
 
@@ -479,13 +488,13 @@ public sealed class Terminal : IAsyncDisposable
             cursorShape = _emulator.CursorShape;
             isAlternateScreen = _emulator.IsAlternateScreen;
             bracketedPaste = _emulator.BracketedPasteActive;
+            scrollback = completed ? _emulator.GetScrollback() : [];
         }
 
-        // Empty scrollback → the serializer emits only the reset prologue plus the
-        // current screen grid, which is the least xterm.js needs to render the last screen.
         var replayBytes = TerminalGridSerializer.Serialize(
-            Array.Empty<TerminalEmulator.TerminalCell[]>(), snap, rows, cols,
-            cursorRow, cursorCol, cursorVisible, cursorShape, isAlternateScreen, bracketedPaste);
+            scrollback, snap, rows, cols,
+            cursorRow, cursorCol, !completed && cursorVisible, cursorShape,
+            !completed && isAlternateScreen, !completed && bracketedPaste);
 
         return new TerminalSnapshotData(
             cols,

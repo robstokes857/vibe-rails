@@ -78,7 +78,7 @@ npx playwright test --config playwright.terminal-automations.config.js
 ```
 
 Uses real terminal UI/xterm with intercepted API and WebSocket fixtures. Covers a long robot
-menu, lazy live attachment, finished-run replay, launch events/remount, independent close/undo,
+menu, lazy live attachment, scrollable finished output and reload, launch events/remount, independent close/undo,
 and narrow-window keyboard access. Does not launch a CLI or touch application state.
 
 ### Focused chat history tests (No Backend Required)

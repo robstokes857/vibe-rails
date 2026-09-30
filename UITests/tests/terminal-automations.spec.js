@@ -31,6 +31,14 @@ async function openFixture(page, total = 35) {
     });
     await page.route('**/api/v1/**', route => {
         const path = new URL(route.request().url()).pathname;
+        const snapshotMatch = path.match(/^\/api\/v1\/agent-tools\/terminal\/([^/]+)\/snapshot$/);
+        if (snapshotMatch) {
+            const tab = tabs.get(snapshotMatch[1]);
+            const output = '\x1b[?1049;1047;47l\x1b[?1000;1002;1003;1006;2004l\x1b[?25l'
+                + Array.from({ length: 100 }, (_, i) => `Review finding ${i + 1}\r\n`).join('');
+            return route.fulfill({ json: { sessionId: tab.sessionId, cols: 80, rows: 24,
+                xterm_ui_bytes: { base64: Buffer.from(output).toString('base64'), includes_scrollback: true } } });
+        }
         const match = path.match(/^\/api\/v1\/terminal\/tabs\/([^/]+)(?:\/status)?$/);
         if (match) {
             if (route.request().method() === 'DELETE') {
@@ -93,13 +101,30 @@ test('many Automations stay in a scrollable robot menu and attach only when sele
     expect(fixture.connections.filter(id => id !== 'ordinary')).toEqual(['automation-1']);
 });
 
-test('completed Automations replay without connecting a terminal host', async ({ page }) => {
+test('completed Automations keep scrollable output through switching and reload without connecting a host', async ({ page }, testInfo) => {
     const fixture = await openFixture(page, 2);
     await page.locator(button).click();
-    await expect(page.locator('[data-automation-open="automation-2"]')).toContainText('Replay');
+    await expect(page.locator('[data-automation-open="automation-2"]')).toContainText('View output');
     await page.locator('[data-automation-open="automation-2"]').click();
-    await expect(page.getByText(`Session Replay — ${fixture.tabs.get('automation-2').sessionId}`, { exact: true })).toBeVisible();
-    await expect(page.frameLocator('iframe[data-session-replay]').locator('#speed-ts-control')).toBeVisible();
+    const readOutput = () => page.evaluate(() => window.app?.terminalController?.manager?.getActiveTab()?.instance?.vibeTerminal?.getPlainText());
+    await expect.poll(readOutput).toContain('Review finding 100');
+    await expect(page.locator('#vb-terminal-window-title')).toContainText('Nightly workflow 2');
+    expect(await page.evaluate(() => window.app.terminalController.manager.getActiveTab().instance.terminal.options.disableStdin)).toBe(true);
+    const viewport = page.locator('.vb-terminal-tab-panel:visible .xterm');
+    // Use the real wheel handler: mouse reporting must not swallow scrolling after exit.
+    const before = await page.evaluate(() => window.app.terminalController.manager.getActiveTab().instance.terminal.buffer.active.viewportY);
+    expect(before).toBeGreaterThan(0);
+    await viewport.hover();
+    await page.mouse.wheel(0, -1200);
+    await expect.poll(() => page.evaluate(() => window.app.terminalController.manager.getActiveTab().instance.terminal.buffer.active.viewportY)).toBeLessThan(before);
+    await page.screenshot({ path: testInfo.outputPath('completed-output.png') });
+    await page.locator('.vb-terminal-tab-item[data-tab-id="ordinary"] .vb-terminal-tab-button').click();
+    await page.locator(button).click();
+    await page.locator('[data-automation-open="automation-2"]').click();
+    await expect.poll(readOutput).toContain('Review finding 1');
+    await page.reload();
+    await expect.poll(readOutput).toContain('Review finding 100');
+    await expect(page.locator('iframe[data-session-replay]')).toHaveCount(0);
     expect(fixture.connections).toEqual(['ordinary']);
 });
 
@@ -146,19 +171,24 @@ test('opening a Board Automation session link retains its menu classification', 
     )).toBe(false);
 });
 
-test('completion switches a live Automation to replay and an unavailable host stays unavailable', async ({ page }) => {
+test('completion retains the selected Automation output and an unavailable host stays unavailable', async ({ page }) => {
     const fixture = await openFixture(page, 2);
+    await page.locator(button).click();
+    await page.locator('[data-automation-open="automation-1"]').click();
+    await expect.poll(() => fixture.connections.includes('automation-1')).toBe(true);
     const finished = fixture.tabs.get('automation-1');
     finished.hasActiveSession = false;
     fixture.emit('session_completed', { tabId: finished.tabId, sessionId: finished.sessionId, exitCode: 0 });
     fixture.tabs.get('automation-2').statusAvailable = false;
+    await expect.poll(() => page.evaluate(() => window.app.terminalController.manager.getActiveTab().instance.vibeTerminal?.getPlainText())).toContain('Review finding 100');
+    expect(await page.evaluate(() => window.app.terminalController.manager.activeTabId)).toBe('automation-1');
     await page.locator(button).click();
     await expect(page.locator('[data-automation-open="automation-1"]')).toContainText('Finished');
     await expect(page.locator('[data-automation-open="automation-2"]')).toContainText('Unavailable');
     await page.locator('[data-automation-open="automation-2"]').click();
     await expect(page.getByText('This Automation terminal is temporarily unavailable. Try again shortly.', { exact: true })).toBeVisible();
     await expect(page.getByRole('combobox', { name: 'Replay speed' })).toHaveCount(0);
-    expect(fixture.connections).toEqual(['ordinary']);
+    expect(fixture.connections).toEqual(['ordinary', 'automation-1']);
 });
 
 test('confirmed Automation closure removes its selected viewer and returns to the ordinary terminal', async ({ page }) => {

@@ -500,6 +500,7 @@ export class TerminalTab {
     }
 
     disposeTerminalInstance() {
+        this._completedOutputSessionId = null;
         if (!this.vibeTerminal) {
             return;
         }
@@ -551,6 +552,7 @@ export class TerminalTab {
     }
 
     dispose() {
+        this._disposed = true;
         this.disconnect({ disposeTerminal: true, preserveStatus: true });
         this.teardownInputFocusHandlers();
         this.statusController?.dispose();
@@ -987,6 +989,43 @@ export class TerminalTab {
                 this.manager.updateUi();
             };
         });
+    }
+
+    async showCompletedOutput() {
+        const sessionId = this.state.sessionId;
+        if (!sessionId || this.state.hasActiveSession || this._disposed) return false;
+        if (this._completedOutputSessionId === sessionId && this.vibeTerminal) return true;
+        if (this._completedOutputRequest) return this._completedOutputRequest;
+
+        this.autoReconnect?.cancel();
+        this.disconnect({ preserveStatus: true });
+        this._completedOutputRequest = (async () => {
+            const snapshot = await this.manager.app.apiCall(
+                `/api/v1/agent-tools/terminal/${encodeURIComponent(this.state.id)}/snapshot`,
+                'GET', null, { showLoading: false });
+            if (this._disposed || this.manager._destroyed || !this.isActive
+                || this.state.hasActiveSession || this.state.sessionId !== sessionId) return false;
+            const payload = snapshot?.xterm_ui_bytes;
+            if (snapshot?.sessionId !== sessionId || !payload?.base64 || payload.includes_scrollback !== true)
+                throw new Error('Completed output is not available yet. Try opening the terminal again.');
+
+            this.ensureTerminal();
+            const terminal = this.vibeTerminal;
+            this.terminal.options.disableStdin = true;
+            terminal.resize(snapshot.cols, snapshot.rows);
+            terminal.resetForSnapshotReplay();
+            const bytes = Uint8Array.from(atob(payload.base64), char => char.charCodeAt(0));
+            await terminal.writeAsync(bytes);
+            if (this._disposed || this.vibeTerminal !== terminal || !this.isActive) return false;
+            terminal.fit({ notify: false });
+            terminal.scrollToBottom();
+            this.setupResizeHandling();
+            this._completedOutputSessionId = sessionId;
+            this.state.status = 'finished';
+            this.manager.updateUi();
+            return true;
+        })().finally(() => { this._completedOutputRequest = null; });
+        return this._completedOutputRequest;
     }
 
     async startSession(body) {

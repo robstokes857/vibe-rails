@@ -35,6 +35,7 @@ public class TerminalSessionService : ITerminalSessionService
     private static WebSocket? s_activeWebSocket;
     private static string? s_sessionOwnerId;
     private static bool s_externallyOwned;
+    private static TerminalSnapshot? s_completedSnapshot;
 
     public bool HasActiveSession
     {
@@ -98,6 +99,7 @@ public class TerminalSessionService : ITerminalSessionService
             {
                 if (s_terminal != null)
                     return false;
+                s_completedSnapshot = null;
             }
 
             // Past the gate and past the occupancy check, so this call owns the slot and no
@@ -296,6 +298,7 @@ public class TerminalSessionService : ITerminalSessionService
             {
                 if (s_terminal != null)
                     throw new InvalidOperationException("A terminal session is already active");
+                s_completedSnapshot = null;
                 s_terminal = terminal;
                 s_sessionId = sessionId;
                 s_cli = null; // external sessions don't report a CLI; web-side per-CLI behavior stays off
@@ -378,13 +381,15 @@ public class TerminalSessionService : ITerminalSessionService
         {
             terminal = s_terminal;
             sessionId = s_sessionId;
+            if (terminal == null || sessionId == null)
+                return Task.FromResult(s_completedSnapshot);
         }
 
-        if (terminal == null || sessionId == null)
-            return Task.FromResult<TerminalSnapshot?>(null);
+        return Task.FromResult<TerminalSnapshot?>(CreateSnapshot(sessionId, terminal.CaptureSnapshotData(), false));
+    }
 
-        var capture = terminal.CaptureSnapshotData();
-        var snapshot = new TerminalSnapshot(
+    internal static TerminalSnapshot CreateSnapshot(string sessionId, TerminalSnapshotData capture, bool includesScrollback) =>
+        new(
             sessionId,
             DateTimeOffset.UtcNow,
             capture.Cols,
@@ -398,12 +403,9 @@ public class TerminalSessionService : ITerminalSessionService
                 ByteLength: capture.XtermReplayBytes.Length,
                 Cols: capture.Cols,
                 Rows: capture.Rows,
-                IncludesScrollback: false,
+                IncludesScrollback: includesScrollback,
                 RendererHint: "xterm.js"),
             XtermPngString: null);
-
-        return Task.FromResult<TerminalSnapshot?>(snapshot);
-    }
 
     public Task<TerminalImageCaptureResult> CaptureImageSnapshotAsync(CancellationToken cancellationToken = default)
     {
@@ -675,6 +677,18 @@ public class TerminalSessionService : ITerminalSessionService
             if (teardown.TerminalToDispose != null)
             {
                 await teardown.TerminalToDispose.DisposeAsync();
+                // Disposal gives the read loop a bounded drain before capturing. Publish before the completed
+                // event, so a viewer opened from that event can immediately read the final bytes.
+                try
+                {
+                    var snapshot = CreateSnapshot(teardown.SessionId,
+                        teardown.TerminalToDispose.CaptureCompletedSnapshotData(), true);
+                    lock (s_lock) s_completedSnapshot = snapshot;
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning(ex, "[Terminal] Could not retain completed output for {SessionId}", teardown.SessionId);
+                }
             }
 
             TerminalResizeCoordinator.ClearSession(teardown.SessionId);
