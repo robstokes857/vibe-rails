@@ -5,6 +5,9 @@ export const LLM_MODEL_OPTIONS = Object.freeze({
     'codex': [
         ['', 'Default (Codex recommended)'],
         ['gpt-6-astra', 'gpt-6-astra'],
+        ['gpt-6.1-sol', 'gpt-6.1-sol'],
+        ['gpt-6-sol', 'gpt-6-sol'],
+        ['gpt-6-luna', 'gpt-6-luna'],
         ['gpt-5.6-sol', 'gpt-5.6-sol'],
         ['gpt-5.6-terra', 'gpt-5.6-terra'],
         ['gpt-5.6-luna', 'gpt-5.6-luna'],
@@ -24,6 +27,7 @@ export const LLM_MODEL_OPTIONS = Object.freeze({
         ['claude-opus-5[1m]', 'claude-opus-5[1m]'],
         ['claude-opus-4-8[1m]', 'claude-opus-4-8[1m]'],
         ['claude-opus-4-7[1m]', 'claude-opus-4-7[1m]'],
+        ['claude-sonnet-5-5[1m]', 'claude-sonnet-5-5[1m]'],
         ['claude-sonnet-5[1m]', 'claude-sonnet-5[1m]'],
         ['claude-sonnet-4-6[1m]', 'claude-sonnet-4-6[1m]'],
         ['claude-haiku-4-5', 'claude-haiku-4-5']

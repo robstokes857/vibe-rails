@@ -27,12 +27,50 @@ test.describe('Codex environment form – Model field', () => {
         expect(values).toEqual([
             '',
             'gpt-6-astra',
+            'gpt-6.1-sol',
+            'gpt-6-sol',
+            'gpt-6-luna',
             'gpt-5.6-sol',
             'gpt-5.6-terra',
             'gpt-5.6-luna',
             'gpt-5.5',
         ]);
     });
+
+    for (const model of ['gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna']) {
+        test(`${model} saves the exact launch value and reopens as a pinned model`, async ({ page }) => {
+            let savedEnvironment = null;
+            let savedSettings = {};
+            // Keep environment and CLI settings writes in this browser fixture.
+            await page.route('**/api/v1/environments', async route => {
+                if (route.request().method() === 'GET') {
+                    return route.fulfill({ json: { environments: savedEnvironment ? [savedEnvironment] : [] } });
+                }
+                expect(route.request().method()).toBe('POST');
+                savedEnvironment = {
+                    ...route.request().postDataJSON(), id: 424242, path: '',
+                    lastUsedUTC: new Date().toISOString()
+                };
+                await route.fulfill({ json: savedEnvironment });
+            });
+            await page.route('**/api/v1/codex/settings/**', async route => {
+                if (route.request().method() === 'PUT') savedSettings = route.request().postDataJSON();
+                await route.fulfill({ json: savedSettings });
+            });
+
+            await openCodexEnvironmentForm(page);
+            await page.locator('#codex-model').selectOption(model);
+            await page.locator('#env-name').fill(`e2e-${model}`);
+            await page.locator('#env-form button[type="submit"]').click();
+            await expect(page.locator('#env-form')).toHaveCount(0);
+            expect(savedEnvironment.customArgs).toBe(`--model ${model}`);
+            expect(savedSettings.model).toBe(model);
+
+            await page.locator(`[data-action="edit-environment"][data-env-name="e2e-${model}"]`).click();
+            await expect(page.locator('#codex-model')).toHaveValue(model);
+            await expect(page.locator('#codex-model option:checked')).toHaveText(model);
+        });
+    }
 
     test('effort select includes all current Codex reasoning levels', async ({ page }) => {
         await openCodexEnvironmentForm(page);

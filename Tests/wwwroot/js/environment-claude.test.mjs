@@ -32,6 +32,7 @@ const PINNED_CLAUDE_MODELS = [
     'claude-opus-5[1m]',
     'claude-opus-4-8[1m]',
     'claude-opus-4-7[1m]',
+    'claude-sonnet-5-5[1m]',
     'claude-sonnet-5[1m]',
     'claude-sonnet-4-6[1m]',
     'claude-haiku-4-5'
@@ -114,6 +115,21 @@ test('a bare 1M-capable ID saved before 2026-09-28 upgrades to its pinned [1m] f
 test('Board base Claude launch can select Opus 5.5', () => {
     assert.match(renderBoardLaunchOptions('base:claude', { model: 'claude-opus-5-5[1m]' }), /value="claude-opus-5-5\[1m\]" selected/);
     assert.equal(normalizeBoardLaunchOptions('base:claude', { model: 'claude-opus-5-5[1m]' }).model, 'claude-opus-5-5[1m]');
+});
+
+test('Sonnet 5.5 sits above Sonnet 5, saves as its [1m] form, and a bare saved ID reopens as pinned', () => {
+    const models = LLM_MODEL_OPTIONS.claude.map(([model]) => model);
+    assert.equal(models.indexOf('claude-sonnet-5-5[1m]') + 1, models.indexOf('claude-sonnet-5[1m]'));
+
+    const controller = createController();
+    const settings = controller.mergeClaudeSettingsFromCustomArgs({}, '--model claude-sonnet-5-5 --effort medium');
+    assert.equal(settings.model, 'claude-sonnet-5-5[1m]');
+    assert.equal(controller.buildClaudeCustomArgs(settings), '--model claude-sonnet-5-5[1m] --effort medium');
+    assert.match(controller.buildCliSettingsHtml('claude', settings), /<option value="claude-sonnet-5-5\[1m\]" selected>/);
+    assert.doesNotMatch(controller.buildCliSettingsHtml('claude', settings), /\(custom\)/);
+
+    assert.equal(normalizeBoardLaunchOptions('base:claude', { model: 'claude-sonnet-5-5[1m]' }).model, 'claude-sonnet-5-5[1m]');
+    assert.match(renderBoardLaunchOptions('base:claude', { model: 'claude-sonnet-5-5[1m]' }), /value="claude-sonnet-5-5\[1m\]" selected/);
 });
 
 test('Board base Claude launch keeps the 1M-context form and it reopens as pinned', () => {
