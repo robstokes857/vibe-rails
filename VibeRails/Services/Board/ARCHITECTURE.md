@@ -1,5 +1,13 @@
 # Vibe Board architecture and review
 
+## VB-52: shared boards (2026-09-30)
+
+`Sync/BoardSharingService.cs` and six existing-host REST routes expose owner invitations and
+accepted-board discovery/import. The website enforces membership; desktop storage remains behind
+`IBoardStore`. `BoardStore.Sharing.cs` and additive `board/26` persist pinned origins and apply
+layouts transactionally. `board-sharing.js` owns modal requests and disposal. See
+[SYNC.md](SYNC.md#vb-52-shared-boards) for privacy, compatibility and POC limitations.
+
 ## VIBE-1: card organization and unified discussion (2026-09-30)
 
 `BoardStore.CardActions.cs` adds transactional merge and user-only discussion deletion.

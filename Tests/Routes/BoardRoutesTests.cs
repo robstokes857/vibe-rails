@@ -34,6 +34,34 @@ namespace Tests.Routes;
 public sealed class BoardRoutesTests : IAsyncLifetime
 {
     [Fact]
+    public async Task SharingRoutesRequireBothCredentialsAndScopeLocalBoardBeforeRemoteCalls()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var store = _app.Services.GetRequiredService<IBoardStore>();
+        var local = await store.CreateBoardAsync(_project, "Local", ct);
+        var foreign = await store.CreateBoardAsync(_project + "-foreign", "Foreign", ct);
+        var path = $"/api/v1/board/boards/{local.Id}/sharing";
+        foreach (var (method, url) in new[] {
+            (HttpMethod.Get, "/api/v1/board/shared"), (HttpMethod.Post, "/api/v1/board/shared/remote/import"),
+            (HttpMethod.Get, path), (HttpMethod.Post, path), (HttpMethod.Put, path + "/invite"), (HttpMethod.Delete, path + "/invite") })
+        {
+            using var anonymous = await SendAsync(method, url);
+            using var session = await SendAsync(method, url, "test-session");
+            using var tab = await SendAsync(method, url, tab: "test-tab");
+            Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+            Assert.Equal(HttpStatusCode.Unauthorized, session.StatusCode);
+            Assert.Equal(HttpStatusCode.Unauthorized, tab.StatusCode);
+        }
+        using var result = await SendAsync(HttpMethod.Get, path, "test-session", "test-tab");
+        result.EnsureSuccessStatusCode();
+        Assert.True(result.Headers.CacheControl!.NoStore);
+        using var data = await ReadJsonAsync(result);
+        Assert.False(data.RootElement.GetProperty("configured").GetBoolean());
+        using var denied = await SendAsync(HttpMethod.Get, $"/api/v1/board/boards/{foreign.Id}/sharing", "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.BadRequest, denied.StatusCode);
+    }
+
+    [Fact]
     public async Task MergeAndCommentDeletionRequireBothCredentialsAndScopeBothCards()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -133,6 +161,7 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         builder.Services.AddSingleton(new Mock<IBoardSyncClient>(MockBehavior.Loose).Object);
         builder.Services.AddSingleton<IFeatureLog>(NullFeatureLog.Instance);
         builder.Services.AddScoped<IBoardSyncService, BoardSyncService>();
+        builder.Services.AddScoped<BoardSharingService>();
 
         _app = builder.Build();
         _app.UseMiddleware<CookieAuthMiddleware>();

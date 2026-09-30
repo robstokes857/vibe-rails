@@ -30,7 +30,9 @@ public sealed record BoardSyncLinkRecord(
     string BoardName = "",
     string? DestinationKey = null,
     int ActivitySchema = 0,
-    string? ActivityAfter = null);
+    string? ActivityAfter = null,
+    bool Imported = false,
+    string? RemoteKeyPrefix = null);
 
 /// <summary>An unsent Card Log entry together with the card identity the wire needs.</summary>
 public sealed record BoardSyncOutboundEntry(BoardCommentRecord Entry, string CardKey);

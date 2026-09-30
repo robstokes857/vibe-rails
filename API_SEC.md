@@ -1,5 +1,30 @@
 # API authentication coverage
 
+## VB-52 Board sharing (2026-09-30, scoped amendment)
+
+Six root-only routes use the existing session-plus-tab middleware and no-store responses:
+`GET /api/v1/board/shared`, `POST /api/v1/board/shared/{remoteId}/import`,
+`GET|POST /api/v1/board/boards/{boardId}/sharing` and
+`PUT|DELETE /api/v1/board/boards/{boardId}/sharing/{inviteId}`. Local operations derive the project
+server-side and check board scope before remote calls. Transport reuses bounded HTTPS, header-only
+API keys, no redirects and destination fingerprints. Imported boards retain their original
+remote/destination identity and never auto-publish after revocation.
+
+The companion hosted API checks owner-only collaborator CRUD and accepted-member Board access
+on every request. Inviting never queries account existence. Verified-email recipients accept,
+decline, leave and block through Auth0 and antiforgery. Declines and blocks are private. Each
+board permits three pending/accepted collaborators. Membership extends only Board query filters;
+session archives, terminal control and unrelated account data remain actor-owned. Sharing writes
+advance a concurrency token, so racing card writes retry authorization. The companion
+`Services/Boards/Sharing.md` enumerates hosted routes and narrow privileged queries.
+
+Scoped route enumeration and both mandatory repository-wide listener searches found the main
+Kestrel host, the non-serving PortFinder probe and test-only hosts; the cross-runtime search had
+no matches. No new listener, authentication exception or unresolved violation was found. Isolated
+HTTP tests cover both local credentials, project isolation, hosted owner/member permissions,
+conflicting browser/key identities and CSRF. Relational tests cover the cap and revocation during
+acceptance/card writes. This is a scoped addition, not a full re-audit.
+
 ## VB-6TYZ2-4 session replay (2026-09-30, scoped amendment)
 
 Seven read-only routes are added on the existing root Kestrel host, all requiring the

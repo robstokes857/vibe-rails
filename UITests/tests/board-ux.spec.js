@@ -5,6 +5,89 @@ const { test, expect } = process.env.VIBERAILS_BOARD_STATIC === '1'
 const IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=';
 const DESCRIPTION = 'Repro screenshot\n![Screenshot.png](attachment:att_image)\n<img src=x onerror="window.__injected=true">';
 
+for (const width of [1440, 390]) {
+    test(`owner sharing modal CRUD and invitation limit at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 900 });
+        await openBoard(page);
+        let invites = [{ id: 'invite_1', email: 'member@example.test', status: 'accepted' }];
+        const writes = [];
+        await page.route('**/api/v1/board/boards/brd_main/sharing**', async route => {
+            const request = route.request(); const method = request.method();
+            if (method === 'GET') return route.fulfill({ json: { configured: true, isOwner: true, sharing: { limit: 3, invitations: invites } } });
+            expect(request.headers().viberails_tab).toBe('board-fixture');
+            writes.push({ method, body: method === 'DELETE' ? null : request.postDataJSON() });
+            if (method === 'POST') invites.push({ id: 'invite_' + (invites.length + 1), email: request.postDataJSON().email, status: 'pending' });
+            if (method === 'PUT') invites[0].email = request.postDataJSON().email;
+            if (method === 'DELETE') invites = invites.filter(i => !request.url().endsWith('/' + i.id));
+            return route.fulfill({ json: { saved: true } });
+        });
+        await page.getByRole('button', { name: 'Share', exact: true }).click();
+        const modal = page.locator('[data-sharing-modal]');
+        await expect(modal).toContainText('1 of 3');
+        await modal.getByRole('textbox', { name: 'Invite email', exact: true }).fill('future@example.test');
+        await modal.getByRole('button', { name: 'Invite', exact: true }).click();
+        await expect(modal).toContainText('Invitation saved');
+        await expect(modal.locator('[data-sharing-edit]')).toHaveCount(2);
+        await modal.getByRole('textbox', { name: 'Invite email', exact: true }).fill('third@example.test');
+        await modal.getByRole('button', { name: 'Invite', exact: true }).click();
+        await expect(modal.locator('[data-sharing-new]')).toHaveCount(0);
+        const first = modal.locator('[data-sharing-edit]').first();
+        await first.getByRole('textbox').fill('changed@example.test');
+        await first.getByRole('button', { name: 'Save address' }).click();
+        await expect.poll(() => invites[0].email).toBe('changed@example.test');
+        const bounds = await page.locator('#modal-container .modal-content').boundingBox();
+        expect(bounds.x).toBeGreaterThanOrEqual(0);
+        expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+        expect(await modal.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+        await page.screenshot({ path: testInfo.outputPath(`sharing-${width}.png`) });
+        await first.getByRole('button', { name: 'Remove' }).click();
+        await page.getByRole('alertdialog').getByRole('button', { name: 'Remove', exact: true }).click();
+        await expect(modal.locator('[data-sharing-edit]')).toHaveCount(2);
+        await expect(modal.locator('[data-sharing-new]')).toHaveCount(1);
+        expect(writes.map(w => w.method)).toEqual(['POST', 'POST', 'PUT', 'DELETE']);
+        expect(await page.evaluate(() => Boolean(window.__injected))).toBe(false);
+    });
+}
+
+test('shared board members have no owner CRUD and late sharing responses cannot replace another modal', async ({ page }) => {
+    await openBoard(page);
+    await page.route('**/api/v1/board/boards/brd_main/sharing', route => route.fulfill({ json: { configured: true, isOwner: false, sharing: null } }));
+    await page.getByRole('button', { name: 'Share', exact: true }).click();
+    await expect(page.locator('[data-sharing-modal]')).toContainText('Only its owner');
+    await expect(page.locator('[data-sharing-modal] form')).toHaveCount(0);
+    await page.evaluate(() => window.app.closeModal());
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    await page.route('**/api/v1/board/boards/brd_main/sharing', async route => {
+        await gate; await route.fulfill({ json: { configured: true, isOwner: true, sharing: { limit: 3, invitations: [] } } }).catch(() => {});
+    });
+    await page.getByRole('button', { name: 'Share', exact: true }).click();
+    await expect(page.locator('[data-sharing-modal]')).toContainText('Loading');
+    await page.evaluate(() => window.app.boardController.openBoardEditor(null));
+    release();
+    await expect(page.locator('[data-board-board-editor]')).toBeVisible();
+    await expect(page.locator('[data-sharing-modal]')).toHaveCount(0);
+});
+
+test('accepted shared boards are explicitly imported into the chosen project', async ({ page }) => {
+    await openBoard(page);
+    const remoteId = '11111111-1111-4111-8111-111111111111';
+    await page.route('**/api/v1/board/shared', route => route.fulfill({ json: [{ remoteBoardId: remoteId, name: 'Shared <script>work</script>', isOwner: false }] }));
+    let imports = 0;
+    await page.route(`**/api/v1/board/shared/${remoteId}/import`, route => {
+        imports++; expect(route.request().method()).toBe('POST');
+        return route.fulfill({ json: { boardId: 'brd_main', name: 'Shared work' } });
+    });
+    await page.getByRole('button', { name: 'Shared boards', exact: true }).click();
+    await expect(page.locator('[data-sharing-modal]')).toContainText('Shared <script>work</script>');
+    await expect(page.locator('[data-sharing-modal] script')).toHaveCount(0);
+    expect(imports).toBe(0);
+    await page.getByRole('button', { name: 'Add to this project' }).click();
+    await expect.poll(() => imports).toBe(1);
+    await expect(page.locator('[data-sharing-modal]')).toHaveCount(0);
+    await expect(page.locator('[data-board-select]')).toHaveValue('brd_main');
+});
+
 test('move and merge use explicit destinations and preserve drafts until saved', async ({ page }, testInfo) => {
     let current;
     await openBoard(page, { relatedCards: true, onCard: card => { current = card; } });

@@ -1,5 +1,32 @@
 # Board sync (VB-51)
 
+## VB-52: shared boards
+
+Owners use **Share** on either client to manage three collaborators, including pending invitations.
+Inviting has the same response for registered, unregistered and blocked addresses. Recipients use
+the website's **Invitations** and **Blocked users** screens; only a verified account email can
+accept. No email notification is sent. The hosted API enforces owner-only member management and
+grants accepted members portable card, discussion and layout edits.
+
+Desktop **Shared boards** lists accepted boards and imports one into the current project on
+request. `BoardSharingService` orchestrates transport; `IBoardStore` owns atomic persistence.
+Automatic additive `board/26` adds `BoardSharedOrigins` in the normal `board.db`. It pins remote
+board ID, API destination/key fingerprint and remote key prefix independently of legacy sync
+fields. Each remote board is imported at most once per machine. Imported boards never publish
+as a new owner after revocation or destination changes; downloaded data stays. The original API
+key is required for these POC imports; credential relinking is future work. Older binaries can
+read local data but do not understand shared-board sync; use the updated version for sharing.
+
+Cards and discussion reuse bounded Card Log push/pull. Portable layouts reconcile both ways;
+transactional snapshot checks preserve concurrent local edits. Removed lanes remain until pending
+card moves arrive. Launch settings, environments and Automations stay machine-local. Owner activity
+snapshots are readable by members on the website. Imported desktop boards neither import activity
+rails nor upload replacement snapshots. Session archives and live terminals retain their own ACLs.
+
+The companion Front `BoardSharing` migration adds invitations, memberships, blocks and a
+concurrency token. It must ship through the normal hosted release workflow before deploying
+sharing. This work does not apply production migrations; desktop setup remains automatic.
+
 ## VIBE-1: transfers and one discussion stream
 
 The Board settings sync section has been removed. Automatic publication and protected sync APIs
@@ -30,7 +57,7 @@ copied comments/activity and source soft deletion. No additional listener or cre
 A configured viberails.ai API key automatically publishes all local boards and their linked
 activity (VIBE-13). The root backend pushes and pulls every 60 seconds while open. Without a key,
 local edits wait for a configured account. Protected APIs retain the manual sync action.
-There are no invitations, shared editing, or multi-user permissions in this slice.
+VB-52 adds invitations and shared editing through the hosted Board ACL described above.
 
 ## Conversation and history
 

@@ -1,5 +1,13 @@
 # Board persistence
 
+## Shared origins (board/26, VB-52)
+
+`BoardStore.Sharing.cs` imports accepted shared boards and applies remote layouts atomically.
+`BoardSharedOrigins` pins remote identity, destination/key fingerprint and prefix separately from
+legacy sync fields. Setup adds the table without converting old rows. Keep imports project-scoped,
+retain cards when retiring remote lanes, and preserve the expected-layout check. Legacy remote keys
+are accepted only for explicit shared imports. See the Board `SYNC.md` contract.
+
 ## Card actions (board/25, VIBE-1)
 
 `BoardStore.CardActions.cs` owns atomic merging, user-only discussion tombstones and cross-board
@@ -18,7 +26,7 @@ Read the cross-layer [Board contributor guide](../../VibeRails/Services/Board/AG
 [database migration policy](../DB/AGENTS.md), before changing this component.
 
 This directory owns `IBoardStore`'s SQLite implementation in `~/.vibe_rails/board.db`, including
-component migrations `board/1`–`board/23`. The historical `VibeRails.Services.Board` namespace
+component migrations `board/1`–`board/26`. The historical `VibeRails.Services.Board` namespace
 does not move this code back into the application project. Keep DTO/contracts in
 `VibeRails.Data.Abstractions/Board`; keep Git, live terminal state and UI policy in the host.
 

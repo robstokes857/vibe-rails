@@ -388,6 +388,11 @@ for data limits, vendor provenance, themes/CSP, lifecycle and regression tests.
 
 ### Vibe Board
 
+VB-52 adds owner invitation controls, website recipient inbox/block screens and desktop shared-board
+import. The website enforces the three-collaborator cap and Board membership. Additive `board/26`
+stores pinned import origins; existing sync carries portable edits both ways. See the
+[sharing contract](../VibeRails/Services/Board/SYNC.md#vb-52-shared-boards) for lifecycle and limits.
+
 VIBE-1 adds the card editor's **Move or merge** actions, one Comments stream and human-only
 comment deletion. `BoardStore.CardActions.cs` keeps merge/transfer/tombstone writes atomic;
 `board-card-organize.js` owns destination selection and draft protection. A merge preserves

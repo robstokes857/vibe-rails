@@ -1771,6 +1771,8 @@ public sealed partial class BoardStore : IBoardStore
             SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardComments ADD COLUMN TransferRemoteSeq INTEGER");
             SqliteSchema.Execute(db, transaction, TransferDeliverySchemaSql);
         });
+        SqliteMigrationRunner.Apply(connection, "board", 26, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, SharedOriginsSchemaSql));
         ReconcileDerivedRows(connection);
     }
 

@@ -39,10 +39,12 @@ public sealed partial class BoardStore
         """;
 
     private const string SyncLinkSelectSql = """
-        SELECT l.BoardId, l.RemoteBoardId, l.Cursor, l.Enabled, l.LayoutHash, l.LastSyncUTC, l.LastError,
-               l.CreatedUTC, l.UpdatedUTC, b.ProjectPath, b.Name, l.DestinationKey, l.ActivitySchema, l.ActivityAfter
+        SELECT l.BoardId, COALESCE(o.RemoteBoardId, l.RemoteBoardId), l.Cursor, l.Enabled, l.LayoutHash, l.LastSyncUTC, l.LastError,
+               l.CreatedUTC, l.UpdatedUTC, b.ProjectPath, b.Name, COALESCE(o.DestinationKey, l.DestinationKey), l.ActivitySchema, l.ActivityAfter,
+               o.BoardId IS NOT NULL, o.KeyPrefix
         FROM BoardSyncLinks l
         JOIN Boards b ON b.Id = l.BoardId
+        LEFT JOIN BoardSharedOrigins o ON o.BoardId = l.BoardId
         """;
 
     // Only cards the server has been told about take part: an entry about a card without a
@@ -585,9 +587,12 @@ public sealed partial class BoardStore
             await transaction.CommitAsync(cancellationToken);
             return existing;
         }
-        // Existing legacy cards may receive a baseline, but every newly imported card needs
-        // the immutable random key. Check after the identity lookup in this transaction.
-        if (!BoardKeys.TryParseStored(cardKey, out var storedKey) || storedKey != cardKey)
+        // An explicitly imported shared board can contain pre-random-key cards. Preserve their
+        // immutable identity too; ordinary publication still requires random keys for new cards.
+        var sharedLegacy = stamp.BoardId is { } sharedBoard
+            && BoardKeys.TryParse(cardKey, out var legacyPrefix, out var legacyNumber) && cardKey == $"{legacyPrefix}-{legacyNumber}"
+            && await ScalarLongAsync(connection, transaction, "SELECT COUNT(*) FROM BoardSharedOrigins WHERE BoardId=$board", ("$board", sharedBoard), cancellationToken) == 1;
+        if ((!BoardKeys.TryParseStored(cardKey, out var storedKey) || storedKey != cardKey) && !sharedLegacy)
             throw new BoardValidationException("A new remote card requires a stored random key.");
         if (stamp.BoardId is { } boardId && card.BoardId != boardId)
             throw new BoardValidationException("A synced card must belong to its published board.");
@@ -680,5 +685,7 @@ public sealed partial class BoardStore
         reader.GetString(10),
         reader.IsDBNull(11) ? null : reader.GetString(11),
         reader.GetInt32(12),
-        reader.IsDBNull(13) ? null : reader.GetString(13));
+        reader.IsDBNull(13) ? null : reader.GetString(13),
+        reader.GetInt32(14) != 0,
+        reader.IsDBNull(15) ? null : reader.GetString(15));
 }

@@ -137,6 +137,9 @@ CREATE TABLE BoardPendingAutomations ( CardId TEXT PRIMARY KEY REFERENCES BoardC
 -- table BoardProjectKeys
 CREATE TABLE BoardProjectKeys ( ProjectPath TEXT PRIMARY KEY COLLATE NOCASE, Prefix TEXT NOT NULL, CreatedUTC TEXT NOT NULL );
 
+-- table BoardSharedOrigins
+CREATE TABLE BoardSharedOrigins ( BoardId TEXT PRIMARY KEY REFERENCES Boards(Id) ON DELETE CASCADE, RemoteBoardId TEXT NOT NULL UNIQUE, DestinationKey TEXT NOT NULL, KeyPrefix TEXT NOT NULL );
+
 -- table BoardSyncLinks
 CREATE TABLE BoardSyncLinks ( BoardId TEXT PRIMARY KEY REFERENCES Boards(Id) ON DELETE CASCADE, RemoteBoardId TEXT NOT NULL, Cursor INTEGER NOT NULL DEFAULT 0, Enabled INTEGER NOT NULL DEFAULT 1, LayoutHash TEXT, LastSyncUTC TEXT, LastError TEXT, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL , DestinationKey TEXT, ActivitySchema INTEGER NOT NULL DEFAULT 0, ActivityAfter TEXT);
 

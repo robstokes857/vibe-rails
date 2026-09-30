@@ -33,6 +33,7 @@ import { BoardApi } from './board-api.js';
 import { BOARD_SELECTION_STORAGE_KEY } from './board-selection.js';
 import { boardContextSection, laneAutomationSection, mountBoardContext, mountLaneAutomation } from './board-settings.js';
 import { cardOrganizeSection, bindCardOrganization } from './board-card-organize.js';
+import { openBoardSharing, openSharedBoards } from './board-sharing.js';
 import { renderCardLinksSection, bindCardLinks } from './board-card-links.js';
 import { cardAutomationControls, bindCardAutomations } from './board-card-automations.js';
 import { contextSectionMarkup, bindCardContext } from './board-card-context.js';
@@ -136,6 +137,8 @@ export class BoardController {
     }
 
     unload() {
+        this.sharingDispose?.();
+        this.sharingDispose = null;
         this.disposeSessionActivity();
         clearTimeout(this._filterTimer);
         this.cancelPageRequests();
@@ -963,6 +966,16 @@ export class BoardController {
                 break;
             case 'new-board':
                 this.openBoardEditor(null);
+                break;
+            case 'share-board':
+                this.sharingDispose?.();
+                this.sharingDispose = openBoardSharing(this.app, this.state.boardId);
+                break;
+            case 'shared-boards':
+                this.sharingDispose?.();
+                this.sharingDispose = openSharedBoards(this.app, async boardId => {
+                    this.state.boardId = boardId; this.persistBoardSelection(); await this.refresh();
+                });
                 break;
             case 'edit-board':
                 this.openBoardEditor(this.state.boardId);

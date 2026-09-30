@@ -1,5 +1,13 @@
 # Working on Vibe Board
 
+## Board sharing (VB-52)
+
+See [SYNC.md](SYNC.md#vb-52-shared-boards) for the POC contract. Persistence stays behind
+`IBoardStore`. Imported boards retain their remote/destination identity and never fall back to
+owner publication after access ends. The hosted API enforces owner-only collaborator management.
+Keep recipient-private declines/blocks and the response that does not disclose email registration.
+Imported activity must not overwrite owner snapshots.
+
 ## Unified discussion and card organization (VIBE-1)
 
 Comments is the one discussion stream, including retained legacy `note` rows. New
@@ -86,7 +94,7 @@ serialization or tool discovery into the Native AOT path.
   read `comment`/`note` rows only, and `CommentCount` counts `comment` rows only. The card
   response contains only Comments and Agent notes. History is a separate, explicit settings
   view for both cards and boards, loaded on demand. Never expose History through MCP or agent
-  launch context. See [SYNC.md](SYNC.md) for the single-owner sync contract.
+  launch context. See [SYNC.md](SYNC.md) for the portable sync and sharing contract.
 - **Agent context is measured, recorded and budgeted (VB-63).** `GET /api/v1/board/cards/{card}/context`
   (`BoardContextEstimator`) renders the real launch prompt (`BoardLaunchService.ComposePromptAsync`)
   and the real `get_board_card` / `list_board_columns` output (`BoardTool.RenderCardAsync`,

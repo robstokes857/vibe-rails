@@ -188,6 +188,7 @@ namespace VibeRails
             serviceCollection.AddSingleton(_ => Services.Board.Sync.BoardSyncLock.BesideStateDatabase());
             serviceCollection.AddSingleton<Services.Board.Sync.BoardSyncActivityCache>();
             serviceCollection.AddScoped<Services.Board.Sync.IBoardSyncService, Services.Board.Sync.BoardSyncService>();
+            serviceCollection.AddScoped<Services.Board.Sync.BoardSharingService>();
             serviceCollection.AddSingleton<Services.Board.Sync.IBoardSyncScheduler, Services.Board.Sync.BoardSyncScheduler>();
             serviceCollection.AddScoped<Services.Board.BoardAutomationService>();
             serviceCollection.AddScoped<Services.Board.BoardCardAutomationService>();

@@ -35,6 +35,24 @@ public static class BoardRoutes
         });
 
         // ---------------------------------------------------------------- boards
+        var sharingRoutes = app.MapGroup("/api/v1/board");
+        sharingRoutes.AddEndpointFilter((context, next) =>
+        {
+            context.HttpContext.Response.Headers.CacheControl = "no-store";
+            return next(context);
+        });
+        sharingRoutes.MapGet("/shared", ([Microsoft.AspNetCore.Mvc.FromServices] BoardSharingService sharing, CancellationToken ct) =>
+            RunAsync(async () => Results.Ok(await sharing.DiscoverAsync(ct))));
+        sharingRoutes.MapPost("/shared/{remoteId}/import", ([Microsoft.AspNetCore.Mvc.FromServices] BoardSharingService sharing, string remoteId, CancellationToken ct) =>
+            RunAsync(async () => Results.Ok(await sharing.ImportAsync(Project(), remoteId, ct))));
+        sharingRoutes.MapGet("/boards/{boardId}/sharing", ([Microsoft.AspNetCore.Mvc.FromServices] BoardSharingService sharing, string boardId, CancellationToken ct) =>
+            RunAsync(async () => Results.Ok(await sharing.GetAsync(Project(), boardId, ct))));
+        sharingRoutes.MapPost("/boards/{boardId}/sharing", ([Microsoft.AspNetCore.Mvc.FromServices] BoardSharingService sharing, string boardId, BoardSharingEmailRequest body, CancellationToken ct) =>
+            RunAsync(async () => Results.Ok(await sharing.SaveAsync(Project(), boardId, null, body, ct))));
+        sharingRoutes.MapPut("/boards/{boardId}/sharing/{inviteId}", ([Microsoft.AspNetCore.Mvc.FromServices] BoardSharingService sharing, string boardId, string inviteId, BoardSharingEmailRequest body, CancellationToken ct) =>
+            RunAsync(async () => Results.Ok(await sharing.SaveAsync(Project(), boardId, inviteId, body, ct))));
+        sharingRoutes.MapDelete("/boards/{boardId}/sharing/{inviteId}", ([Microsoft.AspNetCore.Mvc.FromServices] BoardSharingService sharing, string boardId, string inviteId, CancellationToken ct) =>
+            RunAsync(async () => Results.Ok(await sharing.RemoveAsync(Project(), boardId, inviteId, ct))));
         //
         // Lane and card lists take ?board=<id>; omitted means the project's first board, which is
         // what every client before boards existed was reading.
@@ -365,6 +383,10 @@ public static class BoardRoutes
         catch (BoardConflictException ex)
         {
             return Results.Conflict(new ErrorResponse(ex.Message));
+        }
+        catch (BoardSyncClientException ex)
+        {
+            return Results.Json(new ErrorResponse(ex.Message), statusCode: ex.Status is >= 400 and <= 599 ? ex.Status : 502);
         }
         catch (Services.Jobs.JobServiceException ex)
         {

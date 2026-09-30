@@ -19,6 +19,11 @@ public interface IBoardSyncClient
     Task<BoardSyncPushResponse> PushAsync(string remoteBoardId, BoardSyncPushRequest request, CancellationToken cancellationToken, string? expectedDestination = null);
     Task<BoardSyncPullResponse> PullAsync(string remoteBoardId, long after, int limit, CancellationToken cancellationToken, string? expectedDestination = null);
     Task<BoardSyncActivityAck> PutActivityAsync(string remoteBoardId, string cardId, BoardSyncActivityWire activity, CancellationToken cancellationToken, string? expectedDestination = null);
+    Task<BoardRemoteDescriptor?> DescribeAsync(string remoteBoardId, CancellationToken ct, string? destination = null) => Task.FromResult<BoardRemoteDescriptor?>(null);
+    Task<List<BoardRemoteDescriptor>> DiscoverAsync(CancellationToken ct, string? destination = null) => throw new NotSupportedException();
+    Task<BoardSharingOverview> GetSharingAsync(string remoteBoardId, CancellationToken ct, string? destination = null) => throw new NotSupportedException();
+    Task<BoardSharingResult> SaveInviteAsync(string remoteBoardId, string? invitationId, BoardSharingEmailRequest body, CancellationToken ct, string? destination = null) => throw new NotSupportedException();
+    Task<BoardSharingResult> RemoveInviteAsync(string remoteBoardId, string invitationId, CancellationToken ct, string? destination = null) => throw new NotSupportedException();
 }
 
 /// <summary>
@@ -48,6 +53,22 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Fu
     public static readonly TimeSpan ExchangeTimeout = TimeSpan.FromSeconds(30);
 
     public Uri? Endpoint => endpoint();
+
+    public async Task<BoardRemoteDescriptor?> DescribeAsync(string remoteBoardId, CancellationToken ct, string? destination = null) =>
+        await SendAsync<object, BoardRemoteDescriptor>(HttpMethod.Get, Uri.EscapeDataString(remoteBoardId), null, null,
+            BoardSyncJsonContext.Default.BoardRemoteDescriptor, ct, destination);
+    public Task<List<BoardRemoteDescriptor>> DiscoverAsync(CancellationToken ct, string? destination = null) =>
+        SendAsync<object, List<BoardRemoteDescriptor>>(HttpMethod.Get, "", null, null, BoardSyncJsonContext.Default.ListBoardRemoteDescriptor, ct, destination);
+    public Task<BoardSharingOverview> GetSharingAsync(string remoteBoardId, CancellationToken ct, string? destination = null) =>
+        SendAsync<object, BoardSharingOverview>(HttpMethod.Get, Uri.EscapeDataString(remoteBoardId) + "/sharing", null, null,
+            BoardSyncJsonContext.Default.BoardSharingOverview, ct, destination);
+    public Task<BoardSharingResult> SaveInviteAsync(string remoteBoardId, string? invitationId, BoardSharingEmailRequest body, CancellationToken ct, string? destination = null) =>
+        SendAsync(invitationId is null ? HttpMethod.Post : HttpMethod.Put,
+            Uri.EscapeDataString(remoteBoardId) + "/sharing" + (invitationId is null ? "" : "/" + Uri.EscapeDataString(invitationId)),
+            body, BoardSyncJsonContext.Default.BoardSharingEmailRequest, BoardSyncJsonContext.Default.BoardSharingResult, ct, destination);
+    public Task<BoardSharingResult> RemoveInviteAsync(string remoteBoardId, string invitationId, CancellationToken ct, string? destination = null) =>
+        SendAsync<object, BoardSharingResult>(HttpMethod.Delete, Uri.EscapeDataString(remoteBoardId) + "/sharing/" + Uri.EscapeDataString(invitationId),
+            null, null, BoardSyncJsonContext.Default.BoardSharingResult, ct, destination);
 
     public async Task<BoardSyncActivityAck> PutActivityAsync(string remoteBoardId, string cardId, BoardSyncActivityWire activity,
         CancellationToken cancellationToken, string? expectedDestination = null)
@@ -117,10 +138,12 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Fu
                     throw new BoardSyncClientException("The server rejected a queued entry. Its data has been kept locally.",
                         BoardSyncWire.CodeInvalidEntry, status, entryId);
                 if (response.StatusCode == HttpStatusCode.BadRequest && code == BoardSyncWire.CodeInvalidRequest)
-                    throw new BoardSyncClientException("viberails.ai rejected the request as invalid; entries remain queued. Check the board and lane names, then retry.",
+                    throw new BoardSyncClientException(relativePath.Contains("/sharing", StringComparison.Ordinal)
+                        ? "Check the email address and the limit of three collaborators, including pending invitations."
+                        : "viberails.ai rejected the request as invalid; entries remain queued. Check the board and lane names, then retry.",
                         BoardSyncWire.CodeInvalidRequest, status);
                 if (response.StatusCode == HttpStatusCode.NotFound && code == BoardSyncWire.CodeBoardNotFound)
-                    throw new BoardSyncClientException("viberails.ai no longer has this board's published copy. Automatic publication will retry next minute.",
+                    throw new BoardSyncClientException("This board is unavailable on viberails.ai, or this account no longer has access.",
                         BoardSyncWire.CodeBoardNotFound, status);
                 if (response.StatusCode == HttpStatusCode.Conflict && code == BoardSyncWire.CodeWriteConflict)
                     throw new BoardSyncClientException("viberails.ai was updating this board at the same time; the sync will retry.",

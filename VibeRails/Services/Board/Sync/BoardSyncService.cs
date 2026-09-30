@@ -96,6 +96,12 @@ public sealed class BoardSyncService(
         var projectPath = board.ProjectPath;
         var boardId = board.Id;
         var existing = await store.GetSyncLinkAsync(projectPath, boardId, cancellationToken);
+        if (existing is { Imported: true })
+        {
+            if (client.IsConfigured && existing.DestinationKey != client.DestinationKey)
+                throw new BoardValidationException("This shared board belongs to a different signed-in account. Its local data is retained; sign in to the original account to sync.");
+            return existing; // Never publish a collaborator's cached board as a new owner.
+        }
         if (!client.IsConfigured)
             return existing;
         if (!force && existing is { Enabled: true, ActivitySchema: >= 1 } && existing.DestinationKey == client.DestinationKey)
@@ -196,7 +202,7 @@ public sealed class BoardSyncService(
             {
                 link = await SyncOnceAsync(link, cancellationToken, forceActivity);
             }
-            catch (BoardSyncClientException ex) when (ex.Code == BoardSyncWire.CodeBoardNotFound)
+            catch (BoardSyncClientException ex) when (ex.Code == BoardSyncWire.CodeBoardNotFound && !link.Imported)
             {
                 // The hosted copy may have been deleted. Recreate it once, then let any
                 // further failure reach the normal status path instead of retrying forever.
@@ -230,8 +236,33 @@ public sealed class BoardSyncService(
     private async Task<BoardSyncLinkRecord> SyncOnceAsync(BoardSyncLinkRecord link, CancellationToken cancellationToken, bool forceActivity)
     {
         link = await PushAsync(link, cancellationToken);
+        link = await RefreshLayoutAsync(link, cancellationToken);
         link = await PullAsync(link, cancellationToken);
+        link = await RefreshLayoutAsync(link, cancellationToken);
+        // Activity snapshots still belong to their originating desktop. A collaborator's empty
+        // local rails must never replace the owner's published attachments/code/session links.
+        if (link.Imported) return link;
         return await BoardSyncActivity.RefreshAsync(store, client, activityCache, link, cancellationToken, forceActivity);
+    }
+
+    private async Task<BoardSyncLinkRecord> RefreshLayoutAsync(BoardSyncLinkRecord link, CancellationToken ct)
+    {
+        BoardRemoteDescriptor? remote;
+        try { remote = await client.DescribeAsync(link.RemoteBoardId, ct, link.DestinationKey); }
+        catch (BoardSyncClientException ex) when (!link.Imported && ex.Code == "http_404") { return link; } // Older hosted version.
+        if (remote is null) return link;
+        if (!string.Equals(remote.RemoteBoardId, link.RemoteBoardId, StringComparison.OrdinalIgnoreCase))
+            throw new BoardValidationException("The server returned a different board identity.");
+        var board = await store.GetBoardAsync(link.ProjectPath, link.BoardId, ct);
+        if (board is null) return link;
+        var columns = await store.GetColumnsAsync(link.ProjectPath, ct, link.BoardId);
+        var prefix = link.RemoteKeyPrefix ?? await store.EnsureProjectKeyPrefixAsync(link.ProjectPath, ct);
+        var hash = BoardLayoutHash.Compute(board.Name, prefix, board.EffectiveDisplayPrefix,
+            columns.Select(c => new BoardRemoteLane(c.Id, c.Name, c.Color, c.Position)));
+        // A local change made during the network request belongs to the next push.
+        if (hash != link.LayoutHash) return link;
+        var applied = await store.ApplyRemoteLayoutAsync(link.ProjectPath, link.BoardId, remote, board, columns, ct);
+        return applied is null ? link : link with { LayoutHash = applied };
     }
 
     private async Task<BoardSyncLinkRecord> PushAsync(BoardSyncLinkRecord link, CancellationToken cancellationToken)
@@ -408,7 +439,7 @@ public sealed class BoardSyncService(
     /// </summary>
     private async Task<bool> ApplyAsync(BoardSyncLinkRecord link, IReadOnlyList<BoardColumnRecord> columns, BoardSyncPulledEntryWire entry, CancellationToken cancellationToken)
     {
-        ValidatePulledEntryContent(entry);
+        ValidatePulledEntryContent(entry, link.Imported);
         var author = ToAuthor(entry.Author);
         var stamp = new BoardSyncStamp(entry.Id, entry.Seq, entry.CreatedUtc, entry.Body, entry.Changes?.GetRawText(), link.BoardId);
         bool applied;
@@ -434,6 +465,10 @@ public sealed class BoardSyncService(
                     break;
                 }
 
+                case BoardSyncWire.KindRestored when link.Imported:
+                    applied = await store.RestoreSharedCardAsync(link.ProjectPath, entry.CardId, author, stamp, cancellationToken);
+                    break;
+
                 case BoardSyncWire.KindComment:
                 case BoardSyncWire.KindNote:
                 {
@@ -457,7 +492,8 @@ public sealed class BoardSyncService(
 
     private async Task<(string Prefix, List<BoardSyncLaneWire> Lanes, string Hash)> ReadLayoutAsync(string projectPath, BoardRecord board, CancellationToken cancellationToken)
     {
-        var prefix = await store.EnsureProjectKeyPrefixAsync(projectPath, cancellationToken);
+        var link = await store.GetSyncLinkAsync(projectPath, board.Id, cancellationToken);
+        var prefix = link?.RemoteKeyPrefix ?? await store.EnsureProjectKeyPrefixAsync(projectPath, cancellationToken);
         var lanes = (await store.GetColumnsAsync(projectPath, cancellationToken, board.Id))
             .OrderBy(c => c.Position)
             .Select((c, index) => new BoardSyncLaneWire(c.Id, c.Name, string.IsNullOrWhiteSpace(c.Color) ? null : c.Color, index))
@@ -657,8 +693,9 @@ public sealed class BoardSyncService(
     /// What this version can apply: a known kind, and field values it accepts. A failure is permanent
     /// for this version (a kind or value added after it), so the pull records the entry and passes it.
     /// </summary>
-    private static void ValidatePulledEntryContent(BoardSyncPulledEntryWire entry)
+    private static void ValidatePulledEntryContent(BoardSyncPulledEntryWire entry, bool imported = false)
     {
+        if (imported && entry.Kind == BoardSyncWire.KindRestored) return;
         if (entry.Kind is not (BoardSyncWire.KindCreated or BoardSyncWire.KindChange or BoardSyncWire.KindDeleted
             or BoardSyncWire.KindComment or BoardSyncWire.KindNote))
             throw new BoardValidationException("This version cannot apply remote entry kind: " + SkippedKind(entry.Kind));

@@ -4912,8 +4912,9 @@
                     }
 
                     .board-view .board-picker-select {
-                        flex: 1 1 130px;
-                        width: 130px;
+                        flex: 1 1 80px;
+                        min-width: 0;
+                        width: 80px;
                     }
 
                     .board-view .board-head-actions {
@@ -4934,6 +4935,12 @@
                         </button>
                         <button type="button" class="board-icon-btn" data-board-action="edit-board" title="Board settings" aria-label="Board settings">
                             <i class="fa-solid fa-gear" aria-hidden="true"></i>
+                        </button>
+                        <button type="button" class="board-icon-btn" data-board-action="share-board" title="Share this board" aria-label="Share">
+                            <i class="fa-solid fa-user-plus" aria-hidden="true"></i>
+                        </button>
+                        <button type="button" class="board-icon-btn" data-board-action="shared-boards" title="Boards shared with you" aria-label="Shared boards">
+                            <i class="fa-solid fa-users" aria-hidden="true"></i>
                         </button>
                     </div>
                     <div class="board-stats" data-board-stats></div>

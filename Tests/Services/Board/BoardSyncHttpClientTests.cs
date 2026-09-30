@@ -35,6 +35,35 @@ public sealed class BoardSyncHttpClientTests
     }
 
     [Fact]
+    public async Task SharingUsesPinnedHeaderCredentialsAndAotWireTypes()
+    {
+        var sent = new List<string>();
+        var handler = new Handler(request =>
+        {
+            Assert.Equal("test-key", Assert.Single(request.Headers.GetValues("X-Api-Key")));
+            var path = request.RequestUri!.AbsolutePath;
+            sent.Add(request.Method + " " + path);
+            var body = path.EndsWith("/boards/", StringComparison.Ordinal)
+                ? """[{"remoteBoardId":"remote","name":"Shared","keyPrefix":"VB","displayPrefix":"TEAM","lanes":[{"id":"lane","name":"Todo","color":null,"position":0}],"isOwner":false,"lastSeq":4}]"""
+                : request.Method == HttpMethod.Get ? """{"limit":3,"invitations":[{"id":"invite","email":"a@example.com","status":"pending"}]}"""
+                : """{"saved":true,"message":"Invitation saved."}""";
+            return new(HttpStatusCode.OK) { Content = new StringContent(body) };
+        });
+        var client = Client(handler);
+        var discovered = await client.DiscoverAsync(Ct, client.DestinationKey);
+        Assert.Equal("Shared", Assert.Single(discovered).Name);
+        // Minimal API Results.Ok receives the concrete runtime List in an AOT host.
+        var json = System.Text.Json.JsonSerializer.Serialize((object)discovered, VibeRails.DTOs.AppJsonSerializerContext.Default.Options);
+        Assert.Contains("\"remoteBoardId\":\"remote\"", json);
+        Assert.Equal(3, (await client.GetSharingAsync("remote", Ct, client.DestinationKey)).Limit);
+        Assert.True((await client.SaveInviteAsync("remote", null, new("a@example.com"), Ct, client.DestinationKey)).Saved);
+        await client.SaveInviteAsync("remote", "invite", new("b@example.com"), Ct, client.DestinationKey);
+        await client.RemoveInviteAsync("remote", "invite", Ct, client.DestinationKey);
+        Assert.Equal(["GET /api/v1/boards/", "GET /api/v1/boards/remote/sharing", "POST /api/v1/boards/remote/sharing",
+            "PUT /api/v1/boards/remote/sharing/invite", "DELETE /api/v1/boards/remote/sharing/invite"], sent);
+    }
+
+    [Fact]
     public async Task ChangedCredentialFailsBeforeSending()
     {
         var handler = new Handler(_ => throw new Xunit.Sdk.XunitException("Must not send"));
@@ -131,7 +160,7 @@ public sealed class BoardSyncHttpClientTests
     }
 
     [Theory]
-    [InlineData(HttpStatusCode.NotFound, "board_not_found", "board_not_found", "Automatic publication")]
+    [InlineData(HttpStatusCode.NotFound, "board_not_found", "board_not_found", "no longer has access")]
     [InlineData(HttpStatusCode.Conflict, "write_conflict", "write_conflict", "retry")]
     [InlineData(HttpStatusCode.BadRequest, "invalid_request", "invalid_request", "invalid")]
     [InlineData(HttpStatusCode.NotFound, "write_conflict", "http_404", "HTTP 404")]
