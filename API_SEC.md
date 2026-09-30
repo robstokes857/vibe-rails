@@ -1,5 +1,39 @@
 # API authentication coverage
 
+## Route and authentication reconciliation (2026-09-30)
+
+Reconciled the active inventory against the current working tree in both directions,
+including grouped and constant-based paths, all five proxy mappings, MCP, and the inherited
+event WebSocket. Added 15 entries previously documented only in scoped amendments:
+seven session-replay routes, six Board-sharing routes, card merge, and comment deletion.
+No active entry needed removal. Corrected the totals to **246 mapped surfaces**, including
+**234 under `/api/v1`** and **59 Board routes**. Earlier dated counts are historical;
+removed-route descriptions below remain historical explanations, not active inventory entries.
+
+Checked production registration and middleware ordering, session/tab validation, bootstrap
+single-use consumption and two-minute expiry, local redirect validation, and the shared
+proxy/control authentication gate. The only session-authentication exceptions remain exact
+`GET /health`, `OPTIONS *`, and exact
+`GET /auth/bootstrap?code={one-time-code}&redirect={local-path}`. Every other endpoint
+requires a valid session credential. Business `/api/v1` handlers, MCP, WebSocket upgrades,
+and enabled proxy operations additionally require the tab credential. Cookie and session
+header are alternative transports of the same secret; existing session-only page/static
+loads and conditional proxy responses remain documented in section 2.
+
+Both mandatory repository-wide listener searches found only the approved main Kestrel host,
+the non-serving PortFinder probe, and test-only Kestrel hosts. The cross-runtime search had
+no matches. No additional endpoint lacking session authentication or production listener
+was found, so no `SECURITY_ERROR.md` was created.
+
+Validation: **136 passed, 0 failed, 0 skipped**, using `dotnet test Tests/Tests.csproj`
+with `--artifacts-path C:/source/vibe-rails/Tests/obj/ApiSecAuditArtifacts --verbosity quiet`
+and a `FullyQualifiedName` filter covering `CookieAuthMiddlewareTests`, `AuthServiceTests`,
+`AuthRoutesTests`, all five LLM proxy route test classes, `TokenSaverPauseRoutesTests`,
+`McpServerHttpTests`, `BoardRoutesTests`, `SessionReplayRoutesTests`, and
+`RemoteAccountLinkRoutesTests`. The build reported existing xUnit analyzer warnings.
+This was source reconciliation plus targeted regressions, not a live request sweep of
+every production endpoint.
+
 ## VB-52 Board sharing (2026-09-30, scoped amendment)
 
 Six root-only routes use the existing session-plus-tab middleware and no-store responses:
@@ -801,7 +835,7 @@ discovery alone is insufficient if the same feature change is allowed to expand 
 set. The production listener set is now frozen above so a new match starts as a finding, not as
 an expectation.
 
-### Repository-wide listener result — 2026-09-28
+### Repository-wide listener result — 2026-09-30
 
 - Approved serving implementation: the main Kestrel host in `VibeRails/Program.cs`.
 - Rejected and removed before merge: `GrokLoopbackBridge`'s `HttpListener`.
@@ -840,8 +874,8 @@ spoofer's own local exchange rows.
 Authentication is enforced primarily by
 [`CookieAuthMiddleware`](VibeRails/Middleware/CookieAuthMiddleware.cs). The LLM proxy
 routes additionally use
-[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 230 mapped route
-surfaces in this inventory: 218 `/api/v1` method/path mappings, nine non-`/api` protected
+[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 246 mapped route
+surfaces in this inventory: 234 `/api/v1` method/path mappings, nine non-`/api` protected
 API surfaces, and three bootstrap/page/probe routes. Static-file middleware and the
 global `OPTIONS` behavior are noted separately because they are not finite mapped-route
 lists.
@@ -1087,6 +1121,19 @@ No local endpoint is anonymous and no production listener was added.
 - `GET /api/v1/sessions/{sessionId}/inputs`
 - `GET /api/v1/sessions/{sessionId}/output`
 
+### Session replay (7; active root backend only)
+
+All seven read-only routes require session and tab credentials and return no-store responses.
+Detail reads are scoped to the requested session ID.
+
+- `GET /api/v1/session-replay/status`
+- `GET /api/v1/session-replay/sessions`
+- `GET /api/v1/session-replay/sessions/{id}`
+- `GET /api/v1/session-replay/sessions/{id}/frames`
+- `GET /api/v1/session-replay/sessions/{id}/exchanges`
+- `GET /api/v1/session-replay/sessions/{id}/changes/{changeId:long}`
+- `GET /api/v1/session-replay/sessions/{id}/exchanges/{exchangeId}`
+
 ### CLI, environment, and LLM-picker management (16)
 
 - `GET /api/v1/environments`
@@ -1213,13 +1260,24 @@ transcript text out of messages and exception text; do not rely on the Logs view
 hidden. `Tests/Routes/InternalToolsRoutesTests.cs` pins the two-credential requirement, the
 whitelist rejection of path-like sources, and the absence of mutating verbs.
 
-### Kanban board (50; active root backend only)
+### Kanban board (59; active root backend only)
 
 All mapped by `BoardRoutes.Map` under `if (isActiveRootBackend)`; every path contains `/api/`,
 so both credentials are enforced by the middleware with no route-level registration. The
 project is always `ParserConfigs.GetRootPath()` — never a value from the request — so a caller
 cannot read or write another project's board through this surface.
 
+- `GET /api/v1/board/shared` — discover shared remote boards.
+- `POST /api/v1/board/shared/{remoteId}/import` — import into the server-derived project.
+- `GET /api/v1/board/boards/{boardId}/sharing`,
+  `POST /api/v1/board/boards/{boardId}/sharing`,
+  `PUT /api/v1/board/boards/{boardId}/sharing/{inviteId}`,
+  `DELETE /api/v1/board/boards/{boardId}/sharing/{inviteId}` — scoped collaborator management.
+  All six sharing routes require session and tab credentials and return no-store responses;
+  local board operations check project/board scope before making remote calls.
+- `POST /api/v1/board/cards/{card}/merge` — merge cards within the server-derived project.
+- `DELETE /api/v1/board/cards/{card}/comments/{commentId}` — remove a user-authored comment
+  belonging to the live card. Merge and deletion require session and tab credentials.
 - `GET /api/v1/board/boards`, `POST /api/v1/board/boards`, `PUT /api/v1/board/boards/{boardId}`,
   `DELETE /api/v1/board/boards/{boardId}` — boards (2026-09-18). A project holds one or more
   boards (sprints, sub-projects); every lane belongs to one and a card belongs to a board through
