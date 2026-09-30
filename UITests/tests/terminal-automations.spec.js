@@ -44,9 +44,10 @@ async function openFixture(page, total = 35) {
                 cli: tab.cli, workingDirectory: tab.workingDirectory
             } : {} });
         }
-        if (path.endsWith('/terminal-replay')) {
-            return route.fulfill({ json: { initialCols: 80, initialRows: 24,
-                frames: [{ data: Buffer.from('Completed workflow output\r\n').toString('base64'), delayMs: 0 }] } });
+        if (path.startsWith('/api/v1/session-replay/sessions/')) {
+            if (path.endsWith('/frames')) return route.fulfill({json:{items:[{id:1,at:0,cols:80,rows:24,data:Buffer.from('Completed workflow output\r\n').toString('base64')}],next:1,done:true}});
+            return route.fulfill({json:{session:{id:path.split('/').at(-1),cli:'shell',title:'Completed workflow',started:0,ended:1000,directory:''},
+                cards:[],prompts:[],changes:[],geometry:[],frameSource:'enriched',frameCount:1,frameMaxId:1,frameBytes:27,proxyMaxId:0,end:1000,notes:[]}});
         }
         const responses = {
             '/api/v1/context': { isInGit: true, rootPath: 'C:/fixture', launchDirectory: 'C:/fixture' },
@@ -98,7 +99,7 @@ test('completed Automations replay without connecting a terminal host', async ({
     await expect(page.locator('[data-automation-open="automation-2"]')).toContainText('Replay');
     await page.locator('[data-automation-open="automation-2"]').click();
     await expect(page.getByText(`Session Replay — ${fixture.tabs.get('automation-2').sessionId}`, { exact: true })).toBeVisible();
-    await expect(page.getByRole('combobox', { name: 'Replay speed' })).toBeVisible();
+    await expect(page.frameLocator('iframe[data-session-replay]').locator('#speed-ts-control')).toBeVisible();
     expect(fixture.connections).toEqual(['ordinary']);
 });
 

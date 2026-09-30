@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Session Replay · VibeRails</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23a89bff'/%3E%3Cpath d='m12 8 12 8-12 8z' fill='%23151922'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="../assets/xterm/xterm.css">
+  <link rel="stylesheet" href="../assets/tom-select/tom-select.bootstrap5.min.css">
+  <link rel="stylesheet" href="./style.css">
+  <script src="../assets/xterm/xterm.min.js"></script>
+  <!-- Load Tom Select before Monaco installs its AMD loader. -->
+  <script src="../assets/tom-select/tom-select.complete.min.js"></script>
+  <script src="../assets/monaco/vs/loader.js"></script>
+  <script type="module" src="./app.js"></script>
+</head>
+<body data-view="simple">
+  <header class="app-bar">
+    <nav class="top-nav" aria-label="Session replay navigation">
+      <div class="view-switch" role="group" aria-label="Replay view">
+        <button id="view-simple" aria-pressed="true" title="Terminal and playback controls">Simple</button>
+        <button id="view-advanced" aria-pressed="false" title="Terminal, code changes, and activity">Advanced</button>
+      </div>
+      <a class="brand" href="#" aria-label="VibeRails session replay">
+        <span class="brand-mark" aria-hidden="true">▸</span>
+        <span class="brand-copy"><span class="brand-name">VibeRails</span><span class="brand-section">SESSION REPLAY</span></span>
+      </a>
+      <div class="bar-right"><button id="reload" class="icon-button" disabled title="Reload this recording" aria-label="Reload snapshot">↻</button><button id="browse" class="button">▤ &nbsp; Sessions</button></div>
+    </nav>
+  </header>
+  <main>
+    <section class="session-heading"><div><div class="eyebrow" id="project">YOUR SESSION, FRAME BY FRAME</div><h1 id="session-title">Replay the work.</h1><div class="session-sub"><span id="session-state" class="pill" hidden></span><span id="session-id" class="advanced-only">Choose a recording to explore its terminal, code, and tools.</span><button id="copy-id" class="text-button advanced-only" title="Copy session ID" hidden>Copy ID</button><span id="view-description">Just the session. At your pace.</span></div></div></section>
+    <section class="metadata advanced-only" aria-label="Session information"><div><span class="label">MODEL</span><strong id="model">—</strong></div><div><span class="label">REASONING EFFORT</span><strong id="effort">—</strong></div><div><span class="label">STARTED · LOCAL TIME</span><strong id="started">—</strong></div><div><span class="label">RECORDED DURATION</span><strong id="duration">—</strong></div><div><span class="label">ENVIRONMENT</span><strong id="environment">—</strong></div><div><span class="label">BOARD CARD</span><strong id="board">—</strong></div></section>
+    <div id="notice" class="notice" role="status" hidden></div>
+    <section class="transport" aria-label="Playback controls">
+      <div class="control-row"><div class="play-controls"><button id="restart" class="icon-button advanced-only" title="Restart" aria-label="Restart" disabled>↺</button><button id="rewind" class="icon-button" title="Rewind 10 seconds (left arrow)" aria-label="Rewind 10 seconds" disabled>−10</button><button id="play" class="play-button" disabled>▶ <span>Play</span></button><button id="forward" class="icon-button" title="Forward 10 seconds (right arrow)" aria-label="Forward 10 seconds" disabled>+10</button><span class="control-divider advanced-only"></span><select id="speed" aria-label="Playback speed"><option value="1">1× speed</option><option value="2">2× speed</option><option value="5" selected>5× speed</option><option value="10">10× speed</option><option value="25">25× speed</option><option value="100">100× speed</option></select><label class="skip-label advanced-only"><input id="skip-idle" type="checkbox" checked> Skip idle time</label></div><div class="time-display"><span id="position">00:00</span><span class="muted">/</span><span id="total">00:00</span></div></div>
+      <div class="timeline-wrap"><div class="advanced-only" id="timeline-markers" aria-hidden="true"></div><input id="scrubber" type="range" min="0" max="1000" value="0" aria-label="Replay position" disabled></div>
+      <div class="timeline-caption"><span id="playback-status" role="status">Select a session to begin</span><div class="legend advanced-only"><span><i class="dot prompt"></i>Prompts</span><span><i class="dot change"></i>Code changes</span><span><i class="dot tool"></i>Tool calls</span></div></div>
+    </section>
+    <section class="tool-strip advanced-only" aria-label="Recent tool calls">
+      <span class="tool-strip-label"><i class="status-dot"></i>Tool activity</span>
+      <div class="tool-strip-content">
+        <div id="toast-stack" class="toast-stack" aria-live="polite" aria-relevant="additions"></div>
+        <span class="tool-strip-empty">Tool calls appear here during playback</span>
+      </div>
+    </section>
+    <div class="workspace">
+      <section class="panel terminal-panel"><div class="panel-heading"><h2><span class="terminal-icon">›_</span> Terminal</h2><div><span id="geometry" class="mono muted advanced-only">120 × 30</span><span class="panel-tag advanced-only">RECORDED OUTPUT</span></div></div><div id="terminal-viewport"><div id="terminal"></div><div id="terminal-empty" class="empty-state"><div class="empty-symbol">›_</div><h3>A front-row seat to the session</h3><p>Play back the terminal exactly as it was captured.<br>Code and tool activity will follow alongside it.</p><button id="choose-session" class="button primary">Browse recordings <span>→</span></button></div></div><section class="html-replay" aria-label="Readable replay screen">
+      <div class="html-toolbar">
+        <div class="html-modes" role="group" aria-label="Screen display mode"><button data-screen-mode data-mode="reading" aria-pressed="true">Reading</button><button data-screen-mode data-mode="screen" aria-pressed="false">Screen lines</button></div>
+        <button id="html-refresh" class="text-button" disabled aria-label="Refresh screen">↻</button>
+        <span id="html-status" role="status">Choose a recording.</span>
+      </div>
+      <div id="html-shell" class="html-shell">
+        <div class="html-screen-heading"><span>At this moment</span><time id="html-time">—</time></div>
+        <div id="html-screen" class="html-screen" tabindex="0" aria-label="Readable terminal snapshot" data-mode="reading"></div>
+        <div class="html-screen-footer"><span id="html-geometry">Current screen</span><span>Read only</span></div>
+      </div>
+    </section><div class="terminal-footer"><span id="working-directory">No recording selected</span><span class="advanced-only" id="frame-count">0 frames</span></div></section>
+      <section class="panel inspector-panel advanced-only" id="inspector-panel" aria-label="Recording inspector">
+        <div class="panel-heading inspector-heading">
+          <div class="inspector-tabs" role="tablist" aria-label="Inspect recording">
+            <button id="code-tab" role="tab" aria-selected="true" aria-controls="code-panel" tabindex="0"><span class="code-icon" aria-hidden="true">⌘</span> Code <span class="count" id="change-count">0</span></button>
+            <button id="events-tab" role="tab" aria-selected="false" aria-controls="events-panel" tabindex="-1"><span aria-hidden="true">≡</span> Events <span class="count" id="activity-count">0</span></button>
+          </div>
+          <button id="expand-panel" class="text-button" title="Expand inspector" aria-expanded="false">⤢ &nbsp; Expand</button>
+        </div>
+        <div id="code-panel" class="inspector-tab-panel" role="tabpanel" aria-labelledby="code-tab">
+          <div class="file-heading"><div><strong id="file-name">Waiting for a code change</strong><span id="file-stats"></span></div><span id="change-timing" class="muted">Saved patches appear at prompt boundaries</span></div>
+          <div class="editor-wrap"><div id="editor"></div><div id="code-empty" class="empty-state"><div class="empty-symbol">{ }</div><h3>Follow the changes</h3><p>Choose a file below to inspect its captured patch.</p></div></div>
+          <div class="code-footer"><span id="code-description">Saved patch · read only</span><button id="jump-change" class="text-button" disabled>Jump to capture ↗</button></div>
+          <div class="list-heading"><h3>Captured files</h3><input id="file-search" type="search" placeholder="Filter files…" aria-label="Filter captured files" disabled></div>
+          <div id="file-list" class="capture-list" aria-label="Captured files"><div class="small-empty">Your session’s files will appear here.</div></div>
+          <div class="list-footer"><span id="file-list-status">No recording selected</span><div><button id="files-previous" class="text-button" aria-label="Previous files" disabled>←</button><button id="files-next" class="text-button" aria-label="Next files" disabled>→</button></div></div>
+        </div>
+        <div id="events-panel" class="inspector-tab-panel" role="tabpanel" aria-labelledby="events-tab" hidden>
+          <div class="event-details" id="event-details">
+            <div id="event-empty" class="empty-state"><div class="empty-symbol">≡</div><h3>Inspect an event</h3><p>Choose a prompt, tool call, request, or code capture below.</p></div>
+            <div id="event-content" hidden>
+              <div class="eyebrow" id="event-kind"></div><h3 id="event-title"></h3>
+              <details class="event-metadata"><summary id="event-summary">Capture details</summary><div id="event-meta" class="event-meta"></div></details>
+              <div id="event-tabs" class="event-body-tabs" role="group" aria-label="Captured event body"></div>
+              <pre id="event-body" tabindex="0" aria-label="Event details"></pre>
+            </div>
+          </div>
+          <div class="code-footer"><button id="open-event-code" class="text-button" hidden>Open captured file ↗</button><button id="jump-event" class="text-button" disabled>Jump to event ↗</button></div>
+          <div class="list-heading"><h3>Event list</h3><select id="activity-filter" aria-label="Filter events"><option value="all">All events</option><option value="tool">Tool calls</option><option value="proxy">Proxy requests</option><option value="prompt">Prompts</option><option value="change">Code changes</option></select></div>
+          <div id="activity-list" class="capture-list" aria-label="Recorded events"><div class="small-empty">Your session’s events will appear here.</div></div>
+          <div class="list-footer"><span id="event-list-status">No recording selected</span><div><button id="follow-events" class="text-button" title="Show events at the playback position" disabled>At playhead</button><button id="events-previous" class="text-button" aria-label="Previous events" disabled>←</button><button id="events-next" class="text-button" aria-label="Next events" disabled>→</button></div></div>
+        </div>
+      </section>
+    </div>
+    <footer class="page-footer"><span><i class="status-dot"></i> Session replay <span class="advanced-only" id="source-status"></span></span><button id="capture-notes" class="text-button">About this recording</button><span>Space to play / pause <span class="footer-divider">·</span> ← → to seek</span></footer>
+  </main>
+  <dialog id="sessions-dialog"><div class="dialog-heading"><div><div class="eyebrow">RECORDING LIBRARY</div><h2>Find a session</h2></div><button class="icon-button" data-close="sessions-dialog" aria-label="Close sessions">×</button></div><div class="search-wrap"><input id="session-search" type="search" placeholder="Search by project, CLI, title, or session ID…" aria-label="Search sessions"></div><div id="session-list" class="session-list"></div><div class="dialog-footer"><span id="library-status">Recent recordings from state.db</span><button id="load-more" class="button" hidden>Load more</button></div></dialog>
+  <dialog id="detail-dialog"><div class="dialog-heading"><div><div class="eyebrow" id="detail-kind">EVENT DETAILS</div><h2 id="detail-title">Activity</h2></div><button class="icon-button" data-close="detail-dialog" aria-label="Close details">×</button></div><div id="detail-meta" class="detail-meta"></div><div id="detail-tabs" class="detail-tabs"></div><pre id="detail-body" tabindex="0"></pre></dialog>
+</body></html>

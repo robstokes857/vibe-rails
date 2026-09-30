@@ -28,6 +28,7 @@ public static class SqliteStorage
         // not been configured." This overload is the one that knows about vectors, so it wins
         // outright rather than depending on which extension method was called first.
         services.Replace(ServiceDescriptor.Singleton(pathsFactory));
+        services.TryAddSingleton<VibeRails.Data.Replay.IReplayStore, Replay.ReplayStore>();
         services.AddSqliteStateStorage(pathsFactory);
         services.TryAddSingleton<IBertV2VectorStore>(sp => new BertV2VectorStore(VectorPath(sp)));
         services.TryAddSingleton<IBertV2SessionVectorStore>(sp => new BertV2SessionVectorStore(VectorPath(sp)));

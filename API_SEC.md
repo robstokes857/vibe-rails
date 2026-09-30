@@ -1,5 +1,23 @@
 # API authentication coverage
 
+## VB-6TYZ2-4 session replay (2026-09-30, scoped amendment)
+
+Seven read-only routes are added on the existing root Kestrel host, all requiring the
+normal session credential (cookie or header) plus tab header through CookieAuthMiddleware:
+`GET /api/v1/session-replay/status`, `/sessions`, `/sessions/{id}`,
+`/sessions/{id}/frames`, `/sessions/{id}/exchanges`, `/sessions/{id}/changes/{changeId}`,
+and `/sessions/{id}/exchanges/{exchangeId}`. They expose local recording data to the same
+authenticated dashboard user as chat history; every detail query includes the exact session ID.
+Responses are no-store. SQLite reads use ReadOnly/query_only; Board labels go through IBoardStore.
+No listener, authentication exception, outbound destination, schema or logging write was added.
+
+Scoped route enumeration checked all seven mappings and their root-only registration.
+Both mandatory repository-wide listener searches were repeated: the existing main Kestrel
+host, non-serving PortFinder probe and test-only hosts were the only acceptors; the
+cross-runtime search had no matches. The new route regression covers all seven routes with
+missing/session-only/tab-only credentials, authorized reads, no-store and absent details.
+The existing middleware suite also passes. This is a scoped addition, not a new full inventory audit.
+
 ## VIBE-9 agent coordination (2026-09-29, scoped amendment)
 
 Added `complete_board_agent` and `get_board_agent_status` to the existing `BoardTool` HTTP and

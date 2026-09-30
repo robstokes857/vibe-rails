@@ -1217,3 +1217,15 @@ for `complete_board_agent`, `get_board_agent_status`, optional Automation descri
 running-agent indicators, and root-owned cleanup of finished Automation terminals. Final agent
 reports live behind `IBoardStore` in `board.db`; process/run outcomes and recordings stay in
 `state.db`. Completion reports never bypass remaining workflow actions or recording finalization.
+
+## Shared session replay (2026-09-30)
+
+`wwwroot/session-replay/viewer.mjs` mounts the shared isolated viewer used by desktop
+history, Board, Automations and VibeRails-Front's uploaded recording page. Its component
+README documents adapters, lifecycle, responsive playback and syncing the static copies.
+The desktop root maps seven read-only `/api/v1/session-replay` routes behind existing
+session/tab authentication. `IReplayStore` lives in Data.Abstractions, its ReadOnly SQLite
+provider in Data.Sqlite/Replay, and Board labels remain behind IBoardStore. No schema or
+capture change is involved. The website adapts its existing authenticated envelope in the
+browser. At mobile widths the replay displays delayed HTML snapshots from the reconstructed
+terminal; live terminal rendering is independent.

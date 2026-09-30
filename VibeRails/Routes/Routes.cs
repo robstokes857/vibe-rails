@@ -28,6 +28,7 @@ public static class RouteExtensions
         CliLaunchRoutes.Map(app, launchDirectory);
         SessionRoutes.Map(app);
         ChatHistoryRoutes.Map(app);
+        if (isActiveRootBackend) SessionReplayRoutes.Map(app);
         LlmProxyRoutes.Map(app);
         LlmAnthropicProxyRoutes.Map(app);
         LlmZaiProxyRoutes.Map(app);

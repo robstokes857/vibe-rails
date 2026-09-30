@@ -849,9 +849,11 @@ opaque Midnight cards by default. General settings offers Midnight, Light and Fo
 this appearance preference applies immediately and persists in browser local storage. CSS owns
 the palette and compact spacing; toasts retain escaped content, hover pause and manual dismissal.
 
-`session-replay-playback.js` owns the replay clock shared by session/history viewers. Elapsed-time
-batching avoids a timer per output chunk, so dense recordings respect 5x/10x speeds despite browser
-timer clamping. Speed changes reschedule immediately; pause/seek/restart/close reset the clock.
+Session/history/Board/Automation replay uses `session-replay/viewer.mjs` through
+`js/modules/session-viewer.js`. See [the component contract](session-replay/README.md) for mounting,
+data adapters, lifecycle, mobile readable snapshots and explicit syncing to the website and lab.
+Each instance owns an isolated document and must be disposed when its host closes. The old
+`session-replay-playback.js` remains a legacy helper; the shared viewer owns the current replay clock.
 
 
 ### Board Automation activity

@@ -1,4 +1,4 @@
-import { SessionReplayPlayback } from './session-replay-playback.js';
+import { mountSessionViewer } from '../../session-replay/viewer.mjs';
 
 function createModal(title, onClose) {
     const overlay = document.createElement('div');
@@ -36,18 +36,6 @@ function createModal(title, onClose) {
     return { body, close };
 }
 
-/**
- * Frame index to dump instantly before playing. `frames.length` means the requested
- * instant is at or past the last frame — stay finished; do not call play(), which
- * would treat that index as Restart.
- */
-export function resolveReplaySeekIndex(frames, seekToMs, leadInMs = 1500) {
-    if (seekToMs == null || !frames?.length) return 0;
-    const from = Math.max(0, seekToMs - leadInMs);
-    const idx = frames.findIndex(frame => frame.delayMs >= from);
-    return idx < 0 ? frames.length : idx;
-}
-
 function getApiBaseUrl() {
     return window.__viberails_API_BASE__ || '';
 }
@@ -61,10 +49,11 @@ function getApiHeaders() {
     }
 }
 
-async function fetchJson(endpoint) {
+async function fetchJson(endpoint, signal) {
     const baseUrl = getApiBaseUrl();
     const response = await fetch(baseUrl + endpoint, {
         method: 'GET',
+        signal,
         headers: getApiHeaders(),
         credentials: 'include',
         cache: 'no-store'
@@ -182,297 +171,18 @@ export async function showTranscriptModal(sessionId) {
  *   and then plays at the selected speed so the reader sees the context leading up to it.
  */
 export async function showReplayModal(sessionId, { seekToUtc = null } = {}) {
-    let term = null;
-    let playback = null;
-    let closed = false;
-    let onWindowResize = null;
-
-    const { body } = createModal(`Session Replay — ${sessionId}`, () => {
-        closed = true;
-        playback?.pause();
-        if (onWindowResize) window.removeEventListener('resize', onWindowResize);
-        term?.dispose();
-    });
-
-    // Toolbar with playback controls
-    const toolbar = document.createElement('div');
-    toolbar.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 12px;border-bottom:1px solid #333;flex-shrink:0;';
-
-    const playBtn = document.createElement('button');
-    playBtn.textContent = '\u25B6';
-    playBtn.title = 'Play / Pause';
-    playBtn.style.cssText = 'background:#2d2d2d;border:1px solid #555;color:#ccc;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:14px;font-family:monospace;min-width:36px;';
-
-    const speedSelect = document.createElement('select');
-    speedSelect.setAttribute('aria-label', 'Replay speed');
-    speedSelect.style.cssText = 'background:#2d2d2d;border:1px solid #555;color:#ccc;padding:3px 6px;border-radius:4px;font-size:12px;font-family:monospace;';
-    for (const [label, val] of [['1x', 1], ['2x', 2], ['5x', 5], ['10x', 10], ['Max', 0]]) {
-        const opt = document.createElement('option');
-        opt.value = val;
-        opt.textContent = label;
-        if (val === 5) opt.selected = true;
-        speedSelect.appendChild(opt);
-    }
-
-    const altBadge = document.createElement('span');
-    altBadge.style.cssText = 'display:none;background:#5a3e8e;color:#e0d0ff;font-size:10px;font-family:monospace;padding:2px 6px;border-radius:3px;white-space:nowrap;';
-    altBadge.textContent = 'ALT';
-
-    const progress = document.createElement('span');
-    progress.style.cssText = 'color:#888;font-size:11px;font-family:monospace;margin-left:auto;';
-    progress.textContent = '';
-
-    toolbar.append(playBtn, speedSelect, altBadge, progress);
-
-    // Terminal container — xterm renders into this; the viewport is sized to fit the recorded grid.
-    const termEl = document.createElement('div');
-    termEl.style.cssText = 'width:100%;flex:1;overflow:hidden;background:#1e1e1e;';
-
-    body.style.cssText += 'display:flex;flex-direction:column;';
-    body.append(toolbar, termEl);
-
-    if (typeof window.Terminal !== 'function') {
-        termEl.style.cssText += 'color:#aaa;padding:12px;font-family:monospace;';
-        termEl.textContent = 'xterm.js not loaded';
-        return;
-    }
-
-    const BASE_FONT_SIZE = 13;
-    term = new window.Terminal({
-        fontFamily: 'Menlo, Monaco, Consolas, "Cascadia Mono", "Liberation Mono", "Courier New", monospace',
-        fontSize: BASE_FONT_SIZE,
-        disableStdin: true,
-        convertEol: false,
-        allowProposedApi: true,
-        scrollback: 20000,
-        theme: { background: '#1e1e1e', foreground: '#d4d4d4' }
-    });
-
-    let fitAddon = null;
-    if (window.FitAddon?.FitAddon) {
-        fitAddon = new window.FitAddon.FitAddon();
-        term.loadAddon(fitAddon);
-    }
-
-    term.open(termEl);
-    term.write('Loading session data\u2026\r\n');
-
-    // Pick a fontSize that makes (cols x rows) fit the container without clipping.
-    // FitAddon.proposeDimensions() tells us how many cells fit at the current fontSize;
-    // the ratio gives the fontSize that makes them match. Iterates twice because the
-    // first pass changes the cell metrics that the second pass measures against.
-    function fitFontToGrid(cols, rows) {
-        const width = termEl.clientWidth;
-        const height = termEl.clientHeight;
-        if (!width || !height || !cols || !rows) return;
-
-        for (let i = 0; i < 2; i++) {
-            let proposed = null;
-            try { proposed = fitAddon?.proposeDimensions?.(); } catch { proposed = null; }
-            if (!proposed || !proposed.cols || !proposed.rows) {
-                proposed = { cols: Math.max(1, Math.floor(width / 8)), rows: Math.max(1, Math.floor(height / 18)) };
-            }
-
-            const currentFont = Number(term.options.fontSize) || BASE_FONT_SIZE;
-            const scale = Math.min(proposed.cols / cols, proposed.rows / rows);
-            const newFont = Math.max(4, Math.min(32, Math.floor(currentFont * scale)));
-            if (!Number.isFinite(newFont) || newFont <= 0 || newFont === currentFont) break;
-            term.options.fontSize = newFont;
-        }
-    }
-
-
-    let frames = [];
-    let resizeEvents = []; // [{afterFrameIndex, cols, rows}]
-    let altScreenEvents = []; // [{afterFrameIndex, isAlt}]
-    let initialCols = 120;
-    let initialRows = 40;
-    let maxCols = initialCols;
-    let maxRows = initialRows;
-    let seekToMs = null; // offset into the recording to fast-forward to, when seekToUtc was given
-    try {
-        const json = await fetchJson(`/api/v1/chatHistory/${encodeURIComponent(sessionId)}/terminal-replay`);
-        if (closed) return;
-        initialCols = json.initialCols || 120;
-        initialRows = json.initialRows || 40;
-        if (seekToUtc != null && json.startedUtc) {
-            const target = new Date(seekToUtc).getTime();
-            const started = new Date(json.startedUtc).getTime();
-            if (Number.isFinite(target) && Number.isFinite(started)) {
-                seekToMs = Math.max(0, target - started);
-            }
-        }
-        frames = (json.frames || []).map(f => ({
-            data: Uint8Array.from(atob(f.data), c => c.charCodeAt(0)),
-            delayMs: f.delayMs
-        }));
-
-        // Build resize + alt-screen timelines from enriched chunks.
-        // Map each enriched chunk to a byte offset in the combined legacy output so we
-        // can figure out which legacy frame index corresponds to each event.
-        const chunks = json.chunks || [];
-        maxCols = initialCols;
-        maxRows = initialRows;
-        let prevCols = initialCols, prevRows = initialRows;
-        let prevAlt = false;
-        let chunkByteOffset = 0;
-        for (const chunk of chunks) {
-            const chunkBytes = atob(chunk.data).length;
-
-            if (chunk.cols > maxCols) maxCols = chunk.cols;
-            if (chunk.rows > maxRows) maxRows = chunk.rows;
-
-            const colsChanged = chunk.cols !== prevCols || chunk.rows !== prevRows;
-            const altChanged = !!chunk.isAlternateScreen !== prevAlt;
-
-            if (colsChanged || altChanged) {
-                // Find the legacy frame closest to this byte offset
-                let accumulated = 0;
-                let frameIdx = 0;
-                for (let i = 0; i < frames.length; i++) {
-                    accumulated += frames[i].data.length;
-                    if (accumulated > chunkByteOffset) { frameIdx = i; break; }
-                }
-                if (colsChanged) {
-                    resizeEvents.push({ afterFrameIndex: frameIdx, cols: chunk.cols, rows: chunk.rows });
-                    prevCols = chunk.cols;
-                    prevRows = chunk.rows;
-                }
-                if (altChanged) {
-                    altScreenEvents.push({ afterFrameIndex: frameIdx, isAlt: !!chunk.isAlternateScreen });
-                    prevAlt = !!chunk.isAlternateScreen;
-                }
-            }
-            chunkByteOffset += chunkBytes;
-        }
-    } catch (err) {
-        if (closed) return;
-        term.write(`\r\nError: ${err.message}\r\n`);
-        return;
-    }
-
-    if (frames.length === 0) {
-        term.write('\r\nNo replay data.\r\n');
-        return;
-    }
-
-    // Playback state
-    let frameIndex = 0;
-    let nextResizeIdx = 0; // index into resizeEvents
-    let nextAltIdx = 0;    // index into altScreenEvents
-    let currentCols = initialCols;
-    let currentRows = initialRows;
-
-    // Size the font once for the largest geometry seen during the recording so the
-    // viewport never gets cropped. The visible grid still tracks the per-chunk dims
-    // via term.resize() in applyPendingResizes — only the font stays constant.
-    fitFontToGrid(maxCols, maxRows);
-    term.resize(initialCols, initialRows);
-
-    onWindowResize = () => {
-        fitFontToGrid(maxCols, maxRows);
-        term.resize(currentCols, currentRows);
-    };
-    window.addEventListener('resize', onWindowResize);
-
-    function updateDimensions(cols, rows) {
-        currentCols = cols;
-        currentRows = rows;
-        updateProgress();
-    }
-
-    function updateProgress() {
-        progress.textContent = `${currentCols}\u00d7${currentRows}  ${frameIndex} / ${frames.length}`;
-    }
-
-    // Apply any pending resize/alt-screen events up to the given frame index.
-    // Only the visible grid changes — the font was sized once for maxCols x maxRows
-    // so resizing mid-playback doesn't cause font flicker.
-    function applyPendingResizes(idx) {
-        while (nextResizeIdx < resizeEvents.length && resizeEvents[nextResizeIdx].afterFrameIndex <= idx) {
-            const ev = resizeEvents[nextResizeIdx];
-            term.resize(ev.cols, ev.rows);
-            updateDimensions(ev.cols, ev.rows);
-            nextResizeIdx++;
-        }
-        while (nextAltIdx < altScreenEvents.length && altScreenEvents[nextAltIdx].afterFrameIndex <= idx) {
-            const ev = altScreenEvents[nextAltIdx];
-            altBadge.style.display = ev.isAlt ? '' : 'none';
-            nextAltIdx++;
-        }
-    }
-
-    playback = new SessionReplayPlayback(frames, {
-        speed: Number(speedSelect.value),
-        onFrame(index) {
-            applyPendingResizes(index);
-            term.write(frames[index].data);
-        },
-        onProgress(index) {
-            frameIndex = index;
-            updateProgress();
-        },
-        onFinish() {
-            playBtn.textContent = '\u21BB';
-            playBtn.title = 'Restart';
+    let viewer;
+    const { body, close } = createModal(`Session Replay — ${sessionId}`, () => viewer?.dispose());
+    body.parentElement.style.cssText = 'background:#101319;border:1px solid #343b4d;border-radius:12px;display:flex;flex-direction:column;overflow:hidden;width:96vw;max-width:1800px;height:94dvh;';
+    body.style.cssText = 'flex:1;min-height:0;overflow:hidden;position:relative;';
+    viewer = mountSessionViewer(body, {
+        sessionId, seekToUtc, autoplay: true,
+        onEvent(event) { if (event.type === 'close-request') close(); },
+        request(path, { signal }) {
+            return fetchJson(path.replace(/^\/api(?=\/)/, '/api/v1/session-replay'), signal);
         }
     });
-
-    function play() {
-        if (frameIndex >= frames.length) {
-            // Restart
-            frameIndex = 0;
-            playback.seek(0);
-            nextResizeIdx = 0;
-            nextAltIdx = 0;
-            altBadge.style.display = 'none';
-            term.reset();
-            term.resize(initialCols, initialRows);
-            updateDimensions(initialCols, initialRows);
-        }
-        playBtn.textContent = '\u23F8';
-        playBtn.title = 'Pause';
-        playback.play();
-    }
-
-    function pause() {
-        playback.pause();
-        playBtn.textContent = '\u25B6';
-        playBtn.title = 'Play';
-    }
-
-    playBtn.addEventListener('click', () => {
-        if (playback.playing) pause(); else play();
-    });
-    speedSelect.addEventListener('change', () => playback.setSpeed(Number(speedSelect.value)));
-
-    // Auto-start — reset and size to recording dimensions. Font is already sized
-    // for maxCols x maxRows above, so the visible grid here uses the recorded start.
-    term.reset();
-    term.resize(initialCols, initialRows);
-    updateDimensions(initialCols, initialRows);
-
-    // Seek: dump every frame before the target instantly, then play from there so the moment
-    // itself arrives at normal speed. A short lead-in keeps the context that produced it.
-    if (seekToMs != null) {
-        const idx = resolveReplaySeekIndex(frames, seekToMs);
-        while (frameIndex < idx) {
-            applyPendingResizes(frameIndex);
-            term.write(frames[frameIndex].data);
-            frameIndex++;
-        }
-        const marker = document.createElement('span');
-        marker.style.cssText = 'color:#9cdcfe;font-size:11px;font-family:monospace;white-space:nowrap;';
-        const secs = Math.round(seekToMs / 1000);
-        marker.textContent = `↳ jumped to ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')} into the session`;
-        toolbar.insertBefore(marker, progress);
-        updateProgress();
-    }
-    playback.seek(frameIndex);
-    if (frameIndex >= frames.length) {
-        playBtn.textContent = '\u21BB';
-        playBtn.title = 'Restart';
-        return;
-    }
-    play();
+    // The embedded viewer handles inspector/dialog Escape before asking to close.
+    await viewer.ready.catch(() => {});
+    return { viewer, close };
 }
