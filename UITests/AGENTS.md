@@ -79,12 +79,14 @@ npx playwright test --config playwright.terminal-automations.config.js
 ```
 
 Uses real terminal UI/xterm with intercepted API and WebSocket fixtures. Covers a long robot
-menu, lazy live attachment, scrollable finished output and reload, launch events/remount, independent close/undo,
+menu, finished-agent removal, retained output through Board links and reload, launch events/remount, independent close/undo,
 and narrow-window keyboard access. Does not launch a CLI or touch application state.
 Snapshot fixtures are generated from current backend capture/serialization code by
 `Tests/headless/TerminalSnapshots`. The headless xterm tests check every history/screen row,
 repeat attach, cursor position and live input modes; browser tests use those same bytes and
 cover switching away and back while a completed write is pending.
+Fixture builds use `Tests/obj/terminal-snapshot-artifacts` so a running Debug app does not lock
+their build output.
 
 ### Focused chat history tests (No Backend Required)
 

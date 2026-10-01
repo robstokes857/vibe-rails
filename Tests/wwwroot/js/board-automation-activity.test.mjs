@@ -127,3 +127,35 @@ test('an activity response cannot update a replacement card editor', async () =>
         await pending;
     } finally { globalThis.document = original; }
 });
+
+test('lane activity is refreshed even with no loaded cards, and is cleared on completion', async () => {
+    const original = globalThis.document;
+    globalThis.document = { querySelector: () => null };
+    try {
+        const { controller, requests } = harness();
+        controller.state.cards = [];
+        const lanes = [];
+        controller.laneAgents.updateActivity = ids => lanes.push(ids);
+        let pending = controller.refreshSessionActivity();
+        assert.deepEqual(requests[0].body.cardIds, []);
+        requests[0].resolve({ cards: [], activeAutomationColumnIds: ['review'] });
+        await pending;
+        pending = controller.refreshSessionActivity();
+        requests[1].resolve({ cards: [], activeAutomationColumnIds: [] });
+        await pending;
+        assert.deepEqual(lanes, [['review'], []]);
+    } finally { globalThis.document = original; }
+});
+
+test('a running Automation in another root is not reported as finished or focused through a stale tab', async () => {
+    const { controller, requests } = harness();
+    const messages = [];
+    controller.app.showToast = (...args) => messages.push(args.join(' '));
+    controller.focusSessionTab = () => assert.fail('cannot focus another root’s tab');
+    const pending = controller.goToCardAutomation('card');
+    requests[0].resolve({ hasActiveAutomation: true, sessions: [
+        { id: 'shell', isAutomation: true, active: false, tabId: 'foreign-tab' }
+    ] });
+    await pending;
+    assert.match(messages[0], /running in another VibeRails window/);
+});

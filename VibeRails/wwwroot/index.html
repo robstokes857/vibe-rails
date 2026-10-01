@@ -57,7 +57,7 @@
         appStyleLink.rel = 'stylesheet';
         appStyleLink.href = window.__viberails_asset_url__('style.css');
         document.head.appendChild(appStyleLink);
-        for (const path of ['js/modules/code-report/vendor/quality/quality-report.css', 'js/modules/code-report/styles.css']) {
+        for (const path of ['js/modules/code-report/vendor/quality/quality-report.css', 'js/modules/code-report/styles.css', 'assets/board/board-lane-agents.css']) {
             const link = document.createElement('link');
             link.rel = 'stylesheet';
             link.href = window.__viberails_asset_url__(path);
@@ -3324,6 +3324,7 @@
                     min-height: 260px;
                     overflow-x: auto;
                     overflow-y: hidden;
+                    padding-top: 18px;
                     padding-bottom: 0.35rem;
                 }
 
@@ -3335,7 +3336,7 @@
                     /* Keep the trailing Add lane button beyond every lane when
                        the canvas scrolls; overflowing lanes must not cover it. */
                     min-width: min-content;
-                    height: 100%;
+                    height: auto;
                 }
 
                 .board-view .board-lane {

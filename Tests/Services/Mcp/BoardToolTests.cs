@@ -721,6 +721,8 @@ public sealed class BoardToolTests : IDisposable
             .Returns<string, string, BoardCardPatch, CancellationToken, BoardAuthor?>((project, id, patch, ct, author) => _store.UpdateCardAsync(project, id, patch, ct, author));
         racing.Setup(s => s.GetCardDetailAsync(_project, It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns<string, string, CancellationToken>((project, id, ct) => _store.GetCardDetailAsync(project, id, ct));
+        racing.Setup(s => s.GetRunningAutomationsAsync(_project, It.IsAny<CancellationToken>()))
+            .Returns<string, CancellationToken>((project, ct) => _store.GetRunningAutomationsAsync(project, ct));
         var service = new BoardService(racing.Object, Mock.Of<IBoardCommitService>(), new NullBoardLiveSessionProbe());
 
         var updated = await service.UpdateCardAsync(_project, "PROJ-1", new UpdateBoardCardRequest(DescriptionAppend: "agent note"), Ct);

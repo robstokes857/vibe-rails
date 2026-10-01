@@ -32,7 +32,10 @@ Completed Automation tabs remain available until dismissed, the root exits, or t
 capacity policy reclaims an older finished host. Do not delete them on completion. The PTY
 still exits and its recording finalizes normally; `TerminalSessionService` retains one final
 snapshot per owned tab session, including the emulator's bounded 20,000-line scrollback. The
-existing authenticated snapshot route returns it when inactive, and a new session clears it.
+terminal agent menu hides confirmed completed runs; retained hosts remain available through
+Board session links and an already-open output viewer (VIBE-18). Starting or unavailable hosts
+are not treated as finished. This is a menu filter, not a host or recording deletion.
+The existing authenticated snapshot route returns the snapshot when inactive, and a new session clears it.
 The finished snapshot renders as a read-only main screen without mouse/input reporting modes.
 Live PTY bytes and live snapshot semantics remain intact. CLI-private full-screen history that
 never entered terminal scrollback cannot be reconstructed from this snapshot; Replay remains

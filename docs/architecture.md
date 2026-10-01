@@ -398,6 +398,11 @@ for data limits, vendor provenance, themes/CSP, lifecycle and regression tests.
 
 ### Vibe Board
 
+Compact robot buttons overlap adjacent lane headers and open the destination lane's existing
+Automation settings. `board-lane-agents.js` handles assignment/removal, inline Automation descriptions,
+and navigation to the existing Automation editor. It adds no scheduler or storage behavior;
+see the [lane controls contract](../VibeRails/Services/Board/ARCHITECTURE.md#lane-agent-controls-2026-09-30).
+
 VB-52 adds owner invitation controls, website recipient inbox/block screens and desktop shared-board
 import. The website enforces the three-collaborator cap and Board membership. Additive `board/26`
 stores pinned import origins; existing sync carries portable edits both ways. See the

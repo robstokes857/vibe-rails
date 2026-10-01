@@ -22,7 +22,7 @@ export const laneAutomationSection = () => `
     </section>`;
 
 // Each mount owns its request and DOM. Replacing/closing a modal cannot populate a newer one.
-function mountSettings(app, element, { load, render, read, save, savedMessage }) {
+function mountSettings(app, element, { load, render, read, save, savedMessage, onSaved }) {
     if (!element) return () => {};
     const abort = new AbortController();
     let disposed = false;
@@ -57,6 +57,7 @@ function mountSettings(app, element, { load, render, read, save, savedMessage })
             const result = await save({ ...read(element), expectedRevision: revision });
             if (!alive()) return;
             revision = result.revision;
+            onSaved?.(result);
             app.showToast('Board', savedMessage, 'success');
         } catch (error) {
             if (alive()) app.showToast('Board', error?.message || 'Settings could not be saved.', 'error');
@@ -102,7 +103,7 @@ export function mountBoardContext(app, element, boardId) {
 }
 
 // Automatic account sync status and an immediate retry.
-export function mountLaneAutomation(app, element, columnId) {
+export function mountLaneAutomation(app, element, columnId, onSaved) {
     return mountSettings(app, element, {
         load: extra => BoardApi.getLaneAutomationAsync(columnId, extra),
         render: ({ jobs, jobIds, jobId }) => {
@@ -122,6 +123,7 @@ export function mountLaneAutomation(app, element, columnId) {
         },
         read: root => ({ jobIds: [...root.querySelectorAll('[data-lane-automation-job]:checked')].map(input => Number(input.value)) }),
         save: payload => BoardApi.saveLaneAutomationAsync(columnId, payload),
-        savedMessage: 'Lane automations saved.'
+        savedMessage: 'Lane automations saved.',
+        onSaved
     });
 }

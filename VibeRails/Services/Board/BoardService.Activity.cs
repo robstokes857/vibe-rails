@@ -19,7 +19,9 @@ public sealed partial class BoardService
             || request.CardIds is null || request.CardIds.Count > MaxActivityCardIds
             || request.CardIds.Any(id => string.IsNullOrWhiteSpace(id) || id.Length > 100))
             throw new BoardValidationException("Supply a board ID and up to 100 card IDs.");
-        if (request.CardIds.Count == 0) return new([]);
+        var running = (await store.GetRunningAutomationsAsync(projectPath, cancellationToken))
+            .Where(run => run.BoardId == request.BoardId).ToList();
+        var runningCards = running.Select(run => run.CardId).ToHashSet(StringComparer.Ordinal);
         var live = await liveSessions.GetLiveSessionsAsync(cancellationToken);
         var activity = await store.GetCardActivityAsync(projectPath, request.BoardId,
             request.CardIds.Distinct(StringComparer.Ordinal).ToList(), live.Keys.ToList(), cancellationToken);
@@ -34,7 +36,11 @@ public sealed partial class BoardService
             var active = liveRows.FirstOrDefault(a => !automationRows.Contains(a));
             return new BoardCardActivityResponse(group.Key, active?.SessionId,
                 active?.SessionId is { } id ? live[id] : null,
-                automationRows.Count > 0);
-        }).ToList());
+                automationRows.Count > 0 || runningCards.Contains(group.Key));
+        }).ToList())
+        {
+            ActiveAutomationColumnIds = running.Where(run => run.ColumnId is not null)
+                .Select(run => run.ColumnId!).Distinct(StringComparer.Ordinal).ToList()
+        };
     }
 }

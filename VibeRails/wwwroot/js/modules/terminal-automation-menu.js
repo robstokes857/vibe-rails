@@ -11,7 +11,11 @@ export function automationStatus(tab) {
 }
 
 export function automationEntries(tabs) {
-    return [...tabs.values()].sort((a, b) => {
+    // Retain finished hosts for Board links and output viewing; only the menu is filtered.
+    // A failed status read or a host still starting is not evidence that the agent finished.
+    return [...tabs.values()].filter(tab =>
+        tab.statusAvailable === false || tab.hasActiveSession !== false || !tab.sessionId
+    ).sort((a, b) => {
         const active = Number(b.hasActiveSession === true) - Number(a.hasActiveSession === true);
         return active || (Date.parse(b.createdUTC) || 0) - (Date.parse(a.createdUTC) || 0);
     });
@@ -74,7 +78,7 @@ export class TerminalAutomationMenu {
         this.count.textContent = String(entries.length);
         this.button.title = `Automations: ${running} running · ${entries.length} terminals`;
         this.button.setAttribute('aria-label', this.button.title);
-        this.button.classList.toggle('is-active', this.manager.automationTabs.has(this.manager.activeTabId));
+        this.button.classList.toggle('is-active', entries.some(tab => tab.tabId === this.manager.activeTabId));
         const signature = JSON.stringify(entries.map(tab => [tab.tabId, tab.automationName, tab.jobRunId,
             tab.hasActiveSession, tab.sessionId, tab.statusAvailable, this.manager.activeTabId === tab.tabId]));
         if (signature === this.signature) return;
@@ -129,11 +133,15 @@ export class TerminalAutomationMenu {
         this.popup.appendChild(list);
         const footer = document.createElement('div');
         footer.className = 'vb-terminal-automations-footer';
-        footer.textContent = 'Finished output stays scrollable until dismissed. At 100 terminals, the oldest finished run makes room. Recordings stay in History.';
+        footer.textContent = 'Recordings remain available from the Board and Automations after agents finish.';
         this.popup.appendChild(footer);
-        if (!entries.length) this.close();
+        if (!entries.length) {
+            this.close();
+            if (focusId) this.manager.tabAdd?.focus({ preventScroll: true });
+        }
         else if (focusId) {
-            [...this.popup.querySelectorAll('button')].find(button => button.dataset[focusAction] === focusId)?.focus();
+            const buttons = [...this.popup.querySelectorAll('button')];
+            (buttons.find(button => button.dataset[focusAction] === focusId) || buttons[0])?.focus();
         }
         this.position();
     }
@@ -159,7 +167,8 @@ export class TerminalAutomationMenu {
 
     close() {
         if (!this.popup) return;
-        if (this.popup.contains(document.activeElement)) this.button.focus({ preventScroll: true });
+        if (this.popup.contains(document.activeElement))
+            (this.wrapper.hidden ? this.manager.tabAdd : this.button)?.focus({ preventScroll: true });
         this.popup.hidden = true;
         this.button.setAttribute('aria-expanded', 'false');
     }

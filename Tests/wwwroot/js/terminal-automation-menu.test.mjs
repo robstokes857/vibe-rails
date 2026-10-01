@@ -41,12 +41,14 @@ test('restore keeps dozens of Automation runs as metadata without creating termi
     assert.equal(manager.getTabCount(), 100);
 });
 
-test('running entries precede finished runs and UUID run ids sort by creation time', () => {
+test('finished runs leave the group while running entries sort by creation time', () => {
     const older = { tabId: 'older', jobRunId: 'ffff', hasActiveSession: true, createdUTC: '2026-09-23T10:00:00Z' };
     const newer = { tabId: 'newer', jobRunId: 'aaaa', hasActiveSession: true, createdUTC: '2026-09-23T11:00:00Z' };
-    const finished = { tabId: 'done', jobRunId: 'bbbb', sessionId: 's1', createdUTC: '2026-09-23T12:00:00Z' };
-    const rows = automationEntries(new Map([finished, older, newer].map(tab => [tab.tabId, tab])));
-    assert.deepEqual(rows.map(row => row.tabId), ['newer', 'older', 'done']);
+    const finished = { tabId: 'done', jobRunId: 'bbbb', hasActiveSession: false, sessionId: 's1', createdUTC: '2026-09-23T12:00:00Z' };
+    const tabs = new Map([finished, older, newer].map(tab => [tab.tabId, tab]));
+    const rows = automationEntries(tabs);
+    assert.deepEqual(rows.map(row => row.tabId), ['newer', 'older']);
+    assert.equal(tabs.get('done'), finished, 'retained output is still accessible');
     assert.equal(automationStatus(finished), 'Finished');
     assert.equal(automationStatus({ ...finished, statusAvailable: false }), 'Unavailable');
     assert.equal(automationStatus({}), 'Starting');
@@ -102,6 +104,17 @@ test('stale refresh cannot populate a manager destroyed during navigation', asyn
     resolve({ tabs: [{ tabId: 'late', jobRunId: 'late-run' }] });
     await pending;
     assert.equal(manager.automationTabs.size, 0);
+});
+
+test('starting and unavailable agents stay visible until completion is confirmed', () => {
+    const starting = { tabId: 'starting', hasActiveSession: false, sessionId: null };
+    const unavailable = { tabId: 'unavailable', hasActiveSession: false, sessionId: 'session', statusAvailable: false };
+    const unknown = { tabId: 'unknown', sessionId: 'session' };
+    const tabs = new Map([starting, unavailable, unknown].map(tab => [tab.tabId, tab]));
+    assert.equal(automationEntries(tabs).length, 3);
+    unavailable.statusAvailable = true;
+    unknown.hasActiveSession = false;
+    assert.deepEqual(automationEntries(tabs).map(tab => tab.tabId), ['starting']);
 });
 
 test('the completion event removes an open Automation viewer and late refresh cannot resurrect it', async () => {

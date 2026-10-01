@@ -30,6 +30,7 @@
 import { escapeHtml, confirmDialog, parseLlmSelection, getCliBrand, canonicalLlmSelection } from './utils.js';
 import { mountLlmPicker, setLlmPickerValue, getEnabledLlmItems } from './pickers/llm-picker.js';
 import { BoardApi } from './board-api.js';
+import { BoardLaneAgents } from './board-lane-agents.js';
 import { BOARD_SELECTION_STORAGE_KEY } from './board-selection.js';
 import { boardContextSection, laneAutomationSection, mountBoardContext, mountLaneAutomation } from './board-settings.js';
 import { cardOrganizeSection, bindCardOrganization } from './board-card-organize.js';
@@ -101,6 +102,7 @@ export class BoardController {
         this._activityDisposers = [];
         this._activityGeneration = 0;
         BoardApi.attach(app);
+        this.laneAgents = new BoardLaneAgents(app);
         this.state = {
             boards: [],
             boardId: null,
@@ -137,6 +139,7 @@ export class BoardController {
     }
 
     unload() {
+        this.laneAgents.dispose();
         this.sharingDispose?.();
         this.sharingDispose = null;
         this.disposeSessionActivity();
@@ -170,6 +173,7 @@ export class BoardController {
             const dispose = this.app.appEventClient?.on(event, refresh);
             if (dispose) this._activityDisposers.push(dispose);
         }
+        refresh();
         // Also catches launches in another root and a final event missed during a reconnect.
         this._activityPoll = setInterval(() => {
             if (!document.hidden) void this.refreshSessionActivity();
@@ -187,7 +191,7 @@ export class BoardController {
 
     async refreshSessionActivity() {
         const root = this.root;
-        if (!root?.isConnected || this.app.currentView !== 'board' || this._activityPending) return;
+        if (!root?.isConnected || this.app.currentView !== 'board' || !this.state.boardId || this._activityPending) return;
         const generation = this._activityGeneration;
         const refreshGeneration = this._refreshGeneration;
         const boardId = this.state.boardId;
@@ -200,20 +204,26 @@ export class BoardController {
         const loadedIds = [...new Set(this.state.cards.map(card => card.id))];
         const readActivity = async () => {
             const cards = [];
+            let columnIds = [];
             // Bound every request and never fetch the unloaded remainder of a completed lane.
-            for (let offset = 0; offset < loadedIds.length; offset += 100) {
-                if (!current() || abort.signal.aborted) return [];
-                cards.push(...await BoardApi.getBoardCardActivityAsync(boardId,
-                    loadedIds.slice(offset, offset + 100), { signal: abort.signal }));
+            for (let offset = 0; offset < Math.max(1, loadedIds.length); offset += 100) {
+                if (!current() || abort.signal.aborted) return { cards: [], columnIds: [] };
+                const activity = await BoardApi.getBoardCardActivityAsync(boardId,
+                    loadedIds.slice(offset, offset + 100), { signal: abort.signal });
+                cards.push(...activity.cards);
+                columnIds = activity.activeAutomationColumnIds;
             }
-            return cards;
+            return { cards, columnIds };
         };
         try {
-            const [cards, detail] = await Promise.all([
+            const [activity, detail] = await Promise.all([
                 readActivity(),
                 cardId ? BoardApi.getBoardCardAsync(cardId, { signal: abort.signal }) : null
             ]);
             if (!current()) return;
+            const { cards, columnIds } = activity;
+            this._activeAutomationColumnIds = columnIds;
+            this.laneAgents.updateActivity(columnIds);
             const byId = new Map(cards.map(card => [card.id, card]));
             const tiles = new Map([...root.querySelectorAll('[data-card-id]')].map(tile => [tile.dataset.cardId, tile]));
             for (const card of this.state.cards) {
@@ -264,7 +274,9 @@ export class BoardController {
                 || generation !== this._activityGeneration) return;
             const session = card.sessions?.find(item => item.active && item.isAutomation && item.tabId);
             if (session) await this.focusSessionTab(card, session);
-            else this.app.showToast('Board', 'This Automation has finished. Its recording is available on the card.', 'info');
+            else this.app.showToast('Board', card.hasActiveAutomation
+                ? 'This Automation is running in another VibeRails window. Open it there to view the live terminal.'
+                : 'This Automation has finished. Its recording is available on the card.', 'info');
         } catch (error) {
             if (root === this.root && root?.isConnected) this.app.showError(error.message);
         }
@@ -678,7 +690,7 @@ export class BoardController {
         const html = this.state.columns
             .slice()
             .sort((a, b) => a.position - b.position)
-            .map(column => {
+            .map((column, index) => {
                 const cards = visible
                     .filter(card => card.columnId === column.id)
                     .sort((a, b) => a.position - b.position);
@@ -693,6 +705,7 @@ export class BoardController {
                 return `
                     <section class="board-lane" data-column-id="${escapeHtml(column.id)}"
                         style="--lane-color:${escapeHtml(column.color)}">
+                        ${index > 0 ? this.laneAgents.button(column) : ''}
                         <header class="board-lane-head">
                             <button type="button" class="board-lane-grip" title="Drag to reorder this lane"
                                 aria-label="Reorder ${escapeHtml(column.name)}">
@@ -713,6 +726,10 @@ export class BoardController {
 
         const host = this.query('[data-board-lanes]');
         if (host) host.innerHTML = html;
+        if (host) {
+            this.laneAgents.mount(host);
+            this.laneAgents.updateActivity(this._activeAutomationColumnIds);
+        }
         this.restoreScroll(scroll);
         this.bindDragAndDrop();
         this.queryAll('.board-lane-list').forEach(list => {
@@ -889,6 +906,7 @@ export class BoardController {
             // The picker already names the new board. Old lanes must not remain actionable.
             this.state.columns = [];
             this.state.cards = [];
+            this._activeAutomationColumnIds = [];
             this.cardPage = null;
             this.renderAll();
         }
@@ -929,6 +947,7 @@ export class BoardController {
         const action = trigger?.dataset.boardAction;
         const cardEl = event.target.closest('.board-card');
         const avatar = event.target.closest('[data-assignee-id]');
+        if (action !== 'lane-agents') this.laneAgents.close(false);
 
         if (avatar && cardEl) {
             event.stopPropagation();
@@ -945,6 +964,9 @@ export class BoardController {
         }
 
         switch (action) {
+            case 'lane-agents':
+                this.laneAgents.open(trigger, this.state.columns.find(column => column.id === trigger.dataset.columnId));
+                break;
             case 'go-to-automation':
                 event.stopPropagation();
                 if (cardEl) void this.goToCardAutomation(cardEl.dataset.cardId);
@@ -2408,7 +2430,8 @@ export class BoardController {
         const container = document.getElementById('modal-container');
         const editor = container?.querySelector('[data-board-lane-editor]');
         if (!editor) return;
-        if (column) this.boardSettingsDispose = mountLaneAutomation(this.app, editor.querySelector('[data-lane-automation]'), column.id);
+        if (column) this.boardSettingsDispose = mountLaneAutomation(this.app, editor.querySelector('[data-lane-automation]'), column.id,
+            settings => this.laneAgents.updateColumnCount(column.id, settings));
 
         editor.querySelector('[data-board-swatches]')?.addEventListener('click', event => {
             const swatch = event.target.closest('[data-board-color]');

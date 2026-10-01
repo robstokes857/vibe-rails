@@ -168,7 +168,7 @@ async function getBoardCardsAsync(boardId = null, extra = {}) {
 
 async function getBoardCardActivityAsync(boardId, cardIds, extra = {}) {
     const response = await call('/cards/activity', 'POST', { boardId, cardIds }, extra);
-    return response?.cards || [];
+    return { cards: response?.cards || [], activeAutomationColumnIds: response?.activeAutomationColumnIds || [] };
 }
 
 async function getBoardCardPageAsync(boardId, filters = {}, { columnId, offset = 0, continuationToken, signal } = {}) {

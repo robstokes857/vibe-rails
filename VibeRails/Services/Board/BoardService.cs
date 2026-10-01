@@ -239,7 +239,8 @@ public sealed partial class BoardService(
     {
         var live = await liveSessions.GetLiveSessionsAsync(cancellationToken);
         var activeByCard = new Dictionary<string, (string SessionId, string TabId)>(StringComparer.Ordinal);
-        var automationCards = new HashSet<string>(StringComparer.Ordinal);
+        var automationCards = (await store.GetRunningAutomationsAsync(projectPath, cancellationToken))
+            .Select(run => run.CardId).ToHashSet(StringComparer.Ordinal);
         if (live.Count > 0)
         {
             var sessions = await store.GetSessionsForProjectAsync(projectPath, cancellationToken);
@@ -547,6 +548,9 @@ public sealed partial class BoardService(
     {
         var live = await liveSessions.GetLiveSessionsAsync(cancellationToken);
         var sessions = await SessionDtosAsync(detail.Card.ProjectPath, detail.Sessions, live, cancellationToken);
+        var hasActiveAutomation = sessions.Any(s => s.Active && s.IsAutomation)
+            || (await store.GetRunningAutomationsAsync(detail.Card.ProjectPath, cancellationToken))
+                .Any(run => run.CardId == detail.Card.Id);
         // The working agent is the first live session that is not an Automation's (see GetCardListResponseAsync).
         var active = sessions.FirstOrDefault(s => s.Active && !s.IsAutomation);
         var summary = ToSummary(detail.Card, active?.Id, active?.TabId);
@@ -564,7 +568,7 @@ public sealed partial class BoardService(
             sessions,
             detail.Attachments.Select(ToDto).ToList(),
             detail.Card.BaseLlmOptions,
-            notes, summary.Type, summary.BoardId, summary.Flagged, sessions.Any(s => s.Active && s.IsAutomation), summary.DisplayId, summary.AgentMade)
+            notes, summary.Type, summary.BoardId, summary.Flagged, hasActiveAutomation, summary.DisplayId, summary.AgentMade)
         {
             LinkedCards = detail.LinkedCards.Select(ToDto).ToList()
         };

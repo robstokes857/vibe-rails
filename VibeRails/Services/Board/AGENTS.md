@@ -1,5 +1,15 @@
 # Working on Vibe Board
 
+## Workflow intent (VIBE-17)
+
+Keep the existing automatic lane-entry execution and settling delay. Humans and LLM agents
+decide card movement through the UI or Board MCP tools. Give agents the lane context, purpose,
+expected output and workflow instructions so they can choose the appropriate next action.
+Do not add deterministic application rules that move cards based on review or Automation outcomes,
+or impose a stay-in-lane default. Lane names, order and the meaning of Done remain user-defined.
+New template review defaults use Switch reviewer (Claude to Codex, Codex to Claude), with editable
+mappings and a fixed Codex review alternative; the implementation scope is tracked on VIBE-20–25.
+
 ## Board sharing (VB-52)
 
 See [SYNC.md](SYNC.md#vb-52-shared-boards) for the POC contract. Persistence stays behind

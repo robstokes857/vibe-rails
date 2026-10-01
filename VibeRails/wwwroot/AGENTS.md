@@ -220,6 +220,34 @@ Automations and active-job overlap are skipped independently for each selection.
 checkboxes to disable lane Automations; selected disabled/deleted jobs remain removable. The ordinary root Automation scheduler and
 trigger-based run lifecycle apply: Board lane runs and runs started from a card open terminal tabs; ordinary manual runs, retries and other triggers open native terminals. Automation recordings appear in the Automations rail immediately below Sessions.
 
+`board-lane-agents.js` also exposes these settings through compact robot buttons across lane
+header corners, in the existing gutters. Each button belongs to the lane on its right: all
+entries to that lane count, including newly created cards. The badge counts assigned Automations,
+including disabled or unavailable ones. The first lane remains configurable from Lane settings.
+The wider anchored panel adds existing project Automations, links to the existing Automation
+editor for create/edit, and confirms removal from the lane without deleting the Automation.
+Each row shows a two-line preview of the existing 2,000-character Automation description. Edit
+description expands the field; Save description and Cancel collapse it, with Cancel discarding
+only that row's draft. This is the description read by Board consumers and included in agent launch
+context, shared wherever the Automation is used. Saving reads the latest definition, preserves
+the enabled state and workflow, and keeps other rows' drafts intact across refreshes and errors.
+There is no on/off switch in this panel and no new run/approval mode.
+Worker rows use the shared CLI brand logo and provider name, resolved from the Worker action
+and its Environment. Script-only workflows use a code icon; the lane-entry buttons keep robots.
+The panel loads the Environment catalog alongside Jobs so direct Board navigation also resolves
+the Worker's saved model and effort. `llm-display.js` formats those argv values as friendly labels;
+unknown values remain escaped text and unset options stay absent. `cli-arguments.js` shares the
+tokenizer with the Environment editor. Lane buttons show a small pulsing dot and Running caption
+from the activity endpoint's `activeAutomationColumnIds`, independently of filters and loaded
+cards. Polling preserves panel drafts; reduced-motion preferences leave a static dot.
+Lane selection saves use the existing revision check and cancel pending triggers. The existing
+endpoint only accepts enabled selections: an Add explains disabled selections that must first be
+enabled/removed, and a Remove confirmation lists other unavailable selections being cleared.
+Lane rerenders (including background pagination) reattach the existing panel to the replacement
+button, preserving description drafts, focus and pending panel requests. Navigation or removal of
+the lane button disposes the panel, requests and document listeners; Escape restores focus to the
+current button. Theme-aware styling lives in `assets/board/board-lane-agents.css`.
+
 The view uses the app's shared surfaces rather than its own: `app.showModal` (upgraded to
 `modal-xl` for the card editor, the same way the rule and quality modals do it), `confirmDialog`
 for every delete, and `app.showToast` for results. It owns no toast stack, no Bootstrap modal, and
@@ -710,8 +738,9 @@ recorded shell tab, retaining Worker workspace/arguments and script ordering. Hi
 copyable session ID and a full-workflow replay alongside individual Worker recordings.
 
 Automation terminals live in a separate **robot/count** menu beside recently closed terminals.
-The list retains running and recent completed hosts; live entries attach on selection, completed
-entries open retained read-only output in the terminal, with scrolling and copying. Restoring or receiving a launch event updates the menu without opening an
+The list shows running, starting and unavailable hosts, and hides confirmed completed agents.
+Live entries attach on selection; Board links can still open retained completed output with
+scrolling and copying. Restoring or receiving a launch event updates the menu without opening an
 xterm/socket per run or stealing focus. Server-owned `jobRunId` and `automationName` classify the
 entries across reloads; unavailable status must not be treated as completed. Ordinary close/undo
 keeps its independent two-minute grace window. The root's cap is 100; at capacity it may reclaim
@@ -903,6 +932,10 @@ an `automation` origin; older recordings are identified by their project-scoped 
 IDs through `IBoardStore`, so renaming a recording does not change its group. List/detail responses
 include `hasActiveAutomation`; cards show the Environment UI's `fa-robot` icon blinking alongside
 the live-session border. Reduced-motion preferences disable the animation.
+Running Job state supplements local tab liveness, so another root (including Debug) can see
+the card's active Automation. Clicking that icon focuses a local Automation tab when available;
+otherwise a running run explains that its terminal belongs to another VibeRails window. The
+workflow shell and its Worker have separate recordings but belong to one run.
 
 While Board is mounted, session lifecycle events and a ten-second visible-page fallback refresh
 activity through `POST /api/v1/board/cards/activity`, requesting only loaded card IDs in batches
@@ -931,5 +964,11 @@ VB-60 keeps completed hosts and opens their retained output through the existing
 snapshot API. Completion does not emit a closure event. Dismissal, capacity reclamation and
 child exits do; a viewer socket disconnect alone never removes a host. Snapshot loads are lazy,
 guarded against navigation/session changes, and never open a socket or enable terminal input.
+The terminal robot group now hides confirmed finished agents (VIBE-18 follow-up): a successful
+status read reports `hasActiveSession=false` with a recorded `sessionId`. Starting and unavailable
+hosts stay visible. Completion events and the ten-second status poll refresh the list and badge;
+the group closes and disappears when empty. Focus moves to a remaining agent or Add terminal.
+This filters the menu only: an already-open finished viewer stays readable, and Board session
+links can still open retained output. Stored recordings and backend host retention are unchanged.
 Automation descriptions are optional, escaped, limited to 2,000 characters, and included in
 editor saves, recipes and repository imports.

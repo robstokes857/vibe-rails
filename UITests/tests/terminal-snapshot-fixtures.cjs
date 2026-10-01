@@ -10,6 +10,8 @@ module.exports = function snapshotFixtures() {
         const output = path.join(directory, 'snapshots.json');
         execFileSync('dotnet', ['run', '--project',
             path.resolve(__dirname, '../../Tests/headless/TerminalSnapshots/TerminalSnapshots.csproj'),
+            // Keep fixture builds separate from DLLs loaded by a running Debug app.
+            '--artifacts-path', path.resolve(__dirname, '../../Tests/obj/terminal-snapshot-artifacts'),
             '--no-launch-profile', '--verbosity', 'quiet', '--', output],
         { encoding: 'utf8', timeout: 120000, windowsHide: true });
         return JSON.parse(readFileSync(output, 'utf8'));

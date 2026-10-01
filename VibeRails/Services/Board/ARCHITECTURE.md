@@ -19,6 +19,41 @@ queue. A merge appends source content and copies its rails before soft deletion;
 metadata wins. Legacy notes are read with Comments, and new notes are comments. See SYNC.md for
 source/destination delivery, return moves and the companion hosted deletion projection.
 
+## Lane agent controls (2026-09-30)
+
+VIBE-18 adds model/effort labels from the Worker's saved Environment arguments. The panel reads
+the Environment catalog when opened, including on a direct Board load; `llm-display.js` formats
+known model IDs and effort levels, retaining unknown IDs as escaped text. Its argv tokenizer is
+shared with the Environment editor. Unset options have no label.
+
+`IBoardStore.GetRunningAutomationsAsync` reads running Jobs in `state.db` and resolves their
+immutable Board trigger to existing project cards in `board.db`, using separate read connections.
+Card list/detail/activity responses combine that state with the root's local live tabs, so a debug
+window sees a run launched by another root. Run completion/reaping clears the shared indicator;
+queued runs do not count. This does not make a foreign terminal focusable or a working agent.
+The shell workflow recording and its Worker recording are two sessions of one Automation run.
+
+The activity response also carries `activeAutomationColumnIds` for the requested board, including
+when no cards are loaded or filters hide the running card. Only lane-triggered runs light the
+originating lane; a later card move does not move that indicator. Moving the card to another board
+or deleting its old lane removes the old lane reference. The existing ten-second activity poll
+updates a small pulsing dot and Running caption without replacing the lane panel or its drafts.
+Reduced motion keeps the dot static. No schema, launch claim, or scheduler changes are involved.
+
+The Board's compact robot buttons overlap adjacent lane header corners without widening the
+gutters. Each opens a non-modal panel for the destination lane's existing entry Automations.
+`board-lane-agents.js` uses the existing lane GET/PUT and Jobs GET/PUT endpoints: revision-checked
+assignment/removal and inline editing of the existing 2,000-character Automation description.
+Descriptions start as two-line previews. Edit description opens the field; Save and Cancel close
+it, with Cancel discarding the row's draft without writing.
+Description saves retain the current enabled state, triggers and workflow; unsaved drafts survive
+panel refreshes and failed saves. Board consumers and launch context already read this field.
+Create/edit navigates to the existing Automation editor. The first lane's configuration remains
+in Lane settings. Badges include paused/unavailable assignments; saves there also update the badge.
+The UI states the 60-second entry delay and the scope of descriptions/removal. Lane entry uses
+the existing automatic scheduler, API and persistence. The UI suite exercises desktop/narrow geometry,
+assignment/removal, description persistence and draft preservation, editor navigation, conflict recovery and stale-response cleanup.
+
 ## VIBE-9: agent completion and Automation lifecycle (2026-09-29)
 
 `complete_board_agent(summary, outcome, card?)` records the current linked session's first final

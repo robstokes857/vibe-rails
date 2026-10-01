@@ -144,6 +144,11 @@ export class JobController {
         if (data?.newJob) {
             this.openEditor(null, Number(data.triggerKind));
         }
+        if (data?.editJobId) {
+            const job = this.jobs.find(item => Number(item.id) === Number(data.editJobId));
+            if (job) this.openEditor(job);
+            else this.app.showError('This Automation is no longer available.');
+        }
         // The nav launcher's customize modal hands off here: it cannot host the picker itself
         // (it is a nested layer over #modal-container), so it navigates and asks us to open it.
         if (data?.importFromRepository) {
