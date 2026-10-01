@@ -676,6 +676,7 @@ test('Creating an environment uses one trimmed name for both the record and CLI 
     const cliSelect = { value: 'codex', addEventListener() {} };
     const dom = installEnvironmentFormDom({
         'env-name': { value: '  Nightly review  ' },
+        'env-purpose': { value: 'work', addEventListener() {} },
         'env-cli': cliSelect,
         'env-hidden': { checked: false }
     });
@@ -703,6 +704,7 @@ test('Creating an environment uses one trimmed name for both the record and CLI 
         body: {
             name: 'Nightly review',
             cli: 'codex',
+            purpose: 'work',
             customArgs: '--model gpt-5.4',
             // environment-controller.js always sends an explicit visibility flag on create.
             hidden: false
@@ -1704,6 +1706,21 @@ test('Import creates script workflows disabled and lets the backend pin local by
         timeoutSeconds: null
     }]);
     assert.equal(Object.hasOwn(app.calls[0].body.actions[0], 'approvedHash'), false);
+});
+
+test('Review recipe cannot reuse a Worker whose purpose changed', async () => {
+    const app = createApp();
+    app.closeModal = () => {};
+    const controller = new JobController(app);
+    controller.environments = [{ id: 1, name: 'Reviewer', cli: 'codex', purpose: 'work' }];
+    controller.refreshAll = async () => {};
+    const recipe = { recipeVersion: 'V2', name: 'Review', worker: { name: 'Reviewer', cli: 'codex', purpose: 'code_review' }, actions: [{ kind: 0 }] };
+    await assert.rejects(controller.applyRecipe(recipe, { addEnv: false, addJob: true, existingEnv: { id: 1, purpose: 'code_review' }, button: null }), /could not be created or found/);
+    assert.equal(app.calls.length, 0);
+    controller.environments[0].purpose = 'code_review';
+    await controller.applyRecipe(recipe, { addEnv: false, addJob: true, existingEnv: null, button: null });
+    assert.equal(app.calls[0].url, '/api/v1/jobs');
+    assert.equal(app.calls[0].body.environmentId, 1);
 });
 
 test('The editor keeps time limit visible and simple, with blank meaning no limit', () => {

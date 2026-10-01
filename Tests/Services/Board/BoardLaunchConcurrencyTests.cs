@@ -29,6 +29,28 @@ public sealed class BoardLaunchConcurrencyTests : IDisposable
     }
 
     [Fact]
+    public async Task DirectReviewRecordsPurposeAndFailedStartupWithoutASession()
+    {
+        var card = await CreateCardAsync();
+        _tabs.Setup(t => t.StartSessionAsync("tab-1", It.IsAny<StartTerminalRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("provider unavailable"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Launcher().LaunchAsync(_root, card.Id, null, Ct, "code_review"));
+        var failed = Assert.Single(await _store.GetReviewsAsync(_root, card.Id, 0, Ct));
+        Assert.Equal("Failed", failed.ProcessStatus); Assert.Null(failed.SessionId); Assert.Null(failed.Result);
+        StartTerminalRequest? request = null;
+        _tabs.Setup(t => t.StartSessionAsync("tab-1", It.IsAny<StartTerminalRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<string, StartTerminalRequest, CancellationToken>((_, value, _) => request = value)
+            .ReturnsAsync(new TerminalStatusResponse(true, Guid.NewGuid().ToString(), "codex", _root));
+        await Launcher().LaunchAsync(_root, card.Id, null, Ct, "code_review");
+        var session = Assert.Single((await _store.GetCardDetailAsync(_root, card.Id, Ct))!.Sessions);
+        Assert.Equal("code_review", session.Origin);
+        Assert.True(BoardService.IsAutomationSession(session.Origin, session.SessionId, null));
+        Assert.Contains("You are the code review agent.", request!.InitialPrompt);
+        Assert.True(request.AuthorizeBoardTools);
+        Assert.Equal(2, (await _store.GetReviewsAsync(_root, card.Id, 0, Ct)).Count);
+    }
+
+    [Fact]
     public async Task ConcurrentLaunchesAcrossServiceInstancesOnlyStartOneCli()
     {
         var card = await CreateCardAsync();

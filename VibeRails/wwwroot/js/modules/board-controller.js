@@ -1,3 +1,4 @@
+import { cardReviewsSection, bindCardReviews } from './board-card-reviews.js';
 import { cardChecksSection, bindCardChecks } from './board-card-checks.js';
 // ============================================
 // Board (view 'board')
@@ -253,6 +254,7 @@ export class BoardController {
                     activeTabId: detail.activeTabId, hasActiveAutomation: detail.hasActiveAutomation });
                 if (changed) this.renderSessionsPanel(editor, card);
                 void this.cardAutomations?.refresh();
+                void this.cardReviews?.refresh();
             }
         } catch (error) {
             if (current()) console.warn('Could not refresh Board session activity:', error);
@@ -284,6 +286,8 @@ export class BoardController {
     }
 
     disposeCardPickers() {
+        this.cardReviews?.dispose();
+        this.cardReviews = null;
         this.cardChecks?.dispose();
         this.cardChecks = null;
         this.cardAutomations?.dispose();
@@ -1118,6 +1122,7 @@ export class BoardController {
                     </section>
 
                     ${card ? cardChecksSection() : ''}
+                    ${cardReviewsSection(card)}
                     <section class="board-block">
                         <h3 class="board-block-label">Attachments <span class="board-count" data-board-count="attachments">${card?.attachments?.length || 0}</span></h3>
                         <div class="board-attachment-list" data-board-attachments></div>
@@ -1215,7 +1220,7 @@ export class BoardController {
                     <section class="board-side-section">
                         <h3 class="board-side-label">
                             <i class="fa-solid fa-terminal" aria-hidden="true"></i>
-                            Sessions <span class="board-count" data-board-count="sessions">${(card?.sessions || []).filter(session => !session.isAutomation).length}</span>
+                            Sessions <span class="board-count" data-board-count="sessions">${(card?.sessions || []).filter(session => !session.isAutomation && !session.isReview && session.origin !== 'code_review').length}</span>
                         </h3>
                         <div class="board-side-list" data-board-sessions></div>
                         <p class="board-side-empty">Link the same session to every card it is working on.</p>
@@ -1232,7 +1237,7 @@ export class BoardController {
                     <section class="board-side-section">
                         <h3 class="board-side-label">
                             <i class="fa-solid fa-robot" aria-hidden="true"></i>
-                            Automations <span class="board-count" data-board-count="automations">${(card?.sessions || []).filter(session => session.isAutomation).length}</span>
+                            Automations <span class="board-count" data-board-count="automations">${(card?.sessions || []).filter(session => session.isAutomation && !session.isReview && session.origin !== 'code_review').length}</span>
                         </h3>
                         ${cardAutomationControls(Boolean(card))}
                         <div class="board-side-list" data-board-automations></div>
@@ -1363,6 +1368,7 @@ export class BoardController {
         // environments plus the bare CLIs, never a shell, never a Worker).
         this.disposeCardPickers();
         const assigneeSelect = editor.querySelector('#board-card-assignee');
+        this.cardReviews = bindCardReviews(editor, card, this.app, () => void this.refreshSessionActivity());
         this.cardChecks = bindCardChecks(editor, card, this.app);
         this.cardAutomations = bindCardAutomations(editor, card, {
             app: this.app,
@@ -1926,8 +1932,8 @@ export class BoardController {
     renderSessionsPanel(editor, card) {
         this.updateStartWorkButton(editor, card);
         const sessions = card?.sessions || [];
-        this.renderSessionList(editor, card, sessions.filter(session => !session.isAutomation), 'sessions');
-        this.renderSessionList(editor, card, sessions.filter(session => session.isAutomation), 'automations');
+        this.renderSessionList(editor, card, sessions.filter(session => !session.isAutomation && !session.isReview && session.origin !== 'code_review'), 'sessions');
+        this.renderSessionList(editor, card, sessions.filter(session => session.isAutomation && !session.isReview && session.origin !== 'code_review'), 'automations');
     }
 
     renderSessionList(editor, card, sessions, section) {

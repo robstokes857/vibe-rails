@@ -36,6 +36,8 @@ namespace VibeRails.DTOs
         // and from the LLM-picker preferences catalog (regardless of Hidden), and is
         // offered by the automation editor's Worker picker instead. Set at creation only.
         public bool AutomationWorker { get; set; }
+        /// <summary>Explicit agent purpose; never inferred from names.</summary>
+        public string Purpose { get; set; } = "work";
         // Where this environment's CLI runs — the project directory, a persistent clone, or a
         // fresh clone per launch. Clone modes are backed by a Sandboxes row pointing back here.
         public EnvironmentWorkspaceMode WorkspaceMode { get; set; } = EnvironmentWorkspaceMode.Project;

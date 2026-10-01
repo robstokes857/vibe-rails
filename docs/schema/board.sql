@@ -56,6 +56,12 @@ CREATE INDEX IX_BoardPendingAutomations_Due ON BoardPendingAutomations(DueUnixMs
 -- index IX_BoardProjectKeys_Prefix
 CREATE INDEX IX_BoardProjectKeys_Prefix ON BoardProjectKeys(Prefix);
 
+-- index IX_BoardReviews_Card
+CREATE INDEX IX_BoardReviews_Card ON BoardReviews(CardId, CreatedUTC DESC);
+
+-- index IX_BoardReviews_Session
+CREATE INDEX IX_BoardReviews_Session ON BoardReviews(json_extract(RecordJson, '$.sessionId'));
+
 -- index IX_Boards_Project
 CREATE INDEX IX_Boards_Project ON Boards(ProjectPath, Position);
 
@@ -142,6 +148,9 @@ CREATE TABLE BoardPendingAutomations ( CardId TEXT PRIMARY KEY REFERENCES BoardC
 
 -- table BoardProjectKeys
 CREATE TABLE BoardProjectKeys ( ProjectPath TEXT PRIMARY KEY COLLATE NOCASE, Prefix TEXT NOT NULL, CreatedUTC TEXT NOT NULL );
+
+-- table BoardReviews
+CREATE TABLE BoardReviews ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, CreatedUTC TEXT NOT NULL, ReportedUTC TEXT, RecordJson TEXT NOT NULL );
 
 -- table BoardSharedOrigins
 CREATE TABLE BoardSharedOrigins ( BoardId TEXT PRIMARY KEY REFERENCES Boards(Id) ON DELETE CASCADE, RemoteBoardId TEXT NOT NULL UNIQUE, DestinationKey TEXT NOT NULL, KeyPrefix TEXT NOT NULL );

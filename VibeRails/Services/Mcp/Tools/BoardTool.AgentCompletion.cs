@@ -84,6 +84,7 @@ public sealed partial class BoardTool
                 if (runs.Count == 0 && pending.Count == 0) text.AppendLine("No pending entries or recent card Automation runs.");
             }
             text.Append("Poll again in about 10 seconds while waiting. A completion report is the agent's result; only a terminal run status confirms all Automation actions finished.");
+            text.Append("\n").Append(await GetBoardReviews(card, cancellationToken: cancellationToken));
             return text.ToString();
         }
         catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }

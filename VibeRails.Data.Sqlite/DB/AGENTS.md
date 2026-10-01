@@ -1206,3 +1206,12 @@ the description; an empty string clears it. Older readers/writers do not name th
 `board-agent-completion/1` creates `BoardAgentCompletions` in `board.db`, keyed by the globally unique
 session ID and scoped to its project. Writes require current card membership, retain the first final report, and never alter
 Sessions or JobRuns outcomes. Both migrations are additive and automatic.
+
+
+### Explicit review purpose (VIBE-20)
+
+`environment-purpose/1` adds `Environments.Purpose` (default `work`); `job-run-purpose/1` adds
+`JobRuns.Purpose` with the same default. Queueing snapshots purpose and provider identity;
+retries retain the original purpose. Older writers omit the columns and keep working. Neither
+migration infers names or backfills history. Lean JobStore setup shares Environment adoption
+when the table already exists; normal application paths and automatic upgrades are unchanged.

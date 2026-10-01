@@ -1701,3 +1701,81 @@ test('closing a card while its Automation catalog loads cannot repaint the next 
     await expect(page.locator('[data-board-automation-choice]')).toHaveCount(0);
     await expect(page.getByText('Stale workflow', { exact: true })).toHaveCount(0);
 });
+
+
+test('Code review Worker preset defaults to Codex and remains editable', async ({ page }) => {
+    await openBoard(page);
+    const writes = [];
+    await page.route('**/api/v1/environments', async route => {
+        if (route.request().method() === 'POST') {
+            writes.push(route.request().postDataJSON());
+            return route.fulfill({ json: { success: true } });
+        }
+        return route.fulfill({ json: [] });
+    });
+    await page.evaluate(() => window.app.environmentController.showEnvironmentForm({ mode: 'create', automationWorker: true }));
+    const form = page.locator('#env-form');
+    await form.getByRole('button', { name: 'Code review preset', exact: true }).click();
+    await expect(form.locator('#env-cli')).toHaveValue('codex');
+    await expect(form.locator('#env-purpose')).toHaveValue('code_review');
+    await expect(form.locator('#env-initial-message')).toHaveValue(/Save the review on the originating card/);
+    await form.locator('#env-name').fill('My reviewer');
+    await form.locator('#env-cli').evaluate(select => select.tomselect ? select.tomselect.setValue('claude') : select.value = 'claude');
+    await form.locator('#env-initial-message').fill('Review the scoped changes and save the report.');
+    await form.getByRole('button', { name: 'Create Worker', exact: true }).click();
+    await expect.poll(() => writes.length).toBe(1);
+    expect(writes[0]).toMatchObject({ name: 'My reviewer', cli: 'claude', purpose: 'code_review', automationWorker: true });
+});
+
+for (const width of [1440, 390]) {
+    test(`Code reviews keep drafts, separate recordings and show scope at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 1000 });
+        const requests = await openBoard(page, { onCard: card => {
+            card.sessions = [
+                { id: 'work-session', displayName: 'Working agent', cli: 'codex', origin: 'launch', active: false },
+                { id: 'review-session', displayName: 'Review agent', cli: 'codex', origin: 'code_review', isAutomation: true, isReview: true, active: false }
+            ];
+        } });
+        const report = { id: 'review-1', reviewer: 'Codex <img src=x onerror="window.__reviewsXss=1">', provider: 'codex',
+            createdUtc: '2026-10-01T10:00:00Z', processStatus: 'Succeeded', sessionId: 'review-session',
+            result: 'Findings', reportedUtc: '2026-10-01T10:02:00Z', workspace: 'C:/actual-checkout', scope: 'working-tree',
+            scopeDescription: 'Dirty changes for this feature', includeDirty: true, scopeFiles: ['Modified: src/example.cs'],
+            baseCommit: 'a'.repeat(40), headCommit: 'a'.repeat(40), findings: 'src/example.cs:10 — <script>window.__reviewsXss=1</script>',
+            validation: 'Unit tests', limitations: 'No live provider', freshness: 'Unknown' };
+        let rows = [report];
+        let launches = [];
+        await page.route('**/api/v1/board/cards/card_test/reviews?*', route => route.fulfill({ json: { reviews: rows, hasMore: false } }));
+        await page.route('**/api/v1/board/cards/card_test/reviews/review-1*', route => route.fulfill({ json: {
+            ...report, freshness: route.request().url().includes('verify=true') ? 'Stale — reviewed changes differ now' : 'Unknown'
+        } }));
+        await page.route('**/api/v1/board/cards/card_test/launch', route => {
+            launches.push(route.request().postDataJSON());
+            rows = [{ id: 'queued', reviewer: 'Codex', provider: 'codex', createdUtc: '2026-10-01T11:00:00Z', processStatus: 'Failed', error: 'CLI unavailable' }, report];
+            return route.fulfill({ json: { tabId: 'tab-review', sessionId: 'session-new', cli: 'codex', cardId: 'card_test', cardKey: 'VB-1' } });
+        });
+        await page.getByText('Description images', { exact: true }).click();
+        const editor = page.locator('[data-board-card-editor]');
+        const reviews = editor.locator('[data-board-reviews]');
+        await expect(reviews).toContainText('Findings');
+        await expect(editor.locator('[data-board-sessions] [data-session-id]')).toHaveCount(1);
+        await expect(editor.locator('[data-board-automations] [data-session-id]')).toHaveCount(0);
+        await editor.locator('#board-card-title').fill('Keep this unsaved draft');
+        await reviews.getByRole('button', { name: 'Run review', exact: true }).click();
+        await expect.poll(() => launches.length).toBe(1);
+        expect(launches[0]).toEqual({ selection: 'base:codex', intent: 'code_review' });
+        await expect(editor.locator('#board-card-title')).toHaveValue('Keep this unsaved draft');
+        await expect(reviews.locator('[data-review-latest]')).toContainText('Report missing');
+        await expect(reviews.locator('[data-review-latest]')).toContainText('CLI unavailable');
+        expect(requests.filter(r => r.method === 'PUT' && r.path === '/api/v1/board/cards/card_test')).toHaveLength(0);
+        await reviews.locator('[data-review-latest]').getByRole('button', { name: 'View report' }).click();
+        await expect(reviews.locator('[data-review-report]')).toContainText('C:/actual-checkout');
+        await reviews.getByRole('button', { name: 'Compare review inputs' }).click();
+        await expect(reviews.locator('[data-review-report]')).toContainText('Stale');
+        await expect(reviews.locator('[data-review-report]')).toContainText('src/example.cs:10');
+        await expect(reviews.locator('.board-check-result script, .board-check-result img, [data-review-report] script, [data-review-report] img')).toHaveCount(0);
+        expect(await page.evaluate(() => Boolean(window.__reviewsXss))).toBe(false);
+        await expect(editor.locator('#board-card-title')).toHaveValue('Keep this unsaved draft');
+        await reviews.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: testInfo.outputPath(`reviews-${width}.png`) });
+    });
+}

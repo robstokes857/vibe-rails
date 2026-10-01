@@ -35,6 +35,37 @@ namespace Tests.Routes;
 public sealed class BoardRoutesTests : IAsyncLifetime
 {
     [Fact]
+    public async Task ReviewRoutesRequireBothCredentialsAndScopeReportsToCardAndProject()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var store = _app.Services.GetRequiredService<IBoardStore>();
+        await store.EnsureDefaultColumnsAsync(_project, ct);
+        var card = await store.CreateCardAsync(_project, new(null, "Review", "", null, "medium", null, [], false), ct);
+        var other = await store.CreateCardAsync(_project, new(null, "Other", "", null, "medium", null, [], false), ct);
+        await store.EnsureDefaultColumnsAsync(_project + "-other", ct);
+        var foreign = await store.CreateCardAsync(_project + "-other", new(null, "Foreign", "", null, "medium", null, [], false), ct);
+        await store.SaveReviewAsync(_project, new("review", card.Id, "codex", "Reviewer", DateTime.UtcNow), ct);
+        var path = $"/api/v1/board/cards/{card.Id}/reviews";
+        foreach (var url in new[] { path, path + "/review" })
+        {
+            foreach (var credentials in new[] { (Session: (string?)null, Tab: (string?)null), ("test-session", null), (null, "test-tab") })
+            {
+                using var denied = await SendAsync(HttpMethod.Get, url, credentials.Session, credentials.Tab);
+                Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+            }
+            using var valid = await SendAsync(HttpMethod.Get, url, "test-session", "test-tab");
+            valid.EnsureSuccessStatusCode(); Assert.True(valid.Headers.CacheControl!.NoStore);
+        }
+        foreach (var id in new[] { other.Id, foreign.Id })
+        {
+            using var response = await SendAsync(HttpMethod.Get, $"/api/v1/board/cards/{id}/reviews/review", "test-session", "test-tab");
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+        using var badOffset = await SendAsync(HttpMethod.Get, path + "?offset=-1", "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.BadRequest, badOffset.StatusCode);
+    }
+
+    [Fact]
     public async Task CheckRoutesRequireBothCredentialsAndScopeEvidence()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -177,6 +208,7 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         builder.Services.AddScoped<BoardCardAutomationService>();
         builder.Services.AddGitPreflight();
         builder.Services.AddScoped<BoardChecksReader>();
+        builder.Services.AddScoped<BoardReviewService>();
         builder.Services.AddScoped<IJobService, JobService>();
         builder.Services.AddSingleton(new Mock<IJobExecutableResolver>().Object);
         builder.Services.AddSingleton(new Mock<IJobScheduler>().Object);

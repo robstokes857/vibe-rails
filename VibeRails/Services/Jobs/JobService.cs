@@ -592,7 +592,7 @@ public sealed class JobService(
         run.Id, run.JobId, run.JobName, run.TriggerKind, run.Status, run.ProjectPath, run.Llm,
         run.EnvironmentName, run.SessionId, run.TimeoutMinutes, run.QueuedUtc, run.StartedUtc,
         run.EndedUtc, run.ExitCode, run.ErrorMessage, run.CancelRequested,
-        run.Actions?.Select(ToRunActionDto).ToList(), run.TerminalSessionId);
+        run.Actions?.Select(ToRunActionDto).ToList(), run.TerminalSessionId, run.Purpose);
 
     private static JobActionRequest ToRequest(JobActionRecord action) => new(
         action.Id,

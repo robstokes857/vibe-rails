@@ -456,6 +456,23 @@ public sealed class AutomationImportServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Import_ClonesReviewWorkerWhenVisibleWorkerHasDifferentPurpose()
+    {
+        AddEnvironment(1, "Nightly", _sourceRoot);
+        _environments[0].Purpose = "code_review";
+        AddEnvironment(2, "NIGHTLY", _targetRoot);
+        _jobs.Add(Job(70, "Review", _sourceRoot, WorkerAction(70, 1)));
+
+        var response = await Service().ImportAsync(
+            _targetRoot, new AutomationImportRequest(70), TestContext.Current.CancellationToken);
+
+        Assert.Equal(AutomationImportWorkerOutcome.Created, response.WorkerOutcome);
+        Assert.Equal("code_review", _savedEnvironment?.Purpose);
+        Assert.Equal("work", _environments[1].Purpose);
+        Assert.Equal(500, _createdRequest?.EnvironmentId);
+    }
+
+    [Fact]
     public async Task Import_ReusesAVisibleWorkerInsteadOfCloning()
     {
         AddEnvironment(1, "Nightly", _sourceRoot);

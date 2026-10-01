@@ -145,8 +145,9 @@ public static class CliLoop
         // at the top on purpose: {{git_branch}} and step commands must see the workspace-resolved
         // directory.
         string? initialPrompt = null;
+        var runPurpose = jobRunId is null ? "work" : (await scopedServices.GetRequiredService<VibeRails.DB.IJobStore>().GetRunAsync(jobRunId, cancellationToken))?.Purpose ?? "work";
         var promptTemplate = boardCardKey is null ? environment?.CustomPrompt
-            : Services.Board.BoardPromptComposer.ComposeAutomationPrompt(boardCardKey, environment?.CustomPrompt);
+            : Services.Board.BoardPromptComposer.ComposeAutomationPrompt(boardCardKey, environment?.CustomPrompt, runPurpose);
         if (!string.IsNullOrWhiteSpace(promptTemplate))
         {
             var promptPlaceholders = scopedServices.GetRequiredService<IPromptPlaceholderService>();

@@ -28,7 +28,8 @@ namespace VibeRails.Services.Mcp.Tools;
 public sealed partial class BoardTool(
     IBoardService service,
     IBoardProjectResolver projects,
-    IBoardStore store)
+    IBoardStore store,
+    BoardReviewService? reviews = null)
 {
     /// <summary>
     /// MCP image payloads are base64 encoded and copied by the protocol stack. Keep this transfer
@@ -273,6 +274,14 @@ public sealed partial class BoardTool(
             pending.Select(p => $"\"{p.Automation.Name}\" (settles {p.DueUtc.ToString("u", CultureInfo.InvariantCulture)})").ToList(), stats);
         var checks = await store.GetLatestChecksAsync(project, detail.Id, cancellationToken);
         text += "\n\n" + CheckSummary(checks);
+        var reviewRows = await store.GetReviewsAsync(project, detail.Id, 0, cancellationToken);
+        text += "\n\nCode reviews: " + (reviewRows.Count == 0 ? "No saved reports. Poll get_board_reviews for queued runs and review status."
+            : string.Join("\n", reviewRows.Take(5).Select(r => $"{r.Id}: {r.Result ?? "Report missing"} · {r.Provider} · scope {BoardPromptComposer.SanitizeLine(r.ScopeDescription, 300)} · freshness unknown; get_board_reviews reviewId={r.Id}")));
+        if (!string.IsNullOrEmpty(detail.BoardId))
+        {
+            var settings = await store.GetContextSettingsAsync(project, detail.BoardId, cancellationToken);
+            if (settings is not null) text += "\n\nBoard workflow context supplied by the user:\n" + BoardPromptComposer.ComposeBoardContext(settings.Context, detail.Type);
+        }
         return new CardRender(text, stats);
     }
 

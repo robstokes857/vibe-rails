@@ -219,7 +219,9 @@ public sealed partial class BoardService
         var summary = parts.Count > 0 ? string.Join(" + ", parts)
             : definition.Name is null ? "definition unavailable"
             : "no actions";
-        var output = definition.WorkerName is not null ? "a Worker terminal run linked to the card's Sessions rail"
+        if (definition.Purpose == "code_review") summary = "Purpose: Code review. " + summary;
+        var output = definition.Purpose == "code_review" ? "a durable report in Code reviews (begin_board_review/save_board_review); next: save handoff, inspect destination Automations, then decide movement using the Board workflow; poll get_board_reviews for the report"
+            : definition.WorkerName is not null ? "a Worker terminal run linked to the card's Sessions rail"
             : definition.ScriptPaths.Count > 0 ? "script output recorded on the card's Sessions rail"
             : "nothing";
         return new BoardLaneAutomationInfo(definition.JobId, name, summary, output, unavailable, definition.ActiveRunId, definition.ActiveRunIsRunning, definition.Description);

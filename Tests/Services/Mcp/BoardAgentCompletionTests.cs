@@ -123,6 +123,27 @@ public sealed class BoardAgentCompletionTests : IDisposable
         Assert.Contains(ids[0], await tool.GetBoardAgentStatus(card.Key, ids[0], Ct));
     }
 
+    [Fact]
+    public async Task ReviewToolsRequireExplicitPurposeAndOwnSession_AndExposeCanonicalIncompleteReport()
+    {
+        var card = await Card();
+        Assert.StartsWith("FAIL:", await tool.BeginBoardReview("unknown", "No session", card: card.Key, cancellationToken: Ct));
+        var session = Guid.NewGuid().ToString(); resolver.CurrentSessionId = session;
+        await store.LinkSessionAsync(root, card.Id, session, null, "base:codex", "codex", "Reviewer", "code_review", Ct);
+        await store.SaveReviewAsync(root, new("review", card.Id, "codex", "Reviewer", DateTime.UtcNow, SessionId: session), Ct);
+        Assert.Contains("Scope ambiguous", await tool.BeginBoardReview("unknown", "Several unrelated changes", card: card.Key, cancellationToken: Ct));
+        Assert.Contains("Incomplete", await tool.SaveBoardReview("review", "No findings reported", "None", "Read handoff", "Unknown scope", card.Key, Ct));
+        Assert.Contains("Incomplete", await tool.GetBoardReviews(card.Key, "review", cancellationToken: Ct));
+        Assert.Contains("get_board_reviews", await tool.GetBoardAgentStatus(card.Key, cancellationToken: Ct));
+        var ordinary = Guid.NewGuid().ToString(); resolver.CurrentSessionId = ordinary;
+        await store.LinkSessionAsync(root, card.Id, ordinary, null, "base:codex", "codex", "Code review name", "launch", Ct);
+        Assert.StartsWith("FAIL:", await tool.BeginBoardReview("unknown", "No inferred purpose", card: card.Key, cancellationToken: Ct));
+        Assert.StartsWith("FAIL:", await tool.SaveBoardReview("review", "Findings", "Fake", "None", "None", card.Key, Ct));
+        var other = await Card();
+        Assert.StartsWith("FAIL:", await tool.GetBoardReviews(other.Key, "review", cancellationToken: Ct));
+        Assert.Single((await store.GetCardDetailAsync(root, card.Id, Ct))!.Comments);
+    }
+
     private async Task<BoardCardRecord> Card()
     {
         await service.GetColumnsAsync(root, Ct);

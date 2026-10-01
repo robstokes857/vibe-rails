@@ -1,6 +1,6 @@
 import { parseCliArguments } from './cli-arguments.js';
 import { normalizeLlmModel, renderLlmModelOptions } from './llm-model-catalog.js';
-import { getEnabledLlmItems, mountLlmPicker } from './pickers/llm-picker.js';
+import { getEnabledLlmItems, mountLlmPicker, setLlmPickerValue } from './pickers/llm-picker.js';
 import { isConfirmDialogOpen } from './utils.js';
 import {
     normalizeSteps,
@@ -660,9 +660,17 @@ export class EnvironmentController {
         this.app.showModal(title, `
             <form id="env-form" class="${workerOnly ? 'env-worker-form' : ''}">
                 ${nameRow}
+                ${!isEdit ? '<button type="button" class="btn btn-sm btn-outline-secondary mb-3" data-code-review-preset>Code review preset</button>' : ''}
                 <div class="mb-3">
                     <label class="form-label">CLI Type</label>
                     ${cliField}
+                </div>
+                <div class="mb-3"><label class="form-label" for="env-purpose">Purpose</label>
+                    <select id="env-purpose" class="form-select">
+                        <option value="work" ${env?.purpose !== 'code_review' ? 'selected' : ''}>Work / custom</option>
+                        <option value="code_review" ${env?.purpose === 'code_review' ? 'selected' : ''}>Code review</option>
+                    </select>
+                    <small class="form-text text-muted">Code review saves a report on the originating card. The preset starts with Codex; its provider and instructions remain editable.</small>
                 </div>
                 ${initialMessageRow}
                 ${formBody}
@@ -702,6 +710,21 @@ export class EnvironmentController {
             });
         }
 
+        document.querySelector('[data-code-review-preset]')?.addEventListener('click', () => {
+            const purpose = document.getElementById('env-purpose');
+            purpose.value = 'code_review';
+            purpose.dispatchEvent(new Event('change', { bubbles: true }));
+            const name = document.getElementById('env-name');
+            if (name && !name.value.trim()) name.value = 'Code review';
+        });
+        document.getElementById('env-purpose')?.addEventListener('change', event => {
+            if (!isEdit && event.target.value === 'code_review') {
+                setLlmPickerValue(this.app, cliSelect, 'codex');
+                cliSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                const message = document.getElementById('env-initial-message');
+                if (message && !message.value.trim()) message.value = 'Review the intended changes for correctness, regressions and missing validation. Establish scope from the card handoff and actual checkout. Save the review on the originating card, then follow its workflow instructions.';
+            }
+        });
         this.bindCliSettingsInteractions(initialCli);
         const refreshInitialMessageRefs = this.bindInitialMessageField(() => editedSteps ?? initialSteps);
 
@@ -800,6 +823,7 @@ export class EnvironmentController {
                 if (isEdit) {
                     const settingsPayload = this.extractCliSettingsPayload(env.cli);
                     const payload = this.buildEnvironmentSavePayload(env.cli, settingsPayload);
+                    payload.purpose = document.getElementById('env-purpose').value;
                     if (hiddenInput) payload.hidden = hiddenInput.checked;
                     if (workspaceMode !== null) payload.workspaceMode = workspaceMode;
                     // Omitted entirely when the steps editor was never opened, so the PUT's
@@ -814,6 +838,7 @@ export class EnvironmentController {
                     const payload = {
                         name,
                         cli,
+                        purpose: document.getElementById('env-purpose').value,
                         ...this.buildEnvironmentSavePayload(cli, settingsPayload),
                         ...(hiddenInput ? { hidden: hiddenInput.checked } : {}),
                         ...(workspaceMode !== null ? { workspaceMode } : {}),

@@ -350,11 +350,11 @@ public sealed partial class JobStore : IJobStore
             insertRun.CommandText = """
                 INSERT INTO JobRuns
                     (Id, JobId, TriggerKind, TriggerKey, Status, JobName, ProjectPath, Llm,
-                     EnvironmentId, EnvironmentName, TimeoutMinutes, QueuedUTC, LaunchMinimized, LaunchInTerminalTab)
+                     EnvironmentId, EnvironmentName, TimeoutMinutes, QueuedUTC, LaunchMinimized, LaunchInTerminalTab, Purpose)
                 SELECT $retryId, source.JobId, $manual, $triggerKey, $queued, source.JobName,
                        source.ProjectPath, source.Llm, source.EnvironmentId,
                        source.EnvironmentName, source.TimeoutMinutes, $queuedUtc,
-                       source.LaunchMinimized, 0
+                       source.LaunchMinimized, 0, source.Purpose
                 FROM JobRuns source
                 JOIN Jobs job ON job.Id = source.JobId AND job.DeletedUTC IS NULL
                 WHERE source.Id = $sourceId AND source.DeletedUTC IS NULL
@@ -1350,10 +1350,10 @@ public sealed partial class JobStore : IJobStore
         command.CommandText = $"""
             INSERT OR IGNORE INTO JobRuns
                 (Id, JobId, TriggerKind, TriggerKey, Status, JobName, ProjectPath, Llm,
-                 EnvironmentId, EnvironmentName, TimeoutMinutes, QueuedUTC, LaunchMinimized, LaunchInTerminalTab)
+                 EnvironmentId, EnvironmentName, TimeoutMinutes, QueuedUTC, LaunchMinimized, LaunchInTerminalTab, Purpose)
             SELECT $runId, j.Id, $triggerKind, $triggerKey, $queued, j.Name, j.ProjectPath,
                    COALESCE(e.LLM, 0), j.EnvironmentId, e.CustomName, j.TimeoutMinutes, $queuedUtc,
-                   j.LaunchMinimized, $launchInTerminalTab
+                   j.LaunchMinimized, $launchInTerminalTab, COALESCE(e.Purpose, 'work')
             FROM Jobs j
             LEFT JOIN Environments e ON e.Id = j.EnvironmentId
             WHERE j.Id = $jobId AND ($requireEnabled = 0 OR j.Enabled = 1) AND j.DeletedUTC IS NULL
@@ -1756,7 +1756,8 @@ public sealed partial class JobStore : IJobStore
         reader.IsDBNull(18) ? null : reader.GetInt32(18),
         reader.GetInt32(19) != 0,
         LaunchInTerminalTab: reader.GetInt32(20) != 0,
-        TerminalSessionId: reader.IsDBNull(21) ? null : reader.GetString(21));
+        TerminalSessionId: reader.IsDBNull(21) ? null : reader.GetString(21),
+        Purpose: reader.GetString(22));
 
     private int _dependenciesReady;
 
@@ -1792,6 +1793,8 @@ public sealed partial class JobStore : IJobStore
             if (!SqliteSchema.HasColumn(db, transaction, "JobRuns", "TerminalSessionId"))
                 SqliteSchema.Execute(db, transaction, "ALTER TABLE JobRuns ADD COLUMN TerminalSessionId TEXT;");
         });
+        SqliteMigrationRunner.Apply(connection, "job-run-purpose", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE JobRuns ADD COLUMN Purpose TEXT NOT NULL DEFAULT 'work'"));
         EnsureDependentSchema(connection);
     }
 
@@ -1891,7 +1894,11 @@ public sealed partial class JobStore : IJobStore
         // cross-component adoption pending until its parent schema becomes available.
         var environmentsReady = SqliteSchema.HasColumn(connection, null, "Environments", "Id");
         if (environmentsReady)
+        {
+            SqliteMigrationRunner.Apply(connection, "environment-purpose", 1, MigrationKind.Additive, (db, transaction) =>
+                SqliteSchema.AdoptStatement(db, transaction, SqlStrings.MigrateEnvironmentsAddPurpose));
             SqliteMigrationRunner.Apply(connection, "jobs-worker-actions", 1, MigrationKind.Additive, AdoptWorkerActions);
+        }
         var sessionsReady = EnsureSessionLinkSchema(connection);
         if (environmentsReady && sessionsReady)
             Volatile.Write(ref _dependenciesReady, 1);
@@ -2058,7 +2065,7 @@ public sealed partial class JobStore : IJobStore
         "Id", "JobId", "TriggerKind", "TriggerKey", "Status", "JobName", "ProjectPath",
         "Llm", "EnvironmentId", "EnvironmentName", "TimeoutMinutes", "SessionId",
         "QueuedUTC", "StartedUTC", "EndedUTC", "ExitCode", "ErrorMessage",
-        "CancelRequested", "OwnerProcessId", "LaunchMinimized", "LaunchInTerminalTab", "TerminalSessionId"
+        "CancelRequested", "OwnerProcessId", "LaunchMinimized", "LaunchInTerminalTab", "TerminalSessionId", "Purpose"
     ];
 
     /// <summary>Bare column list, for projections that read JobRuns through a subquery.</summary>

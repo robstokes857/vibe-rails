@@ -7,3 +7,5 @@ rules heading below; the optional Files section lists files covered by this poli
 - Log file changes > 10 lines (WARN)
 
 ## Files
+- `JobStore.cs`: snapshot review purpose when queuing/retrying runs and adopt the additive purpose columns automatically.
+- `SqlStrings.cs`: include explicit purpose in Environment reads/writes while keeping Work as the default for older writers.

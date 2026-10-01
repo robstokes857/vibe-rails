@@ -30,7 +30,8 @@ public sealed record BoardLaneAutomationDefinition(
     IReadOnlyList<string> ScriptPaths,
     string? ActiveRunId,
     bool ActiveRunIsRunning,
-    string? Description = null);
+    string? Description = null,
+    string Purpose = "work");
 
 /// <summary>A lane entry recorded for a card that the scheduler has not consumed yet.</summary>
 public sealed record BoardPendingLaneAutomation(long JobId, string ColumnId, DateTime DueUtc);

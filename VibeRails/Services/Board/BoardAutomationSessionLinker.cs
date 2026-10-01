@@ -21,7 +21,7 @@ internal static class BoardAutomationSessionLinker
         try
         {
             await boards.LinkSessionAsync(run.ProjectPath, card.Card.Id, sessionId, tabId, selection,
-                cli, $"Automation: {run.JobName}", BoardSessionRecord.AutomationOrigin, cancellationToken);
+                cli, $"Automation: {run.JobName}", run.Purpose == "code_review" ? "code_review" : BoardSessionRecord.AutomationOrigin, cancellationToken);
         }
         catch (BoardConflictException)
         {

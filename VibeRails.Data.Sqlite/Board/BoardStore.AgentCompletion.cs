@@ -96,23 +96,47 @@ public sealed partial class BoardStore
         return result;
     }
 
-    public async Task<IReadOnlyList<BoardAgentRun>> GetAgentRunsAsync(string projectPath, string cardId,
+    public Task<IReadOnlyList<BoardAgentRun>> GetAgentRunsAsync(string projectPath, string cardId,
+        CancellationToken cancellationToken = default) => GetAgentRunsCoreAsync(projectPath, cardId, false, 0, cancellationToken);
+
+    public Task<IReadOnlyList<BoardAgentRun>> GetReviewRunsAsync(string projectPath, string cardId, int offset = 0,
+        CancellationToken cancellationToken = default) => GetAgentRunsCoreAsync(projectPath, cardId, true, offset, cancellationToken);
+
+    public async Task<BoardAgentRun?> FindReviewRunAsync(string projectPath, string cardId, string? runId, string? sessionId,
         CancellationToken cancellationToken = default)
     {
+        if (runId is null && sessionId is null) throw new ArgumentException("A run or session id is required.");
+        return (await GetAgentRunsCoreAsync(projectPath, cardId, true, 0, cancellationToken, runId, sessionId)).FirstOrDefault();
+    }
+
+    private async Task<IReadOnlyList<BoardAgentRun>> GetAgentRunsCoreAsync(string projectPath, string cardId, bool reviewsOnly,
+        int offset, CancellationToken cancellationToken, string? runId = null, string? sessionId = null)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(offset);
         var card = await FindCardAsync(projectPath, cardId, cancellationToken);
         if (card is null) return [];
         await using var state = await OpenStateAsync(cancellationToken);
         if (!await _stateFeatures.HasTableAsync(state, "JobRuns", cancellationToken)) return [];
         var terminal = _stateFeatures.HasColumn(state, "JobRuns", "TerminalSessionId") ? "TerminalSessionId" : "NULL";
+        var purpose = _stateFeatures.HasColumn(state, "JobRuns", "Purpose") ? "Purpose" : "'work'";
+        var provider = _stateFeatures.HasColumn(state, "JobRuns", "Llm") ? "Llm" : "0";
+        var reviewer = _stateFeatures.HasColumn(state, "JobRuns", "EnvironmentName") ? "EnvironmentName" : "NULL";
         await using var command = state.CreateCommand();
         command.CommandText = $"""
-            SELECT Id, JobName, Status, QueuedUTC, COALESCE({terminal}, SessionId), SessionId, ErrorMessage
+            SELECT Id, JobName, Status, QueuedUTC, COALESCE({terminal}, SessionId), SessionId, ErrorMessage, {purpose}, {provider}, {reviewer}
             FROM JobRuns WHERE ProjectPath = $project{ProjectPathCollation} AND DeletedUTC IS NULL
+              AND ($reviews = 0 OR {purpose} = 'code_review')
+              AND ($run IS NULL OR Id = $run) AND ($session IS NULL OR SessionId = $session)
               AND ((TriggerKind = $lane AND instr(TriggerKey, $lanePrefix) = 1)
                 OR (TriggerKind = $manual AND instr(TriggerKey, $manualPrefix) = 1))
-            ORDER BY QueuedUTC DESC, Id DESC LIMIT 20;
+            ORDER BY QueuedUTC DESC, Id DESC LIMIT $limit OFFSET $offset;
             """;
         command.Parameters.AddWithValue("$project", NormalizeProjectPath(projectPath));
+        command.Parameters.AddWithValue("$reviews", reviewsOnly ? 1 : 0);
+        command.Parameters.AddWithValue("$run", (object?)runId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$session", (object?)sessionId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$limit", reviewsOnly ? 50 : 20);
+        command.Parameters.AddWithValue("$offset", offset);
         command.Parameters.AddWithValue("$lane", (int)JobTriggerKind.BoardLane);
         command.Parameters.AddWithValue("$manual", (int)JobTriggerKind.Manual);
         command.Parameters.AddWithValue("$lanePrefix", $"board-lane:{card.Key}:");
@@ -122,7 +146,8 @@ public sealed partial class BoardStore
         while (await reader.ReadAsync(cancellationToken))
             result.Add(new(reader.GetString(0), reader.GetString(1), (JobRunStatus)reader.GetInt32(2),
                 ParseDb(reader.GetString(3)), reader.IsDBNull(4) ? null : reader.GetString(4),
-                reader.IsDBNull(5) ? null : reader.GetString(5), reader.IsDBNull(6) ? null : reader.GetString(6)));
+                reader.IsDBNull(5) ? null : reader.GetString(5), reader.IsDBNull(6) ? null : reader.GetString(6), reader.GetString(7),
+                ((VibeRails.Services.LLM)reader.GetInt32(8)).ToString().ToLowerInvariant(), reader.IsDBNull(9) ? null : reader.GetString(9)));
         return result;
     }
 }

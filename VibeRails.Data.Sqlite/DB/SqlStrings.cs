@@ -37,6 +37,7 @@ namespace VibeRails.DB
         // Workers are excluded from every launch picker and from the LLM-picker preferences
         // catalog regardless of Hidden; the automation editor's Worker picker lists them
         // instead. Lives in MigrationStatements so a legacy DB picks up the column via ALTER.
+        public const string MigrateEnvironmentsAddPurpose = "ALTER TABLE Environments ADD COLUMN Purpose TEXT NOT NULL DEFAULT 'work'";
         public const string MigrateEnvironmentsAddAutomationWorker = "ALTER TABLE Environments ADD COLUMN AutomationWorker INTEGER NOT NULL DEFAULT 0";
         // Where this environment runs: 0 = the project directory (the original behaviour),
         // 1 = a persistent git clone reused across launches, 2 = a fresh clone per launch.
@@ -551,22 +552,22 @@ namespace VibeRails.DB
 
         // Environment CRUD (global)
         public const string InsertEnvironment = """
-            INSERT INTO Environments (CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath)
-            VALUES ($customName, $llm, $path, $customArgs, $customPrompt, $createdUTC, $lastUsedUTC, $hidden, $automationWorker, $workspaceMode, $projectPath)
+            INSERT INTO Environments (CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath, Purpose)
+            VALUES ($customName, $llm, $path, $customArgs, $customPrompt, $createdUTC, $lastUsedUTC, $hidden, $automationWorker, $workspaceMode, $projectPath, $purpose)
             RETURNING Id;
             """;
         public const string SelectEnvironmentById = """
-            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath
+            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath, Purpose
             FROM Environments
             WHERE Id = $id;
             """;
         public const string SelectEnvironmentByNameAndLlm = """
-            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath
+            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath, Purpose
             FROM Environments
             WHERE CustomName = $customName AND LLM = $llm;
             """;
         public const string SelectEnvironmentByName = """
-            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath
+            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath, Purpose
             FROM Environments
             WHERE CustomName = $customName
             ORDER BY LastUsedUTC DESC
@@ -576,19 +577,19 @@ namespace VibeRails.DB
         // name maps to a case-insensitive directory). NOCASE folds ASCII, matching the
         // validated env-name charset.
         public const string SelectEnvironmentByNameNoCase = """
-            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath
+            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath, Purpose
             FROM Environments
             WHERE CustomName = $customName COLLATE NOCASE
             ORDER BY LastUsedUTC DESC
             LIMIT 1;
             """;
         public const string SelectAllEnvironments = """
-            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath
+            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath, Purpose
             FROM Environments
             ORDER BY LastUsedUTC DESC;
             """;
         public const string SelectCustomEnvironments = """
-            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath
+            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath, Purpose
             FROM Environments
             WHERE CustomName != 'Default'
               AND NOT (
@@ -609,6 +610,7 @@ namespace VibeRails.DB
                 LastUsedUTC = $lastUsedUTC,
                 Hidden = $hidden,
                 AutomationWorker = $automationWorker,
+                Purpose = $purpose,
                 WorkspaceMode = $workspaceMode,
                 ProjectPath = $projectPath
             WHERE Id = $id;

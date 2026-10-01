@@ -635,7 +635,7 @@ public sealed partial class BoardService(
     /// poll and launch gate all decide through this.
     /// </summary>
     internal static bool IsAutomationSession(string? origin, string sessionId, IReadOnlySet<string>? automationIds) =>
-        origin == BoardSessionRecord.AutomationOrigin || automationIds?.Contains(sessionId) == true;
+        origin is BoardSessionRecord.AutomationOrigin or "code_review" || automationIds?.Contains(sessionId) == true;
 
     private async Task<List<BoardSessionDto>> SessionDtosAsync(string projectPath,
         IReadOnlyList<BoardSessionRecord> sessions, IReadOnlyDictionary<string, string> live, CancellationToken cancellationToken)
@@ -643,7 +643,9 @@ public sealed partial class BoardService(
         if (sessions.Count == 0) return [];
         var automationIds = await store.GetAutomationSessionIdsAsync(projectPath,
             sessions.Select(s => s.SessionId).ToList(), cancellationToken);
-        return sessions.Select(s => ToDto(s, live) with { IsAutomation = IsAutomation(s, automationIds) }).ToList();
+        var reviewIds = await store.GetReviewSessionIdsAsync(projectPath, sessions.Select(s => s.SessionId).ToList(), cancellationToken);
+        return sessions.Select(s => ToDto(s, live) with { IsAutomation = IsAutomation(s, automationIds),
+            IsReview = s.Origin == "code_review" || reviewIds.Contains(s.SessionId) }).ToList();
     }
 
     // ------------------------------------------------------------------ normalisation

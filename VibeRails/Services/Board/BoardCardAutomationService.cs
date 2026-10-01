@@ -18,7 +18,7 @@ public sealed class BoardCardAutomationService(IBoardStore boards, IJobStore job
         // Once a recording is linked, the existing Automations rail owns its open/replay action.
         // Keep queued and failed-before-launch runs visible even when they have no recording.
         return new(catalog.Select(job => new BoardAutomationOption(job.Id, job.Name, job.Enabled)).ToList(),
-            runs.Select(run => new BoardCardAutomationRunResponse(run.Id, run.JobName, run.Status,
+            runs.Where(run => run.Purpose != "code_review").Select(run => new BoardCardAutomationRunResponse(run.Id, run.JobName, run.Status,
                     run.QueuedUtc, run.ErrorMessage)).ToList());
     }
 

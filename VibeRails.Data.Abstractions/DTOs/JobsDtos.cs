@@ -245,7 +245,8 @@ public sealed record JobRunResponse(
     string? ErrorMessage,
     bool CancelRequested,
     List<JobRunActionDto>? Actions = null,
-    string? TerminalSessionId = null);
+    string? TerminalSessionId = null,
+    string Purpose = "work");
 
 public sealed record JobRunActionDto(
     string Id,
@@ -380,7 +381,8 @@ public sealed record JobRunRecord(
     bool LaunchMinimized = false,
     IReadOnlyList<JobRunActionRecord>? Actions = null,
     bool LaunchInTerminalTab = false,
-    string? TerminalSessionId = null);
+    string? TerminalSessionId = null,
+    string Purpose = "work");
 
 public sealed record JobRunActionRecord(
     string Id,

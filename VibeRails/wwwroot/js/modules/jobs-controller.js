@@ -1901,6 +1901,7 @@ export class JobController {
                 effort,
                 customArgs,
                 prompt,
+                purpose: environment.purpose || 'work',
                 workspaceMode: Number(environment.workspaceMode) || 0
             } : null,
             actions: actions.map(action => action.kind === JOB_ACTION.WORKER
@@ -2142,6 +2143,7 @@ viberails-recipe -->
                 effort: this.extractArg(worker.customArgs, ['--effort', '--reasoning-effort']) || this.extractConfig(worker.customArgs, 'model_reasoning_effort') || '',
                 customArgs: worker.customArgs || '',
                 prompt: worker.prompt || '',
+                purpose: worker.purpose || 'work',
                 workspaceMode: Number(worker.workspaceMode) || 0
             } : null,
             actions: (entry.actions || []).map(action => Number(action.kind) === JOB_ACTION.WORKER
@@ -2267,7 +2269,7 @@ viberails-recipe -->
                 ? { id: importSource.worker.reusableEnvironmentId, name: importSource.worker.reusableEnvironmentName || worker.name }
                 : null)
             : worker
-                ? (this.environments || []).find(env => (env.name || '').toLowerCase() === String(worker.name).toLowerCase() && (env.cli || '').toLowerCase() === cli)
+                ? (this.environments || []).find(env => (env.name || '').toLowerCase() === String(worker.name).toLowerCase() && (env.cli || '').toLowerCase() === cli && (env.purpose || 'work') === (worker.purpose || 'work'))
                 : null;
         const whenText = (recipe.triggers || []).length
             ? (recipe.triggers || []).map(t => this.formatTrigger(t)).join(', ')
@@ -2380,6 +2382,7 @@ viberails-recipe -->
                     customArgs: worker.customArgs || '',
                     customPrompt: worker.prompt || '',
                     automationWorker: true,
+                    purpose: worker.purpose || 'work',
                     workspaceMode: Number(worker.workspaceMode) || 0
                 });
             }
@@ -2387,7 +2390,7 @@ viberails-recipe -->
 
             if (addJob) {
                 const environment = worker
-                    ? (this.environments || []).find(env => (env.name || '').toLowerCase() === String(worker.name).toLowerCase() && (env.cli || '').toLowerCase() === cli) || existingEnv
+                    ? (this.environments || []).find(env => (env.name || '').toLowerCase() === String(worker.name).toLowerCase() && (env.cli || '').toLowerCase() === cli && (env.purpose || 'work') === (worker.purpose || 'work'))
                     : null;
                 if (worker && !environment) throw new Error('The recipe Worker could not be created or found.');
                 const llm = environment ? getJobLlmForCli(cli) : 0;

@@ -28,6 +28,28 @@ public sealed class BoardPromptComposerTests
         Assert.EndsWith("Review {{board_card}} and exit.", automation); // Worker placeholders resolve later.
     }
 
+    [Fact]
+    public void ReviewPromptsRequireCanonicalScopeAndReport_AndTeachBothAgentsToPoll()
+    {
+        var review = BoardPromptComposer.Compose(Card(), "Arbitrary lane", "codex", null, intent: "code_review");
+        var automation = BoardPromptComposer.ComposeAutomationPrompt("VB-12", "Custom instructions", "code_review");
+        foreach (var prompt in new[] { review, automation })
+        {
+            Assert.Contains("You are the code review agent.", prompt);
+            Assert.Contains("begin_board_review", prompt); Assert.Contains("save_board_review", prompt);
+            Assert.Contains("actual checkout", prompt); Assert.Contains("dirty changes", prompt);
+            Assert.Contains("not automatically a Git diff boundary", prompt);
+            Assert.Contains("Save the review and handoff before moving", prompt);
+            Assert.Contains("Done alone is not permission to merge or publish", prompt);
+        }
+        foreach (var prompt in new[] { review, automation, BoardPromptComposer.Compose(Card(), "Build", "codex", null) })
+        {
+            Assert.Contains("get_board_reviews every 10 seconds", prompt);
+            Assert.Contains("fix findings you agree with", prompt);
+        }
+        Assert.DoesNotContain("You are the code review agent.", BoardPromptComposer.ComposeAutomationPrompt("VB-12", "Named Code review"));
+    }
+
     [Theory]
     [InlineData("work")]
     [InlineData("chat")]
@@ -179,7 +201,7 @@ public sealed class BoardPromptComposerTests
             new BoardPromptComposer.LaunchContext([], [], [], Activity: new(0, 0, 0)));
         // Resolver cap is 30 000 resolved chars; the Windows command line cap is 32 000 after quoting.
         // 4 000 of description + 6 000 of template + the generated activity and workflow guidance.
-        Assert.True(prompt.Length < 12_500, $"prompt was {prompt.Length} chars");
+        Assert.True(prompt.Length < 13_000, $"prompt was {prompt.Length} chars");
         Assert.Contains(new string('d', BoardPromptComposer.MaxDescriptionChars), prompt);
         Assert.DoesNotContain(new string('d', BoardPromptComposer.MaxDescriptionChars + 1), prompt);
     }

@@ -142,6 +142,7 @@ public static class McpStdioHost
         services.AddSingleton<VibeRails.Services.Board.IBoardCommitService, VibeRails.Services.Board.BoardCommitService>();
         services.AddSingleton<VibeRails.Services.Board.IBoardLiveSessionProbe, VibeRails.Services.Board.NullBoardLiveSessionProbe>();
         services.AddScoped<VibeRails.Services.Board.IBoardService, VibeRails.Services.Board.BoardService>();
+        services.AddScoped<VibeRails.Services.Board.BoardReviewService>();
         services.AddScoped<BoardTool>();
         // HostShellTools (run_shell_command) and WebResearchTools (web_search/web_fetch) are
         // intentionally not exposed for now (security review 2026-07-02); mirrors MapRegisterServices.

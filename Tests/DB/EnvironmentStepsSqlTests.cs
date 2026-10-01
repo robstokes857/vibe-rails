@@ -163,7 +163,7 @@ public class EnvironmentStepsSqlTests
             {
                 await legacy.OpenAsync(cancellationToken);
                 await using var create = legacy.CreateCommand();
-                create.CommandText = SqlStrings.CreateEnvironmentsTable;
+                create.CommandText = SqlStrings.CreateEnvironmentsTable + ";" + SqlStrings.MigrateEnvironmentsAddPurpose;
                 await create.ExecuteNonQueryAsync(cancellationToken);
             }
 
@@ -311,6 +311,7 @@ public class EnvironmentStepsSqlTests
         foreach (var sql in new[]
                  {
                      SqlStrings.CreateEnvironmentsTable,
+                     SqlStrings.MigrateEnvironmentsAddPurpose,
                      SqlStrings.CreateEnvironmentStepsTable,
                      SqlStrings.CreateEnvironmentStepsIndex
                  })
@@ -331,6 +332,7 @@ public class EnvironmentStepsSqlTests
     {
         await using var insert = connection.CreateCommand();
         insert.CommandText = SqlStrings.InsertEnvironment;
+        insert.Parameters.AddWithValue("$purpose", "work");
         insert.Parameters.AddWithValue("$customName", customName);
         insert.Parameters.AddWithValue("$llm", (int)llm);
         insert.Parameters.AddWithValue("$path", "");

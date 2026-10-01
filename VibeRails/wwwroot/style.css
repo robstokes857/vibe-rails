@@ -19513,3 +19513,9 @@ body.performance-mode .brand-text-sm {
 .rules-files-rail .agent-file-tree-path { order: 1; font-size: .72rem; font-weight: 400; color: var(--color-text-muted, #94a3b8); line-height: 1.4; }
 .rules-files-rail .agent-file-tree-item { gap: .45rem; padding: .65rem; }
 .rules-files-rail .agent-file-tree-rename { margin-left: 40px; padding: .2rem .5rem; font-size: .7rem; }
+
+.board-review-text { white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 1rem; }
+
+[data-board-reviews] { min-width: 0; overflow-wrap: anywhere; }
+[data-board-reviews] .d-flex { flex-wrap: wrap; }
+[data-board-reviews] .ts-wrapper { min-width: 0; flex: 1 1 180px; }

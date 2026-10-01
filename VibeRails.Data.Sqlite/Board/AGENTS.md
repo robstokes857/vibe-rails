@@ -1,5 +1,9 @@
 # Board persistence
 
+`board-reviews/1` adds canonical review attempts/reports without changing old rows. Keep all
+review access behind `IBoardStore`. Only the owning linked session can finalize evidence; the
+report and its single discussion reference commit together. Saved reports are immutable.
+
 ## Remote launch sync check (VIBE-26)
 
 `IsCardSyncAppliedAsync` scopes the live card to its project and Board, checks the complete

@@ -1,5 +1,15 @@
 # Working on Vibe Board
 
+## Code reviews (VIBE-20)
+
+Purpose is explicit on the Worker/Environment and snapshotted onto each queued Job run.
+`BoardReviewService` and `BoardStore.Reviews.cs` own direct attempts and canonical reports;
+UI and MCP share that contract. Keep process outcome separate from report result. Never infer
+review purpose from names, retag history, or turn a successful exit into approval. See
+[the review contract](ARCHITECTURE.md#explicit-code-reviews-vibe-20) for scope, freshness and storage.
+Both worker/reviewer prompts must name `get_board_reviews` and explain polling and fixing agreed
+findings. Save evidence/handoff before any human/LLM-chosen movement; keep existing lane execution.
+
 ## Card checks (VIBE-24)
 
 Read [CHECKS.md](CHECKS.md) for scope, immutable evidence, UI lifecycle and starter review defaults.

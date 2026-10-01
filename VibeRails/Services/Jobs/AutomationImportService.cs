@@ -315,7 +315,7 @@ public sealed partial class AutomationImportService(
                     ToStepDtos(stepsByEnvironment.GetValueOrDefault(environment.Id)),
                     reusable?.Id,
                     reusable?.CustomName,
-                    SuggestCloneName(environment.CustomName, targetRepositoryName, environments.Select(item => item.CustomName)));
+                    SuggestCloneName(environment.CustomName, targetRepositoryName, environments.Select(item => item.CustomName)), environment.Purpose);
             }
             else
             {
@@ -391,7 +391,7 @@ public sealed partial class AutomationImportService(
     }
 
     /// <summary>
-    /// A Worker the target repository can already see with the same name and CLI. Same rule the
+    /// A Worker the target repository can already see with the same name, CLI and purpose. Same rule the
     /// file-based recipe import applies client-side, evaluated here because the browser cannot
     /// see other repositories' environments.
     /// </summary>
@@ -401,6 +401,7 @@ public sealed partial class AutomationImportService(
         string currentRoot) =>
         environments.FirstOrDefault(candidate =>
             candidate.LLM == source.LLM
+            && candidate.Purpose == source.Purpose
             && string.Equals(candidate.CustomName, source.CustomName, StringComparison.OrdinalIgnoreCase)
             && ProjectPathComparer.IsVisibleIn(candidate.ProjectPath, currentRoot));
 
@@ -538,6 +539,7 @@ public sealed partial class AutomationImportService(
             // Installed through the Automation flow, so it is a Worker: listed by the Worker
             // picker, excluded from launch pickers — the same as a recipe import.
             AutomationWorker = true,
+            Purpose = source.Purpose,
             WorkspaceMode = source.WorkspaceMode,
             ProjectPath = currentRoot,
             CreatedUTC = now,

@@ -28,14 +28,21 @@ public static class BoardPromptComposer
     public const int MaxDescriptionChars = 4_000;
     internal const string AgentCompletionGuidance =
         "Before exiting, call complete_board_agent with your outcome and summary after the handoff and card moves. "
-        + "To wait for a triggered agent, poll get_board_agent_status every 10 seconds for pending entries, run outcomes and completion reports. ";
+        + "To wait for a triggered agent, poll get_board_agent_status every 10 seconds for pending entries, run outcomes and completion reports. "
+        + "Poll get_board_reviews every 10 seconds for review status; read its report with reviewId, check scope and fix findings you agree with. Success without a report means report missing, never approved. ";
+    internal const string ReviewGuidance =
+        "You are the code review agent. Purpose: Code review. Expected output: a durable review on the originating card through begin_board_review and save_board_review, in addition to any destinations explicitly requested by the user. "
+        + "Before reviewing code, call begin_board_review to capture the actual checkout, base/head or explicit change scope and dirty changes where applicable. A card is not automatically a Git diff boundary: identify the intended changes, and surface ambiguous scope as Incomplete instead of attributing unrelated edits to this card. "
+        + "Inspect the captured scope and save findings with file/line references, validation performed and limitations using save_board_review. No findings reported is not approval. "
+        + "Next action: use judgment and the user's Board workflow. Read get_board_card and list_board_columns for lane context and destination Automations. Save the review and handoff before moving, then report the move. Humans and LLMs decide movement; a lane named Done alone is not permission to merge or publish. ";
 
     /// <summary>Adds the Board workflow to a card-triggered Worker without replacing its instructions.</summary>
-    internal static string ComposeAutomationPrompt(string cardKey, string? workerPrompt) =>
+    internal static string ComposeAutomationPrompt(string cardKey, string? workerPrompt, string purpose = "work") =>
+        (purpose == "code_review" ? ReviewGuidance : "Purpose: Work. Expected output: the configured Worker output and a card handoff. ") +
         "This Automation was triggered for kanban card " + SanitizeLine(cardKey, 100) + ". "
         + "The user has authorized the viberails-mcp Board tools for this card session. "
         + "Read get_board_card for its task, linked commits and latest activity. Read its Checks summary and use read_board_check for full evidence. Findings and failed analysis are different; judge coverage and scope before deciding the next lane. Post your findings with add_board_comment. "
-        + AgentCompletionGuidance + "\n\n" + (workerPrompt ?? "");
+        + "Before moving, save your handoff, check destination Automations with list_board_columns, then report the move. Read the user's Board context from get_board_card. " + AgentCompletionGuidance + "\n\n" + (workerPrompt ?? "");
     public const int MinDescriptionChars = 1_500;
     public const int MaxTitleChars = 200;
     public const int MaxLinkedCommits = 10;
@@ -71,11 +78,12 @@ public static class BoardPromptComposer
         LaunchContext? context = null,
         string intent = "work")
     {
-        if (intent is not ("work" or "chat"))
-            throw new BoardValidationException("Launch intent must be work or chat.");
+        if (intent is not ("work" or "chat" or "code_review"))
+            throw new BoardValidationException("Launch intent must be work, chat or code_review.");
         context ??= LaunchContext.Empty;
         var boardContext = ComposeBoardContext(context.Settings, card.Type);
         var builder = new StringBuilder();
+        if (intent == "code_review") builder.Append(ReviewGuidance).Append("\n\n");
         var key = card.Key;
         builder.Append(intent == "chat" ? "The user wants to talk with you about kanban card " : "You are working on kanban card ").Append(key)
             .Append(" in the VibeRails board for this project.\n");

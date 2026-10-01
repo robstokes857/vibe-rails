@@ -30,15 +30,43 @@ public sealed partial class BoardStore
         return result;
     }
 
-    public async Task<IReadOnlySet<string>> GetAutomationSessionIdsAsync(string projectPath,
+    public Task<IReadOnlySet<string>> GetAutomationSessionIdsAsync(string projectPath,
         IReadOnlyList<string> sessionIds, CancellationToken cancellationToken = default)
+        => GetAutomationSessionIdsCoreAsync(projectPath, sessionIds, false, cancellationToken);
+
+    public Task<IReadOnlySet<string>> GetReviewSessionIdsAsync(string projectPath,
+        IReadOnlyList<string> sessionIds, CancellationToken cancellationToken = default)
+        => GetAutomationSessionIdsCoreAsync(projectPath, sessionIds, true, cancellationToken);
+
+    private async Task<IReadOnlySet<string>> GetAutomationSessionIdsCoreAsync(string projectPath,
+        IReadOnlyList<string> sessionIds, bool reviewsOnly, CancellationToken cancellationToken)
     {
         var result = new HashSet<string>(StringComparer.Ordinal);
         if (sessionIds.Count == 0) return result;
+        // Direct review launches also retain immutable purpose if an early tool call linked the session first.
+        await using (var board = await OpenAsync(cancellationToken))
+        {
+            foreach (var batch in sessionIds.Distinct(StringComparer.Ordinal).Chunk(100))
+            {
+                await using var query = board.CreateCommand();
+                var parameters = string.Join(",", batch.Select((_, i) => $"$s{i}"));
+                query.CommandText = $"""
+                    SELECT json_extract(r.RecordJson, '$.sessionId') FROM BoardReviews r
+                    JOIN BoardCards c ON c.Id = r.CardId
+                    WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.DeletedUTC IS NULL
+                      AND json_extract(r.RecordJson, '$.sessionId') IN ({parameters});
+                    """;
+                query.Parameters.AddWithValue("$project", NormalizeProjectPath(projectPath));
+                for (var i = 0; i < batch.Length; i++) query.Parameters.AddWithValue($"$s{i}", batch[i]);
+                await using var reader = await query.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken)) result.Add(reader.GetString(0));
+            }
+        }
         await using var state = await OpenStateAsync(cancellationToken);
         // A Board-only/stdio host need not have initialized Jobs. This is a read, not setup.
         if (!_stateFeatures.HasColumn(state, "JobRuns", "SessionId"))
             return result;
+        var purpose = _stateFeatures.HasColumn(state, "JobRuns", "Purpose") ? "Purpose" : "'work'";
         var hasTerminalSession = _stateFeatures.HasColumn(state, "JobRuns", "TerminalSessionId");
         foreach (var batch in sessionIds.Distinct(StringComparer.Ordinal).Chunk(100))
         {
@@ -48,8 +76,10 @@ public sealed partial class BoardStore
             command.CommandText = $"""
                 SELECT SessionId, {terminal} FROM JobRuns
                 WHERE ProjectPath = $project{ProjectPathCollation}
+                  AND ($reviews = 0 OR {purpose} = 'code_review')
                   AND (SessionId IN ({parameters}) OR {terminal} IN ({parameters}));
                 """;
+            command.Parameters.AddWithValue("$reviews", reviewsOnly ? 1 : 0);
             command.Parameters.AddWithValue("$project", NormalizeProjectPath(projectPath));
             for (var i = 0; i < batch.Length; i++) command.Parameters.AddWithValue($"$s{i}", batch[i]);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);

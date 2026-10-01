@@ -179,6 +179,7 @@ namespace VibeRails.DB
             cmd.Parameters.AddWithValue("$hidden", environment.Hidden ? 1 : 0);
             cmd.Parameters.AddWithValue("$automationWorker", environment.AutomationWorker ? 1 : 0);
             cmd.Parameters.AddWithValue("$workspaceMode", (int)environment.WorkspaceMode);
+            cmd.Parameters.AddWithValue("$purpose", environment.Purpose);
             cmd.Parameters.AddWithValue("$projectPath", (object?)environment.ProjectPath ?? DBNull.Value);
 
             var result = await cmd.ExecuteScalarAsync(cancellationToken);
@@ -203,6 +204,7 @@ namespace VibeRails.DB
             cmd.Parameters.AddWithValue("$hidden", environment.Hidden ? 1 : 0);
             cmd.Parameters.AddWithValue("$automationWorker", environment.AutomationWorker ? 1 : 0);
             cmd.Parameters.AddWithValue("$workspaceMode", (int)environment.WorkspaceMode);
+            cmd.Parameters.AddWithValue("$purpose", environment.Purpose);
             cmd.Parameters.AddWithValue("$projectPath", (object?)environment.ProjectPath ?? DBNull.Value);
 
             await cmd.ExecuteNonQueryAsync(cancellationToken);
@@ -946,6 +948,7 @@ namespace VibeRails.DB
                 LastUsedUTC = DateTime.Parse(reader.GetString(7), null, System.Globalization.DateTimeStyles.RoundtripKind),
                 Hidden = reader.GetBoolean(8),
                 AutomationWorker = reader.GetBoolean(9),
+                Purpose = reader.GetString(12),
                 WorkspaceMode = (EnvironmentWorkspaceMode)reader.GetInt32(10),
                 ProjectPath = reader.IsDBNull(11) ? null : reader.GetString(11)
             };

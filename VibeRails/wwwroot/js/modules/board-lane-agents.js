@@ -141,6 +141,8 @@ export class BoardLaneAgents {
                 const name = option?.name || `Unavailable Automation (${id})`;
                 const description = descriptionDrafts.get(id) ?? job?.description ?? '';
                 const worker = workerIdentity(job, environments);
+                const environmentId = job?.actions?.find(a => Number(a.kind) === 0)?.environmentId ?? job?.environmentId;
+                const purpose = environments.find(env => Number(env.id) === Number(environmentId))?.purpose;
                 const workerLogo = worker.logo
                     ? `<img src="${escapeHtml(worker.logo)}" alt="${escapeHtml(worker.label)}"${worker.logoFilter ? ` style="filter:${escapeHtml(worker.logoFilter)}"` : ''}>`
                     : icon(worker.icon);
@@ -150,6 +152,7 @@ export class BoardLaneAgents {
                     <span class="board-lane-agent-icon" title="${escapeHtml(workerLabel)}">${workerLogo}</span>
                     <div class="board-lane-agent-copy"><strong>${escapeHtml(name)}</strong>
                         <small>${escapeHtml(workerLabel)}</small>
+                        <small>${purpose === 'code_review' ? 'Code review · Saves a card report; the agent follows Board workflow for the next action.' : 'Work / custom · Produces the configured output and a handoff.'}</small>
                         ${worker.modelSummary ? `<small class="board-lane-agent-model">${escapeHtml(worker.modelSummary)}</small>` : ''}
                         ${option && !option.enabled ? '<small>Disabled · manage in the Automation editor</small>' : ''}</div>
                     <button type="button" class="board-lane-agents-action" data-agent-action="edit" aria-label="Edit ${escapeHtml(name)}"

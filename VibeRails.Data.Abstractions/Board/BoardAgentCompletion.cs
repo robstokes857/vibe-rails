@@ -11,7 +11,7 @@ public sealed record BoardAgentSessionStatus(BoardSessionRecord Session, BoardAg
 
 /// <summary>A card-triggered Automation, including runs that have not opened a terminal yet.</summary>
 public sealed record BoardAgentRun(string Id, string Name, JobRunStatus Status, DateTime QueuedUtc,
-    string? SessionId, string? WorkerSessionId, string? Error);
+    string? SessionId, string? WorkerSessionId, string? Error, string Purpose = "work", string Provider = "unknown", string? Reviewer = null);
 
 public partial interface IBoardStore
 {

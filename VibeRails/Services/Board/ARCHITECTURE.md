@@ -921,3 +921,50 @@ closes stdin, and `BoardCommitService` distinguishes timeout from a missing comm
 did not establish why the installed host still fails or replace that host. The actual commit
 SHA and unsuccessful link attempts are recorded on VB-18; a successful snapshot link is still
 pending. Do not confuse testing current source with testing the installed MCP binary.
+
+
+## Explicit code reviews (VIBE-20)
+
+Workers and ordinary Environments have an explicit `Purpose` (`work` or `code_review`). The
+Environment editor offers Work / custom, Code review, and an editable Codex Code review preset.
+The same field is available to future reviewer-routing presets; selecting a provider dynamically
+is VIBE-22 work. Creating a preset does not enable lane triggers. Existing Automations still run
+after the normal lane-entry settling period, and humans/LLMs continue to decide card movement.
+
+`environment-purpose/1` and `job-run-purpose/1` add default-Work columns to `state.db`. Jobs copy
+the purpose and existing provider/Worker identity when queuing; retries preserve that snapshot.
+Names never classify a run. No old session is retagged. Both normal state setup and lean Jobs
+setup adopt the Environment column when the table exists, so startup order does not matter.
+
+`board-reviews/1` adds `BoardReviews` in `board.db`, behind `IBoardStore`. A direct card review
+creates an attempt before opening its terminal and records startup failures without requiring a
+session. Automation attempts are projected from immutable Job runs, including queued and failed
+runs without recordings. Their canonical report uses the Job run ID; direct attempts use their
+own ID. `BoardReviewService` joins process observations with those records. Saved reports are
+immutable and remain independent of process success, completion reports, lane names and movement.
+One comment refers to each saved report; discussions and handoffs stay in Comments. Reports are
+local Board evidence; hosted report publication remains outside this change.
+
+`begin_board_review` captures the calling terminal's actual checkout before review. Supported
+scopes are working-tree, unpushed, a pinned full-SHA range, repository, or explicit unknown scope.
+Range/unpushed reviews may include dirty changes. Captured file names, base/head and fingerprints
+are retained. Capture is repeated to detect concurrent changes; unavailable/binary contents or
+failed capture leave freshness unknown. Unknown scope forces an Incomplete report.
+`save_board_review` requires the same linked session and saves findings, validation and limitations
+with No findings reported, Findings or Incomplete. A successful exit without it is Report missing.
+
+`get_board_reviews` and the root-only `/cards/{card}/reviews` reads expose the same record. History
+pages direct attempts and review Automation runs by 50; the latest saved report is fetched
+independently, so many newer unfinished attempts cannot hide it. Freshness comparison only reads
+the caller's server-derived checkout, never a stored path. A different checkout is Unknown;
+changed HEAD or captured inputs are Stale. Opening a report in the UI compares inputs; the user
+can compare again after editing files. Findings are escaped text with file references.
+
+The card's Code reviews section uses the saved card, preserving editor drafts. Its picker defaults
+to Codex, sends explicit `code_review` launch intent and leaves assignment unchanged. Recordings
+have terminal/replay access and are excluded from ordinary Sessions/Automations counts. The
+review snapshot also classifies an early MCP-created link without rewriting its stored origin.
+The existing visible-page activity refresh updates the section; requests/pickers are disposed on
+editor replacement. Both launch prompts teach ten-second MCP polling and handling agreed findings.
+Reviewer prompts require saving the review and handoff before a move, discovering destination
+Automations, and reporting the move. Done alone never grants merge/publish permission.

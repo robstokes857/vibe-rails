@@ -35,7 +35,8 @@ public sealed record AutomationImportWorker(
     List<EnvironmentStepDto> Steps,
     int? ReusableEnvironmentId,
     string? ReusableEnvironmentName,
-    string SuggestedCloneName);
+    string SuggestedCloneName,
+    string Purpose = "work");
 
 /// <summary>
 /// One ordered action of the source Automation. For scripts, <c>ExistsInTargetRepository</c>

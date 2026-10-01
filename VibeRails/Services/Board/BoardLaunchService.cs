@@ -46,8 +46,8 @@ public sealed class BoardLaunchService(
 
     public async Task<LaunchBoardCardResponse?> LaunchAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken = default, string intent = "work")
     {
-        if (intent is not ("work" or "chat"))
-            throw new BoardValidationException("Launch intent must be work or chat.");
+        if (intent is not ("work" or "chat" or "code_review"))
+            throw new BoardValidationException("Launch intent must be work, chat or code_review.");
         var card = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
         if (card is null) return null;
         // Card ids are globally unique in the shared database; VB numbers are project-local.
@@ -64,12 +64,12 @@ public sealed class BoardLaunchService(
             return null;
         // Measured after the reservation is released, so the measurement never holds the gate: a second
         // Start work is answered by the live agent it would join, not refused while this one is counted.
-        await RecordContextSampleAsync(projectPath, launched.Card, launched.Prompt, intent, launched.Response.SessionId, launched.Cli, launched.Selection);
+        await RecordContextSampleAsync(projectPath, launched.Card, launched.Prompt, launched.Intent, launched.Response.SessionId, launched.Cli, launched.Selection);
         return launched.Response;
     }
 
     /// <summary>A started launch and what its context sample needs.</summary>
-    private sealed record Launched(LaunchBoardCardResponse Response, BoardCardRecord Card, BoardLaunchPrompt Prompt, string Cli, string Selection);
+    private sealed record Launched(LaunchBoardCardResponse Response, BoardCardRecord Card, BoardLaunchPrompt Prompt, string Cli, string Selection, string Intent);
 
     private async Task<Launched?> LaunchCoreAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken, string intent)
     {
@@ -96,6 +96,8 @@ public sealed class BoardLaunchService(
                 throw new BoardValidationException("The assigned environment belongs to another project.");
         }
 
+        if (intent != "chat" && environment?.Purpose == "code_review") intent = "code_review";
+        var isReview = intent == "code_review";
         var assigneeLabel = environment is not null
             ? $"{environment.CustomName} ({parsed.Cli})"
             : parsed.Cli;
@@ -116,11 +118,14 @@ public sealed class BoardLaunchService(
             .Where(session => !BoardService.IsAutomationSession(session.Origin, session.SessionId, automationIds))
             .Select(session => session.SessionId)
             .ToHashSet(StringComparer.Ordinal);
-        if (tabs.Any(tab => tab.HasActiveSession && tab.SessionId is not null && workingSessionIds.Contains(tab.SessionId)))
+        if (!isReview && tabs.Any(tab => tab.HasActiveSession && tab.SessionId is not null && workingSessionIds.Contains(tab.SessionId)))
             throw new BoardConflictException("An agent is already running on this card. Open it from Sessions.");
         if (tabs.Count >= tabHost.MaxTabs)
             throw new BoardConflictException($"All {tabHost.MaxTabs} terminal tabs are in use. Close one first.");
 
+        BoardReviewRecord? review = isReview ? new("review_" + Guid.NewGuid().ToString("N"), card.Id, parsed.Cli, assigneeLabel, DateTime.UtcNow) : null;
+        if (review is not null && !await store.SaveReviewAsync(projectPath, review, cancellationToken))
+            throw new BoardValidationException("The review card is no longer available.");
         TerminalTabStatusResponse? tab = null;
         try
         {
@@ -143,7 +148,7 @@ public sealed class BoardLaunchService(
                 try
                 {
                     var linked = await store.LinkSessionAsync(projectPath, card.Id, session.SessionId!, tab.TabId, parsed.Key, parsed.Cli,
-                        title, BoardSessionRecord.LaunchOrigin, cancellationToken);
+                        title, isReview ? "code_review" : BoardSessionRecord.LaunchOrigin, cancellationToken);
                     if (linked is null)
                         throw new BoardValidationException("The card was deleted while its agent was starting. The terminal has been closed.");
                 }
@@ -157,11 +162,22 @@ public sealed class BoardLaunchService(
                 Log.Warning("[Board] Tab {TabId} started for {Card} without a session id; the card will not show it", tab.TabId, card.Key);
             }
 
+            if (review is not null)
+            {
+                review = review with { SessionId = session.SessionId, TabId = tab.TabId, ProcessStatus = "Running" };
+                if (!await store.SaveReviewAsync(projectPath, review, CancellationToken.None))
+                    throw new BoardValidationException("Could not link the review attempt to its session.");
+            }
             return new Launched(new LaunchBoardCardResponse(tab.TabId, session.SessionId, session.Cli, session.WorkingDirectory, card.Id, card.Key, parsed.Key),
-                card, composed, parsed.Cli, parsed.Key);
+                card, composed, parsed.Cli, parsed.Key, intent);
         }
-        catch
+        catch (Exception failure)
         {
+            if (review is not null)
+            {
+                try { await store.SaveReviewAsync(projectPath, review with { ProcessStatus = "Failed", Error = failure.Message }, CancellationToken.None); }
+                catch (Exception recordFailure) { Log.Warning(recordFailure, "[Board] Could not record review launch failure {ReviewId}", review.Id); }
+            }
             if (tab is not null)
             {
                 try { await tabHost.DeleteTabAsync(tab.TabId, CancellationToken.None); }
@@ -200,8 +216,7 @@ public sealed class BoardLaunchService(
             boardContext?.Context,
             orderedColumns.Select(c => (IReadOnlyList<string>)laneAutomations[c.Id].Select(a => a.Name).ToList()).ToList(),
             detail is null ? null : new BoardPromptComposer.CardActivity(detail.Comments.Count, detail.Notes.Count, detail.Sessions.Count),
-            orderedColumns.SelectMany(c => laneAutomations[c.Id].Where(a => !string.IsNullOrWhiteSpace(a.Description))
-                .Select(a => $"{c.Name} / {a.Name}: {a.Description}")).ToList());
+            orderedColumns.SelectMany(c => laneAutomations[c.Id].Select(a => $"{c.Name} / {a.Name}: {a.Summary}. Output and next action: {a.Output}")).ToList());
         var prompt = BoardPromptComposer.Compose(card, column?.Name ?? "(no lane)", assigneeLabel, environmentPrompt, context, intent);
         return new BoardLaunchPrompt(prompt, environmentPrompt, boardContext?.Context, boardId, boardName, detail);
     }

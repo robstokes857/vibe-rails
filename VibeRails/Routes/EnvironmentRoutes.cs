@@ -132,6 +132,8 @@ public static class EnvironmentRoutes
                 return Results.BadRequest(new ErrorResponse($"CustomPrompt exceeds {MaxCustomPromptLength} character limit."));
             }
 
+            if (request.Purpose is not (null or "work" or "code_review"))
+                return Results.BadRequest(new ErrorResponse("Purpose must be work or code_review."));
             if (!TryParseWorkspaceMode(request.WorkspaceMode, out var workspaceMode))
             {
                 return Results.BadRequest(new ErrorResponse(UnknownWorkspaceModeMessage(request.WorkspaceMode)));
@@ -172,6 +174,7 @@ public static class EnvironmentRoutes
                 CustomPrompt = request.CustomPrompt ?? "",
                 Hidden = request.Hidden,
                 AutomationWorker = request.AutomationWorker,
+                Purpose = request.Purpose ?? "work",
                 WorkspaceMode = workspaceMode,
                 // Every environment created from now on belongs to the project it was created
                 // in. Existing rows keep a null scope and stay visible everywhere.
@@ -255,6 +258,9 @@ public static class EnvironmentRoutes
             }
 
             var workspaceModeChanged = false;
+            if (request.Purpose is not (null or "work" or "code_review"))
+                return Results.BadRequest(new ErrorResponse("Purpose must be work or code_review."));
+            if (request.Purpose is not null) environment.Purpose = request.Purpose;
             if (request.WorkspaceMode.HasValue)
             {
                 if (!TryParseWorkspaceMode(request.WorkspaceMode.Value, out var requestedMode))
@@ -420,7 +426,7 @@ public static class EnvironmentRoutes
             workspace?.Id,
             workspace?.Path,
             workspace?.Branch,
-            EnvironmentStepRoutes.ToDtos(steps));
+            EnvironmentStepRoutes.ToDtos(steps), environment.Purpose);
 
     /// <summary>
     /// Parses a wire workspace mode. Explicit rather than casting the int straight to the enum:

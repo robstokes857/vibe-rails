@@ -103,6 +103,7 @@ public sealed partial class BoardStore
             var jobEnvironment = hasEnvironments
                 ? "e.CustomName, COALESCE(e.LLM, 0), COALESCE(NULLIF(TRIM(e.CustomPrompt), ''), '')"
                 : "NULL, 0, ''";
+            var purpose = hasEnvironments && _stateFeatures.HasColumn(state, "Environments", "Purpose") ? "COALESCE(e.Purpose, 'work')" : "'work'";
             var description = _stateFeatures.HasColumn(state, "Jobs", "Description") ? "j.Description" : "NULL";
             var jobJoin = hasEnvironments ? "LEFT JOIN Environments e ON e.Id = j.EnvironmentId" : string.Empty;
             await using (var jobs = state.CreateCommand())
@@ -111,7 +112,7 @@ public sealed partial class BoardStore
                     SELECT j.Id, j.Name, j.Enabled, j.DeletedUTC IS NOT NULL,
                            j.ProjectPath = $project{ProjectPathCollation},
                            EXISTS (SELECT 1 FROM JobActions a WHERE a.JobId = j.Id),
-                           {jobEnvironment}, {description}
+                           {jobEnvironment}, {description}, {purpose}
                     FROM Jobs j {jobJoin}
                     WHERE j.Id IN ({ids});
                     """;
@@ -137,7 +138,7 @@ public sealed partial class BoardStore
                         scripts.TryGetValue(jobId, out var paths) ? paths : [],
                         run.Id,
                         run.Running,
-                        reader.IsDBNull(9) ? null : reader.GetString(9));
+                        reader.IsDBNull(9) ? null : reader.GetString(9), reader.GetString(10));
                 }
             }
         }

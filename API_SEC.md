@@ -1,5 +1,28 @@
 # API authentication coverage
 
+## VIBE-20 explicit code reviews (2026-10-01, scoped amendment)
+
+Added root-only `GET /api/v1/board/cards/{card}/reviews` and
+`GET /api/v1/board/cards/{card}/reviews/{reviewId}` with no-store responses and the existing
+session-plus-tab credential gate. The existing launch endpoint accepts explicit Code review
+intent. Environment create/update validates `work` or `code_review`; omitted edits preserve
+purpose. Project identity remains server-derived and every review read/write scopes the live card.
+
+`begin_board_review`, `save_board_review` and `get_board_reviews` join the existing BoardTool
+registrations and exact Board launch grants on HTTP/stdio. Writes require an explicitly classified
+run and its current session; report finalization rechecks membership inside the store transaction.
+Git capture uses the caller's actual checkout and validated full SHAs with argv-only reads.
+Freshness never follows a supplied/stored path, and a different checkout reports Unknown. Report
+text is bounded and escaped; the MCP report reader chunks output. No new executor, listener,
+authentication exception, hosted publication or automatic card movement is introduced.
+
+Scoped route enumeration and both mandatory repository-wide listener searches found only the
+approved main Kestrel host, non-serving PortFinder probe and test hosts; the cross-runtime search
+had no matches. Credential, project/card/session isolation, immutable reports, source-generated
+serialization and launch grants are covered by regressions. No security violation was found.
+This is a scoped amendment, not a full inventory re-audit.
+
+
 ## VIBE-26 remote Start work (2026-10-01, scoped amendment)
 
 The active root backend polls the existing configured Board HTTPS destination every ten seconds,
@@ -1327,7 +1350,10 @@ transcript text out of messages and exception text; do not rely on the Logs view
 hidden. `Tests/Routes/InternalToolsRoutesTests.cs` pins the two-credential requirement, the
 whitelist rejection of path-like sources, and the absence of mutating verbs.
 
-### Kanban board (61; active root backend only)
+### Kanban board (63; active root backend only)
+
+- `GET /api/v1/board/cards/{card}/reviews` — paged review attempts, run status and latest saved report.
+- `GET /api/v1/board/cards/{card}/reviews/{reviewId}` — canonical report; `verify=true` compares the current checkout.
 
 - `GET /api/v1/board/cards/{card}/checks` — paged saved check summaries and current check runs.
 - `GET /api/v1/board/cards/{card}/checks/{checkId}` — full saved evidence and qualified freshness.

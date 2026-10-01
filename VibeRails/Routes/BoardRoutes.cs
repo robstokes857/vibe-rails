@@ -34,6 +34,17 @@ public static class BoardRoutes
             await next(context);
         });
 
+        var reviewRoutes = app.MapGroup("/api/v1/board/cards/{card}/reviews");
+        reviewRoutes.AddEndpointFilter((context, next) =>
+        {
+            context.HttpContext.Response.Headers.CacheControl = "no-store";
+            return next(context);
+        });
+        reviewRoutes.MapGet("", ([Microsoft.AspNetCore.Mvc.FromServices] BoardReviewService reader, string card, int? offset, CancellationToken ct) =>
+            RunAsync(async () => OkOrNotFound(await reader.ReadAsync(Project(), card, offset ?? 0, ct), "Card")));
+        reviewRoutes.MapGet("/{reviewId}", ([Microsoft.AspNetCore.Mvc.FromServices] BoardReviewService reader, string card, string reviewId, bool? verify, CancellationToken ct) =>
+            RunAsync(async () => OkOrNotFound(await reader.ReportAsync(Project(), card, reviewId, verify == true, Project(), ct), "Review")));
+
         var checks = app.MapGroup("/api/v1/board/cards/{card}/checks");
         checks.AddEndpointFilter((context, next) =>
         {

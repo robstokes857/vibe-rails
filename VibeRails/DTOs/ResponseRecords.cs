@@ -223,7 +223,7 @@ namespace VibeRails.DTOs
         string Origin,
         DateTime CreatedAt,
         bool Active,
-        bool IsAutomation = false);
+        bool IsAutomation = false, bool IsReview = false);
 
     // LinkedAt is when the commit was put on the card; CommittedAt is the commit's own date. "Since"
     // views filter on LinkedAt: linking an old commit during a session is that session's activity.
@@ -380,7 +380,8 @@ namespace VibeRails.DTOs
         bool Hidden = false,
         bool AutomationWorker = false,
         int WorkspaceMode = 0,
-        List<EnvironmentStepRequest>? Steps = null
+        List<EnvironmentStepRequest>? Steps = null,
+        string? Purpose = null
     );
 
     // Hidden is nullable so a stale client that omits it leaves the stored value untouched
@@ -396,7 +397,8 @@ namespace VibeRails.DTOs
         // Same nullable guard, and it matters more here than anywhere else: the steps editor is a
         // separate modal, so an env form saved without ever opening it must leave them alone
         // rather than replace them with an empty list.
-        List<EnvironmentStepRequest>? Steps = null
+        List<EnvironmentStepRequest>? Steps = null,
+        string? Purpose = null
     );
 
     // Environment Step DTOs. Steps ride on the environment endpoints as a child collection, the
@@ -462,7 +464,8 @@ namespace VibeRails.DTOs
         int? WorkspaceSandboxId = null,
         string? WorkspacePath = null,
         string? WorkspaceBranch = null,
-        List<EnvironmentStepDto>? Steps = null
+        List<EnvironmentStepDto>? Steps = null,
+        string Purpose = "work"
     );
 
     public record EnvironmentListResponse(
@@ -1618,6 +1621,8 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(List<SandboxDiffFileResponse>))]
     [JsonSerializable(typeof(MergeBackResponse))]
     // Environment DTOs
+    [JsonSerializable(typeof(VibeRails.Services.Board.BoardReviewRecord))]
+    [JsonSerializable(typeof(VibeRails.Services.Board.BoardReviewsResponse))]
     [JsonSerializable(typeof(CreateEnvironmentRequest))]
     [JsonSerializable(typeof(UpdateEnvironmentRequest))]
     [JsonSerializable(typeof(EnvironmentResponse))]
