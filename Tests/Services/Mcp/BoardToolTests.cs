@@ -930,15 +930,15 @@ public sealed class BoardToolTests : IDisposable
         Assert.Equal(4, lines.Length);
 
         var card = await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct);
-        Assert.Contains("\nPending lane automations: ", card);
-        Assert.Contains("\"Automated code review\" (settles ", card);
-        Assert.Contains("\"Open PR\" (settles ", card);
+        Assert.Contains("Lane Automation entries", card);
+        Assert.Contains("Automated code review · Waiting", card);
+        Assert.Contains("Open PR · Waiting", card);
 
         // Leaving before the entries settle cancels them; the scheduler never sees them.
         Assert.Equal("Moved PROJ-1 to Build (position 0).\nNo lane automations.\nCancelled pending: \"Automated code review\", \"Open PR\" (earlier lane entries of this card that had not settled).",
             BoardKeyText.Short(await _tool.MoveBoardCard("PROJ-1", "build", cancellationToken: Ct)));
         Assert.Empty(await TickAsync());
-        Assert.DoesNotContain("Pending lane automations", await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct));
+        Assert.Contains("Automated code review · Cancelled", await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct));
 
         // Entering again records fresh entries, which settle into one run of each Automation.
         await _tool.MoveBoardCard("PROJ-1", "review", cancellationToken: Ct);
@@ -946,7 +946,7 @@ public sealed class BoardToolTests : IDisposable
         var jobIds = new List<long>();
         foreach (var runId in runs) jobIds.Add((await _jobs.GetRunAsync(runId, Ct))!.JobId);
         Assert.Equal(new[] { review, openPr }.Order(), jobIds.Order());
-        Assert.DoesNotContain("Pending lane automations", await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct));
+        Assert.Contains("Automated code review · Queued", await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct));
     }
 
     [Fact]
@@ -959,11 +959,11 @@ public sealed class BoardToolTests : IDisposable
         await _jobs.UpdateJobAsync(openPr, new(definition.Name, _project, LLM.NotSet, null, "", null, false, [], Actions: [Script("open_pr.py")]), Ct);
 
         var lanes = await _tool.ListBoardColumns(cancellationToken: Ct);
-        Assert.Contains($"  on entry: {ReviewDetail} — a run is already active (run {active}, queued); an entry settling while it runs is dropped\n", lanes);
+        Assert.Contains($"  on entry: {ReviewDetail} — a run is already active (run {active}, queued); eligible entries wait durably for their turn\n", lanes);
         Assert.Contains($"  on entry: {OpenPrDetail} — will not run: the Automation is disabled\n", lanes);
 
         Assert.Equal("Moved PROJ-1 to Review (position 0).\n"
-            + $"Skipped: \"Automated code review\" — a run of this Automation is already active (run {active}, queued); the entry is dropped if that run is still active when it settles.\n"
+            + $"Waiting: \"Automated code review\" — a run of this Automation is already active (run {active}, queued); this entry waits for its turn after the 60-second settling period.\n"
             + "Skipped: \"Open PR\" — the Automation is disabled.",
             BoardKeyText.Short(await _tool.MoveBoardCard("PROJ-1", "review", cancellationToken: Ct)));
         // The scheduler applies the same gates when the entries settle: nothing new is queued.

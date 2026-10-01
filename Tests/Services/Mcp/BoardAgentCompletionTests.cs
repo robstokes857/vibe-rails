@@ -76,7 +76,7 @@ public sealed class BoardAgentCompletionTests : IDisposable
         var review = (await store.GetColumnsAsync(root, Ct)).Single(c => c.Name == "Review");
         await store.SaveLaneAutomationAsync(root, review.Id, [job.Id], 0, Ct);
         await store.MoveCardAsync(root, card.Id, review.Id, null, Ct);
-        Assert.Contains("Pending Automation: Review", await tool.GetBoardAgentStatus(card.Key, cancellationToken: Ct));
+        Assert.Contains("Review · Waiting", await tool.GetBoardAgentStatus(card.Key, cancellationToken: Ct));
 
         var runId = (await jobs.EnqueueBoardCardRunAsync(root, job.Id, card.Key, Ct))!;
         var queued = await tool.GetBoardAgentStatus(card.Key, cancellationToken: Ct);

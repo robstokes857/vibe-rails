@@ -105,7 +105,10 @@ public sealed class BoardCardAutomationTests : IDisposable
         _scripts.Setup(s => s.GetRuntimeUnavailableMessage(JobScriptRuntime.Python)).Returns((string?)null);
         await _service.RunAsync(Project, card.Id, job.Id, Ct);
         var secondCard = await Card();
-        Assert.Equal(409, (await Assert.ThrowsAsync<JobServiceException>(() => _service.RunAsync(Project, secondCard.Id, job.Id, Ct))).StatusCode);
+        var busy = await Assert.ThrowsAsync<JobServiceException>(() => _service.RunAsync(Project, secondCard.Id, job.Id, Ct));
+        Assert.Equal(409, busy.StatusCode);
+        Assert.Contains("busy", busy.Message);
+        Assert.Contains("not queued", busy.Message);
         Assert.Empty((await _service.GetAsync(Project, secondCard.Id, Ct))!.Runs);
         Assert.Single(await _jobs.GetRunsAsync(cancellationToken: Ct));
     }

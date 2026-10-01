@@ -67,10 +67,8 @@ public sealed partial class BoardTool
             if (sessions.Count == 0) text.AppendLine("No linked agent sessions yet.");
             if (selected is null)
             {
-                var pending = await service.GetPendingLaneAutomationsAsync(target.Project, detail.Id, cancellationToken) ?? [];
-                foreach (var entry in pending)
-                    text.Append("- Pending Automation: ").Append(entry.Automation.Name)
-                        .Append(" · settles ").AppendLine(entry.DueUtc.ToString("O"));
+                var entries = await store.GetLaneAutomationStatusesAsync(target.Project, detail.Id, cancellationToken);
+                text.AppendLine(FormatLaneStatuses(entries));
                 var runs = await store.GetAgentRunsAsync(target.Project, detail.Id, cancellationToken);
                 foreach (var run in runs)
                 {
@@ -81,7 +79,7 @@ public sealed partial class BoardTool
                     if (run.Error is not null) text.Append(" · ").Append(BoardPromptComposer.SanitizeLine(run.Error, 600));
                     text.AppendLine();
                 }
-                if (runs.Count == 0 && pending.Count == 0) text.AppendLine("No pending entries or recent card Automation runs.");
+                if (runs.Count == 0 && entries.Count == 0) text.AppendLine("No pending entries or recent card Automation runs.");
             }
             text.Append("Poll again in about 10 seconds while waiting. A completion report is the agent's result; only a terminal run status confirms all Automation actions finished.");
             text.Append("\n").Append(await GetBoardReviews(card, cancellationToken: cancellationToken));
@@ -89,5 +87,20 @@ public sealed partial class BoardTool
         }
         catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
         catch (Exception ex) when (ex is not OperationCanceledException) { return Fail("read agent status", ex); }
+    }
+
+    private static string FormatLaneStatuses(IReadOnlyList<BoardLaneAutomationStatus> entries)
+    {
+        if (entries.Count == 0) return "No recent lane Automation entries.";
+        var text = new StringBuilder("Lane Automation entries (up to 100, pending first):\n");
+        foreach (var entry in entries)
+        {
+            text.Append("- ").Append(BoardPromptComposer.SanitizeLine(entry.Name, 120)).Append(" · ").Append(entry.Status)
+                .Append(" · entry ").Append(entry.EventKey).Append(" · lane ").Append(entry.ColumnId)
+                .Append(" · settles ").Append(entry.DueUtc.ToString("O"));
+            if (entry.RunId is not null) text.Append(" · run ").Append(entry.RunId);
+            text.Append(" · ").AppendLine(BoardPromptComposer.SanitizeLine(entry.Reason, 600));
+        }
+        return text.ToString();
     }
 }

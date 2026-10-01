@@ -40,6 +40,38 @@ public sealed class BoardReviewsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ReviewDiscoveryShowsWaitingAndCancelledEntriesWithoutInventingReports()
+    {
+        var environment = new LLM_Environment { CustomName = "Reviewer", LLM = LLM.Codex, Purpose = "code_review", AutomationWorker = true };
+        await repository.SaveEnvironmentAsync(environment, Ct);
+        var job = await jobs.CreateJobAsync(new("Code review", repo, LLM.Codex, environment.Id, "Review", null, true, []), Ct);
+        await jobs.EnqueueManualRunAsync(job.Id, Ct);
+        var lane = (await store.GetColumnsAsync(repo, Ct)).Single(c => c.Name == "Review");
+        await store.SaveLaneAutomationAsync(repo, lane.Id, [job.Id], 0, Ct);
+        await store.MoveCardAsync(repo, card.Id, lane.Id, null, Ct);
+        await using (var connection = new SqliteConnection(boardPath))
+        {
+            await connection.OpenAsync(Ct);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE BoardPendingAutomations SET DueUnixMs = 1 WHERE CardId = $card;";
+            command.Parameters.AddWithValue("$card", card.Id);
+            await command.ExecuteNonQueryAsync(Ct);
+        }
+        Assert.Empty(await jobs.EnqueueDueSchedulesAsync(DateTime.UtcNow, Ct));
+        var waiting = Assert.Single((await reviews.ReadAsync(repo, card.Id, 0, Ct))!.Reviews);
+        Assert.Equal("Waiting", waiting.ProcessStatus);
+        Assert.Contains("busy", waiting.Error);
+        Assert.Null(waiting.RunId); Assert.Null(waiting.SessionId); Assert.Null(waiting.Result);
+        await store.MoveCardAsync(repo, card.Id, card.ColumnId, null, Ct);
+        var cancelled = Assert.Single((await reviews.ReadAsync(repo, card.Id, 0, Ct))!.Reviews);
+        Assert.Equal("Cancelled", cancelled.ProcessStatus);
+        Assert.Contains("left the destination lane", cancelled.Error);
+        Assert.Null(cancelled.Result);
+        await store.MoveCardAsync(repo, card.Id, lane.Id, null, true, Ct);
+        Assert.Contains((await reviews.ReadAsync(repo, card.Id, 0, Ct))!.Reviews, r => r.ProcessStatus == "Skipped");
+    }
+
+    [Fact]
     public async Task PurposeAndProviderAreSnapshottedForManualAndLaneRuns_AndSurviveEditsAndRestart()
     {
         var environment = new LLM_Environment { CustomName = "Reviewer", LLM = LLM.Codex, Purpose = "code_review", AutomationWorker = true };

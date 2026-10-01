@@ -1,5 +1,18 @@
 # API authentication coverage
 
+## VIBE-21 waiting lane Automations (2026-10-01, scoped amendment)
+
+The existing root-only card Automations GET adds up to 100 lane entry states and reasons.
+Card resolution and run reconciliation remain scoped to the server-derived project, behind
+IBoardStore and the existing session-plus-tab middleware. get_board_card and get_board_agent_status
+use the same bounded read. No route, tool grant, listener or authentication exception changed.
+The UI escapes names/reasons; MCP sanitizes them. Source-generated response serialization remains.
+
+Scoped Board route enumeration and both repository listener searches found the existing main
+Kestrel host, non-serving PortFinder probe and test hosts only; no cross-runtime listener matches.
+Disposable-fixture tests cover foreign cards/projects, run identity and pre-session states;
+browser tests cover escaping and preserving drafts. No security violation was found.
+
 ## VIBE-20 explicit code reviews (2026-10-01, scoped amendment)
 
 Added root-only `GET /api/v1/board/cards/{card}/reviews` and

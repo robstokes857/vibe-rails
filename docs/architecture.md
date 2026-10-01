@@ -436,6 +436,9 @@ lists the references next to linked commits and attachments.
 Keep all Board persistence behind `IBoardStore`, including pending lane Automation events, so a
 future shared API-backed store can replace local storage. Local Jobs and terminal history remain
 in `state.db`; queuing an Automation run and acknowledging its Board event are separate commits.
+Busy lane entries stay pending and retry in order per Automation, with durable cancellation and
+skip reasons on the card. See [waiting lane Automations](../VibeRails/Services/Board/ARCHITECTURE.md#waiting-lane-automations-vibe-21)
+for coalescing, concurrency and the shared UI/agent status contract.
 
 ### Services Layer
 

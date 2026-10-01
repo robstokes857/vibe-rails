@@ -8,8 +8,8 @@ namespace VibeRails.Services.Board;
 /// from its own definition (Worker, prompt, scripts), where its output lands, and whether the
 /// scheduler would run it for an entry recorded now. <see cref="Unavailable"/> names the gate
 /// that would consume the entry without a run; <see cref="ActiveRunId"/> is the self-overlap
-/// guard's reason. Both are evaluated at read time; the scheduler re-checks them when the entry
-/// settles.
+/// guard's waiting reason. Both are evaluated at read time; the scheduler re-checks them on
+/// each attempt after the entry settles.
 /// </summary>
 public sealed record BoardLaneAutomationInfo(
     long JobId,
@@ -37,7 +37,7 @@ public sealed record BoardCardMoveRequest(string ColumnIdOrName, int? Position =
 /// What a lane entry does (or did) beyond moving the card. <see cref="EnteredLane"/> is false for
 /// a same-lane reposition, which records no entry. <see cref="Automations"/> are the destination
 /// lane's Automations in their configured order; <see cref="Cancelled"/> are earlier entries of
-/// this card that the move replaced before they settled.
+/// this card that the move replaced before they committed a run.
 /// </summary>
 public sealed record BoardLaneEntryReport(
     string LaneName,

@@ -1,5 +1,15 @@
 # Working on Vibe Board
 
+## Waiting lane Automations (VIBE-21)
+
+Busy lane demand stays in the existing Board queues. Keep the oldest pending entry per Job
+first, with one pending entry per card/Job and a fresh 60-second delay after reentry. Moves and
+settings edits cancel uncommitted entries; committed runs keep their own lifecycle. The additive
+dispatch ledger retains reasons, while actual Job run status wins after acknowledgment failures.
+UI, get_board_card, get_board_agent_status and review discovery share that state. Manual card
+runs still reject overlap; do not apply lane waiting to other trigger policies. See
+[the waiting contract](ARCHITECTURE.md#waiting-lane-automations-vibe-21).
+
 ## Code reviews (VIBE-20)
 
 Purpose is explicit on the Worker/Environment and snapshotted onto each queued Job run.

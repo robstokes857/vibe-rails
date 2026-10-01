@@ -11,6 +11,13 @@ public sealed record BoardLaneAutomation(IReadOnlyList<long> JobIds, int Revisio
 public sealed record BoardLaneAutomationEvent(
     string CardId, long JobId, string EventKey, string ProjectPath, string TriggerKey, bool IsCurrent);
 
+/// <summary>A durable dispatch observation; Waiting is retryable, all other states acknowledge the entry.</summary>
+public sealed record BoardLaneAutomationDispatch(string Status, string Reason, string? RunId = null);
+
+/// <summary>A lane entry's visible state, including entries without a terminal session.</summary>
+public sealed record BoardLaneAutomationStatus(string EventKey, long JobId, string ColumnId,
+    DateTime DueUtc, string Name, string Status, string Reason, string? RunId = null, string Purpose = "work");
+
 /// <summary>
 /// A lane Automation read from its local definition so agents can be told what a lane entry
 /// triggers (VB-34). <see cref="Name"/> is null when the definition cannot be read: the Jobs
@@ -44,13 +51,21 @@ public partial interface IBoardStore
     Task<IReadOnlyList<BoardLaneAutomationEvent>> GetDueLaneAutomationsAsync(DateTime nowUtc, CancellationToken cancellationToken = default);
     /// <summary>Removes only the observed entry; a subsequent lane entry must survive.</summary>
     Task AcknowledgeLaneAutomationAsync(BoardLaneAutomationEvent entry, CancellationToken cancellationToken = default);
+    /// <summary>Rechecks exact entry identity immediately before the independent run commit.</summary>
+    Task<bool> IsLaneAutomationCurrentAsync(BoardLaneAutomationEvent entry, CancellationToken cancellationToken = default);
+    /// <summary>Retains busy demand or records an outcome and acknowledges only this entry in one Board commit.</summary>
+    Task RecordLaneAutomationDispatchAsync(BoardLaneAutomationEvent entry, BoardLaneAutomationDispatch dispatch,
+        DateTime nowUtc, CancellationToken cancellationToken = default);
+    /// <summary>Recent entry states, with committed run status taking precedence over dispatch observations.</summary>
+    Task<IReadOnlyList<BoardLaneAutomationStatus>> GetLaneAutomationStatusesAsync(string projectPath, string cardId,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Describes selected Automations from their local definitions, one entry per requested id in
     /// the requested order. Never throws for a missing definition; see <see cref="BoardLaneAutomationDefinition"/>.
     /// </summary>
     Task<IReadOnlyList<BoardLaneAutomationDefinition>> DescribeLaneAutomationsAsync(string projectPath, IReadOnlyList<long> jobIds, CancellationToken cancellationToken = default);
-    /// <summary>The card's lane entries that have not settled yet, soonest first.</summary>
+    /// <summary>The card's uncommitted entries, including settled entries waiting for a busy Job, soonest first.</summary>
     Task<IReadOnlyList<BoardPendingLaneAutomation>> GetPendingLaneAutomationsAsync(string projectPath, string cardId, CancellationToken cancellationToken = default);
     /// <summary>
     /// Moves a card. With <paramref name="skipLaneAutomations"/> the lane entries this move

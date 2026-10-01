@@ -1653,6 +1653,31 @@ for (const width of [1440, 390]) {
     });
 }
 
+test('lane Automation entries show waiting and terminal reasons before a session exists', async ({ page }) => {
+    await openBoard(page);
+    const entry = { eventKey: 'entry-1', name: '<img src=x onerror="window.__entryXss=1">', status: 'Waiting',
+        reason: 'Automation is busy; waiting for its turn.' };
+    await page.route('**/api/v1/board/cards/card_test/automations', route => route.fulfill({ json: {
+        jobs: [], runs: [], laneEntries: [entry]
+    } }));
+    await page.getByText('Description images', { exact: true }).click();
+    const list = page.locator('[data-board-automation-runs]');
+    await expect(list).toContainText('Waiting');
+    await expect(list).toContainText('Automation is busy; waiting for its turn.');
+    await expect(list.locator('img')).toHaveCount(0);
+    await expect(page.locator('[data-board-count="automations"]')).toHaveText('1');
+    await page.locator('#board-card-title').fill('Unsaved waiting card');
+    for (const status of ['Queued', 'Running', 'Failed', 'Skipped', 'Cancelled']) {
+        entry.status = status;
+        entry.reason = status === 'Cancelled' ? 'Card left the destination lane.' : `Automation ${status.toLowerCase()}.`;
+        await page.evaluate(() => window.app.boardController.refreshSessionActivity());
+        await expect(list).toContainText(status);
+        await expect(list).toContainText(entry.reason);
+        await expect(page.locator('#board-card-title')).toHaveValue('Unsaved waiting card');
+    }
+    expect(await page.evaluate(() => window.__entryXss)).toBeUndefined();
+});
+
 test('card Automation load and launch failures can be retried without losing the selection', async ({ page }) => {
     await openBoard(page);
     let loadFailed = true;

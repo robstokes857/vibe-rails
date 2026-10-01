@@ -286,6 +286,10 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         var comment = Assert.Single(skippedDocument.RootElement.GetProperty("comments").EnumerateArray());
         Assert.Equal("user", comment.GetProperty("author").GetProperty("kind").GetString());
         Assert.Equal("Moved to Review; lane Automations skipped at the caller's request: \"Automated code review\".", comment.GetProperty("body").GetString());
+        using var skippedStates = await GetJsonAsync($"/api/v1/board/cards/{cardId}/automations");
+        var skippedEntry = Assert.Single(skippedStates.RootElement.GetProperty("laneEntries").EnumerateArray());
+        Assert.Equal("Skipped", skippedEntry.GetProperty("status").GetString());
+        Assert.Contains("caller's request", skippedEntry.GetProperty("reason").GetString());
 
         // Without the flag the entry is recorded as before; the default is unchanged.
         using var back = await PostJsonAsync($"/api/v1/board/cards/{cardId}/move", new { columnId = buildId });
@@ -296,6 +300,10 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         Assert.Equal(job.Id, pending.JobId);
         Assert.Equal(reviewId, pending.ColumnId);
         Assert.InRange(pending.DueUtc, DateTime.UtcNow.AddSeconds(50), DateTime.UtcNow.AddSeconds(70));
+        using var waitingStates = await GetJsonAsync($"/api/v1/board/cards/{cardId}/automations");
+        var waitingEntry = waitingStates.RootElement.GetProperty("laneEntries")[0];
+        Assert.Equal("Waiting", waitingEntry.GetProperty("status").GetString());
+        Assert.Equal(reviewId, waitingEntry.GetProperty("columnId").GetString());
     }
 
     [Fact]

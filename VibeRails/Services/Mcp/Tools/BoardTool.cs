@@ -268,10 +268,11 @@ public sealed partial class BoardTool(
             outcomes[session.Id] = (outcome, last);
         }
         var automations = await service.GetLaneAutomationsByLaneAsync(project, lanes.Select(c => c.Id).ToList(), cancellationToken);
-        var pending = await service.GetPendingLaneAutomationsAsync(project, detail.Id, cancellationToken) ?? [];
+        var entries = await store.GetLaneAutomationStatusesAsync(project, detail.Id, cancellationToken);
         var stats = new CardRenderStats();
         var text = FormatCard(detail, lane?.Name ?? detail.ColumnId, lanes.Select(c => LaneLabel(c.Name, automations[c.Id])).ToList(), outcomes, options, boardName,
-            pending.Select(p => $"\"{p.Automation.Name}\" (settles {p.DueUtc.ToString("u", CultureInfo.InvariantCulture)})").ToList(), stats);
+            [], stats);
+        text += "\n\n" + FormatLaneStatuses(entries);
         var checks = await store.GetLatestChecksAsync(project, detail.Id, cancellationToken);
         text += "\n\n" + CheckSummary(checks);
         var reviewRows = await store.GetReviewsAsync(project, detail.Id, 0, cancellationToken);
@@ -773,7 +774,7 @@ public sealed partial class BoardTool(
     /// shows an on-entry Automation, and in the card-session preamble (BoardPromptComposer).
     /// </summary>
     internal const string LaneAutomationGuidance =
-        "Lanes with on-entry Automations run them about " + SettleSecondsText + " seconds after a card enters, while a VibeRails dashboard is open. "
+        "Lanes with on-entry Automations become eligible about " + SettleSecondsText + " seconds after a card enters, while a VibeRails dashboard is open; busy Automations keep entries waiting for their turn. "
         + "Link commits and post your summary comment before moving a card into such a lane, and move it once. "
         + "Use get_board_agent_status to discover the run and poll for its result. "
         + "move_board_card reports what an entry queued or skipped; pass skipAutomations=true to move without running them, or preview=true to see what a move would trigger.";
@@ -790,7 +791,7 @@ public sealed partial class BoardTool(
         if (automation.Unavailable is not null)
             return line + $" — will not run: the Automation {automation.Unavailable}";
         if (automation.ActiveRunId is not null)
-            return line + $" — a run is already active ({RunLabel(automation)}); an entry settling while it runs is dropped";
+            return line + $" — a run is already active ({RunLabel(automation)}); eligible entries wait durably for their turn";
         return line;
     }
 
@@ -827,8 +828,8 @@ public sealed partial class BoardTool(
                 if (automation.Unavailable is not null)
                     builder.Append(skipped).Append(": \"").Append(automation.Name).Append("\" — the Automation ").Append(automation.Unavailable).Append(".\n");
                 else if (automation.ActiveRunId is not null)
-                    builder.Append(skipped).Append(": \"").Append(automation.Name).Append("\" — a run of this Automation is already active (")
-                        .Append(RunLabel(automation)).Append("); the entry is dropped if that run is still active when it settles.\n");
+                    builder.Append(preview ? "Would wait" : "Waiting").Append(": \"").Append(automation.Name).Append("\" — a run of this Automation is already active (")
+                        .Append(RunLabel(automation)).Append("); this entry waits for its turn after the 60-second settling period.\n");
                 else
                 {
                     anyQueued = true;

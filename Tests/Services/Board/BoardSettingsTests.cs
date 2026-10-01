@@ -174,7 +174,7 @@ public sealed partial class BoardSettingsTests : IDisposable
         if (reason == "removed-setting") await _boards.SaveLaneAutomationAsync(_root, a, [], 1, Ct);
         if (reason == "overlap") Assert.NotNull(await _jobs.EnqueueManualRunAsync(job.Id, Ct));
         Assert.Empty(await Tick(due));
-        Assert.Equal(0, await Due(card.Id));
+        Assert.Equal(reason == "overlap" ? due : 0, await Due(card.Id));
     }
 
     [Fact]
@@ -258,13 +258,18 @@ public sealed partial class BoardSettingsTests : IDisposable
         var unavailable = new Mock<IBoardStore>(MockBehavior.Strict);
         unavailable.Setup(store => store.GetDueLaneAutomationsAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .Returns<DateTime, CancellationToken>(_boards.GetDueLaneAutomationsAsync);
-        unavailable.Setup(store => store.AcknowledgeLaneAutomationAsync(It.IsAny<BoardLaneAutomationEvent>(), It.IsAny<CancellationToken>()))
+        unavailable.Setup(store => store.IsLaneAutomationCurrentAsync(It.IsAny<BoardLaneAutomationEvent>(), It.IsAny<CancellationToken>()))
+            .Returns<BoardLaneAutomationEvent, CancellationToken>(_boards.IsLaneAutomationCurrentAsync);
+        unavailable.Setup(store => store.RecordLaneAutomationDispatchAsync(It.IsAny<BoardLaneAutomationEvent>(), It.IsAny<BoardLaneAutomationDispatch>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("Board unavailable after local commit"));
         // The acknowledgement failure is logged and the cycle continues; the run is already committed.
         Assert.Single(await Tick(due, new JobStore(_stateConnectionString, unavailable.Object)));
         var run = Assert.Single(await _jobs.GetRunsAsync(cancellationToken: Ct));
         Assert.Single((await _jobs.GetRunAsync(run.Id, Ct))!.Actions!);
         Assert.Equal(due, await Due(card.Id));
+        var queued = Assert.Single(await _boards.GetLaneAutomationStatusesAsync(_root, card.Id, Ct));
+        Assert.Equal("Queued", queued.Status);
+        Assert.Equal(run.Id, queued.RunId);
         await _jobs.CompleteRunAsync(run.Id, JobRunStatus.Succeeded, 0, null, Ct);
 
         Assert.Empty(await Tick(due + 1, ReopenJobs()));
@@ -320,10 +325,12 @@ public sealed partial class BoardSettingsTests : IDisposable
         var flaky = new Mock<IBoardStore>(MockBehavior.Strict);
         flaky.Setup(store => store.GetDueLaneAutomationsAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .Returns<DateTime, CancellationToken>(_boards.GetDueLaneAutomationsAsync);
-        flaky.Setup(store => store.AcknowledgeLaneAutomationAsync(It.Is<BoardLaneAutomationEvent>(e => e.JobId == first.Id), It.IsAny<CancellationToken>()))
+        flaky.Setup(store => store.IsLaneAutomationCurrentAsync(It.IsAny<BoardLaneAutomationEvent>(), It.IsAny<CancellationToken>()))
+            .Returns<BoardLaneAutomationEvent, CancellationToken>(_boards.IsLaneAutomationCurrentAsync);
+        flaky.Setup(store => store.RecordLaneAutomationDispatchAsync(It.Is<BoardLaneAutomationEvent>(e => e.JobId == first.Id), It.IsAny<BoardLaneAutomationDispatch>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("Poison entry"));
-        flaky.Setup(store => store.AcknowledgeLaneAutomationAsync(It.Is<BoardLaneAutomationEvent>(e => e.JobId != first.Id), It.IsAny<CancellationToken>()))
-            .Returns<BoardLaneAutomationEvent, CancellationToken>(_boards.AcknowledgeLaneAutomationAsync);
+        flaky.Setup(store => store.RecordLaneAutomationDispatchAsync(It.Is<BoardLaneAutomationEvent>(e => e.JobId != first.Id), It.IsAny<BoardLaneAutomationDispatch>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns<BoardLaneAutomationEvent, BoardLaneAutomationDispatch, DateTime, CancellationToken>(_boards.RecordLaneAutomationDispatchAsync);
 
         Assert.Equal(2, (await Tick(due, new JobStore(_stateConnectionString, flaky.Object))).Count);
         Assert.Equal(2, (await _jobs.GetRunsAsync(cancellationToken: Ct)).Count);

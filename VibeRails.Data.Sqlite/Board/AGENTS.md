@@ -1,5 +1,12 @@
 # Board persistence
 
+`board-lane-dispatch/1` adds a dispatch ledger and cancellation triggers that write only to that
+new table. Existing queue/schema writers remain compatible. Busy events stay pending; the drain
+selects the oldest entry per Job and rotates attempted Jobs through a bounded batch. Exact event
+identity protects reentry from stale acknowledgments. Run commit and Board acknowledgment remain
+independent. Status reads reconcile immutable trigger keys with local Job runs, including a run
+committed before acknowledgment failed. Never backfill or infer execution from an empty queue.
+
 `board-reviews/1` adds canonical review attempts/reports without changing old rows. Keep all
 review access behind `IBoardStore`. Only the owning linked session can finalize evidence; the
 report and its single discussion reference commit together. Saved reports are immutable.

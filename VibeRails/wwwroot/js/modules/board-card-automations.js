@@ -53,13 +53,18 @@ export function bindCardAutomations(editor, card, { app, onQueued }) {
                 + jobs.map(job => `<option value="${escapeHtml(String(job.id))}"${job.enabled ? '' : ' disabled'}>${escapeHtml(job.name)}${job.enabled ? '' : ' (disabled)'}</option>`).join('');
             if (jobs.some(job => String(job.id) === selected && job.enabled)) select.value = selected;
             select.disabled = !hasEnabledJobs;
-            runs.innerHTML = (result?.runs || []).map(run => `<div class="board-automation-run" data-board-run-id="${escapeHtml(run.id)}">
+            const entries = result?.laneEntries || [];
+            runs.innerHTML = entries.map(entry => `<div class="board-automation-run">
+                <span class="board-side-title">${escapeHtml(entry.name)}</span>
+                <span class="board-side-sub">${escapeHtml(entry.status)}</span>
+                <span class="board-side-sub">${escapeHtml(entry.reason)}</span>
+            </div>`).join('') + (result?.runs || []).map(run => `<div class="board-automation-run" data-board-run-id="${escapeHtml(run.id)}">
                 <span class="board-side-title">${escapeHtml(run.name)}</span>
                 <span class="board-side-sub">${escapeHtml(STATUSES[run.status] || 'Unknown')}</span>
                 ${run.errorMessage ? `<span class="board-side-sub text-danger">${escapeHtml(run.errorMessage)}</span>` : ''}
             </div>`).join('');
             const count = editor.querySelector('[data-board-count="automations"]');
-            if (count) count.textContent = String((result?.runs?.length || 0)
+            if (count) count.textContent = String(entries.length + (result?.runs?.length || 0)
                 + editor.querySelectorAll('[data-board-automations] [data-session-id]').length);
             loaded = true;
             message.textContent = jobs.length ? '' : 'Create an Automation for this project on the Automations page.';

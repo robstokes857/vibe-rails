@@ -809,6 +809,12 @@ public sealed partial class BoardStore : IBoardStore
             await using var skip = connection.CreateCommand();
             skip.Transaction = transaction;
             skip.CommandText = """
+                INSERT INTO BoardLaneAutomationDispatch (EventKey, JobId, CardId, ColumnId, DueUnixMs, Status, Reason)
+                SELECT EventKey, JobId, CardId, ColumnId, DueUnixMs, 'Skipped', 'Lane Automations skipped at the caller''s request.'
+                FROM BoardPendingAutomations WHERE CardId = $id
+                UNION ALL
+                SELECT EventKey, JobId, CardId, ColumnId, DueUnixMs, 'Skipped', 'Lane Automations skipped at the caller''s request.'
+                FROM BoardPendingAdditionalAutomations WHERE CardId = $id;
                 DELETE FROM BoardPendingAutomations WHERE CardId = $id;
                 DELETE FROM BoardPendingAdditionalAutomations WHERE CardId = $id;
                 """;
@@ -1816,6 +1822,7 @@ public sealed partial class BoardStore : IBoardStore
         });
         SqliteMigrationRunner.Apply(connection, "board", 26, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, SharedOriginsSchemaSql));
+        SqliteMigrationRunner.Apply(connection, "board-lane-dispatch", 1, MigrationKind.Additive, ApplyLaneDispatchSchema);
         SqliteMigrationRunner.Apply(connection, "board-checks", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, ChecksSchemaSql));
         ReconcileDerivedRows(connection);

@@ -224,14 +224,14 @@ Planning surface: `get_board_card`, `list_boards` and the launch prompt annotate
 `Review (on entry: "Automated code review")`; `list_board_columns` adds one `on entry:` line per
 Automation with its summary, where its output lands (a Worker terminal run or script output on the
 card's Sessions rail) and, when the scheduler would consume the entry without a run, why (disabled,
-deleted, another repository, no actions, or a run already active). `get_board_card` also lists this
-card's entries that have not settled (`Pending lane automations:`), so "queued, not yet run" is
-distinguishable from "nothing configured". The card-session preamble and the `list_board_columns`
+deleted, another repository, or no actions). An active run makes an eligible entry wait (VIBE-21).
+`get_board_card` also lists recent lane entry states and reasons, including before a session
+exists. The card-session preamble and the `list_board_columns`
 footer carry the sequencing rule: link commits and post the summary before moving into such a
 lane, and move once.
 
 Confirmation surface: `move_board_card` keeps its historical first line and appends `Queued:` /
-`Skipped:` lines per Automation, `Cancelled pending:` for earlier unsettled entries the move
+`Waiting:` / `Skipped:` lines per Automation, `Cancelled pending:` for earlier pending entries the move
 replaced, otherwise `No lane automations.` or `Same lane; no lane automations triggered.`, plus a
 `get_board_card since=<move time>` hint for the run's session. There is no run id at move time,
 so settle-time conditions are stated rather than predicted as fact.
@@ -422,11 +422,11 @@ Additive `board/6` creates `BoardContextSettings`, `BoardLaneAutomations`,
 `BoardPendingAutomations`, a due-time index and two card triggers. Triggers write only to the new
 tables and preserve old card SQL compatibility. The existing leased Automation scheduler drains
 settled entries on its normal cycle (normally within 10 seconds after the 60-second delay).
-Consumption and `JobRuns`/`JobRunActions` snapshots share one SQLite transaction, preventing
-duplicate enqueue across roots or restart. It rechecks the current lane, configured job, project,
-enabled/deleted state and ordinary job overlap guard. Invalid/disabled/overlapping events are
-consumed without queuing and are not retried when the job later becomes available. Once queued,
-the normal Automation run lifecycle applies; a later move does not cancel a running job.
+The run/action snapshot commits in state.db before the exact entry is acknowledged in board.db;
+the immutable trigger key deduplicates retries across roots and restart. It rechecks the exact
+entry, current lane, configured job, project, enabled/deleted state and ordinary overlap guard.
+Unavailable events receive terminal reasons; busy events stay pending (VIBE-21). Once committed,
+the normal Automation run lifecycle applies; a later move does not cancel the committed run.
 Pending entries survive backend shutdown and are processed when a root backend is open again.
 There is no additional scheduler host, daemon, OS registration, listener, or MCP grant.
 
@@ -968,3 +968,45 @@ The existing visible-page activity refresh updates the section; requests/pickers
 editor replacement. Both launch prompts teach ten-second MCP polling and handling agreed findings.
 Reviewer prompts require saving the review and handoff before a move, discovering destination
 Automations, and reporting the move. Done alone never grants merge/publish permission.
+
+## Waiting lane Automations (VIBE-21)
+
+Lane demand remains in board.db behind IBoardStore when its Automation already has a queued or
+running run. InsertRunAsync still enforces one active run per Job for every trigger. Board dispatch
+distinguishes a committed duplicate, a busy Job, disabled/deleted/missing Jobs, wrong projects,
+missing actions and no-longer-current entries. Only busy/transient failures retry. Manual card
+runs return a conflict that explicitly says the request was not queued.
+
+Each scheduler cycle reads at most 100 distinct Jobs, taking the oldest settled entry for each
+across both pending tables (due time, card ID, event key). Persisted attempt times rotate Jobs
+across batches; one busy Job with hundreds of cards cannot hide other Jobs. The original due
+time remains unchanged. The scheduler's normal root lifecycle drives retries, including after
+restart; no browser, daemon or alternate runtime database is involved.
+
+Coalescing is per card/Job: departure cancels an uncommitted entry, and reentry creates one fresh
+entry bound to the new destination and its 60-second delay. Other cards retain their places.
+Same-lane edits/reordering do not create entries. Settings changes cancel pending entries and
+affect future entries only. Explicit skip and deletion leave terminal reasons. Once a run commits,
+movement does not cancel it; at most one newer pending entry per card/Job can wait behind it.
+There is no automatic reentry or card movement on run completion.
+
+Additive migration board-lane-dispatch/1 creates BoardLaneAutomationDispatch and cancellation
+triggers on the existing pending tables. It performs no backfill or historical conversion. Older
+card/settings writers keep working and the triggers retain their cancellation evidence. An older
+scheduler can still consume an overlapping entry under its old policy; upgrade active schedulers
+to obtain the waiting guarantee.
+
+The state.db run/action snapshot and board.db dispatch/acknowledgment commit separately. An exact
+entry recheck occurs immediately before the run transaction. Movement can still race that recheck
+and the independent commit (the existing cross-store best-effort boundary); a committed run wins
+over the cancellation observation in all status readers. Trigger keys deduplicate committed runs
+after crash, duplicate delivery or acknowledgment failure. A late acknowledgment never deletes
+a newer entry. No Board writer transaction spans a state.db writer transaction.
+
+The card Automations endpoint exposes up to 100 lane entries, pending first, with Waiting,
+Queued, Running, Succeeded, Failed, Cancelled, Skipped and other native Job terminal states.
+Reasons and event/run IDs exist before a recording. get_board_card and get_board_agent_status
+show the same states; review/check discovery uses the same pending/terminal reasons while
+preserving process outcome versus review result. Actual runs override ledger observations by
+immutable trigger key even before acknowledgment. The existing visible editor refresh updates
+the display without changing drafts or scheduling work.

@@ -47,6 +47,9 @@ CREATE INDEX IX_BoardHistory_BoardTime ON BoardHistory(BoardId, CreatedUTC);
 -- index IX_BoardJiraLinks_Card
 CREATE INDEX IX_BoardJiraLinks_Card ON BoardJiraLinks(CardId);
 
+-- index IX_BoardLaneAutomationDispatch_Card
+CREATE INDEX IX_BoardLaneAutomationDispatch_Card ON BoardLaneAutomationDispatch(CardId, DueUnixMs DESC);
+
 -- index IX_BoardPendingAdditionalAutomations_Due
 CREATE INDEX IX_BoardPendingAdditionalAutomations_Due ON BoardPendingAdditionalAutomations(DueUnixMs);
 
@@ -137,6 +140,9 @@ CREATE TABLE BoardJiraLinks ( CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON 
 -- table BoardLaneAdditionalAutomations
 CREATE TABLE BoardLaneAdditionalAutomations ( ColumnId TEXT NOT NULL REFERENCES BoardLaneAutomations(ColumnId) ON DELETE CASCADE, JobId INTEGER NOT NULL, Position INTEGER NOT NULL, PRIMARY KEY (ColumnId, JobId) );
 
+-- table BoardLaneAutomationDispatch
+CREATE TABLE BoardLaneAutomationDispatch ( EventKey TEXT NOT NULL, JobId INTEGER NOT NULL, CardId TEXT NOT NULL, ColumnId TEXT NOT NULL, DueUnixMs INTEGER NOT NULL, Status TEXT NOT NULL, Reason TEXT NOT NULL, RunId TEXT NULL, LastAttemptUnixMs INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (EventKey, JobId) );
+
 -- table BoardLaneAutomations
 CREATE TABLE BoardLaneAutomations ( ColumnId TEXT PRIMARY KEY REFERENCES BoardColumns(Id) ON DELETE CASCADE, JobId INTEGER NULL, Revision INTEGER NOT NULL );
 
@@ -193,6 +199,12 @@ CREATE TRIGGER BoardColumns_HistoryDeleted AFTER DELETE ON BoardColumns BEGIN IN
 
 -- trigger BoardLaneAutomations_ClearAdditional
 CREATE TRIGGER BoardLaneAutomations_ClearAdditional AFTER UPDATE ON BoardLaneAutomations BEGIN DELETE FROM BoardLaneAdditionalAutomations WHERE ColumnId = NEW.ColumnId; END;
+
+-- trigger BoardPendingAdditionalAutomations_RecordCancellation
+CREATE TRIGGER BoardPendingAdditionalAutomations_RecordCancellation BEFORE DELETE ON BoardPendingAdditionalAutomations BEGIN INSERT INTO BoardLaneAutomationDispatch (EventKey, JobId, CardId, ColumnId, DueUnixMs, Status, Reason) VALUES (OLD.EventKey, OLD.JobId, OLD.CardId, OLD.ColumnId, OLD.DueUnixMs, 'Cancelled', CASE WHEN NOT EXISTS (SELECT 1 FROM BoardCards WHERE Id = OLD.CardId AND DeletedUTC IS NULL) THEN 'Card was deleted.' WHEN NOT EXISTS (SELECT 1 FROM BoardCards WHERE Id = OLD.CardId AND ColumnId = OLD.ColumnId) THEN 'Card left the destination lane; a later entry starts a new settling period.' ELSE 'Lane Automation assignment changed or the pending entry was removed.' END) ON CONFLICT(EventKey, JobId) DO UPDATE SET Status = excluded.Status, Reason = excluded.Reason WHERE BoardLaneAutomationDispatch.Status = 'Waiting'; END;
+
+-- trigger BoardPendingAutomations_RecordCancellation
+CREATE TRIGGER BoardPendingAutomations_RecordCancellation BEFORE DELETE ON BoardPendingAutomations BEGIN INSERT INTO BoardLaneAutomationDispatch (EventKey, JobId, CardId, ColumnId, DueUnixMs, Status, Reason) VALUES (OLD.EventKey, OLD.JobId, OLD.CardId, OLD.ColumnId, OLD.DueUnixMs, 'Cancelled', CASE WHEN NOT EXISTS (SELECT 1 FROM BoardCards WHERE Id = OLD.CardId AND DeletedUTC IS NULL) THEN 'Card was deleted.' WHEN NOT EXISTS (SELECT 1 FROM BoardCards WHERE Id = OLD.CardId AND ColumnId = OLD.ColumnId) THEN 'Card left the destination lane; a later entry starts a new settling period.' ELSE 'Lane Automation assignment changed or the pending entry was removed.' END) ON CONFLICT(EventKey, JobId) DO UPDATE SET Status = excluded.Status, Reason = excluded.Reason WHERE BoardLaneAutomationDispatch.Status = 'Waiting'; END;
 
 -- trigger Boards_DeleteJiraConnection
 CREATE TRIGGER Boards_DeleteJiraConnection AFTER DELETE ON Boards BEGIN DELETE FROM BoardJiraConnections WHERE BoardId = OLD.Id; END;

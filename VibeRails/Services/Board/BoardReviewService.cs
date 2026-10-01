@@ -28,14 +28,11 @@ public sealed class BoardReviewService(IBoardStore store, IBoardService board)
                     rows.Add(await store.GetReviewAsync(project, card.Id, run.Id, ct) ?? FromRun(card.Id, run));
         if (offset == 0)
         {
-            var pending = await store.GetPendingLaneAutomationsAsync(project, card.Id, ct);
-            var definitions = await store.DescribeLaneAutomationsAsync(project, pending.Select(p => p.JobId).ToList(), ct);
-            foreach (var entry in pending)
+            var entries = await store.GetLaneAutomationStatusesAsync(project, card.Id, ct);
+            foreach (var entry in entries.Where(e => e.Purpose == "code_review" && e.RunId is null))
             {
-                var definition = definitions.FirstOrDefault(d => d.JobId == entry.JobId && d.Purpose == "code_review");
-                if (definition is not null)
-                    rows.Add(new($"pending-{entry.JobId}", card.Id, definition.WorkerCli, definition.WorkerName ?? definition.Name ?? "Reviewer",
-                        entry.DueUtc, ProcessStatus: "Waiting for lane entry to settle"));
+                rows.Add(new($"entry-{entry.EventKey}", card.Id, "unknown", entry.Name,
+                    entry.DueUtc, ProcessStatus: entry.Status, Error: entry.Reason));
             }
         }
         var resolved = new List<BoardReviewRecord>();

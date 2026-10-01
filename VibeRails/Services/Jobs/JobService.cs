@@ -124,7 +124,7 @@ public sealed class JobService(
         // Recheck project/enabled/overlap under the snapshot transaction. The card key was
         // resolved through IBoardStore; a browser never supplies a project or trigger key.
         var runId = await store.EnqueueBoardCardRunAsync(projectPath, id, cardKey, CancellationToken.None)
-            ?? throw JobServiceException.Conflict("The Automation is already queued or running, or is no longer available in this project.");
+            ?? throw JobServiceException.Conflict("The Automation is busy (already queued or running), or became unavailable in this project. This manual card request was not queued; retry when it is available.");
         scheduler.Kick();
         return new JobActionResponse(true, "Automation queued and linked to this card.", runId);
     }

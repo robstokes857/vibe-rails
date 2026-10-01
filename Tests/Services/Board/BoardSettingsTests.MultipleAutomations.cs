@@ -19,6 +19,10 @@ public sealed partial class BoardSettingsTests
     }
 
     private Task RemoveBoard7() => ExecuteSql("""
+        DROP TRIGGER BoardPendingAutomations_RecordCancellation;
+        DROP TRIGGER BoardPendingAdditionalAutomations_RecordCancellation;
+        DROP TABLE BoardLaneAutomationDispatch;
+        DELETE FROM SchemaMigrations WHERE Component = 'board-lane-dispatch';
         DROP TRIGGER BoardCards_AdditionalLaneAutomation_Insert;
         DROP TRIGGER BoardCards_AdditionalLaneAutomation_Move;
         DROP TRIGGER BoardLaneAutomations_ClearAdditional;
@@ -94,7 +98,7 @@ public sealed partial class BoardSettingsTests
         if (reason == "overlap") Assert.NotNull(await _jobs.EnqueueManualRunAsync(skipped.Id, Ct));
         var run = (await _jobs.GetRunAsync(Assert.Single(await Tick(due)), Ct))!;
         Assert.Equal(valid.Id, run.JobId);
-        Assert.Equal(0, await Due(card.Id));
+        Assert.Equal(reason == "overlap" ? due : 0, await Due(card.Id));
         Assert.Empty(await Tick(due + 100_000));
     }
 
@@ -138,9 +142,9 @@ public sealed partial class BoardSettingsTests
         var card = await Card(a);
         var due = await Due(card.Id);
         var firstBatch = await Tick(due);
-        Assert.Equal(101, firstBatch.Count); // Original queue plus 100 additional events.
+        Assert.Equal(100, firstBatch.Count); // One shared bounded batch across both queues.
         var remaining = await Tick(due);
-        Assert.Equal(2, remaining.Count);
+        Assert.Equal(3, remaining.Count);
         Assert.Equal(103, firstBatch.Concat(remaining).Distinct().Count());
         Assert.Equal(0, await Due(card.Id));
         Assert.Empty(await Tick(due));

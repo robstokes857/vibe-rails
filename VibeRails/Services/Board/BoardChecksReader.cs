@@ -54,14 +54,14 @@ public sealed class BoardChecksReader(IBoardStore boards, IJobStore jobs, BoardC
                         : $"No completed check evidence. Run {run.Status}: {action.ErrorMessage ?? run.ErrorMessage}", 0, 0, 0, 0, []));
             }
         }
-        foreach (var entry in await boards.GetPendingLaneAutomationsAsync(project, card.Id, ct))
+        foreach (var entry in (await boards.GetLaneAutomationStatusesAsync(project, card.Id, ct)).Where(e => e.RunId is null))
         {
-            var job = catalog.FirstOrDefault(job => job.Id == entry.JobId && job.Enabled);
+            var job = catalog.FirstOrDefault(job => job.Id == entry.JobId);
             foreach (var action in job?.Actions?.Where(a => JobCheckScope.IsCheck(a.Kind)) ?? [])
-                pending.Add(new($"pending-{action.Id}", card.Id, "lane-entry", action.Id,
-                    action.Kind == JobActionKind.Vca ? "VCA" : "Code quality", "Waiting",
+                pending.Add(new($"entry-{entry.EventKey}-{action.Id}", card.Id, "lane-entry", action.Id,
+                    action.Kind == JobActionKind.Vca ? "VCA" : "Code quality", entry.Status,
                     string.Join(" ", action.Arguments), null, null, null, null, "unknown", entry.DueUtc, null,
-                    "Waiting for the lane entry to settle.", 0, 0, 0, 0, []));
+                    entry.Reason, 0, 0, 0, 0, []));
         }
         return new(resolved, pending, options, checks.Count == 50, latest);
     }
