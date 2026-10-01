@@ -674,10 +674,70 @@ async function openLaneAgentsBoard(page) {
             current.jobIds = body.jobIds;
             current.revision++;
         }
-        return route.fulfill({ json: { ...current, jobs: jobs.map(({ id, name, enabled }) => ({ id, name, enabled })) } });
+        return route.fulfill({ json: { ...current, jobs: jobs.map(({ id, name, enabled, setup }) => ({ id, name, enabled, setup })) } });
     });
     await page.evaluate(() => window.app.boardController.refresh());
     return { jobs, settings, writes };
+}
+
+for (const width of [1440, 390]) {
+    test(`starter reviewer is editable and removable from the first lane at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 900 });
+        const { jobs, settings, writes } = await openLaneAgentsBoard(page);
+        jobs[0].setup = 'Setup needed: Install/sign in to claude. No provider will be substituted. <img src=x onerror="window.__setupXss=1">';
+        settings.lane_0.jobIds = [12];
+        const environments = [{ id: 8, name: 'Starter Worker', cli: 'codex', purpose: 'code_review',
+            reviewerRouting: { mode: 'switch', mappings: [
+                { sourceProvider: 'claude', reviewer: { selection: 'base:codex' } },
+                { sourceProvider: 'codex', reviewer: { selection: 'base:claude' } }
+            ], fallback: { selection: 'base:codex' } } }];
+        await page.route('**/api/v1/environments', route => route.fulfill({ json: { environments } }));
+        const reviewerWrites = [];
+        await page.route('**/api/v1/environments/Starter%20Worker', route => {
+            const body = route.request().postDataJSON(); reviewerWrites.push(body);
+            Object.assign(environments[0], body);
+            return route.fulfill({ json: environments[0] });
+        });
+        const launches = [];
+        page.on('request', request => { if (request.method() === 'POST' && /\/(launch|run|run-now)$/.test(new URL(request.url()).pathname)) launches.push(request.url()); });
+        await page.evaluate(() => window.app.boardController.refresh());
+        const button = page.getByRole('button', { name: 'Agents on entry to Backlog', exact: true });
+        await expect(button).toBeVisible();
+        const buttonBox = await button.boundingBox();
+        expect(buttonBox.x).toBeGreaterThanOrEqual(0);
+        await button.click();
+        const panel = page.getByRole('dialog', { name: 'Lane agents', exact: true });
+        await expect(panel).toContainText('Claude → Codex; Codex → Claude');
+        await expect(panel).toContainText('Code review report');
+        await expect(panel).toContainText('does not launch an agent');
+        await expect(panel).toContainText('Setup needed: Install/sign in to claude');
+        expect(await page.evaluate(() => window.__setupXss)).toBeUndefined();
+        await panel.getByRole('button', { name: 'Choose reviewer / edit mappings' }).click();
+        await expect(panel.getByLabel('Coding provider')).toHaveCount(2);
+        await panel.getByLabel('Coding provider').first().fill('opencode');
+        await panel.getByRole('button', { name: 'Save reviewer', exact: true }).click();
+        await expect.poll(() => reviewerWrites.length).toBe(1);
+        expect(reviewerWrites[0].reviewerRouting.mappings[0].sourceProvider).toBe('opencode');
+        await expect(panel).toContainText('OpenCode → Codex');
+        await panel.getByRole('button', { name: 'Choose reviewer / edit mappings' }).click();
+        await panel.getByRole('button', { name: 'Code review — Codex', exact: true }).click();
+        await expect(panel.getByLabel('Coding provider')).toHaveCount(0);
+        await expect(panel.locator('[data-reviewer-fallback] select[data-reviewer-target]')).toHaveValue('base:codex');
+        await panel.getByRole('button', { name: 'Save reviewer', exact: true }).click();
+        await expect.poll(() => reviewerWrites.length).toBe(2);
+        expect(reviewerWrites[1].reviewerRouting).toMatchObject({ mappings: [], fallback: { selection: 'base:codex' } });
+        await expect(panel).toContainText('Reviewer: Codex for every coding source.');
+        expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+        await page.screenshot({ path: testInfo.outputPath(`starter-reviewer-${width}.png`) });
+        await panel.getByRole('button', { name: 'Remove Code reviewer from this lane' }).click();
+        await page.getByRole('alertdialog').getByRole('button', { name: 'Remove', exact: true }).click();
+        await expect.poll(() => settings.lane_0.jobIds).toEqual([]);
+        await panel.getByRole('button', { name: 'Close lane agents' }).click();
+        await button.click();
+        await expect(panel).toContainText('No agents on entry');
+        expect(writes.every(write => write.kind === 'selection')).toBe(true);
+        expect(launches).toEqual([]);
+    });
 }
 
 for (const width of [1440, 390]) {
@@ -735,7 +795,7 @@ for (const width of [1440, 390]) {
         await page.setViewportSize({ width, height: 900 });
         const { jobs, settings, writes } = await openLaneAgentsBoard(page);
         const buttons = page.locator('.board-lane-agents-button');
-        await expect(buttons).toHaveCount(3);
+        await expect(buttons).toHaveCount(4);
         const button = page.getByRole('button', { name: 'Agents on entry to Review', exact: true });
         await expect(button.locator('.board-lane-agents-count')).toHaveText('2');
         await button.scrollIntoViewIfNeeded();

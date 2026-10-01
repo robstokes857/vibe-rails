@@ -1,5 +1,10 @@
 # Board persistence
 
+`board-starter-workflows/1` adds new-board recipe intents, bound to lane IDs at creation only.
+Settings insert/update triggers retire an intent without changing existing settings or history.
+Completion and assignment commit together behind `IBoardStore`; state recipe installation commits
+independently through `IJobStore`. Never backfill old boards or reset completion after removal.
+
 `board-lane-dispatch/1` adds a dispatch ledger and cancellation triggers that write only to that
 new table. Existing queue/schema writers remain compatible. Busy events stay pending; the drain
 selects the oldest entry per Job and rotates attempted Jobs through a bounded batch. Exact event

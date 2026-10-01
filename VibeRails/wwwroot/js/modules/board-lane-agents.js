@@ -2,9 +2,23 @@ import { BoardApi } from './board-api.js';
 import { escapeHtml, confirmDialog, isConfirmDialogOpen, getCliBrand } from './utils.js';
 import { getJobCliForLlm } from './jobs-controller.js';
 import { workerModelSummary } from './llm-display.js';
+import { routingEditorMarkup, mountRoutingEditor, switchReviewerDefaults } from './reviewer-routing.js';
 
 const selectedIds = settings => settings.jobIds ?? (settings.jobId ? [settings.jobId] : []);
 const icon = name => `<i class="fa-solid fa-${name}" aria-hidden="true"></i>`;
+
+export function laneReviewerSummary(environment, environments = []) {
+    const label = target => {
+        const parts = (target?.selection || '').split(':');
+        const env = parts[0] === 'env' ? environments.find(item => Number(item.id) === Number(parts[1])) : null;
+        return env?.name || (parts[0] === 'base' ? getCliBrand(parts[1]).label : target?.selection) || 'Unavailable reviewer';
+    };
+    const routing = environment?.reviewerRouting;
+    if (routing?.mode !== 'switch') return `Reviewer: ${getCliBrand(environment?.cli || '').label}`;
+    const mappings = (routing.mappings || []).map(mapping => `${getCliBrand(mapping.sourceProvider).label} → ${label(mapping.reviewer)}`);
+    return mappings.length ? `Switch reviewer: ${mappings.join('; ')}. Unknown, mixed, human or unmapped source → ${label(routing.fallback)}.`
+        : `Reviewer: ${label(routing.fallback)} for every coding source.`;
+}
 
 function workerIdentity(job, environments = []) {
     const actions = Array.isArray(job?.actions) ? job.actions : [];
@@ -13,6 +27,8 @@ function workerIdentity(job, environments = []) {
         : job?.environmentId ? job : null;
     if (!worker) return { label: job ? 'Script workflow' : 'Unavailable Automation', icon: job ? 'code' : 'question' };
     const environment = environments.find(item => worker.environmentId != null && Number(item.id) === Number(worker.environmentId));
+    if (environment?.reviewerRouting?.mode === 'switch')
+        return { label: 'Reviewer selection', icon: 'shuffle', workerName: environment.name };
     const cli = environment?.cli || getJobCliForLlm(worker.llm || job.llm);
     return { ...getCliBrand(cli || ''), icon: 'user-gear',
         workerName: environment?.name || worker.environmentName || job.environmentName,
@@ -101,7 +117,7 @@ export class BoardLaneAgents {
             <div><h2 id="board-lane-agents-title">Lane agents</h2><p>On entry to <strong>${escapeHtml(column.name)}</strong></p></div>
             <button type="button" class="board-lane-agents-action" data-agent-action="close" aria-label="Close lane agents">${icon('xmark')}</button>
         </header>
-        <p class="board-lane-agents-help">Move cards freely. Enabled Automations run after a card stays here for 60 seconds, from any lane or when newly created.</p>
+        <p class="board-lane-agents-help">Move cards freely. Enabled Automations run after a card stays here for 60 seconds, from any lane or when newly created. Creating a board or saving settings does not launch an agent. You and your agents choose the next action; Done has the meaning you give it.</p>
         <div data-lane-agents-content role="status">Loading agents…</div>`;
         this.anchor = button;
         this.panel = panel;
@@ -118,6 +134,10 @@ export class BoardLaneAgents {
         const descriptionDrafts = new Map();
         const editingDescriptions = new Set();
         const savedDescriptions = new Set();
+        const editingReviewers = new Set();
+        const reviewerDrafts = new Map();
+        const reviewerEditors = new Map();
+        const disposeReviewers = () => { reviewerEditors.forEach(editor => editor.dispose()); reviewerEditors.clear(); };
         const options = { showLoading: false, preferErrorResponseMessage: true, signal: abort.signal };
         const projectPath = this.app.data.configs?.rootPath || '';
 
@@ -132,17 +152,19 @@ export class BoardLaneAgents {
         this.positionPanel = position;
 
         const render = () => {
+            disposeReviewers();
             const ids = selectedIds(settings);
             const choices = settings.jobs || [];
             content.removeAttribute('role');
-            content.innerHTML = `<div class="board-lane-agents-list">${ids.map(id => {
+            content.innerHTML = `${settings.starterSetupPending ? '<p role="status">Starter review setup is pending. Reopen this panel to retry, or save your own lane selection to cancel the default.</p>' : ''}<div class="board-lane-agents-list">${ids.map(id => {
                 const option = choices.find(job => job.id === id);
                 const job = jobs.find(job => job.id === id);
                 const name = option?.name || `Unavailable Automation (${id})`;
                 const description = descriptionDrafts.get(id) ?? job?.description ?? '';
                 const worker = workerIdentity(job, environments);
                 const environmentId = job?.actions?.find(a => Number(a.kind) === 0)?.environmentId ?? job?.environmentId;
-                const purpose = environments.find(env => Number(env.id) === Number(environmentId))?.purpose;
+                const environment = environments.find(env => Number(env.id) === Number(environmentId));
+                const purpose = environment?.purpose;
                 const workerLogo = worker.logo
                     ? `<img src="${escapeHtml(worker.logo)}" alt="${escapeHtml(worker.label)}"${worker.logoFilter ? ` style="filter:${escapeHtml(worker.logoFilter)}"` : ''}>`
                     : icon(worker.icon);
@@ -160,6 +182,17 @@ export class BoardLaneAgents {
                     <button type="button" class="board-lane-agents-action" data-agent-action="remove" aria-label="Remove ${escapeHtml(name)} from this lane"
                         title="Remove from this lane">${icon('trash-can')}</button>
                     </div>
+                    ${purpose === 'code_review' ? `<p class="board-lane-agent-reviewer">${escapeHtml(laneReviewerSummary(environment, environments))}</p>
+                        <p class="small">Output: saved Checks evidence for configured checks, a Code review report and a card handoff. Review the scope and coverage on the card.</p>
+                        ${option?.setup ? `<p class="small" role="status">${escapeHtml(option.setup)}</p>` : ''}
+                        ${editingReviewers.has(id) ? `<div data-agent-reviewer-editor>
+                            <div class="d-flex flex-wrap gap-2 mb-2"><button type="button" class="btn btn-sm btn-outline-secondary" data-agent-action="switch-preset">Switch reviewer</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" data-agent-action="codex-preset">Code review — Codex</button></div>
+                            ${routingEditorMarkup()}
+                            <p class="small">Reviewer settings belong to this Worker and apply wherever it is used.</p>
+                            <button type="button" class="btn btn-sm btn-outline-primary" data-agent-action="save-reviewer">Save reviewer</button>
+                            <button type="button" class="btn btn-sm btn-link" data-agent-action="cancel-reviewer">Cancel</button>
+                        </div>` : '<button type="button" class="btn btn-sm btn-outline-secondary mb-2" data-agent-action="edit-reviewer">Choose reviewer / edit mappings</button>'}` : ''}
                     ${job ? editingDescriptions.has(id) ? `<label class="board-lane-agent-description-label" for="lane-agent-description-${Number(id)}">Agent description</label>
                         <textarea id="lane-agent-description-${Number(id)}" class="form-control board-lane-agent-description"
                             data-agent-description rows="3" maxlength="2000" aria-label="Agent description for ${escapeHtml(name)}"
@@ -192,6 +225,16 @@ export class BoardLaneAgents {
                     <button type="button" class="btn btn-sm btn-link" data-agent-action="create">Create Automation…</button></div>
                 <small>Create and edit Automations on the Automations page, then select them here.</small>
             </form>` : `<button type="button" class="btn btn-sm btn-outline-secondary" data-agent-action="add">${icon('plus')} Add agent</button>`}`;
+            for (const id of editingReviewers) {
+                const host = content.querySelector(`[data-agent-id="${id}"] [data-agent-reviewer-editor]`);
+                if (!host) continue;
+                const job = jobs.find(item => item.id === id);
+                const envId = job?.actions?.find(a => Number(a.kind) === 0)?.environmentId ?? job?.environmentId;
+                const environment = environments.find(item => Number(item.id) === Number(envId));
+                const initial = reviewerDrafts.get(id) || environment?.reviewerRouting || { mode: 'switch', mappings: [], fallback: { selection: `base:${environment?.cli || 'codex'}` } };
+                const editor = mountRoutingEditor(this.app, host, initial, () => reviewerDrafts.set(id, editor.read()));
+                reviewerEditors.set(id, editor);
+            }
             position();
         };
 
@@ -231,7 +274,7 @@ export class BoardLaneAgents {
         const run = async (operation, focusSelector) => {
             if (busy) return;
             busy = true;
-            content.querySelectorAll('button, select, textarea').forEach(control => { control.disabled = true; });
+            content.querySelectorAll('button, select, textarea, input').forEach(control => { control.disabled = true; });
             try { await operation(); }
             catch (error) {
                 if (!alive()) return;
@@ -260,6 +303,31 @@ export class BoardLaneAgents {
             const id = Number(event.target.closest('[data-agent-id]')?.dataset.agentId);
             if (action === 'retry') { void reload(); return; }
             if (action === 'add') { adding = true; render(); content.querySelector('select')?.focus(); return; }
+            if (action === 'edit-reviewer') { editingReviewers.add(id); render(); return; }
+            if (action === 'cancel-reviewer') { editingReviewers.delete(id); reviewerDrafts.delete(id); render(); return; }
+            if (action === 'switch-preset' || action === 'codex-preset') {
+                reviewerDrafts.set(id, action === 'switch-preset' ? switchReviewerDefaults()
+                    : { mode: 'switch', mappings: [], fallback: { selection: 'base:codex' } });
+                render(); return;
+            }
+            if (action === 'save-reviewer') {
+                const routing = reviewerEditors.get(id).read();
+                reviewerDrafts.set(id, routing);
+                const job = jobs.find(item => item.id === id);
+                const envId = job?.actions?.find(a => Number(a.kind) === 0)?.environmentId ?? job?.environmentId;
+                void run(async () => {
+                    const catalog = await this.app.apiCall('/api/v1/environments', 'GET', null, options);
+                    if (!alive()) return;
+                    const environment = catalog?.environments?.find(item => Number(item.id) === Number(envId));
+                    if (!environment) throw new Error('The Worker is unavailable. Reload and choose another Automation.');
+                    await this.app.apiCall(`/api/v1/environments/${encodeURIComponent(environment.name)}`, 'PUT',
+                        { purpose: 'code_review', reviewerRouting: routing }, { showLoading: false, preferErrorResponseMessage: true });
+                    if (!alive()) return;
+                    editingReviewers.delete(id); reviewerDrafts.delete(id);
+                    await load();
+                }, `[data-agent-id="${id}"] [data-agent-action="edit-reviewer"]`);
+                return;
+            }
             if (action === 'edit-description') {
                 editingDescriptions.add(id);
                 render();
@@ -323,7 +391,7 @@ export class BoardLaneAgents {
                         { showLoading: false, preferErrorResponseMessage: true });
                     if (!alive()) return;
                     jobs = jobs.map(item => item.id === id ? saved : item);
-                    settings.jobs = settings.jobs.map(item => item.id === id ? { id, name: saved.name, enabled: saved.enabled } : item);
+                    settings.jobs = settings.jobs.map(item => item.id === id ? { ...item, name: saved.name, enabled: saved.enabled } : item);
                     descriptionDrafts.delete(id);
                     editingDescriptions.delete(id);
                     savedDescriptions.add(id);
@@ -363,6 +431,7 @@ export class BoardLaneAgents {
         resizeObserver.observe(panel);
         this.cleanup = () => {
             abort.abort();
+            disposeReviewers();
             resizeObserver.disconnect();
             document.removeEventListener('pointerdown', outside);
             document.removeEventListener('keydown', keydown, true);

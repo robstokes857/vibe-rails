@@ -1,5 +1,10 @@
 # SQLite Data Layer — Business Logic & Technical Reference
 
+`jobs-board-recipes/1` adds stable local new-board recipe receipts. `JobStore.BoardRecipes.cs`
+creates the Worker, Job, ordered checks and receipt atomically; Board assignment is a separate
+commit through `IBoardStore`. Receipts retain identity after deletion and recovery never updates
+user-edited definitions. See the [Board starter contract](../../VibeRails/Services/Board/ARCHITECTURE.md#new-board-review-defaults-vibe-23).
+
 Implementation is in `VibeRails.Data.Sqlite`; contracts and shared records are in
 `VibeRails.Data.Abstractions`. Namespaces remain stable for callers. Host composition uses
 `SqliteStorage`; application code does not construct connections or concrete stores.

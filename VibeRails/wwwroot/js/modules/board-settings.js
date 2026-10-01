@@ -18,7 +18,7 @@ export const laneAutomationSection = () => `
         <h6>Automations</h6>
         <p class="board-editor-muted">Run selected Automations after a card enters this lane and stays for 60 seconds. Each runs independently. Moving again restarts the wait. Reordering or editing a card in the same lane does not trigger them.</p>
         <div data-board-settings-content>Loading Automations…</div>
-        <p class="board-editor-muted mt-2">Runs while a VibeRails backend is open. Disabled Automations and overlapping runs are skipped. Saving this setting cancels pending triggers for this lane and applies to future entries.</p>
+        <p class="board-editor-muted mt-2">Runs while a VibeRails backend is open. Busy Automations wait for their turn. Saving settings cancels pending entries for this lane and applies to future entries; it does not launch an agent. Lane agents shows each workflow’s purpose, output and reviewer choices. Removing a selection keeps the shared Automation. You define what each lane, including Done, means.</p>
     </section>`;
 
 // Each mount owns its request and DOM. Replacing/closing a modal cannot populate a newer one.
@@ -106,11 +106,11 @@ export function mountBoardContext(app, element, boardId) {
 export function mountLaneAutomation(app, element, columnId, onSaved) {
     return mountSettings(app, element, {
         load: extra => BoardApi.getLaneAutomationAsync(columnId, extra),
-        render: ({ jobs, jobIds, jobId }) => {
+        render: ({ jobs, jobIds, jobId, starterSetupPending }) => {
             const selected = new Set(jobIds ?? (jobId ? [jobId] : []));
             const choices = [...jobs, ...[...selected].filter(id => !jobs.some(job => job.id === id))
                 .map(id => ({ id, name: `Unavailable Automation (${id})`, enabled: false }))];
-            return `<fieldset class="mb-2">
+            return `${starterSetupPending ? '<p role="status">Starter review setup is pending. Reopen to retry, or save your lane selection to cancel the default.</p>' : ''}<fieldset class="mb-2">
                 <legend class="board-editor-label">Automations on entry</legend>
                 <p class="board-editor-muted">Select any number, or clear all to turn off Automations for this lane. Remove unavailable or disabled selections before saving.</p>
                 ${choices.map(job => `<label class="d-flex align-items-start gap-2 mb-2">

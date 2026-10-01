@@ -712,7 +712,7 @@ export class BoardController {
                 return `
                     <section class="board-lane" data-column-id="${escapeHtml(column.id)}"
                         style="--lane-color:${escapeHtml(column.color)}">
-                        ${index > 0 ? this.laneAgents.button(column) : ''}
+                        ${this.laneAgents.button(column)}
                         <header class="board-lane-head">
                             <button type="button" class="board-lane-grip" title="Drag to reorder this lane"
                                 aria-label="Reorder ${escapeHtml(column.name)}">

@@ -1,5 +1,17 @@
 # Working on Vibe Board
 
+## New-board review defaults (VIBE-23)
+
+The single local lane template records a `BoardStarterWorkflows` intent with the new Review
+lane's ID in the board-creation transaction. `BoardStarterWorkflowService` recovers it through
+`IJobStore.EnsureBoardReviewRecipeAsync`, then assigns it through `IBoardStore`. Workers, Jobs
+and the stable recipe receipt commit together in state.db. Root Board access and the existing
+scheduler recover incomplete installs; a lean stdio first-board creation only records intent.
+Never seed by runtime lane name, retrofit existing boards, refresh installed recipes, or restore
+a removed assignment. A settings write, even an empty selection from an older writer, cancels
+pending installation. Removing a lane or assignment keeps the shared Automation and Worker.
+See [the starter contract](ARCHITECTURE.md#new-board-review-defaults-vibe-23).
+
 ## Waiting lane Automations (VIBE-21)
 
 Busy lane demand stays in the existing Board queues. Keep the oldest pending entry per Job

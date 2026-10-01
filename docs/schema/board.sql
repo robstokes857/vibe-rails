@@ -164,6 +164,9 @@ CREATE TABLE BoardReviews ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES
 -- table BoardSharedOrigins
 CREATE TABLE BoardSharedOrigins ( BoardId TEXT PRIMARY KEY REFERENCES Boards(Id) ON DELETE CASCADE, RemoteBoardId TEXT NOT NULL UNIQUE, DestinationKey TEXT NOT NULL, KeyPrefix TEXT NOT NULL );
 
+-- table BoardStarterWorkflows
+CREATE TABLE BoardStarterWorkflows ( ColumnId TEXT PRIMARY KEY REFERENCES BoardColumns(Id) ON DELETE CASCADE, RecipeId TEXT NOT NULL, Completed INTEGER NOT NULL DEFAULT 0 );
+
 -- table BoardSyncLinks
 CREATE TABLE BoardSyncLinks ( BoardId TEXT PRIMARY KEY REFERENCES Boards(Id) ON DELETE CASCADE, RemoteBoardId TEXT NOT NULL, Cursor INTEGER NOT NULL DEFAULT 0, Enabled INTEGER NOT NULL DEFAULT 1, LayoutHash TEXT, LastSyncUTC TEXT, LastError TEXT, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL , DestinationKey TEXT, ActivitySchema INTEGER NOT NULL DEFAULT 0, ActivityAfter TEXT);
 
@@ -208,6 +211,12 @@ CREATE TRIGGER BoardPendingAdditionalAutomations_RecordCancellation BEFORE DELET
 
 -- trigger BoardPendingAutomations_RecordCancellation
 CREATE TRIGGER BoardPendingAutomations_RecordCancellation BEFORE DELETE ON BoardPendingAutomations BEGIN INSERT INTO BoardLaneAutomationDispatch (EventKey, JobId, CardId, ColumnId, DueUnixMs, Status, Reason) VALUES (OLD.EventKey, OLD.JobId, OLD.CardId, OLD.ColumnId, OLD.DueUnixMs, 'Cancelled', CASE WHEN NOT EXISTS (SELECT 1 FROM BoardCards WHERE Id = OLD.CardId AND DeletedUTC IS NULL) THEN 'Card was deleted.' WHEN NOT EXISTS (SELECT 1 FROM BoardCards WHERE Id = OLD.CardId AND ColumnId = OLD.ColumnId) THEN 'Card left the destination lane; a later entry starts a new settling period.' ELSE 'Lane Automation assignment changed or the pending entry was removed.' END) ON CONFLICT(EventKey, JobId) DO UPDATE SET Status = excluded.Status, Reason = excluded.Reason WHERE BoardLaneAutomationDispatch.Status = 'Waiting'; END;
+
+-- trigger BoardStarterWorkflows_SettingsInsert
+CREATE TRIGGER BoardStarterWorkflows_SettingsInsert AFTER INSERT ON BoardLaneAutomations BEGIN UPDATE BoardStarterWorkflows SET Completed = 1 WHERE ColumnId = NEW.ColumnId; END;
+
+-- trigger BoardStarterWorkflows_SettingsUpdate
+CREATE TRIGGER BoardStarterWorkflows_SettingsUpdate AFTER UPDATE ON BoardLaneAutomations BEGIN UPDATE BoardStarterWorkflows SET Completed = 1 WHERE ColumnId = NEW.ColumnId; END;
 
 -- trigger Boards_DeleteJiraConnection
 CREATE TRIGGER Boards_DeleteJiraConnection AFTER DELETE ON Boards BEGIN DELETE FROM BoardJiraConnections WHERE BoardId = OLD.Id; END;

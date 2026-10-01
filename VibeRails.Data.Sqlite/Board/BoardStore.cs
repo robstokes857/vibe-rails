@@ -1552,8 +1552,19 @@ public sealed partial class BoardStore : IBoardStore
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
         var lanePosition = 0;
-        foreach (var (laneName, color) in DefaultLanes)
-            await InsertColumnAsync(connection, transaction, NewId("col"), project, board.Id, laneName, lanePosition++, color, now, cancellationToken);
+        foreach (var (laneName, color, recipeId) in DefaultLaneTemplate)
+        {
+            var columnId = NewId("col");
+            await InsertColumnAsync(connection, transaction, columnId, project, board.Id, laneName, lanePosition++, color, now, cancellationToken);
+            // This is a template role, captured once at creation, never a runtime lane-name lookup.
+            if (recipeId is null) continue;
+            await using var seed = connection.CreateCommand();
+            seed.Transaction = transaction;
+            seed.CommandText = "INSERT INTO BoardStarterWorkflows (ColumnId, RecipeId) VALUES ($column, $recipe);";
+            seed.Parameters.AddWithValue("$column", columnId);
+            seed.Parameters.AddWithValue("$recipe", recipeId);
+            await seed.ExecuteNonQueryAsync(cancellationToken);
+        }
         return board;
     }
 
@@ -1827,6 +1838,8 @@ public sealed partial class BoardStore : IBoardStore
         SqliteMigrationRunner.Apply(connection, "board-lane-dispatch", 1, MigrationKind.Additive, ApplyLaneDispatchSchema);
         SqliteMigrationRunner.Apply(connection, "board-checks", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, ChecksSchemaSql));
+        SqliteMigrationRunner.Apply(connection, "board-starter-workflows", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, StarterWorkflowSchemaSql));
         ReconcileDerivedRows(connection);
     }
 
@@ -1971,15 +1984,18 @@ public sealed partial class BoardStore : IBoardStore
     private static string ToDb(DateTime value) => value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
     private static DateTime ParseDb(string value) => DateTime.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind).ToUniversalTime();
 
-    /// <summary>The lanes a new project's board starts with (the placeholder's seed, minus its sample cards).</summary>
-    public static readonly IReadOnlyList<(string Name, string Color)> DefaultLanes =
+    private static readonly IReadOnlyList<(string Name, string Color, string? RecipeId)> DefaultLaneTemplate =
     [
-        ("Backlog", "#64748b"),
-        ("Ready", "#3b82f6"),
-        ("Build", "#06b6d4"),
-        ("Review", "#f59e0b"),
-        ("Done", "#10b981")
+        ("Backlog", "#64748b", null),
+        ("Ready", "#3b82f6", null),
+        ("Build", "#06b6d4", null),
+        ("Review", "#f59e0b", VibeRails.DTOs.BoardReviewDefaults.RecipeId),
+        ("Done", "#10b981", null)
     ];
+
+    /// <summary>The lanes offered for first and additional local boards.</summary>
+    public static readonly IReadOnlyList<(string Name, string Color)> DefaultLanes =
+        DefaultLaneTemplate.Select(lane => (lane.Name, lane.Color)).ToArray();
 
     internal const string BoardsTableSql = """
         CREATE TABLE IF NOT EXISTS Boards (

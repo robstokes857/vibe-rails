@@ -75,7 +75,8 @@ public partial interface IBoardService
 public sealed partial class BoardService(
     IBoardStore store,
     IBoardCommitService commits,
-    IBoardLiveSessionProbe liveSessions) : IBoardService
+    IBoardLiveSessionProbe liveSessions,
+    BoardStarterWorkflowService? starterWorkflows = null) : IBoardService
 {
     // Raised 2026-09-17 (description 20k→100k, comment 10k→50k, attachments 12→40 per card): the
     // first agents to work cards split multi-part reports across comments and hit the old caps.
@@ -92,9 +93,15 @@ public sealed partial class BoardService(
 
     // ------------------------------------------------------------------ boards
 
-    public async Task<BoardListResponse> GetBoardsAsync(string projectPath, CancellationToken cancellationToken = default)
+    private async Task EnsureDefaultBoardAsync(string projectPath, CancellationToken cancellationToken)
     {
         await store.EnsureDefaultColumnsAsync(projectPath, cancellationToken);
+        if (starterWorkflows is not null) await starterWorkflows.RecoverAsync(projectPath, cancellationToken);
+    }
+
+    public async Task<BoardListResponse> GetBoardsAsync(string projectPath, CancellationToken cancellationToken = default)
+    {
+        await EnsureDefaultBoardAsync(projectPath, cancellationToken);
         var boards = await store.GetBoardsAsync(projectPath, cancellationToken);
         var columns = await store.GetAllColumnsAsync(projectPath, cancellationToken);
         var counts = await store.CountCardsByBoardAsync(projectPath, cancellationToken);
@@ -107,6 +114,7 @@ public sealed partial class BoardService(
         // Board and prefix are one write: a failure cannot leave the board without the prefix it was created with.
         var prefix = string.IsNullOrWhiteSpace(request.DisplayPrefix) ? null : BoardDisplayIds.NormalizePrefix(request.DisplayPrefix);
         var board = await store.CreateBoardAsync(projectPath, name, prefix, cancellationToken);
+        if (starterWorkflows is not null) await starterWorkflows.RecoverAsync(projectPath, cancellationToken);
         var columns = await store.GetColumnsAsync(projectPath, cancellationToken, board.Id);
         return ToDto(board, columns, new Dictionary<string, int>());
     }
@@ -160,7 +168,7 @@ public sealed partial class BoardService(
         var wanted = idOrName?.Trim() ?? string.Empty;
         if (wanted.Length == 0)
             return null;
-        await store.EnsureDefaultColumnsAsync(projectPath, cancellationToken);
+        await EnsureDefaultBoardAsync(projectPath, cancellationToken);
         var boards = await store.GetBoardsAsync(projectPath, cancellationToken);
         var byId = boards.FirstOrDefault(b => string.Equals(b.Id, wanted, StringComparison.Ordinal));
         if (byId is not null)
@@ -175,7 +183,7 @@ public sealed partial class BoardService(
 
     public async Task<BoardColumnListResponse> GetColumnsAsync(string projectPath, CancellationToken cancellationToken = default, string? boardId = null)
     {
-        await store.EnsureDefaultColumnsAsync(projectPath, cancellationToken);
+        await EnsureDefaultBoardAsync(projectPath, cancellationToken);
         var columns = await store.GetColumnsAsync(projectPath, cancellationToken, boardId);
         return new BoardColumnListResponse(columns.Select(ToDto).ToList());
     }
@@ -184,7 +192,7 @@ public sealed partial class BoardService(
     {
         var name = NormalizeColumnName(request.Name) ?? "New lane";
         var color = NormalizeColor(request.Color) ?? "#64748b";
-        await store.EnsureDefaultColumnsAsync(projectPath, cancellationToken);
+        await EnsureDefaultBoardAsync(projectPath, cancellationToken);
         var column = await store.CreateColumnAsync(projectPath, name, color, cancellationToken, NormalizeBoardId(request.BoardId));
         return ToDto(column);
     }
@@ -218,7 +226,7 @@ public sealed partial class BoardService(
         var wanted = idOrName?.Trim() ?? string.Empty;
         if (wanted.Length == 0)
             return null;
-        await store.EnsureDefaultColumnsAsync(projectPath, cancellationToken);
+        await EnsureDefaultBoardAsync(projectPath, cancellationToken);
         var everywhere = await store.GetAllColumnsAsync(projectPath, cancellationToken);
         var byId = everywhere.FirstOrDefault(c => string.Equals(c.Id, wanted, StringComparison.Ordinal));
         if (byId is not null)
@@ -279,7 +287,7 @@ public sealed partial class BoardService(
     {
         var title = NormalizeTitle(request.Title) ?? throw new BoardValidationException("Title is required.");
         // A brand-new project's first card may arrive over MCP before anything listed the lanes.
-        await store.EnsureDefaultColumnsAsync(projectPath, cancellationToken);
+        await EnsureDefaultBoardAsync(projectPath, cancellationToken);
         var card = await store.CreateCardAsync(projectPath, new NewBoardCard(
             request.ColumnId,
             title,

@@ -1,5 +1,48 @@
 # Vibe Board architecture and review
 
+## New-board review defaults (VIBE-23)
+
+There is one supported local lane template: Backlog / Ready / Build / Review / Done. Both first
+board initialization and additional-board creation use `InsertBoardWithDefaultLanesAsync`.
+The template's Review definition carries recipe `viberails.board.switch-reviewer.v1`; creation
+records its newly allocated lane ID in `BoardStarterWorkflows`, in the same Board transaction.
+Shared imports and adoption of legacy lanes do not seed local workflows.
+
+`BoardStarterWorkflowService` finishes untouched intents on root Board access and each root
+scheduler cycle. Lean stdio creation records the intent for that root recovery without running
+full state-schema setup. `IJobStore.EnsureBoardReviewRecipeAsync` creates a dedicated editable
+Worker, enabled Job and `BoardAutomationRecipes` receipt in one state.db transaction. The receipt
+is keyed by project, lane ID and stable recipe ID, independent of display names. Separate Board
+completion assigns once. A failed state write rolls back the Worker too; an interruption between
+commits reuses the receipt. The UI reports pending setup while the normal recovery retries.
+
+Both schemas are additive (`board-starter-workflows/1`, `jobs-board-recipes/1`), with no historical
+backfill. Lane-settings insert/update triggers only touch the new intent table, cancelling an
+unfinished install even when an older writer saves an empty selection. Completed intents and
+state receipts survive assignment removal; neither opening nor upgrading refreshes installed
+defaults. Lane deletion cancels its intent but keeps its Worker/Automation. Deleted or disabled
+Automations encountered during recovery are not recreated or assigned. No transaction spans files.
+
+The workflow is Code quality → VCA (editable unpushed scopes from `ReviewCheckDefaults.Create()`)
+→ one explicitly classified Code review Worker. Switch reviewer starts with Claude → Codex,
+Codex → Claude and a visible Codex fallback for unknown/mixed/human/unmapped coding sources.
+Existing attribution, scope snapshots, prerequisite checks and the root scheduler apply. Missing
+providers remain setup problems; no substitute provider or permission bypass is introduced.
+
+Every lane, including the first, has a Lane agents button. The panel shows purpose, report/check
+output, live reviewer mappings and provider setup guidance. Its shared reviewer editor supports
+editable provider/environment targets and a Code review — Codex choice (no source mappings, an
+explicit Codex target for every source). It saves the Worker's routing through the existing
+Environment update; other Worker fields and Automation actions stay intact. The ordinary
+Automation editor owns checks, descriptions, prompts and other workflow edits.
+
+Creation and settings saves never queue runs. Future card entries from any direction, including
+creation in that lane, retain the existing 60-second delay. Renaming/reordering never changes the
+binding. Saved settings cancel pending entries. Humans and agents choose card movement; output
+does not trigger deterministic application moves and Done remains user-defined. Local defaults
+do not publish hosted recipes (VIBE-25). Tests: `BoardStarterWorkflowTests`, schema/compatibility
+tests, and desktop/mobile Lane agents cases in `board-ux.spec.js`.
+
 ## VIBE-26: remote Start work (2026-10-01)
 
 The hosted card editor now offers the owner's Start work action. An open root backend polls
@@ -57,8 +100,8 @@ Descriptions start as two-line previews. Edit description opens the field; Save 
 it, with Cancel discarding the row's draft without writing.
 Description saves retain the current enabled state, triggers and workflow; unsaved drafts survive
 panel refreshes and failed saves. Board consumers and launch context already read this field.
-Create/edit navigates to the existing Automation editor. The first lane's configuration remains
-in Lane settings. Badges include paused/unavailable assignments; saves there also update the badge.
+Create/edit navigates to the existing Automation editor. Every lane now has an agent button,
+including the first lane. Badges include paused/unavailable assignments; Lane settings saves also update the badge.
 The UI states the 60-second entry delay and the scope of descriptions/removal. Lane entry uses
 the existing automatic scheduler, API and persistence. The UI suite exercises desktop/narrow geometry,
 assignment/removal, description persistence and draft preservation, editor navigation, conflict recovery and stale-response cleanup.

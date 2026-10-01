@@ -92,6 +92,9 @@ CREATE INDEX idx_user_inputs_unembedded ON UserInputs(Id) WHERE BertEmbeddedUTC 
 -- table AgentMetadata
 CREATE TABLE AgentMetadata ( Id INTEGER PRIMARY KEY AUTOINCREMENT, Path TEXT NOT NULL UNIQUE, CustomName TEXT NOT NULL );
 
+-- table BoardAutomationRecipes
+CREATE TABLE BoardAutomationRecipes ( ProjectPath TEXT NOT NULL, ColumnId TEXT NOT NULL, RecipeId TEXT NOT NULL, JobId INTEGER NOT NULL, WorkerId INTEGER NOT NULL, PRIMARY KEY (ProjectPath, ColumnId, RecipeId) );
+
 -- table ChatSummary
 CREATE TABLE ChatSummary ( Id INTEGER PRIMARY KEY AUTOINCREMENT, SessionId TEXT NOT NULL UNIQUE, SummaryText TEXT NOT NULL DEFAULT '', Date TEXT NOT NULL );
 

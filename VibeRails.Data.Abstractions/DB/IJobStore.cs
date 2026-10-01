@@ -8,6 +8,8 @@ namespace VibeRails.DB;
 
 public interface IJobStore
 {
+    /// <summary>Atomically creates a new-board review Worker, Job and stable recipe receipt, or returns that receipt.</summary>
+    Task<long> EnsureBoardReviewRecipeAsync(string projectPath, string columnId, string recipeId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<JobDefinitionRecord>> GetJobsAsync(string? projectPath = null, bool includeDeleted = false, CancellationToken cancellationToken = default);
     Task<JobDefinitionRecord?> GetJobAsync(long id, CancellationToken cancellationToken = default);
     Task<JobDefinitionRecord> CreateJobAsync(CreateJobRequest request, CancellationToken cancellationToken = default);

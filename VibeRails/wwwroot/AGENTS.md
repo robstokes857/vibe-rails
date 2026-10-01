@@ -223,7 +223,7 @@ trigger-based run lifecycle apply: Board lane runs and runs started from a card 
 `board-lane-agents.js` also exposes these settings through compact robot buttons across lane
 header corners, in the existing gutters. Each button belongs to the lane on its right: all
 entries to that lane count, including newly created cards. The badge counts assigned Automations,
-including disabled or unavailable ones. The first lane remains configurable from Lane settings.
+including disabled or unavailable ones. The first lane has its own accessible agent button too.
 The wider anchored panel adds existing project Automations, links to the existing Automation
 editor for create/edit, and confirms removal from the lane without deleting the Automation.
 Each row shows a two-line preview of the existing 2,000-character Automation description. Edit
@@ -232,6 +232,10 @@ only that row's draft. This is the description read by Board consumers and inclu
 context, shared wherever the Automation is used. Saving reads the latest definition, preserves
 the enabled state and workflow, and keeps other rows' drafts intact across refreshes and errors.
 There is no on/off switch in this panel and no new run/approval mode.
+Code review rows show their live mappings, expected Checks/report output and provider setup state.
+Choose reviewer mounts the shared routing editor, with editable mappings and a Code review — Codex
+choice. It saves only purpose/routing through the existing Environment update. Saving and removing
+never launch a run. Panel disposal also disposes every reviewer picker; row drafts survive rerenders.
 Worker rows use the shared CLI brand logo and provider name, resolved from the Worker action
 and its Environment. Script-only workflows use a code icon; the lane-entry buttons keep robots.
 The panel loads the Environment catalog alongside Jobs so direct Board navigation also resolves

@@ -78,6 +78,8 @@
 }
 
 .board-view .board-lane:has(.board-lane-agents-button) .board-lane-head { padding-left: 22px; }
+.board-view .board-lane:first-child .board-lane-agents-button { left: 20px; }
+.board-view .board-lane:first-child .board-lane-head { padding-left: 48px; }
 .board-view .board-lane:not(:last-child) .board-lane-head { padding-right: 22px; }
 
 .board-lane-agents-panel {
