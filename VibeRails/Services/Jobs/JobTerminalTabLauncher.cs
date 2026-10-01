@@ -112,8 +112,13 @@ public sealed class JobTerminalTabLauncher(
         static string PosixLiteral(string value) => $"'{value.Replace("'", "'\"'\"'", StringComparison.Ordinal)}'";
         // Every value is a shell literal. End the wrapper when the workflow exits, so history
         // and tab status do not leave a completed Automation looking active indefinitely.
+        // The child relays the CLI's PTY output to this console with Console.Write, which encodes
+        // with the console output code page. On a default OEM console (437) that best-fits
+        // U+2022 "•" to BEL, "›" to ">", "…" to "." and anything else to "?", so the frames
+        // Codex paints land one cell off and the tab shreds. Switch the console to UTF-8 first,
+        // exactly as the native-window wrappers (BaseLlmCliLauncher, JobProcessLauncher) do.
         return windows
-            ? $"& {PowerShellLiteral(executable)} @({string.Join(", ", arguments.Select(PowerShellLiteral))}); exit $LASTEXITCODE"
+            ? $"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; & {PowerShellLiteral(executable)} @({string.Join(", ", arguments.Select(PowerShellLiteral))}); exit $LASTEXITCODE"
             : $"exec {PosixLiteral(executable)} {string.Join(" ", arguments.Select(PosixLiteral))}";
     }
 }

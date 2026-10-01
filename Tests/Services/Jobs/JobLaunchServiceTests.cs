@@ -222,7 +222,9 @@ public sealed class JobLaunchServiceTests
     public void TerminalTabCommand_TreatsEveryArgumentAsALiteralAndExitsTheWrapper()
     {
         var arguments = new[] { "--job-run", "quote' $(danger) `value` ; & |", "--", "a b" };
-        Assert.Equal("& 'C:/app''s/vb.exe' @('--job-run', 'quote'' $(danger) `value` ; & |', '--', 'a b'); exit $LASTEXITCODE",
+        // The UTF-8 switch must come first: the child inherits this console's output code page,
+        // and on OEM 437 its Console.Write relay turns Codex's "•" into BEL (session dcc90020).
+        Assert.Equal("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; & 'C:/app''s/vb.exe' @('--job-run', 'quote'' $(danger) `value` ; & |', '--', 'a b'); exit $LASTEXITCODE",
             JobTerminalTabLauncher.BuildRunCommand("C:/app's/vb.exe", arguments, windows: true));
         Assert.Equal("exec '/app/vb' '--job-run' 'quote'\"'\"' $(danger) `value` ; & |' '--' 'a b'",
             JobTerminalTabLauncher.BuildRunCommand("/app/vb", arguments, windows: false));
