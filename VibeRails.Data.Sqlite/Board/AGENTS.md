@@ -41,6 +41,17 @@ Only scheduler compositions opt in to Board event consumption (`consumeBoardEven
 Commit hooks and non-scheduling Automation hosts resolve a state-only `JobStore` and must work
 without opening `board.db`, even if that file is newer, busy or damaged.
 
+Reads that reach into `state.db` (`GetRunningAutomationsAsync`, `GetAutomationSessionIdsAsync`,
+`DescribeLaneAutomationsAsync`, `GetAgentRunsAsync`, `FindSessionAuthorAsync`,
+`FindSessionOutcomeAsync`, `GetSyncSessionOutcomesAsync`) still probe the schema first so a
+stdio host can open a file that never held Automations or Sessions, but they go through the
+store's `SqliteSchemaFeatures` memo (VIBE-27): a table or column seen once is never probed again
+for the life of the instance, a missing one is asked for on every call. Use `_stateFeatures`
+for any new state.db probe on a read path; keep `SqliteSchema.HasColumn` for migration SQL,
+which must see the file as it is inside its transaction. Only the probe is remembered: the row
+reads behind it stay live, so pruned `Sessions` history still falls back to the card-session
+label (`BoardDatabaseIsolationTests` pins that) and a run's status is never served from memory.
+
 Preserve scoped transactional lookups, persistent per-project numbering, dense ordering,
 current-state card/attachment writes, and atomic commit snapshots. Add a new migration for schema
 changes and update schema/compatibility tests. Use temporary databases for verification.

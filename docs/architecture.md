@@ -801,6 +801,20 @@ AppliedUTC)` records completed changes transactionally with each migration. Exis
 a one-time adoption pass; ordinary starts skip completed changes. The SQLite write lock serializes
 migration ownership between processes, and failed changes remain pending.
 
+**In-memory caching over the stores is rare on purpose (VIBE-27).** `state.db` and `board.db` are
+written by several processes at once (root backends, tab children, `vb mcp` hosts, `--job-run`
+children) and there is no cross-process change signal, so a process-wide cache of anything another
+process writes — Job runs, lane-entry queues, card activity, picker preferences, environments —
+would serve stale answers to the other windows. What is cached is data that cannot change once
+seen: `SqliteSchemaFeatures` remembers, per store instance, that an optional table or column of
+`state.db` exists (the Board store probes before every Jobs/Sessions read so a stdio host can open
+a file that never held Automations; a missing feature is still re-probed each call, and the row
+reads behind the probe stay live). A session's author was considered and left uncached: pruned
+history must fall back to the card-session label on the same instance.
+`IGlobalCache` / `IProjectCache` are scoped, so their dictionaries are per-request memos rather than
+caches; the direct `IRepository` reads beside them are correct. `BoardSyncActivityCache` (hashes,
+2 h) and `BoardFileIndexService` (repo file list, 10 s) are the other deliberate caches.
+
 Git input recording is application orchestration in `UserInputRecordingService`; storage never
 invokes Git. BERT inference stays in the application while SQL and vector writes live in the
 provider. Small provider JSON contexts retain Native AOT support. Root-only maintenance retries

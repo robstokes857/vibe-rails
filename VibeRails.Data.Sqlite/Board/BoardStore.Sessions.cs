@@ -1,5 +1,4 @@
 using Microsoft.Data.Sqlite;
-using VibeRails.Data.Sqlite;
 
 namespace VibeRails.Services.Board;
 
@@ -38,9 +37,9 @@ public sealed partial class BoardStore
         if (sessionIds.Count == 0) return result;
         await using var state = await OpenStateAsync(cancellationToken);
         // A Board-only/stdio host need not have initialized Jobs. This is a read, not setup.
-        if (!SqliteSchema.HasColumn(state, null, "JobRuns", "SessionId"))
+        if (!_stateFeatures.HasColumn(state, "JobRuns", "SessionId"))
             return result;
-        var hasTerminalSession = SqliteSchema.HasColumn(state, null, "JobRuns", "TerminalSessionId");
+        var hasTerminalSession = _stateFeatures.HasColumn(state, "JobRuns", "TerminalSessionId");
         foreach (var batch in sessionIds.Distinct(StringComparer.Ordinal).Chunk(100))
         {
             await using var command = state.CreateCommand();

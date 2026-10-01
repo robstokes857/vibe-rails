@@ -1,7 +1,5 @@
 using System.Globalization;
-using Microsoft.Data.Sqlite;
 using VibeRails.DTOs;
-using VibeRails.Data.Sqlite;
 
 namespace VibeRails.Services.Board;
 
@@ -46,10 +44,10 @@ public sealed partial class BoardStore
         var ids = string.Join(", ", jobIds.Distinct().Select(id => id.ToString(CultureInfo.InvariantCulture)));
 
         await using var state = await OpenStateAsync(cancellationToken);
-        var hasJobs = await TableExistsAsync(state, "Jobs", cancellationToken)
-            && await TableExistsAsync(state, "JobActions", cancellationToken)
-            && await TableExistsAsync(state, "JobRuns", cancellationToken);
-        var hasEnvironments = hasJobs && await TableExistsAsync(state, "Environments", cancellationToken);
+        var hasJobs = await _stateFeatures.HasTableAsync(state, "Jobs", cancellationToken)
+            && await _stateFeatures.HasTableAsync(state, "JobActions", cancellationToken)
+            && await _stateFeatures.HasTableAsync(state, "JobRuns", cancellationToken);
+        var hasEnvironments = hasJobs && await _stateFeatures.HasTableAsync(state, "Environments", cancellationToken);
 
         var definitions = new Dictionary<long, BoardLaneAutomationDefinition>();
         var workers = new Dictionary<long, (string Name, string Cli)>();
@@ -105,7 +103,7 @@ public sealed partial class BoardStore
             var jobEnvironment = hasEnvironments
                 ? "e.CustomName, COALESCE(e.LLM, 0), COALESCE(NULLIF(TRIM(e.CustomPrompt), ''), '')"
                 : "NULL, 0, ''";
-            var description = SqliteSchema.HasColumn(state, null, "Jobs", "Description") ? "j.Description" : "NULL";
+            var description = _stateFeatures.HasColumn(state, "Jobs", "Description") ? "j.Description" : "NULL";
             var jobJoin = hasEnvironments ? "LEFT JOIN Environments e ON e.Id = j.EnvironmentId" : string.Empty;
             await using (var jobs = state.CreateCommand())
             {
@@ -150,9 +148,4 @@ public sealed partial class BoardStore
                 : new BoardLaneAutomationDefinition(jobId, null, false, false, false, false, null, string.Empty, string.Empty, [], null, false));
         return results;
     }
-
-    private static async Task<bool> TableExistsAsync(SqliteConnection connection, string table, CancellationToken cancellationToken) =>
-        await ScalarLongAsync(connection, null,
-            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = $table",
-            ("$table", table), cancellationToken) > 0;
 }

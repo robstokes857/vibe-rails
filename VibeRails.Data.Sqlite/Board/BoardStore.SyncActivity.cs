@@ -1,6 +1,5 @@
 using System.Text.Json;
 using System.Globalization;
-using VibeRails.Data.Sqlite;
 using VibeRails.DTOs;
 
 namespace VibeRails.Services.Board;
@@ -16,21 +15,14 @@ public sealed partial class BoardStore
         if (ids.Length == 0) return outcomes;
 
         await using var connection = await OpenStateAsync(cancellationToken);
-        var tables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        await using (var probe = connection.CreateCommand())
-        {
-            probe.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('Sessions','ChatSummary');";
-            await using var reader = await probe.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken)) tables.Add(reader.GetString(0));
-        }
-        if (!tables.Contains("Sessions")
-            || !SqliteSchema.HasColumn(connection, null, "Sessions", "EndedUTC")
-            || !SqliteSchema.HasColumn(connection, null, "Sessions", "ExitCode")) return outcomes;
+        if (!await _stateFeatures.HasTableAsync(connection, "Sessions", cancellationToken)
+            || !_stateFeatures.HasColumn(connection, "Sessions", "EndedUTC")
+            || !_stateFeatures.HasColumn(connection, "Sessions", "ExitCode")) return outcomes;
 
         await using var command = connection.CreateCommand();
         var parameters = ids.Select((id, index) => "$session" + index).ToArray();
         for (var i = 0; i < ids.Length; i++) command.Parameters.AddWithValue(parameters[i], ids[i]);
-        var hasSummary = tables.Contains("ChatSummary");
+        var hasSummary = await _stateFeatures.HasTableAsync(connection, "ChatSummary", cancellationToken);
         command.CommandText = $"""
             SELECT s.Id, s.EndedUTC, s.ExitCode, {(hasSummary ? "substr(c.SummaryText,1,16000)" : "NULL")}
             FROM Sessions s {(hasSummary ? "LEFT JOIN ChatSummary c ON c.SessionId=s.Id" : "")}

@@ -1,4 +1,3 @@
-using VibeRails.Data.Sqlite;
 using VibeRails.DTOs;
 
 namespace VibeRails.Services.Board;
@@ -14,7 +13,7 @@ public sealed partial class BoardStore
         await using (var state = await OpenStateAsync(cancellationToken))
         {
             // Board-only hosts may not have initialized Jobs. Never initialize it just for a read.
-            if (!SqliteSchema.HasColumn(state, null, "JobRuns", "TriggerKey")) return [];
+            if (!_stateFeatures.HasColumn(state, "JobRuns", "TriggerKey")) return [];
             await using var command = state.CreateCommand();
             command.CommandText = $"""
                 SELECT TriggerKind, TriggerKey FROM JobRuns

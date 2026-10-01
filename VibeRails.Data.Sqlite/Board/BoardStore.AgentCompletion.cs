@@ -102,8 +102,8 @@ public sealed partial class BoardStore
         var card = await FindCardAsync(projectPath, cardId, cancellationToken);
         if (card is null) return [];
         await using var state = await OpenStateAsync(cancellationToken);
-        if (!await TableExistsAsync(state, "JobRuns", cancellationToken)) return [];
-        var terminal = SqliteSchema.HasColumn(state, null, "JobRuns", "TerminalSessionId") ? "TerminalSessionId" : "NULL";
+        if (!await _stateFeatures.HasTableAsync(state, "JobRuns", cancellationToken)) return [];
+        var terminal = _stateFeatures.HasColumn(state, "JobRuns", "TerminalSessionId") ? "TerminalSessionId" : "NULL";
         await using var command = state.CreateCommand();
         command.CommandText = $"""
             SELECT Id, JobName, Status, QueuedUTC, COALESCE({terminal}, SessionId), SessionId, ErrorMessage

@@ -31,6 +31,12 @@ public sealed partial class BoardStore : IBoardStore
     private readonly string _connectionString;
     private readonly string _stateConnectionString;
 
+    // Reads that reach into state.db (Jobs, JobRuns, Sessions) must tolerate a file another host
+    // has not initialised yet, so each one probes the schema first. The probes are hot — the
+    // Board activity poll, card list/detail and every get_board_card / list_board_columns pay
+    // several per call — and their answer never changes once true, so remember it here.
+    private readonly SqliteSchemaFeatures _stateFeatures = new();
+
     /// <param name="connectionString">board.db: every Board-owned table.</param>
     /// <param name="stateConnectionString">
     /// state.db: Jobs and Sessions lookups only. Required rather than defaulted so a host that
@@ -823,10 +829,7 @@ public sealed partial class BoardStore : IBoardStore
     {
         await using var connection = await OpenStateAsync(cancellationToken);
         // Terminal history stays in state.db; a fresh stdio host may not yet have Sessions.
-        var hasSessions = await ScalarLongAsync(connection, null,
-            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = $table",
-            ("$table", "Sessions"), cancellationToken) > 0;
-        if (hasSessions)
+        if (await _stateFeatures.HasTableAsync(connection, "Sessions", cancellationToken))
         {
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT Cli, EnvironmentName FROM Sessions WHERE Id = $session LIMIT 1;";
@@ -923,18 +926,10 @@ public sealed partial class BoardStore : IBoardStore
     public async Task<BoardSessionOutcomeRecord?> FindSessionOutcomeAsync(string sessionId, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenStateAsync(cancellationToken);
-        var tables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        await using (var probe = connection.CreateCommand())
-        {
-            probe.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('Sessions', 'ChatSummary');";
-            await using var reader = await probe.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
-                tables.Add(reader.GetString(0));
-        }
         // Fixtures (and very old files) carry a Sessions table without these columns.
-        if (!tables.Contains("Sessions")
-            || !SqliteSchema.HasColumn(connection, null, "Sessions", "EndedUTC")
-            || !SqliteSchema.HasColumn(connection, null, "Sessions", "ExitCode"))
+        if (!await _stateFeatures.HasTableAsync(connection, "Sessions", cancellationToken)
+            || !_stateFeatures.HasColumn(connection, "Sessions", "EndedUTC")
+            || !_stateFeatures.HasColumn(connection, "Sessions", "ExitCode"))
             return null;
 
         DateTime? ended = null;
@@ -953,7 +948,7 @@ public sealed partial class BoardStore : IBoardStore
         }
 
         string? summary = null;
-        if (tables.Contains("ChatSummary"))
+        if (await _stateFeatures.HasTableAsync(connection, "ChatSummary", cancellationToken))
         {
             await using var chat = connection.CreateCommand();
             chat.CommandText = "SELECT SummaryText FROM ChatSummary WHERE SessionId = $session LIMIT 1;";
