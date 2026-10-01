@@ -12,7 +12,7 @@ public sealed record BoardReviewsResponse(IReadOnlyList<BoardReviewRecord> Revie
 /// <summary>Shared review result and scope contract for REST and MCP. Never moves a card.</summary>
 public sealed class BoardReviewService(IBoardStore store, IBoardService board)
 {
-    private readonly GitStagedSnapshotProvider snapshots = new();
+    private static readonly GitStagedSnapshotProvider snapshots = new();
 
     /// <summary>Read review attempts and process observations without interpreting process success as approval.</summary>
     public async Task<BoardReviewsResponse?> ReadAsync(string project, string cardKey, int offset, CancellationToken ct)
@@ -41,7 +41,7 @@ public sealed class BoardReviewService(IBoardStore store, IBoardService board)
             var run = runs.FirstOrDefault(r => r.Id == row.RunId);
             if (run is null && row.RunId is not null)
                 run = await store.FindReviewRunAsync(project, card.Id, row.RunId, null, ct);
-            var updated = run is null ? (row.RunId is null ? row : row with { ProcessStatus = "Run status unknown" }) : row with { ProcessStatus = run.Status.ToString(), Error = run.Error,
+            var updated = run is null ? (row.RunId is null ? row : row with { ProcessStatus = "Run status unknown" }) : row with { ProcessStatus = run.Status.ToString(), Error = run.Error ?? run.Routing?.Problem,
                 SessionId = run.WorkerSessionId ?? row.SessionId, TerminalSessionId = run.SessionId ?? row.TerminalSessionId };
             if (updated.RunId is null && updated.SessionId is {} session)
             {
@@ -60,8 +60,8 @@ public sealed class BoardReviewService(IBoardStore store, IBoardService board)
 
     internal static BoardReviewRecord FromRun(string cardId, BoardAgentRun run) => new(
         run.Id, cardId, run.Provider, run.Reviewer ?? run.Name, run.QueuedUtc,
-        RunId: run.Id, SessionId: run.WorkerSessionId, ProcessStatus: run.Status.ToString(), Error: run.Error,
-        TerminalSessionId: run.SessionId);
+        RunId: run.Id, SessionId: run.WorkerSessionId, ProcessStatus: run.Status.ToString(), Error: run.Error ?? run.Routing?.Problem,
+        TerminalSessionId: run.SessionId, Routing: run.Routing);
 
     /// <summary>Capture before reading code, using only the caller's server-derived checkout.</summary>
     public async Task<BoardReviewRecord> BeginAsync(string project, string cardId, string session, string workspace,
@@ -76,7 +76,16 @@ public sealed class BoardReviewService(IBoardStore store, IBoardService board)
         if (row is null) throw new BoardValidationException("This session was not launched with Code review purpose for this card.");
         if (row.ReportedUtc is not null || row.CapturedUtc is not null) return row;
         if (scope != "unknown") JobCheckScope.Parse(scope == "range" ? [scope, baseCommit ?? "", headCommit ?? ""] : [scope]);
+        if (row.Routing is {} routing)
+        {
+            if (!VibeRails.Utils.ProjectPathComparer.Matches(workspace, routing.Workspace)
+                || scope != routing.Scope || scope != "working-tree" && includeDirty != routing.IncludeDirty
+                || scope == "range" && (!string.Equals(baseCommit, routing.BaseCommit, StringComparison.OrdinalIgnoreCase) || !string.Equals(headCommit, routing.HeadCommit, StringComparison.OrdinalIgnoreCase)))
+                throw new BoardValidationException("Use the checkout and scope frozen on this review run. Request a new review to change them.");
+        }
         var capture = await CaptureAsync(workspace, scope, baseCommit, headCommit, includeDirty, ct);
+        if (row.Routing?.InputHash is {} expected && capture.Hash != expected)
+            throw new BoardValidationException("The requested review inputs changed before capture. Request a new review for the newer scope.");
         row = row with { Workspace = workspace, Scope = scope, ScopeDescription = description.Trim(),
             BaseCommit = capture.Base, HeadCommit = capture.Head, IncludeDirty = includeDirty,
             SnapshotHash = capture.Hash, CaptureLimitations = capture.Limitations, CapturedUtc = DateTime.UtcNow, ScopeFiles = capture.Files };
@@ -99,7 +108,7 @@ public sealed class BoardReviewService(IBoardStore store, IBoardService board)
             throw new BoardValidationException("Only this review's linked agent may save its report.");
         if (row.ReportedUtc is not null) return row;
         if (row.CapturedUtc is null) throw new BoardValidationException("Capture review scope before saving.");
-        if (row.Scope == "unknown") result = "Incomplete";
+        if (row.Scope == "unknown" || row.Routing is not null && (row.SnapshotHash is null || row.Routing.InputHash is null)) result = "Incomplete";
         row = row with { Result = result, Findings = findings.Trim(), Validation = validation.Trim(),
             Limitations = limitations.Trim(), ReportedUtc = DateTime.UtcNow };
         if (!await store.SaveReviewAsync(project, row, ct)) throw new BoardConflictException("Review already saved or card unavailable.");
@@ -122,9 +131,9 @@ public sealed class BoardReviewService(IBoardStore store, IBoardService board)
             : current.Hash == row.SnapshotHash ? "Current — captured inputs match" : "Stale — reviewed changes differ now" };
     }
 
-    private sealed record Capture(string? Hash, string? Base, string? Head, string? Limitations, IReadOnlyList<string>? Files = null);
+    internal sealed record Capture(string? Hash, string? Base, string? Head, string? Limitations, IReadOnlyList<string>? Files = null);
 
-    private async Task<Capture> CaptureAsync(string workspace, string scope, string? baseCommit, string? headCommit, bool dirty, CancellationToken ct)
+    internal static async Task<Capture> CaptureAsync(string workspace, string scope, string? baseCommit, string? headCommit, bool dirty, CancellationToken ct)
     {
         if (scope == "unknown") return new(null, baseCommit, headCommit, "Scope ambiguous; freshness cannot be established.");
         try

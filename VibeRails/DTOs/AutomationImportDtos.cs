@@ -36,7 +36,7 @@ public sealed record AutomationImportWorker(
     int? ReusableEnvironmentId,
     string? ReusableEnvironmentName,
     string SuggestedCloneName,
-    string Purpose = "work");
+    string Purpose = "work", ReviewerRouting? ReviewerRouting = null);
 
 /// <summary>
 /// One ordered action of the source Automation. For scripts, <c>ExistsInTargetRepository</c>

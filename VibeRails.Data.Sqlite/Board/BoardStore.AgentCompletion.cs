@@ -1,3 +1,4 @@
+using System.Text.Json;
 using VibeRails.Data.Sqlite;
 using VibeRails.DTOs;
 
@@ -120,15 +121,17 @@ public sealed partial class BoardStore
         var terminal = _stateFeatures.HasColumn(state, "JobRuns", "TerminalSessionId") ? "TerminalSessionId" : "NULL";
         var purpose = _stateFeatures.HasColumn(state, "JobRuns", "Purpose") ? "Purpose" : "'work'";
         var provider = _stateFeatures.HasColumn(state, "JobRuns", "Llm") ? "Llm" : "0";
+        var routing = _stateFeatures.HasColumn(state, "JobRuns", "ReviewLaunchJson") ? "ReviewLaunchJson" : "NULL";
         var reviewer = _stateFeatures.HasColumn(state, "JobRuns", "EnvironmentName") ? "EnvironmentName" : "NULL";
         await using var command = state.CreateCommand();
         command.CommandText = $"""
-            SELECT Id, JobName, Status, QueuedUTC, COALESCE({terminal}, SessionId), SessionId, ErrorMessage, {purpose}, {provider}, {reviewer}
+            SELECT Id, JobName, Status, QueuedUTC, COALESCE({terminal}, SessionId), SessionId, ErrorMessage, {purpose}, {provider}, {reviewer}, {routing}
             FROM JobRuns WHERE ProjectPath = $project{ProjectPathCollation} AND DeletedUTC IS NULL
               AND ($reviews = 0 OR {purpose} = 'code_review')
               AND ($run IS NULL OR Id = $run) AND ($session IS NULL OR SessionId = $session)
               AND ((TriggerKind = $lane AND instr(TriggerKey, $lanePrefix) = 1)
-                OR (TriggerKind = $manual AND instr(TriggerKey, $manualPrefix) = 1))
+                OR (TriggerKind = $manual AND instr(TriggerKey, $manualPrefix) = 1)
+                OR json_extract({routing}, '$.resolution.cardKey') = $cardKey)
             ORDER BY QueuedUTC DESC, Id DESC LIMIT $limit OFFSET $offset;
             """;
         command.Parameters.AddWithValue("$project", NormalizeProjectPath(projectPath));
@@ -139,6 +142,7 @@ public sealed partial class BoardStore
         command.Parameters.AddWithValue("$offset", offset);
         command.Parameters.AddWithValue("$lane", (int)JobTriggerKind.BoardLane);
         command.Parameters.AddWithValue("$manual", (int)JobTriggerKind.Manual);
+        command.Parameters.AddWithValue("$cardKey", card.Key);
         command.Parameters.AddWithValue("$lanePrefix", $"board-lane:{card.Key}:");
         command.Parameters.AddWithValue("$manualPrefix", $"{JobBoardContext.ManualPrefix}{card.Key}:");
         var result = new List<BoardAgentRun>();
@@ -147,7 +151,8 @@ public sealed partial class BoardStore
             result.Add(new(reader.GetString(0), reader.GetString(1), (JobRunStatus)reader.GetInt32(2),
                 ParseDb(reader.GetString(3)), reader.IsDBNull(4) ? null : reader.GetString(4),
                 reader.IsDBNull(5) ? null : reader.GetString(5), reader.IsDBNull(6) ? null : reader.GetString(6), reader.GetString(7),
-                ((VibeRails.Services.LLM)reader.GetInt32(8)).ToString().ToLowerInvariant(), reader.IsDBNull(9) ? null : reader.GetString(9)));
+                ((VibeRails.Services.LLM)reader.GetInt32(8)).ToString().ToLowerInvariant(), reader.IsDBNull(9) ? null : reader.GetString(9),
+                reader.IsDBNull(10) ? null : JsonSerializer.Deserialize(reader.GetString(10), StorageJsonSerializerContext.Default.ReviewLaunchSnapshot)?.Resolution));
         return result;
     }
 }

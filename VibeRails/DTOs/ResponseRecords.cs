@@ -347,7 +347,8 @@ namespace VibeRails.DTOs
     public record LinkBoardCommitRequest(string? Sha = null);
     public record AddBoardSessionRequest(string? Id = null, string? DisplayName = null);
     public record UpdateBoardSessionRequest(string? DisplayName = null);
-    public record LaunchBoardCardRequest(string? Selection = null, string? Intent = null);
+    public record LaunchBoardCardRequest(string? Selection = null, string? Intent = null, ReviewLaunchRequest? Review = null);
+    public record ReviewLaunchRequest(ReviewerRouting? Routing = null, ReviewerTarget? Override = null);
     public record LaunchBoardCardResponse(
         string TabId,
         string? SessionId,
@@ -381,7 +382,8 @@ namespace VibeRails.DTOs
         bool AutomationWorker = false,
         int WorkspaceMode = 0,
         List<EnvironmentStepRequest>? Steps = null,
-        string? Purpose = null
+        string? Purpose = null,
+        ReviewerRouting? ReviewerRouting = null
     );
 
     // Hidden is nullable so a stale client that omits it leaves the stored value untouched
@@ -398,7 +400,8 @@ namespace VibeRails.DTOs
         // separate modal, so an env form saved without ever opening it must leave them alone
         // rather than replace them with an empty list.
         List<EnvironmentStepRequest>? Steps = null,
-        string? Purpose = null
+        string? Purpose = null,
+        ReviewerRouting? ReviewerRouting = null
     );
 
     // Environment Step DTOs. Steps ride on the environment endpoints as a child collection, the
@@ -465,7 +468,8 @@ namespace VibeRails.DTOs
         string? WorkspacePath = null,
         string? WorkspaceBranch = null,
         List<EnvironmentStepDto>? Steps = null,
-        string Purpose = "work"
+        string Purpose = "work",
+        ReviewerRouting? ReviewerRouting = null
     );
 
     public record EnvironmentListResponse(
@@ -952,7 +956,12 @@ namespace VibeRails.DTOs
         string? ResumeSummary = null,
         BaseLlmOptions? BaseLlmOptions = null,
         bool AuthorizeBoardTools = false
-    );
+    )
+    {
+        /// <summary>Server-only review scope decision. Browser input cannot bypass workspace resolution.</summary>
+        [JsonIgnore]
+        public bool PreserveWorkingDirectory { get; init; }
+    }
 
     public record TerminalInputRequest(
         string Text,
@@ -1853,6 +1862,12 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(LinkBoardCommitRequest))]
     [JsonSerializable(typeof(AddBoardSessionRequest))]
     [JsonSerializable(typeof(UpdateBoardSessionRequest))]
+    [JsonSerializable(typeof(BoardReviewSettings))]
+    [JsonSerializable(typeof(ReviewerRouting))]
+    [JsonSerializable(typeof(ReviewLaunchSnapshot))]
+    [JsonSerializable(typeof(ReviewRoutingSnapshot))]
+    [JsonSerializable(typeof(ReviewLaunchRequest))]
+    [JsonSerializable(typeof(EnvironmentStep))]
     [JsonSerializable(typeof(LaunchBoardCardRequest))]
     [JsonSerializable(typeof(LaunchBoardCardResponse))]
     [JsonSerializable(typeof(JsonElement))]

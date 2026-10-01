@@ -444,7 +444,7 @@ public static class JobRunner
     /// retries get a new manual key and do not inherit the original run's Board context.
     /// </summary>
     internal static string? GetBoardCardKey(JobRunRecord run) =>
-        JobBoardContext.GetCardKey(run.TriggerKind, run.TriggerKey);
+        run.ReviewLaunch?.Resolution.CardKey ?? JobBoardContext.GetCardKey(run.TriggerKind, run.TriggerKey);
 
     private static string DescribeAction(JobRunActionRecord action) => action.Kind switch
     {

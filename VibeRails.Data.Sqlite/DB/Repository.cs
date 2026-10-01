@@ -180,6 +180,7 @@ namespace VibeRails.DB
             cmd.Parameters.AddWithValue("$automationWorker", environment.AutomationWorker ? 1 : 0);
             cmd.Parameters.AddWithValue("$workspaceMode", (int)environment.WorkspaceMode);
             cmd.Parameters.AddWithValue("$purpose", environment.Purpose);
+            cmd.Parameters.AddWithValue("$reviewerRouting", environment.ReviewerRouting is null ? DBNull.Value : JsonSerializer.Serialize(environment.ReviewerRouting, StorageJsonSerializerContext.Default.ReviewerRouting));
             cmd.Parameters.AddWithValue("$projectPath", (object?)environment.ProjectPath ?? DBNull.Value);
 
             var result = await cmd.ExecuteScalarAsync(cancellationToken);
@@ -205,6 +206,7 @@ namespace VibeRails.DB
             cmd.Parameters.AddWithValue("$automationWorker", environment.AutomationWorker ? 1 : 0);
             cmd.Parameters.AddWithValue("$workspaceMode", (int)environment.WorkspaceMode);
             cmd.Parameters.AddWithValue("$purpose", environment.Purpose);
+            cmd.Parameters.AddWithValue("$reviewerRouting", environment.ReviewerRouting is null ? DBNull.Value : JsonSerializer.Serialize(environment.ReviewerRouting, StorageJsonSerializerContext.Default.ReviewerRouting));
             cmd.Parameters.AddWithValue("$projectPath", (object?)environment.ProjectPath ?? DBNull.Value);
 
             await cmd.ExecuteNonQueryAsync(cancellationToken);
@@ -949,6 +951,7 @@ namespace VibeRails.DB
                 Hidden = reader.GetBoolean(8),
                 AutomationWorker = reader.GetBoolean(9),
                 Purpose = reader.GetString(12),
+                ReviewerRouting = reader.IsDBNull(13) ? null : JsonSerializer.Deserialize(reader.GetString(13), StorageJsonSerializerContext.Default.ReviewerRouting),
                 WorkspaceMode = (EnvironmentWorkspaceMode)reader.GetInt32(10),
                 ProjectPath = reader.IsDBNull(11) ? null : reader.GetString(11)
             };

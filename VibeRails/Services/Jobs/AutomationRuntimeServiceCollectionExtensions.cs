@@ -21,6 +21,8 @@ public static class AutomationRuntimeServiceCollectionExtensions
     {
         services.AddSqliteStateStorage(_ => new SqliteStoragePaths(ParserConfigs.GetStatePath()),
             consumeBoardEvents: hostScheduler);
+        services.TryAddScoped<VibeRails.Services.Board.ReviewRoutingService>();
+        services.TryAddSingleton<VibeRails.DTOs.IReviewRunSnapshotFactory, VibeRails.Services.Board.ReviewRunSnapshotFactory>();
         services.TryAddSingleton<IJobExecutableResolver, JobExecutableResolver>();
         services.TryAddSingleton<IAutomationScriptService, AutomationScriptService>();
         services.TryAddSingleton<IJobProcessLauncher, JobProcessLauncher>();

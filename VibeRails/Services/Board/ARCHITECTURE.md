@@ -927,8 +927,8 @@ pending. Do not confuse testing current source with testing the installed MCP bi
 
 Workers and ordinary Environments have an explicit `Purpose` (`work` or `code_review`). The
 Environment editor offers Work / custom, Code review, and an editable Codex Code review preset.
-The same field is available to future reviewer-routing presets; selecting a provider dynamically
-is VIBE-22 work. Creating a preset does not enable lane triggers. Existing Automations still run
+Switch reviewer uses the same purpose and report contract (see VIBE-22 below).
+Creating a preset does not enable lane triggers. Existing Automations still run
 after the normal lane-entry settling period, and humans/LLMs continue to decide card movement.
 
 `environment-purpose/1` and `job-run-purpose/1` add default-Work columns to `state.db`. Jobs copy
@@ -960,14 +960,49 @@ the caller's server-derived checkout, never a stored path. A different checkout 
 changed HEAD or captured inputs are Stale. Opening a report in the UI compares inputs; the user
 can compare again after editing files. Findings are escaped text with file references.
 
-The card's Code reviews section uses the saved card, preserving editor drafts. Its picker defaults
-to Codex, sends explicit `code_review` launch intent and leaves assignment unchanged. Recordings
+The card's Code reviews section uses the saved card, preserving editor drafts. Its Switch reviewer
+defaults and override picker send explicit `code_review` intent and leave assignment unchanged. Recordings
 have terminal/replay access and are excluded from ordinary Sessions/Automations counts. The
 review snapshot also classifies an early MCP-created link without rewriting its stored origin.
 The existing visible-page activity refresh updates the section; requests/pickers are disposed on
 editor replacement. Both launch prompts teach ten-second MCP polling and handling agreed findings.
 Reviewer prompts require saving the review and handoff before a move, discovering destination
 Automations, and reporting the move. Done alone never grants merge/publish permission.
+
+## Switch reviewer (VIBE-22)
+
+`ReviewRoutingService` resolves the reviewer for existing Code review Workers/Jobs and direct card
+reviews. `ReviewerRouting.SwitchDefault()` maps Claude to Codex and Codex to Claude, with Codex as
+the visible fallback. All mappings and the fallback are editable, including same-provider targets,
+other supported providers, custom environments and base model options. A direct review can override
+the selection once. Fixed-provider Workers retain their existing pipeline. New-board template
+seeding consumes this default in VIBE-23; this change does not enable or replace existing Jobs.
+
+Coding attribution is an explicit per-card declaration through `BoardReviewSettings`: unknown,
+mixed, human/external, or a linked coding session with a description of its contribution. Assignment,
+link order and previous reviewers are never attribution. Known chat/planning/review links and
+historical context samples exclude those sessions even when attached to another card. Each card
+in a multi-card session needs its own declaration. Unknown or unmapped sources visibly use fallback.
+
+The chosen review checkout is the current project directory. The UI and prompt state this choice
+and retain the source session's checkout separately; neither coding clones nor reviewer environment
+clone settings silently change it. Queueing pins scope, base/head, input hash, mapping, source,
+selected provider/environment/model and the Worker prompt. Unpushed ranges become pinned SHAs.
+Retry copies this snapshot and card association. Changes to inputs or reviewer execution settings
+require a new review. Missing CLIs can be installed and retried; no alternate provider or permission
+bypass is injected. Unavailable input fingerprints force Incomplete on routed reports.
+
+The selected environment owns its arguments, prompt and steps. The Switch Worker adds its saved
+initial message; its display CLI settings do not replace the selected reviewer's settings. A Switch
+Worker with its own steps or step references records a prerequisite problem explaining how to move
+them to reviewer environments. Direct launch uses a server-only workspace-preservation flag that
+JSON input cannot set. `begin_board_review` also checks frozen checkout, scope and input hash.
+
+Routing history is included in Code reviews and MCP reports. Source/settings storage stays behind
+`IBoardStore`; launch metadata stays in JobRuns. The root-only settings GET/PUT and preview POST use
+the existing Board credential gate. Local repository imports copy routing; unavailable project-local
+targets require reselection. V2 recipe files round-trip base-provider routing and show its options
+for review. Portable custom-environment references await VIBE-25; raw local IDs are rejected.
 
 ## Waiting lane Automations (VIBE-21)
 

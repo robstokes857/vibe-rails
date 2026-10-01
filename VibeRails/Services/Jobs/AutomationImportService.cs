@@ -315,7 +315,7 @@ public sealed partial class AutomationImportService(
                     ToStepDtos(stepsByEnvironment.GetValueOrDefault(environment.Id)),
                     reusable?.Id,
                     reusable?.CustomName,
-                    SuggestCloneName(environment.CustomName, targetRepositoryName, environments.Select(item => item.CustomName)), environment.Purpose);
+                    SuggestCloneName(environment.CustomName, targetRepositoryName, environments.Select(item => item.CustomName)), environment.Purpose, environment.ReviewerRouting);
             }
             else
             {
@@ -402,6 +402,8 @@ public sealed partial class AutomationImportService(
         environments.FirstOrDefault(candidate =>
             candidate.LLM == source.LLM
             && candidate.Purpose == source.Purpose
+            && System.Text.Json.JsonSerializer.Serialize(candidate.ReviewerRouting, AppJsonSerializerContext.Default.ReviewerRouting)
+                == System.Text.Json.JsonSerializer.Serialize(source.ReviewerRouting, AppJsonSerializerContext.Default.ReviewerRouting)
             && string.Equals(candidate.CustomName, source.CustomName, StringComparison.OrdinalIgnoreCase)
             && ProjectPathComparer.IsVisibleIn(candidate.ProjectPath, currentRoot));
 
@@ -540,6 +542,7 @@ public sealed partial class AutomationImportService(
             // picker, excluded from launch pickers — the same as a recipe import.
             AutomationWorker = true,
             Purpose = source.Purpose,
+            ReviewerRouting = source.ReviewerRouting,
             WorkspaceMode = source.WorkspaceMode,
             ProjectPath = currentRoot,
             CreatedUTC = now,

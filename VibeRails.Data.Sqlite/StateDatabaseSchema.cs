@@ -41,6 +41,8 @@ internal static class StateDatabaseSchema
         });
         SqliteMigrationRunner.Apply(connection, "environment-purpose", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.AdoptStatement(db, transaction, SqlStrings.MigrateEnvironmentsAddPurpose));
+        SqliteMigrationRunner.Apply(connection, "environment-review-routing", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE Environments ADD COLUMN ReviewerRoutingJson TEXT"));
         var queued = 0;
         // Breaking: 1.10.10 writes UserInputs_fts directly over UserInputs; after this the index is
         // fed from UserInputSearchDocuments. Existing databases upgrade automatically with a

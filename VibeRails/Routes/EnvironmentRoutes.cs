@@ -132,6 +132,8 @@ public static class EnvironmentRoutes
                 return Results.BadRequest(new ErrorResponse($"CustomPrompt exceeds {MaxCustomPromptLength} character limit."));
             }
 
+            try { VibeRails.Services.Board.ReviewRoutingService.Validate(request.ReviewerRouting, request.Purpose ?? "work"); }
+            catch (VibeRails.Services.Board.BoardValidationException ex) { return Results.BadRequest(new ErrorResponse(ex.Message)); }
             if (request.Purpose is not (null or "work" or "code_review"))
                 return Results.BadRequest(new ErrorResponse("Purpose must be work or code_review."));
             if (!TryParseWorkspaceMode(request.WorkspaceMode, out var workspaceMode))
@@ -175,6 +177,7 @@ public static class EnvironmentRoutes
                 Hidden = request.Hidden,
                 AutomationWorker = request.AutomationWorker,
                 Purpose = request.Purpose ?? "work",
+                ReviewerRouting = request.ReviewerRouting?.Mode == "fixed" ? null : request.ReviewerRouting,
                 WorkspaceMode = workspaceMode,
                 // Every environment created from now on belongs to the project it was created
                 // in. Existing rows keep a null scope and stay visible everywhere.
@@ -258,9 +261,13 @@ public static class EnvironmentRoutes
             }
 
             var workspaceModeChanged = false;
+            try { VibeRails.Services.Board.ReviewRoutingService.Validate(request.ReviewerRouting, request.Purpose ?? environment.Purpose); }
+            catch (VibeRails.Services.Board.BoardValidationException ex) { return Results.BadRequest(new ErrorResponse(ex.Message)); }
             if (request.Purpose is not (null or "work" or "code_review"))
                 return Results.BadRequest(new ErrorResponse("Purpose must be work or code_review."));
             if (request.Purpose is not null) environment.Purpose = request.Purpose;
+            if (request.ReviewerRouting is not null) environment.ReviewerRouting = request.ReviewerRouting.Mode == "fixed" ? null : request.ReviewerRouting;
+            if (environment.Purpose != "code_review") environment.ReviewerRouting = null;
             if (request.WorkspaceMode.HasValue)
             {
                 if (!TryParseWorkspaceMode(request.WorkspaceMode.Value, out var requestedMode))
@@ -426,7 +433,7 @@ public static class EnvironmentRoutes
             workspace?.Id,
             workspace?.Path,
             workspace?.Branch,
-            EnvironmentStepRoutes.ToDtos(steps), environment.Purpose);
+            EnvironmentStepRoutes.ToDtos(steps), environment.Purpose, environment.ReviewerRouting);
 
     /// <summary>
     /// Parses a wire workspace mode. Explicit rather than casting the int straight to the enum:

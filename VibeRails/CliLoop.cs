@@ -137,6 +137,15 @@ public static class CliLoop
             environmentName = environment.CustomName;
         }
 
+        var jobRun = jobRunId is null ? null : await scopedServices.GetRequiredService<IJobStore>().GetRunAsync(jobRunId, cancellationToken);
+        if (jobRun?.ReviewLaunch is {} reviewLaunch)
+        {
+            environment = await scopedServices.GetRequiredService<VibeRails.Services.Board.ReviewRoutingService>().RequireLaunchAsync(reviewLaunch, cancellationToken);
+            if (!ProjectPathComparer.Matches(workingDirectory, reviewLaunch.Resolution.Workspace)
+                || !VibeRails.Services.Board.BoardSelection.TryParse(reviewLaunch.Resolution.Selected.Selection, out var reviewer) || reviewer!.Llm != llm)
+                throw new InvalidOperationException("Review launch does not match the queued provider and checkout.");
+        }
+
         // This process owns the PTY, so this is where the env's Initial Message is resolved —
         // exactly once per launch. Spawning routes deliberately no longer bake the prompt into
         // extraArgs: {{step:<id>}} references run a shell command here, and resolving where the
@@ -145,9 +154,11 @@ public static class CliLoop
         // at the top on purpose: {{git_branch}} and step commands must see the workspace-resolved
         // directory.
         string? initialPrompt = null;
-        var runPurpose = jobRunId is null ? "work" : (await scopedServices.GetRequiredService<VibeRails.DB.IJobStore>().GetRunAsync(jobRunId, cancellationToken))?.Purpose ?? "work";
-        var promptTemplate = boardCardKey is null ? environment?.CustomPrompt
-            : Services.Board.BoardPromptComposer.ComposeAutomationPrompt(boardCardKey, environment?.CustomPrompt, runPurpose);
+        var runPurpose = jobRun?.Purpose ?? "work";
+        var workerPrompt = jobRun?.ReviewLaunch is {} frozen ? frozen.WorkerPrompt + "\n" + environment?.CustomPrompt : environment?.CustomPrompt;
+        var promptTemplate = boardCardKey is null ? workerPrompt
+            : Services.Board.BoardPromptComposer.ComposeAutomationPrompt(boardCardKey, workerPrompt, runPurpose);
+        if (jobRun?.ReviewLaunch is {} routed) promptTemplate += Services.Board.ReviewRoutingService.Prompt(routed.Resolution);
         if (!string.IsNullOrWhiteSpace(promptTemplate))
         {
             var promptPlaceholders = scopedServices.GetRequiredService<IPromptPlaceholderService>();

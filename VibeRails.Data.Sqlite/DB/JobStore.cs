@@ -13,11 +13,13 @@ public sealed partial class JobStore : IJobStore
 {
     private readonly string _connectionString;
     private readonly IBoardStore? _boards;
+    private readonly IReviewRunSnapshotFactory? _reviewSnapshots;
 
-    public JobStore(string connectionString, IBoardStore? boards = null)
+    public JobStore(string connectionString, IBoardStore? boards = null, IReviewRunSnapshotFactory? reviewSnapshots = null)
     {
         _connectionString = connectionString;
         _boards = boards;
+        _reviewSnapshots = reviewSnapshots;
         EnsureSchema();
     }
 
@@ -350,11 +352,11 @@ public sealed partial class JobStore : IJobStore
             insertRun.CommandText = """
                 INSERT INTO JobRuns
                     (Id, JobId, TriggerKind, TriggerKey, Status, JobName, ProjectPath, Llm,
-                     EnvironmentId, EnvironmentName, TimeoutMinutes, QueuedUTC, LaunchMinimized, LaunchInTerminalTab, Purpose)
+                     EnvironmentId, EnvironmentName, TimeoutMinutes, QueuedUTC, LaunchMinimized, LaunchInTerminalTab, Purpose, ReviewLaunchJson)
                 SELECT $retryId, source.JobId, $manual, $triggerKey, $queued, source.JobName,
                        source.ProjectPath, source.Llm, source.EnvironmentId,
                        source.EnvironmentName, source.TimeoutMinutes, $queuedUtc,
-                       source.LaunchMinimized, 0, source.Purpose
+                       source.LaunchMinimized, 0, source.Purpose, source.ReviewLaunchJson
                 FROM JobRuns source
                 JOIN Jobs job ON job.Id = source.JobId AND job.DeletedUTC IS NULL
                 WHERE source.Id = $sourceId AND source.DeletedUTC IS NULL
@@ -496,6 +498,7 @@ public sealed partial class JobStore : IJobStore
                 continue;
             }
 
+            var reviewLaunch = await PrepareReviewAsync(item.JobId, null, cancellationToken);
             await using var transaction = connection.BeginTransaction(deferred: false);
             await using var advance = connection.CreateCommand();
             advance.Transaction = transaction;
@@ -510,7 +513,7 @@ public sealed partial class JobStore : IJobStore
             }
 
             var runId = await InsertRunAsync(connection, transaction, item.JobId, JobTriggerKind.Schedule,
-                $"schedule:{item.TriggerId}:{ToDb(item.ScheduledUtc)}", requireEnabled: true, cancellationToken);
+                $"schedule:{item.TriggerId}:{ToDb(item.ScheduledUtc)}", requireEnabled: true, cancellationToken, reviewLaunch: reviewLaunch);
             await transaction.CommitAsync(cancellationToken);
             if (runId != null)
                 runIds.Add(runId);
@@ -1310,11 +1313,26 @@ public sealed partial class JobStore : IJobStore
 
     private async Task<string?> EnqueueJobRunAsync(long jobId, JobTriggerKind kind, string triggerKey, bool requireEnabled, CancellationToken cancellationToken)
     {
+        var reviewLaunch = await PrepareReviewAsync(jobId, JobBoardContext.GetCardKey(kind, triggerKey), cancellationToken);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(deferred: false);
-        var runId = await InsertRunAsync(connection, transaction, jobId, kind, triggerKey, requireEnabled, cancellationToken);
+        var runId = await InsertRunAsync(connection, transaction, jobId, kind, triggerKey, requireEnabled, cancellationToken, reviewLaunch: reviewLaunch);
         await transaction.CommitAsync(cancellationToken);
         return runId;
+    }
+
+    private async Task<ReviewLaunchSnapshot?> PrepareReviewAsync(long jobId, string? cardKey, CancellationToken ct)
+    {
+        if (_reviewSnapshots is null) return null;
+        var job = await GetJobAsync(jobId, ct);
+        return job?.EnvironmentId is int worker ? await _reviewSnapshots.PrepareAsync(job.ProjectPath, worker, cardKey, ct) : null;
+    }
+
+    private static void BoardSelectionValue(string selection, out LLM llm, out int? environmentId)
+    {
+        var parts = selection.Split(':');
+        llm = LlmParser.ParseValue(parts[^1]);
+        environmentId = parts[0] == "env" ? int.Parse(parts[1], CultureInfo.InvariantCulture) : null;
     }
 
     private static async Task<string?> InsertRunAsync(
@@ -1325,7 +1343,7 @@ public sealed partial class JobStore : IJobStore
         string triggerKey,
         bool requireEnabled,
         CancellationToken cancellationToken,
-        string? expectedProjectPath = null)
+        string? expectedProjectPath = null, ReviewLaunchSnapshot? reviewLaunch = null)
     {
         var runId = Guid.NewGuid().ToString("N");
         await using var command = connection.CreateCommand();
@@ -1350,19 +1368,23 @@ public sealed partial class JobStore : IJobStore
         command.CommandText = $"""
             INSERT OR IGNORE INTO JobRuns
                 (Id, JobId, TriggerKind, TriggerKey, Status, JobName, ProjectPath, Llm,
-                 EnvironmentId, EnvironmentName, TimeoutMinutes, QueuedUTC, LaunchMinimized, LaunchInTerminalTab, Purpose)
+                 EnvironmentId, EnvironmentName, TimeoutMinutes, QueuedUTC, LaunchMinimized, LaunchInTerminalTab, Purpose, ReviewLaunchJson)
             SELECT $runId, j.Id, $triggerKind, $triggerKey, $queued, j.Name, j.ProjectPath,
                    COALESCE(e.LLM, 0), j.EnvironmentId, e.CustomName, j.TimeoutMinutes, $queuedUtc,
-                   j.LaunchMinimized, $launchInTerminalTab, COALESCE(e.Purpose, 'work')
+                   j.LaunchMinimized, $launchInTerminalTab, CASE WHEN $reviewLaunch IS NOT NULL THEN 'code_review' ELSE COALESCE(e.Purpose, 'work') END, $reviewLaunch
             FROM Jobs j
             LEFT JOIN Environments e ON e.Id = j.EnvironmentId
             WHERE j.Id = $jobId AND ($requireEnabled = 0 OR j.Enabled = 1) AND j.DeletedUTC IS NULL
               AND ($projectPath IS NULL OR j.ProjectPath = $projectPath{ProjectPathCollation})
               AND EXISTS (SELECT 1 FROM JobActions configured WHERE configured.JobId = j.Id)
+              AND ($reviewLaunch IS NULL OR j.EnvironmentId = $reviewWorker)
+              AND (COALESCE(json_extract(e.ReviewerRoutingJson, '$.mode'), 'fixed') <> 'switch' OR $reviewLaunch IS NOT NULL)
               AND NOT EXISTS (
                   SELECT 1 FROM JobRuns active
                   WHERE active.JobId = j.Id AND active.Status IN ($queued, $running));
             """;
+        command.Parameters.AddWithValue("$reviewLaunch", reviewLaunch is null ? DBNull.Value : JsonSerializer.Serialize(reviewLaunch, StorageJsonSerializerContext.Default.ReviewLaunchSnapshot));
+        command.Parameters.AddWithValue("$reviewWorker", reviewLaunch?.WorkerId ?? 0);
         command.Parameters.AddWithValue("$runId", runId);
         command.Parameters.AddWithValue("$jobId", jobId);
         command.Parameters.AddWithValue("$projectPath", expectedProjectPath is null ? DBNull.Value : expectedProjectPath);
@@ -1397,6 +1419,21 @@ public sealed partial class JobStore : IJobStore
         snapshot.Parameters.AddWithValue("$jobId", jobId);
         snapshot.Parameters.AddWithValue("$pending", (int)JobRunActionStatus.Pending);
         await snapshot.ExecuteNonQueryAsync(cancellationToken);
+        if (reviewLaunch is not null)
+        {
+            BoardSelectionValue(reviewLaunch.Resolution.Selected.Selection, out var llm, out var environmentId);
+            await using var route = connection.CreateCommand();
+            route.Transaction = transaction;
+            route.CommandText = """
+                UPDATE JobRuns SET Llm = $llm, EnvironmentId = $env, EnvironmentName = $name WHERE Id = $run;
+                UPDATE JobRunActions SET Llm = $llm, EnvironmentId = $env, EnvironmentName = $name WHERE RunId = $run AND Kind = 0;
+                """;
+            route.Parameters.AddWithValue("$run", runId);
+            route.Parameters.AddWithValue("$llm", (int)llm);
+            route.Parameters.AddWithValue("$env", (object?)environmentId ?? DBNull.Value);
+            route.Parameters.AddWithValue("$name", reviewLaunch.Resolution.Reviewer);
+            await route.ExecuteNonQueryAsync(cancellationToken);
+        }
         return runId;
     }
 
@@ -1757,7 +1794,8 @@ public sealed partial class JobStore : IJobStore
         reader.GetInt32(19) != 0,
         LaunchInTerminalTab: reader.GetInt32(20) != 0,
         TerminalSessionId: reader.IsDBNull(21) ? null : reader.GetString(21),
-        Purpose: reader.GetString(22));
+        Purpose: reader.GetString(22),
+        ReviewLaunch: reader.IsDBNull(23) ? null : JsonSerializer.Deserialize(reader.GetString(23), StorageJsonSerializerContext.Default.ReviewLaunchSnapshot));
 
     private int _dependenciesReady;
 
@@ -1793,6 +1831,8 @@ public sealed partial class JobStore : IJobStore
             if (!SqliteSchema.HasColumn(db, transaction, "JobRuns", "TerminalSessionId"))
                 SqliteSchema.Execute(db, transaction, "ALTER TABLE JobRuns ADD COLUMN TerminalSessionId TEXT;");
         });
+        SqliteMigrationRunner.Apply(connection, "job-review-routing", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE JobRuns ADD COLUMN ReviewLaunchJson TEXT"));
         SqliteMigrationRunner.Apply(connection, "job-run-purpose", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE JobRuns ADD COLUMN Purpose TEXT NOT NULL DEFAULT 'work'"));
         EnsureDependentSchema(connection);
@@ -1897,6 +1937,8 @@ public sealed partial class JobStore : IJobStore
         {
             SqliteMigrationRunner.Apply(connection, "environment-purpose", 1, MigrationKind.Additive, (db, transaction) =>
                 SqliteSchema.AdoptStatement(db, transaction, SqlStrings.MigrateEnvironmentsAddPurpose));
+            SqliteMigrationRunner.Apply(connection, "environment-review-routing", 1, MigrationKind.Additive, (db, transaction) =>
+                SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE Environments ADD COLUMN ReviewerRoutingJson TEXT"));
             SqliteMigrationRunner.Apply(connection, "jobs-worker-actions", 1, MigrationKind.Additive, AdoptWorkerActions);
         }
         var sessionsReady = EnsureSessionLinkSchema(connection);
@@ -2065,7 +2107,7 @@ public sealed partial class JobStore : IJobStore
         "Id", "JobId", "TriggerKind", "TriggerKey", "Status", "JobName", "ProjectPath",
         "Llm", "EnvironmentId", "EnvironmentName", "TimeoutMinutes", "SessionId",
         "QueuedUTC", "StartedUTC", "EndedUTC", "ExitCode", "ErrorMessage",
-        "CancelRequested", "OwnerProcessId", "LaunchMinimized", "LaunchInTerminalTab", "TerminalSessionId", "Purpose"
+        "CancelRequested", "OwnerProcessId", "LaunchMinimized", "LaunchInTerminalTab", "TerminalSessionId", "Purpose", "ReviewLaunchJson"
     ];
 
     /// <summary>Bare column list, for projections that read JobRuns through a subquery.</summary>

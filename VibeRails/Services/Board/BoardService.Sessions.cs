@@ -22,7 +22,7 @@ public sealed partial class BoardService
         {
             return await LinkSessionAsync(projectPath, card.Id, id, source?.TabId ?? tabId,
                 source?.Selection ?? string.Empty, source?.Cli ?? author?.Cli ?? string.Empty,
-                author?.Label ?? source?.DisplayName ?? "Agent session", BoardSessionRecord.McpOrigin, cancellationToken);
+                author?.Label ?? source?.DisplayName ?? "Agent session", source?.Origin is "chat" or "planning" or "code_review" ? source.Origin : BoardSessionRecord.McpOrigin, cancellationToken);
         }
         catch (BoardConflictException)
         {

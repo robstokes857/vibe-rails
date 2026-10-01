@@ -393,6 +393,8 @@ public sealed class AutomationImportServiceTests : IDisposable
             Step(s1, EnvironmentStepPhase.Manual, "git log -1", name: "Last commit"),
             Step(s2, EnvironmentStepPhase.PostExit, "echo done", enabled: false, timeoutSeconds: 42, startMinimized: true)
         ];
+        _environments[0].Purpose = "code_review";
+        _environments[0].ReviewerRouting = ReviewerRouting.SwitchDefault();
         _jobs.Add(Job(70, "Review", _sourceRoot, WorkerAction(70, 1)));
 
         var response = await Service().ImportAsync(
@@ -408,6 +410,8 @@ public sealed class AutomationImportServiceTests : IDisposable
         Assert.Equal(LLM.Claude, clone.LLM);
         Assert.Equal("--model opus", clone.CustomArgs);
         Assert.True(clone.AutomationWorker);
+        Assert.Equal("code_review", clone.Purpose);
+        Assert.Equivalent(ReviewerRouting.SwitchDefault(), clone.ReviewerRouting);
         Assert.False(clone.Hidden);
         Assert.Equal(EnvironmentWorkspaceMode.Persistent, clone.WorkspaceMode);
         Assert.Equal(_targetRoot, clone.ProjectPath);

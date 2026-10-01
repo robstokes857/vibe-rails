@@ -10,10 +10,17 @@ public sealed record BoardReviewRecord(
     string? SnapshotHash = null, string? CaptureLimitations = null,
     DateTime? CapturedUtc = null, string? Result = null, string? Findings = null,
     string? Validation = null, string? Limitations = null, DateTime? ReportedUtc = null,
-    string Freshness = "Unknown", string? TerminalSessionId = null, IReadOnlyList<string>? ScopeFiles = null);
+    string Freshness = "Unknown", string? TerminalSessionId = null, IReadOnlyList<string>? ScopeFiles = null,
+    VibeRails.DTOs.ReviewRoutingSnapshot? Routing = null);
 
 public partial interface IBoardStore
 {
+    /// <summary>Known discussion/planning/review provenance on any linked card in this project.</summary>
+    Task<bool> IsNonCodingSessionAsync(string projectPath, string sessionId, CancellationToken cancellationToken = default);
+    /// <summary>Explicit per-card coding source and scope; absent settings mean unknown source.</summary>
+    Task<VibeRails.DTOs.BoardReviewSettings?> GetReviewSettingsAsync(string projectPath, string cardId, CancellationToken cancellationToken = default);
+    /// <summary>Save review inputs on a live project-scoped card without rewriting run history.</summary>
+    Task<bool> SaveReviewSettingsAsync(string projectPath, string cardId, VibeRails.DTOs.BoardReviewSettings settings, CancellationToken cancellationToken = default);
     /// <summary>Find an owning session's retained review attempt without a history page limit.</summary>
     Task<BoardReviewRecord?> GetReviewForSessionAsync(string projectPath, string cardId, string sessionId, CancellationToken cancellationToken = default);
     /// <summary>Find an explicit review run by its run id or owning Worker session.</summary>

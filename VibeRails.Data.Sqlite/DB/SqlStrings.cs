@@ -552,22 +552,22 @@ namespace VibeRails.DB
 
         // Environment CRUD (global)
         public const string InsertEnvironment = """
-            INSERT INTO Environments (CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath, Purpose)
-            VALUES ($customName, $llm, $path, $customArgs, $customPrompt, $createdUTC, $lastUsedUTC, $hidden, $automationWorker, $workspaceMode, $projectPath, $purpose)
+            INSERT INTO Environments (CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath, Purpose, ReviewerRoutingJson)
+            VALUES ($customName, $llm, $path, $customArgs, $customPrompt, $createdUTC, $lastUsedUTC, $hidden, $automationWorker, $workspaceMode, $projectPath, $purpose, $reviewerRouting)
             RETURNING Id;
             """;
         public const string SelectEnvironmentById = """
-            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath, Purpose
+            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath, Purpose, ReviewerRoutingJson
             FROM Environments
             WHERE Id = $id;
             """;
         public const string SelectEnvironmentByNameAndLlm = """
-            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath, Purpose
+            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath, Purpose, ReviewerRoutingJson
             FROM Environments
             WHERE CustomName = $customName AND LLM = $llm;
             """;
         public const string SelectEnvironmentByName = """
-            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath, Purpose
+            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath, Purpose, ReviewerRoutingJson
             FROM Environments
             WHERE CustomName = $customName
             ORDER BY LastUsedUTC DESC
@@ -577,19 +577,19 @@ namespace VibeRails.DB
         // name maps to a case-insensitive directory). NOCASE folds ASCII, matching the
         // validated env-name charset.
         public const string SelectEnvironmentByNameNoCase = """
-            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath, Purpose
+            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath, Purpose, ReviewerRoutingJson
             FROM Environments
             WHERE CustomName = $customName COLLATE NOCASE
             ORDER BY LastUsedUTC DESC
             LIMIT 1;
             """;
         public const string SelectAllEnvironments = """
-            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath, Purpose
+            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath, Purpose, ReviewerRoutingJson
             FROM Environments
             ORDER BY LastUsedUTC DESC;
             """;
         public const string SelectCustomEnvironments = """
-            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath, Purpose
+            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath, Purpose, ReviewerRoutingJson
             FROM Environments
             WHERE CustomName != 'Default'
               AND NOT (
@@ -611,6 +611,7 @@ namespace VibeRails.DB
                 Hidden = $hidden,
                 AutomationWorker = $automationWorker,
                 Purpose = $purpose,
+                ReviewerRoutingJson = $reviewerRouting,
                 WorkspaceMode = $workspaceMode,
                 ProjectPath = $projectPath
             WHERE Id = $id;

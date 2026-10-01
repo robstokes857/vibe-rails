@@ -55,7 +55,7 @@ public sealed class JobLaunchService(
     IEnvironmentLaunchService environmentLaunchService,
     IJobProcessLauncher processLauncher,
     IJobTerminalTabLauncher? terminalTabLauncher = null,
-    IBoardProjectResolver? projectResolver = null) : IJobLaunchService
+    IBoardProjectResolver? projectResolver = null, ReviewRoutingService? reviewRouting = null) : IJobLaunchService
 {
     /// <summary>
     /// Ceiling on simultaneously open job terminals across the whole machine. The per-job overlap
@@ -204,6 +204,13 @@ public sealed class JobLaunchService(
                 launch = terminalTabLauncher is null
                     ? new LaunchResult(false, "Terminal tabs are unavailable in this host.")
                     : await terminalTabLauncher.LaunchAsync(run, cancellationToken);
+            }
+            else if (run.ReviewLaunch is not null)
+            {
+                if (reviewRouting is null) throw new InvalidOperationException("Review routing is unavailable in this host.");
+                var environment = await reviewRouting.RequireLaunchAsync(run.ReviewLaunch, cancellationToken);
+                launch = processLauncher.Launch(run.ReviewLaunch.Resolution.Workspace,
+                    ReviewRoutingService.BuildJobArguments(run, environment), run.LaunchMinimized);
             }
             else if (workers.Count == 1 || actions.Count == 0 && run.EnvironmentId is not null)
             {

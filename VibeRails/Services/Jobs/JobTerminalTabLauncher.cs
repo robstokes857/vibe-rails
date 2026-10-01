@@ -26,7 +26,7 @@ public sealed class JobTerminalTabLauncher(
     IJobStore store,
     IRunWorkspaceService workspaces,
     IBoardStore boards,
-    IAppEventBus? events = null) : IJobTerminalTabLauncher
+    IAppEventBus? events = null, ReviewRoutingService? reviewRouting = null) : IJobTerminalTabLauncher
 {
     public async Task<LaunchResult> LaunchAsync(JobRunRecord run, CancellationToken cancellationToken = default)
     {
@@ -34,7 +34,14 @@ public sealed class JobTerminalTabLauncher(
         var arguments = JobLaunchService.BuildStandaloneVbArgs(run);
         var worker = run.Actions?.SingleOrDefault(action => action.Kind == JobActionKind.Worker);
         var environmentId = worker?.EnvironmentId ?? run.EnvironmentId;
-        if (environmentId is int id)
+        if (run.ReviewLaunch is not null)
+        {
+            if (reviewRouting is null) return new LaunchResult(false, "Review routing is unavailable in this host.");
+            var selectedEnvironment = await reviewRouting.RequireLaunchAsync(run.ReviewLaunch, cancellationToken);
+            directory = run.ReviewLaunch.Resolution.Workspace;
+            arguments = ReviewRoutingService.BuildJobArguments(run, selectedEnvironment);
+        }
+        else if (environmentId is int id)
         {
             // Resolve the immutable id, not a reusable name, before provisioning the workspace.
             var environment = await repository.GetEnvironmentByIdAsync(id, cancellationToken);

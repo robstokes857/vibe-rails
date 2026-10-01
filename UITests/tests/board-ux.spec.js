@@ -1728,6 +1728,36 @@ test('closing a card while its Automation catalog loads cannot repaint the next 
 });
 
 
+test('Switch reviewer Worker preset supports same-provider routing and editable fallback', async ({ page }, testInfo) => {
+    await openBoard(page);
+    const writes = [];
+    await page.route('**/api/v1/environments', async route => {
+        if (route.request().method() === 'POST') {
+            writes.push(route.request().postDataJSON());
+            return route.fulfill({ json: { success: true } });
+        }
+        return route.fulfill({ json: [] });
+    });
+    await page.evaluate(() => window.app.environmentController.showEnvironmentForm({ mode: 'create', automationWorker: true }));
+    const form = page.locator('#env-form');
+    await form.getByRole('button', { name: 'Switch reviewer preset', exact: true }).click();
+    await expect(form.locator('#env-purpose')).toHaveValue('code_review');
+    await expect(form.locator('#env-reviewer-mode')).toHaveValue('switch');
+    const choices = form.locator('[data-reviewer-mappings] [data-reviewer-target]');
+    await expect(choices.nth(0)).toHaveValue('base:codex');
+    await expect(choices.nth(1)).toHaveValue('base:claude');
+    await choices.nth(1).evaluate(select => select.tomselect.setValue('base:codex'));
+    await form.locator('[data-reviewer-fallback] [data-reviewer-target]').evaluate(select => select.tomselect.setValue('base:claude'));
+    await page.screenshot({ path: testInfo.outputPath('switch-worker-preset.png') });
+    await form.getByRole('button', { name: 'Create Worker', exact: true }).click();
+    await expect.poll(() => writes.length).toBe(1);
+    expect(writes[0]).toMatchObject({ name: 'Switch reviewer', purpose: 'code_review', automationWorker: true,
+        reviewerRouting: { mode: 'switch', mappings: [
+            { sourceProvider: 'claude', reviewer: { selection: 'base:codex' } },
+            { sourceProvider: 'codex', reviewer: { selection: 'base:codex' } }
+        ], fallback: { selection: 'base:claude' } } });
+});
+
 test('Code review Worker preset defaults to Codex and remains editable', async ({ page }) => {
     await openBoard(page);
     const writes = [];
@@ -1787,7 +1817,7 @@ for (const width of [1440, 390]) {
         await editor.locator('#board-card-title').fill('Keep this unsaved draft');
         await reviews.getByRole('button', { name: 'Run review', exact: true }).click();
         await expect.poll(() => launches.length).toBe(1);
-        expect(launches[0]).toEqual({ selection: 'base:codex', intent: 'code_review' });
+        expect(launches[0]).toEqual({ selection: null, intent: 'code_review', review: { override: null } });
         await expect(editor.locator('#board-card-title')).toHaveValue('Keep this unsaved draft');
         await expect(reviews.locator('[data-review-latest]')).toContainText('Report missing');
         await expect(reviews.locator('[data-review-latest]')).toContainText('CLI unavailable');

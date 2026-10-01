@@ -10,11 +10,12 @@ public sealed partial class JobStore
     {
         if (string.IsNullOrWhiteSpace(cardKey) || cardKey.Contains(':'))
             throw new ArgumentException("A card key is required.", nameof(cardKey));
+        var reviewLaunch = await PrepareReviewAsync(jobId, cardKey, cancellationToken);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(deferred: false);
         var runId = await InsertRunAsync(connection, transaction, jobId, JobTriggerKind.Manual,
             $"{JobBoardContext.ManualPrefix}{cardKey}:{Guid.NewGuid():N}", requireEnabled: true,
-            cancellationToken, expectedProjectPath: NormalizeProjectPath(projectPath));
+            cancellationToken, expectedProjectPath: NormalizeProjectPath(projectPath), reviewLaunch: reviewLaunch);
         await transaction.CommitAsync(cancellationToken);
         return runId;
     }

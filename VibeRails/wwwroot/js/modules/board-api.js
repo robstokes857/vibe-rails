@@ -207,8 +207,8 @@ async function moveBoardCardAsync(cardId, { columnId, position }) {
 }
 
 /** Start work: the server opens a terminal tab with the card prepended to the LLM's initial message. */
-async function launchBoardCardAsync(cardId, { selection, intent = 'work' } = {}) {
-    return call(`/cards/${enc(cardId)}/launch`, 'POST', { selection: selection || null, intent });
+async function launchBoardCardAsync(cardId, { selection, intent = 'work', review } = {}) {
+    return call(`/cards/${enc(cardId)}/launch`, 'POST', { selection: selection || null, intent, ...(review ? { review } : {}) });
 }
 
 // ---------------------------------------------- linked cards

@@ -20,6 +20,14 @@ review purpose from names, retag history, or turn a successful exit into approva
 Both worker/reviewer prompts must name `get_board_reviews` and explain polling and fixing agreed
 findings. Save evidence/handoff before any human/LLM-chosen movement; keep existing lane execution.
 
+## Switch reviewer (VIBE-22)
+
+Keep coding attribution explicit per card. Never derive it from assignment, latest linked session
+or a review/chat session. `ReviewRoutingService` owns resolution for direct reviews and existing
+Workers/Jobs; retries retain the queued routing and scope. Preserve the stated project checkout,
+surface unavailable targets, and never substitute providers or permission flags. See
+[the routing contract](ARCHITECTURE.md#switch-reviewer-vibe-22) for snapshots, steps and recipe limits.
+
 ## Card checks (VIBE-24)
 
 Read [CHECKS.md](CHECKS.md) for scope, immutable evidence, UI lifecycle and starter review defaults.

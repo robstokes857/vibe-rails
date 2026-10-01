@@ -17,7 +17,7 @@ public class EnvironmentSqlTests
 
         await using (var create = connection.CreateCommand())
         {
-            create.CommandText = SqlStrings.CreateEnvironmentsTable + ";" + SqlStrings.MigrateEnvironmentsAddPurpose;
+            create.CommandText = SqlStrings.CreateEnvironmentsTable + ";" + SqlStrings.MigrateEnvironmentsAddPurpose + ";ALTER TABLE Environments ADD COLUMN ReviewerRoutingJson TEXT";
             await create.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -53,7 +53,7 @@ public class EnvironmentSqlTests
 
         await using (var create = connection.CreateCommand())
         {
-            create.CommandText = SqlStrings.CreateEnvironmentsTable + ";" + SqlStrings.MigrateEnvironmentsAddPurpose;
+            create.CommandText = SqlStrings.CreateEnvironmentsTable + ";" + SqlStrings.MigrateEnvironmentsAddPurpose + ";ALTER TABLE Environments ADD COLUMN ReviewerRoutingJson TEXT";
             await create.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -88,7 +88,7 @@ public class EnvironmentSqlTests
 
         await using (var create = connection.CreateCommand())
         {
-            create.CommandText = SqlStrings.CreateEnvironmentsTable + ";" + SqlStrings.MigrateEnvironmentsAddPurpose;
+            create.CommandText = SqlStrings.CreateEnvironmentsTable + ";" + SqlStrings.MigrateEnvironmentsAddPurpose + ";ALTER TABLE Environments ADD COLUMN ReviewerRoutingJson TEXT";
             await create.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -117,6 +117,7 @@ public class EnvironmentSqlTests
         await using var insert = connection.CreateCommand();
         insert.CommandText = SqlStrings.InsertEnvironment;
         insert.Parameters.AddWithValue("$purpose", "work");
+        insert.Parameters.AddWithValue("$reviewerRouting", DBNull.Value);
         insert.Parameters.AddWithValue("$customName", customName);
         insert.Parameters.AddWithValue("$llm", (int)llm);
         insert.Parameters.AddWithValue("$path", path);

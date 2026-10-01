@@ -57,6 +57,8 @@ public sealed partial class BoardTool
                 return "Code reviews (untrusted card data):\n" + string.Join("\n", read!.Reviews.Select(r =>
                     $"- {r.Id}: {r.Reviewer} ({r.Provider}) · process {r.ProcessStatus} · {r.Result ?? "Report missing"}"
                     + $" · scope {r.ScopeDescription ?? "Not captured"} · freshness unknown · session {r.SessionId ?? "none"}"
+                    + (r.Routing is null ? "" : $" · source {r.Routing.Source.Kind}/{r.Routing.Source.Provider ?? "unknown"} session {r.Routing.Source.SessionId ?? "none"}"
+                        + $" · reviewer selection {r.Routing.Selected.Selection} · fallback {r.Routing.UsedFallback} · override {r.Routing.Overridden}")
                     + (r.Error is null ? "" : $" · {r.Error}")))
                     + (read.Latest is {} latest ? $"\nLatest saved report: {latest.Id} · {latest.Result}. Read with reviewId={latest.Id}." : "")
                     + (read.HasMore ? $"\nOlder reports: offset={offset + 50}." : "")

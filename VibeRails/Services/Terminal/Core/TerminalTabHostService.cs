@@ -374,7 +374,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         StartTerminalRequest request,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(request.EnvironmentName))
+        if (request.PreserveWorkingDirectory || string.IsNullOrWhiteSpace(request.EnvironmentName))
             return request;
 
         await using var scope = _scopeFactory.CreateAsyncScope();

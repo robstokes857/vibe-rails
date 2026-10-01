@@ -40,6 +40,22 @@ public static class BoardRoutes
             context.HttpContext.Response.Headers.CacheControl = "no-store";
             return next(context);
         });
+        reviewRoutes.MapGet("/settings", ([Microsoft.AspNetCore.Mvc.FromServices] IBoardStore store, string card, CancellationToken ct) =>
+            RunAsync(async () =>
+            {
+                var current = await store.FindCardAsync(Project(), card, ct);
+                return current is null ? NotFound("Card", card) : Results.Ok(await store.GetReviewSettingsAsync(Project(), current.Id, ct) ?? new BoardReviewSettings());
+            }));
+        reviewRoutes.MapPut("/settings", ([Microsoft.AspNetCore.Mvc.FromServices] ReviewRoutingService routing, string card, BoardReviewSettings request, CancellationToken ct) =>
+            RunAsync(async () => OkOrNotFound(await routing.SaveSettingsAsync(Project(), card, request, ct), "Card")));
+        reviewRoutes.MapPost("/preview", ([Microsoft.AspNetCore.Mvc.FromServices] ReviewRoutingService routing, [Microsoft.AspNetCore.Mvc.FromServices] IBoardStore store,
+            string card, ReviewLaunchRequest request, CancellationToken ct) => RunAsync(async () =>
+            {
+                var current = await store.FindCardAsync(Project(), card, ct);
+                if (current is null) return NotFound("Card", card);
+                var settings = await store.GetReviewSettingsAsync(Project(), current.Id, ct);
+                return Results.Ok((await routing.ResolveAsync(Project(), current.Key, request.Routing ?? settings?.Routing ?? ReviewerRouting.SwitchDefault(), request.Override, ct)).Resolution);
+            }));
         reviewRoutes.MapGet("", ([Microsoft.AspNetCore.Mvc.FromServices] BoardReviewService reader, string card, int? offset, CancellationToken ct) =>
             RunAsync(async () => OkOrNotFound(await reader.ReadAsync(Project(), card, offset ?? 0, ct), "Card")));
         reviewRoutes.MapGet("/{reviewId}", ([Microsoft.AspNetCore.Mvc.FromServices] BoardReviewService reader, string card, string reviewId, bool? verify, CancellationToken ct) =>
@@ -200,7 +216,7 @@ public static class BoardRoutes
             .WithName("DeleteBoardComment");
 
         app.MapPost("/api/v1/board/cards/{card}/launch", (IBoardLaunchService launcher, string card, LaunchBoardCardRequest? request, CancellationToken cancellationToken) =>
-            RunAsync(async () => OkOrNotFound(await launcher.LaunchAsync(Project(), card, request?.Selection, cancellationToken, request?.Intent ?? "work"), "Card")))
+            RunAsync(async () => OkOrNotFound(await launcher.LaunchAsync(Project(), card, request?.Selection, cancellationToken, request?.Intent ?? "work", request?.Review), "Card")))
             .WithName("LaunchBoardCard");
 
         // The context an agent launched on this card right now would receive (VB-63): the launch

@@ -10,7 +10,7 @@ namespace VibeRails.Services.Board;
 /// <summary>"Start work": open a web terminal tab for a card with the card prepended to the environment's Initial Message.</summary>
 public interface IBoardLaunchService
 {
-    Task<LaunchBoardCardResponse?> LaunchAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken = default, string intent = "work");
+    Task<LaunchBoardCardResponse?> LaunchAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken = default, string intent = "work", ReviewLaunchRequest? reviewRequest = null);
 }
 
 /// <summary>
@@ -38,13 +38,13 @@ public sealed class BoardLaunchService(
     IBoardStore store,
     IRepository repository,
     ITerminalTabHostService tabHost,
-    IBoardContextEstimator contextEstimator) : IBoardLaunchService
+    IBoardContextEstimator contextEstimator, ReviewRoutingService? reviewRouting = null) : IBoardLaunchService
 {
     // Only in-flight launches are retained. TryAdd is an immediate reservation, not a
     // queued semaphore, so removal cannot strand waiters or create two gates for one card.
     private static readonly ConcurrentDictionary<string, byte> LaunchingCards = new(StringComparer.Ordinal);
 
-    public async Task<LaunchBoardCardResponse?> LaunchAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken = default, string intent = "work")
+    public async Task<LaunchBoardCardResponse?> LaunchAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken = default, string intent = "work", ReviewLaunchRequest? reviewRequest = null)
     {
         if (intent is not ("work" or "chat" or "code_review"))
             throw new BoardValidationException("Launch intent must be work, chat or code_review.");
@@ -57,7 +57,7 @@ public sealed class BoardLaunchService(
         try
         {
             // Re-read after the reservation: fields may have changed while resolving the key.
-            launched = await LaunchCoreAsync(projectPath, card.Id, selectionOverride, cancellationToken, intent);
+            launched = await LaunchCoreAsync(projectPath, card.Id, selectionOverride, cancellationToken, intent, reviewRequest);
         }
         finally { LaunchingCards.TryRemove(card.Id, out _); }
         if (launched is null)
@@ -71,11 +71,21 @@ public sealed class BoardLaunchService(
     /// <summary>A started launch and what its context sample needs.</summary>
     private sealed record Launched(LaunchBoardCardResponse Response, BoardCardRecord Card, BoardLaunchPrompt Prompt, string Cli, string Selection, string Intent);
 
-    private async Task<Launched?> LaunchCoreAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken, string intent)
+    private async Task<Launched?> LaunchCoreAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken, string intent, ReviewLaunchRequest? reviewRequest)
     {
         var card = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
         if (card is null)
             return null;
+
+        ReviewLaunchSnapshot? routingSnapshot = null;
+        if (reviewRequest is not null)
+        {
+            if (intent != "code_review" || reviewRouting is null) throw new BoardValidationException("Reviewer routing requires Code review intent.");
+            var saved = await store.GetReviewSettingsAsync(projectPath, card.Id, cancellationToken);
+            routingSnapshot = await reviewRouting.ResolveAsync(projectPath, card.Key,
+                reviewRequest.Routing ?? saved?.Routing ?? ReviewerRouting.SwitchDefault(), reviewRequest.Override, cancellationToken);
+            selectionOverride = routingSnapshot.Resolution.Selected.Selection;
+        }
 
         var selectionText = string.IsNullOrWhiteSpace(selectionOverride) ? card.Assignee : selectionOverride;
         if (string.IsNullOrWhiteSpace(selectionText))
@@ -96,14 +106,33 @@ public sealed class BoardLaunchService(
                 throw new BoardValidationException("The assigned environment belongs to another project.");
         }
 
+        string? routingWorkerPrompt = null;
+        if (routingSnapshot is null && intent != "chat" && environment?.ReviewerRouting?.Mode == "switch")
+        {
+            if (reviewRouting is null) throw new BoardValidationException("Review routing is unavailable in this host.");
+            routingWorkerPrompt = environment.CustomPrompt;
+            routingSnapshot = await reviewRouting.ResolveAsync(projectPath, card.Key, environment.ReviewerRouting, null,
+                cancellationToken, environment.Id, environment.CustomPrompt);
+            BoardSelection.TryParse(routingSnapshot.Resolution.Selected.Selection, out parsed);
+            environment = parsed!.EnvironmentId is int reviewerId ? await repository.GetEnvironmentByIdAsync(reviewerId, cancellationToken) : null;
+            intent = "code_review";
+        }
+
         if (intent != "chat" && environment?.Purpose == "code_review") intent = "code_review";
         var isReview = intent == "code_review";
         var assigneeLabel = environment is not null
             ? $"{environment.CustomName} ({parsed.Cli})"
             : parsed.Cli;
-        var composed = await ComposePromptAsync(store, projectPath, card, assigneeLabel, environment?.CustomPrompt, intent, cancellationToken);
-        var prompt = composed.Prompt;
+        var composed = await ComposePromptAsync(store, projectPath, card, assigneeLabel, routingWorkerPrompt is null ? environment?.CustomPrompt : routingWorkerPrompt + "\n" + environment?.CustomPrompt, intent, cancellationToken);
+        var prompt = composed.Prompt + (routingSnapshot is null ? "" : ReviewRoutingService.Prompt(routingSnapshot.Resolution));
         var title = $"{card.DisplayId} · {Truncate(card.Title, 60)}";
+        var launchOptions = routingSnapshot is not null ? routingSnapshot.Resolution.Selected.Options
+            : !parsed.IsEnvironment && string.Equals(parsed.Key, card.Assignee, StringComparison.Ordinal) ? card.BaseLlmOptions : null;
+        var launchArgs = environment is null ? VibeRails.Services.LlmClis.BaseLlmOptionsBuilder.BuildArguments(parsed.Llm, launchOptions)
+            : ShellArgSanitizer.ParseAndValidate(environment.CustomArgs).ToArray();
+        var isPlanning = card.Type == "research-spike" || launchArgs.Select((arg, index) =>
+            arg is "--permission-mode=plan" or "--mode=plan" or "--agent=plan"
+            || arg is "--permission-mode" or "--mode" or "--agent" && index + 1 < launchArgs.Length && launchArgs[index + 1] == "plan").Any(value => value);
 
         // The detail the prompt was composed from, rather than a second read of the same card.
         var detail = composed.Detail;
@@ -123,12 +152,13 @@ public sealed class BoardLaunchService(
         if (tabs.Count >= tabHost.MaxTabs)
             throw new BoardConflictException($"All {tabHost.MaxTabs} terminal tabs are in use. Close one first.");
 
-        BoardReviewRecord? review = isReview ? new("review_" + Guid.NewGuid().ToString("N"), card.Id, parsed.Cli, assigneeLabel, DateTime.UtcNow) : null;
+        BoardReviewRecord? review = isReview ? new("review_" + Guid.NewGuid().ToString("N"), card.Id, parsed.Cli, assigneeLabel, DateTime.UtcNow, Routing: routingSnapshot?.Resolution) : null;
         if (review is not null && !await store.SaveReviewAsync(projectPath, review, cancellationToken))
             throw new BoardValidationException("The review card is no longer available.");
         TerminalTabStatusResponse? tab = null;
         try
         {
+            if (routingSnapshot is not null) await reviewRouting!.RequireLaunchAsync(routingSnapshot, cancellationToken);
             tab = await tabHost.CreateTabAsync(cancellationToken);
             var session = await tabHost.StartSessionAsync(
                 tab.TabId,
@@ -138,9 +168,8 @@ public sealed class BoardLaunchService(
                     EnvironmentName: environment?.CustomName,
                     Title: title,
                     InitialPrompt: prompt,
-                    BaseLlmOptions: !parsed.IsEnvironment && string.Equals(parsed.Key, card.Assignee, StringComparison.Ordinal)
-                        ? card.BaseLlmOptions : null,
-                    AuthorizeBoardTools: true),
+                    BaseLlmOptions: launchOptions,
+                    AuthorizeBoardTools: true) { PreserveWorkingDirectory = routingSnapshot is not null },
                 cancellationToken);
 
             if (!string.IsNullOrWhiteSpace(session.SessionId))
@@ -148,7 +177,7 @@ public sealed class BoardLaunchService(
                 try
                 {
                     var linked = await store.LinkSessionAsync(projectPath, card.Id, session.SessionId!, tab.TabId, parsed.Key, parsed.Cli,
-                        title, isReview ? "code_review" : BoardSessionRecord.LaunchOrigin, cancellationToken);
+                        title, isReview ? "code_review" : intent == "chat" ? "chat" : isPlanning ? "planning" : BoardSessionRecord.LaunchOrigin, cancellationToken);
                     if (linked is null)
                         throw new BoardValidationException("The card was deleted while its agent was starting. The terminal has been closed.");
                 }

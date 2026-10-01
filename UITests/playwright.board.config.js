@@ -4,7 +4,7 @@ const port = Number(process.env.VIBERAILS_BOARD_TEST_PORT) || 18764;
 
 module.exports = defineConfig({
     testDir: './tests',
-    testMatch: ['board-ux.spec.js', 'board-attachment-security.spec.js', 'board-pagination.spec.js', 'toast-appearance.spec.js'],
+    testMatch: ['board-ux.spec.js', 'switch-reviewer.spec.js', 'board-attachment-security.spec.js', 'board-pagination.spec.js', 'toast-appearance.spec.js'],
     workers: 1,
     reporter: 'list',
     use: {

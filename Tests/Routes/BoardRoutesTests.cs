@@ -35,6 +35,41 @@ namespace Tests.Routes;
 public sealed class BoardRoutesTests : IAsyncLifetime
 {
     [Fact]
+    public async Task ReviewRoutingSettingsAndPreviewRequireCredentialsAndScope_AndValidateInputs()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var store = _app.Services.GetRequiredService<IBoardStore>();
+        await store.EnsureDefaultColumnsAsync(_project, ct);
+        var card = await store.CreateCardAsync(_project, new(null, "Routing", "", null, "medium", null, [], false), ct);
+        await store.EnsureDefaultColumnsAsync(_project + "-foreign", ct);
+        var foreign = await store.CreateCardAsync(_project + "-foreign", new(null, "Foreign", "", null, "medium", null, [], false), ct);
+        var path = $"/api/v1/board/cards/{card.Id}/reviews";
+        foreach (var (method, suffix, body) in new[] {
+            (HttpMethod.Get, "/settings", (object?)null),
+            (HttpMethod.Put, "/settings", new BoardReviewSettings()),
+            (HttpMethod.Post, "/preview", new ReviewLaunchRequest()) })
+        {
+            foreach (var credentials in new[] { (Session: (string?)null, Tab: (string?)null), ("test-session", null), (null, "test-tab") })
+            {
+                using var denied = await SendAsync(method, path + suffix, credentials.Session, credentials.Tab, body);
+                Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+            }
+            using var good = await SendAsync(method, path + suffix, "test-session", "test-tab", body);
+            good.EnsureSuccessStatusCode(); Assert.True(good.Headers.CacheControl!.NoStore);
+            using var outside = await SendAsync(method, $"/api/v1/board/cards/{foreign.Id}/reviews" + suffix, "test-session", "test-tab", body);
+            Assert.Equal(HttpStatusCode.NotFound, outside.StatusCode);
+        }
+        using var badScope = await SendAsync(HttpMethod.Put, path + "/settings", "test-session", "test-tab", new BoardReviewSettings(Scope: "range", BaseCommit: "--all", HeadCommit: "HEAD"));
+        Assert.Equal(HttpStatusCode.BadRequest, badScope.StatusCode);
+        using var missingSession = await SendAsync(HttpMethod.Put, path + "/settings", "test-session", "test-tab", new BoardReviewSettings("session", "foreign", "Claimed work"));
+        Assert.Equal(HttpStatusCode.BadRequest, missingSession.StatusCode);
+        using var preview = await SendAsync(HttpMethod.Post, path + "/preview", "test-session", "test-tab", new ReviewLaunchRequest());
+        var resolved = await preview.Content.ReadFromJsonAsync(AppJsonSerializerContext.Default.ReviewRoutingSnapshot, ct);
+        Assert.True(resolved!.UsedFallback); Assert.Equal("codex", resolved.Provider); Assert.NotNull(resolved.Problem);
+        Assert.Null(resolved.Source.Provider);
+    }
+
+    [Fact]
     public async Task ReviewRoutesRequireBothCredentialsAndScopeReportsToCardAndProject()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -209,6 +244,7 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         builder.Services.AddGitPreflight();
         builder.Services.AddScoped<BoardChecksReader>();
         builder.Services.AddScoped<BoardReviewService>();
+        builder.Services.AddScoped<ReviewRoutingService>();
         builder.Services.AddScoped<IJobService, JobService>();
         builder.Services.AddSingleton(new Mock<IJobExecutableResolver>().Object);
         builder.Services.AddSingleton(new Mock<IJobScheduler>().Object);
@@ -1148,9 +1184,10 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         return await SharedClient.SendAsync(request, TestContext.Current.CancellationToken);
     }
 
-    private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, string? session = null, string? tab = null)
+    private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, string? session = null, string? tab = null, object? body = null)
     {
         using var request = new HttpRequestMessage(method, new Uri(_baseUri, path));
+        if (body is not null) request.Content = JsonContent.Create(body, AppJsonSerializerContext.Default.GetTypeInfo(body.GetType())!);
         if (session != null) request.Headers.Add("viberails_session", session);
         if (tab != null) request.Headers.Add("viberails_tab", tab);
         return await SharedClient.SendAsync(request, TestContext.Current.CancellationToken);

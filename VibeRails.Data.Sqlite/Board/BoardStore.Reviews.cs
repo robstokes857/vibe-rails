@@ -33,6 +33,7 @@ public sealed partial class BoardStore
               AND BoardReviews.CreatedUTC = excluded.CreatedUTC
               AND json_extract(BoardReviews.RecordJson, '$.reviewer') = json_extract(excluded.RecordJson, '$.reviewer')
               AND json_extract(BoardReviews.RecordJson, '$.provider') = json_extract(excluded.RecordJson, '$.provider')
+              AND json_extract(BoardReviews.RecordJson, '$.routing') IS json_extract(excluded.RecordJson, '$.routing')
               AND json_extract(BoardReviews.RecordJson, '$.runId') IS json_extract(excluded.RecordJson, '$.runId')
               AND (json_extract(BoardReviews.RecordJson, '$.capturedUtc') IS NULL
                 OR json_extract(BoardReviews.RecordJson, '$.capturedUtc') IS json_extract(excluded.RecordJson, '$.capturedUtc'))

@@ -1,3 +1,4 @@
+using VibeRails.DTOs;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -61,7 +62,7 @@ public static class SqliteStorage
         services.TryAddScoped<IChatSummaryStore>(sp => sp.GetRequiredService<IRepository>());
         services.TryAddScoped<IEmbeddingProgressStore>(sp => sp.GetRequiredService<IRepository>());
         services.TryAddSingleton<IBoardStore>(sp => CreateBoardStore(sp.GetRequiredService<SqliteStoragePaths>().StatePath));
-        services.TryAddSingleton<IJobStore>(sp => new JobStore(StateConnectionString(sp), sp.GetService<BoardAutomationEventSource>()?.Store));
+        services.TryAddSingleton<IJobStore>(sp => new JobStore(StateConnectionString(sp), sp.GetService<BoardAutomationEventSource>()?.Store, sp.GetService<IReviewRunSnapshotFactory>()));
         services.TryAddSingleton<ITokenSavingsStore>(sp => new TokenSavingsStore(StateConnectionString(sp)));
         services.TryAddSingleton<ICodeAnalyzerIgnoreStore>(sp => new CodeAnalyzerIgnoreStore(StateConnectionString(sp)));
         services.TryAddSingleton<ILlmExchangeLogStore>(sp => new LlmExchangeLogStore(ConnectionString(
@@ -87,7 +88,7 @@ public static class SqliteStorage
     public static IServiceCollection AddSqliteJobStorage(this IServiceCollection services,
         Func<IServiceProvider, string> statePathFactory)
     {
-        services.TryAddSingleton<IJobStore>(sp => new JobStore(ConnectionString(statePathFactory(sp)), sp.GetService<BoardAutomationEventSource>()?.Store));
+        services.TryAddSingleton<IJobStore>(sp => new JobStore(ConnectionString(statePathFactory(sp)), sp.GetService<BoardAutomationEventSource>()?.Store, sp.GetService<IReviewRunSnapshotFactory>()));
         return services;
     }
 

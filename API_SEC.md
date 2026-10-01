@@ -1,5 +1,24 @@
 # API authentication coverage
 
+## VIBE-22 Switch reviewer (2026-10-01, scoped amendment)
+
+Added root-only GET/PUT `/api/v1/board/cards/{card}/reviews/settings` and POST
+`/api/v1/board/cards/{card}/reviews/preview`, within the existing no-store review group and
+session-plus-tab credential gate. Project paths are server-derived; attribution validates linked
+session membership and excludes known discussion/planning/review origins. Mapping targets validate
+provider, environment identity and project visibility. Review overrides use the existing launch API.
+
+Queued routing and retry scope are immutable; launch rechecks the environment and checkout inputs.
+The direct-launch workspace flag is server-only (`JsonIgnore`). Reviewer argv uses existing builders
+and the CustomArgs sanitizer, without permission escalation or provider substitution. User-declared
+metadata is bounded, sanitized and fenced as data in prompts; UI output is escaped. Portable recipes
+display routing/permission options in their existing review step and reject local environment IDs.
+
+Scoped Board route enumeration and both mandatory repository listener searches found only the
+approved main Kestrel host, non-serving PortFinder probe and test hosts; the cross-runtime search
+had no matches. Credential/project/card tests and server-only flag serialization tests cover the
+new contract. No security violation was found. This is a scoped amendment, not a full re-audit.
+
 ## VIBE-21 waiting lane Automations (2026-10-01, scoped amendment)
 
 The existing root-only card Automations GET adds up to 100 lane entry states and reasons.

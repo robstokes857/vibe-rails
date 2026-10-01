@@ -59,6 +59,43 @@ function createApp() {
     };
 }
 
+test('Switch reviewer recipe export and import preserve mappings and options', async () => {
+    const { switchReviewerDefaults } = await import(pathToFileURL(path.resolve('VibeRails/wwwroot/js/modules/reviewer-routing.js')).href);
+    const app = createApp(); app.closeModal = () => {};
+    const controller = new JobController(app);
+    const policy = switchReviewerDefaults();
+    policy.mappings[1].reviewer = { selection: 'base:codex', options: { model: 'gpt-6.1', yolo: false } };
+    controller.environments = [{ id: 12, name: 'Switch reviewer', cli: 'codex', purpose: 'code_review', reviewerRouting: policy }];
+    controller.jobs = [{ id: 22, name: 'Review', llm: 2, environmentId: 12, actions: [{ kind: 0, environmentId: 12 }], triggers: [] }];
+    const previousDocument = globalThis.document;
+    const previousCreate = URL.createObjectURL, previousRevoke = URL.revokeObjectURL;
+    let exported;
+    try {
+        globalThis.document = { createElement: () => ({ click() {}, remove() {} }), body: { appendChild() {} } };
+        URL.createObjectURL = blob => { exported = blob; return 'blob:test'; };
+        URL.revokeObjectURL = () => {};
+        controller.exportRecipe(22);
+    } finally {
+        globalThis.document = previousDocument; URL.createObjectURL = previousCreate; URL.revokeObjectURL = previousRevoke;
+    }
+    const recipe = controller.parseRecipe(await exported.text());
+    assert.deepEqual(recipe.worker.reviewerRouting, policy);
+    controller.refreshAll = async () => {
+        const stored = structuredClone(policy);
+        stored.fallback.options = null;
+        stored.mappings[0].reviewer.options = null;
+        stored.mappings[1].reviewer.options = { ...stored.mappings[1].reviewer.options, effort: '', mode: '' };
+        controller.environments[0].reviewerRouting = stored;
+    };
+    await controller.applyRecipe(recipe, { addEnv: true, addJob: true, existingEnv: null, button: null });
+    assert.deepEqual(app.calls[0].body.reviewerRouting, policy);
+    assert.equal(app.calls[1].body.enabled, false);
+    recipe.worker.reviewerRouting.fallback = { selection: 'env:12:codex' };
+    const writes = app.calls.length;
+    await assert.rejects(controller.applyRecipe(recipe, { addEnv: true, addJob: true, button: null }), /machine-local reviewer environments/);
+    assert.equal(app.calls.length, writes);
+});
+
 test('Automation page makes automations primary', () => {
     const controller = new JobController(createApp());
     const html = controller.renderPage();

@@ -38,6 +38,8 @@ namespace VibeRails.DTOs
         public bool AutomationWorker { get; set; }
         /// <summary>Explicit agent purpose; never inferred from names.</summary>
         public string Purpose { get; set; } = "work";
+        /// <summary>Optional Switch reviewer policy; null preserves fixed-provider behavior.</summary>
+        public ReviewerRouting? ReviewerRouting { get; set; }
         // Where this environment's CLI runs — the project directory, a persistent clone, or a
         // fresh clone per launch. Clone modes are backed by a Sandboxes row pointing back here.
         public EnvironmentWorkspaceMode WorkspaceMode { get; set; } = EnvironmentWorkspaceMode.Project;

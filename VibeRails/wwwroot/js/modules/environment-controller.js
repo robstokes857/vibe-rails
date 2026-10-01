@@ -1,3 +1,4 @@
+import { switchReviewerDefaults, routingEditorMarkup, mountRoutingEditor } from './reviewer-routing.js';
 import { parseCliArguments } from './cli-arguments.js';
 import { normalizeLlmModel, renderLlmModelOptions } from './llm-model-catalog.js';
 import { getEnabledLlmItems, mountLlmPicker, setLlmPickerValue } from './pickers/llm-picker.js';
@@ -660,7 +661,7 @@ export class EnvironmentController {
         this.app.showModal(title, `
             <form id="env-form" class="${workerOnly ? 'env-worker-form' : ''}">
                 ${nameRow}
-                ${!isEdit ? '<button type="button" class="btn btn-sm btn-outline-secondary mb-3" data-code-review-preset>Code review preset</button>' : ''}
+                ${!isEdit ? '<button type="button" class="btn btn-sm btn-outline-secondary mb-3" data-switch-reviewer-preset>Switch reviewer preset</button> <button type="button" class="btn btn-sm btn-outline-secondary mb-3" data-code-review-preset>Code review preset</button>' : ''}
                 <div class="mb-3">
                     <label class="form-label">CLI Type</label>
                     ${cliField}
@@ -670,7 +671,12 @@ export class EnvironmentController {
                         <option value="work" ${env?.purpose !== 'code_review' ? 'selected' : ''}>Work / custom</option>
                         <option value="code_review" ${env?.purpose === 'code_review' ? 'selected' : ''}>Code review</option>
                     </select>
-                    <small class="form-text text-muted">Code review saves a report on the originating card. The preset starts with Codex; its provider and instructions remain editable.</small>
+                    <small class="form-text text-muted">Code review saves a report on the originating card. Switch reviewer uses the mappings below; the fixed Code review preset starts with Codex. Instructions remain editable.</small>
+                </div>
+                <div data-reviewer-policy ${env?.purpose === 'code_review' ? '' : 'hidden'}>
+                    <label class="form-label" for="env-reviewer-mode">Reviewer selection</label>
+                    <select id="env-reviewer-mode" class="form-select mb-2"><option value="fixed">Fixed provider</option><option value="switch" ${env?.reviewerRouting?.mode === 'switch' ? 'selected' : ''}>Switch reviewer</option></select>
+                    <div data-reviewer-routing ${env?.reviewerRouting?.mode === 'switch' ? '' : 'hidden'}>${routingEditorMarkup()}</div>
                 </div>
                 ${initialMessageRow}
                 ${formBody}
@@ -710,7 +716,19 @@ export class EnvironmentController {
             });
         }
 
+        const routingHost = document.querySelector('[data-reviewer-routing]');
+        const routingEditor = mountRoutingEditor(this.app, routingHost, env?.reviewerRouting || switchReviewerDefaults());
+        const reviewerMode = document.getElementById('env-reviewer-mode');
+        reviewerMode?.addEventListener('change', () => { routingHost.hidden = reviewerMode.value !== 'switch'; });
+        document.querySelector('[data-switch-reviewer-preset]')?.addEventListener('click', () => {
+            const purpose = document.getElementById('env-purpose');
+            purpose.value = 'code_review'; purpose.dispatchEvent(new Event('change', { bubbles: true }));
+            reviewerMode.value = 'switch'; reviewerMode.dispatchEvent(new Event('change'));
+            const name = document.getElementById('env-name');
+            if (name && !name.value.trim()) name.value = 'Switch reviewer';
+        });
         document.querySelector('[data-code-review-preset]')?.addEventListener('click', () => {
+            reviewerMode.value = 'fixed'; reviewerMode.dispatchEvent(new Event('change'));
             const purpose = document.getElementById('env-purpose');
             purpose.value = 'code_review';
             purpose.dispatchEvent(new Event('change', { bubbles: true }));
@@ -718,6 +736,7 @@ export class EnvironmentController {
             if (name && !name.value.trim()) name.value = 'Code review';
         });
         document.getElementById('env-purpose')?.addEventListener('change', event => {
+            document.querySelector('[data-reviewer-policy]').hidden = event.target.value !== 'code_review';
             if (!isEdit && event.target.value === 'code_review') {
                 setLlmPickerValue(this.app, cliSelect, 'codex');
                 cliSelect.dispatchEvent(new Event('change', { bubbles: true }));
@@ -759,6 +778,7 @@ export class EnvironmentController {
             keydownTarget.removeEventListener('keydown', handleEscape, true);
             closeButtons.forEach(button => button.removeEventListener('click', handleClose));
             cliPickerDisposer?.();
+            routingEditor.dispose();
             // The nested layer lives in #modal-container beside this form; closing the form
             // without it would leave an orphan modal (and a live test stream) behind.
             stepsEditor?.close({ restoreFocus: false });
@@ -824,6 +844,7 @@ export class EnvironmentController {
                     const settingsPayload = this.extractCliSettingsPayload(env.cli);
                     const payload = this.buildEnvironmentSavePayload(env.cli, settingsPayload);
                     payload.purpose = document.getElementById('env-purpose').value;
+                    payload.reviewerRouting = payload.purpose === 'code_review' && reviewerMode?.value === 'switch' ? routingEditor.read() : { ...switchReviewerDefaults(), mode: 'fixed' };
                     if (hiddenInput) payload.hidden = hiddenInput.checked;
                     if (workspaceMode !== null) payload.workspaceMode = workspaceMode;
                     // Omitted entirely when the steps editor was never opened, so the PUT's
@@ -839,6 +860,7 @@ export class EnvironmentController {
                         name,
                         cli,
                         purpose: document.getElementById('env-purpose').value,
+                        ...(document.getElementById('env-purpose').value === 'code_review' && reviewerMode?.value === 'switch' ? { reviewerRouting: routingEditor.read() } : {}),
                         ...this.buildEnvironmentSavePayload(cli, settingsPayload),
                         ...(hiddenInput ? { hidden: hiddenInput.checked } : {}),
                         ...(workspaceMode !== null ? { workspaceMode } : {}),

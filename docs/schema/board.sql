@@ -155,6 +155,9 @@ CREATE TABLE BoardPendingAutomations ( CardId TEXT PRIMARY KEY REFERENCES BoardC
 -- table BoardProjectKeys
 CREATE TABLE BoardProjectKeys ( ProjectPath TEXT PRIMARY KEY COLLATE NOCASE, Prefix TEXT NOT NULL, CreatedUTC TEXT NOT NULL );
 
+-- table BoardReviewSettings
+CREATE TABLE BoardReviewSettings ( CardId TEXT PRIMARY KEY REFERENCES BoardCards(Id) ON DELETE CASCADE, SettingsJson TEXT NOT NULL );
+
 -- table BoardReviews
 CREATE TABLE BoardReviews ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, CreatedUTC TEXT NOT NULL, ReportedUTC TEXT, RecordJson TEXT NOT NULL );
 

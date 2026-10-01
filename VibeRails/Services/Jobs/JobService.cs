@@ -96,7 +96,7 @@ public sealed class JobService(
         var job = await store.GetJobAsync(id, cancellationToken);
         if (job is null || job.DeletedUtc is not null)
             throw JobServiceException.NotFound("Automation not found.");
-        ValidateRunRequirements(job.Actions, job.Llm);
+        await ValidateDefinitionRunRequirementsAsync(job, cancellationToken);
 
         // Once validation has completed, do not let RequestAborted abandon a half-enqueued run.
         cancellationToken.ThrowIfCancellationRequested();
@@ -119,7 +119,7 @@ public sealed class JobService(
             throw JobServiceException.NotFound("Automation not found in this project.");
         if (!job.Enabled)
             throw JobServiceException.BadRequest("Enable this Automation before running it from a card.");
-        ValidateRunRequirements(job.Actions, job.Llm);
+        await ValidateDefinitionRunRequirementsAsync(job, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         // Recheck project/enabled/overlap under the snapshot transaction. The card key was
         // resolved through IBoardStore; a browser never supplies a project or trigger key.
@@ -489,6 +489,20 @@ public sealed class JobService(
 
     }
 
+    private async Task ValidateDefinitionRunRequirementsAsync(JobDefinitionRecord job, CancellationToken ct)
+    {
+        var worker = job.EnvironmentId is int id ? await repository.GetEnvironmentByIdAsync(id, ct) : null;
+        if (worker?.Purpose == "code_review" && worker.ReviewerRouting?.Mode == "switch")
+        {
+            // The preset's display provider is not the resolved reviewer. Queueing captures the
+            // chosen provider and any recoverable prerequisite failure for the Code reviews section.
+            var otherActions = job.Actions?.Where(a => a.Kind != JobActionKind.Worker).ToList();
+            if (otherActions is { Count: > 0 }) ValidateRunRequirements(otherActions, LLM.NotSet);
+            return;
+        }
+        ValidateRunRequirements(job.Actions, job.Llm);
+    }
+
     private void ValidateRunRequirements(IReadOnlyList<JobRunActionRecord>? actions, LLM legacyLlm)
     {
         if (actions is not { Count: > 0 })
@@ -592,7 +606,7 @@ public sealed class JobService(
         run.Id, run.JobId, run.JobName, run.TriggerKind, run.Status, run.ProjectPath, run.Llm,
         run.EnvironmentName, run.SessionId, run.TimeoutMinutes, run.QueuedUtc, run.StartedUtc,
         run.EndedUtc, run.ExitCode, run.ErrorMessage, run.CancelRequested,
-        run.Actions?.Select(ToRunActionDto).ToList(), run.TerminalSessionId, run.Purpose);
+        run.Actions?.Select(ToRunActionDto).ToList(), run.TerminalSessionId, run.Purpose, run.ReviewLaunch?.Resolution);
 
     private static JobActionRequest ToRequest(JobActionRecord action) => new(
         action.Id,

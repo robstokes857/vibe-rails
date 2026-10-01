@@ -1877,6 +1877,10 @@ export class JobController {
         const actions = this.normalizeJobActions(job);
         const workerAction = actions.find(action => action.kind === JOB_ACTION.WORKER);
         const environment = workerAction ? this.findEnvironment(workerAction.environmentId) : null;
+        if (this.hasLocalReviewerTargets(environment?.reviewerRouting)) {
+            this.app.showError('Portable recipes currently support base reviewer providers. Replace environment targets with base providers before exporting; environment IDs are local to this machine.');
+            return;
+        }
         if (workerAction && !environment) {
             this.app.showError('This automation needs a valid Worker before it can be exported.');
             return;
@@ -1902,6 +1906,7 @@ export class JobController {
                 customArgs,
                 prompt,
                 purpose: environment.purpose || 'work',
+                reviewerRouting: environment.reviewerRouting || null,
                 workspaceMode: Number(environment.workspaceMode) || 0
             } : null,
             actions: actions.map(action => action.kind === JOB_ACTION.WORKER
@@ -2144,6 +2149,7 @@ viberails-recipe -->
                 customArgs: worker.customArgs || '',
                 prompt: worker.prompt || '',
                 purpose: worker.purpose || 'work',
+                    reviewerRouting: worker.reviewerRouting || null,
                 workspaceMode: Number(worker.workspaceMode) || 0
             } : null,
             actions: (entry.actions || []).map(action => Number(action.kind) === JOB_ACTION.WORKER
@@ -2260,16 +2266,39 @@ viberails-recipe -->
      * the server decides Worker reuse vs clone — the modal only adds the clone's name and shows,
      * per script, whether the file is already here, will be copied, or is missing everywhere.
      */
+    hasLocalReviewerTargets(routing) {
+        return routing && [...(routing.mappings || []).map(m => m?.reviewer), routing.fallback]
+            .some(target => !target?.selection?.startsWith('base:'));
+    }
+
+    reviewerRoutingMatches(left, right) {
+        // JSON responses include optional null/default fields that portable files may omit.
+        const target = value => ({ selection: value?.selection?.trim().toLowerCase(), options: {
+            model: value?.options?.model || '', effort: value?.options?.effort || '',
+            mode: value?.options?.mode || '', yolo: value?.options?.yolo === true
+        } });
+        const policy = value => !value || value.mode === 'fixed' ? null : {
+            mode: value.mode, fallback: target(value.fallback),
+            mappings: (value.mappings || []).map(m => ({ source: m.sourceProvider?.toLowerCase(), reviewer: target(m.reviewer) }))
+                .sort((a, b) => String(a.source).localeCompare(String(b.source)))
+        };
+        return JSON.stringify(policy(left)) === JSON.stringify(policy(right));
+    }
+
     confirmImportRecipe(recipe, { importSource = null } = {}) {
         recipe = this.normalizeRecipe(recipe);
         const worker = recipe.worker;
+        if (!importSource && this.hasLocalReviewerTargets(worker?.reviewerRouting)) {
+            this.app.showError('This recipe references local reviewer environments. Use base provider mappings in portable recipes, then select local environments after import.');
+            return;
+        }
         const cli = String(worker?.cli || '').toLowerCase();
         const existingEnv = importSource
             ? (worker && importSource.worker?.reusableEnvironmentId != null
                 ? { id: importSource.worker.reusableEnvironmentId, name: importSource.worker.reusableEnvironmentName || worker.name }
                 : null)
             : worker
-                ? (this.environments || []).find(env => (env.name || '').toLowerCase() === String(worker.name).toLowerCase() && (env.cli || '').toLowerCase() === cli && (env.purpose || 'work') === (worker.purpose || 'work'))
+                ? (this.environments || []).find(env => (env.name || '').toLowerCase() === String(worker.name).toLowerCase() && (env.cli || '').toLowerCase() === cli && (env.purpose || 'work') === (worker.purpose || 'work') && this.reviewerRoutingMatches(env.reviewerRouting, worker.reviewerRouting))
                 : null;
         const whenText = (recipe.triggers || []).length
             ? (recipe.triggers || []).map(t => this.formatTrigger(t)).join(', ')
@@ -2279,7 +2308,8 @@ viberails-recipe -->
         const customArgs = String(worker?.customArgs || '');
         const prompt = String(worker?.prompt || '');
         const scripts = (recipe.actions || []).filter(action => Number(action.kind) === JOB_ACTION.SCRIPT);
-        const hasReviewableContent = customArgs.trim().length > 0 || prompt.trim().length > 0 || scripts.length > 0;
+        const routingText = worker?.reviewerRouting ? JSON.stringify(worker.reviewerRouting, null, 2) : '';
+        const hasReviewableContent = customArgs.trim().length > 0 || prompt.trim().length > 0 || scripts.length > 0 || Boolean(routingText);
         const sourceScripts = importSource
             ? (importSource.actions || []).filter(action => Number(action.kind) === JOB_ACTION.SCRIPT)
             : [];
@@ -2323,6 +2353,7 @@ viberails-recipe -->
                     <div class="form-text">Worker names are unique across VibeRails because each one owns a config directory. Letters, digits, spaces, underscores and hyphens.</div>
                 </div>` : ''}
                 <div class="job-recipe-review">
+                    ${routingText ? `<div><div class="form-label mb-1">Reviewer routing and permission options</div><pre class="job-recipe-review-value" data-recipe-routing>${this.escape(routingText)}</pre></div>` : ''}
                     ${worker ? `<div>
                         <div class="form-label mb-1">Custom arguments</div>
                         <pre class="job-recipe-review-value" data-recipe-custom-args>${this.escape(customArgs || '(none)')}</pre>
@@ -2372,6 +2403,7 @@ viberails-recipe -->
         return this.withBusy(button, 'Importing…', async () => {
             recipe = this.normalizeRecipe(recipe);
             const worker = recipe.worker;
+            if (this.hasLocalReviewerTargets(worker?.reviewerRouting)) throw new Error('Portable recipes cannot resolve machine-local reviewer environments. Use base provider mappings.');
             const cli = String(worker?.cli || '').toLowerCase();
             if (worker && addEnv) {
                 // Recipes install through the Automation flow, so the imported record
@@ -2383,6 +2415,7 @@ viberails-recipe -->
                     customPrompt: worker.prompt || '',
                     automationWorker: true,
                     purpose: worker.purpose || 'work',
+                    reviewerRouting: worker.reviewerRouting || null,
                     workspaceMode: Number(worker.workspaceMode) || 0
                 });
             }
@@ -2390,7 +2423,7 @@ viberails-recipe -->
 
             if (addJob) {
                 const environment = worker
-                    ? (this.environments || []).find(env => (env.name || '').toLowerCase() === String(worker.name).toLowerCase() && (env.cli || '').toLowerCase() === cli && (env.purpose || 'work') === (worker.purpose || 'work'))
+                    ? (this.environments || []).find(env => (env.name || '').toLowerCase() === String(worker.name).toLowerCase() && (env.cli || '').toLowerCase() === cli && (env.purpose || 'work') === (worker.purpose || 'work') && this.reviewerRoutingMatches(env.reviewerRouting, worker.reviewerRouting))
                     : null;
                 if (worker && !environment) throw new Error('The recipe Worker could not be created or found.');
                 const llm = environment ? getJobLlmForCli(cli) : 0;

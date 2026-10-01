@@ -36,12 +36,13 @@ public sealed partial class JobStore
             try
             {
                 var current = entry.IsCurrent && await _boards.IsLaneAutomationCurrentAsync(entry, cancellationToken);
+                var reviewLaunch = current ? await PrepareReviewAsync(entry.JobId, JobBoardContext.GetCardKey(JobTriggerKind.BoardLane, entry.TriggerKey), cancellationToken) : null;
                 BoardLaneAutomationDispatch dispatch;
                 await using (var transaction = connection.BeginTransaction(deferred: false))
                 {
                     var runId = current ? await InsertRunAsync(connection, transaction, entry.JobId,
                         JobTriggerKind.BoardLane, entry.TriggerKey, requireEnabled: true, cancellationToken,
-                        expectedProjectPath: entry.ProjectPath) : null;
+                        expectedProjectPath: entry.ProjectPath, reviewLaunch: reviewLaunch) : null;
                     if (runId is not null) runIds.Add(runId);
                     dispatch = runId is not null ? new("Queued", "Lane Automation queued.", runId)
                         : await DescribeBoardRunRejectionAsync(connection, transaction, entry, current, cancellationToken);
