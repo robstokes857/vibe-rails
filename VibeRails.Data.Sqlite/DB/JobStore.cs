@@ -346,6 +346,22 @@ public sealed partial class JobStore : IJobStore
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(deferred: false);
 
+        var triggerKey = $"retry:{runId}:{Guid.NewGuid():N}";
+        await using (var readSource = connection.CreateCommand())
+        {
+            readSource.Transaction = transaction;
+            readSource.CommandText = RunSelectSql + " WHERE r.Id = $sourceId;";
+            readSource.Parameters.AddWithValue("$sourceId", runId);
+            await using var reader = await readSource.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                var source = ReadRun(reader);
+                var cardKey = source.ReviewLaunch?.Resolution.CardKey ?? JobBoardContext.GetCardKey(source.TriggerKind, source.TriggerKey);
+                if (source.Purpose == "code_review" && cardKey is not null)
+                    triggerKey = $"{JobBoardContext.ReviewRetryPrefix}{cardKey}:{triggerKey}";
+            }
+        }
+
         await using (var insertRun = connection.CreateCommand())
         {
             insertRun.Transaction = transaction;
@@ -368,7 +384,7 @@ public sealed partial class JobStore : IJobStore
             insertRun.Parameters.AddWithValue("$retryId", retryId);
             insertRun.Parameters.AddWithValue("$sourceId", runId);
             insertRun.Parameters.AddWithValue("$manual", (int)JobTriggerKind.Manual);
-            insertRun.Parameters.AddWithValue("$triggerKey", $"retry:{runId}:{Guid.NewGuid():N}");
+            insertRun.Parameters.AddWithValue("$triggerKey", triggerKey);
             insertRun.Parameters.AddWithValue("$queued", (int)JobRunStatus.Queued);
             insertRun.Parameters.AddWithValue("$running", (int)JobRunStatus.Running);
             insertRun.Parameters.AddWithValue("$queuedUtc", ToDb(DateTime.UtcNow));
@@ -1325,7 +1341,9 @@ public sealed partial class JobStore : IJobStore
     {
         if (_reviewSnapshots is null) return null;
         var job = await GetJobAsync(jobId, ct);
-        return job?.EnvironmentId is int worker ? await _reviewSnapshots.PrepareAsync(job.ProjectPath, worker, cardKey, ct) : null;
+        if (job?.EnvironmentId is not int worker) return null;
+        var defaultScope = await GetDefaultReviewScopeAsync(job, worker, ct);
+        return await _reviewSnapshots.PrepareAsync(job.ProjectPath, worker, cardKey, ct, defaultScope);
     }
 
     private static void BoardSelectionValue(string selection, out LLM llm, out int? environmentId)

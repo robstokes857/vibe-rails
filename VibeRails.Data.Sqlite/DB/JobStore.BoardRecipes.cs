@@ -7,6 +7,22 @@ namespace VibeRails.DB;
 
 public sealed partial class JobStore
 {
+    private async Task<string> GetDefaultReviewScopeAsync(JobDefinitionRecord job, int workerId, CancellationToken ct)
+    {
+        await using var connection = await OpenAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT EXISTS (SELECT 1 FROM BoardAutomationRecipes
+                WHERE ProjectPath = $project{ProjectPathCollation} AND JobId = $job
+                  AND WorkerId = $worker AND RecipeId = $recipe);
+            """;
+        command.Parameters.AddWithValue("$project", job.ProjectPath);
+        command.Parameters.AddWithValue("$job", job.Id);
+        command.Parameters.AddWithValue("$worker", workerId);
+        command.Parameters.AddWithValue("$recipe", BoardReviewDefaults.RecipeId);
+        return Convert.ToInt64(await command.ExecuteScalarAsync(ct)) != 0 ? BoardReviewDefaults.ReviewScope : "working-tree";
+    }
+
     public async Task<long> EnsureBoardReviewRecipeAsync(string projectPath, string columnId, string recipeId, CancellationToken cancellationToken = default)
     {
         if (recipeId != BoardReviewDefaults.RecipeId) throw new ArgumentException("Unknown local Board recipe.", nameof(recipeId));

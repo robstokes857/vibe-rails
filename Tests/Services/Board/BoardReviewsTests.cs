@@ -5,6 +5,7 @@ using VibeRails.DTOs;
 using VibeRails.Services;
 using VibeRails.Services.Board;
 using VibeRails.Services.Git;
+using VibeRails.Services.Jobs;
 using Xunit;
 
 namespace Tests.Services.Board;
@@ -129,6 +130,56 @@ public sealed class BoardReviewsTests : IAsyncLifetime
         Assert.StartsWith("Stale", (await reviews.ReportAsync(repo, card.Key, begun.Id, true, repo, Ct))!.Freshness);
         Assert.StartsWith("Unknown", (await reviews.ReportAsync(repo, card.Key, begun.Id, true, root, Ct))!.Freshness);
         Assert.Equal(saved.Findings, (await reopened.GetReviewAsync(repo, card.Id, begun.Id, Ct))!.Findings);
+    }
+
+    [Theory]
+    [InlineData("code_review", false)]
+    [InlineData("code_review", true)]
+    [InlineData("work", false)]
+    [InlineData("work", true)]
+    public async Task FixedReviewRetriesKeepCardAndCanonicalReports_WhileWorkRetriesRemainUnlinked(string purpose, bool laneEntry)
+    {
+        var worker = await repository.SaveEnvironmentAsync(new() { CustomName = "Fixed Codex", LLM = LLM.Codex,
+            Purpose = purpose, AutomationWorker = true, CustomPrompt = "Review" }, Ct);
+        var job = await jobs.CreateJobAsync(new("Worker", repo, LLM.Codex, worker.Id, "Review", null, true, []), Ct);
+        string runId;
+        if (laneEntry)
+        {
+            var lane = (await store.GetColumnsAsync(repo, Ct))[3];
+            await store.SaveLaneAutomationAsync(repo, lane.Id, [job.Id], 0, Ct);
+            await store.MoveCardAsync(repo, card.Id, lane.Id, null, Ct);
+            runId = Assert.Single(await jobs.EnqueueDueSchedulesAsync(DateTime.UtcNow.AddMinutes(2), Ct));
+        }
+        else runId = (await jobs.EnqueueBoardCardRunAsync(repo, job.Id, card.Key, Ct))!;
+        // Retry policy follows the original snapshot, even after the Worker's purpose changes.
+        worker.Purpose = purpose == "code_review" ? "work" : "code_review";
+        await repository.UpdateEnvironmentAsync(worker, Ct);
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            await jobs.CompleteRunAsync(runId, JobRunStatus.Failed, 1, "test failure", Ct);
+            runId = (await jobs.EnqueueRetryAsync(runId, Ct))!;
+            var retry = (await new JobStore(state, store).GetRunAsync(runId, Ct))!;
+            Assert.Null(retry.ReviewLaunch);
+            Assert.Equal(purpose, retry.Purpose);
+            Assert.False(retry.LaunchInTerminalTab);
+            Assert.False(JobBoardContext.OpensTerminalTab(retry.TriggerKind, retry.TriggerKey));
+            Assert.Equal(purpose == "code_review" ? card.Key : null, JobRunner.GetBoardCardKey(retry));
+            var session = Guid.NewGuid().ToString();
+            await repository.CreateSessionAsync(session, "codex", worker.CustomName, repo, 1, runId);
+            await BoardAutomationSessionLinker.LinkAsync(store, retry, session, cancellationToken: Ct);
+            if (purpose == "work")
+            {
+                Assert.Empty((await store.GetCardDetailAsync(repo, card.Id, Ct))!.Sessions);
+                Assert.Empty((await reviews.ReadAsync(repo, card.Id, 0, Ct))!.Reviews);
+                continue;
+            }
+            Assert.Contains((await reviews.ReadAsync(repo, card.Id, 0, Ct))!.Reviews, row => row.RunId == runId);
+            Assert.Contains(await jobs.GetBoardCardRunsAsync(repo, card.Key, Ct), row => row.Id == runId);
+            Assert.Empty(await store.GetReviewRunsAsync(repo + "-other", card.Id, 0, Ct));
+            var report = await reviews.BeginAsync(repo, card.Id, session, repo, "repository", "Fixed review retry", null, null, false, Ct);
+            await reviews.SaveAsync(repo, card.Id, session, report.Id, "No findings reported", "None", "Inspected repository", "No runtime tests", Ct);
+            Assert.Equal(runId, (await reviews.ReadAsync(repo, card.Id, 0, Ct))!.Latest!.RunId);
+        }
     }
 
     [Fact]

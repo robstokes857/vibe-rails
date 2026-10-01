@@ -131,6 +131,7 @@ public sealed partial class BoardStore
               AND ($run IS NULL OR Id = $run) AND ($session IS NULL OR SessionId = $session)
               AND ((TriggerKind = $lane AND instr(TriggerKey, $lanePrefix) = 1)
                 OR (TriggerKind = $manual AND instr(TriggerKey, $manualPrefix) = 1)
+                OR (TriggerKind = $manual AND {purpose} = 'code_review' AND instr(TriggerKey, $reviewRetryPrefix) = 1)
                 OR json_extract({routing}, '$.resolution.cardKey') = $cardKey)
             ORDER BY QueuedUTC DESC, Id DESC LIMIT $limit OFFSET $offset;
             """;
@@ -145,6 +146,7 @@ public sealed partial class BoardStore
         command.Parameters.AddWithValue("$cardKey", card.Key);
         command.Parameters.AddWithValue("$lanePrefix", $"board-lane:{card.Key}:");
         command.Parameters.AddWithValue("$manualPrefix", $"{JobBoardContext.ManualPrefix}{card.Key}:");
+        command.Parameters.AddWithValue("$reviewRetryPrefix", $"{JobBoardContext.ReviewRetryPrefix}{card.Key}:");
         var result = new List<BoardAgentRun>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))

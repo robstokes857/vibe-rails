@@ -28,7 +28,8 @@ public sealed partial class JobStore
         command.CommandText = RunSelectSql + $"""
 
             WHERE r.DeletedUTC IS NULL AND r.ProjectPath = $projectPath{ProjectPathCollation}
-              AND r.TriggerKind = $manual AND instr(r.TriggerKey, $prefix) = 1
+              AND r.TriggerKind = $manual AND (instr(r.TriggerKey, $prefix) = 1
+                OR (r.Purpose = 'code_review' AND instr(r.TriggerKey, $reviewRetryPrefix) = 1))
               AND NOT EXISTS (SELECT 1 FROM json_each($recordings)
                   WHERE value = COALESCE(r.TerminalSessionId, r.SessionId))
             ORDER BY r.QueuedUTC DESC, r.Id DESC LIMIT 20;
@@ -36,6 +37,7 @@ public sealed partial class JobStore
         command.Parameters.AddWithValue("$projectPath", NormalizeProjectPath(projectPath));
         command.Parameters.AddWithValue("$manual", (int)JobTriggerKind.Manual);
         command.Parameters.AddWithValue("$prefix", $"{JobBoardContext.ManualPrefix}{cardKey}:");
+        command.Parameters.AddWithValue("$reviewRetryPrefix", $"{JobBoardContext.ReviewRetryPrefix}{cardKey}:");
         command.Parameters.AddWithValue("$recordings", JsonSerializer.Serialize(
             linkedRecordingIds?.ToList() ?? [], StorageJsonSerializerContext.Default.ListString));
         var runs = new List<JobRunRecord>();

@@ -441,7 +441,8 @@ public static class JobRunner
 
     /// <summary>
     /// Board launches persist their originating card in the immutable trigger key. Ordinary
-    /// retries get a new manual key and do not inherit the original run's Board context.
+    /// Work retries get a new manual key without Board context. Code review retries retain the
+    /// originating card in their own retry key, independently of optional reviewer routing.
     /// </summary>
     internal static string? GetBoardCardKey(JobRunRecord run) =>
         run.ReviewLaunch?.Resolution.CardKey ?? JobBoardContext.GetCardKey(run.TriggerKind, run.TriggerKey);

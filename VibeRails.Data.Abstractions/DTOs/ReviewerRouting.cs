@@ -38,5 +38,6 @@ public sealed record ReviewLaunchSnapshot(ReviewRoutingSnapshot Resolution, int 
 /// <summary>Prepare review routing before the state database queue transaction begins.</summary>
 public interface IReviewRunSnapshotFactory
 {
-    Task<ReviewLaunchSnapshot?> PrepareAsync(string project, int workerId, string? cardKey, CancellationToken cancellationToken);
+    Task<ReviewLaunchSnapshot?> PrepareAsync(string project, int workerId, string? cardKey, CancellationToken cancellationToken,
+        string defaultScope = "working-tree");
 }

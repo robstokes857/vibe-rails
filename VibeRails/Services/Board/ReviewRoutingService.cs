@@ -89,7 +89,8 @@ public sealed class ReviewRoutingService(IBoardStore boards, IRepository reposit
 
     /// <summary>Resolve once. Missing prerequisites stay visible on the snapshot and never select another provider.</summary>
     public async Task<ReviewLaunchSnapshot> ResolveAsync(string project, string? cardKey, ReviewerRouting routing,
-        ReviewerTarget? selectionOverride, CancellationToken ct, int workerId = 0, string? workerPrompt = null)
+        ReviewerTarget? selectionOverride, CancellationToken ct, int workerId = 0, string? workerPrompt = null,
+        string defaultScope = "working-tree")
     {
         Validate(routing, "code_review");
         if (selectionOverride is not null) ValidateTarget(selectionOverride);
@@ -98,7 +99,10 @@ public sealed class ReviewRoutingService(IBoardStore boards, IRepository reposit
             ? "Switch reviewer Workers cannot own steps. Move the steps and their prompt references into the selected reviewer environments, then request a new review." : null;
         var card = cardKey is null ? null : await boards.FindCardAsync(project, cardKey, ct)
             ?? throw new BoardValidationException("The review card is no longer available in this project.");
-        var settings = card is null ? new BoardReviewSettings() : await boards.GetReviewSettingsAsync(project, card.Id, ct) ?? new();
+        // Recipe defaults apply only to an absent settings row. Even a deliberately empty/unknown
+        // saved scope belongs to the user; never replace it or write defaults into Board history.
+        var settings = (card is null ? null : await boards.GetReviewSettingsAsync(project, card.Id, ct))
+            ?? new BoardReviewSettings(Scope: defaultScope);
         ValidateSettings(settings);
         ReviewCodingSource source;
         string? problem = workerProblem;
@@ -143,11 +147,12 @@ public sealed class ReviewRoutingService(IBoardStore boards, IRepository reposit
     }
 
     /// <summary>Read a Worker's policy at queue time. Ordinary fixed Workers retain their existing pipeline.</summary>
-    public async Task<ReviewLaunchSnapshot?> PrepareAsync(string project, int workerId, string? cardKey, CancellationToken ct)
+    public async Task<ReviewLaunchSnapshot?> PrepareAsync(string project, int workerId, string? cardKey, CancellationToken ct,
+        string defaultScope = "working-tree")
     {
         var worker = await repository.GetEnvironmentByIdAsync(workerId, ct);
         if (worker?.Purpose != "code_review" || worker.ReviewerRouting?.Mode != "switch") return null;
-        return await ResolveAsync(project, cardKey, worker.ReviewerRouting, null, ct, workerId, worker.CustomPrompt);
+        return await ResolveAsync(project, cardKey, worker.ReviewerRouting, null, ct, workerId, worker.CustomPrompt, defaultScope);
     }
 
     /// <summary>Recheck availability and frozen scope at execution, including on retry.</summary>
@@ -217,11 +222,12 @@ public sealed class ReviewRoutingService(IBoardStore boards, IRepository reposit
 /// <summary>Singleton-safe adapter for the storage queue; it never resolves IJobStore recursively.</summary>
 public sealed class ReviewRunSnapshotFactory(IServiceScopeFactory scopes) : IReviewRunSnapshotFactory
 {
-    public async Task<ReviewLaunchSnapshot?> PrepareAsync(string project, int workerId, string? cardKey, CancellationToken cancellationToken)
+    public async Task<ReviewLaunchSnapshot?> PrepareAsync(string project, int workerId, string? cardKey, CancellationToken cancellationToken,
+        string defaultScope = "working-tree")
     {
         using var scope = scopes.CreateScope();
         var worker = await scope.ServiceProvider.GetRequiredService<IRepository>().GetEnvironmentByIdAsync(workerId, cancellationToken);
         if (worker?.Purpose != "code_review" || worker.ReviewerRouting?.Mode != "switch") return null;
-        return await scope.ServiceProvider.GetRequiredService<ReviewRoutingService>().PrepareAsync(project, workerId, cardKey, cancellationToken);
+        return await scope.ServiceProvider.GetRequiredService<ReviewRoutingService>().PrepareAsync(project, workerId, cardKey, cancellationToken, defaultScope);
     }
 }

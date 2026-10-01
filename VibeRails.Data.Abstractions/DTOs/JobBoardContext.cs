@@ -4,16 +4,19 @@ namespace VibeRails.DTOs;
 public static class JobBoardContext
 {
     public const string ManualPrefix = "board-card:";
+    /// <summary>Review retries retain their card while continuing to open in a native terminal.</summary>
+    public const string ReviewRetryPrefix = "board-review-retry:";
 
     public static bool OpensTerminalTab(JobTriggerKind kind, string triggerKey) =>
-        kind == JobTriggerKind.BoardLane || GetCardKey(kind, triggerKey) is not null;
+        kind == JobTriggerKind.BoardLane || kind == JobTriggerKind.Manual
+            && triggerKey.StartsWith(ManualPrefix, StringComparison.Ordinal) && GetCardKey(kind, triggerKey) is not null;
 
     public static string? GetCardKey(JobTriggerKind kind, string triggerKey)
     {
         var prefix = kind switch
         {
             JobTriggerKind.BoardLane => "board-lane:",
-            JobTriggerKind.Manual => ManualPrefix,
+            JobTriggerKind.Manual => triggerKey.StartsWith(ReviewRetryPrefix, StringComparison.Ordinal) ? ReviewRetryPrefix : ManualPrefix,
             _ => null
         };
         if (prefix is null || !triggerKey.StartsWith(prefix, StringComparison.Ordinal)) return null;

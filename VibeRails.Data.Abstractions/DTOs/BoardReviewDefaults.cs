@@ -4,6 +4,7 @@ namespace VibeRails.DTOs;
 public static class BoardReviewDefaults
 {
     public const string RecipeId = "viberails.board.switch-reviewer.v1";
+    public const string ReviewScope = "unpushed";
     public const string Name = "Switch reviewer";
     public const string Description = "Code quality and VCA check unpushed commits, then the selected reviewer reviews the card. Choose the reviewer and edit provider mappings in Lane agents. Saves Checks evidence and a Code review report on the card. The agent follows your Board instructions to choose the next action.";
     public const string Prompt = """

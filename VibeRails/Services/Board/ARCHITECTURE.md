@@ -28,6 +28,10 @@ The workflow is Code quality → VCA (editable unpushed scopes from `ReviewCheck
 Codex → Claude and a visible Codex fallback for unknown/mixed/human/unmapped coding sources.
 Existing attribution, scope snapshots, prerequisite checks and the root scheduler apply. Missing
 providers remain setup problems; no substitute provider or permission bypass is introduced.
+When a card has no saved review settings, the receipt's Job and Worker use `unpushed` for the
+review snapshot, matching the starter checks and capturing a clean committed handoff. Saved
+card scopes take precedence; unrelated Automations retain `working-tree`. This fallback never
+writes settings or changes an existing run snapshot.
 
 Every lane, including the first, has a Lane agents button. The panel shows purpose, report/check
 output, live reviewer mappings and provider setup guidance. Its shared reviewer editor supports
@@ -314,8 +318,12 @@ Native script-only runs now create a normal Shell session before executing. Scri
 lines and their elapsed timestamps become batched raw logs and replay frames through
 `SessionOutputWriter`; normal, cancelled and timed-out exits complete that session with the
 workflow's actual outcome. The run and originating Board card share that recording's session ID.
-Repeat callbacks are idempotent and deleted cards are ignored. Manual/retry triggers do not
-inherit stale card context. No Board schema changes or historical-session backfill are needed.
+Repeat callbacks are idempotent and deleted cards are ignored. Card-scoped manual launches use
+`board-card:<key>:<event>`. Code review retries retain the card in an immutable
+`board-review-retry:<key>:retry:<run>:<event>` trigger, including fixed-provider Workers without
+routing snapshots, so prompts, tool grants, links and canonical reports keep their context.
+Retries still open native terminals. Work retries retain their ordinary unlinked manual context.
+No Board schema changes or historical-session backfill are needed.
 
 Board `GET /cards?pageSize=30` loads all open cards and only the first page of each lane whose
 name contains ship/done/complete. `columnId`, `offset`, and the first page's opaque

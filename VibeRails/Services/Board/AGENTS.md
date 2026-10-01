@@ -240,8 +240,9 @@ serialization or tool discovery into the Native AOT path.
   Lane-triggered Automations link their full workflow recording to the originating card's
   Automations rail, directly below Sessions. Board runs always open terminal tabs; other triggers
   (including manual retries) open native terminals. Older native recordings remain visible.
-  The run's immutable Board trigger and project scope determine the card; manual retries do not
-  inherit the original trigger's Board context.
+  The run's immutable Board trigger and project scope determine the card. Code review retries
+  retain it through `board-review-retry:` independently of routing, preserving prompts, grants,
+  linking and canonical reports. Work retries do not inherit the original Board context.
 
 ## Card text syntax: `@path` file references
 

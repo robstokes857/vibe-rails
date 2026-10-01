@@ -186,6 +186,62 @@ public sealed class SwitchReviewerTests : IAsyncLifetime
         Assert.NotEqual(queued.ReviewLaunch.Resolution.InputHash, (await Resolve()).Resolution.InputHash);
     }
 
+    [Theory]
+    [InlineData(null, "range")]
+    [InlineData("working-tree", "working-tree")]
+    [InlineData("repository", "repository")]
+    public async Task StarterReviewCapturesCommittedHandoffUnlessTheCardHasAnExplicitScope(string? savedScope, string expectedScope)
+    {
+        await Git("branch", "-M", "main");
+        var baseline = (await GitCli.RunAsync(project, ["rev-parse", "HEAD"], Ct)).StdOut.Trim();
+        await Git("remote", "add", "origin", project);
+        await Git("update-ref", "refs/remotes/origin/main", baseline);
+        await Git("branch", "--set-upstream-to=origin/main", "main");
+        await File.WriteAllTextAsync(Path.Combine(project, "file.txt"), "committed task changes", Ct);
+        await Git("add", "."); await Git("-c", "core.hooksPath=", "commit", "-m", "handoff");
+        Assert.Empty((await GitCli.RunAsync(project, ["status", "--porcelain"], Ct)).StdOut.Trim());
+        if (savedScope is not null)
+            await routing.SaveSettingsAsync(project, card.Id, new(Scope: savedScope), Ct);
+        var seed = Assert.Single(await boards.GetPendingStarterWorkflowsAsync(project, Ct));
+        var job = await jobs.EnsureBoardReviewRecipeAsync(project, seed.ColumnId, seed.RecipeId, Ct);
+        await boards.CompleteStarterWorkflowAsync(project, seed.ColumnId, job, Ct);
+        await boards.MoveCardAsync(project, card.Id, seed.ColumnId, null, Ct);
+        var runId = Assert.Single(await jobs.EnqueueDueSchedulesAsync(DateTime.UtcNow.AddMinutes(2), Ct));
+        var run = (await jobs.GetRunAsync(runId, Ct))!;
+        var snapshot = run.ReviewLaunch!.Resolution;
+        Assert.Equal(expectedScope, snapshot.Scope);
+        Assert.NotNull(snapshot.InputHash);
+        Assert.Null(snapshot.Problem);
+        Assert.Equal(savedScope, (await boards.GetReviewSettingsAsync(project, card.Id, Ct))?.Scope);
+        if (savedScope is null) Assert.Equal(baseline, snapshot.BaseCommit);
+        var session = Guid.NewGuid().ToString();
+        await repository.CreateSessionAsync(session, "codex", null, project, 1, runId);
+        await BoardAutomationSessionLinker.LinkAsync(boards, run, session, cancellationToken: Ct);
+        var reviews = new BoardReviewService(boards, Mock.Of<IBoardService>());
+        var report = await reviews.BeginAsync(project, card.Id, session, project, snapshot.Scope, "Task handoff",
+            snapshot.BaseCommit, snapshot.HeadCommit, snapshot.IncludeDirty, Ct);
+        if (savedScope == "working-tree") Assert.Empty(report.ScopeFiles!);
+        else Assert.Contains(report.ScopeFiles!, file => file.Contains("file.txt", StringComparison.Ordinal));
+        await jobs.CompleteRunAsync(runId, JobRunStatus.Failed, 1, "retry", Ct);
+        var retry = (await jobs.GetRunAsync((await jobs.EnqueueRetryAsync(runId, Ct))!, Ct))!;
+        Assert.Equivalent(run.ReviewLaunch, retry.ReviewLaunch);
+    }
+
+    [Fact]
+    public async Task OtherAutomationsUsingTheStarterWorkerKeepTheirOrdinaryScopeDefault()
+    {
+        var seed = Assert.Single(await boards.GetPendingStarterWorkflowsAsync(project, Ct));
+        var starterId = await jobs.EnsureBoardReviewRecipeAsync(project, seed.ColumnId, seed.RecipeId, Ct);
+        var starter = (await jobs.GetJobAsync(starterId, Ct))!;
+        var other = await jobs.CreateJobAsync(new(BoardReviewDefaults.Name, project, LLM.Codex,
+            starter.EnvironmentId, "Review", null, true, []), Ct);
+        var runId = (await jobs.EnqueueBoardCardRunAsync(project, other.Id, card.Key, Ct))!;
+        var snapshot = (await jobs.GetRunAsync(runId, Ct))!.ReviewLaunch!.Resolution;
+        Assert.Equal("working-tree", snapshot.Scope);
+        Assert.Null(snapshot.Problem);
+        Assert.Null(await boards.GetReviewSettingsAsync(project, card.Id, Ct));
+    }
+
     [Fact]
     public async Task LaneQueueUsesTheSameSnapshotContract()
     {
@@ -354,8 +410,9 @@ public sealed class SwitchReviewerTests : IAsyncLifetime
     }
     private sealed class SnapshotFactory(ReviewRoutingService service) : IReviewRunSnapshotFactory
     {
-        public Task<ReviewLaunchSnapshot?> PrepareAsync(string project, int workerId, string? cardKey, CancellationToken cancellationToken)
-            => service.PrepareAsync(project, workerId, cardKey, cancellationToken);
+        public Task<ReviewLaunchSnapshot?> PrepareAsync(string project, int workerId, string? cardKey, CancellationToken cancellationToken,
+            string defaultScope = "working-tree")
+            => service.PrepareAsync(project, workerId, cardKey, cancellationToken, defaultScope);
     }
     public ValueTask DisposeAsync()
     {
