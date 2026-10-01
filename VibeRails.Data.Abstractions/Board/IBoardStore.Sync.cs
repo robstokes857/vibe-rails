@@ -111,6 +111,13 @@ public partial interface IBoardStore
     Task<IReadOnlySet<string>> GetFieldsChangedAfterAsync(string cardId, long remoteSeq, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// True only for a live card in the specified project and board with no unapplied remote
+    /// entries through the given sequence and no pending or still-protected rejected fields.
+    /// Checks the complete card ledger, not the bounded status preview or historical rejection count.
+    /// </summary>
+    Task<bool> IsCardSyncAppliedAsync(string projectPath, string boardId, string cardId, long throughSeq, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Inserts a card minted elsewhere under its own id and key. The local number is the web
     /// card's when it is just above the project's high-water mark (a bounded gap, so a corrupt key
     /// cannot jump or exhaust local numbering), else the next local number; the key is stored

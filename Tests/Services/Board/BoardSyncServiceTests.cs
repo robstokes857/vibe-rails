@@ -6,7 +6,7 @@ using Xunit;
 
 namespace Tests.Services.Board;
 
-public sealed class BoardSyncServiceTests : IDisposable
+public sealed partial class BoardSyncServiceTests : IDisposable
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "board-sync-service-" + Guid.NewGuid().ToString("N"));
     private readonly BoardStore store;
@@ -831,6 +831,7 @@ public sealed class BoardSyncServiceTests : IDisposable
         var unknown = client.Entries.Skip(1).Take(2).Select(e => e.Id).ToHashSet();
         client.TransformPull = page => page with { Entries = page.Entries.Select(e => unknown.Contains(e.Id) ? e with { Kind = "future_kind" } : e).ToList() };
         Assert.Equal(2, (await service.SyncNowAsync(root, card.BoardId, Ct))!.Skipped);
+        Assert.False(await store.IsCardSyncAppliedAsync(root, card.BoardId, card.Id, 4, Ct));
         await ExecuteAsync("UPDATE BoardSyncSkippedEntries SET Version = '1.0.0';");
         client.TransformPull = null;
 
@@ -840,6 +841,7 @@ public sealed class BoardSyncServiceTests : IDisposable
         Assert.Equal(1, client.PullAfters[calls]);
         Assert.Equal(4, retried.Cursor);
         Assert.Equal(0, retried.Skipped);
+        Assert.True(await store.IsCardSyncAppliedAsync(root, card.BoardId, card.Id, retried.Cursor, Ct));
         // The replayed change is older than the title edit after it: it sets the priority, not the title.
         var current = (await store.FindCardAsync(root, card.Id, Ct))!;
         Assert.Equal("Newer", current.Title);

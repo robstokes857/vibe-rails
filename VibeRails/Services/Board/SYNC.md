@@ -16,6 +16,11 @@ No terminal must already be running. Closing the root stops polling; there is no
 `BoardRemoteLaunchService` syncs through the hosted request's sequence, checks local project,
 Board, card, destination and imported status again, and calls `IBoardLaunchService` with no
 override. Local environments, argv handling, Board grants and launch conflict checks still apply.
+Cursor progress alone does not authorize launch: `IBoardStore.IsCardSyncAppliedAsync` reads
+the target card's complete skipped-entry ledger and current field protection in one read snapshot.
+It rejects unapplied entries through the synced cursor and pending/protected rejected fields.
+Other cards' failures and historical rejections whose fields were corrected do not block it.
+The status response's latest-50 entry preview is never used as proof of application.
 The command carries no directory, executable, arguments or prompt. The hosted broker consumes
 each request once; the desktop also suppresses repeat IDs. Only result acknowledgements retry.
 Lost results become unknown, never success or an automatic second launch. The website polls

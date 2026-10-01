@@ -524,6 +524,31 @@ public sealed partial class BoardStore
         return await GetFieldsChangedAfterAsync(connection, null, cardId, remoteSeq, cancellationToken);
     }
 
+    /// <inheritdoc />
+    public async Task<bool> IsCardSyncAppliedAsync(string projectPath, string boardId, string cardId, long throughSeq, CancellationToken cancellationToken = default)
+    {
+        if (throughSeq < 0) return false;
+        await using var connection = await OpenAsync(cancellationToken);
+        // Membership, skipped entries and protected fields must describe the same read snapshot.
+        // A status cursor can advance past skipped entries; its latest-50 preview is not evidence.
+        await using var transaction = connection.BeginTransaction(deferred: true);
+        var card = await ReadCardAsync(connection, transaction, NormalizeProjectPath(projectPath), cardId, cancellationToken);
+        if (card is null || card.Id != cardId || card.BoardId != boardId) return false;
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT EXISTS (SELECT 1 FROM BoardSyncSkippedEntries
+                WHERE BoardId = $board AND CardKey = $key AND Seq <= $seq);
+            """;
+        command.Parameters.AddWithValue("$board", boardId);
+        command.Parameters.AddWithValue("$key", card.Key);
+        command.Parameters.AddWithValue("$seq", throughSeq);
+        if (await command.ExecuteScalarAsync(cancellationToken) is not 0L) return false;
+        // Reuse the exact field-protection rule used when applying incoming changes. Rejected
+        // history stays stored after an acknowledged correction, but its protection is released.
+        return (await GetFieldsChangedAfterAsync(connection, transaction, card.Id, throughSeq, cancellationToken)).Count == 0;
+    }
+
     private static async Task<IReadOnlySet<string>> GetFieldsChangedAfterAsync(SqliteConnection connection, SqliteTransaction? transaction,
         string cardId, long remoteSeq, CancellationToken cancellationToken)
     {

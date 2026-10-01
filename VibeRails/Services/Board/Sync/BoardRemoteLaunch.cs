@@ -45,6 +45,8 @@ public sealed class BoardRemoteLaunchService(IBoardStore store, IBoardSyncClient
         }
         if (status is null || status.LastError is not null || status.Cursor < command.RequiredSeq || status.Unsent != 0)
             return Result("sync_failed");
+        if (!await store.IsCardSyncAppliedAsync(project, link.BoardId, command.CardId, status.Cursor, ct))
+            return Result("sync_failed");
         var currentLink = await store.GetSyncLinkAsync(project, link.BoardId, ct);
         var card = await store.FindCardAsync(project, command.CardId, ct);
         if (currentLink is not { Imported: false, Enabled: true } || currentLink.RemoteBoardId != link.RemoteBoardId

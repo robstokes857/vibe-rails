@@ -41,6 +41,7 @@ public sealed class BoardRemoteLaunchTests
     [InlineData("behind")]
     [InlineData("sync_error")]
     [InlineData("unsent")]
+    [InlineData("unapplied")]
     public async Task RefusesUntrustedOrStaleLaunchTargets(string failure)
     {
         Setup(failure);
@@ -63,6 +64,7 @@ public sealed class BoardRemoteLaunchTests
     private void Setup(string? failure = null)
     {
         client.SetupGet(x => x.DestinationKey).Returns(Destination);
+        store.Setup(x => x.IsCardSyncAppliedAsync(Project, "board", "card", 12, Ct)).ReturnsAsync(failure != "unapplied");
         store.Setup(x => x.GetBoardsAsync(Project, Ct)).ReturnsAsync([new BoardRecord("board", Project, "Project", 0, default, default)]);
         var link = new BoardSyncLinkRecord("board", remote.ToString(), 12, true, null, null, null, default, default,
             Project, "Project", failure == "destination" ? "other" : Destination, Imported: failure == "imported");

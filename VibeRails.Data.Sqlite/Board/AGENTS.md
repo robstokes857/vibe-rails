@@ -1,5 +1,13 @@
 # Board persistence
 
+## Remote launch sync check (VIBE-26)
+
+`IsCardSyncAppliedAsync` scopes the live card to its project and Board, checks the complete
+skipped-entry ledger by immutable card key through the requested sequence, and reuses the
+incoming-sync field-protection rule. These reads share a deferred transaction; no writer lock
+or schema change is needed. Retained rejected history is not a permanent launch block once
+its fields have been corrected and acknowledged. Keep this check behind `IBoardStore`.
+
 ## Shared origins (board/26, VB-52)
 
 `BoardStore.Sharing.cs` imports accepted shared boards and applies remote layouts atomically.
