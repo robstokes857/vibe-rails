@@ -61,7 +61,13 @@ public interface IJobStore
     Task<int> FailStalledLaunchesAsync(TimeSpan grace, CancellationToken cancellationToken = default);
     Task<bool> StartRunAsync(string runId, int processId, CancellationToken cancellationToken = default);
     Task CompleteRunAsync(string runId, JobRunStatus status, int? exitCode, string? errorMessage, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Completes an idled run atomically, preferring pending cancellation and preserving earlier
+    /// failed actions. Returns the durable outcome if another completion path already won.
+    /// </summary>
     Task<JobRunStatus> CompleteIdleRunAsync(string runId, CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<JobRunActionRecord>> GetRunActionsAsync(string runId, CancellationToken cancellationToken = default);
     Task<bool> StartRunActionAsync(string runId, string actionId, CancellationToken cancellationToken = default);
     Task LinkRunTerminalSessionAsync(string runId, string sessionId, CancellationToken cancellationToken = default);

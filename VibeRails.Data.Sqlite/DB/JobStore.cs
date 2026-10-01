@@ -1098,9 +1098,9 @@ public sealed partial class JobStore : IJobStore
     }
 
     /// <summary>
-    /// Finalizes a run that finished its work as Succeeded unless an explicit cancel is already
-    /// pending, in which case it is Cancelled. The choice and terminal write happen in one SQLite
-    /// statement, so cancellation cannot slip between a separate check and a successful write.
+    /// Finalizes a run whose last action finished, preserving any earlier failed action. An explicit
+    /// pending cancel takes precedence. The action read and terminal write share a writer transaction,
+    /// so a failed check or cancellation cannot be lost between deciding and recording the outcome.
     /// JobRunner routes every successful completion through here — the Worker's raw-output idle
     /// signal, a script-only workflow's last action, and the idle-shutdown fallback alike — and
     /// keeps <see cref="CompleteRunAsync"/> for the non-success outcomes.
@@ -1112,21 +1112,48 @@ public sealed partial class JobStore : IJobStore
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(deferred: false);
         var ended = ToDb(DateTime.UtcNow);
+        var idleStatus = JobRunStatus.Succeeded;
+        var idleExitCode = 0;
+        string? idleError = null;
+        await using (var failure = connection.CreateCommand())
+        {
+            failure.Transaction = transaction;
+            // Checks may fail and still allow the reviewer to run. Match RunAsync's accumulated
+            // outcome (the last failure in workflow order), even when its terminal never unwinds.
+            failure.CommandText = """
+                SELECT ExitCode, ErrorMessage FROM JobRunActions
+                WHERE RunId = $id AND Status = $failed
+                ORDER BY Position DESC LIMIT 1;
+                """;
+            failure.Parameters.AddWithValue("$id", runId);
+            failure.Parameters.AddWithValue("$failed", (int)JobRunActionStatus.Failed);
+            await using var reader = await failure.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                idleStatus = JobRunStatus.Failed;
+                idleExitCode = reader.IsDBNull(0) || reader.GetInt32(0) == 0
+                    ? JobRunOutcome.ToExitCode(JobRunStatus.Failed) : reader.GetInt32(0);
+                idleError = reader.IsDBNull(1) ? "An Automation action failed." : reader.GetString(1);
+            }
+        }
+
         JobRunStatus? completedStatus = null;
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
             command.CommandText = """
                 UPDATE JobRuns SET
-                    Status = CASE WHEN CancelRequested = 1 THEN $cancelled ELSE $succeeded END,
+                    Status = CASE WHEN CancelRequested = 1 THEN $cancelled ELSE $idleStatus END,
                     EndedUTC = $ended,
-                    ExitCode = CASE WHEN CancelRequested = 1 THEN $cancelExitCode ELSE 0 END,
-                    ErrorMessage = CASE WHEN CancelRequested = 1 THEN $cancelMessage ELSE NULL END
+                    ExitCode = CASE WHEN CancelRequested = 1 THEN $cancelExitCode ELSE $idleExitCode END,
+                    ErrorMessage = CASE WHEN CancelRequested = 1 THEN $cancelMessage ELSE $idleError END
                 WHERE Id = $id AND Status IN ($running, $queued)
                 RETURNING Status;
                 """;
             command.Parameters.AddWithValue("$cancelled", (int)JobRunStatus.Cancelled);
-            command.Parameters.AddWithValue("$succeeded", (int)JobRunStatus.Succeeded);
+            command.Parameters.AddWithValue("$idleStatus", (int)idleStatus);
+            command.Parameters.AddWithValue("$idleExitCode", idleExitCode);
+            command.Parameters.AddWithValue("$idleError", idleError is null ? DBNull.Value : idleError);
             command.Parameters.AddWithValue("$running", (int)JobRunStatus.Running);
             command.Parameters.AddWithValue("$queued", (int)JobRunStatus.Queued);
             command.Parameters.AddWithValue("$ended", ended);

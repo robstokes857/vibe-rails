@@ -124,6 +124,61 @@ public sealed class JobStoreOverlapTests : IDisposable
         Assert.NotNull(completedAction.EndedUtc);
     }
 
+    [Theory]
+    [InlineData(JobActionKind.CodeQuality, false)]
+    [InlineData(JobActionKind.Vca, false)]
+    [InlineData(JobActionKind.CodeQuality, true)]
+    [InlineData(JobActionKind.Vca, true)]
+    public async Task CompleteIdleRunAsync_PreservesFailedCheckWhenLastWorkerIdles(
+        JobActionKind checkKind, bool cancelRequested)
+    {
+        var (store, seedJobId) = await SeedJobAsync();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var environmentId = (await store.GetJobAsync(seedJobId, cancellationToken))!.EnvironmentId;
+        var job = await store.CreateJobAsync(AnotherJob("Checked review", environmentId) with
+        {
+            Actions = [new(null, checkKind, Arguments: ["unpushed"]), new(null, JobActionKind.Worker, environmentId)]
+        }, cancellationToken);
+        var runId = (await store.EnqueueManualRunAsync(job.Id, cancellationToken))!;
+        Assert.True(await store.StartRunAsync(runId, 4242, cancellationToken));
+        var actions = await store.GetRunActionsAsync(runId, cancellationToken);
+        var check = Assert.Single(actions, action => action.Kind == checkKind);
+        var worker = Assert.Single(actions, action => action.Kind == JobActionKind.Worker);
+        const string failure = "No upstream is configured for unpushed scope.";
+        Assert.True(await store.StartRunActionAsync(runId, check.Id, cancellationToken));
+        await store.CompleteRunActionAsync(runId, check.Id, JobRunActionStatus.Failed, 23,
+            failure, "Saved check evidence", "Scope capture failed", cancellationToken);
+        var completedCheck = (await store.GetRunActionsAsync(runId, cancellationToken))[0];
+        Assert.True(await store.StartRunActionAsync(runId, worker.Id, cancellationToken));
+        if (cancelRequested)
+            Assert.True(await store.RequestCancelAsync(runId, cancellationToken));
+
+        // This is the atomic finalizer used when the last Worker's idle shutdown wedges.
+        // Exercise it directly without launching a Worker or the process-killing fallback.
+        var expected = cancelRequested ? JobRunStatus.Cancelled : JobRunStatus.Failed;
+        Assert.Equal(expected, await store.CompleteIdleRunAsync(runId, cancellationToken));
+        await store.CompleteRunAsync(runId, JobRunStatus.Succeeded, 0, null, cancellationToken);
+        var reopened = new JobStore(_connectionString);
+        Assert.Equal(expected, await reopened.CompleteIdleRunAsync(runId, cancellationToken));
+        var run = (await reopened.GetRunAsync(runId, cancellationToken))!;
+
+        Assert.Equal(expected, run.Status);
+        Assert.Equal(cancelRequested ? JobRunOutcome.ToExitCode(JobRunStatus.Cancelled) : 23, run.ExitCode);
+        Assert.Equal(cancelRequested ? JobRunOutcome.CancelledMessage : failure, run.ErrorMessage);
+        Assert.NotNull(run.EndedUtc);
+        var persistedCheck = Assert.Single(run.Actions!, action => action.Id == check.Id);
+        Assert.Equal(JobRunActionStatus.Failed, persistedCheck.Status);
+        Assert.Equal(23, persistedCheck.ExitCode);
+        Assert.Equal(failure, persistedCheck.ErrorMessage);
+        Assert.Equal(completedCheck.EndedUtc, persistedCheck.EndedUtc);
+        Assert.Equal("Saved check evidence", persistedCheck.StandardOutput);
+        Assert.Equal("Scope capture failed", persistedCheck.StandardError);
+        var completedWorker = Assert.Single(run.Actions!, action => action.Id == worker.Id);
+        Assert.Equal(cancelRequested ? JobRunActionStatus.Cancelled : JobRunActionStatus.Succeeded, completedWorker.Status);
+        Assert.Equal(cancelRequested ? JobRunOutcome.ToExitCode(JobRunStatus.Cancelled) : 0, completedWorker.ExitCode);
+        Assert.NotNull(completedWorker.EndedUtc);
+    }
+
     [Fact]
     public async Task EnqueueDueSchedulesAsync_DoesNotStackRuns_WhenThePreviousOccurrenceIsStillActive()
     {

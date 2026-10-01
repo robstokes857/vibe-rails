@@ -27,8 +27,10 @@ live tracked files. Quality still analyzes **added code** only, with the user's 
 The action records its attempt before capturing. Findings finish the action successfully and
 remain advisory. An analysis failure marks that action/Automation failed but allows subsequent
 checks and the review Worker to run. Script/Worker failures remain fail-fast. The ordinary run
-cancel/deadline/reaper owns termination. An unfinished evidence row is resolved against its run
-when displayed: failed/cancelled/interrupted runs cannot stay presented as a successful check.
+cancel/deadline/reaper owns termination. The last Worker's idle-shutdown fallback preserves earlier
+failed checks and their error details; pending user cancellation takes precedence. An unfinished
+evidence row is resolved against its run when displayed: failed/cancelled/interrupted runs cannot
+stay presented as a successful check.
 If the run is unavailable, completion is unknown. No background host is introduced.
 
 ## Evidence and access

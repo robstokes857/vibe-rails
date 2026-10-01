@@ -475,7 +475,7 @@ public static class JobRunner
     /// Idle shutdown normally travels cooperatively through TerminalRunner so its PTY and session
     /// records are closed cleanly. If that unwind wedges, this fallback records the run's outcome
     /// and terminates the whole Job process tree. Idle after the final action is the Automation's
-    /// completion signal, so that outcome is Succeeded (through the cancel-aware store path); idle
+    /// completion signal; the store preserves earlier failed checks and pending cancellation. Idle
     /// with actions still queued behind the Worker is a Failed run, because those actions can no
     /// longer execute. Once the Worker phase has returned normally the fallback stands down and
     /// leaves completion to <see cref="RunAsync"/>.
@@ -522,7 +522,7 @@ public static class JobRunner
                 var fallbackStatus = JobRunStatus.Failed;
                 if (isLastAction)
                 {
-                    fallbackStatus = RecordIdleSuccess(store, runId);
+                    fallbackStatus = RecordIdleCompletion(store, runId);
                 }
                 else
                 {
@@ -692,12 +692,12 @@ public static class JobRunner
     }
 
     /// <summary>
-    /// The success twin of <see cref="RecordTerminalStatus"/>: same bounded, swallow-everything
-    /// contract, but through the store's atomic Succeeded-or-Cancelled write so a Stop clicked
-    /// during the idle grace period is not overwritten. Returns what was recorded (or Succeeded
+    /// The idle twin of <see cref="RecordTerminalStatus"/>: same bounded, swallow-everything
+    /// contract, but through the store's atomic completion so earlier failed checks and a Stop
+    /// clicked during the idle grace period are preserved. Returns what was recorded (or Succeeded
     /// when the write could not land — the reaper then closes the row as Interrupted).
     /// </summary>
-    private static JobRunStatus RecordIdleSuccess(IJobStore store, string runId)
+    private static JobRunStatus RecordIdleCompletion(IJobStore store, string runId)
     {
         try
         {
