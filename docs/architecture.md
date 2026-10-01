@@ -415,6 +415,10 @@ source rows under soft deletion. Transfers keep immutable card identity and scop
 marks per board (`board/25`). The former Board sync settings section is removed; publication
 still runs automatically. Navbar Sign in and the Settings Account card use the existing device approval flow.
 
+VIBE-26 adds hosted **Start work** for the Board owner. The active root polls outbound every ten
+seconds, syncs the card and reuses the normal local launch service. No local listener or daemon
+is added. See the [remote launch contract](../VibeRails/Services/Board/SYNC.md#vibe-26-remote-start-work).
+
 For Board UI, API, SQLite, launch and MCP work, start with the
 [Board contributor guide](../VibeRails/Services/Board/AGENTS.md) and
 [architecture and VB-18 review](../VibeRails/Services/Board/ARCHITECTURE.md).

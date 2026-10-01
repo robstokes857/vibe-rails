@@ -9,6 +9,29 @@ public sealed class BoardSyncHttpClientTests
 {
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 
+    [Fact]
+    public async Task RemoteLaunchUsesPinnedHeaderCredentialsAndSourceGeneratedWireTypes()
+    {
+        var id = Guid.NewGuid(); var board = Guid.NewGuid(); var instance = Guid.NewGuid();
+        var sent = new List<string>();
+        var client = Client(new Handler(request =>
+        {
+            Assert.Equal("test-key", Assert.Single(request.Headers.GetValues("X-Api-Key")));
+            Assert.Equal(HttpMethod.Post, request.Method);
+            var path = request.RequestUri!.AbsolutePath;
+            sent.Add(path);
+            return new(HttpStatusCode.OK) { Content = new StringContent(path.EndsWith("/poll", StringComparison.Ordinal)
+                ? $$$"""{"command":{"id":"{{{id}}}","boardId":"{{{board}}}","cardId":"card","requiredSeq":12}}"""
+                : """{"saved":true}""") };
+        }));
+        var poll = await client.PollLaunchAsync(new(instance, "Desktop", [board]), Ct, client.DestinationKey!);
+        Assert.Equal(new BoardLaunchCommand(id, board, "card", 12), poll.Command);
+        Assert.True((await client.CompleteLaunchAsync(id, new(instance, "started", Guid.NewGuid().ToString()), Ct, client.DestinationKey!)).Saved);
+        Assert.Equal(["/api/v1/boards/launches/poll", $"/api/v1/boards/launches/{id}/result"], sent);
+        await Assert.ThrowsAsync<BoardSyncClientException>(() => client.PollLaunchAsync(new(instance, "Desktop", [board]), Ct, "changed"));
+        Assert.Equal(2, sent.Count);
+    }
+
     [Theory]
     [InlineData("http://example.com/api", false)]
     [InlineData("https://example.com/api", true)]

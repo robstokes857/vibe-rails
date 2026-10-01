@@ -1,5 +1,32 @@
 # Board sync (VB-51)
 
+## VIBE-26: remote Start work
+
+The hosted card's **Start work** button saves edits and asks an open desktop for that project
+to launch the saved assignee. One desktop is selected automatically; multiple desktops require
+a choice. Only the Board owner can request execution, and only a key belonging to that owner
+can advertise the Board. Imported/shared boards never advertise launch targets.
+
+`BoardRemoteLaunchHostedService` runs only in an active root backend (excluded from fake-CLI
+test hosts). Every ten seconds it sends a bounded outbound poll through `IBoardSyncClient`,
+using the existing HTTPS/no-redirect/header-key transport and destination fingerprint. It
+advertises at most 100 published boards from the root's resolved project, not other projects.
+No terminal must already be running. Closing the root stops polling; there is no OS service.
+
+`BoardRemoteLaunchService` syncs through the hosted request's sequence, checks local project,
+Board, card, destination and imported status again, and calls `IBoardLaunchService` with no
+override. Local environments, argv handling, Board grants and launch conflict checks still apply.
+The command carries no directory, executable, arguments or prompt. The hosted broker consumes
+each request once; the desktop also suppresses repeat IDs. Only result acknowledgements retry.
+Lost results become unknown, never success or an automatic second launch. The website polls
+status every two seconds while waiting and keeps the user on the Board.
+
+The companion Front release is required. Its process-local live registry expires desktops after
+35 seconds and requests after ten minutes; outstanding results become unknown after two minutes.
+Requests are interactive, not durable offline jobs. Multi-instance hosted deployments need
+consistent routing, as with the existing live relay. See Front `Services/Boards/RemoteLaunch.md`
+for the five hosted routes and credential contract. No schema or local endpoint changes.
+
 ## VB-52: shared boards
 
 Owners use **Share** on either client to manage three collaborators, including pending invitations.

@@ -1,5 +1,14 @@
 # Vibe Board architecture and review
 
+## VIBE-26: remote Start work (2026-10-01)
+
+The hosted card editor now offers the owner's Start work action. An open root backend polls
+outbound every ten seconds for its own project's published boards. The request is scoped to
+the Board owner, API key and selected root instance. The desktop syncs through the requested
+sequence, verifies local Board/card identity, and calls the existing BoardLaunchService with
+saved launch settings. Imported boards are excluded. See [SYNC.md](SYNC.md#vibe-26-remote-start-work)
+for delivery, failure, lifecycle and deployment limits. No local route, listener or schema is added.
+
 ## VB-52: shared boards (2026-09-30)
 
 `Sync/BoardSharingService.cs` and six existing-host REST routes expose owner invitations and

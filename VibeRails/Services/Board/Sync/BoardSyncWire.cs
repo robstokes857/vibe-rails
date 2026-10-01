@@ -121,6 +121,10 @@ public sealed record BoardSyncPullResponse(List<BoardSyncPulledEntryWire> Entrie
 [JsonSerializable(typeof(BoardSharingOverview))]
 [JsonSerializable(typeof(BoardSharingEmailRequest))]
 [JsonSerializable(typeof(BoardSharingResult))]
+[JsonSerializable(typeof(BoardLaunchPoll))]
+[JsonSerializable(typeof(BoardLaunchPollResult))]
+[JsonSerializable(typeof(BoardLaunchResult))]
+[JsonSerializable(typeof(BoardLaunchResultAck))]
 public sealed partial class BoardSyncJsonContext : JsonSerializerContext;
 
 /// <summary>

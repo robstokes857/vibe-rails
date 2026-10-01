@@ -1,5 +1,27 @@
 # API authentication coverage
 
+## VIBE-26 remote Start work (2026-10-01, scoped amendment)
+
+The active root backend polls the existing configured Board HTTPS destination every ten seconds,
+using the header-only API key, no redirects, bounded responses and per-call destination fingerprint.
+Only that root's project and published, non-imported Boards are advertised. A launch request carries
+opaque Board/card IDs and a required sync sequence; no executable, path, argv or launch override.
+The desktop syncs first and rechecks destination, project, Board and card membership before invoking
+the ordinary BoardLaunchService. Existing narrow Board grants and local launch checks apply.
+
+Five companion hosted routes are documented in Front `Services/Boards/RemoteLaunch.md`. Browser
+launches require Auth0, a positive local Board owner and antiforgery. API polling/results require
+the Board owner's API key and bind delivery/results to the exact key and desktop instance;
+browser-authenticated API requests are rejected. Board collaborators cannot request execution.
+Commands are delivered once; result loss is reported as unknown and never automatically retried.
+The process-local hosted registry is bounded, expiring and subject to the existing Board rate limits.
+
+Local route enumeration confirms no local endpoint or authentication exception changes. Both
+mandatory repository listener searches found only the main Kestrel host, non-serving PortFinder
+probe and existing test hosts; the cross-runtime search had no matches. Credential, owner/member,
+CSRF, duplicate-delivery, destination-change and stale-sync regressions pass. No security violation
+was found. This is a scoped review; no production listener or database schema was added.
+
 ## VIBE-24 card check evidence (2026-09-30, scoped amendment)
 
 Added root-only `GET /api/v1/board/cards/{card}/checks` and

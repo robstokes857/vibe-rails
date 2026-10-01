@@ -15,6 +15,11 @@ public interface IBoardSyncClient
     bool IsConfigured { get; }
     string? DestinationKey { get; }
 
+    /// <summary>Advertises this open project root and consumes at most one owner launch request.</summary>
+    Task<BoardLaunchPollResult> PollLaunchAsync(BoardLaunchPoll body, CancellationToken ct, string destination) => throw new NotSupportedException();
+    /// <summary>Reports a launch outcome; retries never repeat the launch.</summary>
+    Task<BoardLaunchResultAck> CompleteLaunchAsync(Guid id, BoardLaunchResult body, CancellationToken ct, string destination) => throw new NotSupportedException();
+
     Task<BoardSyncPublishResponse> PublishAsync(BoardSyncPublishRequest request, CancellationToken cancellationToken, string? expectedDestination = null);
     Task<BoardSyncPushResponse> PushAsync(string remoteBoardId, BoardSyncPushRequest request, CancellationToken cancellationToken, string? expectedDestination = null);
     Task<BoardSyncPullResponse> PullAsync(string remoteBoardId, long after, int limit, CancellationToken cancellationToken, string? expectedDestination = null);
@@ -53,6 +58,19 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Fu
     public static readonly TimeSpan ExchangeTimeout = TimeSpan.FromSeconds(30);
 
     public Uri? Endpoint => endpoint();
+
+    /// <inheritdoc />
+    public Task<BoardLaunchPollResult> PollLaunchAsync(BoardLaunchPoll body, CancellationToken ct, string destination) =>
+        SendAsync(HttpMethod.Post, "launches/poll", body, BoardSyncJsonContext.Default.BoardLaunchPoll,
+            BoardSyncJsonContext.Default.BoardLaunchPollResult, ct, destination);
+
+    /// <inheritdoc />
+    public async Task<BoardLaunchResultAck> CompleteLaunchAsync(Guid id, BoardLaunchResult body, CancellationToken ct, string destination)
+    {
+        var ack = await SendAsync(HttpMethod.Post, "launches/" + id.ToString("D") + "/result", body, BoardSyncJsonContext.Default.BoardLaunchResult,
+            BoardSyncJsonContext.Default.BoardLaunchResultAck, ct, destination);
+        return ack.Saved ? ack : throw new BoardSyncClientException("The server did not acknowledge the launch outcome.", "invalid_response");
+    }
 
     public async Task<BoardRemoteDescriptor?> DescribeAsync(string remoteBoardId, CancellationToken ct, string? destination = null) =>
         await SendAsync<object, BoardRemoteDescriptor>(HttpMethod.Get, Uri.EscapeDataString(remoteBoardId), null, null,
