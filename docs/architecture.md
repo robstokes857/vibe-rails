@@ -1261,3 +1261,12 @@ provider in Data.Sqlite/Replay, and Board labels remain behind IBoardStore. No s
 capture change is involved. The website adapts its existing authenticated envelope in the
 browser. At mobile widths the replay displays delayed HTML snapshots from the reconstructed
 terminal; live terminal rendering is independent.
+
+## Card check evidence (VIBE-24)
+
+Code quality and VCA are ordered Automation actions beside the optional single Worker.
+`BoardCheckService` calls the individual preflight engines without the Automation-enqueuing
+pipeline. `IBoardStore` retains attempts, provenance and reports in additive `BoardChecks`.
+`BoardChecksReader` combines saved evidence with per-card run state; `read_board_check` supplies
+reviewer evidence, and the Checks panel reuses the existing CodeReportViewer. No scan result
+moves a card. See [scope, persistence, status and starter contracts](../VibeRails/Services/Board/CHECKS.md).

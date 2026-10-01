@@ -10,6 +10,7 @@ public static class GitPreflightServiceCollectionExtensions
     {
         services.AddSingleton<IVcaHookValidationService, VcaRulesHookValidationService>();
         services.AddSingleton<GitStagedSnapshotProvider>();
+        services.AddSingleton<VibeRails.Services.Board.BoardCheckService>();
         services.AddSingleton<IGitStagedSnapshotProvider>(provider =>
             provider.GetRequiredService<GitStagedSnapshotProvider>());
         services.AddSingleton<IGitWorkingTreeSnapshotProvider>(provider =>

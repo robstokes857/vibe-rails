@@ -19,6 +19,7 @@ using VibeRails.Services.Board.Sync;
 using VibeRails.Services.Diagnostics;
 using VibeRails.Services.Jira;
 using VibeRails.Services.Jobs;
+using VibeRails.Services.GitPreflight;
 using VibeRails.Services.Terminal;
 using VibeRails.Utils;
 using Xunit;
@@ -33,6 +34,42 @@ namespace Tests.Routes;
 [Collection("ProcessEnvIsolation")] // mutates ParserConfigs.SetGitState (process-global), like AutomationNavPreferenceServiceTests
 public sealed class BoardRoutesTests : IAsyncLifetime
 {
+    [Fact]
+    public async Task CheckRoutesRequireBothCredentialsAndScopeEvidence()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var store = _app.Services.GetRequiredService<IBoardStore>();
+        await store.EnsureDefaultColumnsAsync(_project, ct);
+        var card = await store.CreateCardAsync(_project, new(null, "Checks", "", null, "medium", null, [], false), ct);
+        var other = await store.CreateCardAsync(_project, new(null, "Other", "", null, "medium", null, [], false), ct);
+        var check = new BoardCheckRecord("check", card.Id, "run", "action", "VCA", "Skipped/not applicable", "working-tree",
+            null, null, null, null, "1", DateTime.UtcNow, DateTime.UtcNow, "No rules", 0, 0, 0, 0, [], "{}");
+        Assert.True(await store.SaveCheckAsync(_project, check, ct));
+        await using (var state = new SqliteConnection(_connectionString))
+        {
+            await state.OpenAsync(ct);
+            await using var command = state.CreateCommand();
+            command.CommandText = SqlStrings.CreateEnvironmentsTable;
+            await command.ExecuteNonQueryAsync(ct);
+        }
+        var path = $"/api/v1/board/cards/{card.Id}/checks";
+        foreach (var url in new[] { path, path + "/check" })
+        {
+            using var anonymous = await SendAsync(HttpMethod.Get, url);
+            using var session = await SendAsync(HttpMethod.Get, url, "test-session");
+            using var tab = await SendAsync(HttpMethod.Get, url, tab: "test-tab");
+            Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+            Assert.Equal(HttpStatusCode.Unauthorized, session.StatusCode);
+            Assert.Equal(HttpStatusCode.Unauthorized, tab.StatusCode);
+            using var valid = await SendAsync(HttpMethod.Get, url, "test-session", "test-tab");
+            valid.EnsureSuccessStatusCode(); Assert.True(valid.Headers.CacheControl!.NoStore);
+        }
+        using var wrongCard = await SendAsync(HttpMethod.Get, $"/api/v1/board/cards/{other.Id}/checks/check", "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.NotFound, wrongCard.StatusCode);
+        using var badOffset = await SendAsync(HttpMethod.Get, path + "?offset=-1", "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.BadRequest, badOffset.StatusCode);
+    }
+
     [Fact]
     public async Task SharingRoutesRequireBothCredentialsAndScopeLocalBoardBeforeRemoteCalls()
     {
@@ -138,6 +175,8 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         builder.Services.AddSqliteJobStorage(_ => Path.Combine(_root, "state.db"));
         builder.Services.AddScoped<BoardAutomationService>();
         builder.Services.AddScoped<BoardCardAutomationService>();
+        builder.Services.AddGitPreflight();
+        builder.Services.AddScoped<BoardChecksReader>();
         builder.Services.AddScoped<IJobService, JobService>();
         builder.Services.AddSingleton(new Mock<IJobExecutableResolver>().Object);
         builder.Services.AddSingleton(new Mock<IJobScheduler>().Object);

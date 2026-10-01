@@ -147,3 +147,12 @@ independent errors, escaped excerpts and navigation races. Run it with
 The report case in `vscode-viberails/src/test/suite/smoke.test.ts` uses a real backend and
 installed VS Code webview with the production HTML/CSP and a test-only nonce-bearing probe.
 Also review the real repository in the browser after graph supplier or Atlas layout changes.
+
+## Saved Board reports
+
+`board-card-checks.js` mounts this same viewer for saved Code quality evidence. The card shows
+scope, coverage, limitations and qualified freshness ahead of the report; technical capture
+metadata stays in a disclosure. Its saved measurements precede the current repository map on
+small layouts. Closing or replacing the card aborts fetches and destroys the viewer; a late
+response cannot mount into another card. VCA evidence uses escaped text in the same report rail.
+The Checks summary has no aggregate score. See `Services/Board/CHECKS.md` for the persistence contract.

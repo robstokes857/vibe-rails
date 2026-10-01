@@ -18,6 +18,20 @@ const {
 const { EnvironmentController } = await import(pathToFileURL(environmentModulePath).href);
 const { confirmDialog } = await import(pathToFileURL(utilsModulePath).href);
 
+test('check actions retain explicit scope through editor and portable recipes', async () => {
+    const { validCheckScope, checkFields } = await import(pathToFileURL(path.resolve('VibeRails/wwwroot/js/modules/job-checks.js')).href);
+    const controller = new JobController(createApp());
+    const actions = [{ kind: 2, arguments: ['unpushed'] }, { kind: 3, arguments: ['range', 'a'.repeat(40), 'b'.repeat(40)] }];
+    assert.deepEqual(controller.normalizeJobActions({ actions }).map(a => a.kind), [2, 3]);
+    const recipe = controller.normalizeRecipe({ recipeVersion: 'V2', name: 'Review', worker: null, actions });
+    assert.deepEqual(recipe.actions.map(a => [a.kind, a.arguments]), actions.map(a => [a.kind, a.arguments]));
+    assert.equal(validCheckScope(['linked-commits']), false);
+    assert.equal(validCheckScope(['working-tree']), true);
+    assert.equal(validCheckScope(['range', '--all', 'HEAD']), false);
+    assert.equal(validCheckScope(actions[1].arguments), true);
+    assert.match(checkFields({ arguments: ['range', '<script>', ''] }), /&lt;script&gt;/);
+});
+
 function createApp() {
     const calls = [];
     return {

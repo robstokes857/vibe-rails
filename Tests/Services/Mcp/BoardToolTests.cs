@@ -61,6 +61,26 @@ public sealed class BoardToolTests : IDisposable
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Fact]
+    public async Task CheckToolReadsOnlySavedEvidenceForItsCard_AndPagesFullReport()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var card = await _store.CreateCardAsync(_project, new(null, "Checks", "", null, "medium", null, [], false), Ct);
+        var other = await _store.CreateCardAsync(_project, new(null, "Other", "", null, "medium", null, [], false), Ct);
+        Assert.Contains("Not run", await _tool.ReadBoardCheck(card.Key, cancellationToken: Ct));
+        var evidence = new BoardCheckRecord("check", card.Id, "run", "action", "VCA", "Findings", "range", "base", "head",
+            "snapshot", "rules", "1", DateTime.UtcNow, DateTime.UtcNow, "STOP finding", 1, 1, 0, 1, [], new string('x', 50000));
+        Assert.True(await _store.SaveCheckAsync(_project, evidence, Ct));
+        var detail = await _tool.GetBoardCard(card.Key, cancellationToken: Ct);
+        Assert.Contains("read_board_check checkId=check", detail);
+        Assert.Contains("Findings", detail);
+        var first = await _tool.ReadBoardCheck(card.Key, "check", cancellationToken: Ct);
+        Assert.Contains("Continue with offset=40000", first);
+        var second = await _tool.ReadBoardCheck(card.Key, "check", 40000, Ct);
+        Assert.DoesNotContain("Continue with offset=", second);
+        Assert.StartsWith("FAIL:", await _tool.ReadBoardCheck(other.Key, "check", cancellationToken: Ct));
+    }
+
+    [Fact]
     public async Task ListAndCreate_SeedLanes_AndReturnReadableText()
     {
         var lanes = await _tool.ListBoardColumns(cancellationToken: Ct);

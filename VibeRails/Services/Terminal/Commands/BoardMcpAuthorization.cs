@@ -16,6 +16,7 @@ public static class BoardMcpAuthorization
         "list_board_columns",
         "list_board_cards",
         "get_board_card",
+        "read_board_check",
         "get_board_notes",
         "get_board_agent_status",
         "complete_board_agent",

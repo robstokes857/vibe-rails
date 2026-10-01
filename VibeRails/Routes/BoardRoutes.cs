@@ -34,6 +34,17 @@ public static class BoardRoutes
             await next(context);
         });
 
+        var checks = app.MapGroup("/api/v1/board/cards/{card}/checks");
+        checks.AddEndpointFilter((context, next) =>
+        {
+            context.HttpContext.Response.Headers.CacheControl = "no-store";
+            return next(context);
+        });
+        checks.MapGet("", ([Microsoft.AspNetCore.Mvc.FromServices] BoardChecksReader reader, string card, int? offset, CancellationToken ct) =>
+            RunAsync(async () => OkOrNotFound(await reader.ReadAsync(Project(), card, offset ?? 0, ct), "Card")));
+        checks.MapGet("/{checkId}", ([Microsoft.AspNetCore.Mvc.FromServices] BoardChecksReader reader, string card, string checkId, bool? verify, CancellationToken ct) =>
+            RunAsync(async () => OkOrNotFound(await reader.ReportAsync(Project(), card, checkId, ct, verify == true), "Check")));
+
         // ---------------------------------------------------------------- boards
         var sharingRoutes = app.MapGroup("/api/v1/board");
         sharingRoutes.AddEndpointFilter((context, next) =>

@@ -417,6 +417,14 @@ public sealed class JobService(
                 continue;
             }
 
+            if (JobCheckScope.IsCheck(action.Kind))
+            {
+                try { _ = JobCheckScope.Parse(action.Arguments); }
+                catch (ArgumentException ex) { throw JobServiceException.BadRequest(ex.Message); }
+                normalizedActions.Add(new JobActionRequest(id, action.Kind, Arguments: action.Arguments!.ToList()));
+                continue;
+            }
+
             if (automationScriptService is null)
                 throw JobServiceException.BadRequest("Repository script Automations are not available in this process.");
 
@@ -496,6 +504,12 @@ public sealed class JobService(
             {
                 if (action.Llm == LLM.NotSet || executableResolver.Resolve(action.Llm) is null)
                     throw JobServiceException.BadRequest($"The {action.Llm} CLI is not available on PATH.");
+                continue;
+            }
+
+            if (JobCheckScope.IsCheck(action.Kind))
+            {
+                _ = JobCheckScope.Parse(action.Arguments);
                 continue;
             }
 

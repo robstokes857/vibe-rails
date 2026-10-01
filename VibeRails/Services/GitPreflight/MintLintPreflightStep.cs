@@ -77,11 +77,11 @@ public sealed class MintLintPreflightStep(ICodeAnalyzerIgnoreStore? ignoreStore 
         // The scope label distinguishes the three scan modes in step output: "staged" for
         // commit preflight, "changed" for the working-tree Rules scan, "unpushed" for the
         // committed-but-not-pushed scan. Same pipeline, different framing for the user.
-        var sourceScope = context.Request.UnpushedChanges
+        var sourceScope = context.Request.ScopeLabel ?? (context.Request.UnpushedChanges
             ? "unpushed"
             : context.Request.WorkingTreeChanges
                 ? "changed"
-                : "staged";
+                : "staged");
 
         if (candidates.Count == 0)
         {

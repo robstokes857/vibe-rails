@@ -1,3 +1,4 @@
+import { cardChecksSection, bindCardChecks } from './board-card-checks.js';
 // ============================================
 // Board (view 'board')
 // ============================================
@@ -283,6 +284,8 @@ export class BoardController {
     }
 
     disposeCardPickers() {
+        this.cardChecks?.dispose();
+        this.cardChecks = null;
         this.cardAutomations?.dispose();
         this.cardAutomations = null;
         try { this.launchOptionsDispose?.(); } catch { /* already torn down */ }
@@ -1114,6 +1117,7 @@ export class BoardController {
                         })}
                     </section>
 
+                    ${card ? cardChecksSection() : ''}
                     <section class="board-block">
                         <h3 class="board-block-label">Attachments <span class="board-count" data-board-count="attachments">${card?.attachments?.length || 0}</span></h3>
                         <div class="board-attachment-list" data-board-attachments></div>
@@ -1359,6 +1363,7 @@ export class BoardController {
         // environments plus the bare CLIs, never a shell, never a Worker).
         this.disposeCardPickers();
         const assigneeSelect = editor.querySelector('#board-card-assignee');
+        this.cardChecks = bindCardChecks(editor, card, this.app);
         this.cardAutomations = bindCardAutomations(editor, card, {
             app: this.app,
             onQueued: () => void this.refreshSessionActivity()

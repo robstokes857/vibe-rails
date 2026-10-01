@@ -58,6 +58,8 @@ public sealed record GitStagedFileSnapshot(
     // Content. MintLint scores the fragment while its report still links to the full file.
     IReadOnlyList<int>? AddedLineNumbers = null);
 
+public sealed record GitCheckSnapshotIdentity(string BaseCommit, string HeadCommit);
+
 public sealed record GitStagedSnapshot(
     string RepositoryPath,
     IReadOnlyList<GitStagedFileSnapshot> Files,
@@ -68,7 +70,8 @@ public sealed record GitStagedSnapshot(
     IReadOnlyList<GitIndexTextFile>? ImpactFiles = null,
     // Present only for the staged-index scope. These object ids bind validation and any queued VCA
     // job to one immutable base/tree pair even if the live index changes later in the preflight.
-    GitStagedSnapshotIdentity? StagedIdentity = null)
+    GitStagedSnapshotIdentity? StagedIdentity = null,
+    GitCheckSnapshotIdentity? CheckIdentity = null)
 {
     public static GitStagedSnapshot Preview(string repositoryPath) => new(
         Path.GetFullPath(repositoryPath),
@@ -95,7 +98,8 @@ public sealed record GitPreflightRequest(
     // Only the standalone native pre-commit hook sets this. Browser/Rules previews use
     // the same pipeline and may report matching before-commit Automations, but must never
     // enqueue real runs.
-    bool EnqueueAutomatedJobs = false);
+    bool EnqueueAutomatedJobs = false,
+    string? ScopeLabel = null);
 
 public sealed record GitPreflightEvent(
     string RunId,

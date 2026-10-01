@@ -17,6 +17,9 @@ CREATE INDEX IX_BoardCardSessions_Card ON BoardCardSessions(CardId);
 -- index IX_BoardCards_Column
 CREATE INDEX IX_BoardCards_Column ON BoardCards(ColumnId, Position);
 
+-- index IX_BoardChecks_Card
+CREATE INDEX IX_BoardChecks_Card ON BoardChecks(CardId, StartedUTC DESC);
+
 -- index IX_BoardColumns_Board
 CREATE INDEX IX_BoardColumns_Board ON BoardColumns(BoardId, Position);
 
@@ -88,6 +91,9 @@ CREATE TABLE BoardCardSessions ( SessionId TEXT PRIMARY KEY, CardId TEXT NOT NUL
 
 -- table BoardCards
 CREATE TABLE BoardCards ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Number INTEGER NOT NULL, ColumnId TEXT NOT NULL REFERENCES BoardColumns(Id), Position INTEGER NOT NULL, Title TEXT NOT NULL, Description TEXT NOT NULL DEFAULT '', Assignee TEXT NULL, Priority TEXT NOT NULL DEFAULT 'medium', Type TEXT NOT NULL DEFAULT 'task', Points INTEGER NULL, Tags TEXT NOT NULL DEFAULT '[]', Blocked INTEGER NOT NULL DEFAULT 0, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, Flagged INTEGER NOT NULL DEFAULT 0, CardKey TEXT, DeletedUTC TEXT, DisplayId TEXT, AgentMade INTEGER NOT NULL DEFAULT 0, UNIQUE(ProjectPath, Number) );
+
+-- table BoardChecks
+CREATE TABLE BoardChecks ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, RunId TEXT NOT NULL, ActionId TEXT NOT NULL, StartedUTC TEXT NOT NULL, EndedUTC TEXT NULL, SummaryJson TEXT NOT NULL, ResultJson TEXT NULL, UNIQUE(CardId, RunId, ActionId) );
 
 -- table BoardColumns
 CREATE TABLE BoardColumns ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Name TEXT NOT NULL, Position INTEGER NOT NULL, Color TEXT NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, BoardId TEXT NULL );

@@ -15,6 +15,31 @@ namespace Tests.Services.Jobs;
 public sealed class JobRunnerWorkflowTests
 {
     [Fact]
+    public async Task CheckExecutionFailureStillRunsFollowingActionsAndKeepsFailedOutcome()
+    {
+        // No engine is registered: an unavailable deterministic tool must not hide the failure
+        // or prevent later workflow actions from inspecting it.
+        var check = ScriptAction("check", 0, "") with { Kind = JobActionKind.CodeQuality, Arguments = ["unpushed"] };
+        var script = ScriptAction("after", 1, "inspect.py");
+        var run = Run([check, script]) with { TerminalSessionId = "outer-pty" };
+        var store = StoreFor(run);
+        var completed = new List<(string Id, JobRunActionStatus Status)>();
+        store.Setup(s => s.StartRunActionAsync(run.Id, It.IsAny<string>(), CancellationToken.None)).ReturnsAsync(true);
+        store.Setup(s => s.CompleteRunActionAsync(run.Id, It.IsAny<string>(), It.IsAny<JobRunActionStatus>(), It.IsAny<int?>(),
+            It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), CancellationToken.None))
+            .Callback<string, string, JobRunActionStatus, int?, string?, string?, string?, CancellationToken>(
+                (_, id, status, _, _, _, _, _) => completed.Add((id, status))).Returns(Task.CompletedTask);
+        store.Setup(s => s.CompleteRunAsync(run.Id, JobRunStatus.Failed, 1, It.IsAny<string>(), CancellationToken.None)).Returns(Task.CompletedTask);
+        var cli = new Mock<ICliWrapper>();
+        cli.Setup(c => c.RunAsync(It.IsAny<CliRequest>(), It.IsAny<Func<CliOutputLine, ValueTask>>(), CancellationToken.None))
+            .ReturnsAsync(new CliResult(0, false, false, "inspected", "", TimeSpan.Zero, "python-test"));
+        using var provider = BuildServices(store, PreparedScripts(), cli);
+        Assert.Equal(1, await JobRunner.RunAsync(new ParsedArgs { JobRunId = run.Id, WorkDir = run.ProjectPath }, provider));
+        Assert.Equal(new[] { ("check", JobRunActionStatus.Failed), ("after", JobRunActionStatus.Succeeded) }, completed);
+        store.Verify(s => s.CompleteRunAsync(run.Id, JobRunStatus.Failed, 1, It.IsAny<string>(), CancellationToken.None), Times.Once);
+    }
+
+    [Fact]
     public void BoardCardKey_IsOpaqueAndComesOnlyFromABoardLaneTrigger()
     {
         var run = Run([]);

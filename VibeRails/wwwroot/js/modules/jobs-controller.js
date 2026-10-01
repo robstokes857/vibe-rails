@@ -1,3 +1,4 @@
+import { isCheck, checkName, checkFields, validCheckScope } from './job-checks.js';
 import {
     buildLlmSelectionValue,
     confirmDialog,
@@ -50,7 +51,7 @@ export function getJobCliForLlm(llm) {
 }
 const TRIGGER = Object.freeze({ SCHEDULE: 0, COMMIT: 2, MANUAL: 3, PRECOMMIT: 4 });
 const SCHEDULE = Object.freeze({ INTERVAL: 0, DAILY: 1, WEEKLY: 2 });
-const JOB_ACTION = Object.freeze({ WORKER: 0, SCRIPT: 1 });
+const JOB_ACTION = Object.freeze({ WORKER: 0, SCRIPT: 1, QUALITY: 2, VCA: 3 });
 const SCRIPT_RUNTIME = Object.freeze({ PYTHON: 0, POWERSHELL: 1, BASH: 2 });
 const SCRIPT_RUNTIME_META = Object.freeze({
     [SCRIPT_RUNTIME.PYTHON]: { label: 'Python', extension: '.py', icon: 'fa-brands fa-python' },
@@ -898,6 +899,8 @@ export class JobController {
                     <div class="job-actions-toolbar">
                         <p>Scripts run from this repository with explicit arguments. Add at most one Worker anywhere in the sequence.</p>
                         <div>
+                            <button class="btn btn-sm btn-outline-primary" type="button" data-job-action="add-quality-action">Add Code quality</button>
+                            <button class="btn btn-sm btn-outline-primary" type="button" data-job-action="add-vca-action">Add VCA</button>
                             <button class="btn btn-sm btn-outline-primary" type="button" data-job-action="add-script-action"><i class="fa-solid fa-code me-1" aria-hidden="true"></i>Add script</button>
                             <button class="btn btn-sm btn-outline-primary" type="button" data-job-action="add-worker-action"><i class="fa-solid fa-robot me-1" aria-hidden="true"></i>Add Worker</button>
                         </div>
@@ -952,6 +955,8 @@ export class JobController {
             form.querySelector('#job-local-time').disabled = !enabled || kind === SCHEDULE.INTERVAL;
             form.querySelector('#job-timezone').disabled = !enabled || kind === SCHEDULE.INTERVAL;
         };
+        form?.querySelector('[data-job-action="add-quality-action"]')?.addEventListener('click', () => this.addEditorAction(JOB_ACTION.QUALITY));
+        form?.querySelector('[data-job-action="add-vca-action"]')?.addEventListener('click', () => this.addEditorAction(JOB_ACTION.VCA));
         form?.querySelector('[data-job-action="add-script-action"]')?.addEventListener('click', () => this.addEditorAction(JOB_ACTION.SCRIPT));
         form?.querySelector('[data-job-action="add-worker-action"]')?.addEventListener('click', () => this.addEditorAction(JOB_ACTION.WORKER));
         form?.querySelectorAll('[data-job-action="cancel-editor"]')?.forEach(button => button.addEventListener('click', () => this.closeEditor()));
@@ -991,7 +996,7 @@ export class JobController {
 
         return raw.slice(0, 20).map(action => ({
             id: String(action?.id || this.newActionId()),
-            kind: Number(action?.kind) === JOB_ACTION.SCRIPT ? JOB_ACTION.SCRIPT : JOB_ACTION.WORKER,
+            kind: [0, 1, 2, 3].includes(Number(action?.kind)) ? Number(action.kind) : JOB_ACTION.WORKER,
             environmentId: action?.environmentId == null ? null : Number(action.environmentId),
             environmentName: action?.environmentName || null,
             llm: Number(action?.llm) || 0,
@@ -1023,7 +1028,7 @@ export class JobController {
             return;
         }
 
-        this.editorActions.push(kind === JOB_ACTION.WORKER
+        this.editorActions.push(isCheck(kind) ? { id: this.newActionId(), kind, arguments: ["unpushed"] } : kind === JOB_ACTION.WORKER
             ? { id: this.newActionId(), kind, environmentId: null, environmentName: null, llm: 0 }
             : {
                 id: this.newActionId(),
@@ -1093,6 +1098,8 @@ export class JobController {
                 </article>`;
         }
 
+        if (isCheck(action.kind)) return `<article class="job-action-card" data-job-action-id="${actionId}">
+            <header><span class="job-action-number">${index + 1}</span><strong>${checkName(action.kind)}</strong>${controls}</header>${checkFields(action)}</article>`;
         const runtime = Number(action.scriptRuntime);
         const argumentRows = (action.arguments || []).map((argument, argumentIndex) => `
             <div class="job-script-argument-row">
@@ -1140,6 +1147,13 @@ export class JobController {
         const action = this.editorActions.find(item => item.id === row.dataset.jobActionId);
         if (!action) return;
 
+        if (field === 'checkScope') {
+            action.arguments = event.target.value === 'range' ? ['range', '', ''] : [event.target.value];
+            this.renderEditorActions(); return;
+        }
+        if (field === 'checkBase' || field === 'checkHead') {
+            action.arguments[field === 'checkBase' ? 1 : 2] = event.target.value.trim(); return;
+        }
         if (field === 'argument') {
             const index = Number(event.target.dataset.argumentIndex);
             if (Number.isInteger(index) && index >= 0 && index < action.arguments.length) {
@@ -1429,6 +1443,14 @@ export class JobController {
                 continue;
             }
 
+            if (isCheck(action.kind)) {
+                if (!validCheckScope(action.arguments)) {
+                    if (validate) this.app.showError('Choose a check scope and full 40-character base/head commit SHAs for a range.');
+                    return null;
+                }
+                normalizedActions.push({ id: action.id, kind: action.kind, arguments: [...action.arguments] });
+                continue;
+            }
             const scriptPath = String(action.scriptPath || '').trim();
             const runtime = Number(action.scriptRuntime);
             const runtimeMeta = SCRIPT_RUNTIME_META[runtime];
@@ -1698,7 +1720,7 @@ export class JobController {
         const runtime = SCRIPT_RUNTIME_META[Number(action?.scriptRuntime)];
         const title = kind === JOB_ACTION.WORKER
             ? `Worker — ${action?.environmentName || getLlmName(Number(action?.llm))}`
-            : `${runtime?.label || 'Script'} — ${action?.scriptPath || 'Unknown script'}`;
+            : isCheck(kind) ? `${checkName(kind)} — ${(action.arguments || []).join(' ')}` : `${runtime?.label || 'Script'} — ${action?.scriptPath || 'Unknown script'}`;
         const detail = this.runDetail(action);
         const stdout = String(action?.standardOutput || '');
         const stderr = String(action?.standardError || '');
@@ -1884,7 +1906,7 @@ export class JobController {
             actions: actions.map(action => action.kind === JOB_ACTION.WORKER
                 ? { kind: JOB_ACTION.WORKER }
                 : {
-                    kind: JOB_ACTION.SCRIPT,
+                    kind: Number(action.kind),
                     scriptPath: action.scriptPath,
                     scriptRuntime: Number(action.scriptRuntime),
                     arguments: [...(action.arguments || [])],
@@ -1902,7 +1924,7 @@ export class JobController {
         const workflowText = recipe.actions.length
             ? recipe.actions.map((action, index) => action.kind === JOB_ACTION.WORKER
                 ? `${index + 1}. Worker${environment ? ` — ${environment.name}` : ''}`
-                : `${index + 1}. ${SCRIPT_RUNTIME_META[action.scriptRuntime]?.label || 'Script'} — \`${action.scriptPath}\``).join('\n')
+                : isCheck(action.kind) ? `${index + 1}. ${checkName(action.kind)} — ${action.arguments.join(' ')}` : `${index + 1}. ${SCRIPT_RUNTIME_META[action.scriptRuntime]?.label || 'Script'} — \`${action.scriptPath}\``).join('\n')
             : '_No actions_';
         const markdown = `# VibeRails Recipe — ${job.name}
 
@@ -2125,7 +2147,7 @@ viberails-recipe -->
             actions: (entry.actions || []).map(action => Number(action.kind) === JOB_ACTION.WORKER
                 ? { kind: JOB_ACTION.WORKER }
                 : {
-                    kind: JOB_ACTION.SCRIPT,
+                    kind: Number(action.kind),
                     scriptPath: action.scriptPath,
                     scriptRuntime: Number(action.scriptRuntime),
                     arguments: [...(action.arguments || [])],
@@ -2198,7 +2220,7 @@ viberails-recipe -->
                 actions: recipe.actions.map(action => Number(action?.kind) === JOB_ACTION.WORKER
                     ? { kind: JOB_ACTION.WORKER }
                     : {
-                        kind: JOB_ACTION.SCRIPT,
+                        kind: Number(action.kind),
                         scriptPath: String(action?.scriptPath || ''),
                         scriptRuntime: Number(action?.scriptRuntime),
                         arguments: Array.isArray(action?.arguments) ? action.arguments.map(value => String(value ?? '')) : [],
@@ -2377,7 +2399,7 @@ viberails-recipe -->
                     }
                     : {
                         id: null,
-                        kind: JOB_ACTION.SCRIPT,
+                        kind: Number(action.kind),
                         scriptPath: action.scriptPath,
                         scriptRuntime: Number(action.scriptRuntime),
                         arguments: Array.isArray(action.arguments) ? action.arguments : [],

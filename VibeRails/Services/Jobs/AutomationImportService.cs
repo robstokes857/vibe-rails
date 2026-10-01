@@ -215,7 +215,7 @@ public sealed partial class AutomationImportService(
                 ? new JobActionRequest(null, JobActionKind.Worker, targetWorker!.Id)
                 : new JobActionRequest(
                     null,
-                    JobActionKind.Script,
+                    action.Kind,
                     null,
                     action.ScriptPath,
                     action.ScriptRuntime,
@@ -326,14 +326,14 @@ public sealed partial class AutomationImportService(
         var actionDtos = actions.Select(action => action.Kind == JobActionKind.Worker
             ? new AutomationImportAction(JobActionKind.Worker, null, null, [], null, null, false, false)
             : new AutomationImportAction(
-                JobActionKind.Script,
+                action.Kind,
                 action.ScriptPath,
                 action.ScriptRuntime,
                 action.Arguments.ToList(),
                 action.WorkingDirectory,
                 action.TimeoutSeconds,
-                scriptService.ScriptExists(currentRoot, action.ScriptPath),
-                sourceDirectoryExists && scriptService.ScriptExists(sourceRoot, action.ScriptPath))).ToList();
+                action.Kind == JobActionKind.Script && scriptService.ScriptExists(currentRoot, action.ScriptPath),
+                action.Kind == JobActionKind.Script && sourceDirectoryExists && scriptService.ScriptExists(sourceRoot, action.ScriptPath))).ToList();
 
         if (blocker is null)
         {

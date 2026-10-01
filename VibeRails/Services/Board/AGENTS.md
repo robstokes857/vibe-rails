@@ -1,5 +1,11 @@
 # Working on Vibe Board
 
+## Card checks (VIBE-24)
+
+Read [CHECKS.md](CHECKS.md) for scope, immutable evidence, UI lifecycle and starter review defaults.
+Keep deterministic checks outside the Git preflight pipeline and all evidence behind IBoardStore.
+Results never move cards. VIBE-23 consumes `ReviewCheckDefaults.Create()` when seeding new templates.
+
 ## Workflow intent (VIBE-17)
 
 Keep the existing automatic lane-entry execution and settling delay. Humans and LLM agents

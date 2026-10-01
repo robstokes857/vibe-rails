@@ -1,5 +1,26 @@
 # API authentication coverage
 
+## VIBE-24 card check evidence (2026-09-30, scoped amendment)
+
+Added root-only `GET /api/v1/board/cards/{card}/checks` and
+`GET /api/v1/board/cards/{card}/checks/{checkId}` on the existing host. Both retain the session
+plus tab credential gate and return no-store responses. Project identity is server-derived;
+all evidence reads/writes scope both card and project through `IBoardStore`. Scope capture
+uses validated full SHAs and argv-only Git reads; neither endpoint accepts a filesystem path.
+The existing per-card Automation POST queues runs; checks add no trigger or lane movement.
+
+`read_board_check` is a read-only addition to BoardTool on HTTP and stdio and its exact launch
+grant list. It returns saved, untrusted evidence in bounded text chunks. Reports render escaped
+text, and Quality Lab/Atlas retain the existing iframe sandbox and teardown. No new production
+listener, authentication exception or outbound disclosure is added; hosted evidence remains
+VIBE-25 work. Additive Board evidence is local to the normal board.db.
+
+Both mandatory listener searches found only the approved main Kestrel host, non-serving
+PortFinder probe and test-only hosts; no cross-runtime acceptor matched. Scoped route
+inspection and credential/project/card isolation regressions cover the new reads. No security
+violation was found. This is a scoped amendment, not a full inventory re-audit.
+
+
 ## VIBE-15 account display (2026-09-30, scoped amendment)
 
 The requested follow-up carries only the public `userCode` in a strict
@@ -1284,7 +1305,10 @@ transcript text out of messages and exception text; do not rely on the Logs view
 hidden. `Tests/Routes/InternalToolsRoutesTests.cs` pins the two-credential requirement, the
 whitelist rejection of path-like sources, and the absence of mutating verbs.
 
-### Kanban board (59; active root backend only)
+### Kanban board (61; active root backend only)
+
+- `GET /api/v1/board/cards/{card}/checks` — paged saved check summaries and current check runs.
+- `GET /api/v1/board/cards/{card}/checks/{checkId}` — full saved evidence and qualified freshness.
 
 All mapped by `BoardRoutes.Map` under `if (isActiveRootBackend)`; every path contains `/api/`,
 so both credentials are enforced by the middleware with no route-level registration. The

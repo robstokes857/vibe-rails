@@ -192,6 +192,7 @@ namespace VibeRails
             serviceCollection.AddSingleton<Services.Board.Sync.IBoardSyncScheduler, Services.Board.Sync.BoardSyncScheduler>();
             serviceCollection.AddScoped<Services.Board.BoardAutomationService>();
             serviceCollection.AddScoped<Services.Board.BoardCardAutomationService>();
+            serviceCollection.AddScoped<Services.Board.BoardChecksReader>();
             // Singleton: it holds the ten-second repo file-list cache behind the composer's `@` typeahead.
             serviceCollection.AddSingleton<Services.Board.IBoardFileIndexService, Services.Board.BoardFileIndexService>();
             if (isActiveRootBackendProcess)

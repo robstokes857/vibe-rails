@@ -55,7 +55,9 @@ public readonly record struct JobLaunchClaim(JobLaunchClaimOutcome Outcome, int 
 public enum JobActionKind
 {
     Worker = 0,
-    Script = 1
+    Script = 1,
+    CodeQuality = 2,
+    Vca = 3
 }
 
 /// <summary>The explicitly selected interpreter for a repository-local script action.</summary>

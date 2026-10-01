@@ -34,7 +34,7 @@ public static class BoardPromptComposer
     internal static string ComposeAutomationPrompt(string cardKey, string? workerPrompt) =>
         "This Automation was triggered for kanban card " + SanitizeLine(cardKey, 100) + ". "
         + "The user has authorized the viberails-mcp Board tools for this card session. "
-        + "Read get_board_card for its task, linked commits and latest activity. Post your findings with add_board_comment. "
+        + "Read get_board_card for its task, linked commits and latest activity. Read its Checks summary and use read_board_check for full evidence. Findings and failed analysis are different; judge coverage and scope before deciding the next lane. Post your findings with add_board_comment. "
         + AgentCompletionGuidance + "\n\n" + (workerPrompt ?? "");
     public const int MinDescriptionChars = 1_500;
     public const int MaxTitleChars = 200;

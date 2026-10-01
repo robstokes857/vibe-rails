@@ -80,7 +80,7 @@ public static class JobRunner
 
         try
         {
-            if (run.TerminalSessionId is null && actions.Count > 0 && actions.All(action => action.Kind == JobActionKind.Script))
+            if (run.TerminalSessionId is null && actions.Count > 0 && actions.All(action => action.Kind != JobActionKind.Worker))
                 shutdownState.ScriptRecording = await JobScriptSessionRecorder.StartAsync(scope.ServiceProvider, store, run, workspaceRoot);
 
             // A pre-workflow snapshot can exist only on an older database whose migration could
@@ -126,6 +126,8 @@ public static class JobRunner
                     {
                         outcome = action.Kind switch
                         {
+                            JobActionKind.CodeQuality or JobActionKind.Vca => await RunCheckActionAsync(
+                                scope.ServiceProvider, run, action, workspaceRoot, boardCardKey),
                             JobActionKind.Script => await RunScriptActionAsync(
                                 cli,
                                 scriptService,
@@ -169,6 +171,10 @@ public static class JobRunner
                     status = outcome.RunStatus;
                     exitCode = outcome.ExitCode;
                     error = outcome.Error;
+                    // Deterministic analysis failures stay visible but the reviewer still runs.
+                    // Script/Worker failures preserve the existing fail-fast behavior.
+                    if (JobCheckScope.IsCheck(action.Kind) && outcome.ActionStatus == JobRunActionStatus.Failed)
+                        continue;
                     break; // Ordered workflows are deliberately fail-fast.
                 }
             }
@@ -239,6 +245,20 @@ public static class JobRunner
             finally { Volatile.Write(ref shutdownState.RunFinalized, 1); }
         }
         return ToExitCode(status);
+    }
+
+    private static async Task<ActionOutcome> RunCheckActionAsync(IServiceProvider services,
+        JobRunRecord run, JobRunActionRecord action, string workspace, string? cardKey)
+    {
+        var check = await services.GetRequiredService<BoardCheckService>().ExecuteAsync(run.ProjectPath,
+            workspace, cardKey, run.Id, action.Id, action.Kind, action.Arguments, CancellationToken.None);
+        var output = $"{check.Tool}: {check.Status} — {check.Summary}\nScope: {check.Scope}; "
+            + $"{check.AnalyzedCount} analyzed; {check.SkippedCount} skipped; {check.FindingCount} findings.\n"
+            + string.Join("\n", check.Limitations) + $"\nSaved evidence: {check.Id}";
+        Console.WriteLine(output);
+        return check.Status is "Failed to run" or "Cancelled"
+            ? new(JobRunActionStatus.Failed, JobRunStatus.Failed, 1, check.Summary, output, "")
+            : new(JobRunActionStatus.Succeeded, JobRunStatus.Succeeded, 0, null, output, "");
     }
 
     private static async Task<ActionOutcome> RunScriptActionAsync(

@@ -36,6 +36,22 @@ public sealed class JobServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task DeterministicChecksDoNotRequireWorkerOrInterpreter_AndRejectAmbiguousScope()
+    {
+        _repository.Setup(r => r.GetAllEnvironmentsAsync(It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        CreateJobRequest? captured = null;
+        _store.Setup(store => store.CreateJobAsync(It.IsAny<CreateJobRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<CreateJobRequest, CancellationToken>((request, _) => captured = request).ReturnsAsync(Record());
+        await Service().CreateJobAsync(Request(environmentId: null, actions:
+            [new(null, JobActionKind.CodeQuality, Arguments: ["unpushed"]), new(null, JobActionKind.Vca, Arguments: ["working-tree"])]),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(new[] { JobActionKind.CodeQuality, JobActionKind.Vca }, captured!.Actions!.Select(a => a.Kind));
+        _automationScriptService.Verify(s => s.NormalizeAsync(It.IsAny<string>(), It.IsAny<JobActionRequest>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()), Times.Never);
+        await Assert.ThrowsAsync<JobServiceException>(() => Service().CreateJobAsync(Request(environmentId: null,
+            actions: [new(null, JobActionKind.CodeQuality, Arguments: ["linked-commits"])]), TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task CreateJob_WithoutAnyWorkflowActions_IsRejected()
     {
         var error = await Assert.ThrowsAsync<JobServiceException>(() =>

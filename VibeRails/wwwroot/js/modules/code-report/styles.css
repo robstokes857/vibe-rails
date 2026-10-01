@@ -166,3 +166,30 @@ html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body:i
 .code-report .metric-detail[aria-pressed=true]{border-color:var(--color-accent)}
 .code-report .load-error{color:var(--color-text-muted)}
 .code-report .load-error[role=alert]{color:var(--color-danger)}
+
+/* Saved Board evidence uses the same viewer inside the card's available width. */
+.board-checks { min-width: 0; container-type: inline-size; }
+.board-checks-heading { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; }
+.board-checks-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: .75rem; }
+.board-check-result { border: 1px solid var(--color-border, #596273); border-radius: 8px; padding: .8rem; margin-bottom: .65rem; min-width: 0; }
+.board-check-result p { margin: .4rem 0; font-size: .85rem; }
+.board-check-status { display: inline-block; margin-left: .6rem; font-size: .8rem; font-weight: 600; }
+.board-check-status[data-status="Findings"], .board-check-status[data-status="Failed to run"] { color: var(--bs-warning-text-emphasis, #d09838); }
+.board-checks details { margin: .6rem 0; }
+.board-checks summary { cursor: pointer; padding: .3rem 0; }
+.board-checks [data-check-report] { border-top: 1px solid var(--color-border, #596273); padding-top: 1rem; margin-top: 1rem; }
+.board-checks dd, .board-checks p, .board-checks li, .board-checks code { overflow-wrap: anywhere; }
+.board-checks pre { max-height: 24rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.board-checks :focus-visible { outline: 2px solid var(--bs-primary, #73a7ff); outline-offset: 3px; }
+.board-checks [data-check-quality] { min-width: 0; }
+
+.board-checks .code-report .code-layout { display: flex; flex-direction: column; height: auto; }
+.board-checks .code-report .report-sidebar { order: -1; height: 420px; }
+.board-checks .code-report .graph-panel { height: 360px; }
+@container code-report (max-width:620px) {
+    .board-checks .code-report .report-sidebar { height: 650px; }
+}
+
+/* Coverage is explicit above the card report; do not substitute an aggregate health grade. */
+.board-checks .code-report .qr-health { display: none; }
+.board-checks .code-report .qr-hero { grid-template-columns: minmax(0, 1fr); }

@@ -271,6 +271,8 @@ public sealed partial class BoardTool(
         var stats = new CardRenderStats();
         var text = FormatCard(detail, lane?.Name ?? detail.ColumnId, lanes.Select(c => LaneLabel(c.Name, automations[c.Id])).ToList(), outcomes, options, boardName,
             pending.Select(p => $"\"{p.Automation.Name}\" (settles {p.DueUtc.ToString("u", CultureInfo.InvariantCulture)})").ToList(), stats);
+        var checks = await store.GetLatestChecksAsync(project, detail.Id, cancellationToken);
+        text += "\n\n" + CheckSummary(checks);
         return new CardRender(text, stats);
     }
 

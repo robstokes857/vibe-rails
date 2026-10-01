@@ -6,6 +6,69 @@ const IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAw
 const DESCRIPTION = 'Repro screenshot\n![Screenshot.png](attachment:att_image)\n<img src=x onerror="window.__injected=true">';
 
 for (const width of [1440, 390]) {
+    test(`card Checks preserve scope, history and safe reports at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        await openBoard(page);
+        const check = { id: 'check-1', tool: 'Code quality', status: 'Skipped/not applicable', scope: 'working-tree',
+            startedUtc: '2026-09-30T12:00:00Z', endedUtc: '2026-09-30T12:01:00Z', analyzedCount: 1, findingCount: 0, skippedCount: 2,
+            baseCommit: 'a'.repeat(40), headCommit: 'b'.repeat(40), runId: 'run-1', toolVersion: '1',
+            summary: '<img src=x onerror="window.__checksXss=1">', limitations: ['Unsupported files were skipped.'],
+            scopeFiles: ['Modified: src/example.cs', 'Added: unknown.xyz'], snapshotHash: 'c'.repeat(64), rulesHash: 'd'.repeat(64),
+            resultJson: JSON.stringify({ output: ['<script>window.__checksXss=1</script>'], details: { report: JSON.stringify({
+                schemaVersion: '1.0', files: [{ file: 'src/example.cs', score: 5, rating: 'Healthy', categories: [] }], overview: [], scorecard: []
+            }) } }) };
+        let rows = [], runs = 0;
+        await page.route('**/api/v1/board/cards/card_test/checks?*', route => route.fulfill({ json: {
+            checks: rows, latest: rows, pending: [], hasMore: false,
+            automations: [{ id: 8, name: 'Review checks', enabled: true, scopes: ['unpushed', 'unpushed'] }]
+        } }));
+        await page.route('**/api/v1/board/cards/card_test/checks/check-1*', route => route.fulfill({ json: { check, freshness: route.request().url().includes('verify=true') ? 'Stale: inputs changed' : 'Unknown freshness' } }));
+        await page.route('**/api/v1/code-analyzer/graph', route => route.fulfill({ status: 500, json: { error: 'Map unavailable' } }));
+        await page.route('**/api/v1/board/cards/card_test/automations', route => {
+            if (route.request().method() === 'POST') { runs++; return route.fulfill({ json: { success: true } }); }
+            return route.fulfill({ json: { jobs: [], runs: [] } });
+        });
+        await page.getByText('Description images', { exact: true }).click();
+        const panel = page.locator('[data-board-checks]');
+        await expect(panel.locator('[data-check-summary]')).toContainText('Not run');
+        expect(runs).toBe(0);
+        await panel.locator('[data-check-run-options] summary').click();
+        await panel.locator('[data-check-automation]').selectOption('8');
+        await expect(panel.locator('[data-check-scope]')).toContainText('unpushed');
+        await panel.getByRole('button', { name: 'Run checks', exact: true }).click();
+        await expect.poll(() => runs).toBe(1);
+        rows = [check];
+        await panel.getByRole('button', { name: 'Refresh checks', exact: true }).click();
+        await expect(panel.locator('[data-check-summary]')).toContainText('2 files skipped');
+        await panel.locator('[data-check-summary]').getByRole('button', { name: 'View report' }).click();
+        const report = panel.locator('[data-check-report]');
+        await expect(report).toContainText('Unknown freshness');
+        await report.getByRole('button', { name: 'Compare inputs' }).click();
+        await expect(report).toContainText('Stale: inputs changed');
+        await expect(report).toContainText('Unsupported files were skipped');
+        await expect(report.locator('.code-report')).toBeVisible();
+        await expect(report).toContainText('example.cs');
+        expect(await page.evaluate(() => window.__checksXss)).toBeUndefined();
+        expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+        await report.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: testInfo.outputPath(`checks-${width}.png`) });
+        await report.getByRole('button', { name: 'Close report' }).click();
+        await expect(panel.locator('.code-report')).toHaveCount(0);
+        await expect(panel.getByRole('button', { name: 'Refresh checks' })).toBeFocused();
+        let release;
+        const gate = new Promise(resolve => { release = resolve; });
+        await page.route('**/api/v1/board/cards/card_test/checks/check-1*', async route => {
+            await gate; await route.fulfill({ json: { check, freshness: 'Unknown' } }).catch(() => {});
+        });
+        await panel.locator('[data-check-summary]').getByRole('button', { name: 'View report' }).click();
+        await expect(panel.locator('[data-check-report]')).toContainText('Loading saved evidence');
+        await page.evaluate(() => window.app.closeModal());
+        release();
+        await expect(page.locator('[data-board-checks]')).toHaveCount(0);
+    });
+}
+
+for (const width of [1440, 390]) {
     test(`owner sharing modal CRUD and invitation limit at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 900 });
         await openBoard(page);

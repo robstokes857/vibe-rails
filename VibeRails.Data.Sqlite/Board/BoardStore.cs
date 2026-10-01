@@ -1819,6 +1819,8 @@ public sealed partial class BoardStore : IBoardStore
         });
         SqliteMigrationRunner.Apply(connection, "board", 26, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, SharedOriginsSchemaSql));
+        SqliteMigrationRunner.Apply(connection, "board-checks", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, ChecksSchemaSql));
         ReconcileDerivedRows(connection);
     }
 

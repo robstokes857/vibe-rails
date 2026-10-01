@@ -572,6 +572,28 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         EnsureSucceeded(mergeBaseResult, $"find the merge base of {upstreamRef} and HEAD", repositoryPath);
         var mergeBaseRef = mergeBaseResult.StdOut.Trim();
 
+        return await CaptureCommittedCoreAsync(repositoryPath, mergeBaseRef, headCommit, cancellationToken);
+    }
+
+    /// <summary>Capture a validated, immutable range without changing HEAD, index or working files.</summary>
+    public async Task<GitStagedSnapshot> CaptureRangeAsync(string repositoryPath, string baseCommit, string headCommit, CancellationToken cancellationToken)
+    {
+        var ancestry = await RunTextGitAsync(repositoryPath,
+            ["merge-base", "--is-ancestor", baseCommit, headCommit], cancellationToken);
+        EnsureSucceeded(ancestry, "validate that the base is an ancestor of the selected head", repositoryPath);
+        return await CaptureCommittedCoreAsync(repositoryPath, baseCommit, headCommit, cancellationToken);
+    }
+
+    /// <summary>Capture all committed files at HEAD; dirty working files are explicitly excluded.</summary>
+    public async Task<GitStagedSnapshot> CaptureRepositoryAsync(string repositoryPath, CancellationToken cancellationToken)
+    {
+        var head = await RunTextGitAsync(repositoryPath, ["rev-parse", "--verify", "HEAD^{commit}"], cancellationToken);
+        EnsureSucceeded(head, "resolve HEAD", repositoryPath);
+        return await CaptureCommittedCoreAsync(repositoryPath, "4b825dc642cb6eb9a060e54bf8d69288fbee4904", head.StdOut.Trim(), cancellationToken);
+    }
+
+    private async Task<GitStagedSnapshot> CaptureCommittedCoreAsync(string repositoryPath, string mergeBaseRef, string headCommit, CancellationToken cancellationToken)
+    {
         // This scope represents committed state, so enumerate HEAD's tree rather than the index.
         // `-l` supplies each blob's size before any content is read.
         var headEntries = await ReadTreeEntriesAsync(repositoryPath, headCommit, cancellationToken);
@@ -586,7 +608,7 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
             repositoryPath,
             ["--no-pager", "diff", "--name-status", "-z", "--find-renames", $"{mergeBaseRef}..{headCommit}"],
             cancellationToken);
-        EnsureSucceeded(statusResult, $"read unpushed file status ({upstreamRef}...HEAD)", repositoryPath);
+        EnsureSucceeded(statusResult, "read committed file status", repositoryPath);
 
         var changedEntries = ParseNameStatus(statusResult.StdOut);
         var changedLines = await ReadUnpushedChangedLineCountsAsync(
@@ -716,7 +738,7 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
                 budget.SkippedFileCount);
         }
 
-        return new GitStagedSnapshot(repositoryPath, files, agentFiles, trackedFiles, impactFiles);
+        return new GitStagedSnapshot(repositoryPath, files, agentFiles, trackedFiles, impactFiles, CheckIdentity: new(mergeBaseRef, headCommit));
     }
 
     private static async Task<Dictionary<string, int?>> ReadUnpushedChangedLineCountsAsync(
