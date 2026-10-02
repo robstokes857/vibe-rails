@@ -123,14 +123,39 @@ Refresh from that approved bundle, retaining the relative module imports and Typ
 
 This integration also patches the embedded Atlas layout and connectors:
 
-1. In `scopeNodes`, when more than 200 entities are eligible and the scope has directory
-   children, show those direct children (up to the existing 700 visible-node limit). Preserve
-   the eligible total. Search and `focusNode` still reveal any supplied file, even when it
-   is outside the overview. Smaller snapshots keep the original constellation.
+1. `scopeNodes` shows the whole snapshot: every directory, file, type and function the
+   supplier kept is drawn at once, in the root view and inside any scope (VIBE-33). The
+   previous "direct children above 200 entities" overview and 700-node cap are gone; the
+   3,000-node contract limit is the only bound, and a `Showing N of M` notice appears only
+   beyond it. Search and `focusNode` still reveal any supplied file.
 2. In `layout`, use `groups.length` and `slot = i` instead of wrapping group centers every
    12 domains. Independent directories must not occupy identical centers.
 3. Nodes use curved, directed connectors and moving signals like Cards. Animation respects
    reduced motion and hidden pages; dense overviews retain a bounded animation budget.
+4. Above 600 visible nodes the view is **dense** (`DENSE_VIEW_NODES`, exported by the layout
+   module; the renderer adds `.dense` to the stage). Repulsion switches from the exact O(n²)
+   pass to a Barnes-Hut quadtree with the same force law (theta 1; extent and spacing stay
+   within a few percent of the exact result, 2,800 nodes lay out in ~0.4 s instead of ~2 s).
+   Smaller views keep the exact pass and their original constellation.
+5. A dense field holds still: no ambient sway or pointer parallax, and the animation loop
+   only draws during orbit transitions and inertia. While it turns, each frame writes node
+   positions and the visible signals only; depth cues, stacking order, labels, hover targets
+   and the static threads are written on the frame the motion settles (`.turning` fades the
+   threads meanwhile). The entrance is one compositor transform instead of an orbit easing.
+6. Signals (`.edge-flow`) live in their own promoted SVG (`#signals`) rather than inside each
+   `.edge-group`, so their CSS animation repaints 180 paths instead of every link; `highlight`
+   mirrors `highlight`/`dim`/`change-muted` onto the flow. Edge labels take their position
+   when a link is hovered or highlighted. The Nodes view draws up to 10,000 links; a dense
+   unselected view spreads its 180 signals across the field with a stride.
+7. Dense hover dims through one veil (`#veil`) instead of a class on every node and link:
+   connected nodes get `.lit` and rise above it, connected links are redrawn in `#lit-layer`.
+   Dense glyphs cap at 1.5× and threads use `--stroke-scale` so thousands of entities read as
+   points of light with hairlines at any zoom; module labels avoid each other.
+
+Known limits of the dense view, measured on this repository's 2,800-node / 7,400-link map in
+headless Chromium: the first draw takes ~1 s after the graph arrives, a hover highlight
+~0.1–0.2 s, and rotation runs at roughly 10–15 frames per second because every node is a DOM
+element with its own compositor layer. Pan, zoom and the idle signals stay smooth.
 
 Atlas keeps its opaque-origin sandbox and MessageChannel lifecycle. Pass the host's
 `window.__viberails_NONCE__`; do not add `allow-same-origin`, eval, or CSP exceptions.
@@ -139,9 +164,10 @@ Atlas keeps its opaque-origin sandbox and MessageChannel lifecycle. Pass the hos
 
 Backend graph and authenticated route regressions live under `Tests/Services/CodeReports`
 and `Tests/Routes/CodeGraphRoutesTests.cs`. `UITests/tests/code-quality-ux.spec.js` covers the
-real frontend with test-only supplied data: selection, visible connections, large overviews,
-saved metrics, scrolling, radar keyboard interaction, themes, reduced motion, narrow sizes,
-independent errors, escaped excerpts and navigation races. Run it with
+real frontend with test-only supplied data: selection, visible connections, whole-snapshot
+and dense overviews (bounded signals, hover veil, still field, rotation settle), saved metrics,
+scrolling, radar keyboard interaction, themes, reduced motion, narrow sizes, independent
+errors, escaped excerpts and navigation races. Run it with
 `npx playwright test --config playwright.quality.config.js` from `UITests`.
 
 The report case in `vscode-viberails/src/test/suite/smoke.test.ts` uses a real backend and

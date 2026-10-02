@@ -315,7 +315,7 @@ test('radar supports keyboard categories, saved detail activation and Escape', a
     await expect(report).toBeVisible();
 });
 
-test('large graphs open a connected domain overview and still focus report files', async ({ page }) => {
+test('large graphs draw every entity at once and still focus report files', async ({ page }) => {
     await installQualityApi(page);
     const graph = graphResponse();
     for (let index = 0; index < 220; index++) graph.nodes.push({
@@ -324,10 +324,64 @@ test('large graphs open a connected domain overview and still focus report files
     await page.route('**/api/v1/code-analyzer/graph', route => route.fulfill({ json: graph }));
     const report = await openDetails(page);
     const map = page.frameLocator('.code-report iframe');
-    await expect(map.getByText(/Showing 2 of 224 entities/)).toBeVisible();
+    // The overview is the whole snapshot, not its top-level directories.
+    await expect(map.locator('#nodes .node.orb')).toHaveCount(224);
+    await expect(map.getByText(/Showing \d+ of \d+ entities/)).toHaveCount(0);
+    await expect(map.locator('#stage')).not.toHaveClass(/dense/);
     await expect(map.locator('.cross-link .edge').first()).toBeVisible();
     await report.getByRole('button', { name: new RegExp(PAYMENT_PATH) }).click();
     await expect(map.locator('#inspector h2')).toHaveText('PaymentProcessor.cs');
+});
+
+test('dense graphs show thousands of entities with bounded signals, a hover veil and a still field', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await installQualityApi(page);
+    const graph = graphResponse();
+    // Six directories of 200 files each, with references between them: well past the dense threshold.
+    for (let directory = 0; directory < 6; directory++) {
+        graph.nodes.push({ id: `dir-${directory}`, name: `Area${directory}`, kind: 'module', path: `src/Area${directory}` });
+        for (let index = 0; index < 200; index++) {
+            const id = `dense-${directory}-${index}`;
+            graph.nodes.push({ id, name: `Dense${index}.cs`, kind: 'file', path: `src/Area${directory}/Dense${index}.cs`, parentId: `dir-${directory}` });
+            graph.edges.push({ id: `c-${id}`, source: `dir-${directory}`, target: id, kind: 'contains' });
+            if (index % 5 === 0) graph.edges.push({ id: `r-${id}`, source: id, target: `dense-${(directory + 1) % 6}-${index}`, kind: 'references' });
+        }
+    }
+    await page.route('**/api/v1/code-analyzer/graph', route => route.fulfill({ json: graph }));
+    await openDetails(page);
+    const map = page.frameLocator('.code-report iframe');
+    await expect(map.locator('#atlas-loader')).toBeHidden();
+    await expect(map.locator('#nodes .node.orb')).toHaveCount(graph.nodes.length);
+    await expect(map.locator('#stage')).toHaveClass(/dense/);
+    await expect(map.locator('.edge-group')).toHaveCount(graph.edges.length);
+    // Signals are bounded and spread across the field rather than taken from its first links.
+    await expect(map.locator('#signal-layer .edge-flow:not([hidden])')).toHaveCount(180);
+    const signalled = await map.locator('#signal-layer .edge-flow:not([hidden])').evaluateAll(flows => flows.map(flow => flow.getAttribute('d')).filter(Boolean).length);
+    expect(signalled).toBe(180);
+    // A dense field holds still between interactions: nodes keep their transform across frames.
+    const first = map.locator('#nodes .node.orb').first();
+    const before = await first.evaluate(card => card.style.transform);
+    await page.waitForTimeout(400);
+    expect(await first.evaluate(card => card.style.transform)).toBe(before);
+    // Hover dims through the veil and lifts the connected entities above it.
+    const area = map.locator('#nodes .node.orb.module').filter({ hasText: 'Area0' });
+    await area.hover();
+    await expect(map.locator('#stage')).toHaveClass(/focused/);
+    await expect(map.locator('#veil')).toHaveCSS('opacity', '1');
+    await expect(map.locator('#nodes .node.orb.lit')).toHaveCount(201);
+    await expect(map.locator('#lit-layer .edge.lit')).toHaveCount(200);
+    await expect(map.locator('#nodes .node.orb.dim')).toHaveCount(0);
+    await map.locator('#stage').hover({ position: { x: 5, y: 5 } });
+    await expect(map.locator('#stage')).not.toHaveClass(/focused/);
+    await expect(map.locator('#lit-layer .edge.lit')).toHaveCount(0);
+    // Rotation still works and settles with hover targets in place.
+    await map.locator('#rotate-mode').click();
+    await map.locator('#stage').press('ArrowRight');
+    await expect(map.locator('#stage')).toHaveAttribute('data-yaw', /^0\.17/);
+    await expect(map.locator('#stage')).not.toHaveClass(/turning/);
+    const hit = map.locator('#edge-layer .edge-hit').first();
+    const edge = map.locator('#edge-layer .edge').first();
+    expect(await hit.getAttribute('d')).toBe(await edge.getAttribute('d'));
 });
 
 test('Nodes relationships have card curves, arrows and bounded flowing signals', async ({ page }, testInfo) => {
@@ -338,7 +392,7 @@ test('Nodes relationships have card curves, arrows and bounded flowing signals',
     const map = page.frameLocator('.code-report iframe');
     await expect(map.locator('#stage')).toHaveClass(/constellation/);
     await expect(map.locator('#atlas-loader')).toBeHidden();
-    const edge = map.locator('.edge-group:has(.edge-flow) .edge').first();
+    const edge = map.locator('.edge-group:not(.structural) .edge').first();
     const flow = map.locator('.edge-flow:not([hidden])').first();
     await expect(edge).toHaveAttribute('marker-end', 'url(#arrow)');
     await expect(flow).toBeVisible();
