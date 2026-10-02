@@ -7,6 +7,14 @@ public static class DataExportRoutes
 {
     public static void Map(WebApplication app)
     {
+        app.MapGet("/api/v1/settings/backups", (
+            [Microsoft.AspNetCore.Mvc.FromServices] VibeRails.Services.Backups.CompleteBackupService backups,
+            HttpContext context) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            return Results.Json(backups.GetCoverage(), VibeRails.Services.Backups.BackupJson.Default.BackupCoverage);
+        }).WithName("CompleteBackupCoverage");
+
         // The remote server's status is a domain result, not the local VibeRails
         // authentication status. Always return HTTP 200 so an upstream 401/403 cannot
         // trigger the SPA's local-session bootstrap flow.

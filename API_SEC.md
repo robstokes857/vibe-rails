@@ -1,5 +1,26 @@
 # API authentication coverage
 
+## VIBE-29 complete backups (2026-10-02, scoped amendment)
+
+Added read-only `GET /api/v1/settings/backups` under the existing session-plus-tab gate,
+with no-store coverage/receipt metadata, never credentials or payloads. The resource-aware
+backup job runs only in active root backends. Outbound requests use the fixed HTTPS
+`viberails.ai/api/v1/data-exports/backups/` destination, header-only API keys, no redirects,
+bounded responses, cancellation and strict per-account/computer/version acknowledgements.
+No production listener or authentication exception changed.
+
+The hosted contract is in `VibeRails-Front/Services/CompleteBackups/README.md`: API-key
+ingest, separately Auth0-protected owner-only reads, owner-scoped EF filters/writes, hashed
+4 MiB parts, bounded manifests, four concurrent ingest requests and additive tables.
+Credential/external-file exclusions are explicit; preserved user/database content may
+contain embedded secrets. Archives remain private account data.
+
+Both mandatory repository-wide listener searches included untracked files: only the approved
+main Kestrel host, non-serving PortFinder probe and test hosts were found; no cross-runtime
+matches. Scoped route enumeration found the new coverage GET and existing export routes.
+Fixtures cover wrong/cross-account ACKs, hosted download ownership and corrupted uploads.
+No security violation was found. This is a scoped amendment, not a deployment audit.
+
 ## VIBE-22 Switch reviewer (2026-10-01, scoped amendment)
 
 Added root-only GET/PUT `/api/v1/board/cards/{card}/reviews/settings` and POST

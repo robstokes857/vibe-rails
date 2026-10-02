@@ -390,6 +390,7 @@ namespace VibeRails
                         .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
                     serviceCollection.AddHostedService<TokenSavingsPublishJob>();
                     serviceCollection.AddHostedService<SessionDataDrainJob>();
+                    serviceCollection.AddHostedService<CompleteBackupJob>();
                     serviceCollection.AddHostedService<DataRetentionJob>();
                     serviceCollection.AddHostedService<SearchIndexMaintenanceJob>();
                 }
@@ -418,6 +419,11 @@ namespace VibeRails
             // Progress for the running export, polled by the settings modal. Singleton because a
             // process-wide gate means only one export can ever be in flight here.
             serviceCollection.AddSingleton<IDataExportProgress, DataExportProgress>();
+            serviceCollection.AddSingleton<Services.Backups.BackupFiles>();
+            serviceCollection.AddSingleton<Services.Backups.CompleteBackupService>();
+            serviceCollection.AddHttpClient<Services.Backups.BackupTransport>(client =>
+                client.Timeout = TimeSpan.FromMinutes(2))
+                .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
 
             // Complete state.db export. Large databases are streamed, so allow a deliberate
             // long-running upload window while still propagating request cancellation.

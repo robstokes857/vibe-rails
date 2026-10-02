@@ -1,5 +1,15 @@
 # VibeRails architecture reference
 
+## Complete backups (VIBE-29, October 2, 2026)
+
+The root-host `CompleteBackupJob` independently drains versioned Board, state, proxy and
+configuration archives through cancellable SQLite snapshots, private durable staging and
+verified part/manifest receipts. Session exports and bounded Board sync continue separately.
+The [component contract](../VibeRails/Services/CompleteBackups/README.md) defines cadence,
+freshness, exact file/credential exclusions, retry behavior, size limits and rollout ordering.
+General Settings displays per-dataset coverage. Restore/inspection instructions live in
+`vibe-books/vibe-data/docs/complete-backups.md`; no source retention policy changes.
+
 Moved verbatim from the root `AGENTS.md` on 2026-09-27 so the instructions file that every
 agent session loads stays small; the material below was last reviewed 2026-08-06 (v1.9.11).
 Treat dates, counts and "current" statements as records of that review and check the source

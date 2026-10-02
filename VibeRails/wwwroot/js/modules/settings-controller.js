@@ -1,4 +1,5 @@
 import { showDataExportModal } from './data-export-modal.js';
+import { BackupStatusPanel } from './backup-status.js';
 import { confirmDialog } from './utils.js';
 import { SettingsKeysPanel } from './settings-keys.js';
 import { SettingsJiraPanel } from './settings-jira.js';
@@ -276,6 +277,8 @@ export class SettingsController {
         // full RTT on every Settings visit. The PIN section just pops in when its
         // status lands.
         content.appendChild(fragment);
+        const backupStatus = content.querySelector('[data-backup-status]');
+        if (backupStatus) this._backupStatusPanel = new BackupStatusPanel(this.app, backupStatus);
         this.app.updateAccountNav?.();
 
         if (root) {
@@ -316,6 +319,8 @@ export class SettingsController {
     }
 
     unload() {
+        this._backupStatusPanel?.dispose();
+        this._backupStatusPanel = null;
         this._keysPanel?.unload();
         this._keysPanel = null;
         this._jiraPanel?.clearSecrets();
