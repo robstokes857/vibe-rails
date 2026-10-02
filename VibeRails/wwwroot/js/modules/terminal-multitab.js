@@ -23,6 +23,7 @@ import { TerminalEditorModal } from './terminal-editor-modal.js';
 import { TerminalToast } from './terminal-toast.js';
 import { TerminalNotifications } from './terminal-notifications.js';
 import { resolvePromptTemplateForLaunch } from './prompt-template-modal.js';
+import { cardDisplayId, cardLabel } from './board-card-label.js';
 
 // Pending-close grace window: how long a closed tab is held in the undo
 // dropdown before the backend DELETE actually fires. Keep PENDING_CLOSE_MS
@@ -85,6 +86,19 @@ export function selectBlankPlaceholderTabIds(states, { hasCli, isPendingClose = 
             && !isPendingClose(state.id)
             && !hasCli(state.selection))
         .map((state) => state.id);
+}
+
+// VIBE-36: the Board card a tab's session is linked to, as the tab list reports it (`boardCard`);
+// null when it names none. Only the fields the controls-bar card link renders.
+export function readTabBoardCard(value) {
+    const id = cleanString(value?.id);
+    if (!id) return null;
+    return {
+        id,
+        key: cleanString(value.key) || '',
+        title: cleanString(value.title) || '',
+        displayId: cleanString(value.displayId)
+    };
 }
 
 function waitMs(ms) {
@@ -232,6 +246,8 @@ export class TerminalManager {
 
         this.startBtn = this.container.querySelector('#terminal-start-btn');
         this.reconnectBtn = this.container.querySelector('#terminal-reconnect-btn');
+        this.cardLinkBtn = this.container.querySelector('#terminal-card-link-btn');
+        this.cardLinkLabel = this.container.querySelector('#terminal-card-link-label');
         this.stopBtn = this.container.querySelector('#terminal-stop-btn');
         this.controlsBar = this.container.querySelector('#vb-terminal-controls-bar');
         this.headerSelect = this.container.querySelector('#terminal-header-select');
@@ -409,6 +425,10 @@ export class TerminalManager {
 
         this.reconnectBtn?.addEventListener('click', () => {
             void this.reconnectActiveTab();
+        });
+
+        this.cardLinkBtn?.addEventListener('click', () => {
+            this.openBoardCard(this.getActiveTab()?.state?.boardCard);
         });
 
         // Connect-only button: visible only while a session is disconnected
@@ -618,6 +638,14 @@ export class TerminalManager {
                 for (const id of this.automationTabs.keys()) {
                     if (!current.has(id)) this.removeAutomationTab(id);
                 }
+                // A card an agent attached mid-session appears without a reload. Only for the
+                // session the tab still runs: a start or stop in flight owns the tab's identity.
+                for (const info of response.tabs) {
+                    const local = this.tabs.get(info.tabId);
+                    if (local && !isAutomationTab(info) && (info.sessionId || null) === local.state.sessionId) {
+                        local.state.boardCard = readTabBoardCard(info.boardCard);
+                    }
+                }
                 this.automationTabs = current;
                 for (const info of current.values()) {
                     const local = this.tabs.get(info.tabId);
@@ -629,6 +657,7 @@ export class TerminalManager {
                     if (info.statusAvailable === false) continue;
                     local.state.hasActiveSession = info.hasActiveSession;
                     local.state.sessionId = info.sessionId;
+                    local.state.boardCard = readTabBoardCard(info.boardCard);
                     if (!info.hasActiveSession) {
                         local.instance.autoReconnect?.cancel();
                         if (info.sessionId && this.activeTabId === info.tabId)
@@ -737,6 +766,7 @@ export class TerminalManager {
             renaming: false,
             hasActiveSession: tabInfo.hasActiveSession === true,
             sessionId: tabInfo.sessionId || null,
+            boardCard: readTabBoardCard(tabInfo.boardCard),
             cli: tabInfo.cli || null,
             status: tabInfo.hasActiveSession ? 'disconnected' : 'not-started',
             viewState: {
@@ -2346,6 +2376,7 @@ export class TerminalManager {
 
         if (!active) {
             this.updateWindowTitleBar(null);
+            this.updateBoardCardLink(null);
             this.keyboardBtn?.classList.add('d-none');
             this.editorBtn?.classList.add('d-none');
             this.setBadge('Not Started', 'bg-secondary');
@@ -2381,9 +2412,29 @@ export class TerminalManager {
         }
 
         this.updateWindowTitleBar(active.state);
+        this.updateBoardCardLink(active.state);
         this.updateWindowControlState();
         this.updateAddButtonState();
         this._updateTabScrollArrows();
+    }
+
+    // VIBE-36: a tab whose session is linked to a Board card links back to it from the controls
+    // bar, beside where Reconnect used to sit. Hidden without a session: an ordinary tab then
+    // shows the launch placeholder, not the card's agent.
+    updateBoardCardLink(state) {
+        if (!this.cardLinkBtn) return;
+        const card = state && (state.hasActiveSession === true || isAutomationTab(state)) ? state.boardCard : null;
+        this.cardLinkBtn.classList.toggle('d-none', !card);
+        if (!card) return;
+        const label = cardLabel(card);
+        if (this.cardLinkLabel) this.cardLinkLabel.textContent = cardDisplayId(card) || 'Card';
+        this.cardLinkBtn.title = `Open ${label} on the Board`;
+        this.cardLinkBtn.setAttribute('aria-label', `Open Board card ${label}`);
+    }
+
+    openBoardCard(card) {
+        if (!card?.id) return false;
+        return this.app.navigate('board', { openCardId: card.id });
     }
 
     updateWindowTitleBar(state) {
@@ -3176,7 +3227,8 @@ export class TerminalController {
                 hasActiveSession: authoritative?.hasActiveSession !== false,
                 sessionId: authoritative?.sessionId || null,
                 cli: authoritative?.cli || rememberedCli,
-                workingDirectory: authoritative?.workingDirectory || null
+                workingDirectory: authoritative?.workingDirectory || null,
+                boardCard: authoritative?.boardCard || null
             }, {
                 selection,
                 title: manager.getTabTitleFromStorage(id),
@@ -3588,6 +3640,10 @@ export class TerminalController {
                                 <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466"/>
                             </svg>
                             <span>Reconnect</span>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-light d-none d-inline-flex align-items-center gap-1 vb-terminal-card-link" id="terminal-card-link-btn">
+                            <i class="fa-solid fa-clipboard-list" aria-hidden="true"></i>
+                            <span class="vb-terminal-card-link-label" id="terminal-card-link-label"></span>
                         </button>
                     </div>
                     <!-- Far-right home for the persistent token-compression meter (app.terminalTokenCompression,

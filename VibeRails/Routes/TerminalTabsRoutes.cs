@@ -1,5 +1,7 @@
 using System.Net.WebSockets;
+using Serilog;
 using VibeRails.DTOs;
+using VibeRails.Services.Board;
 using VibeRails.Services.Terminal;
 
 
@@ -11,10 +13,12 @@ public static class TerminalTabsRoutes
     {
         app.MapGet("/api/v1/terminal/tabs", async (
             ITerminalTabHostService tabHost,
+            IBoardStore boardStore,
             CancellationToken cancellationToken) =>
         {
             var tabs = await tabHost.ListTabsAsync(cancellationToken);
-            return Results.Ok(new TerminalTabListResponse(tabs.ToList(), tabHost.MaxTabs));
+            var withCards = await WithBoardCardsAsync(tabs, boardStore, cancellationToken);
+            return Results.Ok(new TerminalTabListResponse(withCards, tabHost.MaxTabs));
         }).WithName("ListTerminalTabs");
 
         app.MapPost("/api/v1/terminal/tabs", async (
@@ -167,5 +171,34 @@ public static class TerminalTabsRoutes
         });
     }
 
+    // VIBE-36: a tab names the Board card its session is linked to (Start work, Chat with agent,
+    // a lane Automation, an agent touching the card), so the terminal can link back to the story.
+    // A session's primary link sorts first. The browser treats a failed list as "no tabs", so a
+    // board.db failure drops only the card links, never the list.
+    internal static async Task<List<TerminalTabStatusResponse>> WithBoardCardsAsync(
+        IReadOnlyList<TerminalTabStatusResponse> tabs,
+        IBoardStore boardStore,
+        CancellationToken cancellationToken)
+    {
+        var sessionIds = tabs.Select(tab => tab.SessionId).OfType<string>().Where(id => id.Length > 0).ToArray();
+        if (sessionIds.Length == 0) return tabs.ToList();
 
+        IReadOnlyList<BoardSessionCard> links;
+        try
+        {
+            links = await boardStore.GetSessionCardsAsync(sessionIds, cancellationToken);
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            Log.Warning(ex, "[TerminalTabs] Could not read Board card links for terminal tabs");
+            return tabs.ToList();
+        }
+
+        var cardBySession = new Dictionary<string, BoardSessionCard>(StringComparer.Ordinal);
+        foreach (var link in links) cardBySession.TryAdd(link.SessionId, link);
+        return tabs.Select(tab => tab.SessionId is { } sessionId && cardBySession.TryGetValue(sessionId, out var card)
+                ? tab with { BoardCard = new TerminalTabBoardCard(card.CardId, card.Key, card.Title, card.DisplayId) }
+                : tab)
+            .ToList();
+    }
 }

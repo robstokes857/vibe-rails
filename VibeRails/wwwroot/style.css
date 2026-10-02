@@ -2812,6 +2812,18 @@ code {
     line-height: 1.2;
 }
 
+/* VIBE-36: link back to the tab's Board card; the full "ID · Title" lives in the tooltip. */
+#vb-terminal-panel .vb-terminal-controls-bar .vb-terminal-card-link {
+    max-width: 14rem;
+    white-space: nowrap;
+}
+
+#vb-terminal-panel .vb-terminal-card-link-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 /* Close button in chat history sidebar header */
 .ch-sidebar-close-btn {
     background: transparent;

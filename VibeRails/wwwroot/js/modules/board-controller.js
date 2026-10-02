@@ -120,7 +120,11 @@ export class BoardController {
     // View lifecycle
     // ============================================
 
-    async loadView() {
+    async loadView(data = {}) {
+        // One-shot (VIBE-36): a terminal tab's card link opens that card. Deleted from the
+        // navigation entry so Back or a remount of this view does not open it again.
+        const openCardId = typeof data?.openCardId === 'string' ? data.openCardId.trim() : '';
+        if (data && Object.prototype.hasOwnProperty.call(data, 'openCardId')) delete data.openCardId;
         const content = document.getElementById('app-content');
         if (!content) return;
 
@@ -136,8 +140,27 @@ export class BoardController {
 
         this.state.columns = [];
         this.state.cards = [];
-        await this.refresh({ restoreSelection: true });
+        if (openCardId) await this.openCardFromNavigation(openCardId);
+        else await this.refresh({ restoreSelection: true });
         if (this.root?.isConnected && this.app.currentView === 'board') this.bindSessionActivity();
+    }
+
+    // Opens the editor over the card's own board, so closing it leaves the user on the card's lane.
+    // An unreadable card (deleted since the link was drawn) still loads the remembered board.
+    async openCardFromNavigation(cardId) {
+        const root = this.root;
+        let card = null;
+        try {
+            card = await BoardApi.getBoardCardAsync(cardId);
+        } catch (error) {
+            if (root === this.root) this.app.showToast('Board', error?.message || 'That card could not be opened.', 'error');
+        }
+        if (root !== this.root || !root?.isConnected || this.app.currentView !== 'board') return;
+        if (card?.boardId) this.state.boardId = card.boardId;
+        await this.refresh({ restoreSelection: !card?.boardId });
+        if (card && root === this.root && root.isConnected && this.app.currentView === 'board') {
+            await this.openCardEditor(card.id);
+        }
     }
 
     unload() {

@@ -555,6 +555,20 @@ Rendering → Auto-reconnect (`viberails_terminal_autoReconnect` = `off`). Tests
 (the fake CLI echoes its command line, so assert replay fidelity as text equality, never as a
 marker count).
 
+## Terminal tab card link (VIBE-36)
+
+`GET /api/v1/terminal/tabs` names the Board card each tab's session is linked to as
+`boardCard { id, key, title, displayId }` (`TerminalTabsRoutes.WithBoardCardsAsync`, the session's
+primary link from `IBoardStore.GetSessionCardsAsync`; a board.db failure drops only the links).
+The server link is the source, not the browser-local `board-card:` task key, so it also covers
+other windows, lane Automation viewers and cards an agent attached itself. The active tab shows
+`#terminal-card-link-btn` (display ID; `ID · Title` in the tooltip) in the controls bar actions,
+after the hidden Reconnect button; it hides once an ordinary tab has no session. Restore, adoption
+and `refreshAutomationTabs` (same session only) set `state.boardCard`; starting or stopping a
+session in the tab clears it. Clicking navigates to `board` with one-shot `openCardId`, which
+`BoardController.loadView` deletes, then `openCardFromNavigation` selects the card's board and opens
+its editor. Tests: `Tests/wwwroot/js/terminal-board-card-link.test.mjs`, `TerminalTabsRoutesTests`.
+
 ## Automation workflow editor
 
 `jobs-controller.js` owns an ordered workflow made of repository Script actions and at most one

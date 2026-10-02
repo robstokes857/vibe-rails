@@ -937,8 +937,12 @@ namespace VibeRails.DTOs
         string? WorkingDirectory = null,
         string? JobRunId = null,
         string? AutomationName = null,
-        bool StatusAvailable = true
+        bool StatusAvailable = true,
+        TerminalTabBoardCard? BoardCard = null
     );
+
+    /// <summary>The Board card a tab's session is linked to (VIBE-36); only the tab list fills it.</summary>
+    public record TerminalTabBoardCard(string Id, string Key, string Title, string? DisplayId = null);
 
     public record TerminalTabListResponse(
         List<TerminalTabStatusResponse> Tabs,

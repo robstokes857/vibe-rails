@@ -1,5 +1,14 @@
 # API authentication coverage
 
+## VIBE-36 terminal tab card link (2026-10-02, scoped amendment)
+
+No route, listener, authentication exception or outbound destination was added. The existing
+`GET /api/v1/terminal/tabs` (session-plus-tab gate, every backend) now adds an optional
+`boardCard { id, key, title, displayId }` per tab, read through `IBoardStore.GetSessionCardsAsync`
+for the tabs' own session IDs. That is the label data chat history already returns on the same
+gate; no description, comment or attachment is exposed. A Board read failure is logged and
+returns the list without links. `TerminalTabsRoutesTests` covers the credentialed AOT response.
+
 ## VIBE-29 complete backups (2026-10-02, scoped amendment)
 
 Added read-only `GET /api/v1/settings/backups` under the existing session-plus-tab gate,

@@ -82,7 +82,8 @@ test('adoptLaunchedTab restores authoritative CLI and session identity', async (
                 hasActiveSession: true,
                 sessionId: 'session-1',
                 cli: 'OpenCode',
-                workingDirectory: 'C:/source/project/.workspace/run-1'
+                workingDirectory: 'C:/source/project/.workspace/run-1',
+                boardCard: { id: 'card-1', key: 'VB-1', title: 'Story', displayId: 'VIBE-1' }
             }] };
         }
     });
@@ -100,7 +101,9 @@ test('adoptLaunchedTab restores authoritative CLI and session identity', async (
         hasActiveSession: true,
         sessionId: 'session-1',
         cli: 'OpenCode',
-        workingDirectory: 'C:/source/project/.workspace/run-1'
+        workingDirectory: 'C:/source/project/.workspace/run-1',
+        // VIBE-36: the adopted tab keeps the Board card the list links its session to.
+        boardCard: { id: 'card-1', key: 'VB-1', title: 'Story', displayId: 'VIBE-1' }
     });
     assert.equal(added[0].options.selection, 'env:7:opencode');
     assert.equal(added[0].options.workingDirectory, 'C:/source/project/.workspace/run-1');
