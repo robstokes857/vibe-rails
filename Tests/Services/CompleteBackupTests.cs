@@ -56,7 +56,7 @@ public sealed class CompleteBackupTests : IDisposable
         // An attachment larger than the entire hosted activity budget forces multiple transport parts.
         await store.AddAttachmentContentAsync(root, linked.Id, "large.bin", "application/octet-stream", RandomNumberGenerator.GetBytes(9 * 1024 * 1024), Ct);
         await Service().TickAsync(Ct);
-        var archive = Assert.Single(cloud.Manifests.Values.Where(m => m.Dataset == "board"));
+        var archive = Assert.Single(cloud.Manifests.Values, m => m.Dataset == "board");
         Assert.True(archive.Parts.Count > 1);
         var restored = await RestoreDatabase(archive);
         var recovered = new BoardStore($"Data Source={restored};Pooling=False", $"Data Source={Path.Combine(root, "state.db")};Pooling=False");
@@ -95,7 +95,7 @@ public sealed class CompleteBackupTests : IDisposable
         await Drain(service, 20);
         var receipt = service.GetCoverage().Datasets.Single(d => d.Dataset == "board").State.Receipt;
         Assert.Equal(pendingVersion, receipt!.Version);
-        Assert.Single(cloud.Manifests.Values.Where(m => m.Dataset == "board"));
+        Assert.Single(cloud.Manifests.Values, m => m.Dataset == "board");
         using (var writer = Open(Path.Combine(root, "board.db"))) Execute(writer, "INSERT INTO Durable VALUES(2,'later edit');");
         Assert.Equal("pending", service.GetCoverage().Datasets.Single(d => d.Dataset == "board").State.Status);
         await Drain(service, 20);
@@ -162,6 +162,65 @@ public sealed class CompleteBackupTests : IDisposable
         using var db = Open(await RestoreDatabase(cloud.Manifests[receipt.Version]));
         Assert.Equal("preserved", Scalar(db, "SELECT Value FROM Durable"));
         if (damage == "malformed-manifest") Assert.Equal("{broken", await File.ReadAllTextAsync(manifest, Ct));
+    }
+
+    [Fact]
+    public async Task RestartCleansAcknowledgedPartsButPreservesReceiptsAndInvalidEvidence()
+    {
+        CreateDatabase("board.db", "CREATE TABLE Durable(Value TEXT); INSERT INTO Durable VALUES('original');");
+        var service = Service();
+        await service.TickAsync(Ct);
+        var archived = Assert.Single(cloud.Manifests.Values, m => m.Dataset == "board");
+        var manifestPath = Assert.Single(Directory.GetFiles(Path.Combine(root, "complete-backups"), "manifest.json", SearchOption.AllDirectories));
+        var versionPath = Path.GetDirectoryName(manifestPath)!;
+        var part = Assert.Single(archived.Parts);
+        var partPath = Path.Combine(versionPath, part.Sha256 + ".part");
+        // Exact on-disk residue of a crash after the checkpoint/receipt, before deletion.
+        await File.WriteAllBytesAsync(partPath, cloud.Parts[(1, part.Sha256)], Ct);
+        var receiptPath = Path.Combine(versionPath, "receipt.json");
+        var receipt = await File.ReadAllTextAsync(receiptPath, Ct);
+        var mismatched = JsonSerializer.Deserialize(receipt, BackupJson.Default.BackupReceipt)! with { AccountId = 999 };
+        await File.WriteAllTextAsync(receiptPath, JsonSerializer.Serialize(mismatched, BackupJson.Default.BackupReceipt), Ct);
+        service = Service();
+        await Drain(service, 4);
+        Assert.True(File.Exists(partPath)); // A foreign or corrupt receipt never authorizes cleanup.
+        await File.WriteAllTextAsync(receiptPath, receipt, Ct);
+        await Drain(service, 4);
+        Assert.False(File.Exists(partPath));
+        Assert.True(File.Exists(manifestPath)); Assert.True(File.Exists(receiptPath));
+        using (var source = Open(Path.Combine(root, "board.db"))) Assert.Equal("original", Scalar(source, "SELECT Value FROM Durable"));
+        now = now.AddDays(1);
+        await Drain(service, 4);
+        Assert.Equal(2, cloud.Manifests.Values.Count(m => m.Dataset == "board"));
+        // Older acknowledged versions are revisited even after newer captures replace the checkpoint receipt.
+        await File.WriteAllBytesAsync(partPath, cloud.Parts[(1, part.Sha256)], Ct);
+        await Drain(service, 4);
+        Assert.False(File.Exists(partPath));
+    }
+
+    [Fact]
+    public async Task UnreadableCheckpointDoesNotStopOtherDatasetsOrOverwriteItsEvidence()
+    {
+        CreateDatabase("board.db", "CREATE TABLE Durable(Value TEXT); INSERT INTO Durable VALUES('original');");
+        var service = Service();
+        await service.TickAsync(Ct);
+        var checkpoint = Directory.GetFiles(Path.Combine(root, "complete-backups"), "checkpoint.json", SearchOption.AllDirectories)
+            .Single(p => Path.GetFileName(Path.GetDirectoryName(p)) == "board");
+        var original = await File.ReadAllBytesAsync(checkpoint, Ct);
+        CreateDatabase("state.db", "CREATE TABLE Durable(Value TEXT); INSERT INTO Durable VALUES('state');");
+        CreateDatabase("proxy_exchanges.db", "CREATE TABLE Durable(Value TEXT); INSERT INTO Durable VALUES('proxy');");
+        service = Service();
+        await using (var held = new FileStream(checkpoint, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            Assert.Equal("failed", service.GetCoverage().Datasets.Single(d => d.Dataset == "board").State.Status);
+            await Drain(service, 8);
+            Assert.All(new[] { "state", "proxy", "configuration" }, dataset =>
+                Assert.Contains(cloud.Manifests.Values, m => m.Dataset == dataset));
+        }
+        Assert.Equal(original, await File.ReadAllBytesAsync(checkpoint, Ct));
+        now = now.AddDays(1);
+        await Drain(service, 4);
+        Assert.Equal(2, cloud.Manifests.Values.Count(m => m.Dataset == "board"));
     }
 
     [Fact]

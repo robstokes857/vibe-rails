@@ -17,6 +17,7 @@ public sealed class CompleteBackupService
     private readonly Func<string> key;
     private readonly Func<DateTime> now;
     private readonly IFeatureLog log;
+    private readonly Dictionary<string, DateTime> checkpointRetryAfter = [];
     private static readonly SemaphoreSlim Gate = new(1, 1);
     internal const int PartsPerTick = 16;
 
@@ -42,7 +43,7 @@ public sealed class CompleteBackupService
         {
             BackupCheckpoint state;
             try { state = ReadState(account, dataset); }
-            catch (Exception e) when (e is IOException or InvalidDataException or JsonException) { state = new() { Status = "failed", Error = "Backup checkpoint could not be read." }; }
+            catch (Exception e) when (e is IOException or InvalidDataException or JsonException or UnauthorizedAccessException) { state = new() { Status = "failed", Error = "Backup checkpoint could not be read." }; }
             if (dataset != "configuration" && state.Status == "current" && state.SourceFingerprint != DatabaseFingerprint(dataset))
                 state = state with { Status = "pending" };
             return new BackupDatasetCoverage(dataset, state);
@@ -61,7 +62,10 @@ public sealed class CompleteBackupService
             if (machineLock is null) return;
             var account = AccountDirectory(credential);
             PrivateFilePermissions.EnsureDirectory(account);
-            var selected = BackupFormat.Datasets.Select(d => (Dataset: d, State: RecoverState(account, d)))
+            var candidates = new List<(string Dataset, BackupCheckpoint State)>();
+            foreach (var candidate in BackupFormat.Datasets)
+                if (TryRecoverState(account, candidate) is { } recovered) candidates.Add((candidate, recovered));
+            var selected = candidates
                 .Where(x => x.State.NextAttemptUtc <= now() || x.State.NextAttemptUtc > now().AddHours(6))
                 .OrderBy(x => x.State.LastCheckedUtc ?? DateTime.MinValue).FirstOrDefault();
             if (selected.Dataset is null) return;
@@ -72,6 +76,8 @@ public sealed class CompleteBackupService
             try
             {
                 ct.ThrowIfCancellationRequested();
+                if (state.Receipt is { AccountId: > 0, ChecksumsVerified: true } acknowledged)
+                    await ReclaimAcknowledgedStagingAsync(datasetPath, dataset, acknowledged.AccountId, ct);
                 var sources = dataset == "configuration" ? await files(ct) : null;
                 var fingerprint = sources is null ? DatabaseFingerprint(dataset) : BackupFiles.Fingerprint(sources);
                 if (state.PendingVersion is null)
@@ -204,6 +210,40 @@ public sealed class CompleteBackupService
                 && Guid.TryParseExact(name[7..^3], "N", out _));
     }
 
+    private static async Task ReclaimAcknowledgedStagingAsync(string directory, string dataset, int accountId, CancellationToken ct)
+    {
+        // A crash can occur after the durable receipt/checkpoint but before part deletion.
+        // Revisit old receipts too, with bounded work, without deleting source or diagnostic data.
+        var inspected = 0;
+        foreach (var candidate in Directory.EnumerateDirectories(directory))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (!Guid.TryParseExact(Path.GetFileName(candidate), "N", out _) || BackupFiles.HasLink(candidate)) continue;
+            try
+            {
+                var receiptPath = Path.Combine(candidate, "receipt.json");
+                if (!File.Exists(receiptPath) || !Directory.EnumerateFiles(candidate, "*.part").Any()
+                    || new FileInfo(receiptPath).Length > 32 * 1024) continue;
+                var (bytes, manifest) = await ReadPendingManifestAsync(candidate, ct);
+                var receipt = JsonSerializer.Deserialize(await File.ReadAllBytesAsync(receiptPath, ct), BackupJson.Default.BackupReceipt);
+                if (manifest is null || !BackupFormat.IsValid(manifest) || manifest.Dataset != dataset
+                    || manifest.Version != Path.GetFileName(candidate)
+                    || !BackupTransport.MatchesReceipt(receipt, accountId, manifest, BackupFormat.Hash(bytes))) continue;
+                foreach (var part in manifest.Parts.DistinctBy(p => p.Sha256))
+                {
+                    var path = Path.Combine(candidate, part.Sha256 + ".part");
+                    if (!File.Exists(path) || BackupFiles.HasLink(path)) continue;
+                    if (inspected++ >= PartsPerTick) return;
+                    if (new FileInfo(path).Length != part.Bytes) continue;
+                    var content = await File.ReadAllBytesAsync(path, ct);
+                    if (BackupFormat.Hash(content) == part.Sha256) File.Delete(path);
+                }
+            }
+            catch (Exception e) when (e is IOException or InvalidDataException or JsonException or UnauthorizedAccessException)
+            { /* Preserve unreadable or corrupt evidence and retry on a later tick. */ }
+        }
+    }
+
     private string DatabasePath(string dataset) => Path.Combine(root(), dataset switch { "board" => "board.db", "state" => "state.db", "proxy" => "proxy_exchanges.db", _ => throw new ArgumentException("Unknown database.") });
     private static async Task<(byte[] Bytes, BackupManifest? Manifest)> ReadPendingManifestAsync(string directory, CancellationToken ct)
     {
@@ -224,8 +264,10 @@ public sealed class CompleteBackupService
     private static BackupCheckpoint ReadState(string account, string dataset)
     {
         var path = Path.Combine(account, dataset, "checkpoint.json");
-        if (!File.Exists(path)) return new();
-        if (new FileInfo(path).Length > 2 * 1024 * 1024) throw new InvalidDataException("Backup checkpoint exceeds its size limit.");
+        long length;
+        try { length = new FileInfo(path).Length; }
+        catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException) { return new(); }
+        if (length > 2 * 1024 * 1024) throw new InvalidDataException("Backup checkpoint exceeds its size limit.");
         var state = JsonSerializer.Deserialize(AtomicFile.ReadAllText(path), BackupJson.Default.BackupCheckpoint)
             ?? throw new InvalidDataException("Backup checkpoint is invalid.");
         if (state.NextPart < 0 || state.NextPart > BackupFormat.MaxParts || state.Attempts < 0
@@ -242,6 +284,25 @@ public sealed class CompleteBackupService
             var path = Path.Combine(account, dataset, "checkpoint.json");
             File.Move(path, path + ".corrupt-" + Guid.NewGuid().ToString("N"));
             return new() { Status = "failed", Error = "A corrupt checkpoint was preserved; a new backup will be created." };
+        }
+    }
+    private BackupCheckpoint? TryRecoverState(string account, string dataset)
+    {
+        var id = Path.Combine(account, dataset);
+        if (checkpointRetryAfter.TryGetValue(id, out var retry) && retry > now() && retry <= now().AddHours(6)) return null;
+        try
+        {
+            var state = RecoverState(account, dataset);
+            checkpointRetryAfter.Remove(id);
+            return state;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Never replace a checkpoint we could not read. Other datasets remain eligible.
+            checkpointRetryAfter[id] = now().AddMinutes(2);
+            log.Write("data-upload", "failed", $"Complete backup checkpoint for {dataset} is unreadable; other datasets will continue.",
+                null, "Complete backup", "failed", LogLevel.Warning);
+            return null;
         }
     }
     private static void WriteState(string account, string dataset, BackupCheckpoint state) => AtomicFile.WriteAllText(

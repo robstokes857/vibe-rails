@@ -77,6 +77,10 @@ are never deleted. Session and bounded Board-sync receipts never enter this stat
 
 Restart can reclaim unfinished transport files only inside recognized version directories
 without any manifest or receipt. It never recurses into unknown directories or follows links.
+Restart also revisits acknowledged versions, validating their persisted receipt, manifest and
+remaining part hashes before removing at most 16 transport parts per tick. Manifests, receipts
+and corrupt evidence remain. An unreadable checkpoint is preserved and retried after two minutes;
+healthy datasets keep running while it is unavailable.
 
 Settings exposes coverage at `GET /api/v1/settings/backups`, under the existing session-plus-tab
 gate. General Settings shows successful receipt/source times, pending/failed work, issues

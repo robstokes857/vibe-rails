@@ -40,14 +40,17 @@ public sealed class BackupTransport(HttpClient http)
         var hash = BackupFormat.Hash(bytes);
         using var response = await SendAsync(HttpMethod.Post, "versions/" + manifest.Version, key, content, ct, hash);
         var receipt = JsonSerializer.Deserialize(await BodyAsync(response, ct), BackupJson.Default.BackupReceipt);
-        if (receipt is null || !receipt.ChecksumsVerified || receipt.AccountId != account
-            || receipt.ComputerId != manifest.ComputerId || receipt.Dataset != manifest.Dataset || receipt.Version != manifest.Version
-            || receipt.ManifestSha256 != hash || receipt.PayloadBytes != manifest.PayloadBytes
-            || receipt.SourceStartedUtc != manifest.SourceStartedUtc || receipt.SourceCompletedUtc != manifest.SourceCompletedUtc
-            || receipt.ReceivedUtc.Kind != DateTimeKind.Utc || receipt.ReceivedUtc < manifest.SourceStartedUtc.AddDays(-1))
+        if (!MatchesReceipt(receipt, account, manifest, hash))
             throw new InvalidDataException("The backup receipt did not match this account, computer and archive version.");
-        return receipt;
+        return receipt!;
     }
+
+    internal static bool MatchesReceipt(BackupReceipt? receipt, int account, BackupManifest manifest, string hash) =>
+        receipt is { ChecksumsVerified: true } && receipt.AccountId == account
+        && receipt.ComputerId == manifest.ComputerId && receipt.Dataset == manifest.Dataset && receipt.Version == manifest.Version
+        && receipt.ManifestSha256 == hash && receipt.PayloadBytes == manifest.PayloadBytes
+        && receipt.SourceStartedUtc == manifest.SourceStartedUtc && receipt.SourceCompletedUtc == manifest.SourceCompletedUtc
+        && receipt.ReceivedUtc.Kind == DateTimeKind.Utc && receipt.ReceivedUtc >= manifest.SourceStartedUtc.AddDays(-1);
 
     private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string relative, string key,
         HttpContent? content, CancellationToken ct, string? checksum = null)
