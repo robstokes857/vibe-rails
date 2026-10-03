@@ -29,6 +29,8 @@ async function openScripts(page, layout = 'top') {
             '/api/v1/python-scripts': { scriptsDirectory: 'C:/fixture/scripts', pinConfigured: true,
                 scripts: Array.from({ length: 40 }, (_, i) => i ? { ...script, name: `script-${i}.py` } : script) },
             '/api/v1/python-scripts/content': { ...script, version: 'one', content: 'print("Hello")\n'.repeat(150) },
+            '/api/v1/python-scripts/run': { exitCode: 0, durationMs: 25,
+                standardOutput: Array.from({ length: 100 }, (_, i) => `Output line ${i + 1}`).join('\n'), standardError: '' },
             '/api/v1/terminal/tabs': { tabs: [agent], maxTabs: 100 },
             '/api/v1/terminal/tabs/agent/status': agent
         };
@@ -38,15 +40,46 @@ async function openScripts(page, layout = 'top') {
     await expect(page.locator('.python-script-row')).toHaveCount(40);
 }
 
-async function expectTerminalFits(page) {
-    await expect.poll(() => page.evaluate(() => {
+async function expectTerminalFits(page, minimumHeight = 100) {
+    await expect.poll(() => page.evaluate(minimumHeight => {
         const terminal = document.querySelector('.xterm-screen')?.getBoundingClientRect();
-        return Boolean(terminal && terminal.height > 100 && terminal.bottom <= innerHeight && terminal.top >= 0);
-    })).toBe(true);
+        return Boolean(terminal && terminal.height > minimumHeight && terminal.bottom <= innerHeight && terminal.top >= 0);
+    }, minimumHeight)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollHeight - innerHeight)).toBeLessThanOrEqual(1);
 }
 
 for (const layout of ['top', 'side']) {
+    test(`verbose run output leaves the editor usable with ${layout} navigation`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width: 1000, height: 500 });
+        await openScripts(page, layout);
+        await page.locator('.python-script-name').first().click();
+        await expect(page.locator('.monaco-editor')).toBeVisible();
+        await page.locator('[data-workbench-action="run"]').click();
+        await expect(page.locator('[data-run-result]')).toContainText('Output line 100');
+        await page.locator('.vb-run-footer [data-run-action="close"]').click();
+        const output = page.locator('[data-workbench-output]');
+        await expect(output).toHaveAttribute('open', '');
+        for (const height of [500, 400]) {
+            await page.setViewportSize({ width: 1000, height });
+            await expect.poll(() => page.locator('[data-workbench-editor-host]').evaluate(
+                node => node.getBoundingClientRect().height)).toBeGreaterThanOrEqual(80);
+            await expectTerminalFits(page, height === 400 ? 64 : 100);
+            // All output remains available inside the drawer without scrolling the page.
+            await output.scrollIntoViewIfNeeded();
+            expect((await output.boundingBox()).height).toBeGreaterThanOrEqual(72);
+            await output.evaluate(node => { node.scrollTop = node.scrollHeight; });
+            await expect.poll(() => output.evaluate(node => node.scrollTop)).toBeGreaterThan(0);
+            const summary = output.locator('summary');
+            await expect(summary).toBeInViewport();
+            await summary.click();
+            await expect(output).not.toHaveAttribute('open', '');
+            await summary.click();
+            await expect(output).toHaveAttribute('open', '');
+        }
+        await output.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: testInfo.outputPath(`output-${layout}.png`) });
+    });
+
     test(`terminal prompt stays in the viewport with ${layout} navigation`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width: 1440, height: 900 });
         await openScripts(page, layout);

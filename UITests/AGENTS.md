@@ -101,6 +101,8 @@ From `UITests`, run `npx playwright test --config playwright.scripts.config.js`.
 Uses the production Automation page, Monaco and xterm with intercepted APIs/WebSockets.
 Checks the terminal prompt stays inside desktop and short windows with top/side navigation,
 splitter resizing, navigation cleanup, scripts toolbar alignment and narrow-screen guidance.
+Verbose Run/Close flows also check usable editor space and drawer scrolling at 1000×500
+and 1000×400 with both navigation layouts.
 It never reads or changes real scripts, signing state, terminals or application databases.
 
 ### Focused account sign-in tests (No Backend Required)

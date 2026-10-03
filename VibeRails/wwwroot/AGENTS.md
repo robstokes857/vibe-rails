@@ -865,7 +865,9 @@ See also: [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for back
   `viberails.pythonWorkbench.terminalWidth`, ArrowLeft/Right. At desktop widths the
   `vb-python-workbench-active` shell bounds the flex chain to the available viewport;
   Monaco, the script rail, and xterm scroll internally so the terminal prompt stays visible
-  even in short windows. 880px is the floor at which both columns clear their minimums
+  even in short windows. The editor body reserves space for code; the last-run drawer
+  shrinks and scrolls with a sticky collapse control. Exceptionally short windows can
+  scroll the editor card independently. 880px is the floor at which both columns clear their minimums
   (`EDITOR_MIN_WIDTH` 380 + 12 + `TERMINAL_MIN_WIDTH` 320) and is deliberately low so a
   docked VS Code webview still gets columns; **only below it do the panes stack**
   (horizontal splitter, `--python-workbench-terminal-height`, localStorage

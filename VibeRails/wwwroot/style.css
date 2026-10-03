@@ -18516,6 +18516,11 @@ button.python-script-name:focus-visible > i {
     gap: 6px;
 }
 
+.python-workbench-editor-actions .btn {
+    padding: 0.4rem 0.65rem;
+    font-size: 0.8rem;
+}
+
 .python-workbench-body {
     display: flex;
     flex: 1 1 auto;
@@ -18791,6 +18796,36 @@ button.python-script-name:focus-visible > i {
     /* The row sizes both panes; the stacked floors would only fight the grid. */
     .python-workbench-editor-card {
         min-height: 0;
+        /* Exceptionally short windows can scroll this pane without moving the terminal. */
+        overflow-y: auto;
+    }
+
+    .python-workbench-body {
+        /* Keep several editable lines below the script strip when output is expanded. */
+        flex: 1 0 140px;
+    }
+
+    .python-workbench-output {
+        flex: 0 1 auto;
+        min-height: 36px;
+        max-height: 30%;
+        overflow: auto;
+    }
+
+    .python-workbench-output[open] {
+        /* Leave room for the summary and at least one readable line of output. */
+        min-height: 72px;
+    }
+
+    .python-workbench-output > summary {
+        position: sticky;
+        top: -6px;
+        background: var(--color-bg-surface, #1e1e1e);
+    }
+
+    .python-workbench-output > pre {
+        /* The whole drawer owns scrolling; its sticky summary remains collapsible. */
+        max-height: none;
     }
 
     .python-workbench-splitter {
