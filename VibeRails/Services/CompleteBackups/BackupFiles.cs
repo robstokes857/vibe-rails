@@ -481,7 +481,7 @@ public sealed partial class BackupFiles(IServiceScopeFactory scopes)
             if (words[i].Length == 0) continue;
             if (hidden == 1 && !words[i].StartsWith('-'))
             {
-                // A quoted value ("prefix secret") runs through its closing quote, however many words that is.
+                // A quoted value ("prefix secret") is one value to the end of the string unless its own word closes it.
                 var last = QuotedValueEnd(words, i);
                 words[i] = RedactedValue;
                 for (var j = i + 1; j <= last; j++) words[j] = "";
@@ -495,17 +495,25 @@ public sealed partial class BackupFiles(IServiceScopeFactory scopes)
     }
 
     /// <summary>
-    /// Index of the word that closes the value starting at <paramref name="start"/>: the word itself unless it opens a
-    /// quote it does not close, then the first later word ending in that quote, or the last word when none does.
+    /// Index of the word that closes the value starting at <paramref name="start"/>: the word itself when it opens no
+    /// quote, or opens and closes one unescaped; otherwise the last word. Shell quoting inside a configuration string
+    /// (escaped quotes, nested quotes) is not parsed, so the rest of the string is redacted rather than guessed at.
     /// </summary>
     private static int QuotedValueEnd(string[] words, int start)
     {
-        var quote = words[start][0];
+        var word = words[start];
+        var quote = word[0];
         if (quote is not ('"' or '\'')) return start;
-        if (words[start].Length >= 2 && words[start][^1] == quote) return start;
-        for (var j = start + 2; j < words.Length; j += 2)
-            if (words[j].Length > 0 && words[j][^1] == quote) return j;
+        if (word.Length >= 2 && word[^1] == quote && !IsEscaped(word, word.Length - 1)) return start;
         return words.Length - 1;
+    }
+
+    /// <summary>True when the character at <paramref name="index"/> is preceded by an odd run of backslashes.</summary>
+    private static bool IsEscaped(string text, int index)
+    {
+        var backslashes = 0;
+        for (var i = index - 1; i >= 0 && text[i] == '\\'; i--) backslashes++;
+        return backslashes % 2 == 1;
     }
 
     /// <summary>Index just past the first <c>=</c>/<c>:</c> whose name is a credential, or the text's length.</summary>
