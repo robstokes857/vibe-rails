@@ -154,6 +154,9 @@ public sealed partial class BoardStore
                 WHERE (l.CardId = $source OR l.LinkedCardId = $source) AND c.Id <> $target
                   AND c.DeletedUTC IS NULL AND c.ProjectPath = $project{ProjectPathCollation};
                 UPDATE BoardCards SET Description = $description, UpdatedUTC = $now WHERE Id = $target;
+                INSERT INTO BoardHandoffs(Id,CardId,Json,CreatedUTC)
+                SELECT 'handoff_' || lower(hex(randomblob(16))), $target, Json, CreatedUTC
+                FROM BoardHandoffs WHERE CardId=$source;
                 UPDATE BoardCards SET DeletedUTC = $now, UpdatedUTC = $now WHERE Id = $source;
                 DELETE FROM BoardPendingAutomations WHERE CardId = $source;
                 DELETE FROM BoardPendingAdditionalAutomations WHERE CardId = $source;

@@ -24,13 +24,22 @@ viewer.dispose();
 ```
 
 Give the host an explicit height (at least 540px). The component appends its own
-iframe and loading status; it leaves other host children alone. Each iframe uses
-a trusted static `srcdoc` template and inherits the host origin. Its document owns
+iframe and loading status; it leaves other host children alone. Browser embeds use
+a trusted static `srcdoc` template and inherit the host origin. Each document owns
 all DOM IDs, styles, library globals, keyboard handlers, terminal and editor state.
 Multiple instances can coexist. The data adapter runs in the host, so existing
-cookie/header authentication stays there. No recording text is inserted into srcdoc.
+cookie/header authentication stays there. No recording text is inserted into the template.
 Serve the bundle and `../assets/{xterm,monaco,tom-select}` locally. No npm package,
 framework, remote CDN, new server or production build-time sibling dependency is required.
+
+VS Code desktop webviews first load their own same-origin `fake.html?id=…` shell,
+then write the trusted template into it. VS Code's resource service worker requires
+a controlled client carrying the webview ID; `srcdoc` cannot load those resources.
+The extension permits `frame-src 'self'`, and the viewer copies the host's meta CSP
+into the replacement document before loading assets. Scripts retain the existing
+nonce/resource-origin restrictions. Closing during either load aborts initialization;
+each frame load has a 15-second timeout. Keep the real-webview regression when changing
+this integration, since ordinary browser CSP tests do not exercise VS Code resource routing.
 
 ### Controls and state
 
@@ -126,3 +135,10 @@ Run Playwright from `UITests` if npm does not forward its working directory. The
 `/` is the standalone example; `/embed.html?session=<id>` demonstrates the same mount API.
 The website's `TestingUIs/sessions-harness/serve.py` and `replay-smoke.mjs` check the real
 session page without starting its production services. Bundled assets retain their licenses.
+
+The extension's `session-replay-webview.test.ts` uses the production webview CSP with
+fixture recordings and no backend. It covers assets, styles, playback, independent
+instances, Monaco patches, script restrictions, close during initialization and reopening.
+Set `VIBERAILS_TEST_GREP=Session replay in a VS Code webview` to run it alone. In an
+Electron-hosted shell, unset `ELECTRON_RUN_AS_NODE` and set `VIBERAILS_VSCODE_CLI` to
+the full `Code.exe` path before running `npm test` from `vscode-viberails`.

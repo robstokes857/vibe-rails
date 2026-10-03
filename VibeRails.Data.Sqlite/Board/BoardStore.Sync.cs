@@ -86,16 +86,8 @@ public sealed partial class BoardStore
         return links;
     }
 
-    public async Task<IReadOnlyList<BoardRecord>> GetBoardsForSyncAsync(CancellationToken cancellationToken = default)
-    {
-        await using var connection = await OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = BoardSelectSql + " ORDER BY ProjectPath, Position, Id;";
-        var boards = new List<BoardRecord>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken)) boards.Add(ReadBoard(reader));
-        return boards;
-    }
+    public Task<IReadOnlyList<BoardRecord>> GetBoardsForSyncAsync(CancellationToken cancellationToken = default) =>
+        GetLocalBoardsAsync(cancellationToken);
 
     public async Task<BoardSyncLinkRecord?> SaveSyncLinkAsync(BoardSyncLinkRecord link, CancellationToken cancellationToken = default)
     {

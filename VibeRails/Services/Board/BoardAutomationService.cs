@@ -20,7 +20,35 @@ public sealed class BoardAutomationService(IBoardStore boards, IJobStore jobs,
             choices.Add(new(job.Id, job.Name, job.Enabled, setting.JobIds.Contains(job.Id)
                 ? await ReviewSetupAsync(projectPath, job, cancellationToken) : null));
         var pending = (await boards.GetPendingStarterWorkflowsAsync(projectPath, cancellationToken)).Any(seed => seed.ColumnId == columnId);
-        return new(setting.JobId, setting.Revision, choices, setting.JobIds, pending);
+        return new(setting.JobId, setting.Revision, choices, setting.JobIds, pending, await ReadRunningAgentsAsync(projectPath, columnId, cancellationToken));
+    }
+
+    /// <summary>
+    /// The lane panel's poll: Automations running for cards that entered this lane and are still on its board.
+    /// No catalog, starter recovery or reviewer setup probes, which only the full settings read needs.
+    /// </summary>
+    public async Task<BoardLaneRunningAgentsResponse?> GetRunningAgentsAsync(string projectPath, string columnId, CancellationToken cancellationToken) =>
+        await boards.GetColumnAsync(projectPath, columnId, cancellationToken) is null ? null
+            : new(await ReadRunningAgentsAsync(projectPath, columnId, cancellationToken));
+
+    private async Task<IReadOnlyList<BoardLaneRunningAgent>> ReadRunningAgentsAsync(string projectPath, string columnId, CancellationToken cancellationToken)
+    {
+        // The store resolves each run's card by its stored trigger key and keeps the entry lane only while it is on
+        // the card's current board, so a legacy short key is matched exactly instead of failing alias resolution.
+        var entries = (await boards.GetRunningAutomationsAsync(projectPath, cancellationToken))
+            .Where(entry => entry.ColumnId == columnId && entry.RunId is not null).ToList();
+        if (entries.Count == 0) return [];
+        var runs = (await jobs.GetActiveRunsAsync(cancellationToken)).ToDictionary(run => run.Id, StringComparer.Ordinal);
+        var running = new List<BoardLaneRunningAgent>();
+        foreach (var entry in entries)
+        {
+            if (!runs.TryGetValue(entry.RunId!, out var run)) continue;
+            // Only this lane's running cards are read, by row ID.
+            var card = await boards.FindCardAsync(projectPath, entry.CardId, cancellationToken);
+            if (card is null) continue;
+            running.Add(new(run.Id, run.JobName, card.Id, $"{card.DisplayId ?? card.Key} · {card.Title}", run.SessionId, run.TerminalSessionId));
+        }
+        return running;
     }
 
     private async Task<string?> ReviewSetupAsync(string project, JobDefinitionRecord job, CancellationToken ct)

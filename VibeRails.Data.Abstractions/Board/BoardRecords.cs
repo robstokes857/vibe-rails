@@ -81,6 +81,7 @@ public sealed record BoardCardDetailRecord(
     IReadOnlyList<BoardCommentRecord> Notes)
 {
     public IReadOnlyList<BoardLinkedCardRecord> LinkedCards { get; init; } = [];
+    public BoardHandoff? PreviousWork { get; init; }
 }
 
 /// <summary>A lightweight, current description of a related card, including its board and lane.</summary>

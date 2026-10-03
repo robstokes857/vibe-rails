@@ -18,10 +18,15 @@ public sealed class CompleteBackupTests : IDisposable
     private DateTime now = DateTime.UtcNow;
     private string key = "account-a";
     private readonly List<BackupFileSource> files = [];
+    private Func<CancellationToken, Task<List<BackupFileSource>>>? enumerate;
     private CancellationToken Ct => TestContext.Current.CancellationToken;
     public CompleteBackupTests() => Directory.CreateDirectory(root);
     private CompleteBackupService Service() => new(new SqliteDatabaseSnapshotStore(), new BackupTransport(new HttpClient(cloud)),
-        _ => Task.FromResult(files), () => root, () => key, () => now);
+        ct => enumerate?.Invoke(ct) ?? Task.FromResult(files), () => root, () => key, () => now);
+    private string DatasetPath(string dataset) => Path.Combine(root, "complete-backups", BackupFormat.Hash("account-a"u8), dataset);
+    private BackupCheckpoint State(CompleteBackupService service, string dataset) => service.GetCoverage().Datasets.Single(d => d.Dataset == dataset).State;
+    private Task WriteCheckpoint(string dataset, BackupCheckpoint state) => File.WriteAllTextAsync(Path.Combine(DatasetPath(dataset), "checkpoint.json"),
+        JsonSerializer.Serialize(state, BackupJson.Default.BackupCheckpoint), Ct);
 
     [Fact]
     public async Task BoardRestoresAllBoardsHistoryRelationshipsAndUnboundedOriginalContent()
@@ -126,12 +131,12 @@ public sealed class CompleteBackupTests : IDisposable
     public async Task CorruptSpoolIsPreservedAndRebuilt_NeverAcknowledged()
     {
         CreateDatabase("board.db", "CREATE TABLE Durable(Value TEXT); INSERT INTO Durable VALUES('original');");
-        cloud.Offline = true;
+        cloud.DeliveryOffline = true;
         var service = Service();
         await service.TickAsync(Ct);
         var part = Assert.Single(Directory.GetFiles(Path.Combine(root, "complete-backups"), "*.part", SearchOption.AllDirectories));
         await File.WriteAllBytesAsync(part, "bad"u8.ToArray(), Ct);
-        cloud.Offline = false;
+        cloud.DeliveryOffline = false;
         await Drain(service, 12);
         Assert.True(File.Exists(part));
         var receipt = service.GetCoverage().Datasets.Single(d => d.Dataset == "board").State.Receipt;
@@ -146,14 +151,14 @@ public sealed class CompleteBackupTests : IDisposable
     public async Task MissingOrMalformedStagingIsRecapturedAfterRestart(string damage)
     {
         CreateDatabase("board.db", "CREATE TABLE Durable(Value TEXT); INSERT INTO Durable VALUES('preserved');");
-        cloud.Offline = true;
+        cloud.DeliveryOffline = true;
         await Service().TickAsync(Ct);
         var manifest = Assert.Single(Directory.GetFiles(Path.Combine(root, "complete-backups"), "manifest.json", SearchOption.AllDirectories));
         var version = Path.GetFileName(Path.GetDirectoryName(manifest));
         if (damage == "missing-manifest") File.Delete(manifest);
         else if (damage == "malformed-manifest") await File.WriteAllTextAsync(manifest, "{broken", Ct);
         else File.Delete(Assert.Single(Directory.GetFiles(Path.GetDirectoryName(manifest)!, "*.part")));
-        cloud.Offline = false;
+        cloud.DeliveryOffline = false;
         var restarted = Service();
         await Drain(restarted, 16);
         var receipt = restarted.GetCoverage().Datasets.Single(d => d.Dataset == "board").State.Receipt;
@@ -286,6 +291,107 @@ public sealed class CompleteBackupTests : IDisposable
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new SqliteDatabaseSnapshotStore().CreateSnapshotAsync(path, Path.Combine(root, "cancelled.db"), cancelled.Token));
     }
 
+    [Fact]
+    public async Task RejectedAccountOrMissingServerNeverStagesAnArchive()
+    {
+        CreateDatabase("board.db", "CREATE TABLE Durable(Value BLOB); INSERT INTO Durable VALUES(randomblob(9000000));");
+        cloud.AccountStatus = HttpStatusCode.NotFound;
+        var service = Service();
+        await service.TickAsync(Ct);
+
+        var state = State(service, "board");
+        Assert.Equal("failed", state.Status);
+        Assert.Equal("The server does not support complete backups yet.", state.Error);
+        Assert.Null(state.PendingVersion);
+        // Nothing was snapshotted or compressed for a server that cannot accept it.
+        Assert.Empty(Directory.GetDirectories(DatasetPath("board")));
+        cloud.AccountStatus = null;
+        await Drain(service, 4);
+        Assert.NotNull(State(service, "board").Receipt);
+    }
+
+    [Fact]
+    public async Task CaptureFailuresBackOffInsteadOfEscapingAndStarvingOtherDatasets()
+    {
+        CreateDatabase("board.db", "CREATE TABLE Durable(Value TEXT); INSERT INTO Durable VALUES('saved');");
+        // What IEnvironmentStore/IJobStore throw while DataRetentionJob holds state.db.
+        var walks = 0;
+        enumerate = _ => { walks++; throw new SqliteException("database is locked", 5); };
+        var service = Service();
+        await Drain(service, 6);
+
+        var configuration = State(service, "configuration");
+        Assert.Equal("failed", configuration.Status);
+        Assert.Equal("Backup preparation or delivery failed; it will retry automatically.", configuration.Error);
+        Assert.True(configuration.NextAttemptUtc > now);
+        Assert.True(walks < 6, $"walked {walks} times in 6 ticks");
+        Assert.NotNull(State(service, "board").Receipt);
+        Assert.Equal("absent", State(service, "state").Status);
+    }
+
+    [Fact]
+    public async Task InterruptedPreparationIsForgottenAndItsLeftoversReclaimed()
+    {
+        CreateDatabase("board.db", "CREATE TABLE Durable(Value TEXT); INSERT INTO Durable VALUES('saved');");
+        var version = Guid.NewGuid().ToString("N");
+        var leftover = Path.Combine(DatasetPath("board"), version);
+        Directory.CreateDirectory(leftover);
+        var native = "native-" + Guid.NewGuid().ToString("N") + ".db";
+        // A process killed mid-capture: native snapshot sidecars, a large-file copy and a half-written part, no manifest.
+        foreach (var name in new[] { "snapshot.db-journal", native, native + "-wal", native + "-shm", "copy-" + Guid.NewGuid().ToString("N") + ".tmp", new string('a', 64) + ".part" })
+            await File.WriteAllTextAsync(Path.Combine(leftover, name), "partial", Ct);
+        await WriteCheckpoint("board", new BackupCheckpoint { Status = "preparing", PendingVersion = version });
+
+        var service = Service();
+        await service.TickAsync(Ct);
+
+        var state = State(service, "board");
+        Assert.NotNull(state.Receipt);
+        Assert.NotEqual(version, state.Receipt.Version);
+        Assert.Equal("current", state.Status);
+        Assert.False(Directory.Exists(leftover));
+    }
+
+    [Fact]
+    public async Task VersionStagedJustBeforeACrashIsDeliveredNotOrphaned()
+    {
+        CreateDatabase("board.db", "CREATE TABLE Durable(Value TEXT); INSERT INTO Durable VALUES('saved');");
+        cloud.DeliveryOffline = true;
+        await Service().TickAsync(Ct);
+        var staged = Assert.Single(Directory.GetDirectories(DatasetPath("board")));
+        var manifest = JsonSerializer.Deserialize(await File.ReadAllBytesAsync(Path.Combine(staged, "manifest.json"), Ct), BackupJson.Default.BackupManifest)!;
+        // The checkpoint a crash leaves between writing manifest.json and recording the uploading state.
+        await WriteCheckpoint("board", new BackupCheckpoint { Status = "preparing", PendingVersion = manifest.Version });
+        cloud.DeliveryOffline = false;
+
+        var service = Service();
+        await service.TickAsync(Ct);
+
+        var state = State(service, "board");
+        Assert.Equal(manifest.Version, state.Receipt!.Version);
+        Assert.Equal(manifest.SourceFingerprint, state.SourceFingerprint);
+        Assert.Equal("current", state.Status);
+        Assert.Single(cloud.Manifests.Values, m => m.Dataset == "board");
+    }
+
+    [Theory]
+    [InlineData("snapshot.db", true)]
+    [InlineData("snapshot.db-wal", true)]
+    [InlineData("snapshot.db-journal", true)]
+    [InlineData("native-0123456789abcdef0123456789abcdef.db", true)]
+    [InlineData("native-0123456789abcdef0123456789abcdef.db-wal", true)]
+    [InlineData("native-0123456789abcdef0123456789abcdef.db-shm", true)]
+    [InlineData("native-0123456789abcdef0123456789abcdef.db-journal", true)]
+    [InlineData("copy-0123456789abcdef0123456789abcdef.tmp", true)]
+    [InlineData("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.part", true)]
+    [InlineData("manifest.json", false)]
+    [InlineData("receipt.json", false)]
+    [InlineData("native-notes.db", false)]
+    [InlineData("copy-notes.tmp", false)]
+    [InlineData("snapshot.db.bak", false)]
+    [InlineData("notes.part", false)]
+    public void OnlyCaptureArtifactsAreReclaimable(string name, bool staging) => Assert.Equal(staging, CompleteBackupService.IsStagingName(name));
+
     private async Task Drain(CompleteBackupService service, int ticks)
     { for (var i = 0; i < ticks; i++) { now = now.AddMinutes(1); await service.TickAsync(Ct); } }
     private void CreateDatabase(string name, string sql) { using var db = Open(Path.Combine(root, name)); Execute(db, sql); }
@@ -320,14 +426,17 @@ public sealed class CompleteBackupTests : IDisposable
         internal readonly Dictionary<(int Account, string Hash), byte[]> Parts = [];
         internal readonly Dictionary<string, BackupManifest> Manifests = [];
         internal readonly Dictionary<string, byte[]> ManifestBytes = [];
-        public bool Offline, WrongReceipt, LoseCommitOnce;
+        // DeliveryOffline: the account check answers, every part upload and commit fails.
+        public bool DeliveryOffline, WrongReceipt, LoseCommitOnce;
+        public HttpStatusCode? AccountStatus;
         public int FailPartOnce, PartRequests;
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
-            if (Offline) throw new HttpRequestException("offline");
             var account = request.Headers.GetValues("X-Api-Key").Single() == "account-a" ? 1 : 2;
             var path = request.RequestUri!.AbsolutePath;
-            if (path.EndsWith("/account")) return Json(new BackupAccount(account), BackupJson.Default.BackupAccount);
+            if (path.EndsWith("/account"))
+                return AccountStatus is { } status ? new HttpResponseMessage(status) : Json(new BackupAccount(account), BackupJson.Default.BackupAccount);
+            if (DeliveryOffline) throw new HttpRequestException("offline");
             var bytes = await request.Content!.ReadAsByteArrayAsync(ct);
             var hash = BackupFormat.Hash(bytes);
             if (request.Method == HttpMethod.Put)

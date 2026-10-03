@@ -112,6 +112,11 @@ async function getLaneAutomationAsync(columnId, extra = {}) {
     return call(`/columns/${enc(columnId)}/automation`, 'GET', null, extra);
 }
 
+/** The lane panel's running list only: cheap enough to poll. */
+async function getLaneRunningAgentsAsync(columnId, extra = {}) {
+    return call(`/columns/${enc(columnId)}/automation/running`, 'GET', null, extra);
+}
+
 async function saveLaneAutomationAsync(columnId, payload) {
     return call(`/columns/${enc(columnId)}/automation`, 'PUT', payload);
 }
@@ -207,8 +212,8 @@ async function moveBoardCardAsync(cardId, { columnId, position }) {
 }
 
 /** Start work: the server opens a terminal tab with the card prepended to the LLM's initial message. */
-async function launchBoardCardAsync(cardId, { selection, intent = 'work', review } = {}) {
-    return call(`/cards/${enc(cardId)}/launch`, 'POST', { selection: selection || null, intent, ...(review ? { review } : {}) });
+async function launchBoardCardAsync(cardId, { selection, intent = 'work', review, question } = {}) {
+    return call(`/cards/${enc(cardId)}/launch`, 'POST', { selection: selection || null, intent, ...(review ? { review } : {}), ...(question ? { question } : {}) });
 }
 
 // ---------------------------------------------- linked cards
@@ -280,8 +285,8 @@ async function getCardAttachmentContentAsync(cardId, attachmentId, extra = {}) {
 
 // ---------------------------------------------- commits
 
-async function getCardCommitsAsync(cardId) {
-    return call(`/cards/${enc(cardId)}/commits`);
+async function getCardCommitsAsync(cardId, extra = {}) {
+    return call(`/cards/${enc(cardId)}/commits`, 'GET', null, extra);
 }
 
 /** The server validates the sha against the project repo and fills in author/message/date. */
@@ -312,8 +317,8 @@ async function getCommitDiffAsync(cardId, sha) {
 // Launches link themselves (origin 'launch'); an LLM touching a card over MCP links its session
 // (origin 'mcp'); this form links an arbitrary id by hand (origin 'manual').
 
-async function getCardSessionsAsync(cardId) {
-    return call(`/cards/${enc(cardId)}/sessions`);
+async function getCardSessionsAsync(cardId, extra = {}) {
+    return call(`/cards/${enc(cardId)}/sessions`, 'GET', null, extra);
 }
 
 async function addCardSessionAsync(cardId, { id, displayName } = {}) {
@@ -355,6 +360,7 @@ export const BoardApi = {
     getBoardContextAsync,
     saveBoardContextAsync,
     getLaneAutomationAsync,
+    getLaneRunningAgentsAsync,
     saveLaneAutomationAsync,
     getCardAutomationsAsync,
     runCardAutomationAsync,

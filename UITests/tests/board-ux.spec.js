@@ -6,6 +6,211 @@ const IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAw
 const DESCRIPTION = 'Repro screenshot\n![Screenshot.png](attachment:att_image)\n<img src=x onerror="window.__injected=true">';
 
 for (const width of [1440, 390]) {
+    test(`live Markdown and little image previews can be toggled at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        await openBoard(page);
+        await page.getByText('Description images', { exact: true }).click();
+        const composer = page.locator('[data-board-composer="description"]');
+        await composer.getByRole('button', { name: 'Edit description' }).click();
+        const text = '# Heading\n**bold** and *italic*\n- [x] checked\n' + DESCRIPTION;
+        await composer.locator('textarea').fill(text);
+        const live = composer.locator('[data-board-composer-live]');
+        await expect(live.locator('h1')).toHaveText('Heading');
+        await expect(live.locator('strong')).toHaveText('bold');
+        await expect(live.locator('img')).toBeVisible();
+        const image = await live.locator('img').boundingBox();
+        expect(image.width).toBeLessThanOrEqual(120);
+        expect(image.height).toBeLessThanOrEqual(80);
+        await composer.getByRole('button', { name: 'Markdown', exact: true }).click();
+        await expect(live.locator('h1')).toHaveCount(0);
+        await expect(live.locator('img')).toBeVisible();
+        await expect(composer.locator('textarea')).toHaveValue(text);
+        await composer.getByRole('button', { name: 'Markdown', exact: true }).click();
+        expect(await page.evaluate(() => window.__injected)).toBeUndefined();
+        await composer.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: testInfo.outputPath(`composer-${width}.png`) });
+        await page.locator('[data-board-save-card]').click();
+        await page.getByText('Description images', { exact: true }).click();
+        await expect(composer.locator('[data-board-composer-preview] h1')).toHaveText('Heading');
+    });
+}
+
+test('reference search routes GUIDs directly, finds card sessions and attaches commits without saving drafts', async ({ page }) => {
+    let current;
+    await openBoard(page, { onCard: card => { current = card; } });
+    const session = { id: '12345678-1234-1234-1234-123456789abc', displayName: 'Earlier investigation', workingDirectory: 'C:/board-fixture' };
+    const commit = { sha: 'abcdef0123456789abcdef0123456789abcdef01', shortSha: 'abcdef0', message: 'Fix the issue' };
+    let fileReads = 0, cardReads = 0, historyReads = 0, sessionLinks = 0, commitLinks = 0;
+    await page.route('**/api/v1/board/files?*', route => { fileReads++; return route.fulfill({ json: { files: [] } }); });
+    await page.route('**/api/v1/chatHistory/*', route => { historyReads++; expect(route.request().url()).toContain(session.id); return route.fulfill({ json: session }); });
+    await page.route('**/api/v1/board/cards/link-candidates?*', route => { cardReads++; return route.fulfill({ json: { cards: [{ id: 'other_card', key: 'VB-AAAAA-7', displayId: 'VIBE-7', title: 'Other card' }] } }); });
+    await page.route('**/api/v1/board/cards/other_card/sessions', route => route.fulfill({ json: [session] }));
+    await page.route('**/api/v1/board/cards/card_test/sessions', route => {
+        sessionLinks++; current.sessions.push(session); return route.fulfill({ json: session });
+    });
+    await page.route('**/api/v1/board/cards/card_test/commits', route => {
+        commitLinks++; current.commits.push(commit); return route.fulfill({ json: commit });
+    });
+    await page.getByText('Description images', { exact: true }).click();
+    const composer = page.locator('[data-board-composer="description"]');
+    await composer.getByRole('button', { name: 'Edit description' }).click();
+    await page.locator('#board-card-title').fill('Keep this draft');
+    const input = composer.locator('textarea');
+    const popup = composer.locator('[data-board-file-popup]');
+    const initialCardReads = cardReads;
+    await input.fill('@' + session.id.replaceAll('-', ''));
+    await expect(popup).toContainText('Earlier investigation');
+    expect(historyReads).toBe(1); expect(fileReads).toBe(0); expect(cardReads).toBe(initialCardReads);
+    await input.press('Enter');
+    await expect(input).toHaveValue('!' + session.id + ' ');
+    expect(sessionLinks).toBe(1);
+    await input.fill('!VIBE-');
+    await expect(popup).toContainText('Other card');
+    await input.press('Enter');
+    await expect(popup).toContainText('Earlier investigation');
+    await input.press('Enter');
+    await expect(input).toHaveValue('!' + session.id + ' ');
+    expect(historyReads).toBe(1); expect(fileReads).toBe(0); expect(sessionLinks).toBe(1);
+    await input.fill('#abcdef0');
+    await expect(popup).toContainText('Link commit');
+    await input.press('Enter');
+    await expect(input).toHaveValue('#' + commit.sha + ' ');
+    expect(commitLinks).toBe(1);
+    await expect(page.locator('#board-card-title')).toHaveValue('Keep this draft');
+    await expect(composer.locator('[data-board-composer-live] [data-board-ref-commit]')).toBeVisible();
+    await page.evaluate(() => { window.app.boardController.openSessionReplay = session => { window.__openedReferenceSession = session; }; });
+    await input.fill('!' + session.id.replaceAll('-', '').toUpperCase());
+    await composer.locator('[data-board-composer-live] [data-board-ref-session]').click();
+    expect(await page.evaluate(() => window.__openedReferenceSession.id)).toBe(session.id);
+});
+
+test('draft image previews survive creation', async ({ page }) => {
+    await openBoard(page);
+    await page.getByRole('button', { name: 'New card', exact: true }).click();
+    await page.locator('#board-card-title').fill('Draft image');
+    const composer = page.locator('[data-board-composer="description"]');
+    await composer.locator('[data-board-composer-file]').setInputFiles({ name: 'draft.png', mimeType: 'image/png', buffer: Buffer.from(IMAGE.split(',')[1], 'base64') });
+    await expect(composer.locator('[data-board-composer-live] img')).toBeVisible();
+    await expect(composer.locator('textarea')).toHaveValue(/attachment:pending_/);
+    await page.locator('[data-board-save-card]').click();
+    await page.getByText('Draft image', { exact: true }).click();
+    await expect(composer.locator('textarea')).not.toHaveValue(/attachment:pending_/);
+    await expect(composer.locator('[data-board-composer-preview] img')).toBeVisible();
+});
+
+test('lane Agents shows running agents and adds VCA and Code quality with explicit scope', async ({ page }) => {
+    const { jobs, settings } = await openLaneAgentsBoard(page);
+    settings.lane_2.runningAgents = [{ runId: 'run_1', name: 'Code reviewer', cardId: 'card_test', cardLabel: 'VIBE-34 · My card', terminalSessionId: 'recording_1' }];
+    const created = [];
+    await page.route('**/api/v1/jobs', route => {
+        const body = route.request().postDataJSON();
+        created.push(body); const job = { ...body, id: 40 + created.length }; jobs.push(job);
+        return route.fulfill({ json: job });
+    });
+    const button = page.getByRole('button', { name: 'Agents on entry to Review', exact: true });
+    await button.click();
+    const panel = page.locator('.board-lane-agents-panel');
+    await expect(panel.locator('[data-lane-running]')).toContainText('VIBE-34 · My card');
+    for (const [choice, scope] of [['check:3', 'working-tree'], ['check:2', 'unpushed']]) {
+        await panel.getByRole('button', { name: 'Add agent', exact: true }).click();
+        await panel.getByLabel('Agent or check').selectOption(choice);
+        await panel.locator('[data-agent-scope]').selectOption(scope);
+        await panel.getByRole('button', { name: 'Add to lane', exact: true }).click();
+        await expect(panel.getByRole('button', { name: 'Add agent', exact: true })).toBeVisible();
+    }
+    expect(created.map(job => job.actions)).toEqual([[{ kind: 3, arguments: ['working-tree'] }], [{ kind: 2, arguments: ['unpushed'] }]]);
+    expect(settings.lane_2.jobIds).toEqual([12, 14, 41, 42]);
+    await page.evaluate(() => { window.app.boardController.goToCardAutomation = (...args) => { window.__openedLaneAgent = args; }; });
+    await panel.locator('[data-lane-running-id="run_1"]').click();
+    expect(await page.evaluate(() => window.__openedLaneAgent)).toEqual(['card_test', 'recording_1']);
+});
+
+test('large inline rasters use authenticated content and release Blob URLs on close', async ({ page }) => {
+    await openBoard(page, { onCard: card => { card.attachments[0].url = ''; } });
+    let reads = 0;
+    await page.route('**/api/v1/board/cards/card_test/attachments/att_image/content', route => {
+        reads++; expect(route.request().headers().viberails_tab).toBe('board-fixture');
+        return route.fulfill({ contentType: 'application/octet-stream', body: Buffer.from(IMAGE.split(',')[1], 'base64') });
+    });
+    await page.evaluate(() => {
+        window.__blobUrls = []; window.__revokedUrls = [];
+        const create = URL.createObjectURL, revoke = URL.revokeObjectURL;
+        URL.createObjectURL = blob => { const url = create(blob); window.__blobUrls.push(url); return url; };
+        URL.revokeObjectURL = url => { window.__revokedUrls.push(url); revoke(url); };
+    });
+    await page.getByText('Description images', { exact: true }).click();
+    const image = page.locator('[data-board-composer-preview] img');
+    await expect(image).toHaveAttribute('src', /^blob:/);
+    await expect.poll(() => image.evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true);
+    expect(reads).toBeGreaterThan(0);
+    await page.evaluate(() => window.app.closeModal());
+    expect(await page.evaluate(() => window.__blobUrls.every(url => window.__revokedUrls.includes(url)))).toBe(true);
+});
+
+test('posted Comments load authenticated raster previews and release them on close', async ({ page }) => {
+    await openBoard(page, { onCard: card => {
+        card.description = '';
+        card.attachments[0].url = '';
+        card.comments = [{ id: 'image_comment', body: DESCRIPTION, author: { kind: 'human', label: 'You' }, createdAt: card.createdAt }];
+    } });
+    let reads = 0;
+    await page.route('**/api/v1/board/cards/card_test/attachments/att_image/content', route => {
+        reads++; expect(route.request().headers().viberails_tab).toBe('board-fixture');
+        return route.fulfill({ contentType: 'application/octet-stream', body: Buffer.from(IMAGE.split(',')[1], 'base64') });
+    });
+    await page.evaluate(() => {
+        window.__blobUrls = []; window.__revokedUrls = [];
+        const create = URL.createObjectURL, revoke = URL.revokeObjectURL;
+        URL.createObjectURL = blob => { const url = create(blob); window.__blobUrls.push(url); return url; };
+        URL.revokeObjectURL = url => { window.__revokedUrls.push(url); revoke(url); };
+    });
+    await page.getByText('Description images', { exact: true }).click();
+    const image = page.locator('[data-board-comments] img[data-board-image]');
+    await image.scrollIntoViewIfNeeded();
+    await expect.poll(() => image.evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true);
+    expect(reads).toBe(1);
+    await page.evaluate(() => window.app.closeModal());
+    expect(await page.evaluate(() => window.__blobUrls.length > 0 && window.__blobUrls.every(url => window.__revokedUrls.includes(url)))).toBe(true);
+});
+
+test('a failed authenticated preview can retry without reopening the card', async ({ page }) => {
+    // No posted comment: the Markdown toggle also redraws posted comments, whose own preview would fetch again.
+    await openBoard(page, { onCard: card => { card.attachments[0].url = ''; card.comments = []; card.commentCount = 0; } });
+    let reads = 0;
+    await page.route('**/api/v1/board/cards/card_test/attachments/att_image/content', route => {
+        reads++;
+        if (reads === 1) return route.fulfill({ status: 503, json: { error: 'Temporary failure' } });
+        return route.fulfill({ contentType: 'application/octet-stream', body: Buffer.from(IMAGE.split(',')[1], 'base64') });
+    });
+    const failed = page.waitForResponse(response => response.url().endsWith('/attachments/att_image/content') && response.status() === 503);
+    await page.getByText('Description images', { exact: true }).click();
+    await failed;
+    const composer = page.locator('[data-board-composer="description"]');
+    await composer.getByRole('button', { name: 'Markdown', exact: true }).click();
+    const image = composer.locator('[data-board-composer-preview] img');
+    await expect.poll(() => image.evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true);
+    expect(reads).toBe(2);
+});
+
+test('posting a comment clears its live preview along with the input', async ({ page }) => {
+    let current;
+    await openBoard(page, { onCard: card => { current = card; } });
+    await page.route('**/api/v1/board/cards/card_test/comments', route => {
+        const comment = { id: 'posted_comment', ...route.request().postDataJSON(), author: { kind: 'human', label: 'You' }, createdAt: current.createdAt };
+        current.comments.push(comment);
+        return route.fulfill({ json: comment });
+    });
+    await page.getByText('Description images', { exact: true }).click();
+    const composer = page.locator('[data-board-composer="comment"]');
+    await composer.locator('textarea').fill('**posted**');
+    await expect(composer.locator('[data-board-composer-live] strong')).toHaveText('posted');
+    await composer.locator('textarea').press('Control+Enter');
+    await expect(composer.locator('textarea')).toHaveValue('');
+    await expect(composer.locator('[data-board-composer-live]')).toBeEmpty();
+    await expect(page.locator('[data-board-comments] strong')).toContainText('posted');
+});
+
+for (const width of [1440, 390]) {
     test(`card Checks preserve scope, history and safe reports at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 950 });
         await openBoard(page);
@@ -32,11 +237,9 @@ for (const width of [1440, 390]) {
         const panel = page.locator('[data-board-checks]');
         await expect(panel.locator('[data-check-summary]')).toContainText('Not run');
         expect(runs).toBe(0);
-        await panel.locator('[data-check-run-options] summary').click();
-        await panel.locator('[data-check-automation]').selectOption('8');
-        await expect(panel.locator('[data-check-scope]')).toContainText('unpushed');
-        await panel.getByRole('button', { name: 'Run checks', exact: true }).click();
-        await expect.poll(() => runs).toBe(1);
+        await expect(panel.locator('[data-check-run-options]')).toHaveCount(0);
+        await expect(panel.locator('[data-check-history]')).toHaveCount(0);
+        await expect(page.locator('[data-board-reviews]')).toHaveCount(0);
         rows = [check];
         await panel.getByRole('button', { name: 'Refresh checks', exact: true }).click();
         await expect(panel.locator('[data-check-summary]')).toContainText('2 files skipped');
@@ -765,7 +968,8 @@ for (const width of [1440, 390]) {
         await button.click();
         const panel = page.getByRole('dialog', { name: 'Lane agents', exact: true });
         await expect(panel).toContainText('GPT 6.1 Sol · Extra high effort');
-        await expect(panel).toContainText('Claude Opus 5.5 (1M context) · Maximum effort');
+        await expect(panel).toContainText('Opus 5.5 · Maximum effort');
+        await expect(panel).not.toContainText('[1m]');
         expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
         await page.screenshot({ path: testInfo.outputPath(`lane-running-${width}.png`) });
         await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -861,7 +1065,7 @@ for (const width of [1440, 390]) {
         await expect(otherDescription).toHaveValue('Keep this unsaved test-runner description');
         await panel.getByRole('button', { name: 'Add agent', exact: true }).click();
         await expect(otherDescription).toHaveValue('Keep this unsaved test-runner description');
-        await panel.getByLabel('Existing Automation').selectOption('15');
+        await panel.getByLabel('Agent or check').selectOption('15');
         await panel.getByRole('button', { name: 'Add to lane', exact: true }).click();
         await expect(button.locator('.board-lane-agents-count')).toHaveText('3');
         await expect(panel.locator('[data-agent-id="15"] .board-lane-agent-copy')).toContainText('Script workflow');
@@ -950,7 +1154,7 @@ test('lane agents handle paused selections, sync the settings badge, and open th
     await expect(panel.locator('[data-agent-id="99"]')).toContainText('Description unavailable');
     await expect(panel.locator('[data-agent-id="99"] textarea')).toHaveCount(0);
     await panel.getByRole('button', { name: 'Add agent', exact: true }).click();
-    await panel.getByLabel('Existing Automation').selectOption('15');
+    await panel.getByLabel('Agent or check').selectOption('15');
     await panel.getByRole('button', { name: 'Add to lane', exact: true }).click();
     await expect(panel.getByRole('alert')).toContainText('Enable disabled Automations in the Automation editor');
     expect(writes).toHaveLength(0);
@@ -1181,6 +1385,32 @@ test('Chat defaults to the assignee, saves first and focuses the returned tab', 
     await expect(page.locator('[data-board-card-editor]')).toHaveCount(0);
 });
 
+for (const width of [1440, 390]) {
+    test(`previous work and an initial question remain usable alongside work at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        const requests = await openBoard(page, { active: true, assignee: 'base:codex', onCard: card => {
+            card.previousWork = { outcome: 'Description overflow fixed', decisions: 'Keep a single scroll region', validation: 'Browser regression passed', outstanding: 'None',
+                author: { label: 'Codex', sessionId: 'earlier-session' }, createdUtc: '2026-10-02T00:00:00Z',
+                files: [{ path: 'VibeRails/wwwroot/js/modules/board-controller.js', reason: 'Open the card editor here', role: 'implementation', symbol: 'openCardEditor', commit: 'cf302fe', status: 'historical reference; verify current code' }] };
+        } });
+        await page.evaluate(() => {
+            window.__discussionTabs = [];
+            window.app.terminalController.adoptLaunchedTab = async id => { window.__discussionTabs.push(id); return true; };
+        });
+        await page.getByText('Description images', { exact: true }).click();
+        await expect(page.getByRole('heading', { name: 'Previous work', exact: true })).toBeVisible();
+        await expect(page.locator('[data-board-previous-work]')).toContainText('Open the card editor here');
+        const question = page.getByLabel('Initial question (optional)');
+        await question.fill('Why did we choose one scroll region?');
+        await question.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: testInfo.outputPath(`recall-${width}.png`) });
+        await page.getByRole('button', { name: 'Chat with agent', exact: true }).click();
+        await expect.poll(() => page.evaluate(() => window.__discussionTabs)).toEqual(['board_background']);
+        const launch = requests.find(item => item.path.endsWith('/launch'));
+        expect(launch.body).toEqual({ selection: 'base:codex', intent: 'chat', question: 'Why did we choose one scroll region?' });
+    });
+}
+
 for (const [assignee, selection] of [
     ['base:codex', 'base:claude'],
     ['base:codex', 'env:7:claude'],
@@ -1237,7 +1467,7 @@ test('description previews newly uploaded images and new cards start in edit mod
     await expect(description.locator('textarea')).toHaveValue(/attachment:att_uploaded/);
     await description.getByRole('button', { name: 'Preview description' }).click();
     await expect(description.locator('[data-board-composer-preview] img')).toHaveCount(2);
-    await expect(description.locator('[data-board-image="att_uploaded"]')).toBeVisible();
+    await expect(description.locator('[data-board-composer-preview] [data-board-image="att_uploaded"]')).toBeVisible();
     await page.locator('[data-board-save-card]').click();
     await page.getByRole('button', { name: 'New card', exact: true }).click();
     await expect(description.locator('textarea')).toBeVisible();
@@ -1294,7 +1524,7 @@ test('a running agent exposes Go to agent while keeping Save and the session ava
     });
     await page.getByText('Description images', { exact: true }).click();
     await expect(page.getByRole('button', { name: 'Go to agent', exact: true })).toBeEnabled();
-    await expect(page.getByRole('button', { name: 'Chat with agent', exact: true })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Chat with agent', exact: true })).toBeEnabled();
     await expect(page.locator('[data-board-save-card]')).toBeEnabled();
     await expect(page.locator('[data-board-open-session="session_test"]')).toBeEnabled();
     await page.getByRole('button', { name: 'Go to agent', exact: true }).click();
@@ -1843,54 +2073,27 @@ test('Code review Worker preset defaults to Codex and remains editable', async (
 });
 
 for (const width of [1440, 390]) {
-    test(`Code reviews keep drafts, separate recordings and show scope at ${width}px`, async ({ page }, testInfo) => {
+    test(`compact card keeps review recordings without reviewer controls at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 1000 });
-        const requests = await openBoard(page, { onCard: card => {
+        await openBoard(page, { onCard: card => {
             card.sessions = [
                 { id: 'work-session', displayName: 'Working agent', cli: 'codex', origin: 'launch', active: false },
                 { id: 'review-session', displayName: 'Review agent', cli: 'codex', origin: 'code_review', isAutomation: true, isReview: true, active: false }
             ];
         } });
-        const report = { id: 'review-1', reviewer: 'Codex <img src=x onerror="window.__reviewsXss=1">', provider: 'codex',
-            createdUtc: '2026-10-01T10:00:00Z', processStatus: 'Succeeded', sessionId: 'review-session',
-            result: 'Findings', reportedUtc: '2026-10-01T10:02:00Z', workspace: 'C:/actual-checkout', scope: 'working-tree',
-            scopeDescription: 'Dirty changes for this feature', includeDirty: true, scopeFiles: ['Modified: src/example.cs'],
-            baseCommit: 'a'.repeat(40), headCommit: 'a'.repeat(40), findings: 'src/example.cs:10 — <script>window.__reviewsXss=1</script>',
-            validation: 'Unit tests', limitations: 'No live provider', freshness: 'Unknown' };
-        let rows = [report];
-        let launches = [];
-        await page.route('**/api/v1/board/cards/card_test/reviews?*', route => route.fulfill({ json: { reviews: rows, hasMore: false } }));
-        await page.route('**/api/v1/board/cards/card_test/reviews/review-1*', route => route.fulfill({ json: {
-            ...report, freshness: route.request().url().includes('verify=true') ? 'Stale — reviewed changes differ now' : 'Unknown'
-        } }));
-        await page.route('**/api/v1/board/cards/card_test/launch', route => {
-            launches.push(route.request().postDataJSON());
-            rows = [{ id: 'queued', reviewer: 'Codex', provider: 'codex', createdUtc: '2026-10-01T11:00:00Z', processStatus: 'Failed', error: 'CLI unavailable' }, report];
-            return route.fulfill({ json: { tabId: 'tab-review', sessionId: 'session-new', cli: 'codex', cardId: 'card_test', cardKey: 'VB-1' } });
-        });
+        let reviewReads = 0;
+        await page.route('**/api/v1/board/cards/card_test/reviews**', route => { reviewReads++; return route.fulfill({ json: {} }); });
         await page.getByText('Description images', { exact: true }).click();
         const editor = page.locator('[data-board-card-editor]');
-        const reviews = editor.locator('[data-board-reviews]');
-        await expect(reviews).toContainText('Findings');
+        await expect(editor.locator('[data-board-reviews]')).toHaveCount(0);
+        await expect(editor.locator('[data-check-run-options], [data-check-history]')).toHaveCount(0);
+        await expect(editor.locator('[data-board-checks]')).toBeVisible();
         await expect(editor.locator('[data-board-sessions] [data-session-id]')).toHaveCount(1);
-        await expect(editor.locator('[data-board-automations] [data-session-id]')).toHaveCount(0);
+        await expect(editor.locator('[data-board-automations] [data-session-id="review-session"]')).toHaveCount(1);
         await editor.locator('#board-card-title').fill('Keep this unsaved draft');
-        await reviews.getByRole('button', { name: 'Run review', exact: true }).click();
-        await expect.poll(() => launches.length).toBe(1);
-        expect(launches[0]).toEqual({ selection: null, intent: 'code_review', review: { override: null } });
+        await page.evaluate(() => window.app.boardController.refreshSessionActivity());
         await expect(editor.locator('#board-card-title')).toHaveValue('Keep this unsaved draft');
-        await expect(reviews.locator('[data-review-latest]')).toContainText('Report missing');
-        await expect(reviews.locator('[data-review-latest]')).toContainText('CLI unavailable');
-        expect(requests.filter(r => r.method === 'PUT' && r.path === '/api/v1/board/cards/card_test')).toHaveLength(0);
-        await reviews.locator('[data-review-latest]').getByRole('button', { name: 'View report' }).click();
-        await expect(reviews.locator('[data-review-report]')).toContainText('C:/actual-checkout');
-        await reviews.getByRole('button', { name: 'Compare review inputs' }).click();
-        await expect(reviews.locator('[data-review-report]')).toContainText('Stale');
-        await expect(reviews.locator('[data-review-report]')).toContainText('src/example.cs:10');
-        await expect(reviews.locator('.board-check-result script, .board-check-result img, [data-review-report] script, [data-review-report] img')).toHaveCount(0);
-        expect(await page.evaluate(() => Boolean(window.__reviewsXss))).toBe(false);
-        await expect(editor.locator('#board-card-title')).toHaveValue('Keep this unsaved draft');
-        await reviews.scrollIntoViewIfNeeded();
-        await page.screenshot({ path: testInfo.outputPath(`reviews-${width}.png`) });
+        expect(reviewReads).toBe(0);
+        await page.screenshot({ path: testInfo.outputPath(`compact-card-${width}.png`) });
     });
 }

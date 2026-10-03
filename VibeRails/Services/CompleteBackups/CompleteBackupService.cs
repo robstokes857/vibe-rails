@@ -73,16 +73,26 @@ public sealed class CompleteBackupService
             var state = selected.State with { LastCheckedUtc = now() };
             var datasetPath = Path.Combine(account, dataset);
             PrivateFilePermissions.EnsureDirectory(datasetPath);
+            var preparing = false;
             try
             {
                 ct.ThrowIfCancellationRequested();
                 if (state.Receipt is { AccountId: > 0, ChecksumsVerified: true } acknowledged)
                     await ReclaimAcknowledgedStagingAsync(datasetPath, dataset, acknowledged.AccountId, ct);
-                var sources = dataset == "configuration" ? await files(ct) : null;
-                var fingerprint = sources is null ? DatabaseFingerprint(dataset) : BackupFiles.Fingerprint(sources);
+                // A shutdown or crash during preparation leaves the recorded version without a manifest. That is an
+                // interrupted capture, not corrupt staging: forget it, and the next preparation reclaims its directory.
+                if (state is { Status: "preparing", PendingVersion: { } interrupted }
+                    && !File.Exists(Path.Combine(VersionPath(datasetPath, interrupted), "manifest.json")))
+                    state = state with { PendingVersion = null, NextPart = 0, Status = "pending" };
+                // The configuration walk is lazy: at most once per tick, and only when a capture or receipt needs it.
+                List<BackupFileSource>? sources = null;
+                string? fingerprint = null;
+                async Task<string> FingerprintAsync() => fingerprint ??= dataset == "configuration"
+                    ? BackupFiles.Fingerprint(sources ??= await files(ct)) : DatabaseFingerprint(dataset);
+                int? accountId = null;
                 if (state.PendingVersion is null)
                 {
-                    if (sources is null && !File.Exists(DatabasePath(dataset)))
+                    if (dataset != "configuration" && !File.Exists(DatabasePath(dataset)))
                     {
                         Save(state with { Status = "absent", Error = "No local database exists; checked again automatically." });
                         return;
@@ -91,26 +101,36 @@ public sealed class CompleteBackupService
                     var interval = dataset == "board" ? TimeSpan.FromMinutes(15) : dataset == "configuration" ? TimeSpan.FromHours(1) : TimeSpan.FromHours(24);
                     if (state.Receipt is not null && age >= TimeSpan.Zero && age < interval && state.Status != "failed")
                     {
-                        Save(state with { Status = fingerprint == state.SourceFingerprint && state.CoverageIssues.Count == 0 ? "current" : "pending", Error = null });
+                        // Configuration is not walked again until its interval elapses; its status is as of the last walk.
+                        if (dataset == "configuration") { Save(state with { Status = state.Status == "preparing" ? "pending" : state.Status, Error = null }); return; }
+                        Save(state with { Status = await FingerprintAsync() == state.SourceFingerprint && state.CoverageIssues.Count == 0 ? "current" : "pending", Error = null });
                         return;
                     }
                     // A forced daily version also catches edits by tools which preserve file timestamps.
-                    if (fingerprint == state.SourceFingerprint && age >= TimeSpan.Zero && age < TimeSpan.FromHours(24) && state.CoverageIssues.Count == 0 && state.Status != "failed")
+                    if (await FingerprintAsync() == state.SourceFingerprint && age >= TimeSpan.Zero && age < TimeSpan.FromHours(24) && state.CoverageIssues.Count == 0 && state.Status != "failed")
                     { Save(state with { Status = "current", Error = null }); return; }
-                    Save(state with { Status = "preparing", Error = null });
+                    // The account service is contacted before anything is staged: a rejected key or a server without
+                    // complete backups must not leave multi-gigabyte archives behind that nothing will accept.
+                    accountId = await transport.AccountAsync(credential, ct);
+                    if (key() != credential) return;
+                    // The version is recorded before staging, so a crash after its manifest is written resumes delivery
+                    // instead of orphaning a complete archive that neither reclaim path would touch.
+                    var version = Guid.NewGuid().ToString("N");
+                    Save(state with { Status = "preparing", PendingVersion = version, NextPart = 0, Error = null });
+                    preparing = true;
                     using var captureTimeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
                     captureTimeout.CancelAfter(TimeSpan.FromMinutes(30));
-                    var manifest = await PrepareAsync(datasetPath, dataset, fingerprint, sources, captureTimeout.Token);
-                    state = state with { PendingVersion = manifest.Version, NextPart = 0, Status = "uploading", Error = null,
-                        SourceFingerprint = fingerprint, CoverageIssues = manifest.CoverageIssues };
+                    var manifest = await PrepareAsync(datasetPath, dataset, version, fingerprint!, sources, captureTimeout.Token);
+                    state = state with { Status = "uploading", Error = null, SourceFingerprint = manifest.SourceFingerprint, CoverageIssues = manifest.CoverageIssues };
                     Save(state);
+                    preparing = false;
                 }
                 if (key() != credential) return;
                 var versionPath = VersionPath(datasetPath, state.PendingVersion!);
                 var (manifestBytes, pending) = await ReadPendingManifestAsync(versionPath, ct);
                 if (pending is null || !BackupFormat.IsValid(pending) || pending.Dataset != dataset || pending.Version != state.PendingVersion || state.NextPart > pending.Parts.Count)
                     throw new InvalidDataException("Backup staging manifest is invalid; it has been preserved.");
-                var accountId = await transport.AccountAsync(credential, ct);
+                accountId ??= await transport.AccountAsync(credential, ct);
                 var end = Math.Min(pending.Parts.Count, state.NextPart + PartsPerTick);
                 var deliveryStarted = System.Diagnostics.Stopwatch.GetTimestamp();
                 for (var i = state.NextPart; i < end; i++)
@@ -123,25 +143,33 @@ public sealed class CompleteBackupService
                     if (System.Diagnostics.Stopwatch.GetElapsedTime(deliveryStarted) > TimeSpan.FromSeconds(45)) break;
                 }
                 if (state.NextPart < pending.Parts.Count || key() != credential) return;
-                var receipt = await transport.CommitAsync(credential, accountId, pending, manifestBytes, ct);
+                var latest = await FingerprintAsync();
+                var receipt = await transport.CommitAsync(credential, accountId.Value, pending, manifestBytes, ct);
                 // Persist the validated receipt before removing any transport staging file.
                 AtomicFile.WriteAllText(Path.Combine(versionPath, "receipt.json"), JsonSerializer.Serialize(receipt, BackupJson.Default.BackupReceipt));
+                // Fingerprint and coverage come from the delivered manifest: a resumed version may not share them with the checkpoint.
                 state = state with { Receipt = receipt, PendingVersion = null, NextPart = 0, Attempts = 0, NextAttemptUtc = default,
-                    Status = pending.CoverageIssues.Count == 0 && fingerprint == pending.SourceFingerprint ? "current" : "pending", Error = null };
+                    SourceFingerprint = pending.SourceFingerprint, CoverageIssues = pending.CoverageIssues,
+                    Status = pending.CoverageIssues.Count == 0 && latest == pending.SourceFingerprint ? "current" : "pending", Error = null };
                 Save(state);
                 foreach (var part in pending.Parts.DistinctBy(p => p.Sha256)) File.Delete(Path.Combine(versionPath, part.Sha256 + ".part"));
                 log.Write("data-upload", "succeeded", $"Complete backup receipt verified for {dataset}.", pending.Version, "Complete backup", "succeeded");
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-            catch (Exception e) when (e is IOException or InvalidDataException or HttpRequestException or JsonException or StorageException or OperationCanceledException or UnauthorizedAccessException)
+            catch (Exception e)
             {
+                // Every failure is recorded with backoff, including SQLite busy/locked errors from the stores the
+                // configuration walk reads and invalid stored paths. An escaped exception would skip this Save, so the
+                // same dataset would be selected again on every tick and the others would starve.
                 var corrupt = e is InvalidDataException && e.Message.StartsWith("Backup staging", StringComparison.Ordinal);
-                state = state with { Status = "failed", Error = e is HttpRequestException or InvalidDataException || e.Message.StartsWith("Not enough disk space", StringComparison.Ordinal) ? e.Message : "Backup preparation or delivery failed; it will retry automatically.",
+                var shown = e is HttpRequestException or InvalidDataException || e.Message.StartsWith("Not enough disk space", StringComparison.Ordinal);
+                state = state with { Status = "failed", Error = shown ? e.Message : "Backup preparation or delivery failed; it will retry automatically.",
                     Attempts = state.Attempts + 1, NextAttemptUtc = now().AddMinutes(Math.Min(360, Math.Pow(2, Math.Min(state.Attempts + 1, 9)))),
-                    PendingVersion = corrupt ? null : state.PendingVersion,
-                    NextPart = corrupt || e is HttpRequestException { StatusCode: System.Net.HttpStatusCode.Conflict } ? 0 : state.NextPart };
+                    // A version that failed during preparation was never published; its directory has no manifest and is reclaimed.
+                    PendingVersion = corrupt || preparing ? null : state.PendingVersion,
+                    NextPart = corrupt || preparing || e is HttpRequestException { StatusCode: System.Net.HttpStatusCode.Conflict } ? 0 : state.NextPart };
                 Save(state);
-                log.Write("data-upload", "failed", $"Complete backup for {dataset} will retry.", state.PendingVersion, "Complete backup", "failed", LogLevel.Warning);
+                log.Write("data-upload", "failed", $"Complete backup for {dataset} will retry ({e.GetType().Name}).", state.PendingVersion, "Complete backup", "failed", LogLevel.Warning);
             }
 
             void Save(BackupCheckpoint current) { state = current; WriteState(account, dataset, current); }
@@ -149,11 +177,10 @@ public sealed class CompleteBackupService
         finally { Gate.Release(); }
     }
 
-    private async Task<BackupManifest> PrepareAsync(string directory, string dataset, string fingerprint,
+    private async Task<BackupManifest> PrepareAsync(string directory, string dataset, string version, string fingerprint,
         List<BackupFileSource>? sources, CancellationToken ct)
     {
         ReclaimUnpublishedStaging(directory);
-        var version = Guid.NewGuid().ToString("N");
         var work = VersionPath(directory, version);
         PrivateFilePermissions.EnsureDirectory(work);
         var started = now();
@@ -164,8 +191,7 @@ public sealed class CompleteBackupService
         if (sources is null)
         {
             var source = DatabasePath(dataset);
-            var disk = new DriveInfo(Path.GetPathRoot(work)!);
-            if (disk.AvailableFreeSpace < new FileInfo(source).Length * 2 + BackupFormat.PartBytes)
+            if (AvailableFreeSpace(work) < new FileInfo(source).Length * 2 + BackupFormat.PartBytes)
                 throw new IOException("Not enough disk space to prepare a complete backup.");
             await snapshots.CreateSnapshotAsync(source, snapshot, ct);
             try
@@ -204,10 +230,27 @@ public sealed class CompleteBackupService
             Directory.Delete(candidate); // Nonrecursive: an unexpected file is never removed.
         }
 
-        static bool IsStagingName(string name) => name is "snapshot.db" or "snapshot.db-wal" or "snapshot.db-shm" or "snapshot.db-journal"
-            || (name.EndsWith(".part", StringComparison.Ordinal) && BackupFormat.IsHash(name[..^5]))
-            || (name.StartsWith("native-", StringComparison.Ordinal) && name.EndsWith(".db", StringComparison.Ordinal)
-                && Guid.TryParseExact(name[7..^3], "N", out _));
+    }
+
+    /// <summary>
+    /// Transport and capture artifacts a preparation creates: parts, the database snapshot, native database
+    /// snapshots and large-file copies, including the SQLite sidecars a crash mid-snapshot leaves beside them.
+    /// </summary>
+    internal static bool IsStagingName(string name)
+    {
+        if (name.EndsWith(".part", StringComparison.Ordinal)) return BackupFormat.IsHash(name[..^5]);
+        if (name.StartsWith("copy-", StringComparison.Ordinal) && name.EndsWith(".tmp", StringComparison.Ordinal)) return Guid.TryParseExact(name[5..^4], "N", out _);
+        var database = name.EndsWith("-journal", StringComparison.Ordinal) ? name[..^8]
+            : name.EndsWith("-wal", StringComparison.Ordinal) || name.EndsWith("-shm", StringComparison.Ordinal) ? name[..^4] : name;
+        return database == "snapshot.db" || (database.StartsWith("native-", StringComparison.Ordinal) && database.EndsWith(".db", StringComparison.Ordinal)
+            && Guid.TryParseExact(database[7..^3], "N", out _));
+    }
+
+    /// <summary>Free space on the staging volume, or unlimited when it is not a drive (a UNC profile); the write itself then reports a full disk.</summary>
+    private static long AvailableFreeSpace(string path)
+    {
+        try { return new DriveInfo(Path.GetPathRoot(path)!).AvailableFreeSpace; }
+        catch (ArgumentException) { return long.MaxValue; }
     }
 
     private static async Task ReclaimAcknowledgedStagingAsync(string directory, string dataset, int accountId, CancellationToken ct)

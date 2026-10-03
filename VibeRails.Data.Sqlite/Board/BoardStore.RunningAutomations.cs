@@ -9,14 +9,14 @@ public sealed partial class BoardStore
         CancellationToken cancellationToken = default)
     {
         var project = NormalizeProjectPath(projectPath);
-        var entries = new List<(string CardKey, string? ColumnId)>();
+        var entries = new List<(string RunId, string CardKey, string? ColumnId)>();
         await using (var state = await OpenStateAsync(cancellationToken))
         {
             // Board-only hosts may not have initialized Jobs. Never initialize it just for a read.
             if (!_stateFeatures.HasColumn(state, "JobRuns", "TriggerKey")) return [];
             await using var command = state.CreateCommand();
             command.CommandText = $"""
-                SELECT TriggerKind, TriggerKey FROM JobRuns
+                SELECT TriggerKind, TriggerKey, Id FROM JobRuns
                 WHERE ProjectPath = $project{ProjectPathCollation} AND Status = $running AND DeletedUTC IS NULL;
                 """;
             command.Parameters.AddWithValue("$project", project);
@@ -29,7 +29,7 @@ public sealed partial class BoardStore
                 var key = JobBoardContext.GetCardKey(kind, trigger);
                 if (key is null) continue;
                 var parts = trigger.Split(':');
-                entries.Add((key, kind == JobTriggerKind.BoardLane && parts.Length == 4 ? parts[2] : null));
+                entries.Add((reader.GetString(2), key, kind == JobTriggerKind.BoardLane && parts.Length == 4 ? parts[2] : null));
             }
         }
         if (entries.Count == 0) return [];
@@ -53,7 +53,7 @@ public sealed partial class BoardStore
             command.Parameters.AddWithValue("$column", (object?)entry.ColumnId ?? DBNull.Value);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             if (await reader.ReadAsync(cancellationToken))
-                result.Add(new(reader.GetString(0), reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2)));
+                result.Add(new(reader.GetString(0), reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2), entry.RunId));
         }
         return result;
     }

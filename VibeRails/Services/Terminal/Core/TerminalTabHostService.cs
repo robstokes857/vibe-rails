@@ -227,12 +227,18 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         }
     }
 
-    private async Task ReclaimCompletedAutomationTabIfFullAsync(CancellationToken cancellationToken)
+    /// <inheritdoc />
+    // No _createGate: TryReserveForReclamation already makes each close exclusive, and holding the gate
+    // across the probes and terminations would stall POST /terminal/tabs and Automation launches every cycle.
+    public Task CloseCompletedAutomationTabsAsync(CancellationToken cancellationToken = default) =>
+        ReclaimCompletedAutomationTabIfFullAsync(cancellationToken, onlyWhenFull: false);
+
+    private async Task ReclaimCompletedAutomationTabIfFullAsync(CancellationToken cancellationToken, bool onlyWhenFull = true)
     {
         TerminalChildProcess[] candidates;
         lock (_lock)
         {
-            if (_tabs.Count < MaxTabs)
+            if (onlyWhenFull && _tabs.Count < MaxTabs)
                 return;
             candidates = _tabs.Values.Where(child => child.Automation is not null)
                 .OrderBy(child => child.CreatedUtc).ToArray();
@@ -241,8 +247,8 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         if (candidates.Length == 0)
             return;
 
-        // Creation holds _createGate, so one reclaimed slot is enough. Keep recent completed
-        // tabs for replay until capacity is actually needed; never evict ordinary terminals.
+        // The scheduler closes every confirmed finished Automation; creation only needs one slot.
+        // Recordings remain in session history. Ordinary terminals are never candidates.
         await using var scope = _scopeFactory.CreateAsyncScope();
         var store = scope.ServiceProvider.GetRequiredService<IJobStore>();
         var sessions = scope.ServiceProvider.GetRequiredService<ISessionStore>();
@@ -253,15 +259,32 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         var checkedVersions = await Task.WhenAll(candidates.Select(CheckCandidateAsync));
         lock (_lock)
         {
-            if (_tabs.Count < MaxTabs)
+            if (onlyWhenFull && _tabs.Count < MaxTabs)
                 return;
         }
+        var closing = new List<Task>();
         for (var i = 0; i < candidates.Length; i++)
         {
             if (checkedVersions[i] is { } version && candidates[i].Automation!.TryReserveForReclamation(version))
             {
-                await DeleteTabAsync(candidates[i].TabId, CancellationToken.None);
-                return;
+                if (onlyWhenFull)
+                {
+                    await DeleteTabAsync(candidates[i].TabId, CancellationToken.None);
+                    return;
+                }
+                closing.Add(CloseFinishedAsync(candidates[i]));
+            }
+        }
+        // Each close can take a graceful stop plus a kill; finished hosts are stopped together, and one
+        // failure neither aborts the others nor escapes into the scheduler cycle.
+        await Task.WhenAll(closing);
+
+        async Task CloseFinishedAsync(TerminalChildProcess child)
+        {
+            try { await DeleteTabAsync(child.TabId, CancellationToken.None); }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "[TerminalTabs] Closing finished Automation tab {TabId} failed", child.TabId);
             }
         }
 

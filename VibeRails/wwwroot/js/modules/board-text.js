@@ -19,10 +19,10 @@
 //      URL in the text)
 //
 // The supported syntax is deliberately tiny — fenced code, inline code, images,
-// `@path` file references and http(s) autolinks. This is not Markdown and is not
-// trying to become it.
+// file/session/card/commit references and a small, optional Markdown subset.
 
 import { escapeHtml } from './utils.js';
+import { styleBoardMarkdown } from './board-markdown.js';
 
 // Sentinels park every generated fragment until parsing is complete, so no
 // transform can rewrite generated attributes or code. U+0000 cannot collide:
@@ -45,7 +45,7 @@ const IMAGE_RE = /!\[([^\]\n]*)\]\(attachment:([A-Za-z0-9_-]+)\)/g;
 // ever be part of a token: an `@<img onerror>` stays literal text. Like URLs, a
 // trailing period/comma/bracket stays outside the reference. A bare reference
 // must also contain a slash or a dot (see the callback), so it looks like a path.
-const INLINE_TOKEN_RE = /`([^`\n\u0000]+)`|(?<![^\s])@(?:&quot;([^\n\u0000]+?)&quot;|([^\s&`\u0000]*[^\s&`\u0000.,;:!?)\]}]))|!\[([^\]\n\u0000]*)\]\(attachment:([A-Za-z0-9_-]+)\)|\bhttps?:\/\/[^\s<>"'`\u0000]+[^\s<>"'`.,;:!?)\]}\u0000]/g;
+const INLINE_TOKEN_RE = /`(?<code>[^`\n\u0000]+)`|@\[(?<cardLabel>[^\]\n\u0000]+)\]\(card:(?<cardId>[A-Za-z0-9_-]+)\)|(?<![^\s])@(?:&quot;(?<quotedPath>[^\n\u0000]+?)&quot;|(?<barePath>[^\s&`\u0000]*[^\s&`\u0000.,;:!?)\]}]))|!\[(?<alt>[^\]\n\u0000]*)\]\(attachment:(?<id>[A-Za-z0-9_-]+)\)|(?<![^\s])!(?<session>[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}|[a-fA-F0-9]{32})(?![\w-])|(?<![^\s])#(?<commit>[a-fA-F0-9]{7,40})(?![\w-])|(?<!!)(?<!\[)\[(?<label>[^\]\n\u0000]+)\]\((?<href>https?:\/\/[^\s()\u0000]+)\)|\bhttps?:\/\/[^\s<>"'`\u0000]+[^\s<>"'`.,;:!?)\]}\u0000]/g;
 const BARE_FILE_REF_LOOKS_LIKE_A_PATH = /[./]/;
 const RASTER_DATA_URL_RE = /^data:image\/(?:png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=\s]+$/i;
 
@@ -76,7 +76,7 @@ function renderCodeBlock({ lang, body }) {
  *        used as a src, so an image can only ever point at our own attachment.
  * @returns {string} HTML safe to assign to innerHTML
  */
-export function renderCommentHtml(text, { attachments = [] } = {}) {
+export function renderCommentHtml(text, { attachments = [], sessions = [], commits = [], markdown = true } = {}) {
     const source = stripControlChars(text);
     if (!source.trim()) return '';
 
@@ -92,7 +92,18 @@ export function renderCommentHtml(text, { attachments = [] } = {}) {
     work = work.replace(FENCE_RE, (_match, lang, body) => park(renderCodeBlock({ lang, body })));
 
     // 3. Only source text is tokenized; generated attributes never enter a regex.
-    work = work.replace(INLINE_TOKEN_RE, (match, code, quotedPath, barePath, alt, id) => {
+    work = work.replace(INLINE_TOKEN_RE, (match, ...args) => {
+        const { code, quotedPath, barePath, alt, id, session, commit, cardId, cardLabel, label, href } = args.at(-1);
+        if (cardId) return park(`<button type="button" class="board-text-reference" data-board-ref-card="${cardId}">${cardLabel}</button>`);
+        if (session) {
+            const linked = sessions.find(item => item.id.replaceAll('-', '').toLowerCase() === session.replaceAll('-', '').toLowerCase());
+            return park(`<button type="button" class="board-text-reference" data-board-ref-session="${session}">! ${escapeHtml(linked?.displayName || session)}</button>`);
+        }
+        if (commit) {
+            const linked = commits.find(item => item.sha.startsWith(commit));
+            return park(`<button type="button" class="board-text-reference" data-board-ref-commit="${commit}" title="${escapeHtml(linked?.message || commit)}">#${commit.slice(0, 7)}</button>`);
+        }
+        if (href) return markdown ? park(`<a href="${href}" target="_blank" rel="noopener noreferrer">${label}</a>`) : park(match);
         if (code !== undefined) return park(`<code class="board-inline-code">${code}</code>`);
         if (quotedPath !== undefined || barePath !== undefined) {
             // "@claude" or "@rob" mid-prose: no slash, no extension, not a file.
@@ -105,7 +116,11 @@ export function renderCommentHtml(text, { attachments = [] } = {}) {
             const attachment = attachments.find(item => item.id === id);
             // The backend supplies raster data URLs only. Files with authenticated
             // content URLs (and large rasters) open through the separate file viewer.
-            if (typeof attachment?.url !== 'string' || !RASTER_DATA_URL_RE.test(attachment.url)) return match;
+            if (!attachment) return match;
+            if (!RASTER_DATA_URL_RE.test(attachment.url || '')) {
+                return /^image\/(png|jpeg|gif|webp)$/.test(attachment.mimeType || '')
+                    ? park(`<img class="board-image" alt="${alt}" data-board-image="${escapeHtml(id)}" loading="lazy">`) : match;
+            }
             // alt was already escaped with the source; escaping again corrupts names.
             return park(`<img class="board-image" src="${escapeHtml(attachment.url)}" alt="${alt}"`
                 + ` data-board-image="${escapeHtml(id)}" loading="lazy">`);
@@ -113,6 +128,8 @@ export function renderCommentHtml(text, { attachments = [] } = {}) {
         // Only a literal http(s) source token reaches this branch, already escaped.
         return park(`<a href="${match}" target="_blank" rel="noopener noreferrer">${match}</a>`);
     });
+
+    if (markdown) work = styleBoardMarkdown(work);
 
     // 4. Reinsert once, after all transforms. Fragments never contain sentinels.
     work = work.replace(/\u0000B(\d+)\u0000/g, (_match, index) => fragments[Number(index)]);

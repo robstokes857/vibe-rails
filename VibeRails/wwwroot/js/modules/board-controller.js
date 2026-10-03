@@ -1,5 +1,5 @@
-import { cardReviewsSection, bindCardReviews } from './board-card-reviews.js';
 import { cardChecksSection, bindCardChecks } from './board-card-checks.js';
+import { previousWorkHtml } from './board-previous-work.js';
 // ============================================
 // Board (view 'board')
 // ============================================
@@ -43,7 +43,9 @@ import { contextSectionMarkup, bindCardContext } from './board-card-context.js';
 import { cardDisplayId, cardLabel } from './board-card-label.js';
 import { renderCommentHtml, wrapSelectionAsCode, toPlainPreview } from './board-text.js';
 import { historySection, mountHistory } from './board-history.js';
-import { bindFileReferencePopup } from './board-file-refs.js';
+import { bindBoardReferences, canonicalSessionId } from './board-references.js';
+import { bindComposerPreview, boardTextOptions } from './board-composer-preview.js';
+import { createBoardImagePreviews } from './board-image-previews.js';
 import { openDiffModal } from './diff-modal.js';
 import * as SessionDebug from './session-viewer.js';
 import { renderBoardLaunchOptions, readBoardLaunchOptions, bindBoardLaunchOptions } from './board-launch-options.js';
@@ -104,7 +106,7 @@ export class BoardController {
         this._activityDisposers = [];
         this._activityGeneration = 0;
         BoardApi.attach(app);
-        this.laneAgents = new BoardLaneAgents(app);
+        this.laneAgents = new BoardLaneAgents(app, agent => this.goToCardAutomation(agent.cardId, agent.terminalSessionId || agent.sessionId));
         this.state = {
             boards: [],
             boardId: null,
@@ -277,7 +279,6 @@ export class BoardController {
                     activeTabId: detail.activeTabId, hasActiveAutomation: detail.hasActiveAutomation });
                 if (changed) this.renderSessionsPanel(editor, card);
                 void this.cardAutomations?.refresh();
-                void this.cardReviews?.refresh();
             }
         } catch (error) {
             if (current()) console.warn('Could not refresh Board session activity:', error);
@@ -290,7 +291,7 @@ export class BoardController {
         return '<button type="button" class="board-icon-btn board-automation-running" data-board-action="go-to-automation" title="Go to running Automation" aria-label="Go to running Automation"><i class="fa-solid fa-robot" aria-hidden="true"></i></button>';
     }
 
-    async goToCardAutomation(cardId) {
+    async goToCardAutomation(cardId, sessionId = null) {
         const root = this.root;
         const boardId = this.state.boardId;
         const generation = this._activityGeneration;
@@ -298,7 +299,7 @@ export class BoardController {
             const card = await BoardApi.getBoardCardAsync(cardId);
             if (root !== this.root || !root?.isConnected || boardId !== this.state.boardId
                 || generation !== this._activityGeneration) return;
-            const session = card.sessions?.find(item => item.active && item.isAutomation && item.tabId);
+            const session = card.sessions?.find(item => item.active && item.isAutomation && item.tabId && (!sessionId || item.id === sessionId));
             if (session) await this.focusSessionTab(card, session);
             else this.app.showToast('Board', card.hasActiveAutomation
                 ? 'This Automation is running in another VibeRails window. Open it there to view the live terminal.'
@@ -309,8 +310,6 @@ export class BoardController {
     }
 
     disposeCardPickers() {
-        this.cardReviews?.dispose();
-        this.cardReviews = null;
         this.cardChecks?.dispose();
         this.cardChecks = null;
         this.cardAutomations?.dispose();
@@ -1144,8 +1143,8 @@ export class BoardController {
                         })}
                     </section>
 
+                    <div data-board-previous-work>${previousWorkHtml(card)}</div>
                     ${card ? cardChecksSection() : ''}
-                    ${cardReviewsSection(card)}
                     <section class="board-block">
                         <h3 class="board-block-label">Attachments <span class="board-count" data-board-count="attachments">${card?.attachments?.length || 0}</span></h3>
                         <div class="board-attachment-list" data-board-attachments></div>
@@ -1217,8 +1216,11 @@ export class BoardController {
                                 <i class="fa-solid fa-comments" aria-hidden="true"></i> Chat with agent
                             </button>
                         </div>
-                        <p class="board-editor-muted mt-2" id="board-chat-help">Chat with an agent about the card without starting it.</p>
+                        <label class="board-editor-label mt-2" for="board-chat-question">Initial question (optional)</label>
+                        <textarea id="board-chat-question" class="form-control form-control-sm" data-board-chat-question maxlength="1000" rows="2"></textarea>
+                        <p class="board-editor-muted mt-2" id="board-chat-help">Ask about previous work. Leave the question empty to open a discussion and wait.</p>
                     </section>` : ''}
+
 
                     ${card ? cardOrganizeSection() : ''}
                     ${renderCardLinksSection(card)}
@@ -1260,7 +1262,7 @@ export class BoardController {
                     <section class="board-side-section">
                         <h3 class="board-side-label">
                             <i class="fa-solid fa-robot" aria-hidden="true"></i>
-                            Automations <span class="board-count" data-board-count="automations">${(card?.sessions || []).filter(session => session.isAutomation && !session.isReview && session.origin !== 'code_review').length}</span>
+                            Automations <span class="board-count" data-board-count="automations">${(card?.sessions || []).filter(session => session.isAutomation || session.isReview || session.origin === 'code_review').length}</span>
                         </h3>
                         ${cardAutomationControls(Boolean(card))}
                         <div class="board-side-list" data-board-automations></div>
@@ -1334,6 +1336,23 @@ export class BoardController {
     bindCardEditor(editor, card) {
         card = card || { id: null, attachments: [], pendingAttachments: [] };
         editor._boardCard = card;
+        editor.addEventListener('click', event => {
+            const target = event.target.closest('[data-board-ref-session], [data-board-ref-commit], [data-board-ref-card], [data-board-image]');
+            if (!target) return;
+            event.preventDefault();
+            if (target.dataset.boardRefSession) {
+                const id = canonicalSessionId(target.dataset.boardRefSession);
+                const session = (card.sessions || []).find(s => canonicalSessionId(s.id) === id) || { id };
+                if (session.active && session.tabId) void this.focusSessionTab(card, session);
+                else this.openSessionReplay(session);
+            } else if (target.dataset.boardRefCommit) void this.openCommitDiff(card, target.dataset.boardRefCommit);
+            else if (target.dataset.boardRefCard) {
+                void this.openLinkedCard(editor, target.dataset.boardRefCard);
+            } else {
+                const attachment = card.attachments?.find(a => a.id === target.dataset.boardImage);
+                if (attachment) void openBoardAttachment(this.app, card.id, attachment);
+            }
+        });
         this.cardOrganizeDispose?.();
         this.cardOrganizeDispose = bindCardOrganization(editor, card, {
             hasDraft: () => editor._boardSaving || editor._boardUploading || editor._boardStarting
@@ -1358,6 +1377,9 @@ export class BoardController {
         };
         editor.addEventListener('input', trackEdits);
         editor.addEventListener('change', trackEdits);
+        editor._boardDiscussionImages = createBoardImagePreviews(() => editor._boardCard,
+            () => this.applyCommentClamps(editor.querySelector('[data-board-comments]')));
+        this.composerDisposers.push(() => editor._boardDiscussionImages.dispose());
         this.renderCardDiscussion(editor, card);
         if (card) this.cardHistoryDispose = mountHistory(editor.querySelector('[data-board-history-view]'), card.boardId, card.id);
         this.renderCommitsPanel(editor, card);
@@ -1391,7 +1413,6 @@ export class BoardController {
         // environments plus the bare CLIs, never a shell, never a Worker).
         this.disposeCardPickers();
         const assigneeSelect = editor.querySelector('#board-card-assignee');
-        this.cardReviews = bindCardReviews(editor, card, this.app, () => void this.refreshSessionActivity());
         this.cardChecks = bindCardChecks(editor, card, this.app);
         this.cardAutomations = bindCardAutomations(editor, card, {
             app: this.app,
@@ -1424,7 +1445,7 @@ export class BoardController {
             this.chatPickerDispose = mountLlmPicker(this.app, chatSelect, {
                 context: 'sandbox',
                 placeholder: 'Select an agent…',
-                selectedValue: card.assignee || getEnabledLlmItems(this.app, 'sandbox')[0]?.key || ''
+                selectedValue: card.sessions?.filter(session => session.origin === 'chat').at(-1)?.selection || card.assignee || getEnabledLlmItems(this.app, 'sandbox')[0]?.key || ''
             });
         }
 
@@ -1490,13 +1511,15 @@ export class BoardController {
                         title="Attach a file (or paste an image)"${off}>
                         <i class="fa-solid fa-paperclip" aria-hidden="true"></i><span>Attach</span>
                     </button>
-                    <span class="board-composer-hint">Drop files or paste an image</span>
+                    <button type="button" class="board-composer-btn" data-board-markdown aria-pressed="true" title="Toggle Markdown styles"${off}>Markdown</button>
+                    <span class="board-composer-hint">@ file/card · ! session · # commit</span>
                     ${preview ? `<button type="button" class="board-composer-btn ms-auto"
                         data-board-composer-toggle aria-label="Preview description"${off}>Preview</button>` : ''}
                 </div>
                 <textarea class="form-control board-composer-input" data-board-composer-input
                     placeholder="${escapeHtml(placeholder)}" rows="3"${off}>${escapeHtml(value)}</textarea>
                 ${preview ? '<div class="board-comment-body board-description-preview" data-board-composer-preview title="Click to edit" hidden></div>' : ''}
+                <div class="board-comment-body board-composer-live" data-board-composer-live aria-label="Live preview"></div>
                 <input type="file" hidden data-board-composer-file multiple>
                 <div class="board-composer-busy" data-board-composer-busy hidden>Adding files…</div>
                 ${submitLabel ? `<div class="board-composer-footer">
@@ -1526,7 +1549,7 @@ export class BoardController {
         const preview = composer.querySelector('[data-board-composer-preview]');
         const toggle = composer.querySelector('[data-board-composer-toggle]');
         const renderPreview = () => {
-            if (preview) preview.innerHTML = renderCommentHtml(input.value, { attachments: card?.attachments || [] });
+            composer._refreshPreview?.();
         };
         const setPreview = viewing => {
             if (!preview || !toggle) return;
@@ -1537,6 +1560,7 @@ export class BoardController {
                 .forEach(element => { element.hidden = viewing; });
             toggle.textContent = viewing ? 'Edit' : 'Preview';
             toggle.setAttribute('aria-label', viewing ? 'Edit description' : 'Preview description');
+            composer._refreshPreview?.();
             if (!viewing) autoGrow();
         };
         toggle?.addEventListener('click', () => {
@@ -1555,7 +1579,38 @@ export class BoardController {
         input.addEventListener('input', autoGrow);
         // `@` opens the repository file typeahead (board-file-refs.js). It only ever edits
         // this textarea's value and is torn down with the other pickers when the editor closes.
-        this.composerDisposers.push(bindFileReferencePopup(input, { app: this.app, host: composer }));
+        // The Markdown toggle is one browser preference: repaint the other composer and the posted thread too.
+        this.composerDisposers.push(bindComposerPreview(composer, input, card, { onMarkdownChange: () => {
+            const editor = composer.closest('[data-board-card-editor]');
+            if (!editor?.isConnected) return;
+            editor.querySelectorAll('[data-board-composer]').forEach(other => other._refreshPreview?.());
+            this.renderCardDiscussion(editor, editor._boardCard || card);
+        } }));
+        this.composerDisposers.push(bindBoardReferences(input, { app: this.app, host: composer, card,
+            onLink: async item => {
+                if (item.kind === 'session' && card.sessions?.some(s => canonicalSessionId(s.id) === canonicalSessionId(item.session.id))) return;
+                if (item.kind === 'commit' && card.commits?.some(c => c.sha === item.commit.sha)) return;
+                if (!card.id) {
+                    card.pendingReferences ||= [];
+                    card.pendingReferences.push(item);
+                    if (item.kind === 'session') (card.sessions ||= []).push(item.session);
+                    else (card.commits ||= []).push(item.commit);
+                    return;
+                }
+                const editor = composer.closest('[data-board-card-editor]');
+                if (item.kind === 'session') {
+                    const session = await BoardApi.addCardSessionAsync(card.id, { id: item.session.id, displayName: item.session.displayName || item.session.sessionDisplayName });
+                    item.session = session;
+                    card.sessions = [...(card.sessions || []).filter(s => s.id !== session.id), session];
+                    if (editor?.isConnected) this.renderSessionsPanel(editor, card);
+                } else {
+                    const commit = await BoardApi.addCardCommitAsync(card.id, { sha: item.commit.sha });
+                    item.commit = commit;
+                    card.commits = [...(card.commits || []).filter(c => c.sha !== commit.sha), commit];
+                    if (editor?.isConnected) this.renderCommitsPanel(editor, card);
+                }
+            }
+        }));
         // Sized now rather than on the next frame: an occluded page never gets one,
         // and the description box would open at its one-line default.
         autoGrow();
@@ -1576,7 +1631,7 @@ export class BoardController {
                     input.value = next.value;
                     input.setSelectionRange(next.selectionStart, next.selectionEnd);
                     input.focus();
-                    autoGrow();
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
                 } else if (action === 'image') {
                     file?.click();
                 } else if (action === 'submit') {
@@ -1637,14 +1692,17 @@ export class BoardController {
                 const payload = await fileToAttachmentPayload(file);
                 if (!card.id) {
                     card.pendingAttachments ||= [];
+                    payload.id = `pending_${crypto.randomUUID().replaceAll('-', '')}`;
                     card.pendingAttachments.push(payload);
+                    if (inline && getAttachmentPreviewKind(payload) === 'image')
+                        insertAtCursor(input, `![${payload.name.replace(/[\[\]\r\n]/g, '')}](attachment:${payload.id})`);
                     if (editor) this.renderAttachmentsPanel(editor, card);
                     continue;
                 }
                 const attachment = await BoardApi.addCardAttachmentAsync(card.id, payload);
                 card.attachments = card.attachments || [];
                 card.attachments.push(attachment);
-                if (inline && attachment.url && getAttachmentPreviewKind(attachment) === 'image')
+                if (inline && getAttachmentPreviewKind(attachment) === 'image')
                     insertAtCursor(input, `![${attachment.name.replace(/[\[\]\r\n]/g, '')}](attachment:${attachment.id})`);
                 if (editor) this.renderAttachmentsPanel(editor, card);
                 editor?._boardContext?.refresh();
@@ -1692,6 +1750,7 @@ export class BoardController {
             if (editor._boardUploading || editor._boardSaving || editor._boardStarting) return;
             pending.splice(Number(button.dataset.boardRemovePending), 1);
             this.renderAttachmentsPanel(editor, card);
+            editor.querySelectorAll('[data-board-composer]').forEach(composer => composer._refreshPreview?.());
         }));
         host.querySelectorAll('[data-board-remove-attachment]').forEach(button => button.addEventListener('click', async () => {
             if (editor._boardUploading || editor._boardSaving || editor._boardStarting) return;
@@ -1710,9 +1769,7 @@ export class BoardController {
                 editor._boardContext?.refresh();
                 // Repaint from the current text, preserving every unsaved field and comment.
                 editor.querySelectorAll('[data-board-composer]').forEach(composer => {
-                    const preview = composer.querySelector('[data-board-composer-preview]');
-                    const input = composer.querySelector('[data-board-composer-input]');
-                    if (preview && input) preview.innerHTML = renderCommentHtml(input.value, { attachments: card.attachments });
+                    composer._refreshPreview?.();
                 });
                 this.renderCardDiscussion(editor, card);
                 this.app.showToast('Board', 'Attachment deleted.', 'success');
@@ -1734,13 +1791,15 @@ export class BoardController {
     renderCardDiscussion(editor, card) {
         const host = editor.querySelector('[data-board-comments]');
         if (!host) return;
-        const attachments = card?.attachments || [];
+        // The composer preview's options: Markdown preference, attachments, session and commit labels.
+        const textOptions = boardTextOptions(card);
         const comments = [...new Map([...(card?.comments || []), ...(card?.notes || [])].map(entry => [entry.id, entry])).values()]
             .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)) || String(a.id).localeCompare(String(b.id)));
         this.updateSectionCount(editor, 'comments', comments.length);
         host.innerHTML = comments.length
-            ? comments.map(entry => this.cardLogCommentHtml(entry, attachments)).join('')
+            ? comments.map(entry => this.cardLogCommentHtml(entry, textOptions)).join('')
             : '<p class="board-editor-muted">No comments yet.</p>';
+        editor._boardDiscussionImages?.hydrate(host);
         host.querySelectorAll('[data-board-delete-comment]').forEach(button => {
             button.addEventListener('click', () => this.deleteComment(editor, button.dataset.boardDeleteComment));
         });
@@ -1764,7 +1823,7 @@ export class BoardController {
     }
 
     // Human and agent entries share the same discussion.
-    cardLogCommentHtml(entry, attachments) {
+    cardLogCommentHtml(entry, textOptions) {
         const author = this.authorInfo(entry.author);
         // An agent entry knows the terminal session that wrote it and when: the link replays
         // that session seeked to this moment (session-viewer.js seekToUtc).
@@ -1783,7 +1842,7 @@ export class BoardController {
                         <span class="board-comment-author">${escapeHtml(author?.label || 'Someone')}</span>
                         <span class="board-comment-when">${jump}${escapeHtml(this.formatDateTime(entry.createdAt))}<button type="button" class="btn btn-link btn-sm text-danger" data-board-delete-comment="${escapeHtml(entry.id)}" aria-label="Delete comment" title="Delete comment"><i class="fa-solid fa-trash" aria-hidden="true"></i></button></span>
                     </div>
-                    <div class="board-comment-body" data-board-comment-body>${renderCommentHtml(entry.body, { attachments })}</div>
+                    <div class="board-comment-body" data-board-comment-body>${renderCommentHtml(entry.body, textOptions)}</div>
                     <button type="button" class="board-comment-more" data-board-comment-more hidden>Show more</button>
                 </div>
             </article>`;
@@ -1840,6 +1899,7 @@ export class BoardController {
             if (composerInput) {
                 composerInput.value = '';
                 composerInput.style.height = 'auto';
+                composerInput.dispatchEvent(new Event('input', { bubbles: true }));
             }
             this.renderCardDiscussion(editor, card);
             // The thread is at the bottom of a single scrolling body, so bring the
@@ -1956,7 +2016,7 @@ export class BoardController {
         this.updateStartWorkButton(editor, card);
         const sessions = card?.sessions || [];
         this.renderSessionList(editor, card, sessions.filter(session => !session.isAutomation && !session.isReview && session.origin !== 'code_review'), 'sessions');
-        this.renderSessionList(editor, card, sessions.filter(session => session.isAutomation && !session.isReview && session.origin !== 'code_review'), 'automations');
+        this.renderSessionList(editor, card, sessions.filter(session => session.isAutomation || session.isReview || session.origin === 'code_review'), 'automations');
     }
 
     renderSessionList(editor, card, sessions, section) {
@@ -2106,7 +2166,9 @@ export class BoardController {
         if (index >= 0) this.state.cards[index] = card;
         // Every rail mutation that reloads the card (comment, commit, session) changed what an
         // agent would read; the Agent context section re-measures rather than going stale.
-        if (editor._boardCard) { editor._boardCard.comments = card.comments; editor._boardCard.notes = card.notes; }
+        if (editor._boardCard) Object.assign(editor._boardCard, {
+            comments: card.comments, notes: card.notes, sessions: card.sessions, commits: card.commits, attachments: card.attachments
+        });
         editor._boardContext?.refresh();
         return card;
     }
@@ -2163,10 +2225,23 @@ export class BoardController {
             const pending = editor._boardCard?.pendingAttachments || [];
             while (pending.length) {
                 const attachment = await BoardApi.addCardAttachmentAsync(saved.id, pending[0]);
-                pending.shift();
+                const uploaded = pending.shift();
+                const description = editor.querySelector('[data-board-composer="description"] [data-board-composer-input]');
+                if (uploaded.id && description.value.includes(`attachment:${uploaded.id}`)) {
+                    description.value = description.value.replaceAll(`attachment:${uploaded.id}`, `attachment:${attachment.id}`);
+                    await BoardApi.updateBoardCardAsync(saved.id, { description: description.value });
+                    editor._boardFormBaseline.description = description.value;
+                }
                 editor._boardCard.attachments ||= [];
                 editor._boardCard.attachments.push(attachment);
                 this.renderAttachmentsPanel(editor, editor._boardCard);
+            }
+            const references = editor._boardCard?.pendingReferences || [];
+            while (references.length) {
+                const item = references[0];
+                if (item.kind === 'session') await BoardApi.addCardSessionAsync(saved.id, { id: item.session.id, displayName: item.session.displayName || item.session.sessionDisplayName });
+                else await BoardApi.addCardCommitAsync(saved.id, { sha: item.commit.sha });
+                references.shift();
             }
             if (editor.isConnected !== false) this.app.closeModal();
             await this.refresh();
@@ -2175,7 +2250,7 @@ export class BoardController {
             // card failed to save sends the user looking for a card that exists. Keep the saved
             // id and remaining upload queue so Save can retry the unfinished uploads.
             this.app.showToast('Board', saved
-                ? `${cardDisplayId(saved)} was saved, but a file did not upload. ${error?.message || ''}`.trim()
+                ? `${cardDisplayId(saved)} was saved, but an attachment or reference did not finish. ${error?.message || ''}`.trim()
                 : error?.message || 'Failed to save the card.', saved ? 'warning' : 'error');
         } finally {
             editor._boardSaving = false;
@@ -2190,7 +2265,7 @@ export class BoardController {
     // (and the CLI it spawned) stays on the card it came from, but once the launched agent's tab
     // is gone the card is back to Start work, never "Go to agent" into the review terminal.
     isWorkingSession(session) {
-        return Boolean(session?.active && !session.isAutomation);
+        return Boolean(session?.active && !session.isAutomation && !['chat', 'code_review'].includes(session.origin));
     }
 
     hasRunningSession(card) {
@@ -2200,8 +2275,8 @@ export class BoardController {
     updateStartWorkButton(editor, card) {
         const chat = editor.querySelector('[data-board-chat]');
         if (chat) {
-            chat.disabled = this.hasRunningSession(card);
-            chat.title = chat.disabled ? 'An agent is already running. Open it from Sessions.' : 'Open a terminal to discuss this card with the selected LLM';
+            chat.disabled = Boolean(editor._boardStarting);
+            chat.title = 'Open a terminal to discuss this card with the selected LLM';
         }
         const button = editor.querySelector('[data-board-start-work]');
         if (!button) return;
@@ -2236,7 +2311,7 @@ export class BoardController {
     async startWork(editor, card, intent = 'work') {
         if (!card?.id) return;
         if (editor._boardSaving || editor._boardUploading || editor._boardStarting || editor._boardOrganizing) return;
-        if (this.hasRunningSession(card)) {
+        if (intent === 'work' && this.hasRunningSession(card)) {
             this.updateStartWorkButton(editor, card);
             if (intent === 'work') {
                 try { await this.goToAgent(editor, card); }
@@ -2261,14 +2336,15 @@ export class BoardController {
         try {
             const saved = await BoardApi.updateBoardCardAsync(card.id, this.cardChanges(editor, payload));
             editor._boardFormBaseline = payload;
-            if (this.hasRunningSession(saved)) {
+            if (intent === 'work' && this.hasRunningSession(saved)) {
                 Object.assign(card, saved);
                 editor._boardStarting = false;
                 this.updateStartWorkButton(editor, saved);
                 if (intent === 'work') await this.goToAgent(editor, card);
                 return;
             }
-            const result = await BoardApi.launchBoardCardAsync(card.id, { selection, intent });
+            const question = intent === 'chat' ? editor.querySelector('[data-board-chat-question]')?.value?.trim() : undefined;
+            const result = await BoardApi.launchBoardCardAsync(card.id, { selection, intent, ...(question ? { question } : {}) });
             const tabId = String(result?.tabId || '').trim();
             if (!tabId) throw new Error('The launch did not return a terminal tab.');
 
@@ -2277,7 +2353,7 @@ export class BoardController {
                 selection: result.selection || selection,
                 label: cardLabel({ ...card, ...saved }, payload.title || card.title),
                 title: cardLabel({ ...card, ...saved }, payload.title || card.title),
-                taskKey: CARD_TASK_KEY(card.id),
+                taskKey: intent === 'chat' ? `${CARD_TASK_KEY(card.id)}:chat` : CARD_TASK_KEY(card.id),
                 accentColor: info?.color || null,
                 workingDirectory: result.workingDirectory || null
             });

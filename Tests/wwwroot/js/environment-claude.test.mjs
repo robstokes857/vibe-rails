@@ -20,23 +20,25 @@ function createController() {
     });
 }
 
-// Every 1M-capable model is pinned once, in its "[1m]" form. Behind the VibeRails LLM proxy
-// Claude Code budgets 200K for the bare ID, so the [1m] entry is how a launch keeps the 1M window
-// (verified 2026-09-27); the bare twin was dropped 2026-09-28 because it was never the right
-// choice behind the proxy and only cluttered the dropdown. Haiku 4.5 has no 1M variant.
+// Every pinned model is its "[1m]" form. Behind the VibeRails LLM proxy Claude Code budgeted 200K
+// for the bare ID, so the [1m] entry is how a launch keeps the 1M window (verified 2026-09-27); the
+// bare twin was dropped 2026-09-28. Only generation-5 models are pinned (owner request 2026-10-02:
+// Opus 4.8/4.7, Sonnet 4.6 and Haiku 4.5 removed), and each is labelled by name, not by its ID.
 const PINNED_CLAUDE_MODELS = [
     '',
     'claude-fable-5-1[1m]',
     'claude-fable-5[1m]',
     'claude-opus-5-5[1m]',
     'claude-opus-5[1m]',
-    'claude-opus-4-8[1m]',
-    'claude-opus-4-7[1m]',
     'claude-sonnet-5-5[1m]',
-    'claude-sonnet-5[1m]',
-    'claude-sonnet-4-6[1m]',
-    'claude-haiku-4-5'
+    'claude-sonnet-5[1m]'
 ];
+const CLAUDE_MODEL_LABELS = ['Default (Claude recommended)', 'Fable 5.1', 'Fable 5', 'Opus 5.5', 'Opus 5', 'Sonnet 5.5', 'Sonnet 5'];
+
+// Visible <option> text only; values legitimately carry the [1m] launch suffix.
+function optionTexts(html) {
+    return [...html.matchAll(/<option[^>]*>([^<]*)<\/option>/g)].map(match => match[1]);
+}
 
 function optionValues(html, id) {
     const start = html.indexOf(`id="${id}"`);
@@ -58,18 +60,30 @@ test('pinned Claude IDs are hyphenated, with at most a trailing [1m] suffix', ()
     }
 });
 
-test('each 1M-capable Claude model is pinned only in its [1m] form, and Haiku only bare', () => {
+test('each Claude model is pinned only in its [1m] form and labelled by its name', () => {
     const models = LLM_MODEL_OPTIONS.claude.map(([model]) => model).filter(Boolean);
-    for (const model of models.filter(model => model !== 'claude-haiku-4-5')) {
+    for (const model of models) {
         assert.ok(model.endsWith('[1m]'), `${model} must be pinned as its [1m] form`);
         assert.ok(!models.includes(model.slice(0, -'[1m]'.length)), `${model} must not also be pinned bare`);
     }
-    assert.equal(models.at(-1), 'claude-haiku-4-5');
-    assert.ok(!models.includes('claude-haiku-4-5[1m]'));
-    // The label is the exact --model value, like every other entry in the catalog.
-    for (const [model, label] of LLM_MODEL_OPTIONS.claude.filter(([model]) => model)) {
-        assert.equal(label, model);
+    // The value is the --model argument; the label is what people read, so it never shows the ID.
+    assert.deepEqual(LLM_MODEL_OPTIONS.claude.map(([, label]) => label), CLAUDE_MODEL_LABELS);
+    const html = createController().buildCliSettingsHtml('claude', {});
+    for (const text of [...optionTexts(html), ...optionTexts(renderBoardLaunchOptions('base:claude'))]) {
+        assert.doesNotMatch(text, /\[1m\]|claude-/, text);
     }
+});
+
+test('a save on a model older than generation 5 still opens, as custom, and keeps its value', () => {
+    // The dropdown no longer offers Opus 4.8, but an environment or card saved with it is not
+    // rewritten: it reopens as "(custom)" and launches the same --model until someone picks again.
+    const controller = createController();
+    const settings = controller.mergeClaudeSettingsFromCustomArgs({}, '--model claude-opus-4-8[1m] --effort high');
+    assert.equal(settings.model, 'claude-opus-4-8[1m]');
+    assert.equal(controller.buildClaudeCustomArgs(settings), '--model claude-opus-4-8[1m] --effort high');
+    assert.match(controller.buildCliSettingsHtml('claude', settings), /<option value="claude-opus-4-8\[1m\]" selected>claude-opus-4-8\[1m\] \(custom\)<\/option>/);
+    assert.equal(normalizeBoardLaunchOptions('base:claude', { model: 'claude-opus-4-8' }).model, 'claude-opus-4-8');
+    assert.match(renderBoardLaunchOptions('base:claude', { model: 'claude-opus-4-8' }), /claude-opus-4-8 \(custom\)/);
 });
 
 test('Default omits --model so Claude Code picks its own default', () => {
@@ -77,7 +91,6 @@ test('Default omits --model so Claude Code picks its own default', () => {
     assert.equal(controller.buildClaudeCustomArgs({}), '');
     assert.equal(controller.buildClaudeCustomArgs({ model: '  ' }), '');
     assert.equal(controller.buildClaudeCustomArgs({ model: 'claude-opus-5-5[1m]' }), '--model claude-opus-5-5[1m]');
-    assert.equal(controller.buildClaudeCustomArgs({ model: 'claude-haiku-4-5' }), '--model claude-haiku-4-5');
 });
 
 test('saved --model claude-opus-5-5[1m] reopens as the pinned entry, not custom', () => {
@@ -87,14 +100,14 @@ test('saved --model claude-opus-5-5[1m] reopens as the pinned entry, not custom'
     assert.equal(controller.buildClaudeCustomArgs(settings), '--model claude-opus-5-5[1m] --effort high');
 
     const html = controller.buildCliSettingsHtml('claude', settings);
-    assert.match(html, /<option value="claude-opus-5-5\[1m\]" selected>claude-opus-5-5\[1m\]<\/option>/);
+    assert.match(html, /<option value="claude-opus-5-5\[1m\]" selected>Opus 5\.5<\/option>/);
     assert.doesNotMatch(html, /\(custom\)/);
 });
 
 test('a bare 1M-capable ID saved before 2026-09-28 upgrades to its pinned [1m] form on reopen', () => {
     // Environments saved --model claude-opus-5-5 while the dropdown still offered the bare form.
     // Behind the proxy that ID budgets 200K, so reopening selects the [1m] entry and the next save
-    // writes it back; Haiku and unknown IDs are left alone (unknown ones still render as custom).
+    // writes it back; unpinned IDs are left alone and still render as custom.
     const controller = createController();
     const settings = controller.mergeClaudeSettingsFromCustomArgs({}, '--model claude-opus-5-5 --effort high');
     assert.equal(settings.model, 'claude-opus-5-5[1m]');
@@ -134,7 +147,7 @@ test('Sonnet 5.5 sits above Sonnet 5, saves as its [1m] form, and a bare saved I
 
 test('Board base Claude launch keeps the 1M-context form and it reopens as pinned', () => {
     const html = renderBoardLaunchOptions('base:claude', { model: 'claude-fable-5-1[1m]' });
-    assert.match(html, /<option value="claude-fable-5-1\[1m\]" selected>claude-fable-5-1\[1m\]<\/option>/);
+    assert.match(html, /<option value="claude-fable-5-1\[1m\]" selected>Fable 5\.1<\/option>/);
     assert.doesNotMatch(html, /\(custom\)/);
     assert.equal(normalizeBoardLaunchOptions('base:claude', { model: 'claude-fable-5-1[1m]' }).model, 'claude-fable-5-1[1m]');
 

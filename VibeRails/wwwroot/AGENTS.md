@@ -224,7 +224,8 @@ trigger-based run lifecycle apply: Board lane runs and runs started from a card 
 header corners, in the existing gutters. Each button belongs to the lane on its right: all
 entries to that lane count, including newly created cards. The badge counts assigned Automations,
 including disabled or unavailable ones. The first lane has its own accessible agent button too.
-The wider anchored panel adds existing project Automations, links to the existing Automation
+The compact anchored panel (440px maximum, constrained to the viewport) groups agents in subtle
+cards and adds existing project Automations, links to the existing Automation
 editor for create/edit, and confirms removal from the lane without deleting the Automation.
 Each row shows a two-line preview of the existing 2,000-character Automation description. Edit
 description expands the field; Save description and Cancel collapse it, with Cancel discarding
@@ -302,29 +303,38 @@ block, composer, or textarea a `flex: 1` chain constrained to leftover viewport 
 auto-grow routine can then make the textarea taller than its composer and its text paints over the
 Attachments section. `.board-editor-scroll` is the one viewport overflow owner.
 
-**Comment and description text is not Markdown.** `board-text.js` supports a deliberately tiny
-syntax: fenced code, inline code, `http(s)` autolinks, images and `@path` file references
-(`@relative/path` or `@"path with spaces"`, only at the start of the text or after whitespace, and a
-bare one needs a `/` or `.` so `@claude` stays prose — see the Board guide). It escapes the entire input
-*before* any transform runs, so raw HTML never enters the pipeline and every tag in the output is
-one the renderer wrote itself. That is why there is no sanitizer here, and why adding a transform
-that interpolates unescaped user text would break the whole security story. The invariants are
-pinned in `Tests/wwwroot/js/board-text.test.mjs` — the CSP sets `script-src 'unsafe-inline'` with
-no nonce, so an injected handler *would* run; this renderer is the only thing standing in the way.
+**Board text (VIBE-34)** uses escape-first rendering in `board-text.js`. Optional Markdown
+styles include headings, emphasis, strikethrough, lists/tasks, quotes and HTTP(S) links;
+`board-markdown.js` emits fixed markup only after escaping and parking code/reference fragments.
+Raw HTML and external image URLs never become active markup. The composer’s Markdown button
+persists a browser display preference without changing the saved source. Posted comments use the
+same render options (`boardTextOptions`: preference, sessions, commits) and repaint on toggle. Edit mode shows a live
+preview with small raster thumbnails. `board-image-previews.js` owns authenticated large-image
+loads for composers and posted Comments, including cancellation, Blob URL disposal and retry on
+the next render after a failed fetch. New-card image tokens use temporary IDs rewritten after
+upload; failed saves preserve the unfinished queue. Markdown/TXT file attachments still preview as source.
 
-**The `@` typeahead** (`board-file-refs.js`) is bound to every composer textarea from
-`bindComposer` — description, comment and the new-card description alike. Typing `@` opens a list
-under the caret (a hidden mirror div measures the caret; measured synchronously, same rule as
-below); keystrokes filter it with a 200 ms debounce over `BoardApi.searchFilesAsync`, an
-AbortController and a generation counter so a stale response never paints. Up/Down move, Enter/Tab
-insert `@path` (or `@"path"` when the bare form would not render), Esc closes with `preventDefault`
-so the app-level Escape handler does not also close the card, and the last row is always "Browse
-for a file…", which opens `app.pickFileSystemEntry` at the project root and inserts the repo-relative
-path (the absolute path when the pick is outside the repo). The popup only ever rewrites the
-textarea's value and dispatches a bubbling `input` event, so auto-grow and the editor's
-unsaved-edit tracking see the change. Its disposers live in `composerDisposers` and are torn down
-by `disposeComposers()` on close/replacement — deliberately **not** in `disposeCardPickers()`, which
-`bindCardEditor` re-runs after the composers are wired and would kill the popups before they opened.
+**Reference typeahead** is shared by descriptions/comments/new cards. `board-references.js`
+uses the disposable/debounced popup in `board-file-refs.js`: `@` keeps repository file search,
+card identifiers show a card and its attached sessions, `!` searches recent project sessions or
+an exact session/card ID, and `#` chooses a linked commit, a SHA to link, or another card’s commits.
+A full GUID takes the exact history lookup (canonical dashed form), complete card IDs take the card
+catalog, and neither loads the file index. An `@` token that is only partly card-shaped (`@VB-`,
+`@board-api`) searches files and cards together (files first, at most 50 rows) and keeps Browse;
+`!`/`#` send it to the card catalog. Email, fences and inline code suppress lookup. Recent
+session-name search is bounded to the first 100 history results; use a GUID or card ID for older
+recordings. Selected sessions/commits link immediately on saved cards and queue on drafts.
+References remain plain source: `!GUID`, `#SHA`, `@[display ID](card:row-id)` and the existing
+`@path` forms. Navigation uses existing replay/diff/unsaved-draft guards. Abort and generation
+checks prevent stale results or asynchronous selections from overwriting edited text.
+
+The card keeps the latest Checks summary and optional saved report. Run checks, Earlier results
+and the Code reviews panel are unmounted; evidence and review APIs remain available. Lane Agents
+lists the originating lane’s running agents (including cards outside loaded pages), and offers
+VCA/Code quality choices with explicit scope as ordinary one-action Automations. These choices
+configure future lane entry; they do not launch during setup. Automation names are unique per
+project: a same-name check is reused (re-enabled if disabled); one with another workflow is
+reported in the panel instead of POSTed. Closing the popup stops its refresh.
 
 Layout rules worth keeping: `pre.board-code` uses `white-space: pre` + `overflow-x: auto`, and
 every ancestor carries `min-width: 0` (including `grid-template-columns: 28px minmax(0, 1fr)` on
@@ -978,15 +988,15 @@ The blinking robot on a Board tile is a button that focuses the active Automatio
 Its lookup ignores responses after navigation. Ordinary working-agent selection is unchanged.
 The terminal manager consumes `automation_terminal_closed`, disposes an open viewer, selects an
 ordinary tab if needed, and remembers closed IDs so an older list response cannot restore them.
-VB-60 keeps completed hosts and opens their retained output through the existing authenticated
-snapshot API. Completion does not emit a closure event. Dismissal, capacity reclamation and
-child exits do; a viewer socket disconnect alone never removes a host. Snapshot loads are lazy,
+VIBE-34 automatically closes confirmed completed Automation hosts after their recordings finish
+flushing, and emits the existing closure event. Dismissal, capacity reclamation and child exits
+also emit it; a viewer socket disconnect alone never removes a host. Snapshot loads are lazy,
 guarded against navigation/session changes, and never open a socket or enable terminal input.
 The terminal robot group now hides confirmed finished agents (VIBE-18 follow-up): a successful
 status read reports `hasActiveSession=false` with a recorded `sessionId`. Starting and unavailable
 hosts stay visible. Completion events and the ten-second status poll refresh the list and badge;
 the group closes and disappears when empty. Focus moves to a remaining agent or Add terminal.
-This filters the menu only: an already-open finished viewer stays readable, and Board session
-links can still open retained output. Stored recordings and backend host retention are unchanged.
+Board session links still open retained recordings after the host closes. Stored recordings
+remain available; ordinary terminal hosts and active or starting Automation hosts stay open.
 Automation descriptions are optional, escaped, limited to 2,000 characters, and included in
 editor saves, recipes and repository imports.

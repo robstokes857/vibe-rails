@@ -6,6 +6,8 @@ namespace VibeRails.Services.Terminal;
 public interface ITerminalTabHostService
 {
     int MaxTabs { get; }
+    /// <summary>Closes finished Automation hosts after their recordings have flushed.</summary>
+    Task CloseCompletedAutomationTabsAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     Task<IReadOnlyList<TerminalTabStatusResponse>> ListTabsAsync(CancellationToken cancellationToken = default);
     Task<TerminalTabStatusResponse> CreateTabAsync(CancellationToken cancellationToken = default);
     Task<TerminalTabStatusResponse> CreateAutomationTabAsync(string runId, string automationName, CancellationToken cancellationToken = default);

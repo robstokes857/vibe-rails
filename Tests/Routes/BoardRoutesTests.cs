@@ -1040,12 +1040,14 @@ public sealed class BoardRoutesTests : IAsyncLifetime
             .ReturnsAsync(new TerminalStatusResponse(true, "chat-session", "codex", _project));
         using var invalid = await PostJsonAsync("/api/v1/board/cards/PROJ-1/launch", new { intent = "surprise" });
         Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
-        using var launched = await PostJsonAsync("/api/v1/board/cards/PROJ-1/launch", new { intent = "chat" });
+        using var launched = await PostJsonAsync("/api/v1/board/cards/PROJ-1/launch", new { intent = "chat", question = "Why this design?" });
         launched.EnsureSuccessStatusCode();
         Assert.NotNull(started);
         Assert.True(started.AuthorizeBoardTools);
-        Assert.Contains("Shared context", started.InitialPrompt);
-        Assert.Contains("Bug context", started.InitialPrompt);
+        Assert.Contains("get_board_card", started.InitialPrompt);
+        Assert.Contains("Why this design?", started.InitialPrompt);
+        Assert.DoesNotContain("Shared context", started.InitialPrompt);
+        Assert.DoesNotContain("Bug context", started.InitialPrompt);
         Assert.Contains("This is a discussion session", started.InitialPrompt);
         using var after = await GetJsonAsync("/api/v1/board/cards/PROJ-1");
         Assert.Equal(card.RootElement.GetProperty("columnId").GetString(), after.RootElement.GetProperty("columnId").GetString());

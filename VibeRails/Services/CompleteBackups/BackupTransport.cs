@@ -5,9 +5,19 @@ using System.Text.Json;
 namespace VibeRails.Services.Backups;
 
 /// <summary>Bounded, idempotent part uploads to the fixed account service. No session receipts enter this protocol.</summary>
-public sealed class BackupTransport(HttpClient http)
+public sealed class BackupTransport
 {
     internal static readonly Uri Endpoint = new("https://viberails.ai/api/v1/data-exports/backups/");
+    internal const string HttpClientName = "complete-backups";
+    private readonly Func<HttpClient> client;
+
+    /// <summary>
+    /// The singleton backup service holds this transport for the process lifetime, so it asks the factory for a
+    /// client per request: a typed client captured once would pin one handler and never pick up DNS changes.
+    /// </summary>
+    public BackupTransport(IHttpClientFactory factory) => client = () => factory.CreateClient(HttpClientName);
+
+    internal BackupTransport(HttpClient http) => client = () => http;
 
     public async Task<int> AccountAsync(string key, CancellationToken ct)
     {
@@ -59,7 +69,7 @@ public sealed class BackupTransport(HttpClient http)
         request.Headers.Add("X-Api-Key", key);
         if (checksum is not null) request.Headers.Add("X-Content-SHA256", checksum);
         request.Content = content;
-        var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        var response = await client().SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
         if (response.IsSuccessStatusCode) return response;
         var code = response.StatusCode;
         response.Dispose();

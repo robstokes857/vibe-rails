@@ -1,5 +1,13 @@
 # VibeRails architecture reference
 
+## Card recall (VB-13)
+
+Board recall adds structured handoffs, curated file references, exact project-scoped card lookup,
+BGE/keyword card discovery and paged linked-session discussion. Chat supports an optional question
+and may coexist with implementation without changing lanes. See the
+[component contract](../VibeRails/Services/Board/ARCHITECTURE.md#card-recall-vb-13) for storage,
+retrieval budgets, incremental indexing and launch behavior.
+
 ## Complete backups (VIBE-29, October 2, 2026)
 
 The root-host `CompleteBackupJob` independently drains versioned Board, state, proxy and
@@ -435,6 +443,9 @@ For Board UI, API, SQLite, launch and MCP work, start with the
 [architecture and VB-18 review](../VibeRails/Services/Board/ARCHITECTURE.md).
 The Board uses `~/.vibe_rails/board.db`; its contracts live in `VibeRails.Data.Abstractions/Board`
 and its store/migrations in `VibeRails.Data.Sqlite/Board`. REST and MCP share `BoardService`.
+MCP discovers all local boards, with current-project boards first and other projects separately
+labeled. Explicit board IDs and full permanent card keys select other projects; omitted targets
+retain the launching card/current-project defaults. See the [local discovery contract](../VibeRails/Services/Board/ARCHITECTURE.md#local-mcp-discovery-vibe-28).
 `GET /api/v1/board/cards/{card}/context` (root-only, both credentials) reports the context an agent
 launched on a card would receive, as characters and estimated tokens (`BoardContextEstimator`);
 each launch records the same measurement in `board.db` `BoardContextSamples` and as a `context`
@@ -1287,6 +1298,9 @@ reports live behind `IBoardStore` in `board.db`; process/run outcomes and record
 `wwwroot/session-replay/viewer.mjs` mounts the shared isolated viewer used by desktop
 history, Board, Automations and VibeRails-Front's uploaded recording page. Its component
 README documents adapters, lifecycle, responsive playback and syncing the static copies.
+Browser embeds use `srcdoc`; VS Code desktop loads its same-origin empty frame shell
+before writing the template so its resource service worker can route assets. The
+replacement document retains the webview CSP, and disposal cancels either load phase.
 The desktop root maps seven read-only `/api/v1/session-replay` routes behind existing
 session/tab authentication. `IReplayStore` lives in Data.Abstractions, its ReadOnly SQLite
 provider in Data.Sqlite/Replay, and Board labels remain behind IBoardStore. No schema or

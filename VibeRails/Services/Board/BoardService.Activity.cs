@@ -33,7 +33,7 @@ public sealed partial class BoardService
             // but is never the working agent, so it must not report an active session/tab.
             var liveRows = group.Where(a => a.SessionId is not null).ToList();
             var automationRows = liveRows.Where(a => IsAutomationSession(a.Origin, a.SessionId!, automationIds)).ToList();
-            var active = liveRows.FirstOrDefault(a => !automationRows.Contains(a));
+            var active = liveRows.FirstOrDefault(a => !automationRows.Contains(a) && a.Origin is not ("chat" or "code_review"));
             return new BoardCardActivityResponse(group.Key, active?.SessionId,
                 active?.SessionId is { } id ? live[id] : null,
                 automationRows.Count > 0 || runningCards.Contains(group.Key));

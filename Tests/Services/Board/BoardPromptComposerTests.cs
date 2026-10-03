@@ -23,6 +23,9 @@ public sealed class BoardPromptComposerTests
         Assert.DoesNotContain("{{step:danger}}", prompt);
         Assert.DoesNotContain('\u202e', prompt);
         var automation = BoardPromptComposer.ComposeAutomationPrompt("VB-12", "Review {{board_card}} and exit.");
+        Assert.Contains("on every card this Automation is working against", automation);
+        Assert.Contains("terminal closes after completion", automation);
+        Assert.DoesNotContain("terminal closes after completion", prompt);
         Assert.Contains("authorized the viberails-mcp Board tools", automation);
         Assert.Contains("complete_board_agent", automation);
         Assert.EndsWith("Review {{board_card}} and exit.", automation); // Worker placeholders resolve later.
@@ -90,7 +93,7 @@ public sealed class BoardPromptComposerTests
         var settings = new BoardContextSettings("Shared instructions {{step:unsafe}}", [
             new("bug", mode, "Reproduce the issue"), new("research-spike", "replace", "Research only")]);
         var context = new BoardPromptComposer.LaunchContext([], [], [], Settings: settings);
-        foreach (var intent in new[] { "work", "chat" })
+        foreach (var intent in new[] { "work" })
         {
             var prompt = BoardPromptComposer.Compose(Card() with { Type = "bug" }, "Build", "codex", null, context, intent);
             Assert.Equal(hasDefault, prompt.Contains("Shared instructions"));
@@ -138,10 +141,10 @@ public sealed class BoardPromptComposerTests
         Assert.Contains("move once and read move_board_card's report", prompt);
         Assert.DoesNotContain('‮', prompt);
 
-        // A chat session is told what the lanes do but not to move anything.
+        // Discussion recovers lane context through MCP instead of carrying it on the command line.
         var chat = BoardPromptComposer.Compose(Card(), "Backlog", "x", null, context, "chat");
-        Assert.Contains("Review (on entry: \"Automated code review\", \"Open PR\")", chat);
-        Assert.Contains("Before moving a card, call list_board_columns", chat);
+        Assert.Contains("get_board_card", chat);
+        Assert.DoesNotContain("Open PR", chat);
         Assert.DoesNotContain("Use move_board_card when the card changes state", chat);
 
         // Lanes without Automations, or callers without the list, read exactly as before.

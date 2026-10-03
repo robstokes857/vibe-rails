@@ -4,7 +4,7 @@ namespace VibeRails.DTOs
     {
         // Fields persisted to settings.json.
         public string Effort { get; set; } = "";                                // effortLevel; low | medium | high | xhigh | max
-        public string Model { get; set; } = "";                                 // model; pinned IDs e.g. claude-opus-4-8; empty = Claude default
+        public string Model { get; set; } = "";                                 // model; pinned IDs e.g. claude-opus-5-5[1m]; empty = Claude default
         public bool FastMode { get; set; } = false;                             // "fastMode": true (same as /fast); no launch flag — Opus-only
 
         // Permission posture is YOLO-or-nothing: DangerouslySkipPermissions is the single

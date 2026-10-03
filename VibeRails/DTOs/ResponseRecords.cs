@@ -201,7 +201,10 @@ namespace VibeRails.DTOs
     public record UpdateBoardRequest(string? Name = null, string? DisplayPrefix = null);
     public record UpdateBoardContextRequest(BoardContextSettings? Context = null, int? ExpectedRevision = null);
     public record BoardAutomationOption(long Id, string Name, bool Enabled, string? Setup = null);
-    public record BoardLaneAutomationResponse(long? JobId, int Revision, List<BoardAutomationOption> Jobs, IReadOnlyList<long> JobIds, bool StarterSetupPending = false);
+    public record BoardLaneRunningAgent(string RunId, string Name, string CardId, string CardLabel, string? SessionId, string? TerminalSessionId);
+    public record BoardLaneRunningAgentsResponse(IReadOnlyList<BoardLaneRunningAgent> RunningAgents);
+    public record BoardLaneAutomationResponse(long? JobId, int Revision, List<BoardAutomationOption> Jobs, IReadOnlyList<long> JobIds, bool StarterSetupPending = false,
+        IReadOnlyList<BoardLaneRunningAgent>? RunningAgents = null);
     public record UpdateBoardLaneAutomationRequest(long? JobId = null, int? ExpectedRevision = null, IReadOnlyList<long>? JobIds = null);
     public record DeleteBoardResponse(bool Ok, int DeletedColumns, int DeletedCards);
 
@@ -303,6 +306,8 @@ namespace VibeRails.DTOs
         bool AgentMade = false)
     {
         public List<BoardLinkedCardDto> LinkedCards { get; init; } = [];
+        public BoardHandoff? PreviousWork { get; init; }
+        public IReadOnlyList<BoardFileReference> FileCandidates { get; init; } = [];
     }
     public record CreateBoardCardRequest(
         string? Title = null,
@@ -347,7 +352,7 @@ namespace VibeRails.DTOs
     public record LinkBoardCommitRequest(string? Sha = null);
     public record AddBoardSessionRequest(string? Id = null, string? DisplayName = null);
     public record UpdateBoardSessionRequest(string? DisplayName = null);
-    public record LaunchBoardCardRequest(string? Selection = null, string? Intent = null, ReviewLaunchRequest? Review = null);
+    public record LaunchBoardCardRequest(string? Selection = null, string? Intent = null, ReviewLaunchRequest? Review = null, string? Question = null);
     public record ReviewLaunchRequest(ReviewerRouting? Routing = null, ReviewerTarget? Override = null);
     public record LaunchBoardCardResponse(
         string TabId,
@@ -1801,6 +1806,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(UpdateBoardContextRequest))]
     [JsonSerializable(typeof(BoardContextSettingsRecord))]
     [JsonSerializable(typeof(BoardLaneAutomationResponse))]
+    [JsonSerializable(typeof(BoardLaneRunningAgentsResponse))]
     [JsonSerializable(typeof(BoardCardAutomationsResponse))]
     [JsonSerializable(typeof(BoardCheckRecord))]
     [JsonSerializable(typeof(BoardChecksResponse))]

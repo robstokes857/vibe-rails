@@ -28,14 +28,37 @@ export function mountSessionViewer(container, options = {}) {
             const html = await response.text();
             if (disposed) return;
             const base = document.createElement('base'); base.href = url.href;
-            const loaded = new Promise((resolve, reject) => {
-                frame.addEventListener('load', resolve, { once: true });
-                controller.signal.addEventListener('abort', () => reject(new DOMException('Viewer disposed', 'AbortError')), { once: true });
-            });
-            // Only the trusted static template enters srcdoc. Captured content is
-            // supplied through the data source and rendered as text by the viewer.
-            frame.srcdoc = html.replace('<head>', '<head>' + base.outerHTML);
-            container.append(frame);
+            // Only the trusted static template enters the document. Captured
+            // content goes through the data source and is rendered as text.
+            let template = html.replace('<head>', '<head>' + base.outerHTML);
+            if (location.protocol === 'vscode-webview:') {
+                // VS Code's resource service worker needs a controlled client
+                // with the webview ID in its URL. srcdoc has no such ID. Use the
+                // same empty shell VS Code uses to bootstrap its own webview.
+                const frameUrl = new URL('./fake.html', location.href);
+                frameUrl.searchParams.set('id', new URL(location.href).searchParams.get('id'));
+                if (crossOriginIsolated) frameUrl.searchParams.set('vscode-coi', '3');
+                // A navigated document does not inherit the parent's meta CSP.
+                // Retain it explicitly when replacing the empty shell's content.
+                const policy = document.querySelector('meta[http-equiv="Content-Security-Policy" i]');
+                if (policy) template = template.replace('<head>', '<head>' + policy.outerHTML);
+                const bootstrapped = waitForFrameLoad(frame, controller.signal);
+                frame.src = frameUrl.href;
+                container.append(frame);
+                await bootstrapped;
+                // Leave the shell's load event before opening its replacement.
+                await new Promise(resolve => setTimeout(resolve, 0));
+                if (disposed) return;
+            }
+            const loaded = waitForFrameLoad(frame, controller.signal);
+            if (location.protocol === 'vscode-webview:') {
+                frame.contentDocument.open();
+                frame.contentDocument.write(template);
+                frame.contentDocument.close();
+            } else {
+                frame.srcdoc = template;
+                container.append(frame);
+            }
             await loaded;
             if (disposed) return;
             api = frame.contentWindow.sessionReplay;
@@ -82,4 +105,20 @@ export function mountSessionViewer(container, options = {}) {
             frame.remove(); loading.remove(); listeners.clear(); state = { ready: false, playing: false };
         }
     };
+}
+
+function waitForFrameLoad(frame, signal) {
+    return new Promise((resolve, reject) => {
+        const cleanup = () => {
+            clearTimeout(timeout);
+            frame.removeEventListener('load', onLoad);
+            signal.removeEventListener('abort', onAbort);
+        };
+        const onLoad = () => { cleanup(); resolve(); };
+        const onAbort = () => { cleanup(); reject(new DOMException('Viewer disposed', 'AbortError')); };
+        const timeout = setTimeout(() => { cleanup(); reject(new Error('The session viewer took too long to initialize')); }, 15000);
+        frame.addEventListener('load', onLoad, { once: true });
+        signal.addEventListener('abort', onAbort, { once: true });
+        if (signal.aborted) onAbort();
+    });
 }

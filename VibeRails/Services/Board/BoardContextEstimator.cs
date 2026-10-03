@@ -70,7 +70,7 @@ public sealed class BoardContextEstimator(
             ?? throw new BoardValidationException("The card was deleted while its context was being measured.");
         var render = await BoardTool.RenderCardAsync(service, store, projectPath, detail, BoardTool.CardReadOptions.Default, cancellationToken);
         var lanes = await BoardTool.RenderLanesAsync(service, store, projectPath, prompt.BoardId, prompt.BoardName, cancellationToken);
-        var promptParts = BoardPromptComposer.Measure(prompt.Prompt, card, prompt.EnvironmentPrompt, prompt.BoardContext);
+        var promptParts = BoardPromptComposer.Measure(prompt.Prompt, card, prompt.EnvironmentPrompt, prompt.BoardContext, prompt.Intent);
         var stats = render.Stats;
 
         var sources = new List<BoardContextPartDto>
@@ -82,7 +82,9 @@ public sealed class BoardContextEstimator(
         var contents = new List<BoardContextPartDto>
         {
             Part("description", "Description", promptParts.DescriptionChars + stats.DescriptionChars, null,
-                promptParts.DescriptionChars < card.Description.Trim().Length ? "excerpt in the prompt, full text in the card read" : "in the prompt and again in the card read"),
+                prompt.Intent == "chat" ? "retrieved through MCP; long descriptions are paged"
+                    : "bounded excerpts in the prompt and card read; descriptionOffset retrieves more"),
+            Part("previousWork", "Previous work and file references", stats.PreviousWorkChars),
             Part("comments", "Comments", stats.Comments.Chars, detail.Comments.Count, TrimNote(stats.Comments)),
             Part("sessions", "Sessions", stats.SessionsChars, detail.Sessions.Count, stats.SessionsOmitted > 0 ? $"newest {stats.SessionsListed} listed" : null),
             Part("commits", "Linked commits", stats.CommitsChars, detail.Commits.Count, stats.CommitsOmitted > 0 ? $"newest {stats.CommitsListed} listed" : null),

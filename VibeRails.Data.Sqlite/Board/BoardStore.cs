@@ -468,7 +468,8 @@ public sealed partial class BoardStore : IBoardStore
             await ReadCommitsAsync(connection, card.Id, cancellationToken),
             [])
         {
-            LinkedCards = await ReadLinkedCardsAsync(connection, project, card.Id, cancellationToken)
+            LinkedCards = await ReadLinkedCardsAsync(connection, project, card.Id, cancellationToken),
+            PreviousWork = await ReadHandoffAsync(connection, card.Id, cancellationToken)
         };
     }
 
@@ -1724,6 +1725,8 @@ public sealed partial class BoardStore : IBoardStore
             SqliteSchema.Execute(db, transaction, ReviewSettingsSchemaSql));
         SqliteMigrationRunner.Apply(connection, "board-reviews", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, ReviewsSchemaSql));
+        SqliteMigrationRunner.Apply(connection, "board-recall", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, RecallSchemaSql));
         SqliteMigrationRunner.Apply(connection, "board-agent-completion", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, AgentCompletionSchemaSql));
         SqliteMigrationRunner.Apply(connection, "board", 2, MigrationKind.Additive, (db, transaction) =>

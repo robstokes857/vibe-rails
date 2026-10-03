@@ -1,5 +1,17 @@
 # Board persistence
 
+`board-recall/1` adds `BoardHandoffs` and `BoardRecallEmbeddings` without modifying old rows.
+Handoffs append with server provenance and a full Comments receipt in one scoped transaction;
+the task description/history remain unchanged. Merge copies them and retains source data.
+The derived BGE cache uses a version tied to current card text/handoff; stale vectors are ignored.
+Candidate file names come from snapshot JSON metadata only. Keep recall reads project-scoped,
+behind `IBoardStore`; historical description logs are not search documents.
+
+`GetLocalBoardsAsync` lists existing local board identities without seeding projects.
+`FindLocalCardAsync` resolves a live card by row ID or full stored permanent key across projects,
+never by display ID or short-key alias. These support explicit MCP targeting (VIBE-28); writes
+still use the resolved owning project and existing transactional checks. No schema change.
+
 `board-starter-workflows/1` adds new-board recipe intents, bound to lane IDs at creation only.
 Settings insert/update triggers retire an intent without changing existing settings or history.
 Completion and assignment commit together behind `IBoardStore`; state recipe installation commits

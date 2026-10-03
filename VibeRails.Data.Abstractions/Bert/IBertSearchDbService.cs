@@ -16,6 +16,8 @@ public interface IBertSearchDbService
     string? GetLatestDocumentId();
     IReadOnlyList<BertStoredDocument> GetCaptures(int skip, int take);
     IReadOnlyList<BertStoredDocument> GetCapturesBySessionId(string sessionId);
+    /// <summary>Bounded previews of captured messages from one known session.</summary>
+    IReadOnlyList<BertStoredDocument> GetSessionRecallPage(string sessionId, int offset, int take);
     IReadOnlyList<BertStoredDocument> GetSessionCaptures(int skip, int take);
     BertStoredDocument? GetCapture(string documentId);
     BertStoredDocument? GetSessionCapture(string documentId);

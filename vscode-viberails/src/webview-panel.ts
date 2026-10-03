@@ -156,6 +156,9 @@ export class WebviewPanelManager {
             // is not silently blocked the way the board's image viewer once was.
             `img-src ${webview.cspSource} https: data: blob:`,
             `font-src ${webview.cspSource} https://fonts.gstatic.com`,
+            // Session replay bootstraps a same-origin frame so VS Code's resource
+            // service worker can identify its requests. The frame retains this CSP.
+            `frame-src 'self'`,
             `connect-src ${loopbackHttpOrigin} ${loopbackWsOrigin} http://localhost:${port} ws://localhost:${port} ${webview.cspSource}`,
             `form-action 'none'`,
             `base-uri ${webview.cspSource} 'self'`,

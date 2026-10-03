@@ -158,6 +158,11 @@ public static class BoardRoutes
             RunAsync(async () => OkOrNotFound(await automation.GetAsync(Project(), columnId, cancellationToken), "Lane")))
             .WithName("GetBoardLaneAutomation");
 
+        // The lane panel's 10-second running list, without the catalog and setup probes of the settings read.
+        app.MapGet("/api/v1/board/columns/{columnId}/automation/running", (BoardAutomationService automation, string columnId, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(await automation.GetRunningAgentsAsync(Project(), columnId, cancellationToken), "Lane")))
+            .WithName("GetBoardLaneRunningAgents");
+
         app.MapPut("/api/v1/board/columns/{columnId}/automation", (BoardAutomationService automation, string columnId, UpdateBoardLaneAutomationRequest request, CancellationToken cancellationToken) =>
             RunAsync(async () => OkOrNotFound(await automation.SaveAsync(Project(), columnId, request, cancellationToken), "Lane")))
             .WithName("SaveBoardLaneAutomation");
@@ -216,7 +221,7 @@ public static class BoardRoutes
             .WithName("DeleteBoardComment");
 
         app.MapPost("/api/v1/board/cards/{card}/launch", (IBoardLaunchService launcher, string card, LaunchBoardCardRequest? request, CancellationToken cancellationToken) =>
-            RunAsync(async () => OkOrNotFound(await launcher.LaunchAsync(Project(), card, request?.Selection, cancellationToken, request?.Intent ?? "work", request?.Review), "Card")))
+            RunAsync(async () => OkOrNotFound(await launcher.LaunchAsync(Project(), card, request?.Selection, cancellationToken, request?.Intent ?? "work", request?.Review, request?.Question), "Card")))
             .WithName("LaunchBoardCard");
 
         // The context an agent launched on this card right now would receive (VB-63): the launch

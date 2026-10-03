@@ -41,6 +41,9 @@ CREATE INDEX IX_BoardComments_Unsent ON BoardComments(CardId) WHERE RemoteSeq IS
 -- index IX_BoardContextSamples_Card
 CREATE INDEX IX_BoardContextSamples_Card ON BoardContextSamples(CardId, MeasuredUTC);
 
+-- index IX_BoardHandoffs_Card
+CREATE INDEX IX_BoardHandoffs_Card ON BoardHandoffs(CardId, CreatedUTC DESC, Id DESC);
+
 -- index IX_BoardHistory_BoardTime
 CREATE INDEX IX_BoardHistory_BoardTime ON BoardHistory(BoardId, CreatedUTC);
 
@@ -128,6 +131,9 @@ CREATE TABLE BoardDeletedComments ( CommentId TEXT PRIMARY KEY REFERENCES BoardC
 -- table BoardDisplaySequences
 CREATE TABLE BoardDisplaySequences ( ProjectPath TEXT NOT NULL COLLATE NOCASE, Prefix TEXT NOT NULL COLLATE NOCASE, LastNumber INTEGER NOT NULL, PRIMARY KEY (ProjectPath, Prefix) );
 
+-- table BoardHandoffs
+CREATE TABLE BoardHandoffs ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, Json TEXT NOT NULL, CreatedUTC TEXT NOT NULL);
+
 -- table BoardHistory
 CREATE TABLE BoardHistory ( Id TEXT PRIMARY KEY, BoardId TEXT NOT NULL, ProjectPath TEXT NOT NULL, Kind TEXT NOT NULL, Body TEXT NOT NULL, CreatedUTC TEXT NOT NULL );
 
@@ -154,6 +160,9 @@ CREATE TABLE BoardPendingAutomations ( CardId TEXT PRIMARY KEY REFERENCES BoardC
 
 -- table BoardProjectKeys
 CREATE TABLE BoardProjectKeys ( ProjectPath TEXT PRIMARY KEY COLLATE NOCASE, Prefix TEXT NOT NULL, CreatedUTC TEXT NOT NULL );
+
+-- table BoardRecallEmbeddings
+CREATE TABLE BoardRecallEmbeddings ( CardId TEXT PRIMARY KEY REFERENCES BoardCards(Id) ON DELETE CASCADE, Version TEXT NOT NULL, Embedding TEXT NOT NULL);
 
 -- table BoardReviewSettings
 CREATE TABLE BoardReviewSettings ( CardId TEXT PRIMARY KEY REFERENCES BoardCards(Id) ON DELETE CASCADE, SettingsJson TEXT NOT NULL );

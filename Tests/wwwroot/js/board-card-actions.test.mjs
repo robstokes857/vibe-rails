@@ -243,13 +243,14 @@ test('Chat waits for the save and keeps the selection captured at click time', a
     assert.deepEqual(h.calls[1].body, { selection: 'base:codex', intent: 'chat' });
 });
 
-test('Chat cannot start alongside an in-flight work launch or a running session', async () => {
+test('Chat waits for an in-flight save but can start alongside a running work session', async () => {
     const h = harness();
     h.editor._boardStarting = true;
     await h.controller.startWork(h.editor, h.card, 'chat');
+    assert.deepEqual(h.calls, []);
     h.editor._boardStarting = false;
     await h.controller.startWork(h.editor, { ...h.card, activeSessionId: 'running' }, 'chat');
-    assert.deepEqual(h.calls, []);
+    assert.deepEqual(h.calls.map(call => call.method), ['PUT', 'POST']);
 });
 
 test('saving a description never sends terminal input to a running agent', async () => {
@@ -278,7 +279,7 @@ test('a queued upload that fails after create says the card was saved', async ()
     await h.controller.saveCard(h.editor);
 
     assert.equal(h.editor.dataset.cardId, 'card_new', 'retrying Save must not create a second card');
-    assert.deepEqual(h.toasts.at(-1), ['Board', 'VB-2 was saved, but a file did not upload. Disk full', 'warning']);
+    assert.deepEqual(h.toasts.at(-1), ['Board', 'VB-2 was saved, but an attachment or reference did not finish. Disk full', 'warning']);
 });
 
 test('a partial upload failure retries only unfinished uploads without fetching history', async () => {
@@ -308,7 +309,7 @@ test('a partial upload failure retries only unfinished uploads without fetching 
 
     assert.equal(h.calls.filter(call => call.method === 'GET').length, 0);
     assert.equal(h.editor._boardCard.pendingAttachments.length, 1);
-    assert.deepEqual(h.toasts.at(-1), ['Board', 'VB-1 was saved, but a file did not upload. Disk full', 'warning']);
+    assert.deepEqual(h.toasts.at(-1), ['Board', 'VB-1 was saved, but an attachment or reference did not finish. Disk full', 'warning']);
     await h.controller.saveCard(h.editor);
     assert.deepEqual(h.calls.filter(call => call.url.endsWith('/attachments')).map(call => call.body.name), ['a.zip', 'b.zip', 'b.zip']);
     assert.equal(h.editor._boardCard.pendingAttachments.length, 0);
@@ -380,7 +381,7 @@ test('A live Automation is not the working agent: Start work stays and Go to age
     h.calls.length = 0;
     h.controller.updateStartWorkButton(h.editor, h.card);
     assert.equal(label.textContent, 'Go to agent');
-    assert.equal(h.fields['[data-board-chat]'].disabled, true);
+    assert.equal(h.fields['[data-board-chat]'].disabled, false);
     await h.controller.startWork(h.editor, h.card);
     assert.deepEqual(h.calls, []);
     assert.equal(focused, 'agent-tab');

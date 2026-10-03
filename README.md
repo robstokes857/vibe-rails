@@ -11,6 +11,13 @@
 ---
 
 ## Overview
+
+![VibeRails Board with fictional demo work](vscode-viberails/media/screenshots/15-board-wide.png)
+
+[Take the visual tour](ABOUT.md) · [Browse all 15 screenshots](vscode-viberails/media/screenshots/README.md)
+
+Screenshots show the real interface with fictional demo content, including illustrative agent activity and quality metrics.
+
 - **Environment Isolation** - Like Conda for LLMs. Create separate environments to experiment with Claude, Codex, Antigravity, Copilot, or OpenCode settings without breaking your primary setup
 - **Cross-LLM Learning** - Share context and learnings between different LLM providers (Claude, Codex, Antigravity, Copilot, and OpenCode)
 - **RAG (Without The Rot) For Your Code** - Track things like repeated fixes the LLM forgets, including when you have to tell it the same thing 6 or 7 times in one session and it still doesn't understand, how you describe a feature and where that code lives, and file change summaries with commits, then only provide what’s useful at call time to prevent context rot.

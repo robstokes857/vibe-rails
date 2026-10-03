@@ -1,5 +1,25 @@
 # Working on Vibe Board
 
+## Card recall (VB-13)
+
+Use `get_board_card` first for named-card questions. `save_board_handoff` records concise previous
+work and curated entry points without editing the task; it also posts the handoff in Comments.
+Keep recall persistence behind `IBoardStore`. `read_board_session` may read only linked sessions;
+its previews and full-document reads are paged. `search_history` keeps explicit keys project-scoped
+and labels broader-history fallback. Discussion sessions may coexist with work and never count as
+working agents. Preserve short bootstraps, input limits, lane state and the prohibition on injecting
+generated input into a live TUI. See [the recall contract](ARCHITECTURE.md#card-recall-vb-13).
+
+## Local MCP board discovery (VIBE-28)
+
+`list_boards` shows current-project boards first, then other local projects with their paths.
+Explicit board IDs and unambiguous names can select any local board; duplicate names require IDs.
+Full stored permanent card keys and row IDs resolve across local projects. Short keys and display
+IDs keep their current-project meaning. Resolve the target's project from `IBoardStore` metadata
+before calling scoped services; REST and transactional membership checks stay project-scoped.
+Omitted targets keep the launching card/current-project defaults. Cross-project writes never
+auto-attach a session, and explicit session attachments remain within the current project.
+
 ## New-board review defaults (VIBE-23)
 
 The single local lane template records a `BoardStarterWorkflows` intent with the new Review
@@ -124,7 +144,7 @@ serialization or tool discovery into the Native AOT path.
 
 ## Invariants to preserve
 
-- Derive project identity server-side. Scope **both ends** of a move, link, lookup, attachment or
+- Derive project identity server-side (MCP explicit targets use the local discovery contract above). Scope **both ends** of a move, link, lookup, attachment or
   commit operation. A board/lane/card ID is not proof of access. A card key (`VB-n`, `VR-n`) is
   unique per project, across boards; its high-water sequence must survive card/board deletion.
   The prefix is the project's, fixed by its first card (`BoardProjectKeys`, see

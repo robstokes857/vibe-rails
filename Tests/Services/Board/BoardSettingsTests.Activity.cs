@@ -54,11 +54,34 @@ public sealed partial class BoardSettingsTests
         var otherBoard = await _boards.CreateBoardAsync(_root, "Other", Ct);
         Assert.Empty((await service.GetCardActivityAsync(_root, request with { BoardId = otherBoard.Id }, Ct)).ActiveAutomationColumnIds);
 
+        var laneSettings = new BoardAutomationService(_boards, _jobs);
+        var laneActivity = (await laneSettings.GetAsync(_root, b, Ct))!;
+        if (manual) Assert.Empty(laneActivity.RunningAgents!);
+        else
+        {
+            var agent = Assert.Single(laneActivity.RunningAgents!);
+            Assert.Equal(run, agent.RunId);
+            Assert.Equal(card.Id, agent.CardId);
+            Assert.Equal(shell, agent.TerminalSessionId);
+            Assert.Contains(card.Title, agent.CardLabel);
+            var json = System.Text.Json.JsonSerializer.Serialize(laneActivity, AppJsonSerializerContext.Default.BoardLaneAutomationResponse);
+            Assert.Contains("runningAgents", json);
+            Assert.Contains(shell, json);
+        }
+        Assert.Empty((await laneSettings.GetAsync(_root, a, Ct))!.RunningAgents!);
+        Assert.Null(await laneSettings.GetAsync(_root + "-foreign", b, Ct));
+        // The panel's poll reads the same list without the catalog and setup probes.
+        Assert.Equal(laneActivity.RunningAgents, (await laneSettings.GetRunningAgentsAsync(_root, b, Ct))!.RunningAgents);
+        Assert.Empty((await laneSettings.GetRunningAgentsAsync(_root, a, Ct))!.RunningAgents);
+        Assert.Null(await laneSettings.GetRunningAgentsAsync(_root + "-foreign", b, Ct));
+
         // Later card moves do not transfer a running lane's indicator to the new lane.
         await _boards.MoveCardAsync(_root, card.Id, c, null, Ct);
         Assert.Equal(manual ? Array.Empty<string>() : [b],
             (await service.GetCardActivityAsync(_root, request, Ct)).ActiveAutomationColumnIds);
+        Assert.Equal(manual ? 0 : 1, (await laneSettings.GetAsync(_root, b, Ct))!.RunningAgents!.Count);
         await _jobs.CompleteRunAsync(run, JobRunStatus.Succeeded, 0, null, Ct);
+        Assert.Empty((await laneSettings.GetAsync(_root, b, Ct))!.RunningAgents!);
         Assert.False((await service.GetCardAsync(_root, card.Id, Ct))!.HasActiveAutomation);
         Assert.Empty((await service.GetCardActivityAsync(_root, request, Ct)).ActiveAutomationColumnIds);
         Assert.False(Assert.Single((await service.GetCardActivityAsync(_root, request, Ct)).Cards).HasActiveAutomation);

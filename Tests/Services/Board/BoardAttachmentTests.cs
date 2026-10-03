@@ -155,7 +155,13 @@ public sealed class BoardAttachmentTests : IDisposable
         var other = await _service.CreateCardAsync(_project, new CreateBoardCardRequest(Title: "Other"), Ct);
         Assert.True((await tool.ReadBoardAttachment(file.Id, other.Key, cancellationToken: Ct)).IsError);
         resolver.Setup(x => x.ResolveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(_project + "-other");
-        Assert.True((await tool.ReadBoardAttachment(file.Id, card.Id, cancellationToken: Ct)).IsError);
+        // Explicit identities reach other local boards, while attachment membership and
+        // short-key aliases keep their scope.
+        var foreignRead = await tool.ReadBoardAttachment(file.Id, card.Id, cancellationToken: Ct);
+        Assert.NotEqual(true, foreignRead.IsError);
+        Assert.Equal(bytes, Assert.IsType<ImageContentBlock>(foreignRead.Content[1]).DecodedData.ToArray());
+        Assert.True((await tool.ReadBoardAttachment(file.Id, "VB-1", cancellationToken: Ct)).IsError);
+        Assert.True((await tool.ReadBoardAttachment(file.Id, other.Id, cancellationToken: Ct)).IsError);
         resolver.Setup(x => x.ResolveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(_project);
         await _service.DeleteAttachmentAsync(_project, card.Id, file.Id, Ct);
         Assert.True((await tool.ReadBoardAttachment(file.Id, card.Key, cancellationToken: Ct)).IsError);

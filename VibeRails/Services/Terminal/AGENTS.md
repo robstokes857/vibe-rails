@@ -28,13 +28,19 @@ Remote relay server (other repo):
 
 ### Completed Automation output (VB-60)
 
-Completed Automation tabs remain available until dismissed, the root exits, or the 100-tab
-capacity policy reclaims an older finished host. Do not delete them on completion. The PTY
-still exits and its recording finalizes normally; `TerminalSessionService` retains one final
-snapshot per owned tab session, including the emulator's bounded 20,000-line scrollback. The
-terminal agent menu hides confirmed completed runs; retained hosts remain available through
-Board session links and an already-open output viewer (VIBE-18). Starting or unavailable hosts
-are not treated as finished. This is a menu filter, not a host or recording deletion.
+VIBE-34 supersedes the retained-host policy: each root scheduler closes completed Automation
+hosts on its normal ten-second pass. `CloseCompletedAutomationTabsAsync` shares the existing
+reservation/validation with capacity reclamation: the run must be terminal, its exact outer
+session inactive, and the recording ended (including final output flush). Starting, unavailable,
+racing session starts and ordinary interactive tabs remain untouched. Completion emits the
+existing `automation_terminal_closed` event, disposing any open viewer and removing its tab.
+The close pass does not take the tab-creation gate (`TryReserveForReclamation` already makes each
+close exclusive), stops confirmed hosts concurrently, and logs a failed close instead of throwing;
+the scheduler also isolates the pass, so a stuck child never delays new tabs or skips reaping,
+enqueueing and launching.
+Recordings and Board links remain available through Replay. Automation-launched Workers alone
+receive instructions to put progress logs and final results in Comments on every target card.
+
 The existing authenticated snapshot route returns the snapshot when inactive, and a new session clears it.
 The finished snapshot renders as a read-only main screen without mouse/input reporting modes.
 Live PTY bytes and live snapshot semantics remain intact. CLI-private full-screen history that

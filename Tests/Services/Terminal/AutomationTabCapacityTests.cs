@@ -86,7 +86,67 @@ public sealed class AutomationTabCapacityTests
     }
 
     [Fact]
-    public async Task FinishedAutomationIsRetainedWhileThereIsCapacity()
+    public async Task SchedulerClosesFinishedAutomationBelowCapacityAndKeepsOtherTabs()
+    {
+        var jobs = new Mock<IJobStore>(MockBehavior.Strict);
+        jobs.Setup(s => s.GetRunAsync("finished", It.IsAny<CancellationToken>())).ReturnsAsync(Run("finished", JobRunStatus.Succeeded));
+        jobs.Setup(s => s.GetRunAsync("running", It.IsAny<CancellationToken>())).ReturnsAsync(Run("running", JobRunStatus.Running));
+        var sessions = new Mock<ISessionStore>(MockBehavior.Strict);
+        sessions.Setup(s => s.GetSessionByIdAsync("outer", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SessionResponse("outer", "shell", null, "/project", DateTime.UtcNow, DateTime.UtcNow, 0));
+        using var services = new ServiceCollection().AddSingleton(jobs.Object).AddSingleton(sessions.Object).BuildServiceProvider();
+        using var http = new StatusHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"hasActiveSession\":false}") });
+        var host = Host(services, http);
+        var registry = Registry(host);
+        using var placeholder = new Process();
+        using var finished = StartHarmlessProcess();
+        try
+        {
+            AddChild(registry, "ordinary", placeholder, 0, null);
+            AddChild(registry, "starting", placeholder, 1, new AutomationTabState("starting", "Starting"));
+            AddChild(registry, "running", placeholder, 2, Started("running"));
+            AddChild(registry, "finished", finished, 3, Started("finished"));
+            await host.CloseCompletedAutomationTabsAsync(TestContext.Current.CancellationToken);
+            Assert.False(registry.Contains("finished"));
+            Assert.True(finished.HasExited);
+            Assert.True(registry.Contains("ordinary"));
+            Assert.True(registry.Contains("starting"));
+            Assert.True(registry.Contains("running"));
+            sessions.VerifyAll();
+        }
+        finally
+        {
+            registry.Clear();
+            await host.DisposeAsync();
+            if (!finished.HasExited) { finished.Kill(entireProcessTree: true); await finished.WaitForExitAsync(TestContext.Current.CancellationToken); }
+        }
+    }
+
+    [Fact]
+    public async Task SchedulerClosePassNeverWaitsBehindTabCreation()
+    {
+        // A Worker launch holds the creation gate through its pre-launch steps; the scheduler's close pass
+        // (probes plus graceful stops) must neither wait for it nor make new-tab requests wait for itself.
+        using var services = new ServiceCollection().BuildServiceProvider();
+        using var http = new StatusHandler(_ => throw new InvalidOperationException("No reclamation probes expected"));
+        var host = Host(services, http);
+        var gate = (SemaphoreSlim)typeof(TerminalTabHostService)
+            .GetField("_createGate", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)!;
+        await gate.WaitAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            await host.CloseCompletedAutomationTabsAsync(TestContext.Current.CancellationToken)
+                .WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            gate.Release();
+            await host.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task CapacityCheckLeavesFinishedAutomationForSchedulerWhenThereIsRoom()
     {
         using var services = new ServiceCollection().BuildServiceProvider();
         using var http = new StatusHandler(_ => throw new InvalidOperationException("No reclamation probes expected"));
@@ -153,7 +213,7 @@ public sealed class AutomationTabCapacityTests
 
     private static Task ReclaimIfFullAsync(TerminalTabHostService host) => (Task)typeof(TerminalTabHostService)
         .GetMethod("ReclaimCompletedAutomationTabIfFullAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
-        .Invoke(host, [TestContext.Current.CancellationToken])!;
+        .Invoke(host, [TestContext.Current.CancellationToken, true])!;
 
     private static AutomationTabState Started(string id)
     {

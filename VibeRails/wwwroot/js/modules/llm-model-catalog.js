@@ -14,23 +14,19 @@ export const LLM_MODEL_OPTIONS = Object.freeze({
         ['gpt-5.5', 'gpt-5.5']
     ],
     // "[1m]" is Claude Code's 1M-context marker on a full model ID. Behind the VibeRails LLM
-    // proxy (a custom ANTHROPIC_BASE_URL) Claude Code cannot verify native 1M support and budgets
-    // a 200K window for the bare ID; the [1m] form keeps the 1M window. Direct launches treat the
-    // suffix as a no-op on natively-1M models, so it is never worse. Since 2026-09-28 the catalog
-    // therefore pins only the [1m] form of each 1M-capable model instead of offering both (the
-    // bare form was never the right choice behind the proxy). Haiku 4.5 has no 1M variant.
+    // proxy (a custom ANTHROPIC_BASE_URL) Claude Code budgeted a 200K window for the bare ID
+    // (measured 2026-09-27); the [1m] form keeps the 1M window. Direct launches treat the suffix
+    // as a no-op on natively-1M models, so it is never worse. The value keeps the suffix because
+    // it is the --model argument; the label is the model's name, so nobody has to read "[1m]".
+    // Only generation-5 models are pinned (owner request 2026-10-02); older saves show "(custom)".
     'claude': [
         ['', 'Default (Claude recommended)'],
-        ['claude-fable-5-1[1m]', 'claude-fable-5-1[1m]'],
-        ['claude-fable-5[1m]', 'claude-fable-5[1m]'],
-        ['claude-opus-5-5[1m]', 'claude-opus-5-5[1m]'],
-        ['claude-opus-5[1m]', 'claude-opus-5[1m]'],
-        ['claude-opus-4-8[1m]', 'claude-opus-4-8[1m]'],
-        ['claude-opus-4-7[1m]', 'claude-opus-4-7[1m]'],
-        ['claude-sonnet-5-5[1m]', 'claude-sonnet-5-5[1m]'],
-        ['claude-sonnet-5[1m]', 'claude-sonnet-5[1m]'],
-        ['claude-sonnet-4-6[1m]', 'claude-sonnet-4-6[1m]'],
-        ['claude-haiku-4-5', 'claude-haiku-4-5']
+        ['claude-fable-5-1[1m]', 'Fable 5.1'],
+        ['claude-fable-5[1m]', 'Fable 5'],
+        ['claude-opus-5-5[1m]', 'Opus 5.5'],
+        ['claude-opus-5[1m]', 'Opus 5'],
+        ['claude-sonnet-5-5[1m]', 'Sonnet 5.5'],
+        ['claude-sonnet-5[1m]', 'Sonnet 5']
     ],
     'copilot': [
         ['', 'Default (auto)'],
@@ -114,7 +110,7 @@ export function renderLlmModelOptions(cli, selectedModel = '') {
 // (`claude-fable-5-1` -> `claude-fable-5-1[1m]`). Bare 1M-capable IDs only exist in
 // environments and Board cards saved before 2026-09-28, when the dropdown still offered both
 // forms; reopening such a save now selects the pinned [1m] entry instead of showing "(custom)".
-// Anything else (Haiku, unknown IDs, other CLIs) passes through unchanged.
+// Anything else (unpinned IDs, other CLIs) passes through unchanged.
 export function normalizeLlmModel(cli, model) {
     const value = String(model || '').trim();
     if (cli !== 'claude' || !value || value.endsWith('[1m]')) return value;

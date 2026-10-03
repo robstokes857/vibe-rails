@@ -131,7 +131,11 @@ function caretOffset(textarea, index) {
  * appended to (the `.board-composer`); `app` supplies the project root, the file explorer and
  * toasts. Returns a dispose function; call it when the editor closes or is replaced.
  */
-export function bindFileReferencePopup(input, { app, host = input?.parentElement } = {}) {
+export function bindFileReferencePopup(input, { app, host = input?.parentElement,
+    findToken = findFileReferenceToken, search = (token, options) => BoardApi.searchFilesAsync(token.query, options),
+    onPick = file => formatFileReference(file), canBrowse = () => true, label = 'Repository files',
+    emptyNote = () => 'No matching files.'
+} = {}) {
     if (!input || !host || typeof document === 'undefined') return () => {};
     const lifetime = new AbortController();
     const { signal } = lifetime;
@@ -174,25 +178,25 @@ export function bindFileReferencePopup(input, { app, host = input?.parentElement
 
     function render() {
         if (!popup) return;
-        const browseIndex = items.length;
+        const browseIndex = canBrowse(token) ? items.length : -1;
         const rows = items.map((file, index) => `
             <div class="board-file-popup-row${index === activeIndex ? ' is-active' : ''}" role="option"
-                aria-selected="${index === activeIndex}" data-board-file-row="${escapeHtml(file)}" title="${escapeHtml(file)}">
+                aria-selected="${index === activeIndex}" data-board-file-row="${index}" title="${escapeHtml(file.label || file)}">
                 <i class="fa-regular fa-file board-file-popup-icon" aria-hidden="true"></i>
-                <span class="board-file-popup-path">${escapeHtml(file)}</span>
+                <span class="board-file-popup-path">${escapeHtml(file.label || file)}</span>
             </div>`);
         let note = '';
-        if (status === 'loading' && items.length === 0) note = 'Finding files…';
-        else if (status === 'error') note = 'Could not list files.';
-        else if (status === '' && items.length === 0) note = 'No matching files.';
-        else if (truncated) note = 'Showing 50 files. Keep typing to narrow.';
+        if (status === 'loading' && items.length === 0) note = 'Searching…';
+        else if (status === 'error') note = 'Search unavailable. Try again.';
+        else if (status === '' && items.length === 0) note = emptyNote(token) || 'No matches.';
+        else if (truncated) note = 'Showing 50 matches. Keep typing to narrow.';
         popup.innerHTML = `${rows.join('')}
             ${note ? `<div class="board-file-popup-note" data-board-file-note>${escapeHtml(note)}</div>` : ''}
-            <div class="board-file-popup-row board-file-popup-browse${activeIndex === browseIndex ? ' is-active' : ''}" role="option"
+            ${browseIndex >= 0 ? `<div class="board-file-popup-row board-file-popup-browse${activeIndex === browseIndex ? ' is-active' : ''}" role="option"
                 aria-selected="${activeIndex === browseIndex}" data-board-file-row data-board-file-browse>
                 <i class="fa-regular fa-folder-open board-file-popup-icon" aria-hidden="true"></i>
                 <span>Browse for a file…</span>
-            </div>`;
+            </div>` : ''}`;
         popup.querySelector('.is-active')?.scrollIntoView?.({ block: 'nearest' });
         position();
     }
@@ -202,7 +206,7 @@ export function bindFileReferencePopup(input, { app, host = input?.parentElement
         popup = document.createElement('div');
         popup.className = 'board-file-popup';
         popup.setAttribute('role', 'listbox');
-        popup.setAttribute('aria-label', 'Repository files');
+        popup.setAttribute('aria-label', label);
         popup.dataset.boardFilePopup = '';
         // mousedown rather than click, and prevented: the textarea keeps focus and its caret
         // through the pick, so the insert lands where the author was typing.
@@ -211,7 +215,7 @@ export function bindFileReferencePopup(input, { app, host = input?.parentElement
             const row = event.target.closest('[data-board-file-row]');
             if (!row) return;
             if (row.dataset.boardFileBrowse !== undefined) void browse();
-            else insert(row.dataset.boardFileRow);
+            else void insert(items[Number(row.dataset.boardFileRow)]);
         }, { signal });
         host.appendChild(popup);
     }
@@ -224,7 +228,7 @@ export function bindFileReferencePopup(input, { app, host = input?.parentElement
         status = 'loading';
         render();
         try {
-            const result = await BoardApi.searchFilesAsync(token.query, { signal: fetchAbort.signal });
+            const result = await search(token, { signal: fetchAbort.signal });
             if (disposed || current !== generation || !token) return;
             items = result.files;
             truncated = result.truncated;
@@ -241,12 +245,12 @@ export function bindFileReferencePopup(input, { app, host = input?.parentElement
 
     function refresh() {
         if (disposed) return;
-        const next = findFileReferenceToken(input.value, input.selectionStart);
+        const next = findToken(input.value, input.selectionStart);
         if (!next) {
             if (popup) close();
             return;
         }
-        const changed = !token || token.start !== next.start || token.query !== next.query || token.quoted !== next.quoted;
+        const changed = !token || token.start !== next.start || token.query !== next.query || token.quoted !== next.quoted || token.kind !== next.kind;
         token = next;
         open();
         if (changed) {
@@ -278,13 +282,25 @@ export function bindFileReferencePopup(input, { app, host = input?.parentElement
         input.dispatchEvent(new Event('input', { bubbles: true }));
     }
 
-    function insert(path) {
-        if (!token) return;
-        const reference = formatFileReference(path);
+    async function insert(item) {
+        if (!token || !item) return;
         const { start } = token;
         const end = input.selectionStart;
+        const value = input.value;
+        const selectedToken = token;
         close();
-        if (reference) commit(start, end, reference);
+        const version = generation;
+        try {
+            const reference = await onPick(item, selectedToken);
+            if (disposed || version !== generation || input.value !== value || !input.isConnected) return;
+            if (reference?.searchText) {
+                input.value = value.slice(0, start) + reference.searchText + value.slice(end);
+                input.focus(); input.setSelectionRange(start + reference.searchText.length, start + reference.searchText.length);
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+            } else if (reference) commit(start, end, reference);
+        } catch (error) {
+            if (!disposed) app?.showToast?.('Board', error.message || 'Could not insert reference.', 'error');
+        }
     }
 
     async function browse() {
@@ -323,13 +339,15 @@ export function bindFileReferencePopup(input, { app, host = input?.parentElement
     input.addEventListener('blur', () => close(), { signal });
     input.addEventListener('keydown', event => {
         if (!popup) return;
-        const total = items.length + 1; // + the Browse row
+        const total = items.length + (canBrowse(token) ? 1 : 0); // + the Browse row
         switch (event.key) {
             case 'ArrowDown':
+                if (!total) break;
                 activeIndex = (activeIndex + 1) % total;
                 render();
                 break;
             case 'ArrowUp':
+                if (!total) break;
                 activeIndex = (activeIndex - 1 + total) % total;
                 render();
                 break;
@@ -342,8 +360,9 @@ export function bindFileReferencePopup(input, { app, host = input?.parentElement
                     close();
                     return;
                 }
-                if (activeIndex === items.length) void browse();
-                else insert(items[activeIndex]);
+                if (canBrowse(token) && activeIndex === items.length) void browse();
+                else if (items[activeIndex]) void insert(items[activeIndex]);
+                else { close(); return; }
                 break;
             case 'Escape':
                 // preventDefault is what keeps app.js from also closing the card modal.

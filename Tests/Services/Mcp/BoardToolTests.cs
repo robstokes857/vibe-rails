@@ -13,7 +13,7 @@ namespace Tests.Services.Mcp;
 /// The kanban MCP tools over a real temp store. The project resolver is faked so the tests own
 /// which project (and which launching session) the tool believes it is running in.
 /// </summary>
-public sealed class BoardToolTests : IDisposable
+public sealed partial class BoardToolTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), $"viberails-board-tool-{Guid.NewGuid():N}");
     private readonly string _connectionString;
@@ -134,7 +134,7 @@ public sealed class BoardToolTests : IDisposable
         Assert.Matches(@"\] Agent \(cm_[0-9a-f]{12}\): Reproduced on two parallel saves\.", card);
         Assert.Contains("Linked commits (1):\n- abc1234 Fix the race (Rob)", card);
 
-        Assert.StartsWith("FAIL: card not found on this project's board: PROJ-9", BoardKeyText.Short(await _tool.GetBoardCard("PROJ-9", cancellationToken: Ct)));
+        Assert.StartsWith("FAIL: card not found: PROJ-9", BoardKeyText.Short(await _tool.GetBoardCard("PROJ-9", cancellationToken: Ct)));
     }
 
     [Fact]
@@ -339,7 +339,7 @@ public sealed class BoardToolTests : IDisposable
         _resolver.CurrentSessionId = "22222222-2222-4222-8222-222222222222";
         await _store.LinkSessionAsync(other, foreign.Id, "22222222-2222-4222-8222-222222222222", null, "", "codex", "Codex", BoardSessionRecord.LaunchOrigin, Ct);
         Assert.StartsWith("FAIL: That session is linked to a card in another project", await _tool.AttachBoardSession("PROJ-1", Ct));
-        Assert.StartsWith("FAIL: card not found", await _tool.AttachBoardSession(foreign.Id, Ct));
+        Assert.StartsWith("FAIL: session attachments must stay", await _tool.AttachBoardSession(foreign.Id, Ct));
         Assert.Empty((await _store.GetCardDetailAsync(_project, "PROJ-1", Ct))!.Sessions);
 
         _resolver.CurrentSessionId = "33333333-3333-4333-8333-333333333333";

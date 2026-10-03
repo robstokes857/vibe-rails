@@ -11,6 +11,10 @@ public partial interface IBoardStore
     // that take an optional boardId (after the token, house style) treat null as the project's
     // default board — the first by position — so single-board callers and tests read unchanged.
     Task<IReadOnlyList<BoardRecord>> GetBoardsAsync(string projectPath, CancellationToken cancellationToken = default);
+    /// <summary>Existing local boards across projects, including their stored project identity. Does not seed boards.</summary>
+    Task<IReadOnlyList<BoardRecord>> GetLocalBoardsAsync(CancellationToken cancellationToken = default);
+    /// <summary>Finds a live local card by exact row ID or full stored permanent key across projects. No short-key or display-ID aliases.</summary>
+    Task<BoardCardRecord?> FindLocalCardAsync(string idOrKey, CancellationToken cancellationToken = default);
     Task<BoardRecord?> GetBoardAsync(string projectPath, string boardId, CancellationToken cancellationToken = default);
     /// <summary>Creates a board with the default lanes. Position is appended.</summary>
     Task<BoardRecord> CreateBoardAsync(string projectPath, string name, CancellationToken cancellationToken = default);

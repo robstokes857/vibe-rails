@@ -5,13 +5,15 @@ import { parseCliArguments } from './cli-arguments.js';
 export function friendlyModelName(cli, model) {
     const value = String(model || '').trim();
     const normalized = normalizeLlmModel(cli, value);
-    if (!(LLM_MODEL_OPTIONS[cli] || []).some(([id]) => id && id === normalized)) return value;
-    let name = value.replace(/^(anthropic|openai|google|zai|zai-coding-plan|deepseek|moonshotai|xai|opencode)\//, '');
-    const context = name.endsWith('[1m]') ? ' (1M context)' : '';
-    name = name.replace(/\[1m\]$/, '').replace(/(\d)-(\d)/g, '$1.$2');
-    if (/[A-Z ]/.test(name)) return name + context; // Antigravity already uses display names.
+    const pinned = (LLM_MODEL_OPTIONS[cli] || []).find(([id]) => id && id === normalized);
+    if (!pinned) return value;
+    // A catalog label that is not the ID itself (Claude's "Opus 5.5") is already the name.
+    if (!pinned[1].startsWith(pinned[0])) return pinned[1];
+    const name = value.replace(/^(anthropic|openai|google|zai|zai-coding-plan|deepseek|moonshotai|xai|opencode)\//, '')
+        .replace(/(\d)-(\d)/g, '$1.$2');
+    if (/[A-Z ]/.test(name)) return name; // Antigravity already uses display names.
     return name.split('-').map(word => ({ gpt: 'GPT', glm: 'GLM', mai: 'MAI' })[word]
-        || word.charAt(0).toUpperCase() + word.slice(1)).join(' ') + context;
+        || word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
 }
 
 export function friendlyEffortName(effort) {

@@ -181,9 +181,9 @@ test('changing a token immediately invalidates its in-flight suggestions', async
 
 test('the controller binds the popup to every composer and disposes it only when the editor closes', () => {
     const source = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/board-controller.js'), 'utf8');
-    assert.match(source, /import \{ bindFileReferencePopup \} from '\.\/board-file-refs\.js'/);
+    assert.match(source, /import \{ bindBoardReferences, canonicalSessionId \} from '\.\/board-references\.js'/);
     const bind = source.slice(source.indexOf('bindComposer(composer,'), source.indexOf('async attachImages('));
-    assert.match(bind, /this\.composerDisposers\.push\(bindFileReferencePopup\(input, \{ app: this\.app, host: composer \}\)\)/);
+    assert.match(bind, /this\.composerDisposers\.push\(bindBoardReferences\(input, \{ app: this\.app, host: composer, card,/);
     // bindCardEditor re-runs disposeCardPickers() AFTER the composers are wired (to reset the
     // assignee/chat pickers). If the composer disposers lived in that bucket the popup would be
     // torn down before it ever opened, which is exactly how the first UI run failed.

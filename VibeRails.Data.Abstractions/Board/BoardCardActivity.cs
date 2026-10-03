@@ -4,7 +4,7 @@ namespace VibeRails.Services.Board;
 public sealed record BoardCardActivityRecord(string CardId, string? SessionId, string? Origin);
 
 /// <summary>A running local Automation, shared by all root windows. ColumnId is its entry lane, if still on the card's board.</summary>
-public sealed record BoardRunningAutomation(string CardId, string BoardId, string? ColumnId);
+public sealed record BoardRunningAutomation(string CardId, string BoardId, string? ColumnId, string? RunId = null);
 
 public partial interface IBoardStore
 {

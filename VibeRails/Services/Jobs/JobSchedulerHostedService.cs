@@ -1,3 +1,4 @@
+using VibeRails.Services.Terminal;
 using System.Threading.Channels;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -165,6 +166,24 @@ public sealed class JobSchedulerHostedService : BackgroundService, IJobScheduler
         }
     }
 
+    /// <summary>
+    /// Every root owns its own terminal hosts, independently of scheduler lease ownership. A failed close
+    /// is logged and retried next cycle; it must not skip reaping, enqueueing or launching.
+    /// </summary>
+    private async Task CloseThisRootsFinishedAutomationTabsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var terminalScope = _scopeFactory.CreateAsyncScope();
+            var tabs = terminalScope.ServiceProvider.GetService<ITerminalTabHostService>();
+            if (tabs is not null) await tabs.CloseCompletedAutomationTabsAsync(cancellationToken);
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            Log.Warning(ex, "[Jobs] Closing finished Automation tabs failed; it will retry on the next cycle");
+        }
+    }
+
     internal async Task<bool> RunCycleAsync(DateTime nowUtc, CancellationToken cancellationToken)
     {
         _health.CycleStarted(nowUtc);
@@ -177,6 +196,7 @@ public sealed class JobSchedulerHostedService : BackgroundService, IJobScheduler
         _health.LeaseChanged(_ownsLease);
         await RecordPresenceAsync(nowUtc, cancellationToken);
         await RecoverThisProjectsStartersAsync(cancellationToken);
+        await CloseThisRootsFinishedAutomationTabsAsync(cancellationToken);
         if (!_ownsLease)
         {
             if (previouslyOwnedLease)

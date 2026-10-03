@@ -33,6 +33,21 @@ public sealed class BertSearchDbService : IBertSearchDbService
     public string? GetLatestDocumentId() => SqliteStorageErrors.Execute(() => GetLatestDocumentIdCore());
     public IReadOnlyList<BertStoredDocument> GetCaptures(int skip, int take) => SqliteStorageErrors.Execute(() => GetCapturesCore(skip, take));
     public IReadOnlyList<BertStoredDocument> GetCapturesBySessionId(string sessionId) => SqliteStorageErrors.Execute(() => GetCapturesBySessionIdCore(sessionId));
+    public IReadOnlyList<BertStoredDocument> GetSessionRecallPage(string sessionId, int offset, int take) => SqliteStorageErrors.Execute(() =>
+    {
+        if (!VectorDatabaseExists) return (IReadOnlyList<BertStoredDocument>)[];
+        using var connection = OpenVectorConnection(loadVectorExtension: false);
+        using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT Id, substr(Text,1,1000) FROM {BertSearchSchema.DocumentTableName}
+            WHERE substr(Id,1,length(@prefix))=@prefix
+            ORDER BY rowid DESC LIMIT @take OFFSET @offset
+            """;
+        command.Parameters.AddWithValue("@prefix", sessionId + ":");
+        command.Parameters.AddWithValue("@take", Math.Clamp(take, 1, 20));
+        command.Parameters.AddWithValue("@offset", Math.Max(0, offset));
+        return ReadDocuments(command, includeScore: false);
+    });
     public IReadOnlyList<BertStoredDocument> GetSessionCaptures(int skip, int take) => SqliteStorageErrors.Execute(() => GetSessionCapturesCore(skip, take));
     public BertStoredDocument? GetCapture(string documentId) => SqliteStorageErrors.Execute(() => GetCaptureCore(documentId));
     public IReadOnlyList<BertStoredDocument> SearchByText(string query, int topK) => SqliteStorageErrors.Execute(() => SearchByTextCore(query, topK));

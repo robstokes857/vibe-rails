@@ -24,6 +24,7 @@ export function run(): Promise<void> {
     const mocha = new Mocha({
         ui: 'tdd',
         color: true,
+        grep: process.env.VIBERAILS_TEST_GREP,
         timeout: 180000
     });
 

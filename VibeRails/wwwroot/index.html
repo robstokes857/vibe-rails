@@ -4401,6 +4401,7 @@
 
                 .board-composer-toolbar {
                     display: flex;
+                    flex-wrap: wrap;
                     align-items: center;
                     gap: 0.35rem;
                     padding: 0.3rem 0.4rem;
@@ -4409,6 +4410,7 @@
 
                 .board-composer-btn {
                     display: inline-flex;
+                    flex-shrink: 0;
                     align-items: center;
                     gap: 0.3rem;
                     padding: 0.2rem 0.45rem;
@@ -4432,6 +4434,8 @@
                 }
 
                 .board-composer-hint {
+                    flex: 1 1 100%;
+                    order: 2;
                     color: var(--color-text-muted, #94a3b8);
                     font-size: 0.7rem;
                     margin-left: 0.15rem;
@@ -4640,6 +4644,16 @@
                     font-size: 0.85em;
                     overflow-wrap: anywhere;
                 }
+
+                .board-composer-live { padding: .6rem .8rem; border-top: 1px solid var(--color-border); max-height: 240px; overflow: auto; }
+                .board-composer-live:empty { display: none; }
+                .board-composer-live img.board-image { display: inline-block; max-width: 120px; max-height: 80px; margin-right: .5rem; }
+                .board-composer-btn[aria-pressed="true"] { color: var(--color-primary); background: var(--color-bg-elevated); }
+                .board-comment-body :is(h1,h2,h3,h4,h5,h6) { font-size: 1.12em; margin: .6em 0 .3em; font-weight: 700; }
+                .board-comment-body :is(ul,ol) { white-space: normal; padding-left: 1.5em; }
+                .board-comment-body li { white-space: pre-wrap; }
+                .board-comment-body blockquote { border-left: 3px solid var(--color-primary); padding-left: .7em; color: var(--color-text-secondary); }
+                .board-text-reference { display: inline; border: 1px solid var(--color-border); border-radius: 4px; padding: 0 .3em; background: var(--color-bg-elevated); color: var(--color-primary); font: inherit; overflow-wrap: anywhere; }
 
                 img.board-image {
                     display: block;

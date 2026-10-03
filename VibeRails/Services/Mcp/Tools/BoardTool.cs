@@ -29,7 +29,8 @@ public sealed partial class BoardTool(
     IBoardService service,
     IBoardProjectResolver projects,
     IBoardStore store,
-    BoardReviewService? reviews = null)
+    BoardReviewService? reviews = null,
+    VibeRails.Services.BertV2.IBertSearchDbService? history = null)
 {
     /// <summary>
     /// MCP image payloads are base64 encoded and copied by the protocol stack. Keep this transfer
@@ -41,31 +42,34 @@ public sealed partial class BoardTool(
         "FAIL: no card given and this terminal is not linked to one. Pass the card key, e.g. card=\"VB-12\" (see list_board_cards).";
 
     private const string BoardArgumentHelp =
-        "Board name or id (see list_boards). Optional: defaults to the board of the card this terminal was launched for, else the project's first board.";
+        "Board ID or unambiguous name from list_boards, including other local projects. Optional: defaults to the launching card's board, else the current project's first board. Use an ID when names repeat.";
 
-    [McpServerTool, Description("List this project's kanban boards (a project can have several: sprints, sub-projects) with their ids, lanes and card counts. Card keys (the project's prefix and a number, like VB-12) are unique across the whole project, so a key never needs a board.")]
+    private const string CardArgumentHelp =
+        "Full permanent card key or row ID from any local board. Short keys and display IDs resolve only in the current project. Omit for this terminal's original card.";
+
+    [McpServerTool, Description("List all local kanban boards with IDs, project paths, lanes and card counts: current-project boards first, then a separate list of other local projects. Use a board ID to list lanes/cards or create a card on another board. Full permanent card keys and row IDs work across local projects; short keys and display IDs stay current-project scoped.")]
     public async Task<string> ListBoards(CancellationToken cancellationToken = default)
     {
         try
         {
             var project = await projects.ResolveAsync(cancellationToken);
-            var boards = await service.GetBoardsAsync(project, cancellationToken);
+            // Retain first-use setup for this project; discovery of other projects only reads.
+            await service.GetBoardsAsync(project, cancellationToken);
             var current = await ResolveBoardAsync(project, null, cancellationToken);
-            var automations = await service.GetLaneAutomationsByLaneAsync(project,
-                boards.Boards.SelectMany(b => b.Columns).Select(c => c.Id).ToList(), cancellationToken);
+            var boards = await store.GetLocalBoardsAsync(cancellationToken);
             var builder = new StringBuilder();
-            builder.Append("Boards for ").Append(project).Append(":\n");
-            foreach (var board in boards.Boards.OrderBy(b => b.Position))
+            builder.Append("Current project boards for ").Append(project).Append(":\n");
+            await AppendBoardsAsync(builder, project, boards.Where(b => SameProject(b.ProjectPath, project)).ToList(), current.BoardId, true, cancellationToken);
+            builder.Append("\nOther local boards (outside the current project):\n");
+            var others = boards.Where(b => !SameProject(b.ProjectPath, project)).ToList();
+            if (others.Count == 0) builder.Append("None.\n");
+            foreach (var group in others.GroupBy(b => b.ProjectPath))
             {
-                builder.Append("- ").Append(board.Name).Append(" (id ").Append(board.Id).Append(", ")
-                    .Append(board.CardCount).Append(" card").Append(board.CardCount == 1 ? "" : "s");
-                if (board.Columns.Count > 0)
-                    builder.Append("; lanes: ").Append(string.Join(" → ", board.Columns.OrderBy(c => c.Position).Select(c => LaneLabel(c.Name, automations[c.Id]))));
-                if (string.Equals(board.Id, current.BoardId, StringComparison.Ordinal)
-                    || (current.BoardId is null && board.Position == boards.Boards.Min(b => b.Position)))
-                    builder.Append("; current");
-                builder.Append(")\n");
+                builder.Append("Project: ").Append(group.Key).Append('\n');
+                await AppendBoardsAsync(builder, group.Key, group.ToList(), null, false, cancellationToken);
             }
+            builder.Append("\nUse board=<id> for an explicit destination. Omitted board stays in the current project. ")
+                .Append("For cards on other projects, use the full permanent key or row ID from list_board_cards; short keys and display IDs are current-project only.");
             return builder.ToString().TrimEnd();
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -85,7 +89,7 @@ public sealed partial class BoardTool(
             var target = await ResolveBoardAsync(project, board, cancellationToken);
             if (target.Error is not null)
                 return target.Error;
-            return await RenderLanesAsync(service, store, project, target.BoardId, target.BoardName, cancellationToken);
+            return await RenderLanesAsync(service, store, target.Project, target.BoardId, target.BoardName, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -125,7 +129,7 @@ public sealed partial class BoardTool(
         return builder.ToString().TrimEnd();
     }
 
-    [McpServerTool, Description("List the cards on this project's VibeRails kanban board: key, lane, type, priority, title, assignee, comment count and whether a terminal session is open on it. Optional filters by lane name, assignee key and card type.")]
+    [McpServerTool, Description("List cards on a local VibeRails board: permanent key, lane, type, priority, title, assignee, comments and open session. Select any local board with board=<id> from list_boards; omitted board stays current. Optional filters by lane, assignee and type.")]
     public async Task<string> ListBoardCards(
         [Description("Only cards in this lane (name or id). Optional.")] string? column = null,
         [Description("Only cards assigned to this LLM picker key, e.g. base:claude or env:7:codex. Optional.")] string? assignee = null,
@@ -139,6 +143,8 @@ public sealed partial class BoardTool(
             var target = await ResolveBoardAsync(project, board, cancellationToken);
             if (target.Error is not null)
                 return target.Error;
+            var outsideProject = !SameProject(project, target.Project);
+            project = target.Project;
             var columns = (await service.GetColumnsAsync(project, cancellationToken, target.BoardId)).Columns.ToDictionary(c => c.Id, c => c);
             var cards = (await service.GetCardsAsync(project, cancellationToken, target.BoardId)).Cards.AsEnumerable();
 
@@ -158,10 +164,11 @@ public sealed partial class BoardTool(
             }
 
             var rows = cards.OrderBy(c => columns.TryGetValue(c.ColumnId, out var lane) ? lane.Position : int.MaxValue).ThenBy(c => c.Position).ToList();
-            if (rows.Count == 0)
-                return "No cards match.";
-
             var builder = new StringBuilder();
+            if (outsideProject)
+                builder.Append("Other local project: ").Append(project).Append(" (board ").Append(target.BoardName).Append(", id ").Append(target.BoardId).Append(")\n");
+            if (rows.Count == 0)
+                return builder.Append("No cards match.").ToString();
             foreach (var card in rows)
             {
                 builder.Append(card.DisplayId ?? card.Key).Append(card.DisplayId is { } display && display != card.Key ? $" ({card.Key})" : "").Append(" [").Append(columns.TryGetValue(card.ColumnId, out var lane) ? lane.Name : card.ColumnId)
@@ -173,6 +180,7 @@ public sealed partial class BoardTool(
                 if (card.AgentMade) builder.Append(" — agent-made");
                 if (card.CommentCount > 0) builder.Append(" — ").Append(card.CommentCount).Append(" comment").Append(card.CommentCount == 1 ? "" : "s");
                 if (!string.IsNullOrWhiteSpace(card.ActiveTabId)) builder.Append(" — session open");
+                if (outsideProject) builder.Append(" — id ").Append(card.Id);
                 builder.Append('\n');
             }
             return builder.ToString().TrimEnd();
@@ -184,16 +192,18 @@ public sealed partial class BoardTool(
         }
     }
 
-    [McpServerTool, Description("Read one kanban card in full: fields, the board's lanes (annotated with the Automations a lane runs on entry) and any lane entry of this card still waiting to run, description, comments, linked cards, linked commits, linked terminal sessions (with each session's id, outcome and last comment), agent notes, and attachment names. Comments and notes are newest first; a small card shows everything, a large one shows the newest entries in full and older ones as one-line previews, and the reply says how to page back (before=) or read everything (activity=all). Omit the card to read the card this terminal was launched for. Pass since to see only activity after a point in time when resuming.")]
+    [McpServerTool, Description("Use this FIRST when a user names a card or asks about its previous work. Read its fields, previous-work handoff and curated file references (or linked-commit candidates), lanes and entry Automations, description, comments, linked cards, commits, sessions and attachment names. Historical references need verification against current code; file contents are not included. Long descriptions have a descriptionOffset continuation; activity is budgeted newest first and paged with before. activity=all explicitly lifts the activity budget. Omit card for this terminal's card; since filters recent activity.")]
     public async Task<string> GetBoardCard(
-        [Description("Card key like VB-12 (or the card id). Optional when this terminal was launched for a card.")] string? card = null,
+        [Description(CardArgumentHelp)] string? card = null,
         [Description("ISO-8601 UTC timestamp, e.g. 2026-09-16T21:50:00Z. Only comments, notes, sessions and commits at or after this time are listed; earlier ones are counted. Optional.")] string? since = null,
         [Description("The id of a comment or note on this card (the reply names one after \"before=\"), or an ISO-8601 UTC timestamp. Only activity before that entry or time is listed; newer entries are counted. Pass the id the reply gives to page back through older activity without skipping entries that share a timestamp. Optional.")] string? before = null,
         [Description("recent (default): the newest comments and notes in full within a size budget, older ones as one-line previews. all: every entry in full with no budget. Optional.")] string? activity = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        [Description("Character offset into the description, in pages of up to 12000 characters. Use the continuation in the preceding reply.")] int descriptionOffset = 0)
     {
         try
         {
+            if (descriptionOffset < 0 || descriptionOffset > BoardService.MaxDescriptionLength) return "FAIL: invalid descriptionOffset.";
             if (!TryParseSince(since, out var sinceUtc))
                 return "FAIL: since must be an ISO-8601 timestamp such as 2026-09-16T21:50:00Z.";
             // A comment/note id (cm_…, note_…, or a synced entry's server id) or a timestamp. A value
@@ -226,7 +236,10 @@ public sealed partial class BoardTool(
                 else
                     return $"FAIL: before={beforeId} is not a comment or note on {detail.Key}. Pass the id the previous reply named, or an ISO-8601 timestamp.";
             }
-            var render = await RenderCardAsync(service, store, target.Project, detail, new CardReadOptions(sinceUtc, beforeUtc, allActivity, beforeId), cancellationToken);
+            var currentProject = await projects.ResolveAsync(cancellationToken);
+            var referenceRoot = string.Equals(target.Project, currentProject, BoardPaths.ProjectPathComparison) ? projects.GitWorkingDirectory : target.Project;
+            detail = detail with { PreviousWork = BoardHandoffService.WithFileStatus(detail.PreviousWork, referenceRoot) };
+            var render = await RenderCardAsync(service, store, target.Project, detail, new CardReadOptions(sinceUtc, beforeUtc, allActivity, beforeId, descriptionOffset), cancellationToken);
             return render.Text;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -241,7 +254,7 @@ public sealed partial class BoardTool(
     /// cursor is an exact comment/note: entries that share its timestamp but sort before it in the
     /// store's (time, id) order are still listed, so paging back never skips a same-second twin.
     /// </summary>
-    internal sealed record CardReadOptions(DateTime? Since = null, DateTime? Before = null, bool AllActivity = false, string? BeforeId = null)
+    internal sealed record CardReadOptions(DateTime? Since = null, DateTime? Before = null, bool AllActivity = false, string? BeforeId = null, int DescriptionOffset = 0)
     {
         public static readonly CardReadOptions Default = new();
     }
@@ -272,6 +285,7 @@ public sealed partial class BoardTool(
         var stats = new CardRenderStats();
         var text = FormatCard(detail, lane?.Name ?? detail.ColumnId, lanes.Select(c => LaneLabel(c.Name, automations[c.Id])).ToList(), outcomes, options, boardName,
             [], stats);
+        text += $"\nProject: {project}\nCard ID: {detail.Id}";
         text += "\n\n" + FormatLaneStatuses(entries);
         var checks = await store.GetLatestChecksAsync(project, detail.Id, cancellationToken);
         text += "\n\n" + CheckSummary(checks);
@@ -344,7 +358,7 @@ public sealed partial class BoardTool(
         + $"{MaxMcpImageBytes} bytes (5 MiB) through MCP. Open or download it in the Board viewer instead; "
         + "the stored attachment is unchanged.";
 
-    [McpServerTool, Description("Create a new kanban card on this project's board. Returns the new card's key. Omit board to create it on the board of the card this terminal was launched for.")]
+    [McpServerTool, Description("Create a kanban card on any local board using board=<id> from list_boards. Returns its permanent key. Omit board for the launching card's board, else the current project's first board.")]
     public async Task<string> CreateBoardCard(
         [Description("Card title (required).")] string title,
         [Description("Longer description of the work. Optional.")] string? description = null,
@@ -361,11 +375,13 @@ public sealed partial class BoardTool(
             var target = await ResolveBoardAsync(project, board, cancellationToken);
             if (target.Error is not null)
                 return target.Error;
+            var outsideProject = !SameProject(project, target.Project);
+            project = target.Project;
             string? columnId = null;
             if (!string.IsNullOrWhiteSpace(column))
             {
                 var lane = await service.FindColumnAsync(project, column, cancellationToken, target.BoardId);
-                if (lane is null)
+                if (lane is null || (target.BoardId is not null && lane.BoardId != target.BoardId))
                     return $"FAIL: lane not found: {column}. Use list_board_columns to see the lanes.";
                 columnId = lane.Id;
             }
@@ -382,7 +398,8 @@ public sealed partial class BoardTool(
                 // (a hand-driven call) stays a human card.
                 AgentMade: author.Kind == BoardAuthor.AgentKind), cancellationToken, author);
             await AutoLinkSessionAsync(project, created.Id, cancellationToken);
-            return $"Created {created.Key}: {created.Title}";
+            return $"Created {created.Key}: {created.Title}"
+                + (outsideProject ? $"\nOther local project: {project} (board {target.BoardName}, id {target.BoardId})" : "");
         }
         catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
         catch (BoardConflictException ex) { return "FAIL: " + ex.Message; }
@@ -394,7 +411,7 @@ public sealed partial class BoardTool(
 
     [McpServerTool, Description("Update fields on a kanban card. Only the arguments you pass change; the rest stay as they are. Use descriptionAppend to add to the description without rewriting it.")]
     public async Task<string> UpdateBoardCard(
-        [Description("Card key like VB-12 (or the card id).")] string card,
+        [Description(CardArgumentHelp)] string card,
         [Description("New title.")] string? title = null,
         [Description("New description (replaces the whole description).")] string? description = null,
         [Description("Text to append to the end of the current description. Cannot be combined with description.")] string? descriptionAppend = null,
@@ -440,7 +457,7 @@ public sealed partial class BoardTool(
 
     [McpServerTool, Description("Move a kanban card to another lane (by lane name or id), optionally at a position within it. Use this when the card changes state, e.g. to Review when the work is ready for eyes. Entering a lane may run that lane's Automations (see the lane annotations in get_board_card / list_board_columns): link commits and post your summary comment BEFORE moving into such a lane, and move once. The result lists what the entry queued or skipped, and why. skipAutomations=true moves without running them (recorded on the card); preview=true reports what a move would trigger without moving.")]
     public async Task<string> MoveBoardCard(
-        [Description("Card key like VB-12 (or the card id).")] string card,
+        [Description(CardArgumentHelp)] string card,
         [Description("Target lane name or id, e.g. Review.")] string column,
         [Description("0-based position within the lane. Defaults to the end.")] int? position = null,
         [Description("true: move the card but do not run the destination lane's Automations for this entry. Per call only; the skip and what it bypassed are recorded as a comment on the card. Use it for moves that need no run (a research spike, a card moved back and forth).")] bool skipAutomations = false,
@@ -484,7 +501,7 @@ public sealed partial class BoardTool(
     [McpServerTool, Description("Add a comment to a kanban card. Use it to record progress, decisions, blockers and hand-off notes so the next session can resume. Omit the card to comment on the card this terminal was launched for.")]
     public async Task<string> AddBoardComment(
         [Description("Comment text.")] string body,
-        [Description("Card key like VB-12 (or the card id). Optional when this terminal was launched for a card.")] string? card = null,
+        [Description(CardArgumentHelp)] string? card = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -510,7 +527,7 @@ public sealed partial class BoardTool(
     [McpServerTool, Description("Compatibility alias for add_board_comment. Checkpoints, findings and progress all go to Comments. Omit the card to use the card this terminal was launched for.")]
     public async Task<string> AppendBoardNote(
         [Description("Note text.")] string body,
-        [Description("Card key like VB-12 (or the card id). Optional when this terminal was launched for a card.")] string? card = null,
+        [Description(CardArgumentHelp)] string? card = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -535,7 +552,7 @@ public sealed partial class BoardTool(
 
     [McpServerTool, Description("Compatibility reader for all card comments, including legacy notes, oldest first. Pass since to read comments added after a point in time. Omit the card to use the card this terminal was launched for.")]
     public async Task<string> GetBoardNotes(
-        [Description("Card key like VB-12 (or the card id). Optional when this terminal was launched for a card.")] string? card = null,
+        [Description(CardArgumentHelp)] string? card = null,
         [Description("ISO-8601 UTC timestamp; only notes at or after it are returned. Optional.")] string? since = null,
         CancellationToken cancellationToken = default)
     {
@@ -569,7 +586,7 @@ public sealed partial class BoardTool(
     public async Task<string> AddBoardAttachment(
         [Description("File name ending in .md or .txt, e.g. findings.md.")] string name,
         [Description("The file's full text (UTF-8).")] string text,
-        [Description("Card key like VB-12 (or the card id). Optional when this terminal was launched for a card.")] string? card = null,
+        [Description(CardArgumentHelp)] string? card = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -595,7 +612,7 @@ public sealed partial class BoardTool(
     [McpServerTool, Description("Save a git commit's changed-code snapshot from this terminal's checkout. One call links it to the target card AND every card attached to this session in the project. Safe to repeat from a session; existing links are kept. The snapshot remains viewable after the checkout is deleted. Call after committing; capture must succeed before any links are saved. Omit card to use the original session card as the target.")]
     public async Task<string> LinkBoardCommit(
         [Description("Commit sha (7-40 hex characters) from this terminal's checkout.")] string sha,
-        [Description("Card key like VB-12 (or the card id). Optional when this terminal was launched for a card.")] string? card = null,
+        [Description(CardArgumentHelp)] string? card = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -633,6 +650,8 @@ public sealed partial class BoardTool(
             var target = await ResolveCardAsync(card, cancellationToken);
             if (target.Error is not null)
                 return target.Error;
+            if (!SameProject(target.Project, await projects.ResolveAsync(cancellationToken)))
+                return "FAIL: session attachments must stay in the current project. You can read and update other local cards by full permanent key or row ID without attaching this session.";
             var tabId = Environment.GetEnvironmentVariable(LocalToolApiContext.CurrentTabIdVariable);
             var attached = await service.AttachSessionAsync(target.Project, target.CardId!, sessionId,
                 string.IsNullOrWhiteSpace(tabId) ? null : tabId.Trim(), cancellationToken);
@@ -653,34 +672,47 @@ public sealed partial class BoardTool(
     private sealed record CardTarget(string Project, string? CardId, string? CardKey, string? Error);
 
     /// <summary>Null BoardId = the project's default board (the store resolves it); Name is known only for an explicit or launched board.</summary>
-    private sealed record BoardTarget(string? BoardId, string? BoardName, string? Error);
+    private sealed record BoardTarget(string Project, string? BoardId, string? BoardName, string? Error);
 
     /// <summary>Explicit board argument first (name or id); otherwise the board of the card this session was launched for.</summary>
     private async Task<BoardTarget> ResolveBoardAsync(string project, string? boardArgument, CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(boardArgument))
         {
-            var found = await service.FindBoardAsync(project, boardArgument, cancellationToken);
+            var wanted = boardArgument.Trim();
+            var boards = await store.GetLocalBoardsAsync(cancellationToken);
+            var found = boards.FirstOrDefault(b => string.Equals(b.Id, wanted, StringComparison.Ordinal));
+            if (found is null)
+            {
+                // Names are searched across every local board, but the caller's project is asked first: a
+                // "Sprint" unique here must not become ambiguous because another project also has one.
+                var matches = boards.Where(b => string.Equals(b.Name, wanted, StringComparison.OrdinalIgnoreCase)).ToList();
+                var inProject = matches.Where(b => SameProject(b.ProjectPath, project)).ToList();
+                if (inProject.Count > 0) matches = inProject;
+                if (matches.Count > 1)
+                    return new BoardTarget(project, null, null, $"FAIL: Board name '{wanted}' is ambiguous. Use a board ID from list_boards.");
+                found = matches.FirstOrDefault();
+            }
             return found is null
-                ? new BoardTarget(null, null, $"FAIL: board not found: {boardArgument.Trim()}. Use list_boards to see the boards.")
-                : new BoardTarget(found.Id, found.Name, null);
+                ? new BoardTarget(project, null, null, $"FAIL: board not found: {wanted}. Use list_boards to see the boards.")
+                : new BoardTarget(found.ProjectPath, found.Id, found.Name, null);
         }
 
         if (projects.CurrentSessionId is { } sessionId)
         {
             var link = await store.FindSessionLinkAsync(sessionId, cancellationToken);
-            if (link is not null && string.Equals(link.ProjectPath, project, StringComparison.OrdinalIgnoreCase))
+            if (link is not null && SameProject(link.ProjectPath, project))
             {
                 var linked = await service.FindCardAsync(link.ProjectPath, link.CardId, cancellationToken);
                 if (linked is not null && !string.IsNullOrEmpty(linked.BoardId))
                 {
                     var boardRecord = await store.GetBoardAsync(project, linked.BoardId, cancellationToken);
                     if (boardRecord is not null)
-                        return new BoardTarget(boardRecord.Id, boardRecord.Name, null);
+                        return new BoardTarget(project, boardRecord.Id, boardRecord.Name, null);
                 }
             }
         }
-        return new BoardTarget(null, null, null);
+        return new BoardTarget(project, null, null, null);
     }
 
     /// <summary>Explicit card argument first; otherwise the card this session was launched for.</summary>
@@ -689,9 +721,12 @@ public sealed partial class BoardTool(
         var project = await projects.ResolveAsync(cancellationToken);
         if (!string.IsNullOrWhiteSpace(card))
         {
+            var explicitCard = await store.FindLocalCardAsync(card, cancellationToken);
+            if (explicitCard is not null)
+                return new CardTarget(explicitCard.ProjectPath, explicitCard.Id, explicitCard.Key, null);
             var found = await service.FindCardAsync(project, card, cancellationToken);
             return found is null
-                ? new CardTarget(project, null, null, $"FAIL: card not found on this project's board: {card}. Use list_board_cards to see the keys.")
+                ? new CardTarget(project, null, null, $"FAIL: card not found: {card}. Use list_boards and list_board_cards; cards on other projects require a full permanent key or row ID.")
                 : new CardTarget(project, found.Id, found.Key, null);
         }
 
@@ -728,6 +763,9 @@ public sealed partial class BoardTool(
     {
         var sessionId = projects.CurrentSessionId;
         if (sessionId is null)
+            return;
+        // A write to another project's card must not redirect this terminal's omitted defaults.
+        if (!SameProject(project, await projects.ResolveAsync(cancellationToken)))
             return;
         try
         {
@@ -896,9 +934,18 @@ public sealed partial class BoardTool(
         builder.Append('\n');
 
         var descriptionStart = builder.Length;
+        var descriptionOffset = Math.Min(options.DescriptionOffset, card.Description.Length);
+        var descriptionLength = Math.Min(12000, card.Description.Length - descriptionOffset);
+        if (descriptionLength > 0 && descriptionOffset + descriptionLength < card.Description.Length
+            && char.IsHighSurrogate(card.Description[descriptionOffset + descriptionLength - 1])) descriptionLength--;
         builder.Append("Description:\n")
-            .Append(string.IsNullOrWhiteSpace(card.Description) ? "(none)" : card.Description).Append("\n\n");
+            .Append(string.IsNullOrWhiteSpace(card.Description) ? "(none)" : card.Description.Substring(descriptionOffset, descriptionLength)).Append("\n\n");
+        if (descriptionOffset + descriptionLength < card.Description.Length)
+            builder.Append($"[description continued: get_board_card card={card.Key} descriptionOffset={descriptionOffset + descriptionLength}]\n\n");
         stats.DescriptionChars = builder.Length - descriptionStart;
+        var previousWork = BoardHandoffService.Format(card.PreviousWork, card.FileCandidates);
+        builder.Append(previousWork);
+        stats.PreviousWorkChars = previousWork.Length;
 
         if (card.LinkedCards.Count > 0)
         {
@@ -972,6 +1019,7 @@ public sealed partial class BoardTool(
             else
                 builder.Append(" · ended");
             builder.Append(" · session ").Append(session.Id).Append('\n');
+            builder.Append("    purpose: ").Append(session.Origin).Append('\n');
             if (extra.LastComment is { } last)
                 builder.Append("    last comment [").Append(last.CreatedAt.ToString("u", CultureInfo.InvariantCulture)).Append("]: ")
                     .Append(Preview(last.Body, SessionLastCommentPreviewCharacters)).Append('\n');
@@ -1200,6 +1248,7 @@ public sealed partial class BoardTool(
     {
         public int TotalChars;
         public int DescriptionChars;
+        public int PreviousWorkChars;
         public int LinkedCardsChars;
         public int CommitsChars;
         public int CommitsListed;
@@ -1211,7 +1260,7 @@ public sealed partial class BoardTool(
         public ActivityRenderStats Comments { get; } = new();
         public ActivityRenderStats Notes { get; } = new();
         /// <summary>Header, lane list, timestamps and the fixed guidance sentences.</summary>
-        public int OtherChars => Math.Max(0, TotalChars - DescriptionChars - LinkedCardsChars - CommitsChars - SessionsChars - AttachmentsChars - Comments.Chars - Notes.Chars);
+        public int OtherChars => Math.Max(0, TotalChars - DescriptionChars - PreviousWorkChars - LinkedCardsChars - CommitsChars - SessionsChars - AttachmentsChars - Comments.Chars - Notes.Chars);
     }
 
     /// <summary>One activity section's outcome: entries shown in full, previewed, omitted, and the body characters that did not reach the agent.</summary>

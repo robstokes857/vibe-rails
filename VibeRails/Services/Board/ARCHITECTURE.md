@@ -1,5 +1,67 @@
 # Vibe Board architecture and review
 
+## Card recall (VB-13)
+
+`save_board_handoff` stores outcome, decisions, validation, outstanding issues and up to twelve
+curated file references independently of the task description. Paths are repository-relative;
+each has a reason, implementation/test/docs role, optional symbol and commit. The server stamps
+author/session/time. `board-recall/1` adds append-only handoffs and a derived embedding cache;
+startup does not convert old card data. Saving also appends the full handoff to Comments in the
+same transaction, so prior handoffs remain readable and ordinary discussion sync carries their
+text. Structured handoffs and vectors are currently local; they are not part of hosted projection.
+Merge copies handoffs while retaining source rows. Linked commit snapshots supply bounded,
+explicitly uncurated path candidates without loading file contents. Current reads mark missing
+paths, links and historical references; they do not claim a commit-era file is current.
+
+`get_board_card` returns Previous work beside the description. Descriptions use 12,000-character
+pages with `descriptionOffset`; the existing activity budget and `before` cursors remain.
+`read_board_session` checks card/session membership, lists ten captured message previews, and
+pages individual documents in 12,000-character chunks. A missing index is reported as unavailable.
+No Board tool types into a live terminal.
+
+`BoardRecallService` resolves explicit short, display and permanent keys within the current
+project before broad history ranking. It recognizes `card 10` only with a linked launching-card
+context. Short-key prefixes must belong to this project's permanent, legacy or current/historical
+display IDs, so incidental tokens such as `GPT-5` and `UTF-8` do not suppress discovery. Full
+permanent keys remain explicit. Recognized keys produce explicit misses when absent; multiple keys
+never substitute a foreign card. No-key queries rank current titles, descriptions and handoffs using keywords and the existing
+BGE embedder with reciprocal rank fusion. Full text participates in keywords; semantic vectors
+represent a bounded prefix under BGE's 512-token limit. Up to 32 stale vectors are refreshed per
+search, so a large project's semantic coverage warms over subsequent searches. Model failure
+retains keyword discovery. Card and linked-session sources are labeled separately from broader
+captured history. All Board state remains behind `IBoardStore`.
+
+The existing **Chat with agent** control accepts an optional 1,000-character question. Discussion
+launches carry a short MCP bootstrap, at most 2,000 characters of environment initial message and
+4,000 characters of environment arguments. Existing command preparation checks the final escaped
+Windows launch command, including provider options and Board grants. Discussion and implementation
+may coexist; `chat` links do not populate the working-agent indicator or block Start work. An empty
+question searches all live discussions for the selected agent before checking capacity; a question
+or an agent without a matching discussion starts fresh. Focus does
+not record another launch sample. The picker defaults to the latest discussion selection, then
+the assignee. Lane and assignment stay unchanged.
+
+Commit recall uses the existing VB-14 Git fix: argv execution, closed stdin, fsmonitor disabled,
+bounded pipe draining and explicit timeout diagnostics. Capture must succeed before linking.
+Regression fixtures cover handoff isolation, duplicate keys across projects, token boundaries,
+missing files, description/session paging, and discussion/work coexistence.
+
+## Local MCP discovery (VIBE-28)
+
+`BoardTool.ListBoards` uses `IBoardStore.GetLocalBoardsAsync` to show current-project boards first,
+followed by a separate other-project section with stored project paths, board IDs, lanes and counts.
+Only the current project retains first-use board setup; listing other projects does not seed them.
+Board IDs and globally unambiguous names select explicit destinations for list/create operations.
+`FindLocalCardAsync` resolves full random stored keys or row IDs across projects; short keys and display
+labels still resolve within the current project. Foreign card lists include row IDs, including for
+legacy cards whose computed or imported short keys are not globally unique. Reads include the owning project.
+
+MCP derives the selected project from stored metadata, then calls the existing scoped services.
+REST remains bound to the dashboard project. Moves/attachments still validate both endpoints;
+cross-project card transfer and cross-project session attachment are not introduced. Cross-project
+writes do not auto-link sessions or change omitted-target defaults. Commit capture still uses the
+caller's actual checkout. No migration, listener, tool name or provider grant is added.
+
 ## New-board review defaults (VIBE-23)
 
 There is one supported local lane template: Backlog / Ready / Build / Review / Done. Both first
@@ -769,7 +831,7 @@ and schema snapshot tests; altering already-applied migration SQL does not upgra
 | Boundary | Observed protection / limitation |
 | --- | --- |
 | Browser to backend | Production auth middleware precedes endpoints and static serving. Session cookie or session header plus `viberails_tab` are required on Board and HTTP MCP. Root-only registration is separate from authentication. |
-| Project scope | No REST/MCP project-path argument; store lookups resolve keys/IDs inside server-derived project. Cross-board links/moves remain inside that project. This is local application scoping, not multi-user tenancy. |
+| Project scope | No REST/MCP project-path argument. REST uses the dashboard project; explicit MCP board IDs/permanent card keys resolve the owning project from local store metadata (VIBE-28). Cross-board links/moves stay within that selected project. This is local application scoping, not multi-user tenancy. |
 | SQL and Git | Values are SQL parameters. Variable SQL fragments are internal constants. SHA validation, argv-based Git and blob IDs avoid shell/path interpolation for snapshot capture. |
 | Browser content | Escape-first small text renderer; attachment images allow only raster data URLs. File response is an octet-stream attachment with `nosniff`, `no-store`, and restrictive CSP. Text uses `textContent`; PDF paints to canvas, not an active document iframe. |
 | Agent instructions | Launch composer bounds text, neutralizes template braces, flattens controls/bidi in metadata, and labels card content as data. Tool output is still untrusted text; fences are guidance, not an authorization boundary. |
@@ -1096,3 +1158,26 @@ show the same states; review/check discovery uses the same pending/terminal reas
 preserving process outcome versus review result. Actual runs override ledger observations by
 immutable trigger key even before acknowledgment. The existing visible editor refresh updates
 the display without changing drafts or scheduling work.
+
+
+## Composer and lane activity (VIBE-34)
+
+`board-references.js` extends the shared composer popup to project card IDs, exact session GUIDs
+and commit SHAs using existing authenticated APIs. Name-based session suggestions read one bounded
+recent-history page; exact GUID/card queries skip unrelated indexes. Saved cards link selected
+sessions/commits immediately; draft cards queue them until Create. Card text carries reference
+syntax; no new schema or historical conversion is involved. `board-markdown.js` styles already
+escaped text and never permits raw HTML or arbitrary image sources. `board-composer-preview.js`
+provides live styles and small attachment previews. `board-image-previews.js` shares authenticated
+raster loading between composer panes and posted Comments, owns Blob URLs and cancellation,
+and allows a later render to retry a failed fetch.
+
+The card keeps current check summaries; detailed run/history/reviewer configuration is unmounted.
+The lane Agents dropdown can configure VCA or Code quality as an ordinary single-action Automation.
+`BoardAutomationService.GetAsync` includes running agents tied to the immutable originating lane,
+scoped to its project and board even after a card moves. The open panel polls only
+`GET /api/v1/board/columns/{columnId}/automation/running` every 10 seconds: it reads
+`IBoardStore.GetRunningAutomationsAsync` (cards matched by stored trigger key, so a legacy short
+key cannot fail alias resolution) and the lane's running cards by row ID, without the catalog,
+starter recovery or reviewer setup probes. Each root scheduler closes confirmed
+completed Automation hosts after their recording flush; saved recordings remain replayable.

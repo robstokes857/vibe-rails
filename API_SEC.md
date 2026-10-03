@@ -1,5 +1,24 @@
 # API authentication coverage
 
+## VB-13 card recall (2026-10-02, scoped amendment)
+
+No new HTTP route, listener or authentication exemption. The existing card response includes
+bounded structured previous work and inert repository-relative file references. MCP adds
+`save_board_handoff` and `read_board_session` on both transports, using exact per-tool Board
+grants. Writes resolve the owning project/card, validate field/path budgets, stamp the caller's
+provenance, and append a Comments receipt atomically. File references do not execute or load
+contents; local status checks stop at symlinks/reparse points.
+
+Session reads require membership on the resolved card. Document IDs must belong to that linked
+session; list and text reads are paged. History lookup uses an exact session prefix, not SQL LIKE
+wildcards. Search resolves explicit card aliases within the current project; broad captured history
+is labeled as a separate local-user source. Discussion questions are bounded and passed through
+existing argv/prompt preparation. A discussion never injects context into an active TUI. The launch
+route retains both credentials and server-derived project identity.
+
+Scoped route inspection and both repository listener searches found only the approved main
+Kestrel host, the transient PortFinder probe and test hosts; the cross-runtime search had no matches.
+
 ## VIBE-36 terminal tab card link (2026-10-02, scoped amendment)
 
 No route, listener, authentication exception or outbound destination was added. The existing
@@ -29,6 +48,40 @@ main Kestrel host, non-serving PortFinder probe and test hosts were found; no cr
 matches. Scoped route enumeration found the new coverage GET and existing export routes.
 Fixtures cover wrong/cross-account ACKs, hosted download ownership and corrupted uploads.
 No security violation was found. This is a scoped amendment, not a deployment audit.
+
+**2026-10-02 pre-release correction (VB-3SKWQ-105 review).** The filename filter admitted
+native credential stores the policy above claimed to exclude: OpenCode `mcp-auth.json`
+(MCP OAuth access/refresh tokens and client secrets) and the whole Antigravity Chromium
+profile under `~/.gemini/antigravity-browser-profile` (`Cookies`, `Login Data`, `Local State`).
+`BackupFiles.Excluded` now matches the credential family (`auth`/`oauth`/`creds`/`accounts`
+name segments, browser directories and Chromium credential files) instead of one `auth.`
+prefix, and JSON redaction covers every `*settings.json`/`*config.json`/`opencode.json(c)` so
+MCP `env`/`headers` blocks are stripped. `Tests/Services/BackupFilesCredentialTests.cs` runs the
+real enumeration and zip writer against a fixture home. No archive had been staged or delivered
+from this machine (`~/.vibe_rails/complete-backups` absent), so no revocation was needed here;
+owners whose roots already ran the feature should check their delivered configuration archives.
+Residual: `config.toml` (Codex, Grok) is copied verbatim because TOML is not redacted.
+
+**2026-10-02 review fixes (VIBE-35).** Redaction now also drops `Proxy-Authorization`, `X-Auth`,
+`Cookie`, `access_key`, `session_id`-style names and every entry of object-valued
+`env`/`environment`/`headers`/`http_headers` blocks, since header and env credentials use arbitrary
+names; Claude's `backups/.claude.json.backup.*` copies are excluded with `.claude.json`. A JSON file
+that cannot be parsed is left out rather than written as an empty entry. CLI transcripts, prompt
+history and log stores are no longer part of the configuration dataset. The account service is
+contacted before staging. Outbound destination, headers and authentication are unchanged.
+The lane review then confirmed the boundary was still open: plugin `.mcp.json`, Codex/Grok
+`config.toml` and MCP `args` (`--token …`) reached archives with credentials intact. Every
+captured JSON file is now redacted (not a name list), every `.toml` file gets line-based TOML
+redaction with the same rules, and every string value is scanned: URL passwords, the value of any
+credential-named `name=value`/`Name: value` pair at any depth (`--header=Authorization: Bearer …`,
+`--env=API_KEY=…`, query tokens), and the item or word after a credential flag or `Bearer`/`Basic`
+become `[redacted]` (the second review found the nested forms). A third review found encoded
+spellings: TOML quoted keys and basic strings are now unescaped before classification
+(`"http\u005fheaders"`, `"--api\u002dkey"`, `\u003d` inside URLs) and query names are also checked
+percent-decoded (`api%5Fkey`), each with archive-level regressions.
+`BackupFilesCredentialTests` drives the real enumeration and zip writer over those three shapes.
+The earlier "TOML copied verbatim" residual is closed; YAML is still copied verbatim (no CLI
+reads MCP servers from YAML today), and free-text content remains embedded-secret territory.
 
 ## VIBE-22 Switch reviewer (2026-10-01, scoped amendment)
 
@@ -1455,7 +1508,9 @@ cannot read or write another project's board through this surface.
   counts creates and updates without writing. Outbound only; no new listener.
 - `GET /api/v1/board/columns/{columnId}/automation`,
   `PUT /api/v1/board/columns/{columnId}/automation` — read/save lane automation settings.
-  Both require session and tab credentials and use the server-derived project.
+  `GET /api/v1/board/columns/{columnId}/automation/running` (VIBE-35) returns only that lane's
+  running agents for the panel's poll. All require session and tab credentials and use the
+  server-derived project; a lane outside it is a 404.
 - `GET /api/v1/board/boards/{boardId}/history` — Board history scoped to the server-derived
   project and board, optionally filtered by `card`. Returns up to 100 entries, a next offset,
   and a has-more indicator; `offset` must be between 0 and 1,000,000. Missing or foreign
@@ -1548,8 +1603,15 @@ real TUI before it ships.
   `PUT /api/v1/board/cards/{card}/sessions/{sessionId}`,
   `DELETE /api/v1/board/cards/{card}/sessions/{sessionId}` — the card ↔ terminal-session links.
 
-MCP note: reads through these tools never link the calling session to a card. Writes auto-link
-an entirely unlinked session; `attach_board_session` explicitly adds another card within the
+MCP note (VIBE-28): board discovery shows all local boards, current-project boards first and
+other projects labeled with their stored paths. Explicit board IDs/unambiguous names and full
+random permanent card keys/row IDs resolve the owning project through `IBoardStore`; short keys
+and display IDs retain current-project scope, including imported legacy short keys. Operations
+then use existing scoped service/store methods. REST still uses the dashboard project. This is
+the local user's Board capability; it introduces no per-project authorization claim.
+Reads never link the calling session. Writes in the current project auto-link an entirely
+unlinked session; writes to another project preserve the caller's defaults and session links.
+`attach_board_session` explicitly adds another card within the
 same project. The same board operations (minus any delete or terminal input) are exposed as `*_board_*` tools on
 `/mcp` (both credentials) and on the stdio `vb mcp` host. The stdio host reads and writes
 `board.db` through `IBoardStore` rather than calling this API, so a CLI in any terminal can work a card
@@ -1557,7 +1619,11 @@ without a VibeRails tab. `read_board_attachment` returns bounded UTF-8 Markdown/
 byte-sniffed PNG/JPEG/GIF/WebP MCP image content up to 5 MiB using current card/project-scoped IDs,
 never paths or direct SQL arguments. Removed attachments are unavailable. The host is a child process of the CLI over pipes and remains
 unauthenticated by design. `Tests/Routes/BoardRoutesTests.cs` pins the two-credential
-requirement and the launch composition; `Tests/Services/Mcp/BoardToolTests.cs` pins the tools.
+requirement and the launch composition; `Tests/Services/Mcp/BoardToolTests.cs` and its discovery
+partial pin the tools. Scoped inspection of Board route mappings and both listener searches
+found only the approved main Kestrel host, the non-serving PortFinder probe and test hosts;
+the cross-runtime search had no matches. No transport, route, authentication exemption or
+provider grant changes for VIBE-28.
 
 ### Local filesystem browser (1)
 
@@ -1854,3 +1920,19 @@ Python probes only consult roots holding the module's first segment, and a per-g
 budget (`module-work-limit`) stops repeated crate-map walks. The C#/PHP scope reader no longer
 rescans the file for every unterminated `using`. Allocation and timing regressions cover each
 case. No route, authentication, listener or repository-containment behaviour changed.
+
+
+## VIBE-34 composer and lane activity (2026-10-01, scoped amendment)
+
+The existing protected lane Automation GET adds running-agent metadata. The service validates
+project, originating lane and current card/board membership; foreign or deleted cards are omitted.
+Existing authenticated Board/history/attachment routes serve reference search and raster previews.
+No new route, listener, credential exception or schema change is introduced. Markdown starts from
+escaped text and emits fixed tags; image sources resolve through raster attachment records or
+owned Blob URLs fetched with both credentials. Browser tests cover escaping and URL disposal.
+
+Each root scheduler closes only Automation hosts with terminal run status, inactive PTY and an
+ended recording, using the existing versioned reservation to reject concurrent starts. Ordinary
+interactive terminals and stored recordings are preserved. No new launch permissions are added.
+Scoped Board route enumeration and both mandatory listener searches found only the main Kestrel
+host, non-serving port probe and existing test hosts; the cross-runtime search had no matches.

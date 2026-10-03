@@ -222,7 +222,7 @@ The Claude CLI supports per-environment settings configuration. Settings are sto
 | Setting | DTO Property | JSON Key | Type | Default | Persisted? | Description |
 |---------|--------------|----------|------|---------|------------|-------------|
 | Effort | `Effort` | `effortLevel` | string | "" | Yes | low/medium/high/xhigh (not "max" — session-only) |
-| Model | `Model` | `model` | string | "" | Yes | Pinned model ID (e.g. claude-opus-4-8) |
+| Model | `Model` | `model` | string | "" | Yes | Pinned model ID (e.g. claude-opus-5-5[1m]) |
 | Fast Mode | `FastMode` | `fastMode` | bool | false | Yes | Same as `/fast`; Opus-only, no launch flag |
 | Dangerously Skip Permissions | `DangerouslySkipPermissions` | — | bool | false | No (launch flag) | `--dangerously-skip-permissions` (YOLO) |
 | No Session Persistence | `NoSessionPersistence` | — | bool | false | No (launch flag) | `--no-session-persistence` |
@@ -240,7 +240,7 @@ stripped (it is never persisted to `settings.json`). The user's `permissions` bl
 ```json
 {
   "effortLevel": "high",
-  "model": "claude-opus-4-8",
+  "model": "claude-opus-5-5[1m]",
   "fastMode": true
 }
 ```

@@ -1,5 +1,30 @@
 # MCP Server (in-process)
 
+## Card recall (VB-13)
+
+`get_board_card` is the first tool for a named card or prior-work question. It returns structured
+Previous work, file provenance/status and a description continuation at 12,000 characters.
+`save_board_handoff` appends structured outcome/decisions/validation/issues/files plus a full
+Comments receipt. `read_board_session` verifies card/session membership and pages captured
+messages or individual documents. Both are methods on the explicitly registered `BoardTool`,
+with exact grants in `BoardMcpAuthorization` for both transports. `search_history` puts exact
+current-project keys ahead of global history, reports misses, and discovers cards without keys
+via the existing BGE embedder and keyword/RRF ranking. See the
+[Board contract](../Board/ARCHITECTURE.md#card-recall-vb-13) for limits and incremental indexing.
+
+## Local board discovery (VIBE-28)
+
+Board MCP tools can address all boards in the local Board store. `list_boards` lists the resolved
+current project's boards first and other local projects in a separate section with project paths.
+Use `board=<id>` with `list_board_columns`, `list_board_cards` or `create_board_card` to select
+another project. A board name must be unique across local projects; exact IDs take precedence.
+Full stored permanent card keys and row IDs resolve globally before current-project aliases.
+Short keys and display IDs remain current-project scoped; foreign card lists include row IDs for
+legacy cards without globally unique keys. Omitted arguments retain the launching card/default
+board. Cross-project writes never auto-link the caller; session attachments stay in one project.
+`IBoardStore.GetLocalBoardsAsync` and `FindLocalCardAsync` provide discovery without schema changes.
+Every operation then uses the stored owning project with the existing scoped service/store methods.
+
 ## VIBE-1 discussion update
 
 Use `add_board_comment` for checkpoints, progress and handoffs. `append_board_note` is retained
@@ -24,7 +49,7 @@ natural one:
 vb.exe — Native AOT, two MCP entry points sharing the same tool classes
 │
 ├── HTTP (dashboard's Kestrel, root backend only)
-│     MapRegisterServices: explicit WithTools<...>() registrations
+│     MapRegisterServices: WithVibeRailsTools() — explicit WithTools<...>() per class, shared JSON options
 │     Program.cs:          app.MapMcp("/mcp")
 │     CookieAuthMiddleware in front of /mcp     ← viberails_session + viberails_tab tokens required
 │
@@ -65,7 +90,7 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 | `pause_token_saver` | `TokenSaverTool.PauseTokenSaver` | Turns VibeRails' token compression off for 5 minutes for this terminal tab, so an agent can read elided output verbatim. |
 | `resume_token_saver` | `TokenSaverTool.ResumeTokenSaver` | Restores token compression immediately, ending an active pause early. |
 | `get_token_saver_status` | `TokenSaverTool.GetTokenSaverStatus` | Reports whether compression is active and whether a pause window is open. |
-| `list_boards` | `BoardTool.ListBoards` | The project's boards (a project can hold several: sprints, sub-projects) with ids, lanes and card counts, and which one is current for this terminal. |
+| `list_boards` | `BoardTool.ListBoards` | All local boards with IDs, lanes and card counts: current project first, then other projects with paths. Marks the current board for this terminal. |
 | `list_board_columns` | `BoardTool.ListBoardColumns` | Lanes of one board with card counts and, per lane, an `on entry:` line for each Automation a card entry triggers (summary from the Job definition, where its output lands, and why it would not run: disabled, deleted, other repository, no actions, run already active), plus the sequencing guidance. `board` (name or id) optional: defaults to the board of the card this terminal was launched for, else the first board. |
 | `list_board_cards` | `BoardTool.ListBoardCards` | Cards on one board (key, lane, type, priority, title, assignee, comment count, session open); optional lane/assignee/type filters and the same optional `board`. Card keys are project-unique, so `get_board_card VB-n` never needs a board. |
 | `get_board_card` | `BoardTool.GetBoardCard` | One card in full: fields, the board's lane names (annotated `Lane (on entry: "Automation")`) and this card's not-yet-settled lane entries (`Pending lane automations:`), description, comments, linked commits, sessions (full session id, ended time/exit code, that session's last comment, its chat summary when one exists), agent notes, attachment ids/names/types/sizes. Comments and notes are newest first (VB-63): when they fit the 24,000-character activity budget nothing is hidden; otherwise the newest entries are full (comments first, notes keep an 8,000-character reserve) and older ones are one-line previews with ids, sessions/commits list the newest 10/30, and the reply names the way back. `card` omitted = the card this terminal was launched for. `since` (ISO-8601) and `before` (a comment/note id the reply names, or an ISO-8601 timestamp) window the activity and count what they hide; the id form is an exact cursor, so entries sharing an instant are never skipped between pages; `activity=all` lifts the budget. Reading never links the session to the card. |
@@ -109,9 +134,8 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
   before/after blobs, then saves the link and `BoardCommitSnapshots` row in one transaction.
   Viewing never consults Git. Capture errors leave no link. More than 60 files is rejected;
   individual file previews retain at most 400,000 characters plus a visible truncation marker.
-- **Board name resolution**: names are case-insensitive; duplicate names fail with an explicit
-  instruction to use the board ID from `list_boards`. Exact IDs take precedence and remain scoped
-  to the current project.
+- **Board name resolution**: names are case-insensitive across local projects; duplicate names fail
+  with an explicit instruction to use the board ID from `list_boards`. Exact IDs take precedence.
 - **Card default**: every `card` argument accepts a key (`VB-12`) or an id; omitted, it means the
   card the session was launched for (or its oldest remaining attachment if that link is removed).
   Writes auto-link an entirely unlinked VibeRails session with origin `mcp`. To attach additional
@@ -134,7 +158,7 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
   `StorageException`) says so explicitly and tells the agent to retry — `Fail()` in `BoardTool`
   — because on 2026-09-16 three agents each lost a comment to the generic "see the log" sentence
   and filed it as a bug. These are local-user capabilities, not a per-card server ACL: an allowed
-  tool can modify other cards in the resolved project. Cards keep one current state; the Card Log (VB-51) records who changed what, but nothing restores from it, so do not describe Board writes as reversible. Tool results remain untrusted task data.
+  tool can modify cards across local projects using explicit IDs or permanent keys. Cards keep one current state; the Card Log (VB-51) records who changed what, but nothing restores from it, so do not describe Board writes as reversible. Tool results remain untrusted task data.
 - **Agent notes (2026-09-17)**: `BoardComments.Kind` (`comment` | `note`, migration `board/2`)
   separates the scratchpad from the thread. Notes never appear in `comments[]`, `CommentCount`
   or the dashboard's comment panel; the card editor shows them in a collapsed "Agent notes" rail
@@ -331,9 +355,18 @@ warnings (`IL2026`/`IL2057`/`IL2070`/`IL2075`/`IL2080`/`IL2104`/`IL3050`) for re
 paths is suppressed via `<NoWarn>` rather than refactored away; don't add new reflection, and
 avoid `WithToolsFromAssembly()` (reflection scan) — it is the AOT-unsafe variant.
 
+Tool registration goes through `McpToolRegistration.WithVibeRailsTools()` in both transports (and in
+`McpServerHttpTests`), which passes `McpToolRegistration.SerializerOptions` to every `WithTools<T>()`:
+the SDK's `McpJsonUtilities.DefaultOptions` with `AppJsonSerializerContext` appended to the resolver
+chain. The SDK's options alone know protocol and primitive types, so a tool parameter or result of an
+application record (`save_board_handoff`'s `BoardHandoff`) failed with "JsonTypeInfo metadata ... was
+not provided" the first time the tools were resolved and took every tool down with it (VIBE-37). A
+record used by a tool must be reachable from `AppJsonSerializerContext`; a new tool class is added to
+`WithVibeRailsTools()` only, never to the three call sites.
+
 ---
 
-**Last checked**: 2026-09-09 by Claude (added BoardTool + stdio runtime-path init)
+**Last checked**: 2026-10-03 by Claude (shared tool serializer options, VIBE-37)
 
 ### Reading card images
 

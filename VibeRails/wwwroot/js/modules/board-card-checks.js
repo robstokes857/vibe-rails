@@ -1,4 +1,3 @@
-import { BoardApi } from './board-api.js';
 import { escapeHtml as esc } from './utils.js';
 import { CodeReportViewer } from './code-report/viewer.js';
 
@@ -8,13 +7,6 @@ export function cardChecksSection() {
             <button type="button" class="btn btn-sm btn-outline-secondary" data-check-refresh>Refresh checks</button></div>
         <p data-check-message role="status" aria-live="polite">Loading checks…</p>
         <div class="board-checks-summary" data-check-summary></div>
-        <details data-check-run-options><summary>Run checks</summary>
-            <p>Choose a saved Automation. Its checks use the scope below and may run its Worker and other actions.</p>
-            <label>Automation <select class="form-select form-select-sm" data-check-automation></select></label>
-            <p data-check-scope></p><button type="button" class="btn btn-sm btn-primary" data-check-run disabled>Run checks</button>
-        </details>
-        <details><summary>Earlier results</summary><div data-check-history></div>
-            <button type="button" class="btn btn-sm btn-outline-secondary" data-check-more hidden>Load earlier results</button></details>
         <section data-check-report hidden aria-label="Saved check report"></section>
     </section>`;
 }
@@ -35,43 +27,29 @@ export function bindCardChecks(editor, card, app) {
     const host = editor.querySelector('[data-board-checks]');
     if (!host || !card?.id) return null;
     const find = key => host.querySelector(`[data-check-${key}]`);
-    let disposed = false, generation = 0, reportGeneration = 0, rows = [], latestRows = [], options = [], submitting = false;
+    let disposed = false, generation = 0, reportGeneration = 0, latestRows = [];
     let request, reportRequest, viewer;
     const current = () => !disposed && host.isConnected;
     const url = `/api/v1/board/cards/${encodeURIComponent(card.id)}/checks`;
     const message = text => { if (current()) find('message').textContent = text; };
-    const selection = () => options.find(job => String(job.id) === find('automation').value);
-    function updateSelection() {
-        const job = selection();
-        find('run').disabled = submitting || !job?.enabled;
-        find('scope').textContent = job ? `Saved scope: ${job.scopes.join('; ')}` : 'Add Code quality and VCA actions on the Automations page, then refresh checks.';
-    }
     function render(pending = []) {
         const latest = ['Code quality', 'VCA'].map(tool => pending.find(row => row.tool === tool) || latestRows.find(row => row.tool === tool)
             || { tool, status: 'Not run', scope: 'Not selected', startedUtc: null });
         const summaryHtml = latest.map(row => row.startedUtc ? checkRow(row)
             : `<article class="board-check-result"><strong>${esc(row.tool)}</strong><span class="board-check-status">Not run</span><p>No saved evidence.</p></article>`).join('');
         if (find('summary').innerHTML !== summaryHtml) find('summary').innerHTML = summaryHtml;
-        const historyHtml = rows.map(checkRow).join('') || '<p>No earlier results.</p>';
-        if (find('history').innerHTML !== historyHtml) find('history').innerHTML = historyHtml;
+
     }
-    async function refresh(more = false) {
-        if (!current() || submitting) return;
+    async function refresh() {
+        if (!current()) return;
         const version = ++generation;
         request?.abort(); request = new AbortController();
         try {
-            const response = await app.apiCall(`${url}?offset=${more ? rows.length : 0}`, 'GET', null,
+            const response = await app.apiCall(`${url}?offset=0`, 'GET', null,
                 { showLoading: false, signal: request.signal, preferErrorResponseMessage: true });
             if (!current() || version !== generation) return;
-            rows = more ? [...rows, ...(response.checks || [])] : response.checks || [];
             latestRows = response.latest || response.checks || [];
-            options = response.automations || [];
-            const selected = find('automation').value;
-            find('automation').innerHTML = '<option value="">Choose an Automation…</option>' + options.map(job =>
-                `<option value="${job.id}"${job.enabled ? '' : ' disabled'}>${esc(job.name)}${job.enabled ? '' : ' (disabled)'}</option>`).join('');
-            find('automation').value = selected;
-            updateSelection(); render(response.pending || []);
-            find('more').hidden = !response.hasMore;
+            render(response.pending || []);
             message('Results cover the recorded scope. A card is not a Git change boundary.');
         } catch (error) { if (current() && version === generation && error.name !== 'AbortError') message(error.message || 'Checks unavailable.'); }
     }
@@ -111,7 +89,6 @@ export function bindCardChecks(editor, card, app) {
     async function onClick(event) {
         const button = event.target.closest('button'); if (!button) return;
         if (button.hasAttribute('data-check-refresh')) return refresh();
-        if (button.hasAttribute('data-check-more')) return refresh(true);
         if (button.dataset.checkView) return showReport(button.dataset.checkView);
         if (button.dataset.checkVerify) {
             const version = reportGeneration;
@@ -131,21 +108,13 @@ export function bindCardChecks(editor, card, app) {
             ++reportGeneration; reportRequest?.abort(); viewer?.destroy(); viewer = null;
             find('report').hidden = true; find('report').replaceChildren(); find('refresh').focus(); return;
         }
-        if (!button.hasAttribute('data-check-run') || submitting || !selection()?.enabled) return;
-        submitting = true; updateSelection(); message('Queuing checks…');
-        try {
-            await BoardApi.runCardAutomationAsync(card.id, selection().id);
-            if (current()) message('Checks queued. Evidence will appear here when the Automation runs.');
-        } catch (error) { message(error.message || 'Could not queue checks.'); }
-        finally { submitting = false; if (current()) { updateSelection(); await refresh(); } }
     }
     host.addEventListener('click', onClick);
-    find('automation').addEventListener('change', updateSelection);
-    const timer = setInterval(() => { if (!host.ownerDocument.hidden && !find('history').parentElement.open) void refresh(); }, 10000);
+    const timer = setInterval(() => { if (!host.ownerDocument.hidden) void refresh(); }, 10000);
     void refresh();
     return { refresh, dispose() {
         disposed = true; ++generation; ++reportGeneration; clearInterval(timer);
         request?.abort(); reportRequest?.abort(); viewer?.destroy();
-        host.removeEventListener('click', onClick); find('automation').removeEventListener('change', updateSelection);
+        host.removeEventListener('click', onClick);
     } };
 }

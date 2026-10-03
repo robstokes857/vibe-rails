@@ -20,12 +20,30 @@ export function laneReviewerSummary(environment, environments = []) {
         : `Reviewer: ${label(routing.fallback)} for every coding source.`;
 }
 
+/**
+ * The project's Automation already named like a lane check, enabled or not: the server allows one
+ * name per project. `reuse` when it is that same one-action check (kind and scope); otherwise the
+ * name is taken and creating the check would be refused.
+ */
+export function findCheckAutomation(jobs, { name, kind, scope }) {
+    const job = (jobs || []).find(item => String(item.name ?? '').trim().toLowerCase() === name.trim().toLowerCase());
+    if (!job) return null;
+    const actions = Array.isArray(job.actions) ? job.actions : [];
+    return { job, reuse: actions.length === 1 && Number(actions[0].kind) === kind && actions[0].arguments?.[0] === scope };
+}
+
 function workerIdentity(job, environments = []) {
     const actions = Array.isArray(job?.actions) ? job.actions : [];
     const worker = actions.length
         ? actions.find(action => Number(action.kind) === 0)
         : job?.environmentId ? job : null;
-    if (!worker) return { label: job ? 'Script workflow' : 'Unavailable Automation', icon: job ? 'code' : 'question' };
+    if (!worker) {
+        const checks = actions.filter(action => [2, 3].includes(Number(action.kind)));
+        const label = checks.length
+            ? checks.map(action => `${Number(action.kind) === 2 ? 'Code quality' : 'VCA'} · ${action.arguments?.join(' ') || 'working-tree'}`).join('; ')
+            : job ? 'Script workflow' : 'Unavailable Automation';
+        return { label, icon: checks.length ? 'list-check' : job ? 'code' : 'question' };
+    }
     const environment = environments.find(item => worker.environmentId != null && Number(item.id) === Number(worker.environmentId));
     if (environment?.reviewerRouting?.mode === 'switch')
         return { label: 'Reviewer selection', icon: 'shuffle', workerName: environment.name };
@@ -37,8 +55,9 @@ function workerIdentity(job, environments = []) {
 
 /** Compact entry points to the existing destination-lane Automation settings. */
 export class BoardLaneAgents {
-    constructor(app) {
+    constructor(app, openRunningAgent = null) {
         this.app = app;
+        this.openRunningAgent = openRunningAgent;
     }
 
     button(column) {
@@ -114,10 +133,12 @@ export class BoardLaneAgents {
         panel.setAttribute('role', 'dialog');
         panel.setAttribute('aria-labelledby', 'board-lane-agents-title');
         panel.innerHTML = `<header class="board-lane-agents-heading">
-            <div><h2 id="board-lane-agents-title">Lane agents</h2><p>On entry to <strong>${escapeHtml(column.name)}</strong></p></div>
+            <span class="board-lane-agents-heading-icon" aria-hidden="true">${icon('robot')}</span>
+            <div class="board-lane-agents-heading-copy"><h2 id="board-lane-agents-title">Lane agents</h2><p>On entry to <strong>${escapeHtml(column.name)}</strong></p></div>
             <button type="button" class="board-lane-agents-action" data-agent-action="close" aria-label="Close lane agents">${icon('xmark')}</button>
         </header>
         <p class="board-lane-agents-help">Move cards freely. Enabled Automations run after a card stays here for 60 seconds, from any lane or when newly created. Creating a board or saving settings does not launch an agent. You and your agents choose the next action; Done has the meaning you give it.</p>
+        <section data-lane-running aria-label="Running agents" aria-live="polite"></section>
         <div data-lane-agents-content role="status">Loading agents…</div>`;
         this.anchor = button;
         this.panel = panel;
@@ -151,7 +172,15 @@ export class BoardLaneAgents {
         };
         this.positionPanel = position;
 
+        const renderRunning = () => {
+            const running = settings?.runningAgents || [];
+            panel.querySelector('[data-lane-running]').innerHTML = `<h3 class="h6">Running agents</h3>` + (running.length
+                ? running.map(agent => `<button type="button" class="board-side-main mb-2" data-lane-running-id="${escapeHtml(agent.runId)}">
+                    ${icon('robot')} <span><strong>${escapeHtml(agent.name)}</strong><small class="d-block">${escapeHtml(agent.cardLabel)}</small></span></button>`).join('')
+                : '<p class="board-lane-agents-empty">No agents running from this lane.</p>');
+        };
         const render = () => {
+            renderRunning();
             disposeReviewers();
             const ids = selectedIds(settings);
             const choices = settings.jobs || [];
@@ -216,11 +245,17 @@ export class BoardLaneAgents {
             <p class="board-lane-agents-scope">Descriptions are shared with agents using the Board and apply wherever this Automation is used. Remove unlinks it from this lane and cancels the lane’s pending triggers.</p>
             <div data-agent-error role="alert"></div>
             ${adding ? `<form class="board-lane-agents-add">
-                <label for="board-lane-agent-choice">Existing Automation</label>
+                <label for="board-lane-agent-choice">Agent or check</label>
                 <select id="board-lane-agent-choice" class="form-select form-select-sm" required>
-                    <option value="">Choose an Automation…</option>
+                    <option value="">Choose an Automation or check…</option>
+                    <option value="check:2">Code quality</option><option value="check:3">VCA</option>
                     ${choices.filter(job => !ids.includes(job.id)).map(job => `<option value="${Number(job.id)}" ${job.enabled ? '' : 'disabled'}>${escapeHtml(job.name)}${job.enabled ? '' : ' (disabled)'}</option>`).join('')}
                 </select>
+                <label data-agent-check-scope hidden>Check scope
+                    <select class="form-select form-select-sm" data-agent-scope>
+                        <option value="working-tree">Working changes</option><option value="unpushed">Unpushed commits</option><option value="repository">Committed repository</option>
+                    </select>
+                </label>
                 <div class="board-lane-agents-footer"><button type="submit" class="btn btn-sm btn-outline-primary">Add to lane</button>
                     <button type="button" class="btn btn-sm btn-link" data-agent-action="create">Create Automation…</button></div>
                 <small>Create and edit Automations on the Automations page, then select them here.</small>
@@ -271,6 +306,17 @@ export class BoardLaneAgents {
             this.updateColumnCount(column.id, settings);
             await load();
         };
+        // Saves a fresh definition with `changes`. Leaving out actions preserves the workflow and
+        // its script approvals on the server. Null when the panel closed in between.
+        const updateJob = async (id, changes) => {
+            const job = await this.app.apiCall(`/api/v1/jobs/${id}`, 'GET', null, options);
+            if (!alive()) return null;
+            const { name, projectPath, llm, environmentId, prompt, timeoutMinutes, triggers, launchMinimized, enabled, description } = job;
+            return this.app.apiCall(`/api/v1/jobs/${id}`, 'PUT',
+                { name, projectPath, llm, environmentId, prompt, timeoutMinutes, triggers, launchMinimized, enabled, description, ...changes },
+                { showLoading: false, preferErrorResponseMessage: true });
+        };
+        // `focusSelector` may be a function, read after the operation (a new row's id is known only then).
         const run = async (operation, focusSelector) => {
             if (busy) return;
             busy = true;
@@ -291,12 +337,18 @@ export class BoardLaneAgents {
                 busy = false;
                 if (alive()) {
                     // render() reflects the saved state, including unavailable rows.
-                    content.querySelector(focusSelector)?.focus();
+                    content.querySelector(typeof focusSelector === 'function' ? focusSelector() : focusSelector)?.focus();
                     position();
                 }
             }
         };
         panel.addEventListener('click', async event => {
+            const runningId = event.target.closest('[data-lane-running-id]')?.dataset.laneRunningId;
+            if (runningId) {
+                const agent = settings?.runningAgents?.find(item => item.runId === runningId);
+                if (agent && this.openRunningAgent) { this.close(false); void this.openRunningAgent(agent); }
+                return;
+            }
             const action = event.target.closest('[data-agent-action]')?.dataset.agentAction;
             if (action === 'close') { this.close(); return; }
             if (!action || busy) return;
@@ -363,6 +415,10 @@ export class BoardLaneAgents {
                 }, '[data-agent-action="add"]');
             }
         });
+        panel.addEventListener('change', event => {
+            if (event.target.id === 'board-lane-agent-choice')
+                content.querySelector('[data-agent-check-scope]').hidden = !event.target.value.startsWith('check:');
+        });
         panel.addEventListener('input', event => {
             if (!event.target.matches('[data-agent-description]') || busy) return;
             const row = event.target.closest('[data-agent-id]');
@@ -381,15 +437,8 @@ export class BoardLaneAgents {
                 if (busy || !descriptionDrafts.has(id)) return;
                 const description = descriptionDrafts.get(id);
                 void run(async () => {
-                    // Update the existing description using a fresh definition. Leaving out
-                    // actions preserves the workflow and its script approvals on the server.
-                    const job = await this.app.apiCall(`/api/v1/jobs/${id}`, 'GET', null, options);
-                    if (!alive()) return;
-                    const { name, projectPath, llm, environmentId, prompt, timeoutMinutes, triggers, launchMinimized, enabled } = job;
-                    const saved = await this.app.apiCall(`/api/v1/jobs/${id}`, 'PUT',
-                        { name, projectPath, llm, environmentId, prompt, timeoutMinutes, triggers, launchMinimized, enabled, description },
-                        { showLoading: false, preferErrorResponseMessage: true });
-                    if (!alive()) return;
+                    const saved = await updateJob(id, { description });
+                    if (!alive() || !saved) return;
                     jobs = jobs.map(item => item.id === id ? saved : item);
                     settings.jobs = settings.jobs.map(item => item.id === id ? { ...item, name: saved.name, enabled: saved.enabled } : item);
                     descriptionDrafts.delete(id);
@@ -401,17 +450,41 @@ export class BoardLaneAgents {
             }
             if (!event.target.matches('.board-lane-agents-add')) return;
             event.preventDefault();
-            const id = Number(content.querySelector('select').value);
-            if (!id || busy) return;
+            const choice = content.querySelector('#board-lane-agent-choice').value;
+            const kind = choice.startsWith('check:') ? Number(choice.slice(6)) : null;
+            let id = Number(choice);
+            if ((!id && kind === null) || busy) return;
+            const checkScope = content.querySelector('[data-agent-scope]')?.value || 'working-tree';
             if (selectedIds(settings).some(value => !settings.jobs?.some(job => job.id === value && job.enabled))) {
                 content.querySelector('[data-agent-error]').textContent = 'Enable disabled Automations in the Automation editor, or remove disabled or unavailable selections before adding another.';
                 position();
                 return;
             }
+            // A check is an ordinary one-action Automation, with the same scope and lifecycle.
+            const name = `${kind === 2 ? 'Code quality' : 'VCA'} · ${column.name} · ${checkScope}`;
+            const existing = kind === null ? null : findCheckAutomation(jobs, { name, kind, scope: checkScope });
+            if (existing && !existing.reuse) {
+                content.querySelector('[data-agent-error]').textContent = `An Automation named “${existing.job.name}” already exists with a different workflow. Rename or edit it in the Automation editor, then add this check again.`;
+                position();
+                return;
+            }
             void run(async () => {
-                await saveSelection([...selectedIds(settings), id]);
+                if (kind !== null) {
+                    // Reuse a same-shape check, re-enabling it if needed: a second POST with its name is a 409.
+                    let saved = existing?.job;
+                    if (!saved) saved = await this.app.apiCall('/api/v1/jobs', 'POST', {
+                        name, projectPath, llm: 0, prompt: '', environmentId: null, timeoutMinutes: null,
+                        enabled: true, triggers: [], actions: [{ kind, arguments: [checkScope] }],
+                        description: `${kind === 2 ? 'Code quality' : 'VCA'} checks (${checkScope}) when a card enters ${column.name}.`
+                    }, { showLoading: false, preferErrorResponseMessage: true });
+                    else if (!saved.enabled) saved = await updateJob(saved.id, { enabled: true });
+                    if (!alive() || !saved) return;
+                    id = saved.id;
+                    jobs = [...jobs.filter(job => job.id !== id), saved];
+                }
+                if (!selectedIds(settings).includes(id)) await saveSelection([...selectedIds(settings), id]);
                 if (alive()) { adding = false; render(); }
-            }, `[data-agent-id="${id}"] [data-agent-action="edit"]`);
+            }, () => Number.isFinite(id) ? `[data-agent-id="${id}"] [data-agent-action="edit"]` : '#board-lane-agent-choice');
         });
         const outside = event => {
             if (!panel.contains(event.target) && !this.anchor?.contains(event.target) && !isConfirmDialogOpen()) this.close(false);
@@ -429,7 +502,18 @@ export class BoardLaneAgents {
         document.addEventListener('scroll', scroll, true);
         const resizeObserver = new ResizeObserver(position);
         resizeObserver.observe(panel);
+        let polling = false;
+        const runningTimer = setInterval(async () => {
+            if (!alive() || document.hidden || polling || busy) return;
+            polling = true;
+            try {
+                const fresh = await BoardApi.getLaneRunningAgentsAsync(column.id, { signal: abort.signal });
+                if (alive() && settings) { settings.runningAgents = fresh.runningAgents; renderRunning(); position(); }
+            } catch { /* Keep the last known list; settings retry stays available. */ }
+            finally { polling = false; }
+        }, 10000);
         this.cleanup = () => {
+            clearInterval(runningTimer);
             abort.abort();
             disposeReviewers();
             resizeObserver.disconnect();

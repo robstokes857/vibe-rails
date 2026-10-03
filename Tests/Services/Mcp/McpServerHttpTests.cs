@@ -68,10 +68,7 @@ public class McpServerHttpTests : IAsyncLifetime
                 options.ServerInfo = new() { Name = "viberails-mcp-test", Version = "1.0.0" };
             })
             .WithHttpTransport()
-            .WithTools<RulesTool>()
-            .WithTools<SessionSearchTool>()
-            .WithTools<TokenSaverTool>()
-            .WithTools<BoardTool>();
+            .WithVibeRailsTools();
 
         _app = builder.Build();
         _app.MapMcp("/mcp");
@@ -173,6 +170,31 @@ public class McpServerHttpTests : IAsyncLifetime
             Assert.Contains(expected, names);
         }
         Assert.Equal(ExpectedTools.Length + BoardMcpAuthorization.ToolNames.Count, names.Count);
+    }
+
+    [Fact]
+    public async Task SaveBoardHandoff_TakesATypedHandoffThroughTheSharedSerializerOptions()
+    {
+        // Regression: the SDK's own JSON context knows protocol and primitive types only, so a tool parameter of an
+        // application record (BoardHandoff) threw "JsonTypeInfo metadata ... was not provided" the first time the
+        // tools were resolved, taking every tool down with it. WithVibeRailsTools adds AppJsonSerializerContext.
+        var ct = TestContext.Current.CancellationToken;
+        await using var client = await ConnectAsync(ct);
+        var tool = Assert.Single(await client.GetAvailableToolsAsync(ct), t => t.Name == "save_board_handoff");
+        var handoff = tool.JsonSchema.GetProperty("properties").GetProperty("handoff");
+        Assert.True(handoff.GetProperty("properties").TryGetProperty("outcome", out _));
+        Assert.True(handoff.GetProperty("properties").TryGetProperty("files", out _));
+
+        var arguments = new Dictionary<string, object?>
+        {
+            ["handoff"] = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+                """{"outcome":"Fixed","decisions":"","validation":"Checked","outstanding":"","files":[{"path":"entry.cs","reason":"Start here"}]}"""),
+            ["card"] = "VB-2",
+        };
+        var result = await client.CallToolAsync("save_board_handoff", arguments, ct);
+        // The record deserialized and the tool body ran; the mocked store simply has no such card.
+        Assert.False(result.IsError);
+        Assert.Contains("FAIL: card not found: VB-2", result.Text);
     }
 
     [Fact]

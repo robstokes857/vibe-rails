@@ -108,7 +108,9 @@ test('comments include legacy notes and history stays in settings', () => {
     assert.match(render, /card\?\.comments/);
     assert.match(render, /card\?\.notes/);
     assert.doesNotMatch(render, /card\?\.history/);
-    assert.match(render, /renderCommentHtml\(entry\.body, \{ attachments \}\)/);
+    // Posted comments share the composer preview's options (Markdown toggle, sessions, commits).
+    assert.match(render, /const textOptions = boardTextOptions\(card\);/);
+    assert.match(render, /renderCommentHtml\(entry\.body, textOptions\)/);
     assert.match(render, /this\.applyCommentClamps\(host\)/);
 });
 

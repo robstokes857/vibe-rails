@@ -262,7 +262,7 @@ public sealed partial class BoardService(
                 // is back to Start work, not "Go to agent" into the review terminal (VB-6Q8ZS-68).
                 if (IsAutomation(session, automationIds))
                     automationCards.Add(session.CardId);
-                else if (!activeByCard.ContainsKey(session.CardId))
+                else if (session.Origin is not ("chat" or "code_review") && !activeByCard.ContainsKey(session.CardId))
                     activeByCard[session.CardId] = (session.SessionId, tabId);
             }
         }
@@ -560,7 +560,7 @@ public sealed partial class BoardService(
             || (await store.GetRunningAutomationsAsync(detail.Card.ProjectPath, cancellationToken))
                 .Any(run => run.CardId == detail.Card.Id);
         // The working agent is the first live session that is not an Automation's (see GetCardListResponseAsync).
-        var active = sessions.FirstOrDefault(s => s.Active && !s.IsAutomation);
+        var active = sessions.FirstOrDefault(s => s.Active && !s.IsAutomation && s.Origin is not ("chat" or "code_review"));
         var summary = ToSummary(detail.Card, active?.Id, active?.TabId);
         // Older comments may have been written before their session was linked.
         // Resolve those labels on read without rewriting historical comment rows.
@@ -578,7 +578,10 @@ public sealed partial class BoardService(
             detail.Card.BaseLlmOptions,
             notes, summary.Type, summary.BoardId, summary.Flagged, hasActiveAutomation, summary.DisplayId, summary.AgentMade)
         {
-            LinkedCards = detail.LinkedCards.Select(ToDto).ToList()
+            LinkedCards = detail.LinkedCards.Select(ToDto).ToList(),
+            PreviousWork = BoardHandoffService.WithFileStatus(detail.PreviousWork, detail.Card.ProjectPath),
+            FileCandidates = detail.PreviousWork is null && detail.Commits.Count > 0
+                ? await store.GetHandoffCandidatesAsync(detail.Card.ProjectPath, detail.Card.Id, cancellationToken) : []
         };
     }
 

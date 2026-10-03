@@ -11,7 +11,9 @@
   </p>
 </div>
 
-![VibeRails dashboard](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/vscode-viberails/media/1.png)
+![VibeRails Board with fictional work assigned to multiple coding agents](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/vscode-viberails/media/screenshots/15-board-wide.png)
+
+*Screenshots show the shared VibeRails dashboard with fictional demo content. Agent activity, quality scores, and terminal output are illustrative.*
 
 ## AI Coding, With Guardrails
 
@@ -45,17 +47,39 @@ VibeRails is the control layer for AI coding inside VS Code. Work faster with Cl
 
 ## See It in Action
 
-### Environments
+### Board and lane agents
 
-![VibeRails environments](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/vscode-viberails/media/2.png)
+Keep requirements, agent discussion, and workflow in one place. Configure reviews and checks for cards entering a lane.
+
+![Review lane with configured agents and checks](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/vscode-viberails/media/screenshots/03-lane-agents.png)
+
+### Code quality and source relationships
+
+Explore the code graph, switch to connected module cards, and inspect saved file measurements.
+
+![Code graph and sample quality report](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/vscode-viberails/media/screenshots/06-code-graph.png)
+
+![Connected module cards for the demo project](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/vscode-viberails/media/screenshots/07-code-cards.png)
+
+### Environments and Workers
+
+Reuse prompts and workspace settings across coding sessions and Automations.
+
+![VibeRails coding environments and Automation Workers](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/vscode-viberails/media/screenshots/10-environments.png)
+
+### Automations
+
+Create repeatable workflows with scripts and an optional Worker. Automations run while VibeRails is open.
+
+![Sample Automations and signed Python scripts](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/vscode-viberails/media/screenshots/11-automations.png)
 
 ### Web UI Terminal
 
-![VibeRails terminal demo 1](https://i.imgur.com/p86L0Ka.gif)
+Use the integrated terminal for CLI sessions. The example below contains a fictional transcript.
 
-### Sandboxing and Multi-LLM Parallel Processing
+![VibeRails terminal with a sample agent session](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/vscode-viberails/media/screenshots/14-terminal.png)
 
-![VibeRails terminal demo 2](https://i.imgur.com/is4r4Vp.gif)
+[Browse the full screenshot collection](https://github.com/robstokes857/vibe-rails/blob/main/vscode-viberails/media/screenshots/README.md).
 
 ## Get Started
 

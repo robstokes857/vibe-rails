@@ -12,6 +12,20 @@ public sealed class BertVectorStorageTests : IDisposable
     private string DatabasePath => Path.Combine(_directory, "vectors.db");
 
     [Fact]
+    public void LinkedSessionRecallUsesExactSessionPrefixAndBoundsRowsAndText()
+    {
+        using var store = new BertV2VectorStore(DatabasePath);
+        var capture = new BertV2InputService(CreateEmbedder().Object, store);
+        capture.Capture("session_1", 1, new string('a', 3000));
+        capture.Capture("session_1", 2, "Most recent");
+        capture.Capture("sessionX1", 3, "Foreign wildcard lookalike");
+        var search = new BertSearchDbService(DatabasePath, Path.Combine(_directory, "absent-state.db"));
+        Assert.Equal("session_1:2", Assert.Single(search.GetSessionRecallPage("session_1", 0, 1)).DocumentId);
+        Assert.Equal(1000, Assert.Single(search.GetSessionRecallPage("session_1", 1, 1)).RawText.Length);
+        Assert.Empty(search.GetSessionRecallPage("session", 0, 20));
+    }
+
+    [Fact]
     public void ReplayedInput_SkipsInference_AndChangedTextEmbedsAgain()
     {
         using var store = new BertV2VectorStore(DatabasePath);

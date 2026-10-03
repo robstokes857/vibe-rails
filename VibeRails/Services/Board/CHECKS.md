@@ -1,8 +1,10 @@
 # Card checks
 
-Every saved card exposes Checks without starting analysis on save. **Run checks** chooses an
-existing project Automation; its ordered actions, Worker, workspace and run recording stay under
-the ordinary per-card Automation machinery. Actions 2 (`CodeQuality`) and 3 (`Vca`) call
+Every saved card exposes the latest Checks summary without starting analysis on save. VIBE-34
+removes Run checks, Earlier results and the Code reviews panel from the card. Evidence and APIs
+remain intact. The lane **Agents** dropdown can create a VCA or Code quality Automation with an
+explicit scope and select it for future lane entry; setup never starts a run. Existing multi-action
+Automations remain editable on the Automations page. Actions 2 (`CodeQuality`) and 3 (`Vca`) call
 `MintLintPreflightStep` and `VcaPreflightStep` directly. They never call the Git preflight pipeline,
 enqueue VCA-rule triggers, or move a card. Existing Git Guard behavior stays in that pipeline.
 

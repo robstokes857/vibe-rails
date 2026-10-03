@@ -71,6 +71,11 @@ remain in the backend and never enter bridge messages. No URI callback handler i
 - No inline scripts - all event handlers use proper addEventListener
 - The `fonts.googleapis.com` / `fonts.gstatic.com` CSP entries are load-bearing: `assets/bootstrap.min.css` `@import`s the Lato family, which HTML `<link>` stripping does not remove
 
+Session replay needs `frame-src 'self'` to load VS Code's empty same-origin frame shell
+before writing its template. A `srcdoc` frame cannot resolve local resources through
+VS Code's service worker. The replay frame explicitly retains the parent CSP; keep the
+real-webview regression in `src/test/suite/session-replay-webview.test.ts` when changing it.
+
 ### Load-bearing manifest entries
 
 The `shift+enter` and `escape` keybinding entries in `package.json` (including the one whose `command` is the empty string) exist to stop VS Code from swallowing those keys inside the webview terminal. **Do not remove or "clean up" any of them.**

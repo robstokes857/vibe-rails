@@ -298,7 +298,8 @@ namespace VibeRails
                 // SessionSearchTool is an instance tool with constructor injection; register it
                 // so the MCP server can resolve it (and its IUnifiedSearchService dependency)
                 // from the per-request scope.
-                serviceCollection.AddScoped<SessionSearchTool>();
+                serviceCollection.AddScoped<SessionSearchTool>(SessionSearchTool.Create);
+                serviceCollection.AddScoped<Services.Board.BoardRecallService>(Services.Board.BoardRecallService.Create);
                 // Same story for TokenSaverTool (ctor-injected IHttpClientFactory). Its named client
                 // is short-timeout because every call is a loopback hop to this machine's proxy.
                 // Registered here AND in McpStdioHost.ConfigureServices — the two transports must
@@ -322,10 +323,7 @@ namespace VibeRails
                         options.ServerInfo = new() { Name = "viberails-mcp", Version = "1.0.0" };
                     })
                     .WithHttpTransport()
-                    .WithTools<RulesTool>()
-                    .WithTools<SessionSearchTool>()
-                    .WithTools<TokenSaverTool>()
-                    .WithTools<BoardTool>();
+                    .WithVibeRailsTools();
             }
 
             // Claude Agent Sync Service (syncs CLAUDE.md to AGENTS.md on session lifecycle)
@@ -421,7 +419,10 @@ namespace VibeRails
             serviceCollection.AddSingleton<IDataExportProgress, DataExportProgress>();
             serviceCollection.AddSingleton<Services.Backups.BackupFiles>();
             serviceCollection.AddSingleton<Services.Backups.CompleteBackupService>();
-            serviceCollection.AddHttpClient<Services.Backups.BackupTransport>(client =>
+            // A named client, not AddHttpClient<BackupTransport>: the transient typed client would be captured
+            // once by the singleton CompleteBackupService and its handler never rotated (see TokenSavingsPublishJob).
+            serviceCollection.AddSingleton<Services.Backups.BackupTransport>();
+            serviceCollection.AddHttpClient(Services.Backups.BackupTransport.HttpClientName, client =>
                 client.Timeout = TimeSpan.FromMinutes(2))
                 .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
 

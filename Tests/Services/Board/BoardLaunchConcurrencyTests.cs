@@ -134,6 +134,59 @@ public sealed class BoardLaunchConcurrencyTests : IDisposable
         return await _store.CreateCardAsync(_root, new(null, "Concurrent card", "Scope", "base:codex", "medium", null, [], false), Ct);
     }
 
+    [Theory]
+    [InlineData("chat", "work")]
+    [InlineData("launch", "chat")]
+    public async Task DiscussionAndWorkCanCoexistWithoutMovingTheCard(string existingOrigin, string intent)
+    {
+        var card = await CreateCardAsync();
+        var existing = Guid.NewGuid().ToString();
+        await _store.LinkSessionAsync(_root, card.Id, existing, "existing", "base:codex", "codex", "Existing", existingOrigin, Ct);
+        _tabs.Setup(t => t.ListTabsAsync(It.IsAny<CancellationToken>())).ReturnsAsync([new("existing", DateTime.UtcNow, true, existing)]);
+        StartTerminalRequest? request = null;
+        _tabs.Setup(t => t.StartSessionAsync("tab-1", It.IsAny<StartTerminalRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<string, StartTerminalRequest, CancellationToken>((_, value, _) => request = value)
+            .ReturnsAsync(new TerminalStatusResponse(true, Guid.NewGuid().ToString(), "codex", _root));
+        Assert.NotNull(await Launcher().LaunchAsync(_root, card.Id, null, Ct, intent, question: intent == "chat" ? "Why this design?" : null));
+        var after = (await _store.GetCardDetailAsync(_root, card.Id, Ct))!;
+        Assert.Equal(card.ColumnId, after.Card.ColumnId);
+        Assert.Equal(2, after.Sessions.Count);
+        if (intent == "chat") { Assert.Contains("Why this design?", request!.InitialPrompt); Assert.DoesNotContain("Scope", request.InitialPrompt); }
+    }
+
+    [Fact]
+    public async Task EmptyQuestionFocusesMatchingDiscussionWithoutWritingToItsTui()
+    {
+        var card = await CreateCardAsync();
+        var session = Guid.NewGuid().ToString();
+        await _store.LinkSessionAsync(_root, card.Id, session, "existing", "base:codex", "codex", "Chat", "chat", Ct);
+        _tabs.Setup(t => t.ListTabsAsync(It.IsAny<CancellationToken>())).ReturnsAsync([new("existing", DateTime.UtcNow, true, session)]);
+        var result = await Launcher().LaunchAsync(_root, card.Id, null, Ct, "chat");
+        Assert.Equal("existing", result!.TabId);
+        _tabs.Verify(t => t.CreateTabAsync(It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Single((await _store.GetCardDetailAsync(_root, card.Id, Ct))!.Sessions);
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(8)]
+    public async Task EmptyQuestionFindsMatchingDiscussionAfterAnotherAgent(int capacity)
+    {
+        var card = await CreateCardAsync();
+        var claude = Guid.NewGuid().ToString();
+        var codex = Guid.NewGuid().ToString();
+        await _store.LinkSessionAsync(_root, card.Id, claude, "claude-tab", "base:claude", "claude", "Claude chat", "chat", Ct);
+        await _store.LinkSessionAsync(_root, card.Id, codex, "codex-tab", "base:codex", "codex", "Codex chat", "chat", Ct);
+        _tabs.SetupGet(t => t.MaxTabs).Returns(capacity);
+        _tabs.Setup(t => t.ListTabsAsync(It.IsAny<CancellationToken>())).ReturnsAsync([
+            new("claude-tab", DateTime.UtcNow, true, claude), new("codex-tab", DateTime.UtcNow, true, codex)]);
+        var result = await Launcher().LaunchAsync(_root, card.Id, null, Ct, "chat");
+        Assert.Equal("codex-tab", result!.TabId);
+        Assert.Equal(codex, result.SessionId);
+        _tabs.Verify(t => t.CreateTabAsync(It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Equal(2, (await _store.GetCardDetailAsync(_root, card.Id, Ct))!.Sessions.Count);
+    }
+
     // A real estimator over the same store: the launch records its context sample like production does.
     private BoardLaunchService Launcher() =>
         new(_store, _repository.Object, _tabs.Object, new BoardContextEstimator(

@@ -97,9 +97,9 @@ public static partial class BaseLlmOptionsBuilder
     // The optional "[1m]" tail is Claude Code's 1M-context marker on a full model ID
     // (`claude-fable-5-1[1m]`). Behind the VibeRails proxy Claude Code cannot verify native 1M
     // support and budgets 200K unless the ID carries it, so the shared catalog pins the [1m] form
-    // of every 1M-capable model (bare IDs still validate: older cards saved them, and Haiku has
-    // no 1M variant). Only that exact tail is allowed, and only for Claude (Normalize rejects it
-    // for other CLIs); brackets stay out of the rest of the name.
+    // of every pinned model (bare IDs still validate: older cards saved them). Only that exact
+    // tail is allowed, and only for Claude (Normalize rejects it for other CLIs); brackets stay
+    // out of the rest of the name.
     private const string OneMillionContextSuffix = "[1m]";
 
     [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9._/: ()\-]*(\[1m\])?$")]

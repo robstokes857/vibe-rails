@@ -1,4 +1,8 @@
 const { test, expect } = require('@playwright/test');
+const { readFileSync } = require('node:fs');
+const { join } = require('node:path');
+const securityHeadersSource = readFileSync(join(__dirname, '../../VibeRails/Middleware/SecurityHeadersMiddleware.cs'), 'utf8');
+const desktopCsp = [...securityHeadersSource.split('internal const string ContentSecurityPolicy =')[1].split('private readonly')[0].matchAll(/"([^"]*)"/g)].map(match => match[1]).join('');
 const started = Date.UTC(2026,8,30);
 const envelope = {
     session: { id:'fixture', cli:'codex', startedUtc:new Date(started).toISOString(), endedUtc:new Date(started+60000).toISOString(), sessionDisplayName:'Replay fixture' },
@@ -9,8 +13,8 @@ const envelope = {
     terminalSessionLogs:[],
     userInputs:[{id:1,sequence:1,timestampUtc:new Date(started+2000).toISOString(),inputText:'Make it readable',fileChanges:[{id:1,filePath:'example.js',diffContent:'--- a/example.js\n+++ b/example.js\n+const works = true;',linesAdded:1,linesDeleted:0}]}]
 };
-async function shell(page, csp = '') {
-    await page.route('**/fixture', route => route.fulfill({ contentType:'text/html',body:`<!doctype html><html><head>${csp}</head><body style="margin:0"><div id="host" style="height:950px"></div><div id="second" style="height:850px"></div></body></html>` }));
+async function shell(page, csp = '', headers = {}) {
+    await page.route('**/fixture', route => route.fulfill({ headers, contentType:'text/html',body:`<!doctype html><html><head>${csp}</head><body style="margin:0"><div id="host" style="height:950px"></div><div id="second" style="height:850px"></div></body></html>` }));
     await page.goto('/fixture');
 }
 async function mount(page, options = {}) {
@@ -93,6 +97,23 @@ test('stale load and teardown cancel pending data without resurfacing content', 
 test('srcdoc works under the webview content policy',async({page})=>{
     await shell(page,`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'self'">`);
     const frame=await mount(page);await expect(frame.locator('#play')).toBeEnabled();
+});
+
+test('replay initializes under the desktop response security headers', async ({page}) => {
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.route('**/*', async route => {
+        const response = await route.fetch();
+        await route.fulfill({ response, headers: { ...response.headers(),
+            'content-security-policy': desktopCsp,
+            'x-content-type-options': 'nosniff',
+            'x-frame-options': 'SAMEORIGIN' } });
+    });
+    await shell(page, '', { 'content-security-policy': desktopCsp,
+        'x-content-type-options': 'nosniff', 'x-frame-options': 'SAMEORIGIN' });
+    const frame = await mount(page);
+    await expect(frame.locator('#play')).toBeEnabled();
+    expect(errors).toEqual([]);
 });
 test('a new load supersedes an initial request and stale failure cannot replace it',async({page})=>{
     await shell(page);

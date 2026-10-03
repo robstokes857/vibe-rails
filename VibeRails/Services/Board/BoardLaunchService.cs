@@ -10,7 +10,7 @@ namespace VibeRails.Services.Board;
 /// <summary>"Start work": open a web terminal tab for a card with the card prepended to the environment's Initial Message.</summary>
 public interface IBoardLaunchService
 {
-    Task<LaunchBoardCardResponse?> LaunchAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken = default, string intent = "work", ReviewLaunchRequest? reviewRequest = null);
+    Task<LaunchBoardCardResponse?> LaunchAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken = default, string intent = "work", ReviewLaunchRequest? reviewRequest = null, string? question = null);
 }
 
 /// <summary>
@@ -18,7 +18,7 @@ public interface IBoardLaunchService
 /// break the same prompt down without composing a second one.
 /// </summary>
 public sealed record BoardLaunchPrompt(string Prompt, string? EnvironmentPrompt, BoardContextSettings? BoardContext, string? BoardId, string? BoardName,
-    BoardCardDetailRecord? Detail = null);
+    BoardCardDetailRecord? Detail = null, string Intent = "work");
 
 /// <summary>
 /// Root-backend only (it needs the in-process tab host). Copies the create/start/cleanup shape of
@@ -44,34 +44,36 @@ public sealed class BoardLaunchService(
     // queued semaphore, so removal cannot strand waiters or create two gates for one card.
     private static readonly ConcurrentDictionary<string, byte> LaunchingCards = new(StringComparer.Ordinal);
 
-    public async Task<LaunchBoardCardResponse?> LaunchAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken = default, string intent = "work", ReviewLaunchRequest? reviewRequest = null)
+    public async Task<LaunchBoardCardResponse?> LaunchAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken = default, string intent = "work", ReviewLaunchRequest? reviewRequest = null, string? question = null)
     {
         if (intent is not ("work" or "chat" or "code_review"))
             throw new BoardValidationException("Launch intent must be work, chat or code_review.");
         var card = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
         if (card is null) return null;
         // Card ids are globally unique in the shared database; VB numbers are project-local.
-        if (!LaunchingCards.TryAdd(card.Id, 0))
+        var reservation = card.Id + (intent == "chat" ? ":chat" : ":work");
+        if (!LaunchingCards.TryAdd(reservation, 0))
             throw new BoardConflictException("An agent is already starting on this card. Wait for it to finish starting.");
         Launched? launched;
         try
         {
             // Re-read after the reservation: fields may have changed while resolving the key.
-            launched = await LaunchCoreAsync(projectPath, card.Id, selectionOverride, cancellationToken, intent, reviewRequest);
+            launched = await LaunchCoreAsync(projectPath, card.Id, selectionOverride, cancellationToken, intent, reviewRequest, question);
         }
-        finally { LaunchingCards.TryRemove(card.Id, out _); }
+        finally { LaunchingCards.TryRemove(reservation, out _); }
         if (launched is null)
             return null;
         // Measured after the reservation is released, so the measurement never holds the gate: a second
         // Start work is answered by the live agent it would join, not refused while this one is counted.
-        await RecordContextSampleAsync(projectPath, launched.Card, launched.Prompt, launched.Intent, launched.Response.SessionId, launched.Cli, launched.Selection);
+        if (!launched.Reused)
+            await RecordContextSampleAsync(projectPath, launched.Card, launched.Prompt, launched.Intent, launched.Response.SessionId, launched.Cli, launched.Selection);
         return launched.Response;
     }
 
     /// <summary>A started launch and what its context sample needs.</summary>
-    private sealed record Launched(LaunchBoardCardResponse Response, BoardCardRecord Card, BoardLaunchPrompt Prompt, string Cli, string Selection, string Intent);
+    private sealed record Launched(LaunchBoardCardResponse Response, BoardCardRecord Card, BoardLaunchPrompt Prompt, string Cli, string Selection, string Intent, bool Reused = false);
 
-    private async Task<Launched?> LaunchCoreAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken, string intent, ReviewLaunchRequest? reviewRequest)
+    private async Task<Launched?> LaunchCoreAsync(string projectPath, string idOrKey, string? selectionOverride, CancellationToken cancellationToken, string intent, ReviewLaunchRequest? reviewRequest, string? question)
     {
         var card = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
         if (card is null)
@@ -124,12 +126,15 @@ public sealed class BoardLaunchService(
             ? $"{environment.CustomName} ({parsed.Cli})"
             : parsed.Cli;
         var composed = await ComposePromptAsync(store, projectPath, card, assigneeLabel, routingWorkerPrompt is null ? environment?.CustomPrompt : routingWorkerPrompt + "\n" + environment?.CustomPrompt, intent, cancellationToken);
+        if (intent == "chat") composed = composed with { Prompt = BoardPromptComposer.ComposeDiscussion(card, environment?.CustomPrompt, question) };
         var prompt = composed.Prompt + (routingSnapshot is null ? "" : ReviewRoutingService.Prompt(routingSnapshot.Resolution));
         var title = $"{card.DisplayId} · {Truncate(card.Title, 60)}";
         var launchOptions = routingSnapshot is not null ? routingSnapshot.Resolution.Selected.Options
             : !parsed.IsEnvironment && string.Equals(parsed.Key, card.Assignee, StringComparison.Ordinal) ? card.BaseLlmOptions : null;
         var launchArgs = environment is null ? VibeRails.Services.LlmClis.BaseLlmOptionsBuilder.BuildArguments(parsed.Llm, launchOptions)
             : ShellArgSanitizer.ParseAndValidate(environment.CustomArgs).ToArray();
+        if (intent == "chat" && launchArgs.Sum(arg => arg.Length + 1) > 4000)
+            throw new BoardValidationException("For card discussion, use at most 4000 characters of environment arguments, or choose a base agent.");
         var isPlanning = card.Type == "research-spike" || launchArgs.Select((arg, index) =>
             arg is "--permission-mode=plan" or "--mode=plan" or "--agent=plan"
             || arg is "--permission-mode" or "--mode" or "--agent" && index + 1 < launchArgs.Length && launchArgs[index + 1] == "plan").Any(value => value);
@@ -145,9 +150,20 @@ public sealed class BoardLaunchService(
             linkedSessions.Select(session => session.SessionId).ToList(), cancellationToken);
         var workingSessionIds = linkedSessions
             .Where(session => !BoardService.IsAutomationSession(session.Origin, session.SessionId, automationIds))
+            .Where(session => intent == "chat" ? session.Origin == "chat" : session.Origin is not ("chat" or "code_review"))
+            .Where(session => intent != "chat" || session.Selection == parsed.Key)
             .Select(session => session.SessionId)
             .ToHashSet(StringComparer.Ordinal);
-        if (!isReview && tabs.Any(tab => tab.HasActiveSession && tab.SessionId is not null && workingSessionIds.Contains(tab.SessionId)))
+        var existingTab = tabs.FirstOrDefault(tab => tab.HasActiveSession && tab.SessionId is not null && workingSessionIds.Contains(tab.SessionId));
+        if (intent == "chat" && existingTab is not null)
+        {
+            var existingSession = linkedSessions.First(s => s.SessionId == existingTab.SessionId);
+            if (existingSession.Selection == parsed.Key && string.IsNullOrWhiteSpace(question))
+                return new Launched(new LaunchBoardCardResponse(existingTab.TabId, existingTab.SessionId, existingSession.Cli, projectPath, card.Id, card.Key, existingSession.Selection),
+                    card, composed, existingSession.Cli, existingSession.Selection, intent, Reused: true);
+            // A different question/agent starts fresh; never paste generated input into a live TUI.
+        }
+        else if (!isReview && existingTab is not null)
             throw new BoardConflictException("An agent is already running on this card. Open it from Sessions.");
         if (tabs.Count >= tabHost.MaxTabs)
             throw new BoardConflictException($"All {tabHost.MaxTabs} terminal tabs are in use. Close one first.");
@@ -247,7 +263,7 @@ public sealed class BoardLaunchService(
             detail is null ? null : new BoardPromptComposer.CardActivity(detail.Comments.Count, detail.Notes.Count, detail.Sessions.Count),
             orderedColumns.SelectMany(c => laneAutomations[c.Id].Select(a => $"{c.Name} / {a.Name}: {a.Summary}. Output and next action: {a.Output}")).ToList());
         var prompt = BoardPromptComposer.Compose(card, column?.Name ?? "(no lane)", assigneeLabel, environmentPrompt, context, intent);
-        return new BoardLaunchPrompt(prompt, environmentPrompt, boardContext?.Context, boardId, boardName, detail);
+        return new BoardLaunchPrompt(prompt, environmentPrompt, boardContext?.Context, boardId, boardName, detail, intent);
     }
 
     /// <summary>

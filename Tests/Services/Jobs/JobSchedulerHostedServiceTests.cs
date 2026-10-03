@@ -1,3 +1,4 @@
+using VibeRails.Services.Terminal;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Serilog.Events;
@@ -37,7 +38,10 @@ public sealed class JobSchedulerHostedServiceTests
         launcher
             .Setup(candidate => candidate.LaunchQueuedProjectRunsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(0);
+        var tabs = new Mock<ITerminalTabHostService>(MockBehavior.Strict);
+        tabs.Setup(t => t.CloseCompletedAutomationTabsAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
         await using var services = new ServiceCollection()
+            .AddSingleton(tabs.Object)
             .AddSingleton(launcher.Object)
             .BuildServiceProvider();
         var scheduler = new JobSchedulerHostedService(
@@ -47,8 +51,44 @@ public sealed class JobSchedulerHostedServiceTests
 
         Assert.False(await scheduler.RunCycleAsync(nowUtc, TestContext.Current.CancellationToken));
 
+        tabs.Verify(t => t.CloseCompletedAutomationTabsAsync(It.IsAny<CancellationToken>()), Times.Once);
         store.VerifyAll();
         store.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task RunCycleAsync_StillLaunchesThisProjectsRuns_WhenClosingFinishedTabsFails()
+    {
+        var nowUtc = new DateTime(2026, 9, 29, 12, 0, 0, DateTimeKind.Utc);
+        var store = new Mock<IJobStore>(MockBehavior.Strict);
+        store
+            .Setup(candidate => candidate.TryAcquireOrRenewSchedulerLeaseAsync(
+                It.IsAny<string>(), nowUtc, JobSchedulerHostedService.SchedulerLeaseDuration, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        var resolver = new Mock<IBoardProjectResolver>(MockBehavior.Strict);
+        resolver.Setup(candidate => candidate.ResolveAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("no root"));
+        var launcher = new Mock<IJobLaunchService>(MockBehavior.Strict);
+        launcher
+            .Setup(candidate => candidate.LaunchQueuedProjectRunsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        var tabs = new Mock<ITerminalTabHostService>(MockBehavior.Strict);
+        tabs.Setup(t => t.CloseCompletedAutomationTabsAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("child would not stop"));
+        await using var services = new ServiceCollection()
+            .AddSingleton(tabs.Object)
+            .AddSingleton(launcher.Object)
+            .BuildServiceProvider();
+        var health = new JobSchedulerHealth();
+        var scheduler = new JobSchedulerHostedService(
+            services.GetRequiredService<IServiceScopeFactory>(),
+            store.Object,
+            health,
+            projectResolver: resolver.Object);
+
+        Assert.False(await scheduler.RunCycleAsync(nowUtc, TestContext.Current.CancellationToken));
+
+        Assert.Null(health.GetSnapshot().LastError);
+        launcher.Verify(candidate => candidate.LaunchQueuedProjectRunsAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

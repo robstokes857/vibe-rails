@@ -1,0 +1,117 @@
+{
+  "content": "Fictional Trailhead demo data; illustrative quality metrics and activity.",
+  "renderer": "Unmodified VibeRails frontend; Playwright Chromium; 2x pixel density (terminal: 1x).",
+  "privacy": "Fresh browser context. All HTTP and WebSocket requests intercepted without forwarding. No backend or database opened. No real account, terminal history, filesystem explorer, or credentials loaded.",
+  "shots": [
+    {
+      "name": "01-board",
+      "title": "Plan work across agents",
+      "width": 3200,
+      "height": 1800,
+      "sha256": "8dc63b0b45345021c919f9691be5f53d77b03f644cbb883332932929748a2a17"
+    },
+    {
+      "name": "02-board-closeup",
+      "title": "A shared Board for every coding agent",
+      "width": 2656,
+      "height": 1738,
+      "sha256": "5ce5af054e9e2935a1c7ef5e78e3674bae135451b7fac27b424ee87beef5d051"
+    },
+    {
+      "name": "03-lane-agents",
+      "title": "Run reviews and checks when a card enters a lane",
+      "width": 3200,
+      "height": 1800,
+      "sha256": "a53df5fc4747abed028904042b426340fe8a51cc1d8496c6da311736d0f42c56"
+    },
+    {
+      "name": "04-card-details",
+      "title": "Keep requirements and agent discussion together",
+      "width": 3200,
+      "height": 1800,
+      "sha256": "78940e0c7050a628289f42e17dd9562f28f8f3645ee67b50abe95f5ed6a4f649"
+    },
+    {
+      "name": "05-project-health",
+      "title": "Rules and code quality in one workspace",
+      "width": 3200,
+      "height": 1800,
+      "sha256": "4c22c5887fdde63e2ce23c67aabcbf698279063bcae4efe4ae804701c00a53a0"
+    },
+    {
+      "name": "06-code-graph",
+      "title": "Explore source relationships and code quality",
+      "width": 2240,
+      "height": 1712,
+      "sha256": "b83cbdef8372e0e5981f9c115146319f953645578b7384861b81285a779d5f58"
+    },
+    {
+      "name": "07-code-cards",
+      "title": "Explore the repository as connected cards",
+      "width": 2240,
+      "height": 1712,
+      "sha256": "95bfbf3eb42894834c23619deb952e771f1f6bb36fbd191b2e6c8ad7f82f2e5d"
+    },
+    {
+      "name": "08-code-inspector",
+      "title": "Follow a quality finding into the source map",
+      "width": 2240,
+      "height": 1712,
+      "sha256": "b8a64e2b537985ab3d852a25ee83da02913dccf021dbe3510bcfb55b991c1450"
+    },
+    {
+      "name": "09-quality-details",
+      "title": "Inspect saved measurements and code excerpts",
+      "width": 2240,
+      "height": 1712,
+      "sha256": "e3033e7aab3206c96b951b61d3b24980297d9325de0b63c722a0fe5f4c82b202"
+    },
+    {
+      "name": "10-environments",
+      "title": "Reusable environments and Automation Workers",
+      "width": 3200,
+      "height": 1800,
+      "sha256": "d23c3d7cf907ed4f8796d49ad89a67e095e5cdf600566b4f8c893b0278356d60"
+    },
+    {
+      "name": "11-automations",
+      "title": "Automate repeatable project workflows",
+      "width": 3200,
+      "height": 1800,
+      "sha256": "f89809c346160c3f6763696b0b7105ca44e6faf575b8fb13cb1b0f008b0eb3ba"
+    },
+    {
+      "name": "12-card-discussion",
+      "title": "Follow the handoff from implementation to review",
+      "width": 3200,
+      "height": 1800,
+      "sha256": "88362f3204845decd2a1c87bc84dd0bce44d3fc59b6d0a907fefa2bff19db8d0"
+    },
+    {
+      "name": "13-environment-settings",
+      "title": "Configure a repeatable coding workflow",
+      "width": 3200,
+      "height": 1800,
+      "sha256": "d8e15f136bab7f3d77d2326bc9a323bb5184ee258b134f2efaaa2dae82ad6b35"
+    },
+    {
+      "name": "14-terminal",
+      "title": "Real terminal UI with a fictional agent transcript",
+      "width": 1600,
+      "height": 900,
+      "sha256": "993280c135fbbb4811413bf5b37c3fe81695f133d989a8a158abb9b2aec5f59d"
+    },
+    {
+      "name": "15-board-wide",
+      "title": "A wide Board with top navigation",
+      "width": 3200,
+      "height": 1800,
+      "sha256": "db7692acac320cd1f896d93e2af8af27bd1b9bf30a103a56c44880626138e945"
+    }
+  ],
+  "blockedHosts": [
+    "fonts.googleapis.com"
+  ],
+  "unhandledFixtures": [],
+  "pageErrors": []
+}
