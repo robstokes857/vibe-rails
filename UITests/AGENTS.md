@@ -95,6 +95,14 @@ This mounts the production sidebar and styles with paged API fixtures. It checks
 against older sessions, Board titles, escaped metadata, narrow scrolling and remount behavior.
 It opens no application database and launches no CLI.
 
+### Focused scripts layout tests (No Backend Required)
+
+From `UITests`, run `npx playwright test --config playwright.scripts.config.js`.
+Uses the production Automation page, Monaco and xterm with intercepted APIs/WebSockets.
+Checks the terminal prompt stays inside desktop and short windows with top/side navigation,
+splitter resizing, navigation cleanup, scripts toolbar alignment and narrow-screen guidance.
+It never reads or changes real scripts, signing state, terminals or application databases.
+
 ### Focused account sign-in tests (No Backend Required)
 
 From `UITests`, run `npx playwright test --config playwright.remote-link.config.js`.

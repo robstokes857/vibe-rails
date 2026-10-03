@@ -90,24 +90,30 @@ export class PythonScriptsController {
                         <h2 id="python-scripts-title"><i class="fa-brands fa-python me-2" aria-hidden="true"></i>Python scripts</h2>
                         <span class="jobs-count" data-python-scripts-count>0 scripts</span>
                     </div>
-                    <p>Single-file scripts from <code data-python-scripts-dir></code>. A script only runs while it is signed with your PIN. Edit a script here with an agent terminal beside it.</p>
+                    <p>Edit single-file Python scripts with an agent terminal beside the editor. Sign with your PIN to run.</p>
+                    <p class="python-scripts-directory">Folder: <code data-python-scripts-dir></code></p>
                 </div>
                 <div class="python-scripts-heading-actions">
                     <button class="btn btn-sm btn-primary" type="button" data-python-scripts-action="new">
-                        <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>New script
+                        <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>New Python script
                     </button>
                     ${this._canImportFromHost() ? `<button class="btn btn-sm btn-outline-secondary" type="button" data-python-scripts-action="import">
                         <i class="fa-solid fa-file-import me-1" aria-hidden="true"></i>Add from disk
                     </button>` : ''}
-                    <button class="btn btn-sm btn-outline-secondary" type="button" data-python-scripts-action="refresh"
-                            title="Refresh" aria-label="Refresh the script list">
-                        <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
-                    </button>
-                    <button class="btn btn-sm btn-outline-secondary" type="button" data-python-scripts-action="pin">
-                        <i class="fa-solid fa-key me-1" aria-hidden="true"></i><span data-python-scripts-pin-label>Set PIN</span>
-                    </button>
+                    <div class="python-scripts-settings-actions">
+                        <button class="btn btn-sm btn-outline-secondary" type="button" data-python-scripts-action="pin">
+                            <i class="fa-solid fa-key me-1" aria-hidden="true"></i><span data-python-scripts-pin-label>Set PIN</span>
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" type="button" data-python-scripts-action="refresh"
+                                title="Refresh" aria-label="Refresh the script list">
+                            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+                        </button>
+                    </div>
                 </div>
             </div>
+            <p class="python-scripts-runtime-help">Automation workflows support <strong>Python <code>.py</code></strong>,
+                <strong>PowerShell <code>.ps1</code></strong>, and <strong>Bash <code>.sh</code></strong>.
+                For scripts in this repository, choose <strong>New automation → Add script</strong> above.</p>
             <div class="python-scripts-list" data-python-scripts-list>
                 <div class="jobs-empty" role="status"><span class="spinner-border spinner-border-sm"></span> Loading scripts…</div>
             </div>`;

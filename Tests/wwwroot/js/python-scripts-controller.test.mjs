@@ -67,7 +67,7 @@ test('A row offers the whole file lifecycle, not just run and sign', () => {
     assert.equal(html.match(/data-python-scripts-action="edit"/g).length, 1, 'one Edit affordance besides the name');
     // The section copy says what opening does.
     const source = readFileSync(modulePath, 'utf8');
-    assert.match(source, /Edit a script here with an agent terminal beside it\./);
+    assert.match(source, /Edit single-file Python scripts with an agent terminal beside the editor\./);
     // Size and edit time are on the row so "did my edit land?" needs no round trip.
     assert.match(html, /2\.00 KB/);
     assert.match(html, /edited /);

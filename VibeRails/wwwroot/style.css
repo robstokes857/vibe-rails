@@ -17702,6 +17702,16 @@ html.sidebar-collapsed .app-sidebar .app-subnav-split .app-subnav-link {
     min-width: 0;
 }
 
+.python-scripts-section .jobs-section-heading {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.python-scripts-section .jobs-section-title-row {
+    flex-wrap: wrap;
+}
+
 .python-scripts-heading-copy {
     min-width: 0;
     flex: 1 1 auto;
@@ -17716,7 +17726,41 @@ html.sidebar-collapsed .app-sidebar .app-subnav-split .app-subnav-link {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    align-items: flex-start;
+    align-items: center;
+}
+
+.python-scripts-settings-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+}
+
+.python-scripts-heading-actions .btn,
+.python-script-actions .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 36px;
+    padding: 0.4rem 0.75rem;
+    white-space: nowrap;
+}
+
+.python-scripts-heading-actions [data-python-scripts-action="refresh"],
+.python-scripts-section .python-script-menu-toggle {
+    width: 36px;
+}
+
+.python-scripts-runtime-help {
+    margin: 0 0 1rem;
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 0.8rem;
+    line-height: 1.6;
+}
+
+.python-scripts-runtime-help strong {
+    font-weight: 500;
+    color: var(--color-text, #f8fafc);
 }
 
 .python-scripts-list {
@@ -17802,6 +17846,11 @@ html.sidebar-collapsed .app-sidebar .app-subnav-split .app-subnav-link {
     .python-script-actions {
         flex-wrap: wrap;
         justify-content: flex-start;
+        margin-left: 0;
+    }
+
+    .python-scripts-settings-actions {
+        margin-left: 0;
     }
 }
 
@@ -18353,8 +18402,8 @@ button.python-script-name:focus-visible > i {
    BESIDE the editor (>= 880px, the terminal is the right column) and,
    only when the window cannot hold two usable columns, UNDERNEATH it.
    Rides on the
-   .vb-rules-workspace-active flowing shell (viewport-filling, footer
-   hidden, page scrolls when the panes need more room) and reuses
+   .vb-rules-workspace-active shell (viewport-filling, footer hidden;
+   desktop panes scroll internally) and reuses
    .rules-section / .rules-pane-terminal / .rules-terminal-host /
    .python-script-menu. Every var() below carries a fallback (enforced
    by the env-steps test).
@@ -18375,6 +18424,7 @@ button.python-script-name:focus-visible > i {
 /* ── Top bar ─────────────────────────────────────────────────────────── */
 .python-workbench-topbar {
     display: flex;
+    flex-shrink: 0;
     flex-wrap: wrap;
     align-items: center;
     gap: 0.6rem 1rem;
@@ -18711,17 +18761,31 @@ button.python-script-name:focus-visible > i {
    the full working height, and the splitter turns vertical (it moves the
    terminal's width). 880px is the floor at which both columns still clear their
    minimums (380 + 12 + 320), deliberately low so a docked VS Code webview gets
-   columns too; below it the panes stack. The panes claim most of the viewport as
-   a MINIMUM height, so a short window scrolls the page instead of squeezing
-   either pane — a terminal you can actually drive an agent in beats one that
-   fits. */
+   columns too; below it the panes stack. Bound the entire desktop flex chain
+   to the viewport so xterm fits the available space and its prompt stays visible. */
 @media (min-width: 880px) {
+    body.vb-python-workbench-active .app-main {
+        height: 100dvh;
+        min-height: 0;
+    }
+
+    html.nav-layout-top body.vb-python-workbench-active .app-main {
+        height: calc(100dvh - var(--navbar-height, 60px));
+    }
+
+    body.vb-python-workbench-active .main-container,
+    body.vb-python-workbench-active #app-content,
+    .python-workbench {
+        min-height: 0;
+    }
+
     .python-workbench-panes {
         display: grid;
+        flex: 1 1 0;
         grid-template-columns: minmax(0, 1fr) 12px var(--python-workbench-terminal-width, 46%);
         grid-template-rows: minmax(0, 1fr);
         align-items: stretch;
-        min-height: clamp(560px, calc(100dvh - 168px), 1400px);
+        min-height: 0;
     }
 
     /* The row sizes both panes; the stacked floors would only fight the grid. */

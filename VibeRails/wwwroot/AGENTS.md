@@ -848,6 +848,10 @@ See also: [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for back
   scripts section: the row's **Edit** button (outline-primary, first in the row) and the
   script name navigate here in every host; "Open in VS Code" is a secondary menu item
   when the extension bridge exists.
+- **Scripts section**: authoring/import actions and PIN/refresh controls have a separate
+  wrapping toolbar. The local signed workbench accepts Python (`.py`); visible guidance
+  points to **New automation → Add script** for repository Python (`.py`), PowerShell
+  (`.ps1`), and Bash (`.sh`) actions. Do not imply the local Python API accepts all three.
 - **Layout**: Back bar (`data-action="go-back"`, bound globally) + identity/status pill +
   Run / Sign / kebab; a `.rules-section` card with a script rail and Monaco
   (`viberails-dark`, Ctrl/⌘+S saves in place); an optional last-run drawer; a draggable
@@ -858,9 +862,10 @@ See also: [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for back
   (`isSideBySideLayout()` = the CSS `@media (min-width: 880px)`) the terminal is a grid
   column BESIDE the editor, full working height, and the (vertical) splitter sets its
   width — `--python-workbench-terminal-width`, persisted in localStorage
-  `viberails.pythonWorkbench.terminalWidth`, ArrowLeft/Right. The panes claim most of the
-  viewport as a minimum height so a short window scrolls the page instead of squeezing
-  either pane. 880px is the floor at which both columns clear their minimums
+  `viberails.pythonWorkbench.terminalWidth`, ArrowLeft/Right. At desktop widths the
+  `vb-python-workbench-active` shell bounds the flex chain to the available viewport;
+  Monaco, the script rail, and xterm scroll internally so the terminal prompt stays visible
+  even in short windows. 880px is the floor at which both columns clear their minimums
   (`EDITOR_MIN_WIDTH` 380 + 12 + `TERMINAL_MIN_WIDTH` 320) and is deliberately low so a
   docked VS Code webview still gets columns; **only below it do the panes stack**
   (horizontal splitter, `--python-workbench-terminal-height`, localStorage

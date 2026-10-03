@@ -1735,11 +1735,10 @@ test('The workbench styles fill the viewport without overlap and carry fallbacks
     // Short viewports: the floor and the default share both drop (see the JS mirror test).
     assert.match(block, /@media \(max-height: 720px\) and \(max-width: 879\.98px\) \{[\s\S]*?\.python-workbench \.python-workbench-terminal \{\s*min-height: 180px;/);
     // Wide windows: editor | splitter | terminal as grid columns, the terminal column width
-    // on its own custom property, and a working height that lets the page scroll instead
-    // of squeezing the panes (Rob: "the terminal is too small… side by side… let it scroll").
+    // on its own custom property; the bounded row keeps the terminal prompt on-screen.
     const wide = block.slice(block.indexOf('@media (min-width: 880px)'));
     assert.ok(wide.length > 0, 'the workbench block has a side-by-side media query');
-    assert.match(wide, /\.python-workbench-panes \{[^}]*display: grid;[^}]*grid-template-columns: minmax\(0, 1fr\) 12px var\(--python-workbench-terminal-width, 46%\);[^}]*min-height: clamp\(560px, calc\(100dvh - 168px\), 1400px\);/);
+    assert.match(wide, /\.python-workbench-panes \{[^}]*display: grid;[^}]*grid-template-columns: minmax\(0, 1fr\) 12px var\(--python-workbench-terminal-width, 46%\);[^}]*min-height: 0;/);
     assert.match(wide, /\.python-workbench-splitter \{[^}]*width: 12px;[^}]*height: auto;[^}]*cursor: col-resize;/);
     assert.match(wide, /\.python-workbench \.python-workbench-terminal \{[^}]*height: auto;[^}]*min-height: 0;/);
     assert.match(block, /--python-workbench-terminal-width: 46%;/);
