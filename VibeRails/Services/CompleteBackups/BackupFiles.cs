@@ -479,10 +479,33 @@ public sealed partial class BackupFiles(IServiceScopeFactory scopes)
         for (int i = 0, hidden = 0; i < words.Length; i += 2)
         {
             if (words[i].Length == 0) continue;
-            if (hidden == 1 && !words[i].StartsWith('-')) { words[i] = RedactedValue; hidden = 0; continue; }
+            if (hidden == 1 && !words[i].StartsWith('-'))
+            {
+                // A quoted value ("prefix secret") runs through its closing quote, however many words that is.
+                var last = QuotedValueEnd(words, i);
+                words[i] = RedactedValue;
+                for (var j = i + 1; j <= last; j++) words[j] = "";
+                i = last;
+                hidden = 0;
+                continue;
+            }
             hidden = HidesNextWord(words[i]) ? 1 : 0;
         }
         return string.Concat(words);
+    }
+
+    /// <summary>
+    /// Index of the word that closes the value starting at <paramref name="start"/>: the word itself unless it opens a
+    /// quote it does not close, then the first later word ending in that quote, or the last word when none does.
+    /// </summary>
+    private static int QuotedValueEnd(string[] words, int start)
+    {
+        var quote = words[start][0];
+        if (quote is not ('"' or '\'')) return start;
+        if (words[start].Length >= 2 && words[start][^1] == quote) return start;
+        for (var j = start + 2; j < words.Length; j += 2)
+            if (words[j].Length > 0 && words[j][^1] == quote) return j;
+        return words.Length - 1;
     }
 
     /// <summary>Index just past the first <c>=</c>/<c>:</c> whose name is a credential, or the text's length.</summary>

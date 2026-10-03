@@ -76,7 +76,8 @@ blocks keep their key but lose every entry, because credentials there use arbitr
 after the separator of any `name=value` or `Name: value` pair whose name is a credential, however
 nested (`--header=Authorization: Bearer ...`, `--env=API_KEY=...`, `...?a=1&token=...`), become
 `[redacted]`; in space-separated text and in string lists (`args`, OpenCode's `command` array) so
-does the word or item after a credential-named flag (`--api-key ...`) or `Bearer`/`Basic`, and the
+does the word or item after a credential-named flag (`--api-key ...`) or `Bearer`/`Basic` (a quoted
+value counts through its closing quote, however many words), and the
 value carried by a header or environment flag whatever its name (`--header "X-Deployment: ..."`,
 `-H`, `--env NAME=...`, `-e`, the `--header=`/`--env=` forms and the attached short forms
 `-HName: ...`/`-eNAME=...`), for the same reason the blocks

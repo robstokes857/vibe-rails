@@ -358,6 +358,11 @@ public sealed class BackupFilesCredentialTests : IDisposable
     [InlineData("curl -HX-Deployment:leak https://mcp.example", "curl -HX-Deployment:[redacted]")]
     [InlineData("docker run -eCUSTOM=leak image", "docker run -eCUSTOM=[redacted]")]
     [InlineData("set -ex && node server.js", "set -ex && node server.js")]
+    // A quoted value after a credential flag or scheme is one value through its closing quote (VIBE-37 review).
+    [InlineData("server --password \"prefix leak suffix\" --port 3000", "server --password [redacted] --port 3000")]
+    [InlineData("server --api-key 'leak more' --verbose", "server --api-key [redacted] --verbose")]
+    [InlineData("Bearer \"leak leak\"", "Bearer [redacted]")]
+    [InlineData("server --password \"leak unterminated --port 3000", "server --password [redacted]")]
     // Ordinary values are untouched.
     [InlineData("https://mcp.example/sse", "https://mcp.example/sse")]
     [InlineData(@"C:\Users\me\.claude\hooks\check_token.py --mode=strict", @"C:\Users\me\.claude\hooks\check_token.py --mode=strict")]
@@ -422,6 +427,7 @@ public sealed class BackupFilesCredentialTests : IDisposable
             proxy = ["https://mcp.example/sse", "--header", "X-Deployment: header-arg-leak"]
             command = "mcp-remote https://mcp.example/sse --header 'X-Deployment: text-header-leak'"
             compact = ["-HX-Deployment: compact-header-leak", "-eCUSTOM=compact-env-leak"]
+            quoted = "server --password \"prefix quoted-leak suffix\" --port 3000"
             """");
 
         Assert.DoesNotContain("leak", redacted);
@@ -433,6 +439,7 @@ public sealed class BackupFilesCredentialTests : IDisposable
         Assert.Contains($"proxy = [\"https://mcp.example/sse\", \"--header\", \"X-Deployment:{BackupFiles.RedactedValue}\"]", redacted);
         Assert.Contains($"command = \"mcp-remote https://mcp.example/sse --header 'X-Deployment:{BackupFiles.RedactedValue}\"", redacted);
         Assert.Contains($"compact = [\"-HX-Deployment:{BackupFiles.RedactedValue}\", \"-eCUSTOM={BackupFiles.RedactedValue}\"]", redacted);
+        Assert.Contains($"quoted = \"server --password {BackupFiles.RedactedValue} --port 3000\"", redacted);
         Assert.Contains("model = \"gpt-5\"", redacted);
         Assert.Contains("[mcp_servers.github]", redacted); Assert.Contains("command = \"npx\"", redacted);
         Assert.Contains($"args = [\"-y\", \"@modelcontextprotocol/server-github\", \"--token\", \"{BackupFiles.RedactedValue}\"]", redacted);
@@ -457,7 +464,7 @@ public sealed class BackupFilesCredentialTests : IDisposable
             "{\"mcpServers\":{\"deploy\":{\"command\":\"npx\",\"args\":[\"deploy-mcp\",\"--api-key\",\"json-args-leak\",\"--header=Authorization: Bearer json-nested-leak\",\"--env=API_KEY=json-env-arg-leak\"],\"env\":{\"DEPLOY_KEY\":\"json-env-leak\"},\"headers\":{\"X-Auth\":\"json-header-leak\"}},"
             + "\"remote\":{\"type\":\"http\",\"url\":\"https://mcp.example/mcp?api_key=json-url-leak\"},\"pct\":{\"url\":\"https://mcp.example/mcp?api%5Fkey=json-pct-leak\"},\"esc\":{\"args\":[\"--api\\u002dkey\",\"json-escaped-leak\"]},\"oc\":{\"command\":[\"npx\",\"server\",\"--token\",\"json-command-leak\"]},"
             + "\"hdr\":{\"command\":\"mcp-remote\",\"args\":[\"https://mcp.example/sse\",\"--header\",\"X-Deployment: json-header-arg-leak\"]},"
-            + "\"compact\":{\"args\":[\"-HX-Deployment: json-compact-header-leak\",\"-eCUSTOM=json-compact-env-leak\"]}}}");
+            + "\"compact\":{\"command\":\"server --password \\\"prefix json-quoted-leak suffix\\\" --port 3000\",\"args\":[\"-HX-Deployment: json-compact-header-leak\",\"-eCUSTOM=json-compact-env-leak\"]}}}");
         Write(Path.Combine(Home, ".claude", "plugins", "marketplaces", "acme", "plugins", "deploy", ".claude-plugin", "plugin.json"),
             "﻿{\"name\":\"deploy\",\"mcpServers\":{\"deploy\":{\"env\":{\"TOKEN\":\"manifest-leak\"}}}}");
         Write(Path.Combine(Home, ".codex", "config.toml"), "model = \"gpt-5\"\n[mcp_servers.github.env]\nGITHUB_TOKEN = \"codex-leak\"\n"
