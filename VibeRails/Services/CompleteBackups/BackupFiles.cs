@@ -400,8 +400,24 @@ public sealed partial class BackupFiles(IServiceScopeFactory scopes)
     /// <summary>What the word after a flag or scheme is: ordinary, a hidden credential, a header, or an environment assignment.</summary>
     private enum NextWord { Ordinary, Hidden, Header, Environment }
 
-    private static NextWord NextWordAfter(string word) =>
-        HidesNextWord(word) ? NextWord.Hidden : word.Contains('=') ? NextWord.Ordinary : CarrierKind(word);
+    private static NextWord NextWordAfter(string word)
+    {
+        var (kind, valueOffset) = Carrier(word);
+        if (kind != NextWord.Ordinary) return valueOffset < 0 ? kind : NextWord.Ordinary;
+        return HidesNextWord(word) ? NextWord.Hidden : NextWord.Ordinary;
+    }
+
+    /// <summary>
+    /// A word that is a carrier flag: alone (value offset -1; the next word is the value) or with its value attached,
+    /// as <c>--header=Name: …</c>, <c>--env=NAME=…</c> or the short forms <c>-HName: …</c> and <c>-eNAME=…</c>.
+    /// </summary>
+    private static (NextWord Kind, int ValueOffset) Carrier(string word)
+    {
+        if (word.Length > 2 && word[0] == '-' && word[1] != '-' && CarrierKind(word[..2]) is var attached && attached != NextWord.Ordinary) return (attached, 2);
+        var equals = word.IndexOf('=');
+        var kind = CarrierKind(equals < 0 ? word : word[..equals]);
+        return kind == NextWord.Ordinary ? (NextWord.Ordinary, -1) : (kind, equals < 0 ? -1 : equals + 1);
+    }
 
     /// <summary>
     /// A flag whose value is a header (<c>--header</c>, <c>-H</c>) or an environment assignment (<c>--env</c>, <c>-e</c>).
@@ -484,7 +500,7 @@ public sealed partial class BackupFiles(IServiceScopeFactory scopes)
 
     /// <summary>
     /// Index where the value carried by a header/environment flag begins (<c>--header X-Deployment: …</c>,
-    /// <c>-e NAME=…</c>, <c>--header=Name: …</c>), or the text's length. The name's separator is looked for in the
+    /// <c>-e NAME=…</c>, <c>--header=Name: …</c>, <c>-HName: …</c>), or the text's length. The name's separator is looked for in the
     /// value's first word: a header without one is a value from its first character, a bare environment name is kept.
     /// </summary>
     private static int CarrierCut(string text)
@@ -503,13 +519,12 @@ public sealed partial class BackupFiles(IServiceScopeFactory scopes)
                 next = NextWord.Ordinary;
                 continue;
             }
-            var equals = word.IndexOf('=');
-            var kind = CarrierKind(equals < 0 ? word : word[..equals]);
+            var (kind, valueOffset) = Carrier(word);
             if (kind == NextWord.Ordinary) { next = NextWord.Ordinary; continue; }
-            if (equals < 0) { next = kind; continue; }
+            if (valueOffset < 0) { next = kind; continue; }
             next = NextWord.Ordinary;
-            var compound = CarriedCut(text, start + equals + 1, word.Length - equals - 1, kind);
-            if (compound >= 0) return compound;
+            var attached = CarriedCut(text, start + valueOffset, word.Length - valueOffset, kind);
+            if (attached >= 0) return attached;
         }
         return text.Length;
     }

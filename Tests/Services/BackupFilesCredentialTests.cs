@@ -334,6 +334,8 @@ public sealed class BackupFilesCredentialTests : IDisposable
     [InlineData(new[] { "-H", "Authorization", "Bearer", "leak" }, new[] { "-H", BackupFiles.RedactedValue, "Bearer", BackupFiles.RedactedValue })]
     [InlineData(new[] { "run", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "ghcr.io/github/github-mcp-server" }, new[] { "run", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "ghcr.io/github/github-mcp-server" })]
     [InlineData(new[] { "--env-file", ".env.production", "--header-case", "lower" }, new[] { "--env-file", ".env.production", "--header-case", "lower" })]
+    // Short options carry their value attached as well (curl -HName: value, docker -eNAME=value); found by the VIBE-37 review.
+    [InlineData(new[] { "-HX-Deployment: leak", "-eCUSTOM=leak", "-e", "KEEP", "-Hleak" }, new[] { "-HX-Deployment:" + BackupFiles.RedactedValue, "-eCUSTOM=" + BackupFiles.RedactedValue, "-e", "KEEP", "-H" + BackupFiles.RedactedValue })]
     public void CredentialArgumentsAreReplacedInPlace(string[] args, string[] expected) => Assert.Equal(expected, BackupFiles.RedactArguments(args));
 
     [Theory]
@@ -353,6 +355,9 @@ public sealed class BackupFilesCredentialTests : IDisposable
     [InlineData("docker run -e DEPLOYMENT=leak image", "docker run -e DEPLOYMENT=[redacted]")]
     [InlineData("docker run -e GITHUB_PERSONAL_ACCESS_TOKEN ghcr.io/github/github-mcp-server", "docker run -e GITHUB_PERSONAL_ACCESS_TOKEN ghcr.io/github/github-mcp-server")]
     [InlineData("node -e console.log(1)", "node -e console.log(1)")]
+    [InlineData("curl -HX-Deployment:leak https://mcp.example", "curl -HX-Deployment:[redacted]")]
+    [InlineData("docker run -eCUSTOM=leak image", "docker run -eCUSTOM=[redacted]")]
+    [InlineData("set -ex && node server.js", "set -ex && node server.js")]
     // Ordinary values are untouched.
     [InlineData("https://mcp.example/sse", "https://mcp.example/sse")]
     [InlineData(@"C:\Users\me\.claude\hooks\check_token.py --mode=strict", @"C:\Users\me\.claude\hooks\check_token.py --mode=strict")]
@@ -416,6 +421,7 @@ public sealed class BackupFilesCredentialTests : IDisposable
             ]
             proxy = ["https://mcp.example/sse", "--header", "X-Deployment: header-arg-leak"]
             command = "mcp-remote https://mcp.example/sse --header 'X-Deployment: text-header-leak'"
+            compact = ["-HX-Deployment: compact-header-leak", "-eCUSTOM=compact-env-leak"]
             """");
 
         Assert.DoesNotContain("leak", redacted);
@@ -426,6 +432,7 @@ public sealed class BackupFilesCredentialTests : IDisposable
         Assert.Contains($"spread = [\"--token\", \"\"\"\n{BackupFiles.RedactedValue}\"\"\"]", redacted);
         Assert.Contains($"proxy = [\"https://mcp.example/sse\", \"--header\", \"X-Deployment:{BackupFiles.RedactedValue}\"]", redacted);
         Assert.Contains($"command = \"mcp-remote https://mcp.example/sse --header 'X-Deployment:{BackupFiles.RedactedValue}\"", redacted);
+        Assert.Contains($"compact = [\"-HX-Deployment:{BackupFiles.RedactedValue}\", \"-eCUSTOM={BackupFiles.RedactedValue}\"]", redacted);
         Assert.Contains("model = \"gpt-5\"", redacted);
         Assert.Contains("[mcp_servers.github]", redacted); Assert.Contains("command = \"npx\"", redacted);
         Assert.Contains($"args = [\"-y\", \"@modelcontextprotocol/server-github\", \"--token\", \"{BackupFiles.RedactedValue}\"]", redacted);
@@ -449,7 +456,8 @@ public sealed class BackupFilesCredentialTests : IDisposable
         Write(Path.Combine(Home, ".claude", "plugins", "marketplaces", "acme", "plugins", "deploy", ".mcp.json"),
             "{\"mcpServers\":{\"deploy\":{\"command\":\"npx\",\"args\":[\"deploy-mcp\",\"--api-key\",\"json-args-leak\",\"--header=Authorization: Bearer json-nested-leak\",\"--env=API_KEY=json-env-arg-leak\"],\"env\":{\"DEPLOY_KEY\":\"json-env-leak\"},\"headers\":{\"X-Auth\":\"json-header-leak\"}},"
             + "\"remote\":{\"type\":\"http\",\"url\":\"https://mcp.example/mcp?api_key=json-url-leak\"},\"pct\":{\"url\":\"https://mcp.example/mcp?api%5Fkey=json-pct-leak\"},\"esc\":{\"args\":[\"--api\\u002dkey\",\"json-escaped-leak\"]},\"oc\":{\"command\":[\"npx\",\"server\",\"--token\",\"json-command-leak\"]},"
-            + "\"hdr\":{\"command\":\"mcp-remote\",\"args\":[\"https://mcp.example/sse\",\"--header\",\"X-Deployment: json-header-arg-leak\"]}}}");
+            + "\"hdr\":{\"command\":\"mcp-remote\",\"args\":[\"https://mcp.example/sse\",\"--header\",\"X-Deployment: json-header-arg-leak\"]},"
+            + "\"compact\":{\"args\":[\"-HX-Deployment: json-compact-header-leak\",\"-eCUSTOM=json-compact-env-leak\"]}}}");
         Write(Path.Combine(Home, ".claude", "plugins", "marketplaces", "acme", "plugins", "deploy", ".claude-plugin", "plugin.json"),
             "﻿{\"name\":\"deploy\",\"mcpServers\":{\"deploy\":{\"env\":{\"TOKEN\":\"manifest-leak\"}}}}");
         Write(Path.Combine(Home, ".codex", "config.toml"), "model = \"gpt-5\"\n[mcp_servers.github.env]\nGITHUB_TOKEN = \"codex-leak\"\n"
@@ -457,7 +465,8 @@ public sealed class BackupFilesCredentialTests : IDisposable
             + "[mcp_servers.remote.\"http\\u005fheaders\"]\nX-Deployment = \"codex-escaped-header-leak\"\n"
             // VIBE-37: a flag and its value in different quote styles, and a header argument under an arbitrary name.
             + "[mcp_servers.multi]\nargs = [\"--api-key\", \"\"\"codex-multiline-value-leak\"\"\"]\n"
-            + "[mcp_servers.literal]\nargs = ['''--token''', \"codex-literal-flag-leak\", \"--header\", \"X-Deployment: codex-header-arg-leak\"]\n");
+            + "[mcp_servers.literal]\nargs = ['''--token''', \"codex-literal-flag-leak\", \"--header\", \"X-Deployment: codex-header-arg-leak\"]\n"
+            + "[mcp_servers.compact]\nargs = [\"-HX-Deployment: codex-compact-header-leak\", \"-eCUSTOM=codex-compact-env-leak\"]\n");
         Write(Path.Combine(Home, ".grok", "config.toml"), "[mcp_servers.search]\ncommand = \"search-mcp\"\nargs = [\"--token\", \"grok-leak\"]\n");
         var files = await Enumerate();
 
@@ -477,6 +486,8 @@ public sealed class BackupFilesCredentialTests : IDisposable
         Assert.Contains("model = \"gpt-5\"", codex);
         Assert.Contains($"[mcp_servers.multi]\nargs = [\"--api-key\", \"\"\"{BackupFiles.RedactedValue}\"\"\"]", codex);
         Assert.Contains($"[mcp_servers.literal]\nargs = ['''--token''', \"{BackupFiles.RedactedValue}\", \"--header\", \"X-Deployment:{BackupFiles.RedactedValue}\"]", codex);
+        Assert.Contains($"[mcp_servers.compact]\nargs = [\"-HX-Deployment:{BackupFiles.RedactedValue}\", \"-eCUSTOM={BackupFiles.RedactedValue}\"]", codex);
+        Assert.Contains("\"-HX-Deployment:" + BackupFiles.RedactedValue + "\"", await Read(zip, "native/.claude/plugins/marketplaces/acme/plugins/deploy/.mcp.json"));
         Assert.Contains("command = \"search-mcp\"", await Read(zip, "native/.grok/config.toml"));
     }
 

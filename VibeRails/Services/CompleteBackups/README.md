@@ -78,7 +78,8 @@ nested (`--header=Authorization: Bearer ...`, `--env=API_KEY=...`, `...?a=1&toke
 `[redacted]`; in space-separated text and in string lists (`args`, OpenCode's `command` array) so
 does the word or item after a credential-named flag (`--api-key ...`) or `Bearer`/`Basic`, and the
 value carried by a header or environment flag whatever its name (`--header "X-Deployment: ..."`,
-`-H`, `--env NAME=...`, `-e`, and the `--header=`/`--env=` forms), for the same reason the blocks
+`-H`, `--env NAME=...`, `-e`, the `--header=`/`--env=` forms and the attached short forms
+`-HName: ...`/`-eNAME=...`), for the same reason the blocks
 lose every entry: the name stays (`X-Deployment:[redacted]`, `NAME=[redacted]`), a header value
 without a name is replaced whole, and a bare `-e NAME` pass-through is kept.
 Every `.toml` file (Codex and Grok `config.toml`) gets the same rules line by line: comments are
