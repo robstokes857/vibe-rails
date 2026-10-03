@@ -1,6 +1,4 @@
-using System.Text.Json;
 using VibeRails.Services.VCA.Hooks;
-using VibeRails.Utils;
 using Xunit;
 
 namespace Tests.Services.VCA;
@@ -17,19 +15,7 @@ public sealed class CommitMessageCoAuthorCleanerTests : IDisposable
     }
 
     [Fact]
-    public void Settings_DefaultsToRemovingCoAuthorTrailers()
-    {
-        Assert.True(new Settings().RemoveCoAuthorTrailers);
-
-        var settingsFromOlderFile = JsonSerializer.Deserialize(
-            "{}",
-            ConfigJsonContext.Default.Settings);
-        Assert.NotNull(settingsFromOlderFile);
-        Assert.True(settingsFromOlderFile.RemoveCoAuthorTrailers);
-    }
-
-    [Fact]
-    public async Task RemoveAsync_Enabled_RemovesAllTrailerCasingsAndKeepsOtherContent()
+    public async Task RemoveAsync_RemovesAllTrailerCasingsAndKeepsOtherContent()
     {
         var path = Path.Combine(_tempDirectory, "COMMIT_EDITMSG");
         const string original =
@@ -41,7 +27,7 @@ public sealed class CommitMessageCoAuthorCleanerTests : IDisposable
             "\tclAuDe-SeSsIoN \t: another-session\r\n" +
             "Signed-off-by: Developer <dev@example.com>\r\n";
         await File.WriteAllTextAsync(path, original, TestContext.Current.CancellationToken);
-        var cleaner = new CommitMessageCoAuthorCleaner(() => true);
+        var cleaner = new CommitMessageCoAuthorCleaner();
 
         var removed = await cleaner.RemoveAsync(path, TestContext.Current.CancellationToken);
 
@@ -53,27 +39,66 @@ public sealed class CommitMessageCoAuthorCleanerTests : IDisposable
             await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken));
     }
 
-    [Fact]
-    public async Task RemoveAsync_Disabled_LeavesCommitMessageUnchanged()
+    [Theory]
+    [InlineData("Claude <noreply@anthropic.com>")]
+    [InlineData("Codex <codex@openai.com>")]
+    [InlineData("Copilot <copilot@github.com>")]
+    [InlineData("Cursor <cursor@cursor.com>")]
+    [InlineData("Gemini <gemini@google.com>")]
+    [InlineData("Antigravity <agent@example.invalid>")]
+    [InlineData("OpenCode <agent@example.invalid>")]
+    [InlineData("Grok <agent@example.invalid>")]
+    [InlineData("A future agent with no email")]
+    public async Task RemoveAsync_RemovesCoAuthorForAnyAgent(string author)
     {
-        var path = Path.Combine(_tempDirectory, "COMMIT_EDITMSG-disabled");
-        const string original =
-            "Implement feature\n\nCo-authored-by: Claude <noreply@anthropic.com>\n" +
-            "Claude-Session: 01234567-89ab-cdef-0123-456789abcdef\n";
+        var path = Path.Combine(_tempDirectory, "COMMIT_EDITMSG-agent");
+        var original = $"Implement feature\n\nCo-authored-by: {author}\n";
         await File.WriteAllTextAsync(path, original, TestContext.Current.CancellationToken);
-        var cleaner = new CommitMessageCoAuthorCleaner(() => false);
+        var cleaner = new CommitMessageCoAuthorCleaner();
 
         var removed = await cleaner.RemoveAsync(path, TestContext.Current.CancellationToken);
 
-        Assert.Equal(0, removed);
+        Assert.Equal(1, removed);
         Assert.Equal(
-            original,
+            "Implement feature\n",
             await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
+    [InlineData("Coauthored-by")]
+    [InlineData("Co-authored by")]
+    [InlineData("Coauthored by")]
+    [InlineData("Co-author")]
+    [InlineData("Coauthor")]
+    [InlineData("CO-AUTHORED BY")]
+    public void RemoveTrailers_RemovesAdditionalCoAuthorSpellings(string token)
+    {
+        var original =
+            $"Fix it\r\n\r\n{token}: is discussed in the body.\r\n" +
+            "Keep this paragraph.\r\n\r\n" +
+            $"\t{token} \t: Agent <agent@example.invalid>\r\n" +
+            "    wrapped attribution\r\n" +
+            "Co-authored-by: Another agent\r\n" +
+            "Claude-Session: session\r\n" +
+            "Signed-off-by: Developer <dev@example.com>\r\n";
+
+        var cleaned = CommitMessageCoAuthorCleaner.RemoveTrailers(original, out var removed);
+
+        Assert.Equal(3, removed);
+        Assert.Equal(
+            $"Fix it\r\n\r\n{token}: is discussed in the body.\r\n" +
+            "Keep this paragraph.\r\n\r\nSigned-off-by: Developer <dev@example.com>\r\n",
+            cleaned);
+        // Unindented space-containing tokens must also qualify for the terminal block.
+        Assert.Equal("Fix it\n", CommitMessageCoAuthorCleaner.RemoveTrailers(
+            $"Fix it\n\n{token}: Agent\n", out removed));
+        Assert.Equal(1, removed);
     }
 
     [Theory]
     [InlineData("Co-authored-by")]
     [InlineData("Claude-Session")]
+    [InlineData("Co-authored by")]
     public void RemoveTrailers_RemovesOrphanedBlankLineAtEndButKeepsComments(string token)
     {
         var original =
@@ -92,9 +117,10 @@ public sealed class CommitMessageCoAuthorCleanerTests : IDisposable
     [Theory]
     [InlineData("Co-authored-by")]
     [InlineData("Claude-Session")]
+    [InlineData("Co-authored by")]
     public void RemoveTrailers_KeepsABodyParagraphThatOpensWithTheToken(string token)
     {
-        // The setting promises to remove trailers. A trailer block is terminal, so a paragraph in
+        // The policy removes trailers. A trailer block is terminal, so a paragraph in
         // the body that happens to start with the token is prose — deleting it silently rewrites
         // what the author wrote about the very feature they are describing.
         var original =
@@ -116,6 +142,7 @@ public sealed class CommitMessageCoAuthorCleanerTests : IDisposable
     [Theory]
     [InlineData("Co-authored-by")]
     [InlineData("Claude-Session")]
+    [InlineData("Co-authored by")]
     public void RemoveTrailers_SingleParagraphMessageHasNoTrailerBlock(string token)
     {
         // Git's rule, and the reason the body case above is even decidable: the first paragraph is
@@ -133,6 +160,10 @@ public sealed class CommitMessageCoAuthorCleanerTests : IDisposable
     [InlineData("X-Claude-Session: keep")]
     [InlineData("Claude-Sessions: keep")]
     [InlineData("Claude-Session=keep")]
+    [InlineData("X-Co-author: keep")]
+    [InlineData("Co-author-credit: keep")]
+    [InlineData("Coauthors: keep")]
+    [InlineData("Coauthored-by-extra: keep")]
     public void RemoveTrailers_KeepsSimilarTokens(string line)
     {
         var original = $"Implement feature\n\n{line}\nClaude-Session: remove\n";
@@ -148,7 +179,7 @@ public sealed class CommitMessageCoAuthorCleanerTests : IDisposable
     {
         // The shape this policy exists for, in its awkward form: the generated-with line sits
         // directly above the trailer with no blank line, so the run of trailer lines at the end is
-        // just the one. The generated-with line is not a trailer and is not this setting's business.
+        // just the one. The generated-with line is not a trailer and is outside this policy.
         const string original =
             "Add the pause endpoint\n\n" +
             "\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)\n" +
@@ -187,6 +218,7 @@ public sealed class CommitMessageCoAuthorCleanerTests : IDisposable
     [Theory]
     [InlineData("Co-authored-by")]
     [InlineData("Claude-Session")]
+    [InlineData("Co-authored by")]
     public void RemoveTrailers_IgnoresEverythingBelowTheScissorsLine(string token)
     {
         // `git commit --verbose` appends an UNCOMMENTED diff below the scissors, and the hook sees
@@ -226,7 +258,7 @@ public sealed class CommitMessageCoAuthorCleanerTests : IDisposable
                 $"Fix the café bug\n\n{token}: value\n"));
         var expected = Concat(preamble, System.Text.Encoding.UTF8.GetBytes("Fix the café bug\n"));
         await File.WriteAllBytesAsync(path, original, TestContext.Current.CancellationToken);
-        var cleaner = new CommitMessageCoAuthorCleaner(() => true);
+        var cleaner = new CommitMessageCoAuthorCleaner();
 
         var removed = await cleaner.RemoveAsync(path, TestContext.Current.CancellationToken);
 
@@ -250,7 +282,7 @@ public sealed class CommitMessageCoAuthorCleanerTests : IDisposable
             System.Text.Encoding.Unicode.GetBytes(
                 $"Fix the thing\n\n{token}: value\n"));
         await File.WriteAllBytesAsync(path, original, TestContext.Current.CancellationToken);
-        var cleaner = new CommitMessageCoAuthorCleaner(() => true);
+        var cleaner = new CommitMessageCoAuthorCleaner();
 
         var removed = await cleaner.RemoveAsync(path, TestContext.Current.CancellationToken);
 
@@ -258,19 +290,6 @@ public sealed class CommitMessageCoAuthorCleanerTests : IDisposable
         Assert.Equal(
             original,
             await File.ReadAllBytesAsync(path, TestContext.Current.CancellationToken));
-    }
-
-    [Fact]
-    public void ReadEnabledSetting_FailsClosedWhenTheSettingCannotBeRead()
-    {
-        // Deliberately the opposite of the documented default. This is the path where the choice is
-        // unknown, and the operation it guards rewrites the author's message irreversibly: skipping
-        // cleanup for one commit is recoverable, rewriting for someone who switched it off is not.
-        Assert.False(CommitMessageCoAuthorCleaner.ReadEnabledSetting(
-            () => throw new IOException("settings.json is locked")));
-
-        Assert.True(CommitMessageCoAuthorCleaner.ReadEnabledSetting(() => true));
-        Assert.False(CommitMessageCoAuthorCleaner.ReadEnabledSetting(() => false));
     }
 
     private static byte[] Concat(byte[] first, byte[] second)

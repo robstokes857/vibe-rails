@@ -1,6 +1,5 @@
 using System.Text;
 using Serilog;
-using VibeRails.Utils;
 
 namespace VibeRails.Services.VCA.Hooks;
 
@@ -10,11 +9,11 @@ public interface ICommitMessageCoAuthorCleaner
 }
 
 /// <summary>
-/// Removes <c>Co-authored-by:</c> and <c>Claude-Session:</c> trailers from the proposed commit message when the
-/// default-on Git Guard policy is enabled. The hook edits Git's message file before any VCA rule
+/// Always removes co-author attribution and <c>Claude-Session:</c> trailers from the proposed commit
+/// message. The hook edits Git's message file before any VCA rule
 /// reads it, so both the policy and commit-message validation see the text Git will record.
 ///
-/// The setting promises to remove <em>trailers</em>, so only the message's terminal trailer block is
+/// The policy removes <em>trailers</em>, so only the message's terminal trailer block is
 /// searched — the shape Git itself recognizes in <c>interpret-trailers</c>. A body line that happens
 /// to start with the token ("Co-authored-by: is what GitHub reads for attribution…") is prose, and
 /// deleting it would silently rewrite the author's paragraph.
@@ -39,26 +38,13 @@ public sealed class CommitMessageCoAuthorCleaner : ICommitMessageCoAuthorCleaner
     /// </summary>
     private static readonly Encoding ByteTransparentEncoding = Encoding.Latin1;
 
-    private readonly Func<bool> _isEnabled;
-
-    public CommitMessageCoAuthorCleaner()
-        : this(ReadEnabledSetting)
-    {
-    }
-
-    internal CommitMessageCoAuthorCleaner(Func<bool> isEnabled)
-    {
-        _isEnabled = isEnabled ?? throw new ArgumentNullException(nameof(isEnabled));
-    }
-
     public async Task<int> RemoveAsync(
         string? commitMessagePath,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!_isEnabled() ||
-            string.IsNullOrWhiteSpace(commitMessagePath) ||
+        if (string.IsNullOrWhiteSpace(commitMessagePath) ||
             !File.Exists(commitMessagePath))
         {
             return 0;
@@ -232,7 +218,13 @@ public sealed class CommitMessageCoAuthorCleaner : ICommitMessageCoAuthorCleaner
     /// common in hand-edited messages, even though Git would read it as a continuation.
     /// </summary>
     private static bool IsRemovedTrailer(ReadOnlySpan<char> line) =>
-        HasTrailerToken(line, "Co-authored-by") || HasTrailerToken(line, "Claude-Session");
+        HasTrailerToken(line, "Co-authored-by") ||
+        HasTrailerToken(line, "Coauthored-by") ||
+        HasTrailerToken(line, "Co-authored by") ||
+        HasTrailerToken(line, "Coauthored by") ||
+        HasTrailerToken(line, "Co-author") ||
+        HasTrailerToken(line, "Coauthor") ||
+        HasTrailerToken(line, "Claude-Session");
 
     private static bool HasTrailerToken(ReadOnlySpan<char> line, string token)
     {
@@ -253,6 +245,13 @@ public sealed class CommitMessageCoAuthorCleaner : ICommitMessageCoAuthorCleaner
     /// </summary>
     private static bool IsTrailer(ReadOnlySpan<char> line)
     {
+        // Also recognize the explicit co-author aliases above when locating the terminal block.
+        // Some use a space inside the token; leave the existing Git-token scan unchanged.
+        if (IsRemovedTrailer(line))
+        {
+            return true;
+        }
+
         var sawWhitespace = false;
         for (var i = 0; i < line.Length; i++)
         {
@@ -388,26 +387,6 @@ public sealed class CommitMessageCoAuthorCleaner : ICommitMessageCoAuthorCleaner
         }
 
         return content.Length >= 4 && content[0] == 0x00 && content[1] == 0x00; // UTF-32 BE.
-    }
-
-    private static bool ReadEnabledSetting() =>
-        ReadEnabledSetting(static () => Config.LoadFresh().RemoveCoAuthorTrailers);
-
-    internal static bool ReadEnabledSetting(Func<bool> read)
-    {
-        try
-        {
-            return read();
-        }
-        catch (Exception ex)
-        {
-            // Fail closed. The documented default is on, but this is the path where the setting
-            // could not be read at all — and the operation it guards edits the author's message
-            // irreversibly. Skipping cleanup for one commit is recoverable; rewriting a message for
-            // someone who had switched the policy off is not.
-            Log.Warning(ex, "Unable to read the trailer removal setting; skipping commit-message cleanup");
-            return false;
-        }
     }
 
     /// <summary>A line as three offsets: its text, and its text plus whatever line ending followed.</summary>

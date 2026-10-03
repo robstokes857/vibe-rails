@@ -3660,6 +3660,37 @@ code {
     transform: rotate(-18deg);
 }
 
+/* Card attention stays visible through status changes and on pinned/minimized tabs. */
+#vb-terminal-panel .vb-terminal-tab-item.tab-needs-attention {
+    background: #491b25;
+    border-color: #ef4444;
+    box-shadow: inset 0 0 0 1px #ef4444;
+}
+#vb-terminal-panel .tab-needs-attention .vb-terminal-tab-label,
+#vb-terminal-panel .vb-tab-attention {
+    color: #fca5a5;
+}
+#vb-terminal-panel .vb-tab-attention {
+    flex-shrink: 0;
+    font-size: 0.75rem;
+}
+#vb-terminal-panel .vb-tab-attention[hidden] { display: none; }
+#vb-terminal-automations-btn.needs-attention,
+.vb-terminal-automation-row.needs-attention {
+    background: #491b25;
+    box-shadow: inset 0 0 0 1px #ef4444;
+    color: #fca5a5;
+}
+.board-comment.is-attention,
+.board-comment.is-agent.is-attention {
+    border: 1px solid #ef4444;
+    border-left-width: 4px;
+    background: #381c24;
+}
+.board-comment.is-attention .board-comment-body,
+.board-comment-attention { color: #fca5a5; }
+.board-comment-attention { font-weight: 600; margin-bottom: 0.35rem; }
+
 /* Status section (right side of tab). It stays intact on roomy tabs and becomes
    icon-only once the tab is forced below 220px. */
 #vb-terminal-panel .vb-tab-status-section {
@@ -19630,3 +19661,19 @@ body.performance-mode .brand-text-sm {
 [data-board-reviews] { min-width: 0; overflow-wrap: anywhere; }
 [data-board-reviews] .d-flex { flex-wrap: wrap; }
 [data-board-reviews] .ts-wrapper { min-width: 0; flex: 1 1 180px; }
+/* A pending lane entry remains visible until its Automation can accept it. */
+.board-automation-waiting {
+    display: block;
+    margin: .4rem 0;
+    padding: .3rem .5rem;
+    border: 1px solid #ba8a30;
+    border-radius: .4rem;
+    background: var(--bs-body-bg, #18202c);
+    color: var(--bs-body-color, #eee);
+    font-size: .75rem;
+    text-align: left;
+}
+
+
+/* Diff viewer: a short status beside the +/- counts (lazy loads, binary and truncated files). */
+.vb-diff-toolbar .vb-diff-notice { margin-left: 12px; font-size: 11px; color: var(--color-text-muted, #94a3b8); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

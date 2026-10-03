@@ -247,6 +247,8 @@ public sealed partial class BoardService(
     {
         var live = await liveSessions.GetLiveSessionsAsync(cancellationToken);
         var activeByCard = new Dictionary<string, (string SessionId, string TabId)>(StringComparer.Ordinal);
+        var waiting = (await store.GetWaitingAutomationCardIdsAsync(projectPath, cards.Select(c => c.Id).ToList(), cancellationToken))
+            .ToHashSet(StringComparer.Ordinal);
         var automationCards = (await store.GetRunningAutomationsAsync(projectPath, cancellationToken))
             .Select(run => run.CardId).ToHashSet(StringComparer.Ordinal);
         if (live.Count > 0)
@@ -270,7 +272,8 @@ public sealed partial class BoardService(
         return new BoardCardListResponse(cards.Select(card =>
         {
             activeByCard.TryGetValue(card.Id, out var active);
-            return ToSummary(card, active.SessionId, active.TabId) with { HasActiveAutomation = automationCards.Contains(card.Id) };
+            return ToSummary(card, active.SessionId, active.TabId) with {
+                HasActiveAutomation = automationCards.Contains(card.Id), HasWaitingAutomation = waiting.Contains(card.Id) };
         }).ToList());
     }
 
@@ -309,6 +312,7 @@ public sealed partial class BoardService(
 
     public async Task<BoardCardResponse?> UpdateCardAsync(string projectPath, string idOrKey, UpdateBoardCardRequest request, CancellationToken cancellationToken = default, BoardAuthor? author = null)
     {
+        var flagReason = BoardAttention.NormalizeReason(request.Flagged, request.FlagReason, author);
         var existing = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
         if (existing is null)
             return null;
@@ -360,7 +364,7 @@ public sealed partial class BoardService(
             ColumnId: request.ColumnId,
             BaseLlmOptions: options,
             ClearBaseLlmOptions: clearOptions,
-            Type: type, Flagged: request.Flagged, DisplayId: request.DisplayId is null ? null : BoardDisplayIds.Normalize(request.DisplayId));
+            Type: type, Flagged: request.Flagged, DisplayId: request.DisplayId is null ? null : BoardDisplayIds.Normalize(request.DisplayId), FlagReason: flagReason);
         var updated = await store.UpdateCardAsync(projectPath, existing.Id, patch, cancellationToken, author);
         if (updated is null) return null;
         var detail = await store.GetCardDetailAsync(projectPath, updated.Id, cancellationToken);
@@ -576,7 +580,8 @@ public sealed partial class BoardService(
             sessions,
             detail.Attachments.Select(ToDto).ToList(),
             detail.Card.BaseLlmOptions,
-            notes, summary.Type, summary.BoardId, summary.Flagged, hasActiveAutomation, summary.DisplayId, summary.AgentMade)
+            notes, summary.Type, summary.BoardId, summary.Flagged, hasActiveAutomation, summary.DisplayId, summary.AgentMade,
+            (await store.GetWaitingAutomationCardIdsAsync(detail.Card.ProjectPath, [detail.Card.Id], cancellationToken)).Count > 0)
         {
             LinkedCards = detail.LinkedCards.Select(ToDto).ToList(),
             PreviousWork = BoardHandoffService.WithFileStatus(detail.PreviousWork, detail.Card.ProjectPath),
@@ -620,7 +625,7 @@ public sealed partial class BoardService(
             columns.Where(c => c.BoardId == board.Id).OrderBy(c => c.Position).Select(ToDto).ToList(), board.EffectiveDisplayPrefix);
 
     internal static BoardCommentDto ToDto(BoardCommentRecord comment) =>
-        new(comment.Id, new BoardAuthorDto(comment.Author.Kind, comment.Author.Label, comment.Author.Cli, comment.Author.SessionId), comment.Body, comment.CreatedUtc);
+        new(comment.Id, new BoardAuthorDto(comment.Author.Kind, comment.Author.Label, comment.Author.Cli, comment.Author.SessionId), comment.Body, comment.CreatedUtc, BoardAttention.IsAttention(comment.Changes));
 
     internal static BoardAttachmentDto ToDto(BoardAttachmentRecord attachment) =>
         new(attachment.Id, attachment.Name, attachment.DataUrl, attachment.MimeType, attachment.Bytes, attachment.CreatedUtc);

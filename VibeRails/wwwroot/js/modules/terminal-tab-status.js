@@ -84,6 +84,7 @@ export class TabStatusController {
         this._statusIconEl = null;
         this._brandLogoEl = null;
         this._labelEl = null;
+        this._attentionEl = null;
         this._lastCliKey = undefined;
         this._lastPinned = undefined;
     }
@@ -165,6 +166,14 @@ export class TabStatusController {
         label.textContent = this._tabState.label || 'Terminal';
         identity.appendChild(label);
         this._labelEl = label;
+
+        const attention = document.createElement('span');
+        attention.className = 'vb-tab-attention';
+        attention.innerHTML = '<i class="fa-solid fa-flag" aria-hidden="true"></i>';
+        attention.title = 'Needs your attention — see the card comments';
+        attention.hidden = this._tabState.needsAttention !== true;
+        identity.appendChild(attention);
+        this._attentionEl = attention;
 
         button.appendChild(identity);
 
@@ -379,6 +388,7 @@ export class TabStatusController {
     }
 
     dispose() {
+        this._attentionEl = null;
         this._statusTextEl = null;
         this._statusIconEl = null;
         this._brandLogoEl = null;
@@ -510,6 +520,10 @@ export class TabStatusController {
         const label = this._tabState.label || 'Terminal';
         const statusText = status ? this._statusTextFor(status) : '';
         const titleParts = [label];
+        const needsAttention = this._tabState.needsAttention === true;
+        this._ui.item?.classList.toggle('tab-needs-attention', needsAttention);
+        if (this._attentionEl) this._attentionEl.hidden = !needsAttention;
+        if (needsAttention) titleParts.push('Needs your attention — see the card comments');
         if (this._tabState.pinned === true) {
             titleParts.push('Pinned');
         }

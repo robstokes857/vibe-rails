@@ -1,5 +1,13 @@
 # Board persistence
 
+`board-attention/1` adds `BoardAttentionRequests` and a trigger that resolves its rows when
+`BoardCards.Flagged` is cleared, including by older binaries. No old rows are converted.
+Agent flag updates validate `FlagReason` and write the flag, comment and request in one
+transaction. Comments remain `Kind=comment`; `Changes.attention.to=true` marks them for red
+rendering and survives sync/merge. Local request/session attribution is not synced. Requests
+and comments remain stored after clearing. Terminal reads join current live cards and unresolved
+requests, mapping Worker sessions through existing JobRuns/JobRunActions recordings.
+
 `board-recall/1` adds `BoardHandoffs` and `BoardRecallEmbeddings` without modifying old rows.
 Handoffs append with server provenance and a full Comments receipt in one scoped transaction;
 the task description/history remain unchanged. Merge copies them and retains source data.

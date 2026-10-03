@@ -293,7 +293,7 @@ public sealed class AppJsonSerializerContextTests
             AppJsonSerializerContext.Default.BoardCommentDto);
 
         Assert.Equal(
-            """{"id":"cm_1","author":{"kind":"agent","label":"Claude VB-1","cli":"claude","sessionId":"sess-1"},"body":"done","createdAt":"2026-09-09T12:30:00Z"}""",
+            """{"id":"cm_1","author":{"kind":"agent","label":"Claude VB-1","cli":"claude","sessionId":"sess-1"},"body":"done","createdAt":"2026-09-09T12:30:00Z","isAttention":false}""",
             json);
     }
 

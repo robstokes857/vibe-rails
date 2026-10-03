@@ -43,7 +43,7 @@ public sealed class RepositoryCodeGraph
 
     /// <summary>Reads only regular, repository-contained files; never follows links.</summary>
     public async Task<CodeGraphResponse> ReadAsync(string repositoryPath, IReadOnlyList<string> priorityFiles,
-        CancellationToken cancellationToken, bool includeDependencies = false)
+        CancellationToken cancellationToken)
     {
         var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(repositoryPath));
         var paths = await ListFilesAsync(root, cancellationToken);
@@ -53,13 +53,12 @@ public sealed class RepositoryCodeGraph
         var diagnostics = new CodeGraphDiagnosticsBuilder
         {
             SupportedFiles = supported.Length,
-            IncludesDependencies = includeDependencies,
-            ExcludedDependencyFiles = supported.Count(path => !priority.Contains(path)
-                && !includeDependencies && path.Split('/').Any(IsDependencyDirectory)),
-            ExcludedBuildOutputFiles = supported.Count(path => !priority.Contains(path)
-                && (includeDependencies || !path.Split('/').Any(IsDependencyDirectory)) && IsCSharpBuildOutput(path))
+            IncludesDependencies = false,
+            ExcludedDependencyFiles = supported.Count(path => path.Split('/').Any(IsDependencyDirectory)),
+            ExcludedBuildOutputFiles = supported.Count(path => !path.Split('/').Any(IsDependencyDirectory)
+                && IsCSharpBuildOutput(path))
         };
-        var candidates = supported.Where(path => priority.Contains(path) || IsSourcePath(path, includeDependencies))
+        var candidates = supported.Where(IsSourcePath)
             .OrderBy(path => path, StringComparer.Ordinal).ToArray();
         var selected = SelectPaths(candidates, priority, MaxFiles, MaxNodes).ToArray();
         // Fewer selected than eligible means the file or node budget left some out: say the map is partial.
@@ -480,16 +479,16 @@ public sealed class RepositoryCodeGraph
         && path.Length <= 4096 && !path.StartsWith('/') && !path.Contains('\\') && !path.Contains(':')
         && !path.Any(char.IsControl) && !path.Split('/').Any(part => part is "" or "." or "..");
 
-    // Dependency directories require an explicit opt-in; MSBuild's bin/obj output is excluded for C# only,
+    // Dependency directories are always excluded, including priority paths. MSBuild's bin/obj output is excluded for C# only,
     // because other ecosystems keep entry points and sources there. Segment names are matched
     // case-insensitively: a checkout on a case-insensitive file system can spell them either way.
-    private static bool IsSourcePath(string path, bool includeDependencies)
+    private static bool IsSourcePath(string path)
     {
         if (!IsSafePath(path) || !MintLintAnalyzer.SupportsFile(path)) return false;
         var isCSharp = Path.GetExtension(path).Equals(".cs", StringComparison.OrdinalIgnoreCase);
         foreach (var part in path.Split('/'))
         {
-            if ((!includeDependencies && IsDependencyDirectory(part)) || (isCSharp && IsBuildOutputDirectory(part))) return false;
+            if (IsDependencyDirectory(part) || (isCSharp && IsBuildOutputDirectory(part))) return false;
         }
         return true;
     }
@@ -500,7 +499,7 @@ public sealed class RepositoryCodeGraph
 
     // `assets` holds vendored bundles far more often than first-party code (Bootstrap, PDF.js and
     // xterm here): one minified bundle over 128 KiB marks every map partial, and its one-letter
-    // names create bogus references. A project whose own code lives there opts in like any dependency.
+    // names create bogus references. Saved analysis remains accessible separately from the map.
     private static bool IsDependencyDirectory(string part) =>
         part.Equals(".git", StringComparison.OrdinalIgnoreCase)
         || part.Equals("node_modules", StringComparison.OrdinalIgnoreCase)

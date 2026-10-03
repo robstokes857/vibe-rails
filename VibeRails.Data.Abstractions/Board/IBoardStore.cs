@@ -72,6 +72,9 @@ public partial interface IBoardStore
     Task<BoardSessionLink?> FindSessionLinkAsync(string sessionId, CancellationToken cancellationToken = default);
     /// <summary>Card labels for local history session IDs, across projects, default attachment first. Excludes deleted cards.</summary>
     Task<IReadOnlyList<BoardSessionCard>> GetSessionCardsAsync(IReadOnlyList<string> sessionIds, CancellationToken cancellationToken = default);
+
+    /// <summary>Returns the supplied sessions with unresolved attention requests, including an Automation's worker.</summary>
+    Task<IReadOnlySet<string>> GetAttentionSessionIdsAsync(IReadOnlyList<string> sessionIds, CancellationToken cancellationToken = default);
     Task<BoardAuthor?> FindSessionAuthorAsync(string sessionId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<BoardSessionRecord>> GetSessionsForProjectAsync(string projectPath, CancellationToken cancellationToken = default);
     /// <summary>Identifies linked recordings owned by Automation runs, including older native runs.</summary>

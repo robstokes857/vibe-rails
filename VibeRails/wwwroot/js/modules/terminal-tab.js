@@ -1044,6 +1044,7 @@ export class TerminalTab {
             this.state.sessionId = response?.sessionId || null;
             // A session started here has no Board card link yet (VIBE-36); the tab list reports one later.
             this.state.boardCard = null;
+            this.state.needsAttention = false;
             this.state.cli = response?.cli || body?.cli || null;
             this.state.workingDirectory = response?.workingDirectory || body?.workingDirectory || this.state.workingDirectory || null;
             if (!this.state.hasActiveSession) {
@@ -1068,6 +1069,7 @@ export class TerminalTab {
             this.state.hasActiveSession = false;
             this.state.sessionId = null;
             this.state.boardCard = null;
+            this.state.needsAttention = false;
             this.state.cli = null;
             this.state.status = 'not-started';
             this.manager.updateUi();
@@ -1087,6 +1089,7 @@ export class TerminalTab {
         this.state.hasActiveSession = false;
         this.state.sessionId = null;
         this.state.boardCard = null;
+        this.state.needsAttention = false;
         this.state.cli = null;
         this.state.status = 'not-started';
         this.disconnect({ disposeTerminal: true, preserveStatus: true });

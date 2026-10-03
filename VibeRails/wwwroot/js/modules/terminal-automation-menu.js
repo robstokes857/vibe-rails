@@ -79,8 +79,9 @@ export class TerminalAutomationMenu {
         this.button.title = `Automations: ${running} running · ${entries.length} terminals`;
         this.button.setAttribute('aria-label', this.button.title);
         this.button.classList.toggle('is-active', entries.some(tab => tab.tabId === this.manager.activeTabId));
+        this.button.classList.toggle('needs-attention', entries.some(tab => tab.needsAttention === true));
         const signature = JSON.stringify(entries.map(tab => [tab.tabId, tab.automationName, tab.jobRunId,
-            tab.hasActiveSession, tab.sessionId, tab.statusAvailable, this.manager.activeTabId === tab.tabId]));
+            tab.hasActiveSession, tab.sessionId, tab.statusAvailable, tab.needsAttention, this.manager.activeTabId === tab.tabId]));
         if (signature === this.signature) return;
         this.signature = signature;
         const focused = document.activeElement;
@@ -97,6 +98,7 @@ export class TerminalAutomationMenu {
             const row = document.createElement('div');
             row.className = 'vb-terminal-automation-row';
             row.classList.toggle('is-active', this.manager.activeTabId === tab.tabId);
+            row.classList.toggle('needs-attention', tab.needsAttention === true);
             const open = document.createElement('button');
             open.type = 'button';
             open.className = 'vb-terminal-automation-open';
@@ -116,6 +118,7 @@ export class TerminalAutomationMenu {
             detail.dataset.status = status.toLowerCase();
             const runId = String(tab.jobRunId);
             detail.textContent = `${status} · ${runId.length > 12 ? runId.slice(0, 8) : runId}${status === 'Finished' ? ' · View output' : ''}`;
+            if (tab.needsAttention === true) detail.textContent += ' · Needs your attention';
             detail.title = `Run ${runId}`;
             main.append(name, detail);
             open.append(icon, main);

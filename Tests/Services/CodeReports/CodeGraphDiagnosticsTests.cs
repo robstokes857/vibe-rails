@@ -44,14 +44,14 @@ public sealed class CodeGraphDiagnosticsTests
     }
 
     [Fact]
-    public async Task Read_CountsUnreadOutlinesAndFilters_AndExplicitlyIncludesDependencies()
+    public async Task Read_CountsUnreadOutlinesAndFilters_AndPriorityCannotIncludeDependencies()
     {
         var root = Path.Combine(Path.GetTempPath(), "viberails-graph-diagnostics-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try
         {
             await Git("init", "--quiet");
-            foreach (var path in new[] { "source.cs", "assets/library.js", "vendor/lib.py", "node_modules/pkg/main.js", "obj/Generated.cs" })
+            foreach (var path in new[] { "source.cs", "assets/library.js", "vendor/lib.py", "nested/NoDe_MoDuLeS/pkg/main.js", "obj/Generated.cs" })
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(root, path))!);
                 await File.WriteAllTextAsync(Path.Combine(root, path), "// source", TestContext.Current.CancellationToken);
@@ -70,11 +70,14 @@ public sealed class CodeGraphDiagnosticsTests
             Assert.DoesNotContain(graph.Nodes, node => node.Path == "assets/library.js");
             Assert.Contains(graph.Nodes, node => node.Path == "large.rs");
 
-            var included = await new RepositoryCodeGraph().ReadAsync(root, [], TestContext.Current.CancellationToken, includeDependencies: true);
-            Assert.Equal(6, included.FileCount);
-            Assert.Contains(included.Nodes, node => node.Path == "assets/library.js");
-            Assert.Equal(0, included.Diagnostics!.ExcludedDependencyFiles);
-            Assert.True(included.Diagnostics.IncludesDependencies);
+            var included = await new RepositoryCodeGraph().ReadAsync(root,
+                ["assets/library.js", "vendor/lib.py", "nested/NoDe_MoDuLeS/pkg/main.js", "obj/Generated.cs"], TestContext.Current.CancellationToken);
+            Assert.Equal(3, included.FileCount);
+            Assert.DoesNotContain(included.Nodes, node => node.Path == "assets/library.js");
+            Assert.DoesNotContain(included.Nodes, node => node.Path == "vendor/lib.py");
+            Assert.DoesNotContain(included.Nodes, node => node.Path.Contains("NoDe_MoDuLeS"));
+            Assert.Equal(3, included.Diagnostics!.ExcludedDependencyFiles);
+            Assert.False(included.Diagnostics.IncludesDependencies);
             Assert.DoesNotContain(included.Nodes, node => node.Path == "obj/Generated.cs");
         }
         finally

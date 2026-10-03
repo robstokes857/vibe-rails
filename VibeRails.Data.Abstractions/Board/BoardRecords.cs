@@ -230,7 +230,8 @@ public sealed record BoardCardPatch(
     bool ClearBaseLlmOptions = false,
     string? Type = null,
     bool? Flagged = null,
-    string? DisplayId = null);
+    string? DisplayId = null,
+    string? FlagReason = null);
 
 /// <summary>
 /// A card key is <c>PREFIX-n</c>: the project's prefix and the card's number within the project.

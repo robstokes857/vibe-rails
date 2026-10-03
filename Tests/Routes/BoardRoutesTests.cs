@@ -340,6 +340,24 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         var waitingEntry = waitingStates.RootElement.GetProperty("laneEntries")[0];
         Assert.Equal("Waiting", waitingEntry.GetProperty("status").GetString());
         Assert.Equal(reviewId, waitingEntry.GetProperty("columnId").GetString());
+        var skipPath = $"/api/v1/board/cards/{cardId}/automations/skip";
+        using var none = await SendAsync(HttpMethod.Post, skipPath);
+        using var sessionOnly = await SendAsync(HttpMethod.Post, skipPath, "test-session");
+        using var tabOnly = await SendAsync(HttpMethod.Post, skipPath, tab: "test-tab");
+        Assert.Equal(HttpStatusCode.Unauthorized, none.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, sessionOnly.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, tabOnly.StatusCode);
+        var skipBody = new { jobId = job.Id, eventKey = waitingEntry.GetProperty("eventKey").GetString() };
+        using var foreignSkip = await PostJsonAsync("/api/v1/board/cards/card_foreign/automations/skip", skipBody);
+        Assert.Equal(HttpStatusCode.NotFound, foreignSkip.StatusCode);
+        using var continued = await PostJsonAsync(skipPath, skipBody);
+        continued.EnsureSuccessStatusCode();
+        using var continuedJson = await ReadJsonAsync(continued);
+        Assert.All(continuedJson.RootElement.GetProperty("laneEntries").EnumerateArray(),
+            entry => Assert.Equal("Skipped", entry.GetProperty("status").GetString()));
+        Assert.Empty(await boards.GetPendingLaneAutomationsAsync(_project, cardId, ct));
+        using var staleSkip = await PostJsonAsync(skipPath, skipBody);
+        Assert.Equal(HttpStatusCode.Conflict, staleSkip.StatusCode);
     }
 
     [Fact]
@@ -408,7 +426,8 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         Assert.Equal(card.Id, activity.GetProperty("id").GetString());
         Assert.Equal(JsonValueKind.Null, activity.GetProperty("activeTabId").ValueKind);
         Assert.False(activity.GetProperty("hasActiveAutomation").GetBoolean());
-        Assert.Equal(4, activity.EnumerateObject().Count());
+        Assert.False(activity.GetProperty("hasWaitingAutomation").GetBoolean());
+        Assert.Equal(5, activity.EnumerateObject().Count());
         Assert.True(json.RootElement.GetRawText().Length < 250);
         using var oversized = await PostJsonAsync(path, new { boardId, cardIds = Enumerable.Repeat(card.Id, 101) });
         Assert.Equal(HttpStatusCode.BadRequest, oversized.StatusCode);

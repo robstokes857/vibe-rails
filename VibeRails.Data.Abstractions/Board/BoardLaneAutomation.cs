@@ -45,6 +45,12 @@ public sealed record BoardPendingLaneAutomation(long JobId, string ColumnId, Dat
 
 public partial interface IBoardStore
 {
+    /// <summary>Requested live cards with pending entries that have no committed run yet.</summary>
+    Task<IReadOnlyList<string>> GetWaitingAutomationCardIdsAsync(string projectPath, IReadOnlyList<string> cardIds,
+        CancellationToken cancellationToken = default);
+    /// <summary>Skips an exact current entry and saves its comment in one Board transaction; false if stale.</summary>
+    Task<bool> SkipLaneAutomationAsync(BoardLaneAutomationEvent entry, BoardAuthor author, string comment,
+        CancellationToken cancellationToken = default);
     Task<BoardLaneAutomation?> GetLaneAutomationAsync(string projectPath, string columnId, CancellationToken cancellationToken = default);
     Task<BoardLaneAutomation?> SaveLaneAutomationAsync(string projectPath, string columnId, IReadOnlyList<long> jobIds, int expectedRevision, CancellationToken cancellationToken = default);
     /// <summary>Reads a bounded batch without claiming or removing entries.</summary>

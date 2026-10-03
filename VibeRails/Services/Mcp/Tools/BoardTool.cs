@@ -420,7 +420,8 @@ public sealed partial class BoardTool(
         [Description("Comma-separated tags (replaces all tags). Pass an empty string to clear.")] string? tags = null,
         [Description("Mark the card blocked (true) or unblocked (false).")] bool? blocked = null,
         [Description("New type: task | bug | feature | research-spike | chore.")] string? type = null,
-        [Description("Flag for the user's attention (true) or clear the flag (false). Add a comment explaining what needs review.")] bool? flagged = null,
+        [Description("Reserve true for an important unresolved issue requiring the user's decision or intervention: a major bug, security/data-loss issue, or missing information that prevents the work. Requires flagReason. Routine progress, completion and review do not need a flag. Clear with false once resolved.")] bool? flagged = null,
+        [Description("Required with flagged=true: explain the major issue and the specific information, decision or action needed from the user. Saved as a red attention comment in the same operation.")] string? flagReason = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -438,7 +439,7 @@ public sealed partial class BoardTool(
                 Points: points is null ? default : PointsElement(points.Value),
                 Tags: tags is null ? null : SplitTags(tags) ?? [],
                 Blocked: blocked,
-                Type: type, Flagged: flagged);
+                Type: type, Flagged: flagged, FlagReason: flagReason);
             var updated = await service.UpdateCardAsync(target.Project, target.CardId!, request, cancellationToken, await ResolveAuthorAsync(cancellationToken));
             if (updated is null)
                 return $"FAIL: card not found: {card}";
@@ -1133,7 +1134,7 @@ public sealed partial class BoardTool(
     }
 
     private static string FormatCommentLine(BoardCommentDto comment) =>
-        "- [" + comment.CreatedAt.ToString("u", CultureInfo.InvariantCulture) + "] " + comment.Author.Label + " (" + comment.Id + "): " + comment.Body + "\n";
+        "- [" + comment.CreatedAt.ToString("u", CultureInfo.InvariantCulture) + "] " + comment.Author.Label + " (" + comment.Id + "): " + (comment.IsAttention ? "ATTENTION: " : "") + comment.Body + "\n";
 
     private static void AppendCommentLine(StringBuilder builder, BoardCommentDto comment) =>
         builder.Append(FormatCommentLine(comment));

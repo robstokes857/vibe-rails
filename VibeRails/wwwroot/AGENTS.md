@@ -1,5 +1,14 @@
 # Web UI Frontend
 
+## Attention comments and terminal alerts (VIBE-40)
+
+Comments with `isAttention=true` get a red border, background and text plus a flag label. Render
+their body through the existing escape-first renderer. Terminal list `needsAttention` is separate
+from Thinking/Ready/Waiting: `terminal-tab-status.js` colors the tab and adds a flag without
+changing those statuses. The existing ten-second list poll updates mounted tabs and the robot
+menu; null means unavailable and preserves the same session's alert. Reload/adoption restore it;
+starting a different session clears local state. Clearing the card flag clears its terminal alerts.
+
 ## VIBE-1 card actions
 
 `board-card-organize.js` renders the saved card's **Move or merge** section. It offers project
@@ -7,7 +16,9 @@ boards/lanes and a card search, confirms the destination and lane Automation cou
 to replace an editor with unsaved drafts. Dispose it on close/replacement/unload. The existing
 navbar **Sign in** opens the device approval flow in both layouts when signed out.
 
-Comments now renders agent checkpoints and legacy note rows in the same chronological stream.
+Comments includes agent checkpoints and legacy note rows. Attention entries appear first; the
+remaining entries stay chronological. All / Hide agent comments / Agent comments filters keep
+attention entries visible, and background refresh preserves the selected filter and drafts.
 Each entry has a confirmed human Delete action; deletion refreshes only discussion and preserves
 drafts. Agent notes no longer has a separate rail. `append_board_note` is a compatibility alias.
 The complete viberails.ai settings section is removed; the backend still publishes automatically.
@@ -23,7 +34,7 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 |------|---------|
 | [app.js](app.js) | Central controller, routing, API layer |
 | [js/modules/internal-tools-modal.js](js/modules/internal-tools-modal.js) | Triple-click the brand icon to open Internal tools: About/version, retained upload attempts, and filterable application/Demon logs and feature journal; lazy loaded with bounded pages and no polling |
-| [js/modules/settings-controller.js](js/modules/settings-controller.js) | App settings, split into General / LLMs / Git / KEYS section tabs (panels stay in the DOM so dirty tracking and the save bar keep reading hidden-tab controls; `_initSettingsTabs` owns click + arrow-key switching). Completed-session sharing is always on (no switch). The legacy one-shot **Export Data** button and progress modal remain ([js/modules/data-export-modal.js](js/modules/data-export-modal.js)) |
+| [js/modules/settings-controller.js](js/modules/settings-controller.js) | App settings, split into General / LLMs / KEYS / Integrations section tabs (panels stay in the DOM so dirty tracking and the save bar keep reading hidden-tab controls; `_initSettingsTabs` owns click + arrow-key switching). Git Guard trailer cleanup and completed-session sharing are always on (no switches). The legacy one-shot **Export Data** button and progress modal remain ([js/modules/data-export-modal.js](js/modules/data-export-modal.js)) |
 | [js/modules/remote-account-link.js](js/modules/remote-account-link.js) | Navigation account modal: user code, external browser link, countdown, polling and cancellation over the protected local `settings/remote-link` API. |
 | [js/modules/settings-keys.js](js/modules/settings-keys.js) | Lazy KEYS panel: create password-protected RSA-4096 keys, sync public keys to the saved API-key account, download public/encrypted private PEMs, and sign a message/file into public-verification JSON. Independent of the settings save bar. |
 | [js/modules/terminal-multitab.js](js/modules/terminal-multitab.js) | Reusable xterm.js terminal manager with per-tab lifecycle and environment picker |
@@ -294,22 +305,23 @@ relationships do not automatically share sessions or commits. Refresh to see MCP
 Once the session is attached, one agent `link_board_commit` call shares the snapshot with all
 its attached cards; the frontend reads the ordinary commit lists and needs no extra request.
 
-Descriptions open as rendered text (including attached images), with an Edit/Preview toggle
-in the composer toolbar. Empty descriptions start in edit mode. The textarea remains the source
-for Save and Start work in either mode; preview uses the same attachment-aware renderer as comments.
+Descriptions always open as editable source, with no preview pane or Edit/Preview controls.
+Markdown is always enabled for rendered comments; the retired browser preference is ignored.
+Previous work remains available as a collapsed sidebar section for saved handoffs and file entry
+points. Checks (Code quality and VCA) also live in the sidebar. The main column flows from
+Description to uploads to Comments.
 
 The description textarea grows in normal document flow. Do not make the new-card description
 block, composer, or textarea a `flex: 1` chain constrained to leftover viewport height: the
 auto-grow routine can then make the textarea taller than its composer and its text paints over the
 Attachments section. `.board-editor-scroll` is the one viewport overflow owner.
 
-**Board text (VIBE-34)** uses escape-first rendering in `board-text.js`. Optional Markdown
+**Board text (VIBE-34)** uses escape-first rendering in `board-text.js`. Markdown
 styles include headings, emphasis, strikethrough, lists/tasks, quotes and HTTP(S) links;
 `board-markdown.js` emits fixed markup only after escaping and parking code/reference fragments.
-Raw HTML and external image URLs never become active markup. The composer’s Markdown button
-persists a browser display preference without changing the saved source. Posted comments use the
-same render options (`boardTextOptions`: preference, sessions, commits) and repaint on toggle. Edit mode shows a live
-preview with small raster thumbnails. `board-image-previews.js` owns authenticated large-image
+Raw HTML and external image URLs never become active markup. Posted comments and the comment
+composer share `boardTextOptions` (Markdown enabled, attachments, sessions, commits). The comment
+composer shows a live preview with small raster thumbnails. `board-image-previews.js` owns authenticated large-image
 loads for composers and posted Comments, including cancellation, Blob URL disposal and retry on
 the next render after a failed fetch. New-card image tokens use temporary IDs rewritten after
 upload; failed saves preserve the unfinished queue. Markdown/TXT file attachments still preview as source.
@@ -972,12 +984,14 @@ the card's active Automation. Clicking that icon focuses a local Automation tab 
 otherwise a running run explains that its terminal belongs to another VibeRails window. The
 workflow shell and its Worker have separate recordings but belong to one run.
 
-While Board is mounted, session lifecycle events and a ten-second visible-page fallback refresh
-activity through `POST /api/v1/board/cards/activity`, requesting only loaded card IDs in batches
-of at most 100. Its response contains live session fields without card descriptions or historical
-rails; it never fetches the unloaded card catalog. The open editor keeps its own detail refresh.
-Loaded lane pages, ordering, scroll and editor drafts are preserved; stale responses
-are discarded after navigation/editor replacement. Unload disposes subscriptions, timers and requests.
+While Board is mounted, a ten-second visible-page poll and window focus/visibility events refresh
+card summaries, lane membership, counts and filters. `refreshBoardSnapshot` reloads only the
+previously loaded depth of completed lanes, with fresh continuation tokens, and skips stale or
+inconsistent responses. Paging, dragging, navigation and explicit refresh cancel it. Lane scroll
+positions and editor drafts survive. The activity endpoint still batches loaded IDs (at most 100)
+and session lifecycle events update badges promptly. The open editor refreshes sessions and
+Comments with their attachment/commit metadata, rejecting reads made stale by local rail changes
+and deferring updates during uploads/saves. Fields, pending uploads and composer drafts survive. Unload disposes subscriptions, timers and requests.
 The editor no longer shows the YOLO warning text or Priority, Points and Tags fields. Saves omit
 those retired fields so stored values survive; YOLO remains an explicit checkbox.
 

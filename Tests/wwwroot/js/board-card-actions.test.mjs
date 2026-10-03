@@ -9,6 +9,18 @@ test('saving a stale editor sends only fields changed by the user', () => {
     assert.deepEqual(BoardController.prototype.cardChanges(editor, { ...editor._boardFormBaseline }), {});
 });
 
+test('attention comments render in red with an escaped body, ordinary comments stay ordinary', () => {
+    const controller = new BoardController({});
+    controller.authorInfo = () => ({ label: 'Codex' });
+    const entry = { id: 'cm-1', author: { kind: 'agent' }, body: '<script>alert(1)</script>', createdAt: '2026-10-03T12:00:00Z', isAttention: true };
+    const html = controller.cardLogCommentHtml(entry);
+    assert.match(html, /board-comment is-agent is-attention/);
+    assert.match(html, /Needs your attention/);
+    assert.doesNotMatch(html, /<script>/);
+    assert.match(html, /&lt;script&gt;/);
+    assert.doesNotMatch(controller.cardLogCommentHtml({ ...entry, isAttention: false }), /is-attention|Needs your attention/);
+});
+
 function harness() {
     const calls = [];
     const toasts = [];

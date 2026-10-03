@@ -1838,6 +1838,15 @@ public sealed partial class JobStore : IJobStore
         using var connection = SqliteConnectionFactory.Open(_connectionString);
         SqliteMigrationRunner.RequireGenerationAtMost(connection, StateDatabaseSchema.Generation, "state.db");
         SqliteMigrationRunner.Apply(connection, "jobs", 1, MigrationKind.Additive, AdoptSchema);
+        // Existing databases already have jobs/1, so additions to SchemaSql need their own receipt.
+        SqliteMigrationRunner.Apply(connection, "jobs-project-roots", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, """
+                CREATE TABLE IF NOT EXISTS JobProjectRoots (
+                    OwnerId TEXT PRIMARY KEY,
+                    ProjectPath TEXT NOT NULL,
+                    ExpiresUTC TEXT NOT NULL
+                );
+                """));
         SqliteMigrationRunner.Apply(connection, "jobs-import-origin", 1, MigrationKind.Additive, AdoptImportOrigin);
         SqliteMigrationRunner.Apply(connection, "jobs-board-recipes", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, BoardRecipeSchemaSql));

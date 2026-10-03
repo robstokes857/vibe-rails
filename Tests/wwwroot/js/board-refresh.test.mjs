@@ -121,6 +121,60 @@ function jiraToolbar(h) {
     return { button, status };
 }
 
+function pollHarness() {
+    const h = harness();
+    h.controller._cardPageGeneration = h.controller._refreshGeneration;
+    h.controller.cardPage = { lanes: [{ columnId: 'done', nextOffset: 60, hasMore: true }] };
+    h.firstPage = () => {
+        h.requests[0].resolve({ boards });
+        h.requests[1].resolve({ columns: [{ id: 'review' }, { id: 'done' }] });
+        h.requests[2].resolve({ cards: [{ id: 'moved', columnId: 'review' }, { id: 'done-first', columnId: 'done' }],
+            lanes: [{ columnId: 'done', nextOffset: 30, hasMore: true, continuationToken: 'fresh-order' }] });
+    };
+    return h;
+}
+
+test('background refresh replaces moved/deleted cards and preserves the number of loaded pages', async () => {
+    const h = pollHarness();
+    const pending = h.controller.refreshBoardSnapshot();
+    h.firstPage();
+    await tick();
+    const continuation = h.requests[3];
+    assert.match(continuation.url, /offset=30&continuationToken=fresh-order/);
+    continuation.resolve({ cards: [{ id: 'done-second', columnId: 'done' }],
+        lanes: [{ columnId: 'done', nextOffset: 60, hasMore: true, continuationToken: 'fresh-order' }] });
+    await pending;
+    assert.deepEqual(h.controller.state.cards.map(c => c.id), ['moved', 'done-first', 'done-second']);
+    assert.equal(h.controller.cardPage.lanes[0].nextOffset, 60);
+    assert.equal(h.requests.length, 4, 'unloaded history is not fetched');
+    assert.equal(h.busy, false, 'a background refresh does not cover the board with a loading state');
+});
+
+test('background snapshots are discarded after navigation, paging, dragging or filter changes', async () => {
+    for (const invalidate of [c => { c.state.boardId = 'B'; }, c => c.disposeSessionActivity(),
+        c => { c._refreshGeneration++; }, c => { c._boardDragging = true; },
+        c => { c._pageRequests.set('done', new AbortController()); }]) {
+        const h = pollHarness();
+        const pending = h.controller.refreshBoardSnapshot();
+        invalidate(h.controller);
+        h.firstPage();
+        await pending;
+        assert.equal(h.controller.state.cards[0].id, 'A-old-card');
+        assert.equal(h.requests.length, 3);
+    }
+});
+
+test('an ordering change during a background continuation keeps the last complete snapshot', async () => {
+    const h = pollHarness();
+    const pending = h.controller.refreshBoardSnapshot();
+    h.firstPage();
+    await tick();
+    h.requests[3].resolve({ cards: [], lanes: [{ columnId: 'done', restartRequired: true }] });
+    await pending;
+    assert.equal(h.controller.state.cards[0].id, 'A-old-card');
+    assert.equal(h.controller.cardPage.lanes[0].nextOffset, 60);
+});
+
 test('a Jira toolbar answer for the previous board cannot update the next board', async () => {
     const h = harness();
     const { button, status } = jiraToolbar(h);

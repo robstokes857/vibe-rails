@@ -30,7 +30,7 @@ public sealed class StoreSchemaAdoptionTests : IDisposable
         Assert.Equal(version, Scalar("PRAGMA schema_version;"));
         Assert.Equal(migrations, Scalar("SELECT COUNT(*) FROM SchemaMigrations;"));
         Assert.Equal(26L, Scalar("SELECT COUNT(*) FROM SchemaMigrations WHERE Component='board';"));
-        Assert.Equal(7L, Scalar("SELECT COUNT(*) FROM SchemaMigrations WHERE Component LIKE 'jobs%';"));
+        Assert.Equal(8L, Scalar("SELECT COUNT(*) FROM SchemaMigrations WHERE Component LIKE 'jobs%';"));
         Assert.Equal(1L, Scalar("SELECT COUNT(*) FROM SchemaMigrations WHERE Component='board-agent-completion';"));
     }
 
@@ -51,6 +51,42 @@ public sealed class StoreSchemaAdoptionTests : IDisposable
             TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken));
         Assert.Equal(version, Scalar("PRAGMA schema_version;"));
         Assert.Equal(1L, Scalar("SELECT COUNT(*) FROM SchemaMigrations WHERE Component='jobs-session-link';"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task JobsAdoptsProjectRootsWhenOriginalReceiptAlreadyExists(bool tableAlreadyExists)
+    {
+        StateDatabaseSchema.Ensure(ConnectionString);
+        var store = new JobStore(ConnectionString);
+        var now = DateTime.UtcNow;
+        var project = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar);
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await store.RecordProjectRootAsync("existing-root", project, now, TimeSpan.FromMinutes(1), cancellationToken);
+
+        // Model a shipped jobs/1 receipt, with or without the table introduced later in SchemaSql.
+        Execute("DELETE FROM SchemaMigrations WHERE Component='jobs-project-roots';");
+        if (!tableAlreadyExists)
+            Execute("DROP TABLE JobProjectRoots;");
+        Assert.Equal(1L, Scalar("SELECT COUNT(*) FROM SchemaMigrations WHERE Component='jobs' AND Version=1;"));
+        Assert.Equal(tableAlreadyExists ? 1L : 0L,
+            Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name='JobProjectRoots';"));
+
+        store = new JobStore(ConnectionString);
+
+        Assert.Equal(1L, Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name='JobProjectRoots';"));
+        Assert.Equal(1L, Scalar("SELECT COUNT(*) FROM SchemaMigrations WHERE Component='jobs-project-roots' AND Version=1;"));
+        if (tableAlreadyExists)
+            Assert.Equal(project, Scalar("SELECT ProjectPath FROM JobProjectRoots WHERE OwnerId='existing-root';"));
+        await store.RecordProjectRootAsync("upgraded-root", project, now, TimeSpan.FromMinutes(1), cancellationToken);
+        Assert.Contains(project, await store.GetOpenProjectRootsAsync(now, cancellationToken));
+
+        var version = Scalar("PRAGMA schema_version;");
+        _ = new JobStore(ConnectionString);
+        Assert.Equal(version, Scalar("PRAGMA schema_version;"));
+        Assert.Equal(tableAlreadyExists ? 2L : 1L, Scalar("SELECT COUNT(*) FROM JobProjectRoots;"));
+        Assert.Equal(1L, Scalar("SELECT COUNT(*) FROM SchemaMigrations WHERE Component='jobs-project-roots';"));
     }
 
     [Fact]

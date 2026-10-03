@@ -184,9 +184,11 @@ public static class TerminalTabsRoutes
         if (sessionIds.Length == 0) return tabs.ToList();
 
         IReadOnlyList<BoardSessionCard> links;
+        IReadOnlySet<string>? attention;
         try
         {
             links = await boardStore.GetSessionCardsAsync(sessionIds, cancellationToken);
+            attention = await boardStore.GetAttentionSessionIdsAsync(sessionIds, cancellationToken);
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
@@ -199,6 +201,7 @@ public static class TerminalTabsRoutes
         return tabs.Select(tab => tab.SessionId is { } sessionId && cardBySession.TryGetValue(sessionId, out var card)
                 ? tab with { BoardCard = new TerminalTabBoardCard(card.CardId, card.Key, card.Title, card.DisplayId) }
                 : tab)
+            .Select(tab => tab with { NeedsAttention = attention is null ? null : tab.SessionId is { } id && attention.Contains(id) })
             .ToList();
     }
 }

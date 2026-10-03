@@ -85,6 +85,8 @@ public sealed class CodeGraphRoutesTests
                 await File.WriteAllTextAsync(Path.Combine(root, "file.cs"), "class Example {}", TestContext.Current.CancellationToken);
                 Directory.CreateDirectory(Path.Combine(root, "vendor"));
                 await File.WriteAllTextAsync(Path.Combine(root, "vendor", "library.js"), "export class Library {}", TestContext.Current.CancellationToken);
+                Directory.CreateDirectory(Path.Combine(root, "node_modules"));
+                await File.WriteAllTextAsync(Path.Combine(root, "node_modules", "library.js"), "export class Dependency {}", TestContext.Current.CancellationToken);
                 using var track = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("git") {
                     WorkingDirectory = root, UseShellExecute = false, CreateNoWindow = true,
                     ArgumentList = { "add", "--force", "--all" }
@@ -102,11 +104,14 @@ public sealed class CodeGraphRoutesTests
                         Assert.False(field.Value.ValueKind == JsonValueKind.Null, field.Name);
                     Assert.False(string.IsNullOrEmpty(item.GetProperty("path").GetString()));
                 });
-                using var withDependencies = await Send(true, true, "{\"includeDependencies\":true}");
+                // Old clients cannot opt dependencies back in, even through report priorities.
+                using var withDependencies = await Send(true, true,
+                    "{\"includeDependencies\":true,\"files\":[\"node_modules/library.js\",\"vendor/library.js\"]}");
                 Assert.Equal(HttpStatusCode.OK, withDependencies.StatusCode);
                 using var dependencyPayload = JsonDocument.Parse(await withDependencies.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
-                Assert.Equal(2, dependencyPayload.RootElement.GetProperty("fileCount").GetInt32());
-                Assert.True(dependencyPayload.RootElement.GetProperty("diagnostics").GetProperty("includesDependencies").GetBoolean());
+                Assert.Equal(1, dependencyPayload.RootElement.GetProperty("fileCount").GetInt32());
+                Assert.False(dependencyPayload.RootElement.GetProperty("diagnostics").GetProperty("includesDependencies").GetBoolean());
+                Assert.Equal(2, dependencyPayload.RootElement.GetProperty("diagnostics").GetProperty("excludedDependencyFiles").GetInt32());
             }
             finally
             {

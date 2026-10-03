@@ -175,6 +175,10 @@ public static class BoardRoutes
             RunAsync(async () => OkOrNotFound(await automation.RunAsync(Project(), card, request.JobId, cancellationToken), "Card")))
             .WithName("RunBoardCardAutomation");
 
+        app.MapPost("/api/v1/board/cards/{card}/automations/skip", (BoardCardAutomationService automation, string card, SkipBoardCardAutomationRequest request, CancellationToken cancellationToken) =>
+            RunAsync(async () => OkOrNotFound(await automation.SkipAsync(Project(), card, request.JobId, request.EventKey, cancellationToken), "Card")))
+            .WithName("SkipBoardCardAutomation");
+
         app.MapGet("/api/v1/board/cards", (IBoardService board, string? boardId, int? pageSize, string? columnId,
             int? offset, string? continuationToken, string? q, string? assignee, string? type, string? priority, string? tag,
             string? origin, CancellationToken cancellationToken) =>

@@ -51,7 +51,6 @@ export class SettingsController {
             claudeTokenSaverEnabled: true,
             codexTokenSaverEnabled: true,
             openCodeTokenSaverEnabled: true,
-            removeCoAuthorTrailers: true,
             dataExportConfigured: false,
             machineName: ''
         };
@@ -116,7 +115,6 @@ export class SettingsController {
             const codexTokenSaverToggle = root.querySelector('#setting-token-saver-codex');
             const opencodeTokenSaverToggle = root.querySelector('#setting-token-saver-opencode');
             const grokTokenSaverToggle = root.querySelector('#setting-token-saver-grok');
-            const removeCoAuthorTrailersToggle = root.querySelector('#setting-remove-co-author-trailers');
 
             if (remoteAccessToggle) {
                 remoteAccessToggle.checked = settings.remoteAccess || false;
@@ -199,10 +197,6 @@ export class SettingsController {
             if (grokTokenSaverToggle) {
                 grokTokenSaverToggle.checked = settings.grokTokenSaverEnabled !== false;
             }
-            if (removeCoAuthorTrailersToggle) {
-                // Missing on older servers/settings files means the documented default: enabled.
-                removeCoAuthorTrailersToggle.checked = settings.removeCoAuthorTrailers !== false;
-            }
 
             const form = root.querySelector('#app-settings-form');
             if (form) {
@@ -248,7 +242,6 @@ export class SettingsController {
                             codexTokenSaverToggle?.checked ?? true,
                             opencodeTokenSaverToggle?.checked ?? true,
                             grokTokenSaverToggle?.checked ?? true,
-                            removeCoAuthorTrailersToggle?.checked ?? true,
                             routeThroughVibeRailsAiToggle?.checked ?? false,
                             clearApiKey
                         );
@@ -286,7 +279,7 @@ export class SettingsController {
         }
     }
 
-    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, openCodeLlmProxyEnabled, grokLlmProxyEnabled, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, removeCoAuthorTrailers, routeThroughVibeRailsAi, clearApiKey = false) {
+    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, openCodeLlmProxyEnabled, grokLlmProxyEnabled, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, routeThroughVibeRailsAi, clearApiKey = false) {
         try {
             const savedSettings = await this.app.apiCall('/api/v1/settings', 'POST', {
                 remoteAccess: remoteAccess,
@@ -304,7 +297,6 @@ export class SettingsController {
                 codexTokenSaverEnabled: codexTokenSaverEnabled,
                 openCodeTokenSaverEnabled: openCodeTokenSaverEnabled,
                 grokTokenSaverEnabled: grokTokenSaverEnabled,
-                removeCoAuthorTrailers: removeCoAuthorTrailers,
                 routeThroughVibeRailsAi: routeThroughVibeRailsAi,
                 clearApiKey: clearApiKey,
                 dataExportOptIn: true
@@ -418,8 +410,7 @@ export class SettingsController {
             '#setting-token-saver-claude',
             '#setting-token-saver-codex',
             '#setting-token-saver-opencode',
-            '#setting-token-saver-grok',
-            '#setting-remove-co-author-trailers'
+            '#setting-token-saver-grok'
         ].join(',');
     }
 
@@ -442,8 +433,7 @@ export class SettingsController {
             claudeTokenSaverEnabled: isChecked('#setting-token-saver-claude'),
             codexTokenSaverEnabled: isChecked('#setting-token-saver-codex'),
             openCodeTokenSaverEnabled: isChecked('#setting-token-saver-opencode'),
-            grokTokenSaverEnabled: isChecked('#setting-token-saver-grok'),
-            removeCoAuthorTrailers: isChecked('#setting-remove-co-author-trailers')
+            grokTokenSaverEnabled: isChecked('#setting-token-saver-grok')
         });
     }
 
@@ -569,9 +559,6 @@ export class SettingsController {
         if (codexTokenSaverToggle) codexTokenSaverToggle.checked = settings.codexTokenSaverEnabled !== false;
         if (opencodeTokenSaverToggle) opencodeTokenSaverToggle.checked = settings.openCodeTokenSaverEnabled !== false;
         if (grokTokenSaverToggle) grokTokenSaverToggle.checked = settings.grokTokenSaverEnabled !== false;
-
-        const removeCoAuthorTrailersToggle = root.querySelector('#setting-remove-co-author-trailers');
-        if (removeCoAuthorTrailersToggle) removeCoAuthorTrailersToggle.checked = settings.removeCoAuthorTrailers !== false;
 
         this._updateDataExportAvailability(root);
     }

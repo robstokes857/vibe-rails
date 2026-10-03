@@ -38,6 +38,13 @@ test('Done loads 30 cards, scrolls for more, and searches unloaded history', asy
     await lane.evaluate(element => { element.scrollTop = element.scrollHeight; });
     await expect(page.locator('.board-card')).toHaveCount(60);
     await expect(page.locator('[data-board-action="load-more"]')).toContainText('60 of 95');
+    await lane.evaluate(element => { element.scrollTop = 400; });
+    const scrollTop = await lane.evaluate(element => element.scrollTop);
+    cards[0].title = 'Updated by another window';
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(page.locator('.board-card-title').first()).toHaveText('Updated by another window');
+    await expect(page.locator('.board-card')).toHaveCount(60);
+    expect(await lane.evaluate(element => element.scrollTop)).toBe(scrollTop);
     await page.locator('[data-board-search]').fill('Completed task 95');
     await expect(page.locator('.board-card')).toHaveCount(1);
     await expect(page.locator('.board-card')).toContainText('Completed task 95');

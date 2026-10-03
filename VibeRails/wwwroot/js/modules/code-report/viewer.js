@@ -4,8 +4,16 @@ import { escapeHtml as esc, formatNumber, healthFromConcern } from './vendor/qua
 import { readReportTheme, observeReportTheme } from './theme-sync.js';
 import { enhanceRadar } from './radar-interactions.js';
 import { isConfirmDialogOpen } from '../utils.js';
+import { openDiffModal } from '../diff-modal.js';
 
 let instanceId = 0;
+// The last graph a viewer fetched, keyed by its request and the report it belongs to. Re-entering the
+// page replays the saved report without a rescan; the map follows the same lifetime instead of capturing
+// the repository again (seconds on a large tree). A new scan response refreshes both.
+let graphCache = null;
+const STATUS_LABELS = { modified: 'Modified', added: 'Added', deleted: 'Deleted', renamed: 'Renamed', copied: 'Copied',
+    untracked: 'Untracked', conflicted: 'Conflicted', typechange: 'Type changed' };
+const STATUS_CODES = { modified: 'M', added: 'A', deleted: 'D', renamed: 'R', copied: 'C', untracked: '?', conflicted: 'U', typechange: 'T' };
 export const reportPath = path => String(path || '').replace(/\\/g, '/').replace(/:\d+(?::\d+)?$/, '').replace(/^\.\//, '');
 const basename = path => reportPath(path).split('/').pop();
 const metricName = name => String(name || '').replaceAll('_', ' ').replace(/^./, c => c.toUpperCase());
@@ -31,7 +39,6 @@ export class CodeReportViewer {
                         <div data-code-map><p class="load-error" role="status">Preparing repository map…</p></div>
                         <div class="graph-note" data-graph-note>Hover a domain to trace its connections. Select a report file to explore it in the map.</div>
                         <div class="graph-options">
-                            <label><input type="checkbox" data-map-dependencies> Include vendor, node_modules and assets sources</label>
                             <details data-map-diagnostics hidden><summary>Map coverage and filters</summary><div data-map-diagnostics-body></div></details>
                         </div>
                     </section>
@@ -47,12 +54,6 @@ export class CodeReportViewer {
         </div>`;
         this.root = host.querySelector('.code-report');
         this.mapHost = this.root.querySelector('[data-code-map]');
-        this.root.querySelector('[data-map-dependencies]').addEventListener('change', () => {
-            const generation = ++this.generation;
-            this.disposeGraph();
-            this.mapHost.innerHTML = '<p class="load-error" role="status">Preparing repository map…</p>';
-            this.ready = this.loadGraph(this.graphFiles || [], generation);
-        });
         this.qualityHost = this.root.querySelector('[data-quality-report]');
         // Details replace the health summary in the sidebar: the report stays inline, never a modal.
         this.details = this.root.querySelector('.details-panel');
@@ -84,6 +85,8 @@ export class CodeReportViewer {
     disposeGraph() {
         this.request?.abort();
         this.request = null;
+        this.changesRequest?.abort();
+        this.changesRequest = null;
         this.themes?.destroy();
         this.themes = null;
         this.atlas?.destroy();
@@ -98,6 +101,7 @@ export class CodeReportViewer {
         this.radar = null;
         this.closeDetails();
         this.disposeGraph();
+        this.changes = undefined;
         this.root.querySelector('[data-map-diagnostics]').hidden = true;
         this.root.querySelector('[data-graph-note]').textContent = 'Preparing repository map…';
         this.quality.setLoading();
@@ -110,6 +114,7 @@ export class CodeReportViewer {
         this.quality.setError(message || 'The code report could not be loaded.');
         // The graph remains useful when analysis fails; its failure is independent.
         this.ready = this.loadGraph([], this.generation);
+        void this.loadChanges(this.generation);
     }
 
     async setResponse(response) {
@@ -125,6 +130,7 @@ export class CodeReportViewer {
         // Start the map, then paint the report we already hold in memory: the quality panel needs no
         // network data, and focusFile awaits this.ready before it touches the map.
         this.ready = this.loadGraph(files, generation);
+        void this.loadChanges(generation);
         if (this.quality.setResponse(this.response)) {
             this.composeFiles();
             this.radar = enhanceRadar(this.qualityHost.querySelector('.qr'), this.response, {
@@ -137,38 +143,41 @@ export class CodeReportViewer {
     isCurrent(generation) { return !this.destroyed && generation === this.generation; }
 
     async loadGraph(files, generation) {
-        this.graphFiles = files;
         this.root.querySelector('[data-map-diagnostics]').hidden = true;
         this.root.querySelector('[data-graph-note]').textContent = 'Preparing repository map…';
         const request = this.request = new AbortController();
+        const cacheKey = JSON.stringify([this.response?.startedUtc ?? null, files.slice(0, 1000)]);
         try {
-            const graph = await this.app.apiCall('/api/v1/code-analyzer/graph', 'POST',
-                { files: files.slice(0, 1000), includeDependencies: this.root.querySelector('[data-map-dependencies]').checked },
-                { showLoading: false, signal: request.signal, preferErrorResponseMessage: true });
+            const graph = graphCache?.key === cacheKey ? graphCache.graph
+                : await this.app.apiCall('/api/v1/code-analyzer/graph', 'POST',
+                    { files: files.slice(0, 1000) },
+                    { showLoading: false, signal: request.signal, preferErrorResponseMessage: true });
             if (!this.isCurrent(generation)) return;
+            graphCache = { key: cacheKey, graph };
             this.graph = graph;
             this.mapHost.replaceChildren();
             const atlas = this.atlas = mountCodeAtlas(this.mapHost, {
                 graph, theme: readReportTheme(this.root), cspNonce: this.window.__viberails_NONCE__,
-                changedFiles: files, highlightChanges: false,
+                changedFiles: this.changedPaths() ?? files, highlightChanges: false,
                 onOpenDetails: details => { if (this.isCurrent(generation)) this.showEntity(details); },
                 onError: error => { if (this.isCurrent(generation)) this.notify(error.message); }
             });
             await atlas.ready;
             if (!this.isCurrent(generation)) return;
             this.themes = observeReportTheme(this.root, theme => atlas.setTheme(theme), error => this.notify(error.message));
-            const note = this.root.querySelector('[data-graph-note]');
-            note.textContent = `${graph.fileCount} source files mapped${graph.truncated ? ' · Partial map — see Map coverage and filters.' : '. Hover a domain to trace source references.'}`;
-            note.title = graph.description || '';
+            this.syncChangedFiles();
+            // The change rows' locate buttons depend on the graph; the list often answers first on a large repository.
+            this.composeChanges();
+            this.updateGraphNote();
             const diagnostics = graph.diagnostics;
             if (diagnostics) {
                 const omissions = diagnostics.omissions || [];
                 const body = this.root.querySelector('[data-map-diagnostics-body]');
                 body.innerHTML = `<p>${esc(diagnostics.supportedFiles)} supported source files in the Git catalog.
-                    ${esc(diagnostics.excludedDependencyFiles)} vendor/node_modules files and
-                    ${esc(diagnostics.excludedBuildOutputFiles)} C# bin/obj files excluded. Report files are always eligible.</p>
-                    <p>Source files in assets and non-C# bin/obj remain eligible, including bundled libraries.
-                    Search covers this snapshot. Open the source for omitted declarations.</p>
+                    ${esc(diagnostics.excludedDependencyFiles)} vendor/node_modules/assets files and
+                    ${esc(diagnostics.excludedBuildOutputFiles)} C# bin/obj files excluded, including report paths.</p>
+                    <p>Non-C# bin/obj sources remain eligible. The map draws every entity of this snapshot and a bounded sample of
+                    its links; hover or select an entity to see all of its links. Search covers the whole snapshot.</p>
                     ${omissions.length ? `<ul>${omissions.map(item => `<li>${esc(item.count)} ${esc(item.detail)}</li>`).join('')}</ul>`
                         : '<p>No omissions from the eligible source files.</p>'}`;
                 this.root.querySelector('[data-map-diagnostics]').hidden = false;
@@ -198,13 +207,148 @@ export class CodeReportViewer {
             name.textContent = basename(path);
             rating.textContent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : rating.textContent;
         }
-        const heading = this.qualityHost.querySelector('.qr-files-section h3');
-        heading.textContent = 'Report files';
-        const count = this.document.createElement('span');
-        count.className = 'file-count';
-        count.textContent = String(rows.length);
-        heading.append(count);
+        this.composeChanges();
+        const count = this.qualityHost.querySelector('[data-report-count]');
+        if (count) count.textContent = String(rows.length);
+        this.showList(this.activeList || 'report');
         if (!rows.length) files.querySelector('.qr-empty').textContent = 'No source files in this report.';
+    }
+
+    changedPaths() { return Array.isArray(this.changes?.files) ? this.changes.files.map(file => file.path) : null; }
+
+    // The working tree's changes against HEAD: every file git reports, not only the scanned sources.
+    async loadChanges(generation) {
+        this.changes = undefined;
+        this.changesRequest?.abort();
+        const request = this.changesRequest = new AbortController();
+        this.composeChanges();
+        try {
+            const changes = await this.app.apiCall('/api/v1/code-analyzer/changes', 'GET', null,
+                { showLoading: false, signal: request.signal, preferErrorResponseMessage: true });
+            if (!this.isCurrent(generation)) return;
+            this.changes = Array.isArray(changes?.files) ? changes
+                : { error: 'The change list could not be read.', files: [], count: 0, additions: 0, deletions: 0 };
+        } catch (error) {
+            if (!this.isCurrent(generation) || request.signal.aborted) return;
+            this.changes = { error: error.message, files: [], count: 0, additions: 0, deletions: 0 };
+        }
+        this.composeChanges();
+        this.syncChangedFiles();
+        this.updateGraphNote();
+    }
+
+    syncChangedFiles() {
+        const paths = this.changedPaths();
+        if (!paths || !this.atlas) return;
+        this.atlas.setChangedFiles(paths.slice(0, 10000)).catch(error => this.notify(error.message));
+    }
+
+    mappedFiles() {
+        return new Set((this.graph?.nodes || []).filter(node => node.kind === 'file').map(node => reportPath(node.path)));
+    }
+
+    updateGraphNote() {
+        const graph = this.graph;
+        if (!graph) return;
+        const note = this.root.querySelector('[data-graph-note]');
+        const parts = [`${graph.fileCount} source files mapped${graph.truncated ? ' · Partial map — see Map coverage and filters' : ''}`];
+        const changes = this.changes;
+        if (changes && !changes.error) {
+            const mapped = this.mappedFiles();
+            const onMap = changes.files.filter(file => mapped.has(file.path)).length;
+            parts.push(`${changes.count} changed ${changes.count === 1 ? 'file' : 'files'} in Git, ${onMap} on the map`);
+        }
+        note.textContent = `${parts.join(' · ')}. Hover a node to trace its connections; Highlight changes lights up the changed files.`;
+        note.title = graph.description || '';
+    }
+
+    // Report files and Git changes share the sidebar list area behind one switch; both counts stay visible.
+    composeChanges() {
+        const section = this.qualityHost.querySelector('.qr-files-section');
+        if (!section) return;
+        let switcher = section.querySelector('.qr-list-switch');
+        if (!switcher) {
+            const heading = section.querySelector('h3');
+            heading.replaceChildren();
+            switcher = this.document.createElement('div');
+            switcher.className = 'qr-list-switch';
+            switcher.setAttribute('role', 'group');
+            switcher.setAttribute('aria-label', 'Sidebar list');
+            switcher.innerHTML = `<button type="button" data-list="report" aria-pressed="true">Report files <span class="file-count" data-report-count>0</span></button>`
+                + `<button type="button" data-list="changes" aria-pressed="false">Git changes <span class="file-count" data-changes-count>…</span></button>`;
+            heading.append(switcher);
+            switcher.addEventListener('click', event => {
+                const button = event.target.closest('[data-list]');
+                if (button) this.showList(button.dataset.list);
+            });
+        }
+        let list = section.querySelector('[data-changes-list]');
+        if (!list) {
+            list = this.document.createElement('div');
+            list.className = 'qr-changes';
+            list.setAttribute('data-changes-list', '');
+            list.setAttribute('role', 'group');
+            list.setAttribute('aria-label', 'Changed files in Git. Select a file to see its diff.');
+            list.hidden = this.activeList !== 'changes';
+            section.append(list);
+        }
+        const changes = this.changes;
+        switcher.querySelector('[data-changes-count]').textContent = changes === undefined ? '…' : changes.error ? '—' : String(changes.count);
+        switcher.querySelector('[data-list="changes"]').title = changes?.error ? `Changes unavailable: ${changes.error}` : 'Working-tree changes against HEAD';
+        if (changes === undefined) { list.innerHTML = '<p class="qr-empty">Reading the working tree…</p>'; return; }
+        if (changes.error) { list.innerHTML = `<p class="qr-empty">Changes unavailable: ${esc(changes.error)}</p>`; return; }
+        if (!changes.files.length) { list.innerHTML = '<p class="qr-empty">No changes in the working tree.</p>'; return; }
+        const mapped = this.mappedFiles();
+        const plural = count => count === 1 ? 'file' : 'files';
+        const stat = file => file.binary ? '<span class="change-stat">binary</span>'
+            : file.additions === undefined && file.deletions === undefined ? ''
+            : `<span class="change-stat"><ins>+${esc(file.additions ?? 0)}</ins><del>−${esc(file.deletions ?? 0)}</del></span>`;
+        list.innerHTML = `<div class="qr-file-head change-head"><span>${esc(changes.count)} changed ${plural(changes.count)} against HEAD${changes.truncated ? ` (first ${esc(changes.files.length)} listed)` : ''}</span>`
+            + `<span class="change-stat"><ins>+${esc(changes.additions)}</ins><del>−${esc(changes.deletions)}</del></span></div>`
+            + changes.files.map((file, index) => {
+                const path = file.path, slash = path.lastIndexOf('/');
+                const name = slash >= 0 ? path.slice(slash + 1) : path, dir = slash >= 0 ? path.slice(0, slash) : '';
+                const status = STATUS_LABELS[file.status] || file.status;
+                const staging = file.status === 'untracked' ? 'Untracked' : file.staged && file.unstaged ? 'Staged and unstaged edits' : file.staged ? 'Staged' : 'Unstaged';
+                return `<div class="change-row" data-path="${esc(path)}">`
+                    + `<button type="button" class="change-open" data-change-index="${index}" title="${esc(path)}" aria-label="${esc(path)}. ${esc(status)}, ${esc(staging)}. Open the diff.">`
+                    + `<span class="change-status change-status-${esc(file.status)}" aria-hidden="true">${esc(STATUS_CODES[file.status] || '·')}</span>`
+                    + `<span class="change-name"><b>${esc(name)}</b><small>${esc(dir || staging)}</small></span>${stat(file)}</button>`
+                    + (mapped.has(path) ? `<button type="button" class="change-locate" data-locate="${esc(path)}" title="Show on the map" aria-label="Show ${esc(name)} on the map">⌖</button>` : '')
+                    + '</div>';
+            }).join('');
+        list.querySelectorAll('[data-change-index]').forEach(button =>
+            button.addEventListener('click', () => this.openChangeDiff(Number(button.dataset.changeIndex))));
+        list.querySelectorAll('[data-locate]').forEach(button =>
+            button.addEventListener('click', () => this.focusFile(button.dataset.locate)));
+    }
+
+    showList(name) {
+        this.activeList = name;
+        const section = this.qualityHost.querySelector('.qr-files-section');
+        if (!section) return;
+        const files = section.querySelector('.qr-files'), changes = section.querySelector('[data-changes-list]');
+        if (files) files.hidden = name === 'changes';
+        if (changes) changes.hidden = name !== 'changes';
+        section.querySelectorAll('.qr-list-switch [data-list]').forEach(button =>
+            button.setAttribute('aria-pressed', String(button.dataset.list === name)));
+    }
+
+    // One diff viewer for the whole app: the changed files fill its rail and each diff loads on demand.
+    openChangeDiff(index) {
+        const changes = this.changes;
+        if (!Array.isArray(changes?.files) || !changes.files.length) return;
+        const files = changes.files.map(file => ({ fileName: file.path, status: file.status, load: () => this.loadDiff(file.path, file.originalPath) }));
+        openDiffModal({ title: `Working tree changes · ${changes.count} ${changes.count === 1 ? 'file' : 'files'} against HEAD`, files, initialIndex: index });
+    }
+
+    async loadDiff(path, originalPath) {
+        // A staged rename's "before" text lives at its original path in HEAD; the list reports that path.
+        const query = `path=${encodeURIComponent(path)}${originalPath ? `&original=${encodeURIComponent(originalPath)}` : ''}`;
+        const diff = await this.app.apiCall(`/api/v1/code-analyzer/changes/diff?${query}`, 'GET', null,
+            { showLoading: false, preferErrorResponseMessage: true });
+        return { originalContent: diff?.originalContent || '', modifiedContent: diff?.modifiedContent || '', language: diff?.language || 'plaintext',
+            notice: diff?.binary ? 'Binary file: no text diff.' : diff?.truncated ? 'Large file: each side shows its first 1,000,000 characters.' : '' };
     }
 
     findFile(path) {

@@ -252,6 +252,7 @@ namespace VibeRails
             serviceCollection.AddSingleton<ISessionOutputParser, SessionParseV4>();
             serviceCollection.AddScoped<IGitService, GitService>();
             serviceCollection.AddSingleton<Services.CodeReports.RepositoryCodeGraph>();
+            serviceCollection.AddSingleton<Services.CodeReports.WorkingTreeChanges>();
 
             // Rules and rule-file services
             serviceCollection.AddScoped<IRulesService, RulesService>();

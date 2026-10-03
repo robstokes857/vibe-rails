@@ -47,6 +47,9 @@ public sealed class BoardPromptComposerTests
         }
         foreach (var prompt in new[] { review, automation, BoardPromptComposer.Compose(Card(), "Build", "codex", null) })
         {
+            Assert.Contains("flagReason", prompt);
+            Assert.Contains("major bug", prompt);
+            Assert.Contains("Routine progress, completion and review do not warrant a flag", prompt);
             Assert.Contains("get_board_reviews every 10 seconds", prompt);
             Assert.Contains("fix findings you agree with", prompt);
         }

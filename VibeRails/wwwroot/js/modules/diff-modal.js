@@ -51,13 +51,21 @@ function trapFocus(event, layer) {
     }
 }
 
+const EXPLICIT_STATUS = {
+    added: ['A', 'added'], untracked: ['A', 'added'], copied: ['C', 'added'], deleted: ['D', 'deleted'],
+    renamed: ['R', 'modified'], conflicted: ['U', 'modified'], typechange: ['T', 'modified'], modified: ['M', 'modified']
+};
+
 function fileStatus(file) {
+    // A caller that knows git's status says so; otherwise the contents decide (lazy files have none yet).
+    const explicit = EXPLICIT_STATUS[file.status];
+    if (explicit) return { code: explicit[0], cls: explicit[1] };
     if (!file.originalContent) return { code: 'A', cls: 'added' };
     if (!file.modifiedContent) return { code: 'D', cls: 'deleted' };
     return { code: 'M', cls: 'modified' };
 }
 
-function renderFileList(files) {
+function renderFileList(files, activeIndex = 0) {
     return files.map((file, index) => {
         const status = fileStatus(file);
         const name = String(file.fileName || '').split('/').pop();
@@ -65,7 +73,7 @@ function renderFileList(files) {
             ? String(file.fileName).slice(0, String(file.fileName).lastIndexOf('/') + 1)
             : '';
         return `
-            <button type="button" class="vb-diff-file-item${index === 0 ? ' active' : ''}"
+            <button type="button" class="vb-diff-file-item${index === activeIndex ? ' active' : ''}"
                 data-file-index="${index}" title="${escapeHtml(file.fileName || '')}">
                 <span class="file-status ${status.cls}">${status.code}</span>
                 <span class="vb-diff-file-name"><span class="vb-diff-file-dir">${escapeHtml(dir)}</span>${escapeHtml(name)}</span>
@@ -78,12 +86,17 @@ function renderFileList(files) {
  *
  * @param {object} options
  * @param {string} options.title  heading text
- * @param {Array<{fileName: string, language?: string, originalContent?: string, modifiedContent?: string}>} options.files
- *        Same shape /api/v1/sandboxes/{id}/diff returns and Monaco consumes directly.
+ * @param {Array<{fileName: string, language?: string, originalContent?: string, modifiedContent?: string, status?: string,
+ *        load?: () => Promise<{originalContent?: string, modifiedContent?: string, language?: string, notice?: string}>}>} options.files
+ *        Same shape /api/v1/sandboxes/{id}/diff returns and Monaco consumes directly. A file may instead
+ *        carry `load`, which is awaited the first time the file is shown (the working-tree changes list
+ *        fetches one diff at a time); its `status` is git's word for the rail badge until then.
  * @param {() => void} [options.onClose]
+ * @param {number} [options.initialIndex] file shown first; defaults to the first file.
  * @returns {{ close: () => void, ready: Promise<boolean> }}
  */
-export function openDiffModal({ title, files = [], onClose = null } = {}) {
+export function openDiffModal({ title, files = [], onClose = null, initialIndex = 0 } = {}) {
+    const startIndex = Number.isInteger(initialIndex) && initialIndex >= 0 && initialIndex < files.length ? initialIndex : 0;
     const host = typeof document !== 'undefined' ? document.getElementById('modal-container') : null;
     if (!host) return { close: () => { }, ready: Promise.resolve(false) };
 
@@ -103,7 +116,7 @@ export function openDiffModal({ title, files = [], onClose = null } = {}) {
                             ? '<div class="vb-diff-empty">No changes to show.</div>'
                             : `<div class="vb-diff-sidebar">
                                     <div class="vb-diff-sidebar-head">Changed files (${files.length})</div>
-                                    ${renderFileList(files)}
+                                    ${renderFileList(files, startIndex)}
                                </div>
                                <div class="vb-diff-main">
                                     <div class="vb-diff-toolbar">
@@ -112,6 +125,7 @@ export function openDiffModal({ title, files = [], onClose = null } = {}) {
                                         <div class="diff-stat" data-vb-diff-stats>
                                             <span class="added">+0</span>&nbsp;<span class="removed">-0</span>
                                         </div>
+                                        <span class="vb-diff-notice" data-vb-diff-notice role="status"></span>
                                     </div>
                                     <div class="vb-diff-editor-container" data-vb-diff-editor>
                                         <div class="vb-diff-empty">Loading the diff viewer…</div>
@@ -120,7 +134,7 @@ export function openDiffModal({ title, files = [], onClose = null } = {}) {
                                         <div class="status-left"><span data-vb-diff-count>0 changes</span></div>
                                         <div class="status-right">
                                             <span>UTF-8</span>
-                                            <span data-vb-diff-language>${escapeHtml(files[0]?.language || 'plaintext')}</span>
+                                            <span data-vb-diff-language>${escapeHtml(files[startIndex]?.language || 'plaintext')}</span>
                                         </div>
                                     </div>
                                </div>`}
@@ -242,7 +256,8 @@ export function openDiffModal({ title, files = [], onClose = null } = {}) {
         });
         state.editor = editor;
 
-        loadFile(files[0]);
+        void loadFile(files[startIndex]);
+        layer.querySelector('.vb-diff-file-item.active')?.scrollIntoView({ block: 'nearest' });
         editor.onDidUpdateDiff(() => updateStats());
 
         layer.querySelectorAll('.vb-diff-file-item').forEach(item => {
@@ -250,9 +265,7 @@ export function openDiffModal({ title, files = [], onClose = null } = {}) {
                 const index = Number(item.dataset.fileIndex);
                 layer.querySelectorAll('.vb-diff-file-item').forEach(other => other.classList.remove('active'));
                 item.classList.add('active');
-                loadFile(files[index]);
-                const language = layer.querySelector('[data-vb-diff-language]');
-                if (language) language.textContent = files[index]?.language || 'plaintext';
+                void loadFile(files[index]);
             });
         });
 
@@ -268,15 +281,49 @@ export function openDiffModal({ title, files = [], onClose = null } = {}) {
         return true;
     }
 
-    function loadFile(file) {
+    let loadSequence = 0;
+    async function loadFile(file) {
         if (!state.editor || !state.monaco || !file) return;
+        const sequence = ++loadSequence;
+        setNotice('');
+        if (typeof file.load === 'function' && !file.loaded) {
+            // Fetch on first view; a selection made while loading wins over this result.
+            showModels('', '', 'plaintext');
+            setNotice('Loading the diff…');
+            delete file.loadError;
+            try {
+                const loaded = await file.load();
+                Object.assign(file, loaded || {}, { loaded: true });
+            } catch (error) {
+                file.loadError = error?.message || String(error);
+            }
+            if (state.disposed || sequence !== loadSequence) return;
+        }
+        if (file.loadError) {
+            showModels('', '', 'plaintext');
+            setNotice(`Could not load this diff: ${file.loadError}`);
+            return;
+        }
+        showModels(file.originalContent || '', file.modifiedContent || '', file.language || 'plaintext');
+        setNotice(file.notice || '');
+    }
+
+    function showModels(originalText, modifiedText, language) {
+        if (!state.editor || !state.monaco) return;
         const previous = state.editor.getModel();
-        const original = state.monaco.editor.createModel(file.originalContent || '', file.language || 'plaintext');
-        const modified = state.monaco.editor.createModel(file.modifiedContent || '', file.language || 'plaintext');
+        const original = state.monaco.editor.createModel(originalText, language);
+        const modified = state.monaco.editor.createModel(modifiedText, language);
         state.editor.setModel({ original, modified });
         // Dispose the models we just swapped out, not the ones now in use.
         try { previous?.original?.dispose(); } catch { /* already gone */ }
         try { previous?.modified?.dispose(); } catch { /* already gone */ }
+        const label = layer.querySelector('[data-vb-diff-language]');
+        if (label) label.textContent = language;
+    }
+
+    function setNotice(text) {
+        const notice = layer.querySelector('[data-vb-diff-notice]');
+        if (notice) notice.textContent = text;
     }
 
     function updateStats() {

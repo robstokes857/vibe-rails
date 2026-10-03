@@ -1,5 +1,23 @@
 # Vibe Board architecture and review
 
+## Card editor and local refresh (VIBE-44)
+
+Previous work preserves the card-recall handoff and file entry points in a collapsed sidebar
+section. Code quality/VCA summaries are also in the sidebar; the main column contains Description,
+uploads and Comments. Description is editable source without preview controls. Rendered comments
+always use Markdown. Discussion filters can hide routine agent entries or show agents only;
+attention comments remain visible at the top, followed by chronological discussion.
+
+`BoardController.refreshBoardSnapshot` polls the visible board every ten seconds and on return to
+the window. It reloads lane/card summaries and the already loaded depth of completed lanes using
+fresh ordering tokens. A changed ordering token during paging discards the partial snapshot.
+Navigation, foreground refresh, paging and dragging invalidate or cancel background reads. The
+existing single editor and its drafts stay mounted; activity refresh updates sessions, Comments
+and their attachment/commit metadata together. It rejects a response if local discussion or rail
+data changed during the request, and defers editor updates during uploads/saves. Pending uploads
+and composer drafts remain on the editor.
+No schema, handoff persistence or review workflow changes are involved.
+
 ## Card recall (VB-13)
 
 `save_board_handoff` stores outcome, decisions, validation, outstanding issues and up to twelve
@@ -1119,6 +1137,20 @@ for review. Portable custom-environment references await VIBE-25; raw local IDs 
 
 ## Waiting lane Automations (VIBE-21)
 
+VIBE-42 surfaces pending entries on card tiles as **Waiting for Automation**. List, detail and
+the bounded activity poll read the same bulk pending-card lookup behind `IBoardStore`; immutable
+Job trigger keys suppress the waiting badge as soon as a run commits, even before acknowledgment.
+The card stays visible in its chosen lane while its Automation entry waits. Completion does not
+move it. In the card's Automations rail, **Continue without this Automation** skips one exact
+Job/event pair and records the request in Comments in the same Board transaction. A failed receipt
+write rolls back the skip so it can be retried. Stale requests cannot remove a reentry, and
+committed runs keep their lifecycle, including the existing independent-commit race.
+
+The lane Agents picker also creates repository Python, PowerShell and Bash script Automations.
+Each is a normal single-script Job with explicit argument lines, repository-root working directory
+and the existing content-hash approval checks. Saving lane settings never runs the script for cards
+already there. A failed lane save retains the newly created Job as the selection for retry.
+
 Lane demand remains in board.db behind IBoardStore when its Automation already has a queued or
 running run. InsertRunAsync still enforces one active run per Job for every trigger. Board dispatch
 distinguishes a committed duplicate, a busy Job, disabled/deleted/missing Jobs, wrong projects,
@@ -1168,7 +1200,7 @@ recent-history page; exact GUID/card queries skip unrelated indexes. Saved cards
 sessions/commits immediately; draft cards queue them until Create. Card text carries reference
 syntax; no new schema or historical conversion is involved. `board-markdown.js` styles already
 escaped text and never permits raw HTML or arbitrary image sources. `board-composer-preview.js`
-provides live styles and small attachment previews. `board-image-previews.js` shares authenticated
+provides live styles and small attachment previews for the comment composer. `board-image-previews.js` shares authenticated
 raster loading between composer panes and posted Comments, owns Blob URLs and cancellation,
 and allows a later render to retry a failed fetch.
 

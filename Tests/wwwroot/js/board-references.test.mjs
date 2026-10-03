@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { findBoardReferenceToken, referenceSearchKind, canonicalSessionId, referenceCanBrowse, referenceEmptyNote, bindBoardReferences } from '../../../VibeRails/wwwroot/js/modules/board-references.js';
 import { renderCommentHtml } from '../../../VibeRails/wwwroot/js/modules/board-text.js';
 import { BoardApi } from '../../../VibeRails/wwwroot/js/modules/board-api.js';
-import { bindComposerPreview, boardMarkdownEnabled, boardTextOptions, setBoardMarkdownEnabled } from '../../../VibeRails/wwwroot/js/modules/board-composer-preview.js';
+import { bindComposerPreview, boardTextOptions } from '../../../VibeRails/wwwroot/js/modules/board-composer-preview.js';
 import { BoardController } from '../../../VibeRails/wwwroot/js/modules/board-controller.js';
 
 test('identifier routing skips unrelated searches, email and code', () => {
@@ -164,60 +164,34 @@ test('an exact card ID skips the file index, and merged results stay bounded', a
     assert.match(crowded, /Showing 50 matches/);
 });
 
-test('posted comments render with the composer preview options and follow the Markdown toggle', t => {
-    const previous = boardMarkdownEnabled();
+test('posted comments always render Markdown alongside session and commit references', t => {
     const savedFrame = globalThis.requestAnimationFrame;
+    const savedStorage = globalThis.localStorage;
     globalThis.requestAnimationFrame = () => 0;
-    t.after(() => {
-        setBoardMarkdownEnabled(previous);
-        if (savedFrame === undefined) delete globalThis.requestAnimationFrame; else globalThis.requestAnimationFrame = savedFrame;
-    });
+    globalThis.localStorage = { getItem: () => 'off' };
+    t.after(() => { globalThis.requestAnimationFrame = savedFrame; globalThis.localStorage = savedStorage; });
     const guid = '12345678-1234-1234-1234-123456789abc';
     const body = `**bold** !${guid} #abcdef0`;
-    const card = { id: 'card_1', attachments: [], comments: [{ id: 'c1', body, author: { kind: 'user' }, createdAt: '2026-10-01T00:00:00Z' }],
+    const card = { id: 'card_1', comments: [{ id: 'c1', body, author: { kind: 'user' } }],
         sessions: [{ id: guid, displayName: 'Fix login' }], commits: [{ sha: 'abcdef0123456', message: 'Repair the form' }] };
     const host = { innerHTML: '', isConnected: false, querySelectorAll: () => [] };
     const editor = { querySelector: selector => selector === '[data-board-comments]' ? host : null, querySelectorAll: () => [] };
-    const controller = Object.create(BoardController.prototype);
-
-    setBoardMarkdownEnabled(true);
-    controller.renderCardDiscussion(editor, card);
-    assert.ok(host.innerHTML.includes(renderCommentHtml(body, boardTextOptions(card))), 'same HTML as the composer preview');
+    Object.create(BoardController.prototype).renderCardDiscussion(editor, card);
+    assert.ok(host.innerHTML.includes(renderCommentHtml(body, boardTextOptions(card))));
     assert.match(host.innerHTML, /<strong>bold<\/strong>/);
     assert.match(host.innerHTML, /! Fix login/);
     assert.match(host.innerHTML, /title="Repair the form"/);
-
-    setBoardMarkdownEnabled(false);
-    controller.renderCardDiscussion(editor, card);
-    assert.doesNotMatch(host.innerHTML, /<strong>/);
-    assert.match(host.innerHTML, /\*\*bold\*\*/);
-    assert.match(host.innerHTML, /! Fix login/);
 });
 
-test('the Markdown toggle flips the shared preference and asks the editor to repaint', t => {
-    const previous = boardMarkdownEnabled();
-    t.after(() => setBoardMarkdownEnabled(previous));
-    setBoardMarkdownEnabled(true);
-    const listeners = {};
-    const toggle = { pressed: null, addEventListener: (type, handler) => { listeners[type] = handler; }, setAttribute(_name, value) { this.pressed = value; } };
-    const preview = { innerHTML: '', querySelectorAll: () => [] };
-    const composer = { querySelector: selector => ({ '[data-board-markdown]': toggle, '[data-board-composer-preview]': preview })[selector] || null };
-    const input = { value: '**x**', hidden: false, addEventListener() {} };
-    let repaints = 0;
-    const dispose = bindComposerPreview(composer, input, { sessions: [], commits: [] }, { onMarkdownChange: () => repaints++ });
-    t.after(dispose);
-    assert.match(preview.innerHTML, /<strong>x<\/strong>/);
-    listeners.click();
-    assert.equal(boardMarkdownEnabled(), false);
-    assert.equal(toggle.pressed, 'false');
-    assert.doesNotMatch(preview.innerHTML, /<strong>/);
-    assert.equal(repaints, 1);
-});
-
-test('the controller re-renders posted comments when the Markdown toggle changes', () => {
-    const source = readFileSync(new URL('../../../VibeRails/wwwroot/js/modules/board-controller.js', import.meta.url), 'utf8');
-    const bind = source.slice(source.indexOf('bindComposerPreview(composer, input, card,'), source.indexOf('bindBoardReferences(input,'));
-    assert.match(bind, /onMarkdownChange: \(\) => \{/);
-    assert.match(bind, /this\.renderCardDiscussion\(editor, editor\._boardCard \|\| card\)/);
-    assert.match(source, /renderCommentHtml\(entry\.body, textOptions\)/);
+test('comment previews update with typing and dispose their listener', () => {
+    const live = { innerHTML: '', querySelectorAll: () => [] };
+    const composer = { querySelector: selector => selector === '[data-board-composer-live]' ? live : null };
+    const input = new EventTarget(); input.value = '**first**';
+    const dispose = bindComposerPreview(composer, input, {});
+    assert.match(live.innerHTML, /<strong>first<\/strong>/);
+    input.value = '**next**'; input.dispatchEvent(new Event('input'));
+    assert.match(live.innerHTML, /<strong>next<\/strong>/);
+    dispose();
+    input.value = '**disposed**'; input.dispatchEvent(new Event('input'));
+    assert.doesNotMatch(live.innerHTML, /disposed/);
 });

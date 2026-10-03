@@ -610,6 +610,9 @@ public sealed partial class BoardStore : IBoardStore
     /// <summary>The update, with the Card Log entry stamped when the change was pulled from viberails.ai.</summary>
     private async Task<BoardCardRecord?> UpdateCardCoreAsync(string projectPath, string cardId, BoardCardPatch patch, BoardAuthor author, BoardSyncStamp? stamp, CancellationToken cancellationToken)
     {
+        // Remote state changes already carry their discussion separately. Local agents must
+        // save the reason and flag together, even when calling the store directly.
+        var flagReason = stamp is null ? BoardAttention.NormalizeReason(patch.Flagged, patch.FlagReason, author) : null;
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
@@ -718,6 +721,8 @@ public sealed partial class BoardStore : IBoardStore
         await TransferCardLogAsync(connection, transaction, existing, updated, author, cancellationToken);
         await LogCardChangedAsync(connection, transaction, existing, updated, fromLaneName, toLaneName,
             author, cancellationToken, stamp);
+        if (flagReason is not null)
+            await InsertAttentionAsync(connection, transaction, updated.Id, author, flagReason, cancellationToken);
         await ReconcileMissingSyncedLaneAsync(connection, transaction, updated, stamp, cancellationToken);
         if (stamp is not null) await ReconcileSyncedDisplayIdAsync(connection, transaction, updated, patch.DisplayId, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -890,16 +895,17 @@ public sealed partial class BoardStore : IBoardStore
 
         // Notes use their own id prefix so an agent can tell the two apart in tool output. A pulled
         // web comment keeps its remote id and time and is already marked sent (VB-51).
-        var comment = new BoardCommentRecord(stamp?.EntryId ?? NewId(kind == BoardCommentKinds.Note ? "note" : "cm"), card.Id, author, body, stamp?.CreatedUtc ?? DateTime.UtcNow, kind);
+        var comment = new BoardCommentRecord(stamp?.EntryId ?? NewId(kind == BoardCommentKinds.Note ? "note" : "cm"), card.Id, author, body, stamp?.CreatedUtc ?? DateTime.UtcNow, kind, stamp?.Changes);
         if (stamp is not null && await HasSyncStampAsync(connection, transaction, stamp, cancellationToken)) return comment;
         await using (var insert = connection.CreateCommand())
         {
             insert.Transaction = transaction;
             insert.CommandText = """
-                INSERT INTO BoardComments (Id, CardId, AuthorKind, AuthorLabel, AuthorCli, SessionId, Body, CreatedUTC, Kind, RemoteSeq)
-                VALUES ($id, $card, $kind, $label, $cli, $session, $body, $created, $rowKind, $remoteSeq);
+                INSERT INTO BoardComments (Id, CardId, AuthorKind, AuthorLabel, AuthorCli, SessionId, Body, CreatedUTC, Kind, RemoteSeq, Changes)
+                VALUES ($id, $card, $kind, $label, $cli, $session, $body, $created, $rowKind, $remoteSeq, $changes);
                 """;
             insert.Parameters.AddWithValue("$remoteSeq", stamp is null ? DBNull.Value : stamp.RemoteSeq);
+            insert.Parameters.AddWithValue("$changes", (object?)stamp?.Changes ?? DBNull.Value);
             insert.Parameters.AddWithValue("$id", comment.Id);
             insert.Parameters.AddWithValue("$card", card.Id);
             insert.Parameters.AddWithValue("$kind", author.Kind);
@@ -1449,7 +1455,7 @@ public sealed partial class BoardStore : IBoardStore
     {
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT Id, CardId, AuthorKind, AuthorLabel, AuthorCli, SessionId, Body, CreatedUTC, Kind
+            SELECT Id, CardId, AuthorKind, AuthorLabel, AuthorCli, SessionId, Body, CreatedUTC, Kind, Changes
             FROM BoardComments WHERE CardId = $card AND Kind IN ('comment', 'note') AND DiscussionHidden = 0
               AND NOT EXISTS (SELECT 1 FROM BoardDeletedComments d WHERE d.CommentId = BoardComments.Id) ORDER BY CreatedUTC, Id;
             """;
@@ -1468,7 +1474,7 @@ public sealed partial class BoardStore : IBoardStore
                     reader.IsDBNull(5) ? null : reader.GetString(5)),
                 reader.GetString(6),
                 ParseDb(reader.GetString(7)),
-                reader.GetString(8)));
+                reader.GetString(8), reader.IsDBNull(9) ? null : reader.GetString(9)));
         }
         return comments;
     }
@@ -1838,6 +1844,8 @@ public sealed partial class BoardStore : IBoardStore
         });
         SqliteMigrationRunner.Apply(connection, "board", 26, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, SharedOriginsSchemaSql));
+        SqliteMigrationRunner.Apply(connection, "board-attention", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, AttentionSchemaSql));
         SqliteMigrationRunner.Apply(connection, "board-lane-dispatch", 1, MigrationKind.Additive, ApplyLaneDispatchSchema);
         SqliteMigrationRunner.Apply(connection, "board-checks", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, ChecksSchemaSql));

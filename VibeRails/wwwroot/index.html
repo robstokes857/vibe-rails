@@ -1193,8 +1193,6 @@
                             aria-controls="settings-panel-general" aria-selected="true" data-settings-tab="general">General</button>
                         <button type="button" class="settings-tab" role="tab" id="settings-tab-llm"
                             aria-controls="settings-panel-llm" aria-selected="false" tabindex="-1" data-settings-tab="llm">LLMs</button>
-                        <button type="button" class="settings-tab" role="tab" id="settings-tab-git"
-                            aria-controls="settings-panel-git" aria-selected="false" tabindex="-1" data-settings-tab="git">Git</button>
                         <button type="button" class="settings-tab" role="tab" id="settings-tab-keys"
                             aria-controls="settings-panel-keys" aria-selected="false" tabindex="-1" data-settings-tab="keys">KEYS</button>
                         <button type="button" class="settings-tab" role="tab" id="settings-tab-integrations"
@@ -1514,29 +1512,6 @@
                                 <small class="form-text text-muted">Applies immediately and is remembered in this browser.</small>
                             </div>
                         </form>
-                    </div>
-                </div>
-            </div>
-            </div>
-            <div class="settings-panel" id="settings-panel-git" role="tabpanel" aria-labelledby="settings-tab-git"
-                tabindex="0" hidden>
-            <div class="row justify-content-center">
-                <div class="col-md-8 col-lg-6 mb-4">
-                    <div class="sandbox-item-card text-start">
-                        <div class="mb-3">
-                            <span class="sandbox-item-name">Git Commit Settings</span>
-                        </div>
-                        <div class="form-check form-switch">
-                            <input class="form-check-input" type="checkbox"
-                                id="setting-remove-co-author-trailers">
-                            <label class="form-check-label" for="setting-remove-co-author-trailers">
-                                Remove co-author and Claude session tags
-                            </label>
-                        </div>
-                        <small class="form-text text-muted">When Git Guard's <code>commit-msg</code> hook runs,
-                            remove every <code>Co-authored-by:</code> and <code>Claude-Session:</code> trailer
-                            before Git creates the commit.
-                            Enabled by default.</small>
                     </div>
                 </div>
             </div>
@@ -4177,6 +4152,10 @@
                     letter-spacing: 0;
                     text-align: center;
                 }
+
+                .board-previous-work > summary { cursor: pointer; }
+                .board-previous-work > summary::before { content: '\25b8'; }
+                .board-previous-work[open] > summary::before { transform: rotate(90deg); }
 
                 .board-activity .board-comments:not(:empty) {
                     margin-bottom: 0.9rem;

@@ -351,7 +351,7 @@ public sealed partial class BoardToolTests : IDisposable
     public async Task AttentionFlag_RoundTripsThroughMcp_WithoutChangingBlockedOrDescription()
     {
         await _tool.CreateBoardCard("Review decision", "Keep this text", cancellationToken: Ct);
-        Assert.Contains("needs your attention", await _tool.UpdateBoardCard("PROJ-1", flagged: true, cancellationToken: Ct));
+        Assert.Contains("needs your attention", await _tool.UpdateBoardCard("PROJ-1", flagged: true, flagReason: "Security issue: need the owner's decision on the permitted exposure.", cancellationToken: Ct));
         Assert.Contains("FLAGGED: needs your attention", await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct));
         Assert.Contains("FLAGGED: needs your attention", await _tool.ListBoardCards(cancellationToken: Ct));
         var saved = (await new BoardStore(_connectionString, _stateConnectionString).FindCardAsync(_project, "PROJ-1", Ct))!;
@@ -743,6 +743,8 @@ public sealed partial class BoardToolTests : IDisposable
             .Returns<string, string, CancellationToken>((project, id, ct) => _store.GetCardDetailAsync(project, id, ct));
         racing.Setup(s => s.GetRunningAutomationsAsync(_project, It.IsAny<CancellationToken>()))
             .Returns<string, CancellationToken>((project, ct) => _store.GetRunningAutomationsAsync(project, ct));
+        racing.Setup(s => s.GetWaitingAutomationCardIdsAsync(_project, It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
+            .Returns<string, IReadOnlyList<string>, CancellationToken>((project, ids, ct) => _store.GetWaitingAutomationCardIdsAsync(project, ids, ct));
         var service = new BoardService(racing.Object, Mock.Of<IBoardCommitService>(), new NullBoardLiveSessionProbe());
 
         var updated = await service.UpdateCardAsync(_project, "PROJ-1", new UpdateBoardCardRequest(DescriptionAppend: "agent note"), Ct);

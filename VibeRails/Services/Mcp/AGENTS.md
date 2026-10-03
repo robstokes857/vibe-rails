@@ -1,5 +1,15 @@
 # MCP Server (in-process)
 
+## Attention flags (VIBE-40)
+
+`update_board_card(flagged: true, flagReason: "issue and requested action")` requires a reason
+and saves it as a red Comments entry atomically with the flag. Blank/oversized reasons or reasons
+without `flagged=true` fail before writes. Use only for important unresolved issues requiring the
+user's intervention: major bugs, security/data-loss issues or missing information that blocks work.
+Completion, routine review and progress do not warrant a flag. Clear with `flagged=false` once
+all reasons are resolved. The requesting terminal keeps a red alert until then; Comments retain
+the historical attention marker. No tool name, grant or listener changes.
+
 ## Card recall (VB-13)
 
 `get_board_card` is the first tool for a named card or prior-work question. It returns structured

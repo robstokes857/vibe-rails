@@ -65,10 +65,17 @@ public sealed partial class BoardStore
     public async Task RecordLaneAutomationDispatchAsync(BoardLaneAutomationEvent entry, BoardLaneAutomationDispatch dispatch,
         DateTime nowUtc, CancellationToken cancellationToken = default)
     {
-        if (dispatch.Status is not ("Waiting" or "Queued" or "Skipped" or "Cancelled"))
-            throw new ArgumentException("Invalid lane dispatch status.", nameof(dispatch));
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(deferred: false);
+        await WriteLaneAutomationDispatchAsync(connection, transaction, entry, dispatch, nowUtc, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    private static async Task WriteLaneAutomationDispatchAsync(SqliteConnection connection, SqliteTransaction transaction,
+        BoardLaneAutomationEvent entry, BoardLaneAutomationDispatch dispatch, DateTime nowUtc, CancellationToken cancellationToken)
+    {
+        if (dispatch.Status is not ("Waiting" or "Queued" or "Skipped" or "Cancelled"))
+            throw new ArgumentException("Invalid lane dispatch status.", nameof(dispatch));
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         // A late busy observation cannot revive an entry cancelled by a move. A committed run
@@ -97,7 +104,6 @@ public sealed partial class BoardStore
                 """;
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
-        await transaction.CommitAsync(cancellationToken);
     }
 
     private static void BindEntry(SqliteCommand command, BoardLaneAutomationEvent entry)

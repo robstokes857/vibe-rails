@@ -78,6 +78,10 @@ function cardType(value) {
     return CARD_TYPES.find(item => item.value === value) || CARD_TYPES[0];
 }
 
+function cardActivitySnapshot(card) {
+    return JSON.stringify([card?.comments, card?.notes, card?.sessions, card?.attachments, card?.commits]);
+}
+
 export class BoardController {
     constructor(app) {
         this.app = app;
@@ -203,17 +207,85 @@ export class BoardController {
         refresh();
         // Also catches launches in another root and a final event missed during a reconnect.
         this._activityPoll = setInterval(() => {
-            if (!document.hidden) void this.refreshSessionActivity();
+            if (!document.hidden) void this.refreshVisibleBoard();
         }, 10000);
+        const resume = () => { if (!document.hidden) void this.refreshVisibleBoard(); };
+        document.addEventListener('visibilitychange', resume);
+        window.addEventListener('focus', resume);
+        this._activityDisposers.push(() => {
+            document.removeEventListener('visibilitychange', resume);
+            window.removeEventListener('focus', resume);
+        });
     }
 
     disposeSessionActivity() {
         clearTimeout(this._activityTimer);
         clearInterval(this._activityPoll);
         this._activityAbort?.abort();
+        this._boardPollAbort?.abort();
         for (const dispose of this._activityDisposers) dispose();
         this._activityDisposers = [];
         this._activityGeneration++;
+    }
+
+    async refreshVisibleBoard() {
+        if (this._boardPollPending) return;
+        this._boardPollPending = true;
+        try {
+            await this.refreshBoardSnapshot();
+            if (!document.hidden) await this.refreshSessionActivity();
+        } finally { this._boardPollPending = false; }
+    }
+
+    // Refresh lane membership and summaries without replacing the editor or resetting loaded pages.
+    async refreshBoardSnapshot() {
+        const root = this.root;
+        if (!root?.isConnected || this.app.currentView !== 'board' || !this.state.boardId
+            || this._cardPageGeneration !== this._refreshGeneration || this._pageRequests.size || this._boardDragging) return;
+        const generation = this._refreshGeneration;
+        const boardId = this.state.boardId;
+        this._boardPollAbort?.abort();
+        const abort = this._boardPollAbort = new AbortController();
+        const current = () => !abort.signal.aborted && root === this.root && root.isConnected
+            && this.app.currentView === 'board' && boardId === this.state.boardId
+            && generation === this._refreshGeneration && !this._boardDragging && !this._pageRequests.size;
+        const filters = { ...this.state.filters };
+        const loaded = new Map((this.cardPage?.lanes || []).map(lane => [lane.columnId, lane.nextOffset]));
+        try {
+            const [boards, columns, page] = await Promise.all([
+                BoardApi.getBoardsAsync({ signal: abort.signal }),
+                BoardApi.getBoardColumnsAsync(boardId, { signal: abort.signal }),
+                BoardApi.getBoardCardPageAsync(boardId, filters, { signal: abort.signal })
+            ]);
+            if (!current()) return;
+            if (!boards.some(board => board.id === boardId)) { await this.refresh(); return; }
+            const cards = new Map((page.cards || []).map(card => [card.id, card]));
+            for (const lane of page.lanes || []) {
+                while (lane.hasMore && lane.nextOffset < (loaded.get(lane.columnId) || 0)) {
+                    const response = await BoardApi.getBoardCardPageAsync(boardId, filters, {
+                        columnId: lane.columnId, offset: lane.nextOffset,
+                        continuationToken: lane.continuationToken, signal: abort.signal
+                    });
+                    if (!current()) return;
+                    const next = response.lanes?.find(item => item.columnId === lane.columnId);
+                    // A concurrent reorder invalidates this snapshot; retry at the next poll.
+                    if (!next || next.restartRequired || next.nextOffset <= lane.nextOffset) return;
+                    for (const card of response.cards || []) cards.set(card.id, card);
+                    Object.assign(lane, next);
+                }
+            }
+            if (!current()) return;
+            const nextCards = [...cards.values()];
+            const changed = JSON.stringify([this.state.boards, this.state.columns, this.state.cards, this.cardPage])
+                !== JSON.stringify([boards, columns, nextCards, page.lanes ? { ...page, cards: nextCards } : null]);
+            this.state.boards = boards;
+            this.state.columns = columns;
+            this.state.cards = nextCards;
+            this.cardPage = page.lanes ? { ...page, cards: nextCards } : null;
+            if (changed) this.renderAll(); // renderLanes preserves horizontal and lane scroll positions.
+        } catch (error) {
+            if (current()) console.warn('Could not refresh Board cards:', error);
+        }
     }
 
     async refreshSessionActivity() {
@@ -224,6 +296,7 @@ export class BoardController {
         const boardId = this.state.boardId;
         const editor = document.querySelector('[data-board-card-editor]');
         const cardId = editor?.dataset.cardId;
+        const editorActivity = cardActivitySnapshot(editor?._boardCard);
         const current = () => root === this.root && root.isConnected && generation === this._activityGeneration
             && refreshGeneration === this._refreshGeneration && boardId === this.state.boardId;
         const abort = this._activityAbort = new AbortController();
@@ -256,28 +329,45 @@ export class BoardController {
             for (const card of this.state.cards) {
                 const fresh = byId.get(card.id);
                 if (!fresh) continue;
-                const changed = card.activeTabId !== fresh.activeTabId || card.hasActiveAutomation !== fresh.hasActiveAutomation;
+                const changed = card.activeTabId !== fresh.activeTabId || card.hasActiveAutomation !== fresh.hasActiveAutomation
+                    || card.hasWaitingAutomation !== fresh.hasWaitingAutomation;
                 card.activeSessionId = fresh.activeSessionId;
                 card.activeTabId = fresh.activeTabId;
                 card.hasActiveAutomation = fresh.hasActiveAutomation;
+                card.hasWaitingAutomation = fresh.hasWaitingAutomation;
                 if (!changed) continue;
                 const tile = tiles.get(card.id);
                 if (!tile) continue;
                 tile.classList.toggle('is-live', Boolean(card.activeTabId));
                 const aside = tile.querySelector('.board-card-aside');
                 aside?.querySelector('.board-automation-running')?.remove();
+                tile.querySelector('.board-automation-waiting')?.remove();
+                if (card.hasWaitingAutomation) tile.querySelector('.board-card-title')?.insertAdjacentHTML('afterend', this.waitingAutomationIndicator());
                 aside?.querySelector('.board-live-dot')?.remove();
                 if (card.hasActiveAutomation) aside?.insertAdjacentHTML('afterbegin', this.automationIndicator());
                 if (card.activeTabId) aside?.insertAdjacentHTML('beforeend', '<span class="board-live-dot" title="A terminal session is working this card" aria-label="Session open"></span>');
             }
             // Update only the rails and live controls. Never replace the user's draft fields.
-            if (detail && editor.isConnected && editor === document.querySelector('[data-board-card-editor]') && editor.dataset.cardId === cardId) {
+            if (detail && editor.isConnected && editor === document.querySelector('[data-board-card-editor]') && editor.dataset.cardId === cardId
+                && !editor._boardUploading && !editor._boardSaving
+                // Local comment/rail writes can finish while this GET is in flight. Keep their newer data.
+                && cardActivitySnapshot(editor._boardCard) === editorActivity) {
                 const card = editor._boardCard || detail;
                 const changed = card === detail || JSON.stringify(card.sessions) !== JSON.stringify(detail.sessions)
                     || card.activeSessionId !== detail.activeSessionId || card.activeTabId !== detail.activeTabId;
+                const attachmentsChanged = JSON.stringify(card.attachments) !== JSON.stringify(detail.attachments);
+                const commitsChanged = JSON.stringify(card.commits) !== JSON.stringify(detail.commits);
+                const discussionChanged = cardActivitySnapshot(card) !== cardActivitySnapshot(detail);
                 Object.assign(card, { sessions: detail.sessions, activeSessionId: detail.activeSessionId,
-                    activeTabId: detail.activeTabId, hasActiveAutomation: detail.hasActiveAutomation });
+                    activeTabId: detail.activeTabId, hasActiveAutomation: detail.hasActiveAutomation,
+                    comments: detail.comments, notes: detail.notes, attachments: detail.attachments, commits: detail.commits });
                 if (changed) this.renderSessionsPanel(editor, card);
+                if (attachmentsChanged) this.renderAttachmentsPanel(editor, card);
+                if (commitsChanged) this.renderCommitsPanel(editor, card);
+                if (discussionChanged) {
+                    this.renderCardDiscussion(editor, card);
+                    editor.querySelectorAll('[data-board-composer]').forEach(composer => composer._refreshPreview?.());
+                }
                 void this.cardAutomations?.refresh();
             }
         } catch (error) {
@@ -289,6 +379,10 @@ export class BoardController {
 
     automationIndicator() {
         return '<button type="button" class="board-icon-btn board-automation-running" data-board-action="go-to-automation" title="Go to running Automation" aria-label="Go to running Automation"><i class="fa-solid fa-robot" aria-hidden="true"></i></button>';
+    }
+
+    waitingAutomationIndicator() {
+        return '<button type="button" class="board-automation-waiting" data-board-action="waiting-automation" title="View waiting Automations or continue without a run"><i class="fa-solid fa-hourglass-half" aria-hidden="true"></i> Waiting for Automation</button>';
     }
 
     async goToCardAutomation(cardId, sessionId = null) {
@@ -688,6 +782,7 @@ export class BoardController {
                         </span>
                     </div>
                     <h3 class="board-card-title">${escapeHtml(card.title)}</h3>
+                    ${card.hasWaitingAutomation ? this.waitingAutomationIndicator() : ''}
                     ${excerpt ? `<p class="board-card-excerpt">${escapeHtml(excerpt)}</p>` : ''}
                     <div class="board-card-meta">
                         <div class="board-card-aside">
@@ -776,6 +871,7 @@ export class BoardController {
     }
 
     filtersChanged(debounce = false) {
+        this._boardPollAbort?.abort();
         clearTimeout(this._filterTimer);
         // Invalidate both list and page requests immediately, before the debounce.
         this._refreshGeneration += 1;
@@ -791,6 +887,7 @@ export class BoardController {
         if (this._cardPageGeneration !== this._refreshGeneration) return;
         const lane = this.cardPage?.lanes?.find(item => item.columnId === columnId);
         if (!lane?.hasMore || this._pageRequests.has(columnId)) return;
+        this._boardPollAbort?.abort();
         const generation = this._refreshGeneration;
         const root = this.root;
         const boardId = this.state.boardId;
@@ -872,6 +969,7 @@ export class BoardController {
                 chosenClass: 'is-chosen',
                 dragClass: 'is-dragging',
                 emptyInsertThreshold: 12,
+                onStart: () => { this._boardDragging = true; this._boardPollAbort?.abort(); },
                 onMove: () => {
                     this.queryAll('.board-lane').forEach(lane => lane.classList.remove('is-drop-target'));
                 },
@@ -879,7 +977,9 @@ export class BoardController {
                     this.queryAll('.board-lane').forEach(lane => lane.classList.remove('is-drop-target'));
                     event.to.closest('.board-lane')?.classList.add('is-drop-target');
                 },
-                onEnd: event => this.onCardDropped(event)
+                onEnd: async event => {
+                    try { await this.onCardDropped(event); } finally { this._boardDragging = false; }
+                }
             }));
         });
 
@@ -889,7 +989,10 @@ export class BoardController {
             animation,
             handle: '.board-lane-grip',
             draggable: '.board-lane',
-            onEnd: () => this.onLanesReordered()
+            onStart: () => { this._boardDragging = true; this._boardPollAbort?.abort(); },
+            onEnd: async () => {
+                try { await this.onLanesReordered(); } finally { this._boardDragging = false; }
+            }
         }));
     }
 
@@ -921,6 +1024,7 @@ export class BoardController {
     }
 
     async refresh({ restoreSelection = false } = {}) {
+        this._boardPollAbort?.abort();
         clearTimeout(this._filterTimer);
         this.cancelPageRequests();
         this._refreshAbort?.abort();
@@ -993,6 +1097,9 @@ export class BoardController {
         }
 
         switch (action) {
+            case 'waiting-automation':
+                if (cardEl) void this.openCardEditor(cardEl.dataset.cardId);
+                break;
             case 'lane-agents':
                 this.laneAgents.open(trigger, this.state.columns.find(column => column.id === trigger.dataset.columnId));
                 break;
@@ -1138,13 +1245,10 @@ export class BoardController {
                         ${this.composerMarkup({
                             name: 'description',
                             value: card?.description || '',
-                            preview: true,
                             placeholder: 'Context, repro steps, links. Use Code for a snippet.'
                         })}
                     </section>
 
-                    <div data-board-previous-work>${previousWorkHtml(card)}</div>
-                    ${card ? cardChecksSection() : ''}
                     <section class="board-block">
                         <h3 class="board-block-label">Attachments <span class="board-count" data-board-count="attachments">${card?.attachments?.length || 0}</span></h3>
                         <div class="board-attachment-list" data-board-attachments></div>
@@ -1157,6 +1261,13 @@ export class BoardController {
 
                     <section class="board-block board-activity">
                         <h3 class="board-block-label">Comments <span class="board-count" data-board-count="comments">${card?.comments?.length || 0}</span></h3>
+                        ${card ? `<label class="board-editor-label" for="board-comment-filter">Show comments</label>
+                        <select class="form-select form-select-sm mb-2" id="board-comment-filter" data-board-comment-filter>
+                            <option value="all">All comments</option>
+                            <option value="human">Hide agent comments</option>
+                            <option value="agent">Agent comments</option>
+                        </select>
+                        <p class="board-editor-muted">Attention comments always appear first.</p>` : ''}
                         <div class="board-comments" data-board-comments></div>
                         ${card ? this.composerMarkup({
                             name: 'comment',
@@ -1222,6 +1333,8 @@ export class BoardController {
                     </section>` : ''}
 
 
+                    ${card ? cardChecksSection() : ''}
+                    <div data-board-previous-work>${previousWorkHtml(card)}</div>
                     ${card ? cardOrganizeSection() : ''}
                     ${renderCardLinksSection(card)}
 
@@ -1380,6 +1493,9 @@ export class BoardController {
         editor._boardDiscussionImages = createBoardImagePreviews(() => editor._boardCard,
             () => this.applyCommentClamps(editor.querySelector('[data-board-comments]')));
         this.composerDisposers.push(() => editor._boardDiscussionImages.dispose());
+        editor.querySelector('[data-board-comment-filter]')?.addEventListener('change', () => {
+            this.renderCardDiscussion(editor, editor._boardCard);
+        });
         this.renderCardDiscussion(editor, card);
         if (card) this.cardHistoryDispose = mountHistory(editor.querySelector('[data-board-history-view]'), card.boardId, card.id);
         this.renderCommitsPanel(editor, card);
@@ -1498,7 +1614,7 @@ export class BoardController {
     // Composer (shared by the description and comments)
     // ============================================
 
-    composerMarkup({ name, value = '', placeholder = '', disabled = false, submitLabel = '', preview = false }) {
+    composerMarkup({ name, value = '', placeholder = '', disabled = false, submitLabel = '' }) {
         const off = disabled ? ' disabled' : '';
         return `
             <div class="board-composer" data-board-composer="${name}">
@@ -1511,15 +1627,11 @@ export class BoardController {
                         title="Attach a file (or paste an image)"${off}>
                         <i class="fa-solid fa-paperclip" aria-hidden="true"></i><span>Attach</span>
                     </button>
-                    <button type="button" class="board-composer-btn" data-board-markdown aria-pressed="true" title="Toggle Markdown styles"${off}>Markdown</button>
                     <span class="board-composer-hint">@ file/card · ! session · # commit</span>
-                    ${preview ? `<button type="button" class="board-composer-btn ms-auto"
-                        data-board-composer-toggle aria-label="Preview description"${off}>Preview</button>` : ''}
                 </div>
                 <textarea class="form-control board-composer-input" data-board-composer-input
                     placeholder="${escapeHtml(placeholder)}" rows="3"${off}>${escapeHtml(value)}</textarea>
-                ${preview ? '<div class="board-comment-body board-description-preview" data-board-composer-preview title="Click to edit" hidden></div>' : ''}
-                <div class="board-comment-body board-composer-live" data-board-composer-live aria-label="Live preview"></div>
+                ${name === 'comment' ? '<div class="board-comment-body board-composer-live" data-board-composer-live aria-label="Live preview"></div>' : ''}
                 <input type="file" hidden data-board-composer-file multiple>
                 <div class="board-composer-busy" data-board-composer-busy hidden>Adding files…</div>
                 ${submitLabel ? `<div class="board-composer-footer">
@@ -1546,46 +1658,8 @@ export class BoardController {
                 input.style.height = `${needed}px`;
             }
         };
-        const preview = composer.querySelector('[data-board-composer-preview]');
-        const toggle = composer.querySelector('[data-board-composer-toggle]');
-        const renderPreview = () => {
-            composer._refreshPreview?.();
-        };
-        const setPreview = viewing => {
-            if (!preview || !toggle) return;
-            renderPreview();
-            preview.hidden = !viewing;
-            input.hidden = viewing;
-            composer.querySelectorAll('[data-board-composer-action="code"], [data-board-composer-action="image"], .board-composer-hint')
-                .forEach(element => { element.hidden = viewing; });
-            toggle.textContent = viewing ? 'Edit' : 'Preview';
-            toggle.setAttribute('aria-label', viewing ? 'Edit description' : 'Preview description');
-            composer._refreshPreview?.();
-            if (!viewing) autoGrow();
-        };
-        toggle?.addEventListener('click', () => {
-            setPreview(preview.hidden);
-            if (preview.hidden) input.focus();
-        });
-        // Clicking into the rendered description opens it for editing (the Edit button stays as
-        // the discoverable way). Links and images keep their own click behaviour.
-        preview?.addEventListener('click', event => {
-            if (event.target.closest('a, img, button')) return;
-            setPreview(false);
-            input.focus();
-            const end = input.value.length;
-            try { input.setSelectionRange(end, end); } catch { /* not a text control */ }
-        });
         input.addEventListener('input', autoGrow);
-        // `@` opens the repository file typeahead (board-file-refs.js). It only ever edits
-        // this textarea's value and is torn down with the other pickers when the editor closes.
-        // The Markdown toggle is one browser preference: repaint the other composer and the posted thread too.
-        this.composerDisposers.push(bindComposerPreview(composer, input, card, { onMarkdownChange: () => {
-            const editor = composer.closest('[data-board-card-editor]');
-            if (!editor?.isConnected) return;
-            editor.querySelectorAll('[data-board-composer]').forEach(other => other._refreshPreview?.());
-            this.renderCardDiscussion(editor, editor._boardCard || card);
-        } }));
+        this.composerDisposers.push(bindComposerPreview(composer, input, card));
         this.composerDisposers.push(bindBoardReferences(input, { app: this.app, host: composer, card,
             onLink: async item => {
                 if (item.kind === 'session' && card.sessions?.some(s => canonicalSessionId(s.id) === canonicalSessionId(item.session.id))) return;
@@ -1614,7 +1688,6 @@ export class BoardController {
         // Sized now rather than on the next frame: an occluded page never gets one,
         // and the description box would open at its one-line default.
         autoGrow();
-        setPreview(Boolean(input.value.trim()));
 
         const submit = () => {
             if (!onSubmit) return;
@@ -1791,14 +1864,18 @@ export class BoardController {
     renderCardDiscussion(editor, card) {
         const host = editor.querySelector('[data-board-comments]');
         if (!host) return;
-        // The composer preview's options: Markdown preference, attachments, session and commit labels.
+        // Markdown, attachments, session and commit labels are shared with the comment composer.
         const textOptions = boardTextOptions(card);
         const comments = [...new Map([...(card?.comments || []), ...(card?.notes || [])].map(entry => [entry.id, entry])).values()]
-            .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)) || String(a.id).localeCompare(String(b.id)));
+            .sort((a, b) => Number(b.isAttention === true) - Number(a.isAttention === true)
+                || String(a.createdAt).localeCompare(String(b.createdAt)) || String(a.id).localeCompare(String(b.id)));
         this.updateSectionCount(editor, 'comments', comments.length);
-        host.innerHTML = comments.length
-            ? comments.map(entry => this.cardLogCommentHtml(entry, textOptions)).join('')
-            : '<p class="board-editor-muted">No comments yet.</p>';
+        const filter = editor.querySelector('[data-board-comment-filter]')?.value || 'all';
+        const visible = comments.filter(entry => entry.isAttention === true || filter === 'all'
+            || (filter === 'agent' ? entry.author?.kind === 'agent' : entry.author?.kind !== 'agent'));
+        host.innerHTML = visible.length
+            ? visible.map(entry => this.cardLogCommentHtml(entry, textOptions)).join('')
+            : `<p class="board-editor-muted">${comments.length ? 'No comments match this filter.' : 'No comments yet.'}</p>`;
         editor._boardDiscussionImages?.hydrate(host);
         host.querySelectorAll('[data-board-delete-comment]').forEach(button => {
             button.addEventListener('click', () => this.deleteComment(editor, button.dataset.boardDeleteComment));
@@ -1835,13 +1912,14 @@ export class BoardController {
                 <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> in session</button>`
             : '';
         return `
-            <article class="board-comment${entry.author?.kind === 'agent' ? ' is-agent' : ''}">
+            <article class="board-comment${entry.author?.kind === 'agent' ? ' is-agent' : ''}${entry.isAttention === true ? ' is-attention' : ''}">
                 ${this.avatarHtml(author, 28, { filterable: false })}
                 <div class="board-comment-content">
                     <div class="board-comment-meta">
                         <span class="board-comment-author">${escapeHtml(author?.label || 'Someone')}</span>
                         <span class="board-comment-when">${jump}${escapeHtml(this.formatDateTime(entry.createdAt))}<button type="button" class="btn btn-link btn-sm text-danger" data-board-delete-comment="${escapeHtml(entry.id)}" aria-label="Delete comment" title="Delete comment"><i class="fa-solid fa-trash" aria-hidden="true"></i></button></span>
                     </div>
+                    ${entry.isAttention === true ? '<div class="board-comment-attention"><i class="fa-solid fa-flag" aria-hidden="true"></i> Needs your attention</div>' : ''}
                     <div class="board-comment-body" data-board-comment-body>${renderCommentHtml(entry.body, textOptions)}</div>
                     <button type="button" class="board-comment-more" data-board-comment-more hidden>Show more</button>
                 </div>

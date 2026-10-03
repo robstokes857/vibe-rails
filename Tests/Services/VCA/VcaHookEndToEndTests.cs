@@ -256,6 +256,34 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
         Assert.Contains("PASS: All VCA rules satisfied", result.Output);
     }
 
+    [Theory]
+    [InlineData("commit-msg")]
+    [InlineData("clean-commit-msg")]
+    public async Task CommitMessage_CleansAgentTrailersBeforeValidation(string kind)
+    {
+        await WriteAsync("vc.rules.md", """
+            ## Vibe Rails Rules
+            - Check commit message for: codex, antigravity, claude (STOP)
+            """);
+        await RunGitAsync("add", "vc.rules.md");
+        var messagePath = Path.Combine(_repositoryPath, ".git", "COMMIT_EDITMSG");
+        await File.WriteAllTextAsync(messagePath,
+            "Implement feature\n\n" +
+            "Coauthored-by: Codex <codex@openai.com>\n" +
+            "Co-authored by: Antigravity <agent@example.invalid>\n" +
+            "Claude-Session: session\n" +
+            "Signed-off-by: Developer <dev@example.com>\n",
+            TestContext.Current.CancellationToken);
+
+        var result = await RunHookAsync(kind, messagePath);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("removed 3 trailers", result.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            "Implement feature\n\nSigned-off-by: Developer <dev@example.com>\n",
+            await File.ReadAllTextAsync(messagePath, TestContext.Current.CancellationToken));
+    }
+
     [Fact]
     public async Task CommitMessageRule_DefersAtPreCommitAndRunsAtCommitMessage()
     {

@@ -79,6 +79,25 @@ function makeController({ isActiveTab = () => true, cliKey = null, pushEnabled =
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
+test('card attention survives normal status transitions and clears independently', () => {
+    const { controller, tabState, ui } = makeController();
+    controller.onSocketOpen();
+    tabState.needsAttention = true;
+    controller._syncButtonLabel();
+    assert.equal(ui.item.classList.contains('tab-needs-attention'), true);
+    assert.match(ui.button.title, /Needs your attention/);
+    controller.onTerminalData('\r');
+    controller.onSessionIdle();
+    controller.onSocketClose();
+    assert.equal(ui.item.classList.contains('tab-needs-attention'), true);
+    assert.equal(controller._status, TAB_STATUS.DISCONNECTED);
+    tabState.needsAttention = false;
+    controller._syncButtonLabel();
+    assert.equal(ui.item.classList.contains('tab-needs-attention'), false);
+    assert.doesNotMatch(ui.button.title, /Needs your attention/);
+    assert.equal(controller._status, TAB_STATUS.DISCONNECTED);
+});
+
 test('socket open from fresh controller → CONNECTED', () => {
     const { controller } = makeController();
     controller.onSocketOpen();

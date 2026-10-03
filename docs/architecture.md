@@ -1,5 +1,14 @@
 # VibeRails architecture reference
 
+## Board editor refresh (VIBE-44)
+
+The Board refreshes lane membership and card summaries every ten seconds while visible, and on
+window focus/visibility return. It preserves loaded page depth, scroll positions and editor drafts;
+stale reads are canceled or discarded. Previous work and Code quality/VCA summaries live in the
+card sidebar. Description is always editable without previews; rendered Comments always use
+Markdown and offer agent filtering with attention entries first. See the
+[Board contract](../VibeRails/Services/Board/ARCHITECTURE.md#card-editor-and-local-refresh-vibe-44).
+
 ## Card recall (VB-13)
 
 Board recall adds structured handoffs, curated file references, exact project-scoped card lookup,
@@ -211,6 +220,11 @@ vb --git-guard
 - Streams VCA, report-only MintLint, and automated-workflow stage events live to the browser
 - VCA is the only preflight stage that can block a commit; automated workflows enqueue before-commit Automations without waiting on them
 - The native pre-commit hook uses the same shared pipeline and console event presentation
+- The commit-msg hook always removes co-author attribution and `Claude-Session:` trailers before
+  chained hooks and VCA validation. `CommitMessageCoAuthorCleaner` keeps the existing terminal-block
+  and byte-preservation behavior and recognizes common co-author token spellings for any agent.
+  The retired settings field remains stored for older versions; the API ignores it and reports true.
+  Settings has no trailer switch or Git tab.
 
 #### 5. Background Automations — there is no background host
 
@@ -408,7 +422,14 @@ root-only `POST /api/v1/code-analyzer/graph` supplies bounded working-tree struc
 lexical source references through `RepositoryCodeGraph`. Python package imports, Rust module
 trees, JS/TS imports/re-exports and namespace-scoped C#/PHP mentions provide link evidence;
 TypeScript interfaces and aliases appear in outlines. Coverage diagnostics distinguish source
-filters from bounded omissions, and the viewer can explicitly include cataloged dependencies.
+filters from bounded omissions. Dependency folders (node_modules, vendor, assets) and C# build
+output stay excluded, including report priorities. The Code graph view draws the whole snapshot
+on two canvases with no DOM per entity: a 4,500-link ambient budget (tree links first, hashed
+sample of references), hover and selection lighting every link of an entity, bounded signals, and
+adaptive thinning or stillness on slow machines. Root-only `GET /api/v1/code-analyzer/changes`
+and `GET /api/v1/code-analyzer/changes/diff` list the working tree's changes against HEAD and
+serve one file's before/after text for the shared diff viewer; the sidebar switches between
+report files and Git changes, and the same list feeds the map's change highlight.
 The request retains the existing repository containment and read limits. No preview fixtures are shipped.
 Scan/exclusion controls and all rule/commit enforcement remain outside the viewer.
 See the [viewer integration contract](../VibeRails/wwwroot/js/modules/code-report/README.md)
@@ -416,8 +437,20 @@ for data limits, vendor provenance, themes/CSP, lifecycle and regression tests.
 
 ### Vibe Board
 
+VIBE-40 makes agent attention flags require `flagReason` on `update_board_card`. The store saves
+the flag, red comment marker and originating-session request atomically. Additive
+`board-attention/1` retains requests and resolves them when any writer clears the card flag.
+`GET /api/v1/terminal/tabs` reports a nullable `needsAttention` for its own recordings and their
+Automation Workers; the existing ten-second poll restores/clears red tab and robot-menu alerts.
+Normal terminal statuses continue independently. Comment attention metadata survives sync and
+merge; local alert attribution stays local. See `BoardStore.Attention.cs` and the Board guide.
+
 Lane agent buttons include the first lane and open the destination lane's Automation settings.
 `board-lane-agents.js` handles assignment/removal, descriptions, reviewer selection and setup state.
+Its Add form can create a repository script Automation using the existing Jobs approval path.
+Waiting cards show a badge backed by the durable lane queue; the card's Automations rail can skip
+one exact pending entry with **Continue without this Automation**. Cards stay in their chosen lane
+while entries wait for an available Automation.
 New local boards prefill Review with Code quality → VCA → Switch reviewer. Durable recipe receipts
 recover across the separate Board/state commits without restoring removed defaults or changing old
 boards. See the [starter workflow contract](../VibeRails/Services/Board/ARCHITECTURE.md#new-board-review-defaults-vibe-23).

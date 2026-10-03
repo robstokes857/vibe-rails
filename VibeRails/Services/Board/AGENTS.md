@@ -1,5 +1,18 @@
 # Working on Vibe Board
 
+## Attention requests (VIBE-40)
+
+Agent `flagged=true` updates require `flagReason`: the important unresolved issue and the
+specific user action needed. Validation precedes every write; the flag, ordinary `comment` row
+with attention metadata, and local session request commit together. Reserve alerts for major
+bugs, security/data-loss issues or missing information/decisions that block the task. Routine
+progress, completion and review stay unflagged. Clear only when no unresolved reason remains.
+
+`BoardStore.Attention.cs` owns persistence behind `IBoardStore`. Clearing Flagged resolves all
+requests for that card, including when an older writer clears it. Historical comments stay red;
+sync and merge preserve their marker. Terminal polling matches the requesting session, including
+an Automation's Worker recording, and never colors every session attached to a flagged card.
+
 ## Card recall (VB-13)
 
 Use `get_board_card` first for named-card questions. `save_board_handoff` records concise previous
@@ -33,6 +46,11 @@ pending installation. Removing a lane or assignment keeps the shared Automation 
 See [the starter contract](ARCHITECTURE.md#new-board-review-defaults-vibe-23).
 
 ## Waiting lane Automations (VIBE-21)
+
+VIBE-42 adds a waiting tile badge and an exact-entry skip action in the card's Automations rail.
+Keep the card visible in its selected lane; only its Automation entry waits. Bulk activity must
+exclude committed runs even before acknowledgment. A skip must not affect a newer entry or stop
+a committed run. Scripts added in the lane picker use ordinary Jobs and existing script approvals.
 
 Busy lane demand stays in the existing Board queues. Keep the oldest pending entry per Job
 first, with one pending entry per card/Job and a fresh 60-second delay after reentry. Moves and

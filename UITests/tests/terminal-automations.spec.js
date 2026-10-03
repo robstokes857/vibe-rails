@@ -12,6 +12,29 @@ const count = '#vb-terminal-automations-count';
 const menu = '#vb-terminal-automations-menu';
 const normalTabs = '#vb-terminal-tab-list .vb-terminal-tab-item:visible';
 
+test('card attention colors the originating terminal and Automation menu until cleared', async ({ page }, testInfo) => {
+    const fixture = await openFixture(page, 1);
+    fixture.tabs.get('ordinary').needsAttention = true;
+    fixture.tabs.get('automation-1').needsAttention = true;
+    await page.evaluate(() => window.app.terminalController.manager.refreshAutomationTabs());
+    const tab = page.locator(normalTabs).first();
+    await expect(tab).toHaveClass(/tab-needs-attention/);
+    await expect(tab).toHaveCSS('background-color', 'rgb(73, 27, 37)');
+    await expect(tab.locator('.vb-tab-attention')).toBeVisible();
+    await expect(page.locator(button)).toHaveClass(/needs-attention/);
+    await page.locator(button).click();
+    await expect(page.locator('.vb-terminal-automation-row.needs-attention')).toContainText('Needs your attention');
+    await page.screenshot({ path: testInfo.outputPath('attention-terminals.png') });
+    await page.keyboard.press('Escape');
+    await page.reload();
+    await expect(page.locator(normalTabs).first()).toHaveClass(/tab-needs-attention/);
+    fixture.tabs.get('ordinary').needsAttention = false;
+    fixture.tabs.get('automation-1').needsAttention = false;
+    await page.evaluate(() => window.app.terminalController.manager.refreshAutomationTabs());
+    await expect(page.locator(normalTabs).first()).not.toHaveClass(/tab-needs-attention/);
+    await expect(page.locator(button)).not.toHaveClass(/needs-attention/);
+});
+
 async function openFixture(page, total = 35) {
     const normal = { tabId: 'ordinary', sessionId: 'ordinary-session', cli: 'codex',
         hasActiveSession: true, createdUTC: '2026-09-23T09:00:00Z', workingDirectory: 'C:/fixture' };

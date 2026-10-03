@@ -34,7 +34,7 @@ no source is executed, copied to the clipboard or sent to an external service by
 
 ## Graph contract
 
-`POST /api/v1/code-analyzer/graph` accepts `{ files?: string[], includeDependencies?: boolean }` with at most 1,000 safe
+`POST /api/v1/code-analyzer/graph` accepts `{ files?: string[] }` with at most 1,000 safe
 repository-relative paths to prioritize. It is read-only, mapped on active root backends,
 and requires both existing session and tab credentials. The repository root is server-derived.
 The response follows Code Atlas schema `1.0` plus `capturedUtc`, `truncated`, `fileCount`
@@ -67,13 +67,13 @@ declarations within the node budget.
 Files beyond source-read limits retain structure without declarations. An entry the path guard
 refuses is omitted and marks the map truncated; a catalog read that exceeds its character bound
 or its timeout is reported as that bound, not as a server fault. Dependency directories
-(`node_modules`, `vendor`, `assets`) and C# `bin`/`obj` output are excluded (segment names matched
-case-insensitively) unless explicitly in the report. `assets` is on that list because it holds
-vendored bundles far more often than first-party code: this repository's `wwwroot/assets` Bootstrap
-bundle alone marked every map partial and its minified names created bogus references. The map's
-**Include vendor, node_modules and assets sources** checkbox sends `includeDependencies: true`,
-making those cataloged files eligible under the same containment and read bounds; C# build output
-remains filtered. No excluded or ignored file is discovered outside Git's catalog. Non-C#
+(`node_modules`, `vendor`, `assets`) and C# `bin`/`obj` output are always excluded,
+including priority report paths (segment names matched case-insensitively). The dependency
+inclusion control and request property are removed; an older client's `includeDependencies`
+property is ignored. `diagnostics.includesDependencies` remains false for response compatibility.
+`assets` is filtered because vendored bundles dominate it and minified names create bogus references.
+Saved analysis for excluded files remains available in the sidebar. No excluded or ignored file
+is discovered outside Git's catalog. Non-C#
 `bin`/`obj` sources remain eligible. Rust crate maps start at `main.rs`/`lib.rs` and at Cargo's
 auto-discovered `src/bin`, `tests`, `examples` and `benches` files, and a bare `use child::…`
 resolves against the current module first, as Rust 2018 does. A local JS/TS import that names a known file extension
@@ -121,41 +121,58 @@ connections, combined toolbar/canvas controls, inspector scroll reset and host n
 The source patch scripts and integration references live in the sibling workbench's `docs/`.
 Refresh from that approved bundle, retaining the relative module imports and TypeScript declarations.
 
-This integration also patches the embedded Atlas layout and connectors:
+## The field and the Git changes list (VIBE-46)
 
-1. `scopeNodes` shows the whole snapshot: every directory, file, type and function the
-   supplier kept is drawn at once, in the root view and inside any scope (VIBE-33). The
-   previous "direct children above 200 entities" overview and 700-node cap are gone; the
-   3,000-node contract limit is the only bound, and a `Showing N of M` notice appears only
-   beyond it. Search and `focusNode` still reveal any supplied file.
-2. In `layout`, use `groups.length` and `slot = i` instead of wrapping group centers every
-   12 domains. Independent directories must not occupy identical centers.
-3. Nodes use curved, directed connectors and moving signals like Cards. Animation respects
-   reduced motion and hidden pages; dense overviews retain a bounded animation budget.
-4. Above 600 visible nodes the view is **dense** (`DENSE_VIEW_NODES`, exported by the layout
-   module; the renderer adds `.dense` to the stage). Repulsion switches from the exact O(n²)
-   pass to a Barnes-Hut quadtree with the same force law (theta 1; extent and spacing stay
-   within a few percent of the exact result, 2,800 nodes lay out in ~0.4 s instead of ~2 s).
-   Smaller views keep the exact pass and their original constellation.
-5. A dense field holds still: no ambient sway or pointer parallax, and the animation loop
-   only draws during orbit transitions and inertia. While it turns, each frame writes node
-   positions and the visible signals only; depth cues, stacking order, labels, hover targets
-   and the static threads are written on the frame the motion settles (`.turning` fades the
-   threads meanwhile). The entrance is one compositor transform instead of an orbit easing.
-6. Signals (`.edge-flow`) live in their own promoted SVG (`#signals`) rather than inside each
-   `.edge-group`, so their CSS animation repaints 180 paths instead of every link; `highlight`
-   mirrors `highlight`/`dim`/`change-muted` onto the flow. Edge labels take their position
-   when a link is hovered or highlighted. The Nodes view draws up to 10,000 links; a dense
-   unselected view spreads its 180 signals across the field with a stride.
-7. Dense hover dims through one veil (`#veil`) instead of a class on every node and link:
-   connected nodes get `.lit` and rise above it, connected links are redrawn in `#lit-layer`.
-   Dense glyphs cap at 1.5× and threads use `--stroke-scale` so thousands of entities read as
-   points of light with hairlines at any zoom; module labels avoid each other.
+The searchable snapshot and the rendered view have separate limits. The server keeps its
+2,000-file / 2,800-node budget; the embedded Atlas template draws the whole snapshot at once
+on two canvases inside `#stage`, with no DOM element per entity:
 
-Known limits of the dense view, measured on this repository's 2,800-node / 7,400-link map in
-headless Chromium: the first draw takes ~1 s after the graph arrives, a hover highlight
-~0.1–0.2 s, and rotation runs at roughly 10–15 frames per second because every node is a DOM
-element with its own compositor layer. Pan, zoom and the idle signals stay smooth.
+- `#field` holds the links, the points and the labels. It is repainted on interaction, on
+  ambient sway and on camera motion, as a handful of batched strokes and fills (links grouped by
+  family and crossing, points by family and depth brightness). `#effects` holds the flowing
+  signals (at most 180, spread across the references, or the lit entity's own links) and the
+  selection ripple; it is repainted every frame they move. Both clear under reduced motion.
+- Ambient links are budgeted: `CodeAtlasLayout.ambientLinks` keeps every tree link first and a
+  hash-sampled set of references up to `AMBIENT_LINK_LIMIT` (4,500). Hovering or selecting an
+  entity lights every link of that entity from the complete set, so the budget hides nothing
+  from inspection; the view summary discloses "Drawing N of M links".
+- The stage hit-tests projected points: hovering within a few pixels shows the tooltip and lights
+  the neighbourhood (a dense field dims through one veil), a press right on a point in Pan mode
+  drags it, a press near one selects it on release unless the pointer moves, and Rotate always
+  turns the field. Search, the inspector's relationship rows and the breadcrumbs remain the
+  keyboard paths to an entity; Enter or Space on the focused stage selects the hovered one.
+- Motion: sway and pointer parallax, the entrance sweep, per-entity fade-in and the signals run
+  at one frame per 30 ms while idle and every frame during a gesture. A camera gesture whose
+  frame costs more than 24 ms thins the ambient links (`stride`) before it drops frames; a field
+  whose ambient sway costs more than 18 ms for twelve frames holds still
+  (`#stage[data-field="still"]`), keeping only the signals. The layout cache is keyed by scope,
+  filter and reveal. Reduced motion stops all of it; the Cards view keeps its SVG curves.
+- `CodeAtlas.locate(id)` and `CodeAtlas.fieldStats()` exist on the frame's own global for
+  browser tests and tracing; the host bridge does not expose them.
+
+Why it is built this way: the previous DOM renderer promoted 2,800 buttons and rewrote 7,400
+SVG paths per frame, which cost roughly 200 ms per rotating frame and 0.1–0.2 s per hover on
+the real repository; a paged 120-entity view was tried and rejected as showing too little.
+Do not reintroduce per-entity DOM, SVG links or per-node CSS animations into the Code graph view.
+
+Beside the map, the sidebar's file list switches between **Report files** (the scanned sources)
+and **Git changes**: `GET /api/v1/code-analyzer/changes` lists the working tree's changes against
+HEAD (status, staged/unstaged, line counts, binary; at most 2,000 entries) and
+`GET /api/v1/code-analyzer/changes/diff?path=` serves one file's HEAD and working-tree text
+(1,000,000 characters per side, a 5 MiB read bound, binary reported rather than returned); a
+renamed entry also passes `original=` so the HEAD side is read at its old path, validated like
+the path itself. Both
+are read-only, mapped on the active root backend only, require both credentials and apply the
+same safe-path rules as graph priorities plus the working-tree path guard. A row opens the shared
+Monaco diff viewer (`diff-modal.js`) with every change in its rail, loading each diff on first
+view; rows for files on the map can also focus them. The same git list feeds Atlas's **Highlight
+changes**. The last graph is cached per report (`startedUtc`) and request, so returning to the
+page replays it without capturing the repository again; a new scan refreshes it.
+
+These integration patches live in the shipped `vendor/atlas/code-atlas.mjs` HTML template (an
+escaped string literal on line 2; decode it to review). Retain them when refreshing the approved
+vendor bundle; `code-map-field.test.mjs` executes its embedded layout module directly, and browser
+tests exercise the real sandbox.
 
 Atlas keeps its opaque-origin sandbox and MessageChannel lifecycle. Pass the host's
 `window.__viberails_NONCE__`; do not add `allow-same-origin`, eval, or CSP exceptions.
@@ -164,10 +181,12 @@ Atlas keeps its opaque-origin sandbox and MessageChannel lifecycle. Pass the hos
 
 Backend graph and authenticated route regressions live under `Tests/Services/CodeReports`
 and `Tests/Routes/CodeGraphRoutesTests.cs`. `UITests/tests/code-quality-ux.spec.js` covers the
-real frontend with test-only supplied data: selection, visible connections, whole-snapshot
-and dense overviews (bounded signals, hover veil, still field, rotation settle), saved metrics,
-scrolling, radar keyboard interaction, themes, reduced motion, narrow sizes, independent
-errors, escaped excerpts and navigation races. Run it with
+real frontend with test-only supplied data: selection, the canvas field at 224 and 2,700
+entities (the latter under 4x CPU throttling, with hover veil, keyboard rotation and search),
+signals and reduced motion, Cards curves, mouse rotation inertia, the ambient link budget, the
+Git changes list and diff viewer, permanent dependency exclusion, saved metrics, scrolling,
+radar keyboard interaction, themes, narrow sizes, independent errors, escaped excerpts and
+navigation races. Run it with
 `npx playwright test --config playwright.quality.config.js` from `UITests`.
 
 The report case in `vscode-viberails/src/test/suite/smoke.test.ts` uses a real backend and

@@ -6,13 +6,41 @@ const IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAw
 const DESCRIPTION = 'Repro screenshot\n![Screenshot.png](attachment:att_image)\n<img src=x onerror="window.__injected=true">';
 
 for (const width of [1440, 390]) {
-    test(`live Markdown and little image previews can be toggled at ${width}px`, async ({ page }, testInfo) => {
+    test(`attention comments stay red and readable at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 950 });
+        await openBoard(page, { onCard: card => {
+            card.flagged = true;
+            card.comments = [{ id: 'attention', author: { kind: 'agent', label: 'Codex', cli: 'codex' },
+                body: '**Security issue:** Please confirm which users may access this endpoint. <script>alert(1)</script>',
+                createdAt: '2026-10-03T12:00:00Z', isAttention: true }];
+        } });
+        await page.getByText('Description images', { exact: true }).click();
+        const comment = page.locator('.board-comment.is-attention');
+        await comment.scrollIntoViewIfNeeded();
+        await expect(comment).toBeVisible();
+        await expect(comment).toContainText('Needs your attention');
+        await expect(comment).toHaveCSS('border-left-color', 'rgb(239, 68, 68)');
+        await expect(comment).toHaveCSS('background-color', 'rgb(56, 28, 36)');
+        await expect(comment.locator('.board-comment-body')).toHaveCSS('color', 'rgb(252, 165, 165)');
+        await expect(comment.locator('script')).toHaveCount(0);
+        expect((await comment.boundingBox()).width).toBeLessThan(width);
+        await page.screenshot({ path: testInfo.outputPath(`attention-comment-${width}.png`) });
+    });
+}
+
+for (const width of [1440, 390]) {
+    test(`Markdown is always enabled and Description has no preview at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        await page.addInitScript(() => localStorage.setItem('viberails.board.markdown', 'off'));
         await openBoard(page);
         await page.getByText('Description images', { exact: true }).click();
-        const composer = page.locator('[data-board-composer="description"]');
-        await composer.getByRole('button', { name: 'Edit description' }).click();
+        const description = page.locator('[data-board-composer="description"]');
+        await expect(description.locator('textarea')).toBeVisible();
+        await expect(description.locator('[data-board-composer-live], [data-board-composer-preview], [data-board-composer-toggle]')).toHaveCount(0);
+        await expect(page.getByRole('button', { name: 'Markdown', exact: true })).toHaveCount(0);
         const text = '# Heading\n**bold** and *italic*\n- [x] checked\n' + DESCRIPTION;
+        await description.locator('textarea').fill(text);
+        const composer = page.locator('[data-board-composer="comment"]');
         await composer.locator('textarea').fill(text);
         const live = composer.locator('[data-board-composer-live]');
         await expect(live.locator('h1')).toHaveText('Heading');
@@ -21,19 +49,104 @@ for (const width of [1440, 390]) {
         const image = await live.locator('img').boundingBox();
         expect(image.width).toBeLessThanOrEqual(120);
         expect(image.height).toBeLessThanOrEqual(80);
-        await composer.getByRole('button', { name: 'Markdown', exact: true }).click();
-        await expect(live.locator('h1')).toHaveCount(0);
-        await expect(live.locator('img')).toBeVisible();
-        await expect(composer.locator('textarea')).toHaveValue(text);
-        await composer.getByRole('button', { name: 'Markdown', exact: true }).click();
         expect(await page.evaluate(() => window.__injected)).toBeUndefined();
         await composer.scrollIntoViewIfNeeded();
         await page.screenshot({ path: testInfo.outputPath(`composer-${width}.png`) });
         await page.locator('[data-board-save-card]').click();
         await page.getByText('Description images', { exact: true }).click();
-        await expect(composer.locator('[data-board-composer-preview] h1')).toHaveText('Heading');
+        await expect(description.locator('textarea')).toHaveValue(text);
     });
 }
+
+for (const width of [1440, 390]) {
+    test(`Previous work and checks stay beside the description at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        await openBoard(page, { onCard: card => {
+            card.previousWork = { outcome: 'Retained handoff', author: { label: 'Codex' }, files: [] };
+            card.comments = [
+                { id: 'old', body: 'Human question', author: { kind: 'user' }, createdAt: '2026-10-01' },
+                { id: 'agent', body: 'Routine agent progress', author: { kind: 'agent' }, createdAt: '2026-10-02' },
+                { id: 'flag', body: 'Important decision', isAttention: true, author: { kind: 'agent' }, createdAt: '2026-10-03' }
+            ];
+        } });
+        await page.getByText('Description images', { exact: true }).click();
+        const editor = page.locator('[data-board-card-editor]');
+        const previous = editor.locator('.board-editor-side [data-board-previous-work] details');
+        await expect(previous).not.toHaveAttribute('open');
+        await expect(editor.locator('.board-editor-main [data-board-checks], .board-editor-main [data-board-previous-work]')).toHaveCount(0);
+        await expect(editor.locator('.board-editor-side [data-board-checks]')).toHaveCount(1);
+        await expect(editor.locator('.board-editor-main [data-board-add-files]')).toHaveCount(1);
+        const comments = editor.locator('[data-board-comments] .board-comment');
+        await expect(comments.first()).toContainText('Important decision');
+        await editor.getByLabel('Show comments').selectOption('human');
+        await expect(comments).toHaveCount(2);
+        await expect(comments.first()).toContainText('Important decision');
+        await expect(comments.last()).toContainText('Human question');
+        await editor.getByLabel('Show comments').selectOption('agent');
+        await expect(comments).toHaveCount(2);
+        await expect(comments.last()).toContainText('Routine agent progress');
+        await previous.locator('summary').click();
+        await expect(previous).toContainText('Retained handoff');
+        expect(await editor.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+        await page.screenshot({ path: testInfo.outputPath(`editor-sidebar-${width}.png`) });
+    });
+}
+
+test('the timer refreshes moved cards and comments while keeping editor drafts and filters', async ({ page }) => {
+    let current;
+    const columns = [{ id: 'col_ready', name: 'Ready', position: 0 }, { id: 'review', name: 'Review', position: 1 }];
+    const requests = await openBoard(page, { columns, onCard: card => { current = card; } });
+    await page.getByText('Description images', { exact: true }).click();
+    await page.locator('#board-card-title').fill('Unsaved title');
+    const description = page.locator('[data-board-composer="description"] textarea');
+    const comment = page.locator('[data-board-composer="comment"] textarea');
+    await description.fill('Unsaved description');
+    await comment.fill('Unsaved comment');
+    await page.getByLabel('Show comments').selectOption('human');
+    current.columnId = 'review'; current.title = 'Updated remotely';
+    current.comments.push({ id: 'flag', body: 'New agent flag', isAttention: true, author: { kind: 'agent' }, createdAt: '2026-10-03' });
+    await expect(page.locator('[data-column-id="review"] .board-card-title')).toHaveText('Updated remotely', { timeout: 15000 });
+    await expect(page.locator('[data-board-comments] .board-comment').first()).toContainText('New agent flag');
+    await expect(page.locator('#board-card-title')).toHaveValue('Unsaved title');
+    await expect(description).toHaveValue('Unsaved description');
+    await expect(comment).toHaveValue('Unsaved comment');
+    await expect(page.getByLabel('Show comments')).toHaveValue('human');
+    const reads = requests.filter(r => r.path === '/api/v1/board/cards').length;
+    current.title = 'Changed again';
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(page.locator('[data-column-id="review"] .board-card-title')).toHaveText('Changed again');
+    expect(requests.filter(r => r.path === '/api/v1/board/cards').length).toBeGreaterThan(reads);
+});
+
+test('remote image comments refresh their metadata and preserve composer drafts', async ({ page }) => {
+    let current;
+    await openBoard(page, { onCard: card => { current = card; } });
+    await page.getByText('Description images', { exact: true }).click();
+    const description = page.locator('[data-board-composer="description"] textarea');
+    const comment = page.locator('[data-board-composer="comment"] textarea');
+    await description.fill('Unsaved description');
+    await comment.fill('Unsaved comment');
+    current.attachments.push({ id: 'remote-image', name: 'Remote.png', mimeType: 'image/png', url: '', bytes: 68 });
+    current.commits.push({ sha: 'abcdef0123456', shortSha: 'abcdef0', message: 'Remote commit' });
+    current.comments.push({ id: 'remote-comment', author: { kind: 'agent' },
+        body: '![Remote](attachment:remote-image) #abcdef0', createdAt: '2026-10-03' });
+    let reads = 0;
+    await page.route('**/api/v1/board/cards/card_test/attachments/remote-image/content', route => {
+        reads++;
+        expect(route.request().headers().viberails_tab).toBe('board-fixture');
+        return route.fulfill({ contentType: 'application/octet-stream', body: Buffer.from(IMAGE.split(',')[1], 'base64') });
+    });
+    await page.evaluate(() => window.app.boardController.refreshSessionActivity());
+    const image = page.locator('[data-board-comments] [data-board-image="remote-image"]');
+    await expect(image).toHaveAttribute('src', /^blob:/);
+    await expect.poll(() => image.evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true);
+    expect(reads).toBe(1);
+    await expect(page.locator('[data-board-comments] [data-board-ref-commit]')).toHaveAttribute('title', 'Remote commit');
+    await expect(page.locator('[data-board-attachments]')).toContainText('Remote.png');
+    await expect(page.locator('[data-board-commits]')).toContainText('Remote commit');
+    await expect(description).toHaveValue('Unsaved description');
+    await expect(comment).toHaveValue('Unsaved comment');
+});
 
 test('reference search routes GUIDs directly, finds card sessions and attaches commits without saving drafts', async ({ page }) => {
     let current;
@@ -53,7 +166,6 @@ test('reference search routes GUIDs directly, finds card sessions and attaches c
     });
     await page.getByText('Description images', { exact: true }).click();
     const composer = page.locator('[data-board-composer="description"]');
-    await composer.getByRole('button', { name: 'Edit description' }).click();
     await page.locator('#board-card-title').fill('Keep this draft');
     const input = composer.locator('textarea');
     const popup = composer.locator('[data-board-file-popup]');
@@ -77,25 +189,27 @@ test('reference search routes GUIDs directly, finds card sessions and attaches c
     await expect(input).toHaveValue('#' + commit.sha + ' ');
     expect(commitLinks).toBe(1);
     await expect(page.locator('#board-card-title')).toHaveValue('Keep this draft');
-    await expect(composer.locator('[data-board-composer-live] [data-board-ref-commit]')).toBeVisible();
+    const comment = page.locator('[data-board-composer="comment"]');
+    await comment.locator('textarea').fill('#' + commit.sha);
+    await expect(comment.locator('[data-board-composer-live] [data-board-ref-commit]')).toBeVisible();
     await page.evaluate(() => { window.app.boardController.openSessionReplay = session => { window.__openedReferenceSession = session; }; });
-    await input.fill('!' + session.id.replaceAll('-', '').toUpperCase());
-    await composer.locator('[data-board-composer-live] [data-board-ref-session]').click();
+    await comment.locator('textarea').fill('!' + session.id.replaceAll('-', '').toUpperCase());
+    await comment.locator('[data-board-composer-live] [data-board-ref-session]').click();
     expect(await page.evaluate(() => window.__openedReferenceSession.id)).toBe(session.id);
 });
 
-test('draft image previews survive creation', async ({ page }) => {
+test('draft image attachments survive creation', async ({ page }) => {
     await openBoard(page);
     await page.getByRole('button', { name: 'New card', exact: true }).click();
     await page.locator('#board-card-title').fill('Draft image');
     const composer = page.locator('[data-board-composer="description"]');
     await composer.locator('[data-board-composer-file]').setInputFiles({ name: 'draft.png', mimeType: 'image/png', buffer: Buffer.from(IMAGE.split(',')[1], 'base64') });
-    await expect(composer.locator('[data-board-composer-live] img')).toBeVisible();
+    await expect(page.locator('[data-board-attachments]')).toContainText('draft.png');
     await expect(composer.locator('textarea')).toHaveValue(/attachment:pending_/);
     await page.locator('[data-board-save-card]').click();
     await page.getByText('Draft image', { exact: true }).click();
     await expect(composer.locator('textarea')).not.toHaveValue(/attachment:pending_/);
-    await expect(composer.locator('[data-board-composer-preview] img')).toBeVisible();
+    await expect(page.locator('[data-board-attachments] .board-attachment-thumb')).toBeVisible();
 });
 
 test('lane Agents shows running agents and adds VCA and Code quality with explicit scope', async ({ page }) => {
@@ -113,7 +227,7 @@ test('lane Agents shows running agents and adds VCA and Code quality with explic
     await expect(panel.locator('[data-lane-running]')).toContainText('VIBE-34 · My card');
     for (const [choice, scope] of [['check:3', 'working-tree'], ['check:2', 'unpushed']]) {
         await panel.getByRole('button', { name: 'Add agent', exact: true }).click();
-        await panel.getByLabel('Agent or check').selectOption(choice);
+        await panel.getByLabel('Agent, check or script').selectOption(choice);
         await panel.locator('[data-agent-scope]').selectOption(scope);
         await panel.getByRole('button', { name: 'Add to lane', exact: true }).click();
         await expect(panel.getByRole('button', { name: 'Add agent', exact: true })).toBeVisible();
@@ -139,7 +253,9 @@ test('large inline rasters use authenticated content and release Blob URLs on cl
         URL.revokeObjectURL = url => { window.__revokedUrls.push(url); revoke(url); };
     });
     await page.getByText('Description images', { exact: true }).click();
-    const image = page.locator('[data-board-composer-preview] img');
+    const composer = page.locator('[data-board-composer="comment"]');
+    await composer.locator('textarea').fill(DESCRIPTION);
+    const image = composer.locator('[data-board-composer-live] img');
     await expect(image).toHaveAttribute('src', /^blob:/);
     await expect.poll(() => image.evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true);
     expect(reads).toBeGreaterThan(0);
@@ -174,7 +290,6 @@ test('posted Comments load authenticated raster previews and release them on clo
 });
 
 test('a failed authenticated preview can retry without reopening the card', async ({ page }) => {
-    // No posted comment: the Markdown toggle also redraws posted comments, whose own preview would fetch again.
     await openBoard(page, { onCard: card => { card.attachments[0].url = ''; card.comments = []; card.commentCount = 0; } });
     let reads = 0;
     await page.route('**/api/v1/board/cards/card_test/attachments/att_image/content', route => {
@@ -184,10 +299,11 @@ test('a failed authenticated preview can retry without reopening the card', asyn
     });
     const failed = page.waitForResponse(response => response.url().endsWith('/attachments/att_image/content') && response.status() === 503);
     await page.getByText('Description images', { exact: true }).click();
+    const composer = page.locator('[data-board-composer="comment"]');
+    await composer.locator('textarea').fill(DESCRIPTION);
     await failed;
-    const composer = page.locator('[data-board-composer="description"]');
-    await composer.getByRole('button', { name: 'Markdown', exact: true }).click();
-    const image = composer.locator('[data-board-composer-preview] img');
+    await composer.locator('textarea').fill(DESCRIPTION + '\nRetry');
+    const image = composer.locator('[data-board-composer-live] img');
     await expect.poll(() => image.evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true);
     expect(reads).toBe(2);
 });
@@ -446,7 +562,7 @@ test('display IDs are visible and editable while permanent IDs remain available'
     const editor = page.locator('[data-board-card-editor]');
     await expect(page.locator('.modal-title')).toContainText('VIBE-7');
     await expect(editor.locator('.board-editor-actions')).not.toContainText('Chat with agent');
-    await expect(editor.locator('.board-discussion')).toContainText('Chat with an agent about the card without starting it.');
+    await expect(editor.locator('.board-discussion')).toContainText('Ask about previous work. Leave the question empty to open a discussion and wait.');
     const picker = editor.locator('.board-chat-controls .ts-wrapper');
     const chat = editor.locator('[data-board-chat]');
     expect(await picker.evaluate((element, other) => Boolean(element.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING), await chat.elementHandle())).toBe(true);
@@ -673,32 +789,20 @@ test('legacy notes join Comments and History loads only from card settings', asy
     expect(historyRequests).toBe(1);
 });
 
-test('description images survive editing and save', async ({ page }) => {
+test('description source and attachments survive editing and save', async ({ page }) => {
     await openBoard(page);
     await page.getByText('Description images', { exact: true }).click();
-    await expect(page.locator('[data-board-open-session="session_test"]')).toBeVisible();
-    await expect(page.locator('[data-board-dump-session]')).toHaveCount(0);
-    const description = page.locator('[data-board-composer="description"]');
-    const preview = description.locator('[data-board-composer-preview]');
-    const input = description.locator('textarea');
-    await expect(preview.locator('img.board-image')).toBeVisible();
-    await expect.poll(() => preview.locator('img').evaluate(image => image.complete && image.naturalWidth > 0)).toBe(true);
-    await expect(page.locator('[data-board-comments] img.board-image')).toBeVisible();
-    await expect(input).toBeHidden();
-    await expect(preview).toContainText('<img src=x onerror=');
-    expect(await page.evaluate(() => window.__injected)).toBeUndefined();
-
-    await description.getByRole('button', { name: 'Edit description' }).click();
+    const input = page.locator('[data-board-composer="description"] textarea');
+    await expect(input).toBeVisible();
     await expect(input).toHaveValue(DESCRIPTION);
+    await expect(page.locator('[data-board-comments] img.board-image')).toBeVisible();
+    expect(await page.evaluate(() => window.__injected)).toBeUndefined();
     await input.fill(`${DESCRIPTION}\nEdited context`);
-    await description.getByRole('button', { name: 'Preview description' }).click();
-    await expect(preview).toContainText('Edited context');
-    await expect(preview.locator('img.board-image')).toBeVisible();
     await page.locator('[data-board-save-card]').click();
     await expect(page.locator('[data-board-card-editor]')).toHaveCount(0);
     await page.getByText('Description images', { exact: true }).click();
-    await expect(preview).toContainText('Edited context');
-    await expect(preview.locator('img.board-image')).toBeVisible();
+    await expect(input).toHaveValue(`${DESCRIPTION}\nEdited context`);
+    await expect(page.locator('[data-board-attachments] .board-attachment-thumb')).toBeVisible();
 });
 
 for (const width of [1440, 900, 390]) {
@@ -755,7 +859,6 @@ for (const width of [1440, 390]) {
         await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel' }).click();
         expect(requests.filter(request => request.method === 'DELETE')).toHaveLength(0);
         await editor.locator('#board-card-title').fill('Unsaved title');
-        await description.getByRole('button', { name: 'Edit description' }).click();
         await description.locator('textarea').fill(`${DESCRIPTION}\nUnsaved description`);
         await comment.fill('Unsaved comment');
         await remove.click();
@@ -795,7 +898,7 @@ test('attachment deletion blocks overlapping saves and keeps the file on failure
     finish();
     await expect(remove).toBeEnabled();
     await expect(page.locator('[data-board-count="attachments"]')).toHaveText('1');
-    await expect(page.locator('[data-board-composer-preview] img.board-image')).toHaveCount(1);
+    await expect(page.locator('[data-board-comments] img.board-image')).toHaveCount(1);
     await page.unroute('**/api/v1/board/cards/card_test/attachments/att_image');
     await remove.click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Delete', exact: true }).click();
@@ -884,6 +987,83 @@ async function openLaneAgentsBoard(page) {
 }
 
 for (const width of [1440, 390]) {
+    test(`lane script creation and retry after a settings conflict at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 900 });
+        const { jobs, settings } = await openLaneAgentsBoard(page);
+        let creates = 0;
+        let conflict = true;
+        await page.route('**/api/v1/jobs', route => {
+            const job = { ...route.request().postDataJSON(), id: 71 };
+            jobs.push(job); creates++;
+            return route.fulfill({ json: job });
+        });
+        await page.route('**/api/v1/board/columns/lane_2/automation', async route => {
+            if (route.request().method() !== 'PUT') return route.fallback();
+            if (conflict) { conflict = false; return route.fulfill({ status: 409, json: { error: 'Selection changed. Retry.' } }); }
+            return route.fallback();
+        });
+        await page.getByRole('button', { name: 'Agents on entry to Review', exact: true }).click();
+        const panel = page.locator('.board-lane-agents-panel');
+        await panel.getByRole('button', { name: 'Add agent', exact: true }).click();
+        await panel.getByLabel('Agent, check or script').selectOption('script');
+        await expect(panel.getByLabel('Automation name', { exact: true })).toHaveAttribute('maxlength', '100');
+        await panel.getByLabel('Automation name', { exact: true }).evaluate(input => {
+            input.value = 'x'.repeat(101);
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        await panel.getByRole('button', { name: 'Add to lane', exact: true }).click();
+        await expect(panel).toContainText('Automation names can have at most 100 characters.');
+        expect(creates).toBe(0);
+        await panel.getByLabel('Automation name', { exact: true }).fill('Validate release');
+        await panel.getByLabel('Script file', { exact: true }).fill('scripts/validate.ps1');
+        await panel.getByLabel('Arguments — one per line').fill('--message\ntwo words\n$(literal)');
+        expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+        await page.screenshot({ path: testInfo.outputPath(`lane-script-${width}.png`) });
+        await panel.getByRole('button', { name: 'Add to lane', exact: true }).click();
+        await expect(panel).toContainText('Selection changed. Retry.');
+        await expect(panel.getByLabel('Agent, check or script')).toHaveValue('71');
+        await panel.getByRole('button', { name: 'Add to lane', exact: true }).click();
+        await expect.poll(() => settings.lane_2.jobIds).toEqual([12, 14, 71]);
+        expect(creates).toBe(1);
+        expect(jobs.find(job => job.id === 71).actions).toEqual([{ kind: 1, scriptPath: 'scripts/validate.ps1',
+            scriptRuntime: 1, arguments: ['--message', 'two words', '$(literal)'] }]);
+    });
+}
+
+test('waiting badge follows server activity and skip preserves editor drafts', async ({ page }, testInfo) => {
+    let waiting = true;
+    await openBoard(page, { onCard: card => { card.hasWaitingAutomation = true; } });
+    const entry = { jobId: 17, eventKey: 'entry-waiting', name: 'Review', status: 'Waiting', reason: 'Busy with an earlier card.' };
+    await page.route('**/api/v1/board/cards/activity', route => route.fulfill({ json: {
+        cards: [{ id: 'card_test', activeSessionId: null, activeTabId: null, hasActiveAutomation: false, hasWaitingAutomation: waiting }]
+    } }));
+    const response = () => ({ jobs: [], runs: [], laneEntries: [entry] });
+    await page.route('**/api/v1/board/cards/card_test/automations', route => route.fulfill({ json: response() }));
+    const skips = [];
+    await page.route('**/api/v1/board/cards/card_test/automations/skip', async route => {
+        skips.push(route.request().postDataJSON());
+        await new Promise(resolve => setTimeout(resolve, 100));
+        waiting = false; entry.status = 'Skipped'; entry.reason = 'User chose to continue without this Automation.';
+        return route.fulfill({ json: response() });
+    });
+    await expect(page.locator('.board-automation-waiting')).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath('waiting-card.png') });
+    await page.locator('.board-automation-waiting').click();
+    await page.locator('#board-card-title').fill('Keep my draft');
+    const skip = page.getByRole('button', { name: 'Continue without this Automation', exact: true });
+    await expect(skip).toBeVisible();
+    await skip.click();
+    await expect(page.locator('[data-board-automation-runs]')).toContainText('Skipped');
+    await expect(page.locator('#board-card-title')).toHaveValue('Keep my draft');
+    expect(skips).toEqual([{ jobId: 17, eventKey: 'entry-waiting' }]);
+    await expect(page.locator('.board-automation-waiting')).toHaveCount(0);
+    waiting = true;
+    await page.evaluate(() => window.app.boardController.refreshSessionActivity());
+    await expect(page.locator('.board-automation-waiting')).toHaveCount(1);
+    await expect(page.locator('#board-card-title')).toHaveValue('Keep my draft');
+});
+
+for (const width of [1440, 390]) {
     test(`starter reviewer is editable and removable from the first lane at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 900 });
         const { jobs, settings, writes } = await openLaneAgentsBoard(page);
@@ -912,7 +1092,7 @@ for (const width of [1440, 390]) {
         const panel = page.getByRole('dialog', { name: 'Lane agents', exact: true });
         await expect(panel).toContainText('Claude → Codex; Codex → Claude');
         await expect(panel).toContainText('Code review report');
-        await expect(panel).toContainText('does not launch an agent');
+        await expect(panel).toContainText('does not launch a run');
         await expect(panel).toContainText('Setup needed: Install/sign in to claude');
         expect(await page.evaluate(() => window.__setupXss)).toBeUndefined();
         await panel.getByRole('button', { name: 'Choose reviewer / edit mappings' }).click();
@@ -1065,7 +1245,7 @@ for (const width of [1440, 390]) {
         await expect(otherDescription).toHaveValue('Keep this unsaved test-runner description');
         await panel.getByRole('button', { name: 'Add agent', exact: true }).click();
         await expect(otherDescription).toHaveValue('Keep this unsaved test-runner description');
-        await panel.getByLabel('Agent or check').selectOption('15');
+        await panel.getByLabel('Agent, check or script').selectOption('15');
         await panel.getByRole('button', { name: 'Add to lane', exact: true }).click();
         await expect(button.locator('.board-lane-agents-count')).toHaveText('3');
         await expect(panel.locator('[data-agent-id="15"] .board-lane-agent-copy')).toContainText('Script workflow');
@@ -1154,7 +1334,7 @@ test('lane agents handle paused selections, sync the settings badge, and open th
     await expect(panel.locator('[data-agent-id="99"]')).toContainText('Description unavailable');
     await expect(panel.locator('[data-agent-id="99"] textarea')).toHaveCount(0);
     await panel.getByRole('button', { name: 'Add agent', exact: true }).click();
-    await panel.getByLabel('Agent or check').selectOption('15');
+    await panel.getByLabel('Agent, check or script').selectOption('15');
     await panel.getByRole('button', { name: 'Add to lane', exact: true }).click();
     await expect(panel.getByRole('alert')).toContainText('Enable disabled Automations in the Automation editor');
     expect(writes).toHaveLength(0);
@@ -1398,7 +1578,7 @@ for (const width of [1440, 390]) {
             window.app.terminalController.adoptLaunchedTab = async id => { window.__discussionTabs.push(id); return true; };
         });
         await page.getByText('Description images', { exact: true }).click();
-        await expect(page.getByRole('heading', { name: 'Previous work', exact: true })).toBeVisible();
+        await page.locator('[data-board-previous-work] summary').click();
         await expect(page.locator('[data-board-previous-work]')).toContainText('Open the card editor here');
         const question = page.getByLabel('Initial question (optional)');
         await question.fill('Why did we choose one scroll region?');
@@ -1456,23 +1636,21 @@ test('closing and reopening the card disposes the chat picker and resets its def
     }
 });
 
-test('description previews newly uploaded images and new cards start in edit mode', async ({ page }) => {
+test('description attaches newly uploaded images and new cards start in edit mode', async ({ page }) => {
     await openBoard(page);
     await page.getByText('Description images', { exact: true }).click();
     const description = page.locator('[data-board-composer="description"]');
-    await description.getByRole('button', { name: 'Edit description' }).click();
     await description.locator('input[type="file"]').setInputFiles({
         name: 'pasted.png', mimeType: 'image/png', buffer: Buffer.from(IMAGE.split(',')[1], 'base64')
     });
     await expect(description.locator('textarea')).toHaveValue(/attachment:att_uploaded/);
-    await description.getByRole('button', { name: 'Preview description' }).click();
-    await expect(description.locator('[data-board-composer-preview] img')).toHaveCount(2);
-    await expect(description.locator('[data-board-composer-preview] [data-board-image="att_uploaded"]')).toBeVisible();
+    await expect(page.locator('[data-board-attachments] .board-attachment-thumb')).toHaveCount(2);
+    await expect(page.locator('[data-board-view-attachment="att_uploaded"]')).toBeVisible();
     await page.locator('[data-board-save-card]').click();
     await page.getByRole('button', { name: 'New card', exact: true }).click();
     await expect(description.locator('textarea')).toBeVisible();
     await expect(description.locator('textarea')).toHaveValue('');
-    await expect(description.locator('[data-board-composer-preview]')).toBeHidden();
+    await expect(description.locator('[data-board-composer-preview]')).toHaveCount(0);
 });
 
 test('card type renders, filters, edits and is sent on save', async ({ page }) => {
@@ -1603,7 +1781,6 @@ test('attention flags persist, paint a red card with a flag, and can be cleared'
 test('a description edit saves without touching the running agent or keeping history', async ({ page }) => {
     const requests = await openBoard(page, { active: true });
     await page.getByText('Description images', { exact: true }).click();
-    await page.getByRole('button', { name: 'Edit description' }).click();
     await page.locator('[data-board-composer="description"] textarea').fill('New scope');
     await page.locator('[data-board-save-card]').click();
     // Saving closes the editor and asks nothing: with a live session on the card there is still
@@ -1800,7 +1977,7 @@ for (const width of [1440, 520]) {
         await page.screenshot({ path: testInfo.outputPath('board.png') });
         await page.getByText('Description images', { exact: true }).click();
         const editor = page.locator('[data-board-card-editor]');
-        await expect(editor.locator('[data-board-composer-preview] img')).toBeVisible();
+        await expect(editor.locator('[data-board-attachments] .board-attachment-thumb')).toBeVisible();
         const layout = await editor.evaluate(element => ({
             width: element.clientWidth, scrollWidth: element.scrollWidth,
             right: element.getBoundingClientRect().right, viewport: innerWidth

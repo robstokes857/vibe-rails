@@ -58,6 +58,9 @@ export function bindCardAutomations(editor, card, { app, onQueued }) {
                 <span class="board-side-title">${escapeHtml(entry.name)}</span>
                 <span class="board-side-sub">${escapeHtml(entry.status)}</span>
                 <span class="board-side-sub">${escapeHtml(entry.reason)}</span>
+                ${entry.status === 'Waiting' && !entry.runId ? `<p class="board-side-empty">This lane entry is waiting. It will run automatically when ready; each Automation handles one card at a time.</p>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-board-skip-automation
+                        data-job-id="${Number(entry.jobId)}" data-event-key="${escapeHtml(entry.eventKey)}">Continue without this Automation</button>` : ''}
             </div>`).join('') + (result?.runs || []).map(run => `<div class="board-automation-run" data-board-run-id="${escapeHtml(run.id)}">
                 <span class="board-side-title">${escapeHtml(run.name)}</span>
                 <span class="board-side-sub">${escapeHtml(STATUSES[run.status] || 'Unknown')}</span>
@@ -116,6 +119,35 @@ export function bindCardAutomations(editor, card, { app, onQueued }) {
     }
 
     select.addEventListener('change', updateButton);
+    async function skip(event) {
+        const target = event.target.closest('[data-board-skip-automation]');
+        if (!target || !current() || running) return;
+        running = true;
+        ++generation;
+        request?.abort();
+        target.disabled = true;
+        updateButton();
+        try {
+            const result = await BoardApi.skipCardAutomationAsync(card.id, Number(target.dataset.jobId), target.dataset.eventKey);
+            if (!current()) return;
+            const entry = result?.laneEntries?.find(item => item.eventKey === target.dataset.eventKey && item.jobId === Number(target.dataset.jobId));
+            app.showToast('Board', entry?.status === 'Skipped' ? 'Continuing without this Automation.'
+                : 'The entry changed while you were skipping it. Its current status is shown below.', 'info');
+            running = false;
+            await refresh();
+            if (current()) onQueued?.();
+        } catch (error) {
+            if (current()) {
+                running = false;
+                await refresh();
+                if (current()) message.textContent = error?.message || 'Could not skip the Automation.';
+            }
+        } finally {
+            running = false;
+            if (current()) { target.disabled = false; updateButton(); }
+        }
+    }
+    runs.addEventListener('click', skip);
     button.addEventListener('click', run);
     retry.addEventListener('click', refresh);
     void refresh();
@@ -126,5 +158,6 @@ export function bindCardAutomations(editor, card, { app, onQueued }) {
         select.removeEventListener('change', updateButton);
         button.removeEventListener('click', run);
         retry.removeEventListener('click', refresh);
+        runs.removeEventListener('click', skip);
     } };
 }

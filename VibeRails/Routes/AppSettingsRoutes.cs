@@ -115,8 +115,8 @@ public static class AppSettingsRoutes
                 settings.OpenCodeTokenSaverEnabled = settingsDto.OpenCodeTokenSaverEnabled.Value;
             if (settingsDto.GrokTokenSaverEnabled.HasValue)
                 settings.GrokTokenSaverEnabled = settingsDto.GrokTokenSaverEnabled.Value;
-            if (settingsDto.RemoveCoAuthorTrailers.HasValue)
-                settings.RemoveCoAuthorTrailers = settingsDto.RemoveCoAuthorTrailers.Value;
+            // Trailer cleanup is unconditional. Ignore the legacy request field and preserve
+            // its stored value for older versions that still expose the setting.
 
             // Nullable is the stale-client guard. Enabling is effective only with the final raw
             // key after clear/replace semantics above have been applied.
@@ -208,7 +208,7 @@ public static class AppSettingsRoutes
             // The export host is fixed in code. A saved API key is the only remaining gate
             // for the legacy one-shot export button.
             DataExportConfigured: true,
-            RemoveCoAuthorTrailers: settings.RemoveCoAuthorTrailers,
+            RemoveCoAuthorTrailers: true,
             RouteThroughVibeRailsAi: settings.RouteThroughVibeRailsAi,
             ShowVibeAiUi: true,
             settings.GrokLlmProxyEnabled,

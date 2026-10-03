@@ -84,6 +84,36 @@ function graphResponse() {
         ] };
 }
 
+function changesResponse() {
+    return { count: 3, additions: 14, deletions: 5, truncated: false, capturedUtc: '2026-10-03T12:00:00Z', head: 'abc1234', files: [
+        { path: PAYMENT_PATH, status: 'modified', staged: false, unstaged: true, additions: 12, deletions: 3, binary: false },
+        { path: 'docs/notes.md', status: 'untracked', staged: false, unstaged: true, additions: 2, deletions: 0, binary: false },
+        { path: 'src/Utilities/Deleted.cs', status: 'deleted', staged: true, unstaged: false, additions: 0, deletions: 2, binary: false }
+    ] };
+}
+
+// Pixels the field or effects canvas has painted: the renderer keeps no DOM per entity.
+async function paintedPixels(map, selector) {
+    return map.locator(selector).evaluate(canvas => {
+        const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+        let painted = 0;
+        for (let index = 3; index < data.length; index += 4) if (data[index]) painted++;
+        return painted;
+    });
+}
+
+// Page coordinates of an entity (by id) or of a stage-relative point, for real mouse input.
+async function stagePoint(page, idOrPoint) {
+    const frame = page.locator('.code-report iframe');
+    const map = page.frameLocator('.code-report iframe');
+    await frame.scrollIntoViewIfNeeded();
+    const point = typeof idOrPoint === 'string' ? await map.locator('body').evaluate((_, id) => CodeAtlas.locate(id), idOrPoint) : idOrPoint;
+    expect(point).not.toBeNull();
+    const box = await frame.boundingBox();
+    const stage = await map.locator('#stage').evaluate(element => { const rect = element.getBoundingClientRect(); return { x: rect.x, y: rect.y }; });
+    return { x: box.x + stage.x + point.x, y: box.y + stage.y + point.y };
+}
+
 async function installQualityApi(page, { empty = false } = {}) {
     const sourceRequests = [];
     const scanRequests = [];
@@ -137,6 +167,14 @@ async function installQualityApi(page, { empty = false } = {}) {
         return route.fulfill({ json: response });
     });
     await page.route('**/api/v1/code-analyzer/graph', route => route.fulfill({ json: graphResponse() }));
+    const diffRequests = [];
+    await page.route('**/api/v1/code-analyzer/changes', route => route.fulfill({ json: changesResponse() }));
+    await page.route('**/api/v1/code-analyzer/changes/diff?*', route => {
+        const path = new URL(route.request().url()).searchParams.get('path');
+        diffRequests.push(path);
+        return route.fulfill({ json: { fileName: path, language: 'csharp', status: 'modified',
+            originalContent: 'class Old {}\n', modifiedContent: 'class New {}\nclass Added {}\n', binary: false, truncated: false } });
+    });
     await page.route('**/api/v1/code-analyzer/ignores*', route => {
         if (route.request().method() === 'POST') ignoredFiles.push(route.request().postDataJSON());
         if (route.request().method() === 'DELETE') {
@@ -152,7 +190,7 @@ async function installQualityApi(page, { empty = false } = {}) {
             content: Array.from({ length: 80 }, (_, index) => `// ${filePath}: source line ${index + 1}`).join('\n')
         } });
     });
-    return { sourceRequests, scanRequests };
+    return { sourceRequests, scanRequests, diffRequests };
 }
 
 async function openQuality(page) {
@@ -315,7 +353,7 @@ test('radar supports keyboard categories, saved detail activation and Escape', a
     await expect(report).toBeVisible();
 });
 
-test('large graphs draw every entity at once and still focus report files', async ({ page }) => {
+test('large graphs draw every entity on the canvas field and still focus report files', async ({ page }) => {
     await installQualityApi(page);
     const graph = graphResponse();
     for (let index = 0; index < 220; index++) graph.nodes.push({
@@ -324,137 +362,243 @@ test('large graphs draw every entity at once and still focus report files', asyn
     await page.route('**/api/v1/code-analyzer/graph', route => route.fulfill({ json: graph }));
     const report = await openDetails(page);
     const map = page.frameLocator('.code-report iframe');
-    // The overview is the whole snapshot, not its top-level directories.
-    await expect(map.locator('#nodes .node.orb')).toHaveCount(224);
-    await expect(map.getByText(/Showing \d+ of \d+ entities/)).toHaveCount(0);
+    await expect(map.locator('body')).toHaveAttribute('data-startup', 'ready');
+    // The overview is the whole snapshot on a canvas: no element per entity, nothing paged away.
+    await expect(map.locator('#stage')).toHaveClass(/constellation/);
     await expect(map.locator('#stage')).not.toHaveClass(/dense/);
-    await expect(map.locator('.cross-link .edge').first()).toBeVisible();
+    await expect(map.locator('#nodes .node')).toHaveCount(0);
+    await expect(map.getByText(/Showing \d+ of \d+ entities/)).toHaveCount(0);
+    const stats = await map.locator('body').evaluate(() => CodeAtlas.fieldStats());
+    expect(stats.nodes).toBe(graph.nodes.length);
+    expect(stats.links).toBe(stats.linkTotal);
+    const located = await map.locator('body').evaluate(() => ['payments', 'payment-file', 'extra-219'].map(id => CodeAtlas.locate(id)));
+    expect(located.every(point => point && Number.isFinite(point.x) && Number.isFinite(point.y) && !point.hidden)).toBe(true);
+    expect(await paintedPixels(map, '#field')).toBeGreaterThan(500);
     await report.getByRole('button', { name: new RegExp(PAYMENT_PATH) }).click();
     await expect(map.locator('#inspector h2')).toHaveText('PaymentProcessor.cs');
 });
 
-test('dense graphs show thousands of entities with bounded signals, a hover veil and a still field', async ({ page }) => {
+test('repository sized graphs light the hovered entity above a veil and rotate under CPU throttling', async ({ page }, testInfo) => {
     await page.emulateMedia({ reducedMotion: 'no-preference' });
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
     await installQualityApi(page);
     const graph = graphResponse();
-    // Six directories of 200 files each, with references between them: well past the dense threshold.
     for (let directory = 0; directory < 6; directory++) {
         graph.nodes.push({ id: `dir-${directory}`, name: `Area${directory}`, kind: 'module', path: `src/Area${directory}` });
-        for (let index = 0; index < 200; index++) {
-            const id = `dense-${directory}-${index}`;
-            graph.nodes.push({ id, name: `Dense${index}.cs`, kind: 'file', path: `src/Area${directory}/Dense${index}.cs`, parentId: `dir-${directory}` });
+        for (let index = 0; index < 450; index++) {
+            const id = `large-${directory}-${index}`;
+            graph.nodes.push({ id, name: `Large${index}.cs`, kind: 'file', path: `src/Area${directory}/Large${index}.cs`, parentId: `dir-${directory}` });
             graph.edges.push({ id: `c-${id}`, source: `dir-${directory}`, target: id, kind: 'contains' });
-            if (index % 5 === 0) graph.edges.push({ id: `r-${id}`, source: id, target: `dense-${(directory + 1) % 6}-${index}`, kind: 'references' });
+            if (index % 5 === 0) graph.edges.push({ id: `r-${id}`, source: id, target: `large-${(directory + 1) % 6}-${index}`, kind: 'references' });
         }
     }
     await page.route('**/api/v1/code-analyzer/graph', route => route.fulfill({ json: graph }));
-    await openDetails(page);
+    const report = await openDetails(page);
     const map = page.frameLocator('.code-report iframe');
-    await expect(map.locator('#atlas-loader')).toBeHidden();
-    await expect(map.locator('#nodes .node.orb')).toHaveCount(graph.nodes.length);
+    await expect(map.locator('body')).toHaveAttribute('data-startup', 'ready', { timeout: 60_000 });
     await expect(map.locator('#stage')).toHaveClass(/dense/);
-    await expect(map.locator('.edge-group')).toHaveCount(graph.edges.length);
-    // Signals are bounded and spread across the field rather than taken from its first links.
-    await expect(map.locator('#signal-layer .edge-flow:not([hidden])')).toHaveCount(180);
-    const signalled = await map.locator('#signal-layer .edge-flow:not([hidden])').evaluateAll(flows => flows.map(flow => flow.getAttribute('d')).filter(Boolean).length);
-    expect(signalled).toBe(180);
-    // A dense field holds still between interactions: nodes keep their transform across frames.
-    const first = map.locator('#nodes .node.orb').first();
-    const before = await first.evaluate(card => card.style.transform);
-    await page.waitForTimeout(400);
-    expect(await first.evaluate(card => card.style.transform)).toBe(before);
-    // Hover dims through the veil and lifts the connected entities above it.
-    const area = map.locator('#nodes .node.orb.module').filter({ hasText: 'Area0' });
-    await area.hover();
+    await expect(map.locator('#nodes .node')).toHaveCount(0);
+    await expect(map.locator('#stage')).toHaveAttribute('data-motion', 'idle', { timeout: 15_000 });
+    const stats = await map.locator('body').evaluate(() => CodeAtlas.fieldStats());
+    expect(stats.nodes).toBe(graph.nodes.length);
+    expect(stats.links).toBe(graph.edges.length);
+    await expect(map.locator('#view-summary')).toBeHidden();
+    await report.locator('iframe').screenshot({ path: testInfo.outputPath('large-field.png') });
+    // Hovering a module shows its tooltip, veils the field and lights every one of its links.
+    const target = await stagePoint(page, 'dir-0');
+    await page.mouse.move(target.x - 30, target.y - 30);
+    await page.mouse.move(target.x, target.y);
+    await expect(map.locator('#node-tooltip')).toContainText('Area0');
     await expect(map.locator('#stage')).toHaveClass(/focused/);
-    await expect(map.locator('#veil')).toHaveCSS('opacity', '1');
-    await expect(map.locator('#nodes .node.orb.lit')).toHaveCount(201);
-    await expect(map.locator('#lit-layer .edge.lit')).toHaveCount(200);
-    await expect(map.locator('#nodes .node.orb.dim')).toHaveCount(0);
-    await map.locator('#stage').hover({ position: { x: 5, y: 5 } });
+    expect(await map.locator('body').evaluate(() => CodeAtlas.fieldStats().lit)).toBe(450);
+    await report.locator('iframe').screenshot({ path: testInfo.outputPath('large-hover.png') });
+    const corner = await stagePoint(page, { x: 4, y: 4 });
+    await page.mouse.move(corner.x, corner.y);
     await expect(map.locator('#stage')).not.toHaveClass(/focused/);
-    await expect(map.locator('#lit-layer .edge.lit')).toHaveCount(0);
-    // Rotation still works and settles with hover targets in place.
+    // Rotation still works from the keyboard and settles with hover targets in place.
     await map.locator('#rotate-mode').click();
     await map.locator('#stage').press('ArrowRight');
     await expect(map.locator('#stage')).toHaveAttribute('data-yaw', /^0\.17/);
-    await expect(map.locator('#stage')).not.toHaveClass(/turning/);
-    const hit = map.locator('#edge-layer .edge-hit').first();
-    const edge = map.locator('#edge-layer .edge').first();
-    expect(await hit.getAttribute('d')).toBe(await edge.getAttribute('d'));
+    await expect(map.locator('#stage')).toHaveAttribute('data-motion', 'idle');
+    // Search reaches any entity of the snapshot and the report list still focuses the map.
+    await map.locator('#search').fill('Large449');
+    await map.locator('.search-result').first().click();
+    await expect(map.locator('#inspector h2')).toHaveText('Large449.cs');
+    await report.getByRole('button', { name: new RegExp(HELPER_PATH) }).click();
+    await expect(map.locator('#inspector h2')).toHaveText('HealthyHelper.cs');
+    await cdp.detach();
 });
 
-test('Nodes relationships have card curves, arrows and bounded flowing signals', async ({ page }, testInfo) => {
+test('the field animates bounded signals and the Cards view keeps SVG curves and arrows', async ({ page }, testInfo) => {
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await installQualityApi(page);
     await page.goto('/?view=agents', { waitUntil: 'domcontentloaded' });
     const report = page.locator('.code-report');
     const map = page.frameLocator('.code-report iframe');
+    await expect(map.locator('body')).toHaveAttribute('data-startup', 'ready');
     await expect(map.locator('#stage')).toHaveClass(/constellation/);
-    await expect(map.locator('#atlas-loader')).toBeHidden();
+    // Signals ride the effects canvas within the budget, and stop under reduced motion.
+    const stats = await map.locator('body').evaluate(() => CodeAtlas.fieldStats());
+    expect(stats.signals).toBeGreaterThan(0);
+    expect(stats.signals).toBeLessThanOrEqual(180);
+    await expect.poll(() => paintedPixels(map, '#effects')).toBeGreaterThan(0);
+    await report.locator('iframe').screenshot({ path: testInfo.outputPath('field-signals.png') });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await expect.poll(() => paintedPixels(map, '#effects')).toBe(0);
+    expect(await paintedPixels(map, '#field')).toBeGreaterThan(0);
+    // Cards keeps its SVG relationships: curved, with arrowheads.
+    await map.locator('#cards-button').click();
+    await expect(map.locator('#stage')).not.toHaveClass(/constellation/);
     const edge = map.locator('.edge-group:not(.structural) .edge').first();
-    const flow = map.locator('.edge-flow:not([hidden])').first();
     await expect(edge).toHaveAttribute('marker-end', 'url(#arrow)');
-    await expect(flow).toBeVisible();
-    await expect(flow).toHaveCSS('animation-name', 'connection-signal');
     const bend = await edge.evaluate(path => {
         const values = path.getAttribute('d').match(/-?\d+(?:\.\d+)?/g).map(Number);
         const [startX, startY, controlX, controlY, endX, endY] = values;
         return Math.hypot(controlX - (startX + endX) / 2, controlY - (startY + endY) / 2);
     });
     expect(bend).toBeCloseTo(30, 2);
-    await report.locator('iframe').screenshot({ path: testInfo.outputPath('nodes-connectors.png') });
-
-    // Exercise the frame's visibility handler; its CSS signals pause alongside node motion.
-    await map.locator('body').evaluate(() => {
-        Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
-        document.dispatchEvent(new Event('visibilitychange'));
-    });
-    await expect(flow).toHaveCSS('animation-play-state', 'paused');
-    await map.locator('body').evaluate(() => {
-        delete document.hidden;
-        document.dispatchEvent(new Event('visibilitychange'));
-    });
-    await expect(flow).toHaveCSS('animation-play-state', 'running');
-    await page.emulateMedia({ reducedMotion: 'reduce' });
-    await expect(flow).toBeHidden();
-    await expect(edge).toHaveAttribute('marker-end', 'url(#arrow)');
-
-    await map.locator('#cards-button').click();
-    await expect(map.locator('#stage')).not.toHaveClass(/constellation/);
-    await expect(map.locator('.edge').first()).toHaveAttribute('marker-end', 'url(#arrow)');
 });
 
-test('dense Nodes graphs retain all visible arrows with at most 180 animated signals', async ({ page }) => {
+test('mouse rotation starts inertia on demand and stops when it settles', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await installQualityApi(page);
+    await openDetails(page);
+    const map = page.frameLocator('.code-report iframe');
+    await expect(map.locator('body')).toHaveAttribute('data-startup', 'ready');
+    await expect(map.locator('#stage')).toHaveAttribute('data-motion', 'idle', { timeout: 10_000 });
+    await map.locator('#rotate-mode').click();
+    const from = await stagePoint(page, { x: 25, y: 80 });
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(from.x + 145, from.y + 30, { steps: 6 });
+    const releaseYaw = await map.locator('#stage').getAttribute('data-yaw');
+    expect(releaseYaw).not.toBe('0.0000');
+    await page.mouse.up();
+    await expect.poll(() => map.locator('#stage').getAttribute('data-yaw')).not.toBe(releaseYaw);
+    await expect(map.locator('#stage')).toHaveAttribute('data-motion', 'idle');
+    const settledYaw = await map.locator('#stage').getAttribute('data-yaw');
+    await page.waitForTimeout(200);
+    expect(await map.locator('#stage').getAttribute('data-yaw')).toBe(settledYaw);
+});
+
+test('a fully connected field draws within its link budget and lights every link of a selection', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await installQualityApi(page);
     const graph = graphResponse();
-    graph.nodes = Array.from({ length: 24 }, (_, index) => ({
+    graph.nodes = Array.from({ length: 100 }, (_, index) => ({
         id: `type-${index}`, name: `Environment${index}`, kind: index % 2 ? 'interface' : 'type',
         path: `src/environment${index}.ts:1`
     }));
     graph.edges = [];
-    for (let source = 0; source < 24; source++) {
-        for (let target = source + 1; target < 24; target++) graph.edges.push({
+    for (let source = 0; source < 100; source++) {
+        for (let target = source + 1; target < 100; target++) graph.edges.push({
             id: `${source}-${target}`, source: `type-${source}`, target: `type-${target}`, kind: 'references'
         });
     }
     await page.route('**/api/v1/code-analyzer/graph', route => route.fulfill({ json: graph }));
     await page.goto('/?view=agents', { waitUntil: 'domcontentloaded' });
     const map = page.frameLocator('.code-report iframe');
-    await expect(map.locator('.edge')).toHaveCount(276);
-    await expect(map.locator('#atlas-loader')).toBeHidden();
-    await expect(map.locator('.edge[marker-end="url(#arrow)"]')).toHaveCount(276);
-    await expect(map.locator('.edge-flow:not([hidden])')).toHaveCount(180);
-    await expect(map.locator('.edge-flow:not([hidden])').first()).toBeVisible();
-    await expect(map.locator('.edge-flow[hidden]').first()).toHaveCSS('display', 'none');
+    await expect(map.locator('body')).toHaveAttribute('data-startup', 'ready');
+    // 4,950 references exceed the ambient budget: the summary says so, the rest stay inspectable.
+    const stats = await map.locator('body').evaluate(() => CodeAtlas.fieldStats());
+    expect(stats.linkTotal).toBe(4950);
+    expect(stats.links).toBe(4500);
+    await expect(map.locator('#view-summary')).toContainText('Drawing 4,500 of 4,950 links');
     // Atlas treats both TypeScript kinds as types instead of its generic function fallback.
-    await expect(map.locator('#nodes .orb.class')).toHaveCount(24);
-    await map.locator('#nodes [data-node-id="type-23"]').press('Enter');
-    await expect(map.locator('.edge-flow:not([hidden])')).toHaveCount(23);
+    await expect(map.locator('#count-class')).toHaveText('100');
+    // Selecting an entity lights all 99 of its links, including ones outside the ambient sample.
+    await map.locator('body').evaluate(() => CodeAtlas.focusNode('type-23'));
+    await expect(map.locator('#inspector h2')).toHaveText('Environment23');
+    const selected = await map.locator('body').evaluate(() => CodeAtlas.fieldStats());
+    expect(selected.lit).toBe(99);
+    expect(selected.signals).toBe(99);
 });
 
-test('map coverage explains omissions and dependency filtering refreshes one map', async ({ page }) => {
+test('the sidebar lists Git changes beside report files and opens the shared diff viewer', async ({ page }) => {
+    const { diffRequests } = await installQualityApi(page);
+    const report = await openDetails(page);
+    const map = page.frameLocator('.code-report iframe');
+    await expect(map.locator('body')).toHaveAttribute('data-startup', 'ready');
+    const switcher = report.locator('.qr-list-switch');
+    await expect(switcher.getByRole('button', { name: /Report files/ })).toContainText('2');
+    await expect(switcher.getByRole('button', { name: /Git changes/ })).toContainText('3');
+    await expect(report.locator('[data-graph-note]')).toContainText('3 changed files in Git, 1 on the map');
+    await switcher.getByRole('button', { name: /Git changes/ }).click();
+    const list = report.locator('[data-changes-list]');
+    await expect(list).toBeVisible();
+    await expect(report.locator('.qr-files')).toBeHidden();
+    await expect(list.locator('.change-head')).toContainText('3 changed files against HEAD');
+    await expect(list.locator('.change-head')).toContainText('+14');
+    await expect(list.locator('.change-head')).toContainText('\u22125');
+    const rows = list.locator('.change-row');
+    await expect(rows).toHaveCount(3);
+    await expect(rows.nth(0).locator('.change-status')).toHaveText('M');
+    await expect(rows.nth(1).locator('.change-status')).toHaveText('?');
+    await expect(rows.nth(2).locator('.change-status')).toHaveText('D');
+    await expect(rows.nth(0).locator('.change-locate')).toHaveCount(1);
+    await expect(rows.nth(1).locator('.change-locate')).toHaveCount(0);
+    // Locate focuses the map; a row opens the shared Monaco viewer with every change in its rail.
+    await rows.nth(0).locator('.change-locate').click();
+    await expect(map.locator('#inspector h2')).toHaveText('PaymentProcessor.cs');
+    await rows.nth(2).locator('.change-open').click();
+    const modal = page.locator('.vb-diff-modal');
+    await expect(modal).toBeVisible();
+    await expect(modal.locator('.vb-diff-file-item')).toHaveCount(3);
+    await expect(modal.locator('.vb-diff-file-item.active')).toContainText('Deleted.cs');
+    await expect(modal.locator('.vb-diff-file-item .file-status.deleted')).toHaveCount(1);
+    await expect(modal.locator('.monaco-diff-editor')).toBeVisible({ timeout: 30_000 });
+    await expect.poll(() => diffRequests.length).toBe(1);
+    expect(diffRequests[0]).toBe('src/Utilities/Deleted.cs');
+    await expect(modal.locator('[data-vb-diff-stats] .added')).toHaveText('+2', { timeout: 15_000 });
+    await modal.locator('.vb-diff-file-item').first().click();
+    await expect.poll(() => diffRequests.length).toBe(2);
+    await expect(modal.locator('[data-vb-diff-language]')).toHaveText('csharp');
+    await page.keyboard.press('Escape');
+    await expect(modal).toHaveCount(0);
+    // Highlight changes on the map uses the git list, not only the scanned sources.
+    await map.locator('#highlight-changes').click();
+    await expect(map.locator('#change-summary')).toContainText('1/3 files matched');
+});
+
+test('change rows gain their map-locate action when the graph arrives after the change list', async ({ page }) => {
+    await installQualityApi(page);
+    let release;
+    const pending = new Promise(resolve => { release = resolve; });
+    await page.route('**/api/v1/code-analyzer/graph', async route => {
+        await pending;
+        await route.fulfill({ json: graphResponse() }).catch(() => {});
+    });
+    await openQuality(page);
+    const report = page.locator('.code-report');
+    await report.locator('.qr-list-switch').getByRole('button', { name: /Git changes/ }).click();
+    const list = report.locator('[data-changes-list]');
+    await expect(list.locator('.change-row')).toHaveCount(3);
+    await expect(list.locator('.change-locate')).toHaveCount(0);
+    release();
+    const map = page.frameLocator('.code-report iframe');
+    await expect(map.locator('body')).toHaveAttribute('data-startup', 'ready');
+    await expect(list.locator('.change-locate')).toHaveCount(1);
+    await expect(list).toBeVisible();
+    await expect(report.locator('[data-graph-note]')).toContainText('3 changed files in Git, 1 on the map');
+    await list.locator('.change-locate').click();
+    await expect(map.locator('#inspector h2')).toHaveText('PaymentProcessor.cs');
+});
+
+test('an unavailable change list leaves the report usable', async ({ page }) => {
+    await installQualityApi(page);
+    await page.route('**/api/v1/code-analyzer/changes', route => route.fulfill({ status: 404, json: { error: 'Not Found' } }));
+    const report = await openDetails(page);
+    const switcher = report.locator('.qr-list-switch');
+    await expect(switcher.getByRole('button', { name: /Git changes/ })).toContainText('\u2014');
+    await switcher.getByRole('button', { name: /Git changes/ }).click();
+    await expect(report.locator('[data-changes-list]')).toContainText('Changes unavailable');
+    await expect(report.getByRole('button', { name: new RegExp(PAYMENT_PATH) })).toHaveCount(0);
+    await switcher.getByRole('button', { name: /Report files/ }).click();
+    await expect(report.getByRole('button', { name: new RegExp(PAYMENT_PATH) })).toBeVisible();
+});
+
+test('map coverage explains permanent dependency exclusions and the drawing budget', async ({ page }) => {
     await installQualityApi(page);
     const requests = [];
     await page.route('**/api/v1/code-analyzer/graph', route => {
@@ -463,14 +607,10 @@ test('map coverage explains omissions and dependency filtering refreshes one map
         const graph = graphResponse();
         graph.truncated = true;
         graph.diagnostics = {
-            supportedFiles: 8, excludedDependencyFiles: request.includeDependencies ? 0 : 3,
-            excludedBuildOutputFiles: 2, includesDependencies: request.includeDependencies,
+            supportedFiles: 8, excludedDependencyFiles: 3,
+            excludedBuildOutputFiles: 2, includesDependencies: false,
             omissions: [{ code: 'file-size', count: 1, detail: 'files exceeded the 128 KiB source limit; their file nodes remain visible.' }]
         };
-        if (request.includeDependencies) {
-            graph.fileCount = 3;
-            graph.nodes.push({ id: 'dependency', name: 'library.ts', kind: 'file', path: 'node_modules/library.ts' });
-        }
         return route.fulfill({ json: graph });
     });
     const report = await openDetails(page);
@@ -479,17 +619,15 @@ test('map coverage explains omissions and dependency filtering refreshes one map
     await report.getByText('Map coverage and filters', { exact: true }).click();
     const coverage = report.locator('[data-map-diagnostics-body]');
     await expect(coverage).toContainText('8 supported source files');
-    await expect(coverage).toContainText('3 vendor/node_modules files');
+    await expect(coverage).toContainText('3 vendor/node_modules/assets files');
     await expect(coverage).toContainText('2 C# bin/obj files excluded');
     await expect(coverage).toContainText('128 KiB source limit');
-    await expect(coverage).toContainText('Search covers this snapshot');
-    const originalFrame = await report.locator('iframe').elementHandle();
-    await report.getByLabel('Include vendor, node_modules and assets sources').check();
-    await expect(report.locator('[data-graph-note]')).toContainText('3 source files mapped');
-    await expect(coverage).toContainText('0 vendor/node_modules files');
-    expect(requests.map(request => request.includeDependencies)).toEqual([false, true]);
+    await expect(coverage).toContainText('draws every entity of this snapshot');
+    await expect(coverage).toContainText('Search covers the whole snapshot');
+    await expect(report.locator('[data-map-dependencies]')).toHaveCount(0);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).not.toHaveProperty('includeDependencies');
     await expect(report.locator('iframe')).toHaveCount(1);
-    expect(await originalFrame.evaluate(frame => frame.isConnected)).toBe(false);
 });
 
 test('graph failures leave saved report and all metrics accessible', async ({ page }) => {

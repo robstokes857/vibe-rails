@@ -1070,6 +1070,10 @@ project it serves, and when the row expires (refreshed every scheduler cycle, de
 stop). The scheduler lease holder reads it before opening another project's Board run in its own
 window; a project with a live row keeps its runs for its own window.
 
+The additive `jobs-project-roots/1` receipt creates this table automatically on upgraded databases
+whose `jobs/1` receipt predates it. Fresh databases already create it through `JobStore.SchemaSql`;
+the separate receipt adopts an existing table without changing its rows.
+
 ```sql
 CREATE TABLE IF NOT EXISTS JobProjectRoots (
     OwnerId     TEXT PRIMARY KEY,

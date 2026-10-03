@@ -33,6 +33,8 @@ public sealed class TerminalTabsRoutesTests
             new TerminalTabStatusResponse("blank", Created, false)
         ]);
         var board = new Mock<IBoardStore>(MockBehavior.Strict);
+        board.Setup(b => b.GetAttentionSessionIdsAsync(It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HashSet<string> { "session-a" });
         board.Setup(b => b.GetSessionCardsAsync(
                 It.Is<IReadOnlyList<string>>(ids => ids.SequenceEqual(new[] { "session-a", "session-b" })),
                 It.IsAny<CancellationToken>()))
@@ -72,6 +74,8 @@ public sealed class TerminalTabsRoutesTests
             Assert.Equal("VB-8L17B-108", card.GetProperty("key").GetString());
             Assert.Equal("Link back <&>", card.GetProperty("title").GetString());
             Assert.Equal("VIBE-36", card.GetProperty("displayId").GetString());
+            Assert.True(tabs[0].GetProperty("needsAttention").GetBoolean());
+            Assert.False(tabs[1].GetProperty("needsAttention").GetBoolean());
             Assert.Equal(JsonValueKind.Null, tabs[1].GetProperty("boardCard").ValueKind);
             Assert.Equal(JsonValueKind.Null, tabs[2].GetProperty("boardCard").ValueKind);
             Assert.Equal(100, json.RootElement.GetProperty("maxTabs").GetInt32());

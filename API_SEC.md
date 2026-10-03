@@ -1,5 +1,58 @@
 # API authentication coverage
 
+## VIBE-46 bounded code maps and working-tree changes (2026-10-03, scoped amendment)
+
+The existing root-only `POST /api/v1/code-analyzer/graph` no longer accepts a dependency
+inclusion option. Old clients sending it cannot bypass dependency/build-output exclusions
+through either the retired option or priority paths. Both credentials, server-derived root,
+path containment, source/response budgets and generated JSON serialization remain in place.
+The viewer retains its opaque-origin sandbox and MessageChannel lifecycle; its Code graph view
+now draws on canvases inside that sandbox, which changes no boundary.
+
+Added, mapped on the active root backend only and behind both credentials:
+`GET /api/v1/code-analyzer/changes` runs `git status`/`git diff --numstat` against HEAD in the
+server-derived root (argv only, bounded output, at most 2,000 entries, no file contents) and
+`GET /api/v1/code-analyzer/changes/diff?path=` returns one path's HEAD blob (`cat-file HEAD:./path`,
+or at the validated `original=` path for a renamed entry) and working-tree text through the existing
+working-tree path guard. The safe-path rules used for graph priorities are applied to both query
+values before git or the file system is touched; each side is bounded to
+1,000,000 characters with a 5 MiB read limit, and binary content is reported, not returned. No
+listener, authentication exception, database change or external destination is added.
+
+Scoped route enumeration and both mandatory repository-wide listener searches found only
+the approved main Kestrel host, the non-serving PortFinder probe and existing test hosts;
+the cross-runtime search had no matches. Route regressions cover credentials, unsafe paths,
+missing repositories and source-generated serialization for all three routes; service
+regressions cover statuses, staging, counts, binary detection and path refusals. No security
+violation was found.
+
+## VIBE-40 attention flags (2026-10-03, scoped amendment)
+
+The existing Board update accepts `flagReason`; agent flag writes validate it and save the
+comment and session attribution atomically behind `IBoardStore`. Comments add `isAttention`;
+the authenticated terminal list adds nullable `needsAttention` for its own session IDs and
+their Automation Workers. No comment body is added to the terminal response. Rendering stays
+escape-first. Existing root/project checks, session-plus-tab gates and exact MCP grants remain.
+
+Scoped Board/terminal route enumeration and both repository-wide listener searches found the
+approved main Kestrel host, transient PortFinder probe and existing test hosts only; the
+cross-runtime search had no matches. No listener or authentication exception was added.
+
+## VIBE-42 lane scripts and waiting cards (2026-10-03, scoped amendment)
+
+Added root-only `POST /api/v1/board/cards/{card}/automations/skip` behind the existing session
+and tab credentials. The server resolves the project/card and matches an exact Job/event pair
+from its bounded lane status read. Stale requests return conflict; newer entries and committed
+runs retain their lifecycle. The skip and its Comments receipt commit atomically. Waiting flags on existing
+card/activity responses use scoped pending entries, reconciled against committed run triggers.
+Script creation uses the existing Jobs API, repository containment, hash approval and explicit
+interpreter/argv execution. No new listener, tool grant or credential exception is introduced.
+
+Both repository-wide listener searches found only the main Kestrel host, the non-serving port
+probe and existing test hosts; the cross-runtime search had no matches. Route regressions cover
+credentials, missing cards, stale entries and source-generated serialization. This is a scoped
+review of the new surface.
+
 ## VB-13 card recall (2026-10-02, scoped amendment)
 
 No new HTTP route, listener or authentication exemption. The existing card response includes
@@ -1364,7 +1417,7 @@ Detail reads are scoped to the requested session ID.
 - `POST /api/v1/compression/preview`
 - `GET /api/v1/token-savings`
 
-### Git, hooks, and code analyzer (16)
+### Git, hooks, and code analyzer (18)
 
 - `POST /api/v1/git/init`
 - `POST /api/v1/git/open-directory`
@@ -1377,6 +1430,8 @@ Detail reads are scoped to the requested session ID.
 - `POST /api/v1/git/preflight/console`
 - `POST /api/v1/code-analyzer`
 - `POST /api/v1/code-analyzer/graph` — read-only, active root backend only; bounded repository structure and lexical references.
+- `GET /api/v1/code-analyzer/changes` — read-only, active root backend only; the working tree's changes against HEAD with statuses and line counts, no contents.
+- `GET /api/v1/code-analyzer/changes/diff` — read-only, active root backend only; one safe repository-relative path's bounded HEAD and working-tree text.
 - `GET /api/v1/code-analyzer/source`
 - `GET /api/v1/code-analyzer/ignores`
 - `POST /api/v1/code-analyzer/ignores`
@@ -1524,6 +1579,9 @@ cannot read or write another project's board through this surface.
   `POST /api/v1/board/cards/{card}/automations` — list project Automation choices and recent
   card-originated runs, or queue an enabled Automation with the originating card retained.
   The POST body is `{ jobId }`; card and job both resolve within the server-derived project.
+- `POST /api/v1/board/cards/{card}/automations/skip` — skip one pending lane entry by
+  `{ jobId, eventKey }`, with both credentials and server-derived project/card resolution.
+  Stale entries conflict; a committed run keeps its lifecycle. A Comments receipt records the request.
 - `GET /api/v1/board/cards/{card}/context` — read-only estimate of the launch prompt and
   initial Board tool reads, in characters and estimated tokens, plus the latest recorded
   launch sample. Requires both credentials and resolves the card within the server-derived

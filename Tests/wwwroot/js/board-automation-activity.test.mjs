@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BoardController } from '../../../VibeRails/wwwroot/js/modules/board-controller.js';
+import { boardTextOptions } from '../../../VibeRails/wwwroot/js/modules/board-composer-preview.js';
+import { renderCommentHtml } from '../../../VibeRails/wwwroot/js/modules/board-text.js';
 
 function harness() {
     const requests = [];
@@ -13,6 +15,75 @@ function harness() {
     controller.state.cards = [{ id: 'card', title: 'Loaded card', activeTabId: null }];
     return { controller, requests };
 }
+
+function openEditor(t) {
+    const original = globalThis.document;
+    const editor = { dataset: { cardId: 'card' }, isConnected: true,
+        _boardCard: { id: 'card', comments: [], notes: [], attachments: [], commits: [], sessions: [] },
+        querySelector: () => null, querySelectorAll: () => [] };
+    globalThis.document = { querySelector: () => editor };
+    t.after(() => { globalThis.document = original; });
+    return editor;
+}
+
+test('a delayed activity read cannot hide a successfully posted comment', async t => {
+    const editor = openEditor(t);
+    const { controller, requests } = harness();
+    const rendered = [];
+    controller.renderCardDiscussion = (_, card) => rendered.push(card.comments.map(c => c.id));
+    const older = structuredClone(editor._boardCard);
+    const poll = controller.refreshSessionActivity();
+    const post = controller.postComment(editor, 'Posted successfully');
+    assert.equal(requests[2].method, 'POST');
+    requests[2].resolve({});
+    await new Promise(resolve => setImmediate(resolve));
+    const comment = { id: 'new-comment', body: 'Posted successfully' };
+    requests[3].resolve({ ...older, comments: [comment] });
+    await post;
+    assert.deepEqual(rendered, [['new-comment']]);
+    requests[0].resolve({ cards: [] });
+    requests[1].resolve(older);
+    await poll;
+    assert.deepEqual(editor._boardCard.comments, [comment]);
+    assert.deepEqual(rendered, [['new-comment']], 'older poll never repaints the discussion');
+});
+
+test('activity adopts reference metadata with comments while retaining pending attachments and draft fields', async t => {
+    const editor = openEditor(t);
+    const pendingFiles = [{ id: 'pending-image', name: 'unsaved.png' }];
+    editor._boardCard.pendingAttachments = pendingFiles;
+    editor._boardCard.description = 'Original description';
+    const { controller, requests } = harness();
+    let html = '', attachments = 0, commits = 0;
+    controller.renderAttachmentsPanel = () => attachments++;
+    controller.renderCommitsPanel = () => commits++;
+    controller.renderCardDiscussion = (_, card) => { html = renderCommentHtml(card.comments[0].body, boardTextOptions(card)); };
+    const poll = controller.refreshSessionActivity();
+    requests[0].resolve({ cards: [] });
+    requests[1].resolve({ ...editor._boardCard, description: 'Remote description',
+        comments: [{ id: 'remote', body: '![Screenshot](attachment:new-image) #abcdef0' }],
+        attachments: [{ id: 'new-image', name: 'Screenshot.png', mimeType: 'image/png' }],
+        commits: [{ sha: 'abcdef0123456', message: 'Remote commit' }] });
+    await poll;
+    assert.match(html, /<img[^>]+data-board-image="new-image"/);
+    assert.match(html, /title="Remote commit"/);
+    assert.equal(attachments, 1);
+    assert.equal(commits, 1);
+    assert.equal(editor._boardCard.pendingAttachments, pendingFiles);
+    assert.equal(editor._boardCard.description, 'Original description');
+});
+
+test('a delayed poll cannot undo an upload that mutated the attachment array in place', async t => {
+    const editor = openEditor(t);
+    const { controller, requests } = harness();
+    const older = structuredClone(editor._boardCard);
+    const poll = controller.refreshSessionActivity();
+    editor._boardCard.attachments.push({ id: 'local-upload' });
+    requests[0].resolve({ cards: [] });
+    requests[1].resolve(older);
+    await poll;
+    assert.equal(editor._boardCard.attachments[0].id, 'local-upload');
+});
 
 test('the running robot opens its Automation, and never opens the card or the working agent', async () => {
     const { controller, requests } = harness();

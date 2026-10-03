@@ -103,13 +103,21 @@ test('refreshing the tab list updates the card only for the session the tab stil
         updateUi() {},
         app: {
             apiCall: async () => ({ maxTabs: 100, tabs: [
-                { tabId: 'same', hasActiveSession: true, sessionId: 'session-a', boardCard: card },
-                { tabId: 'moved', hasActiveSession: true, sessionId: 'session-old', boardCard: card }
+                { tabId: 'same', hasActiveSession: true, sessionId: 'session-a', boardCard: card, needsAttention: true },
+                { tabId: 'moved', hasActiveSession: true, sessionId: 'session-old', boardCard: card, needsAttention: true }
             ] })
         }
     });
     await manager.refreshAutomationTabs();
     assert.deepEqual(same.state.boardCard, card);
+    assert.equal(same.state.needsAttention, true);
+    assert.equal(moved.state.needsAttention, undefined);
+    manager.app.apiCall = async () => ({ tabs: [{ tabId: 'same', sessionId: 'session-a', needsAttention: null }] });
+    await manager.refreshAutomationTabs();
+    assert.equal(same.state.needsAttention, true, 'unknown Board status preserves attention');
+    manager.app.apiCall = async () => ({ tabs: [{ tabId: 'same', sessionId: 'session-a', needsAttention: false }] });
+    await manager.refreshAutomationTabs();
+    assert.equal(same.state.needsAttention, false, 'unflagging clears attention');
     assert.equal(moved.state.boardCard, null);
 });
 

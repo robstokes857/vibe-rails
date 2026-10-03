@@ -47,8 +47,8 @@ const withBoard = (path, boardId) => boardId ? `${path}?boardId=${enc(boardId)}`
 
 // ---------------------------------------------- boards
 
-async function getBoardsAsync() {
-    const response = await call('/boards');
+async function getBoardsAsync(extra = {}) {
+    const response = await call('/boards', 'GET', null, extra);
     return (response?.boards || []).sort((a, b) => a.position - b.position);
 }
 
@@ -125,6 +125,10 @@ async function getCardAutomationsAsync(cardId, extra = {}) {
     return call(`/cards/${enc(cardId)}/automations`, 'GET', null, extra);
 }
 
+async function skipCardAutomationAsync(cardId, jobId, eventKey) {
+    return call(`/cards/${enc(cardId)}/automations/skip`, 'POST', { jobId, eventKey });
+}
+
 async function runCardAutomationAsync(cardId, jobId) {
     return call(`/cards/${enc(cardId)}/automations`, 'POST', { jobId });
 }
@@ -141,8 +145,8 @@ async function deleteBoardAsync(boardId) {
 
 // ---------------------------------------------- columns
 
-async function getBoardColumnsAsync(boardId = null) {
-    const response = await call(withBoard('/columns', boardId));
+async function getBoardColumnsAsync(boardId = null, extra = {}) {
+    const response = await call(withBoard('/columns', boardId), 'GET', null, extra);
     return (response?.columns || []).sort((a, b) => a.position - b.position);
 }
 
@@ -363,6 +367,7 @@ export const BoardApi = {
     getLaneRunningAgentsAsync,
     saveLaneAutomationAsync,
     getCardAutomationsAsync,
+    skipCardAutomationAsync,
     runCardAutomationAsync,
     getCardContextAsync,
     deleteBoardAsync,

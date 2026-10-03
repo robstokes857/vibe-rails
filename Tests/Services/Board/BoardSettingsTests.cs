@@ -270,6 +270,7 @@ public sealed partial class BoardSettingsTests : IDisposable
         var queued = Assert.Single(await _boards.GetLaneAutomationStatusesAsync(_root, card.Id, Ct));
         Assert.Equal("Queued", queued.Status);
         Assert.Equal(run.Id, queued.RunId);
+        Assert.Empty(await _boards.GetWaitingAutomationCardIdsAsync(_root, [card.Id], Ct));
         await _jobs.CompleteRunAsync(run.Id, JobRunStatus.Succeeded, 0, null, Ct);
 
         Assert.Empty(await Tick(due + 1, ReopenJobs()));

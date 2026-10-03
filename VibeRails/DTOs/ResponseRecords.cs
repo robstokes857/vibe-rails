@@ -215,7 +215,7 @@ namespace VibeRails.DTOs
     public record ReorderBoardColumnsRequest(List<string>? OrderedIds = null, string? BoardId = null);
     public record DeleteBoardColumnResponse(bool Ok, string MovedToColumnId, int MovedCards);
 
-    public record BoardCommentDto(string Id, BoardAuthorDto Author, string Body, DateTime CreatedAt);
+    public record BoardCommentDto(string Id, BoardAuthorDto Author, string Body, DateTime CreatedAt, bool IsAttention = false);
     public record BoardHistoryResponse(List<BoardHistoryRecord> Entries, bool HasMore, int NextOffset);
     public record BoardSessionDto(
         string Id,
@@ -253,7 +253,7 @@ namespace VibeRails.DTOs
         string BoardId = "",
         bool Flagged = false,
         bool HasActiveAutomation = false, string? DisplayId = null,
-        bool AgentMade = false);
+        bool AgentMade = false, bool HasWaitingAutomation = false);
     public record BoardCardListResponse(List<BoardCardSummaryResponse> Cards)
     {
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -303,7 +303,7 @@ namespace VibeRails.DTOs
         string BoardId = "",
         bool Flagged = false,
         bool HasActiveAutomation = false, string? DisplayId = null,
-        bool AgentMade = false)
+        bool AgentMade = false, bool HasWaitingAutomation = false)
     {
         public List<BoardLinkedCardDto> LinkedCards { get; init; } = [];
         public BoardHandoff? PreviousWork { get; init; }
@@ -339,7 +339,7 @@ namespace VibeRails.DTOs
         // field of this request. Mutually exclusive with Description.
         string? DescriptionAppend = null,
         string? Type = null,
-        bool? Flagged = null, string? DisplayId = null);
+        bool? Flagged = null, string? DisplayId = null, string? FlagReason = null);
 
     // SkipAutomations (VB-34): move without recording a lane entry for the destination lane's
     // Automations. Per request, never sticky; the skip is recorded as a comment by the user.
@@ -943,7 +943,8 @@ namespace VibeRails.DTOs
         string? JobRunId = null,
         string? AutomationName = null,
         bool StatusAvailable = true,
-        TerminalTabBoardCard? BoardCard = null
+        TerminalTabBoardCard? BoardCard = null,
+        bool? NeedsAttention = null
     );
 
     /// <summary>The Board card a tab's session is linked to (VIBE-36); only the tab list fills it.</summary>
@@ -1135,8 +1136,8 @@ namespace VibeRails.DTOs
         // Read-only. The export host is fixed in code, so this is always true; the legacy
         // one-shot export button still hides until an API key is saved.
         bool DataExportConfigured = false,
-        // Git Guard commit-msg policy. Nullable so an older cached client that does not send the
-        // field cannot reset the persisted choice when it saves unrelated settings.
+        // Trailer removal is always on. Retained for older clients; requests are ignored and
+        // responses always report true. The legacy stored value is preserved.
         bool? RemoveCoAuthorTrailers = null,
         // HTTP-over-WSS proof toggle. Nullable on requests so a cached client that predates the
         // field leaves the persisted choice untouched. Responses always contain an explicit value.
@@ -1619,6 +1620,8 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(CodeAnalyzerSourceResponse))]
     [JsonSerializable(typeof(CodeGraphRequest))]
     [JsonSerializable(typeof(CodeGraphResponse))]
+    [JsonSerializable(typeof(WorkingTreeChangesResponse))]
+    [JsonSerializable(typeof(WorkingTreeDiffResponse))]
     [JsonSerializable(typeof(CodeAnalyzerIgnoreEntryResponse))]
     [JsonSerializable(typeof(List<CodeAnalyzerIgnoreEntryResponse>))]
     [JsonSerializable(typeof(CodeAnalyzerIgnoreListResponse))]
@@ -1837,6 +1840,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(List<BoardCardSummaryResponse>))]
     [JsonSerializable(typeof(BoardCardListResponse))]
     [JsonSerializable(typeof(BoardCardActivityRequest))]
+    [JsonSerializable(typeof(SkipBoardCardAutomationRequest))]
     [JsonSerializable(typeof(BoardCardActivityListResponse))]
     [JsonSerializable(typeof(BoardCardLanePage))]
     [JsonSerializable(typeof(BoardCardResponse))]

@@ -120,7 +120,7 @@ public sealed class RepositoryCodeGraphTests
             await Git(root, "init");
             var sources = new[] { "bin/cli.js", "bin/task.py", "bin/cli.php", "src/bin/main.rs" };
             // `tools/Bin` spells the segment the other way: the exclusion is case-insensitive. `assets`
-            // is where vendored bundles live (this repository's own wwwroot/assets), so it needs the opt-in.
+            // is where vendored bundles live (this repository's own wwwroot/assets), so it stays excluded.
             var excluded = new[] { "bin/Debug/Generated.cs", "obj/Generated.cs", "tools/Bin/Generated.cs", "node_modules/package/main.js",
                 "vendor/package/main.php", "assets/main.ts", "web/wwwroot/Assets/bootstrap.bundle.js" };
             foreach (var path in sources.Concat(excluded))
@@ -365,7 +365,7 @@ public sealed class RepositoryCodeGraphTests
             Assert.DoesNotContain(graph.Nodes, node => node.Name is "Before" or "Hidden");
             Assert.True(graph.Truncated);
             Assert.Contains(graph.Nodes, node => node.Path == "large.cs" && node.Kind == "file");
-            Assert.Contains(graph.Nodes, node => node.Path == "vendor/measured.js" && node.Kind == "file");
+            Assert.DoesNotContain(graph.Nodes, node => node.Path == "vendor/measured.js");
         }
         finally
         {

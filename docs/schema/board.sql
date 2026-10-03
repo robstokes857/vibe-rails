@@ -8,6 +8,12 @@ CREATE INDEX IX_BoardAdditionalCardSessions_Card ON BoardAdditionalCardSessions(
 -- index IX_BoardAttachments_Card
 CREATE INDEX IX_BoardAttachments_Card ON BoardAttachments(CardId);
 
+-- index IX_BoardAttentionRequests_Card
+CREATE INDEX IX_BoardAttentionRequests_Card ON BoardAttentionRequests(CardId, ResolvedUTC);
+
+-- index IX_BoardAttentionRequests_Session
+CREATE INDEX IX_BoardAttentionRequests_Session ON BoardAttentionRequests(SessionId, ResolvedUTC);
+
 -- index IX_BoardCardLinks_LinkedCard
 CREATE INDEX IX_BoardCardLinks_LinkedCard ON BoardCardLinks(LinkedCardId);
 
@@ -88,6 +94,9 @@ CREATE TABLE BoardAttachmentContents ( AttachmentId TEXT PRIMARY KEY REFERENCES 
 
 -- table BoardAttachments
 CREATE TABLE BoardAttachments ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, Name TEXT NOT NULL, MimeType TEXT NOT NULL, Bytes INTEGER NOT NULL, DataUrl TEXT NOT NULL, CreatedUTC TEXT NOT NULL );
+
+-- table BoardAttentionRequests
+CREATE TABLE BoardAttentionRequests ( CommentId TEXT PRIMARY KEY REFERENCES BoardComments(Id) ON DELETE CASCADE, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, SessionId TEXT, ResolvedUTC TEXT );
 
 -- table BoardCardLinks
 CREATE TABLE BoardCardLinks ( CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, LinkedCardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, PRIMARY KEY (CardId, LinkedCardId), CHECK (CardId < LinkedCardId) );
@@ -202,6 +211,9 @@ CREATE TRIGGER BoardCards_LaneAutomation_Insert AFTER INSERT ON BoardCards BEGIN
 
 -- trigger BoardCards_LaneAutomation_Move
 CREATE TRIGGER BoardCards_LaneAutomation_Move AFTER UPDATE OF ColumnId ON BoardCards WHEN OLD.ColumnId <> NEW.ColumnId BEGIN DELETE FROM BoardPendingAutomations WHERE CardId = NEW.Id; INSERT INTO BoardPendingAutomations (CardId, ColumnId, JobId, EventKey, DueUnixMs) SELECT NEW.Id, NEW.ColumnId, a.JobId, lower(hex(randomblob(16))), CAST(unixepoch('subsec') * 1000 AS INTEGER) + 60000 FROM BoardLaneAutomations a WHERE a.ColumnId = NEW.ColumnId AND a.JobId IS NOT NULL; END;
+
+-- trigger BoardCards_ResolveAttention
+CREATE TRIGGER BoardCards_ResolveAttention AFTER UPDATE OF Flagged ON BoardCards WHEN NEW.Flagged = 0 BEGIN UPDATE BoardAttentionRequests SET ResolvedUTC = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE CardId = NEW.Id AND ResolvedUTC IS NULL; END;
 
 -- trigger BoardColumns_HistoryChanged
 CREATE TRIGGER BoardColumns_HistoryChanged AFTER UPDATE OF Name, Color, Position ON BoardColumns WHEN OLD.Name IS NOT NEW.Name OR OLD.Color IS NOT NEW.Color OR OLD.Position IS NOT NEW.Position BEGIN INSERT INTO BoardHistory VALUES ('bh_' || lower(hex(randomblob(16))), COALESCE(NEW.BoardId, ''), NEW.ProjectPath, 'change', 'Lane ' || OLD.Name || ': ' || CASE WHEN OLD.Name IS NOT NEW.Name THEN 'name → ' || NEW.Name || '; ' ELSE '' END || CASE WHEN OLD.Color IS NOT NEW.Color THEN 'colour → ' || NEW.Color || '; ' ELSE '' END || CASE WHEN OLD.Position IS NOT NEW.Position THEN 'position → ' || NEW.Position ELSE '' END, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')); END;

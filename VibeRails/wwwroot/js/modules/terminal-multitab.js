@@ -634,6 +634,12 @@ export class TerminalManager {
                 const response = await this.app.apiCall('/api/v1/terminal/tabs', 'GET', null, { showLoading: false });
                 if (this._destroyed || !Array.isArray(response?.tabs)) return;
                 const current = new Map(response.tabs.filter(tab => isAutomationTab(tab) && !this.closedAutomationTabs.has(tab.tabId)).map(tab => [tab.tabId, tab]));
+                // A Board read failure is unknown, so retain an alert for the same session.
+                for (const info of current.values()) {
+                    const previous = this.automationTabs.get(info.tabId);
+                    if (info.needsAttention == null && previous && previous.sessionId === info.sessionId)
+                        info.needsAttention = previous.needsAttention;
+                }
                 if (Number.isFinite(response.maxTabs)) this.maxTabs = response.maxTabs;
                 for (const id of this.automationTabs.keys()) {
                     if (!current.has(id)) this.removeAutomationTab(id);
@@ -644,6 +650,7 @@ export class TerminalManager {
                     const local = this.tabs.get(info.tabId);
                     if (local && !isAutomationTab(info) && (info.sessionId || null) === local.state.sessionId) {
                         local.state.boardCard = readTabBoardCard(info.boardCard);
+                        if (typeof info.needsAttention === 'boolean') local.state.needsAttention = info.needsAttention;
                     }
                 }
                 this.automationTabs = current;
@@ -656,8 +663,10 @@ export class TerminalManager {
                     local.state.ui.item.classList.add('is-automation');
                     if (info.statusAvailable === false) continue;
                     local.state.hasActiveSession = info.hasActiveSession;
+                    if (local.state.sessionId !== info.sessionId) local.state.needsAttention = false;
                     local.state.sessionId = info.sessionId;
                     local.state.boardCard = readTabBoardCard(info.boardCard);
+                    if (typeof info.needsAttention === 'boolean') local.state.needsAttention = info.needsAttention;
                     if (!info.hasActiveSession) {
                         local.instance.autoReconnect?.cancel();
                         if (info.sessionId && this.activeTabId === info.tabId)
@@ -767,6 +776,7 @@ export class TerminalManager {
             hasActiveSession: tabInfo.hasActiveSession === true,
             sessionId: tabInfo.sessionId || null,
             boardCard: readTabBoardCard(tabInfo.boardCard),
+            needsAttention: tabInfo.needsAttention === true,
             cli: tabInfo.cli || null,
             status: tabInfo.hasActiveSession ? 'disconnected' : 'not-started',
             viewState: {
@@ -3228,7 +3238,8 @@ export class TerminalController {
                 sessionId: authoritative?.sessionId || null,
                 cli: authoritative?.cli || rememberedCli,
                 workingDirectory: authoritative?.workingDirectory || null,
-                boardCard: authoritative?.boardCard || null
+                boardCard: authoritative?.boardCard || null,
+                needsAttention: authoritative?.needsAttention === true
             }, {
                 selection,
                 title: manager.getTabTitleFromStorage(id),

@@ -254,6 +254,16 @@ isolation: using the default live user database caused SQLite lock contention wi
 and made the popup's 20-second completion test time out. Production `RunAsync` retains its normal
 service registrations.
 
+## Commit-message trailer cleanup
+
+Git Guard always removes co-author attribution and `Claude-Session:` trailers during `commit-msg`,
+before chained hooks and VCA validation read the message. Cleanup is independent of settings;
+the legacy `RemoveCoAuthorTrailers` field stays stored for older versions but has no effect here.
+Matching is case-insensitive and accepts `Co-authored-by`, `Coauthored-by`, `Co-authored by`,
+`Coauthored by`, `Co-author`, and `Coauthor`, regardless of the agent name or email. Only the
+terminal trailer block is cleaned; body prose, comments, unrelated trailers, scissors/diff content,
+and the existing byte-preservation protections remain in place.
+
 ## Hook removal
 
 Removing Git Guard strips only the VibeRails-managed sections from `pre-commit`, `commit-msg`, and

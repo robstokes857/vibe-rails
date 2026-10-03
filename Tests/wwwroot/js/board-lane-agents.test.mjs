@@ -1,7 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { findCheckAutomation } from '../../../VibeRails/wwwroot/js/modules/board-lane-agents.js';
+import { findCheckAutomation, laneScriptAction } from '../../../VibeRails/wwwroot/js/modules/board-lane-agents.js';
+
+test('lane scripts infer the interpreter and retain argument boundaries without shell parsing', () => {
+    for (const [path, runtime] of [['scripts/test.py', 0], ['scripts/Check.PS1', 1], ['scripts/check.sh', 2]]) {
+        assert.deepEqual(laneScriptAction(` ${path} `, '--message\r\ntwo words\r\n$(literal); value'), {
+            kind: 1, scriptPath: path, scriptRuntime: runtime, arguments: ['--message', 'two words', '$(literal); value']
+        });
+    }
+    assert.deepEqual(laneScriptAction('check.py').arguments, []);
+    for (const path of ['', 'check.cmd', 'check.py --flag']) assert.throws(() => laneScriptAction(path), /repository/);
+});
 
 // Lane checks are ordinary one-action Automations, and the server allows one Automation name per
 // project (POST /api/v1/jobs answers 409 on a duplicate), so the Add form must find a same-name

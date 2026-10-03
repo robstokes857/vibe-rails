@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace VibeRails.DTOs;
 
 /// <summary>Optional report paths to prioritize within the bounded repository snapshot.</summary>
-public sealed record CodeGraphRequest(string[]? Files = null, bool IncludeDependencies = false);
+public sealed record CodeGraphRequest(string[]? Files = null);
 /// <summary>Display identity for the server-resolved repository.</summary>
 public sealed record CodeGraphRepository(string Name);
 /// <summary>Atlas entity. Optional strings are absent on the wire rather than null.</summary>
@@ -25,3 +25,17 @@ public sealed record CodeGraphDiagnostics(int SupportedFiles, int ExcludedDepend
     int ExcludedBuildOutputFiles, bool IncludesDependencies, IReadOnlyList<CodeGraphOmission> Omissions);
 /// <summary>A bounded omission count with its unit and explanation.</summary>
 public sealed record CodeGraphOmission(string Code, int Count, string Detail);
+
+/// <summary>Working-tree changes against HEAD for the Code quality card: statuses and counts, never the diffs themselves.</summary>
+public sealed record WorkingTreeChangesResponse(int Count, int Additions, int Deletions, bool Truncated,
+    IReadOnlyList<WorkingTreeChangeFile> Files, DateTime CapturedUtc,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Head = null);
+/// <summary>One changed path. Counts are absent for binary files and for files git could not count.</summary>
+public sealed record WorkingTreeChangeFile(string Path, string Status, bool Staged, bool Unstaged,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? Additions,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? Deletions,
+    bool Binary,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? OriginalPath = null);
+/// <summary>Before/after text of one changed file in the shape the shared Monaco diff viewer consumes.</summary>
+public sealed record WorkingTreeDiffResponse(string FileName, string Language, string Status,
+    string OriginalContent, string ModifiedContent, bool Binary, bool Truncated);

@@ -7,6 +7,27 @@ namespace VibeRails.Services.Board;
 /// <summary>Run an existing project Automation and retain the card in its immutable run context.</summary>
 public sealed class BoardCardAutomationService(IBoardStore boards, IJobStore jobs, IJobService runner)
 {
+    /// <summary>Skip one exact pending lane entry; a newer entry or committed run is preserved.</summary>
+    public async Task<BoardCardAutomationsResponse?> SkipAsync(string projectPath, string cardKeyOrId,
+        long jobId, string eventKey, CancellationToken cancellationToken)
+    {
+        if (jobId <= 0 || string.IsNullOrWhiteSpace(eventKey) || eventKey.Length > 100)
+            throw new BoardValidationException("Choose a waiting lane Automation.");
+        var card = await boards.FindCardAsync(projectPath, cardKeyOrId, cancellationToken);
+        if (card is null) return null;
+        var status = (await boards.GetLaneAutomationStatusesAsync(projectPath, card.Id, cancellationToken))
+            .FirstOrDefault(entry => entry.JobId == jobId && entry.EventKey == eventKey);
+        if (status is null || status.Status != "Waiting" || status.RunId is not null)
+            throw new BoardConflictException("This entry is no longer waiting. Refresh to see its current status.");
+        var entry = new BoardLaneAutomationEvent(card.Id, jobId, eventKey, card.ProjectPath,
+            $"board-lane:{card.Key}:{status.ColumnId}:{eventKey}", true);
+        if (!await boards.SkipLaneAutomationAsync(entry, BoardAuthor.User(),
+            $"Requested to continue without lane Automation “{status.Name}” for entry {eventKey}. Any already committed run keeps its lifecycle.",
+            cancellationToken))
+            throw new BoardConflictException("This entry is no longer waiting. Refresh to see its current status.");
+        return await GetAsync(projectPath, card.Id, cancellationToken);
+    }
+
     public async Task<BoardCardAutomationsResponse?> GetAsync(string projectPath, string cardKeyOrId,
         CancellationToken cancellationToken)
     {

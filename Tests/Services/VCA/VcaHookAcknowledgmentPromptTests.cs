@@ -30,7 +30,7 @@ public class VcaHookAcknowledgmentPromptTests
                     ]),
                 new VcaHookValidationAnalyzer(),
                 presenter,
-                new CommitMessageCoAuthorCleaner(() => false));
+                new CommitMessageCoAuthorCleaner());
 
             var exitCode = await runner.RunAsync(
                 new VcaHookInvocation(
@@ -79,7 +79,7 @@ public class VcaHookAcknowledgmentPromptTests
                 new CancelAfterPreflightPipeline(cancellation, tempDir, summary),
                 new VcaHookValidationAnalyzer(),
                 new TestPresenter("should not be read"),
-                new CommitMessageCoAuthorCleaner(() => false));
+                new CommitMessageCoAuthorCleaner());
 
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runner.RunAsync(
                 new VcaHookInvocation(

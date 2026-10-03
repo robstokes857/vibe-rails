@@ -26,6 +26,8 @@ public static class BoardPromptComposer
     /// environment's own Initial Message is long (see <see cref="DescriptionBudget"/>).
     /// </summary>
     public const int MaxDescriptionChars = 4_000;
+    internal const string AttentionGuidance =
+        "Set flagged=true with update_board_card only for an unresolved major bug, security/data-loss issue, or missing information blocking work that requires the user's intervention. Include flagReason explaining the issue and needed action; it saves a red comment and alerts this terminal. Routine progress, completion and review do not warrant a flag. Clear flagged once all reasons are resolved. ";
     internal const string AgentCompletionGuidance =
         "Before exiting, call complete_board_agent with your outcome and summary after the handoff and card moves. "
         + "To wait for a triggered agent, poll get_board_agent_status every 10 seconds for pending entries, run outcomes and completion reports. "
@@ -43,7 +45,7 @@ public static class BoardPromptComposer
         + "The user has authorized the viberails-mcp Board tools for this card session. "
         + "Read get_board_card for its task, linked commits and latest activity. Read its Checks summary and use read_board_check for full evidence. Findings and failed analysis are different; judge coverage and scope before deciding the next lane. Post your findings with add_board_comment. "
         + "This is an Automation-launched agent. Keep your progress logs, decisions, validation results and final handoff in Comments using add_board_comment on every card this Automation is working against. Attach any additional cards with attach_board_session and name each target explicitly when commenting. Do not leave the only copy in terminal output: the Automation terminal closes after completion; its recording remains available. "
-        + "Before moving, save your handoff, check destination Automations with list_board_columns, then report the move. Read the user's Board context from get_board_card. " + AgentCompletionGuidance + "\n\n" + (workerPrompt ?? "");
+        + "Before moving, save your handoff, check destination Automations with list_board_columns, then report the move. Read the user's Board context from get_board_card. " + AttentionGuidance + AgentCompletionGuidance + "\n\n" + (workerPrompt ?? "");
     public const int MinDescriptionChars = 1_500;
     public const int MaxTitleChars = 200;
     public const int MaxLinkedCommits = 10;
@@ -195,7 +197,7 @@ public static class BoardPromptComposer
             .Append("Link commits and post your handoff summary before moving, then move once and read move_board_card's report. ")
             .Append("Use link_board_commit once per commit; it links every card attached to this session. ")
             .Append("If you also work on another card, use attach_board_session with its key; the original card stays the default. ")
-            .Append("Set flagged=true with update_board_card only for an important unresolved issue needing the user's decision or intervention, and explain what is needed in a comment. ")
+            .Append(AttentionGuidance)
             .Append(AgentCompletionGuidance)
             .Append("Use the Board tools as the only access path for card data and attachments.");
 

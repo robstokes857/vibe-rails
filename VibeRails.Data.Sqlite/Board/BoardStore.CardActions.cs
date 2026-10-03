@@ -188,7 +188,7 @@ public sealed partial class BoardStore
         {
             read.Transaction = transaction;
             read.CommandText = """
-                SELECT Id, AuthorKind, AuthorLabel, AuthorCli, SessionId, Body, CreatedUTC FROM BoardComments m
+                SELECT Id, AuthorKind, AuthorLabel, AuthorCli, SessionId, Body, CreatedUTC, Changes FROM BoardComments m
                 WHERE CardId = $source AND Kind IN ('comment', 'note') AND DiscussionHidden = 0
                   AND NOT EXISTS (SELECT 1 FROM BoardDeletedComments d WHERE d.CommentId = m.Id)
                 ORDER BY CreatedUTC, Id;
@@ -197,7 +197,7 @@ public sealed partial class BoardStore
             await using var reader = await read.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct)) rows.Add(new BoardCommentRecord(reader.GetString(0), source,
                 new BoardAuthor(reader.GetString(1), reader.GetString(2), reader.IsDBNull(3) ? null : reader.GetString(3), reader.IsDBNull(4) ? null : reader.GetString(4)),
-                reader.GetString(5), ParseDb(reader.GetString(6))));
+                reader.GetString(5), ParseDb(reader.GetString(6)), Changes: reader.IsDBNull(7) ? null : reader.GetString(7)));
         }
         foreach (var row in rows)
         {
@@ -205,8 +205,8 @@ public sealed partial class BoardStore
             await using var copy = connection.CreateCommand();
             copy.Transaction = transaction;
             copy.CommandText = """
-                INSERT INTO BoardComments (Id, CardId, AuthorKind, AuthorLabel, AuthorCli, SessionId, Body, CreatedUTC, Kind)
-                VALUES ($id, $card, $kind, $label, $cli, $session, $body, $created, 'comment');
+                INSERT INTO BoardComments (Id, CardId, AuthorKind, AuthorLabel, AuthorCli, SessionId, Body, CreatedUTC, Kind, Changes)
+                VALUES ($id, $card, $kind, $label, $cli, $session, $body, $created, 'comment', $changes);
                 """;
             copy.Parameters.AddWithValue("$id", NewId("cm"));
             copy.Parameters.AddWithValue("$card", target);
@@ -216,6 +216,7 @@ public sealed partial class BoardStore
             copy.Parameters.AddWithValue("$session", (object?)row.Author.SessionId ?? DBNull.Value);
             copy.Parameters.AddWithValue("$body", mapBody(row.Body));
             copy.Parameters.AddWithValue("$created", ToDb(row.CreatedUtc));
+            copy.Parameters.AddWithValue("$changes", (object?)row.Changes ?? DBNull.Value);
             await copy.ExecuteNonQueryAsync(ct);
         }
     }

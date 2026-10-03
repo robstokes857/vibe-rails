@@ -53,6 +53,8 @@ Reserve `flagged=true` for important unresolved issues that require the owner's 
 intervention: a breaking database change awaiting authorization, a confirmed security or data-loss
 problem, or a consequential blocker the agent cannot resolve within the authorized scope.
 Explain the concrete issue and the decision or action needed in a card comment.
+For an agent flag, pass `flagReason` with `flagged=true` to `update_board_card`; the tool
+requires it and saves the red attention comment atomically with the flag.
 
 Routine progress, completion, moving to Review, opening a PR, and compatible additive schema
 changes do not warrant an attention flag. Use comments and the normal review workflow for those.

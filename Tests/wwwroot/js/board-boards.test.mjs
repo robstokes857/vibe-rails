@@ -59,19 +59,14 @@ test('board-api.js exposes the boards endpoints and passes the board id through'
     for (const name of ['getBoardsAsync', 'createBoardAsync', 'updateBoardAsync', 'deleteBoardAsync']) {
         assert.match(source, new RegExp(`^\\s+${name},?$`, 'm'), `BoardApi must export ${name}`);
     }
-    assert.match(source, /async function getBoardColumnsAsync\(boardId = null\)/);
+    assert.match(source, /async function getBoardColumnsAsync\(boardId = null, extra = \{\}\)/);
     assert.match(source, /async function getBoardCardsAsync\(boardId = null, extra = \{\}\)/);
     assert.match(source, /async function reorderBoardColumnsAsync\(orderedIds, boardId = null\)/);
 });
 
-test('clicking the rendered description opens it for editing', () => {
+test('description editing has no preview or Markdown toggle', () => {
     const source = readFileSync(controllerPath, 'utf8');
-    const composer = source.slice(source.indexOf('bindComposer(composer'), source.indexOf('async attachImages('));
-    assert.match(composer, /preview\?\.addEventListener\('click', event => \{/);
-    assert.match(composer, /if \(event\.target\.closest\('a, img, button'\)\) return;/);
-    assert.match(composer, /setPreview\(false\);\s*input\.focus\(\);/);
-    assert.match(source, /data-board-composer-preview title="Click to edit"/);
-    assert.match(rule(boardTemplate(), '.board-description-preview'), /cursor:\s*text/);
+    assert.doesNotMatch(source, /data-board-composer-preview|data-board-composer-toggle|data-board-markdown/);
 });
 
 test('a card with a live session marches its border and shows a larger dot', () => {

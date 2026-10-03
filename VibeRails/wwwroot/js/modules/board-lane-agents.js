@@ -7,6 +7,15 @@ import { routingEditorMarkup, mountRoutingEditor, switchReviewerDefaults } from 
 const selectedIds = settings => settings.jobIds ?? (settings.jobId ? [settings.jobId] : []);
 const icon = name => `<i class="fa-solid fa-${name}" aria-hidden="true"></i>`;
 
+/** One repository script action, using the same explicit argv and approval path as Automations. */
+export function laneScriptAction(path, argumentsText = '') {
+    const scriptPath = path.trim();
+    const extension = scriptPath.toLowerCase().match(/\.[^.\\/]+$/)?.[0];
+    const scriptRuntime = { '.py': 0, '.ps1': 1, '.sh': 2 }[extension];
+    if (scriptRuntime === undefined) throw new Error('Choose a repository Python (.py), PowerShell (.ps1), or Bash (.sh) script.');
+    return { kind: 1, scriptPath, scriptRuntime, arguments: argumentsText === '' ? [] : argumentsText.split(/\r?\n/) };
+}
+
 export function laneReviewerSummary(environment, environments = []) {
     const label = target => {
         const parts = (target?.selection || '').split(':');
@@ -137,7 +146,7 @@ export class BoardLaneAgents {
             <div class="board-lane-agents-heading-copy"><h2 id="board-lane-agents-title">Lane agents</h2><p>On entry to <strong>${escapeHtml(column.name)}</strong></p></div>
             <button type="button" class="board-lane-agents-action" data-agent-action="close" aria-label="Close lane agents">${icon('xmark')}</button>
         </header>
-        <p class="board-lane-agents-help">Move cards freely. Enabled Automations run after a card stays here for 60 seconds, from any lane or when newly created. Creating a board or saving settings does not launch an agent. You and your agents choose the next action; Done has the meaning you give it.</p>
+        <p class="board-lane-agents-help">Enabled Automations run after a card stays here for 60 seconds. Each Automation handles one card at a time; later entries show Waiting for Automation until their turn. Open a waiting card to continue without its Automation. Creating a board or saving settings does not launch a run.</p>
         <section data-lane-running aria-label="Running agents" aria-live="polite"></section>
         <div data-lane-agents-content role="status">Loading agents…</div>`;
         this.anchor = button;
@@ -152,6 +161,8 @@ export class BoardLaneAgents {
         let environments = [];
         let busy = false;
         let adding = false;
+        let addChoice = '';
+        const scriptDraft = { name: '', path: '', arguments: '' };
         const descriptionDrafts = new Map();
         const editingDescriptions = new Set();
         const savedDescriptions = new Set();
@@ -245,10 +256,11 @@ export class BoardLaneAgents {
             <p class="board-lane-agents-scope">Descriptions are shared with agents using the Board and apply wherever this Automation is used. Remove unlinks it from this lane and cancels the lane’s pending triggers.</p>
             <div data-agent-error role="alert"></div>
             ${adding ? `<form class="board-lane-agents-add">
-                <label for="board-lane-agent-choice">Agent or check</label>
+                <label for="board-lane-agent-choice">Agent, check or script</label>
                 <select id="board-lane-agent-choice" class="form-select form-select-sm" required>
-                    <option value="">Choose an Automation or check…</option>
+                    <option value="">Choose an Automation, check or script…</option>
                     <option value="check:2">Code quality</option><option value="check:3">VCA</option>
+                    <option value="script">Repository script…</option>
                     ${choices.filter(job => !ids.includes(job.id)).map(job => `<option value="${Number(job.id)}" ${job.enabled ? '' : 'disabled'}>${escapeHtml(job.name)}${job.enabled ? '' : ' (disabled)'}</option>`).join('')}
                 </select>
                 <label data-agent-check-scope hidden>Check scope
@@ -256,10 +268,21 @@ export class BoardLaneAgents {
                         <option value="working-tree">Working changes</option><option value="unpushed">Unpushed commits</option><option value="repository">Committed repository</option>
                     </select>
                 </label>
+                <div data-agent-script-fields ${addChoice === 'script' ? '' : 'hidden'}>
+                    <label>Automation name<input class="form-control form-control-sm" data-lane-script="name" maxlength="100" value="${escapeHtml(scriptDraft.name)}" placeholder="Run lane script"></label>
+                    <label>Script file<input class="form-control form-control-sm" data-lane-script="path" value="${escapeHtml(scriptDraft.path)}" placeholder="scripts/check.ps1"></label>
+                    <small>Repository Python (.py), PowerShell (.ps1), or Bash (.sh). Runs from the repository root.</small>
+                    <label>Arguments — one per line<textarea class="form-control form-control-sm" data-lane-script="arguments" rows="3" placeholder="--check">${escapeHtml(scriptDraft.arguments)}</textarea></label>
+                    <small>Each line is one argument. Saving approves the current script contents; later file changes require approval in the Automation editor.</small>
+                </div>
                 <div class="board-lane-agents-footer"><button type="submit" class="btn btn-sm btn-outline-primary">Add to lane</button>
                     <button type="button" class="btn btn-sm btn-link" data-agent-action="create">Create Automation…</button></div>
                 <small>Create and edit Automations on the Automations page, then select them here.</small>
             </form>` : `<button type="button" class="btn btn-sm btn-outline-secondary" data-agent-action="add">${icon('plus')} Add agent</button>`}`;
+            if (adding) {
+                content.querySelector('#board-lane-agent-choice').value = addChoice;
+                content.querySelector('[data-agent-check-scope]').hidden = !addChoice.startsWith('check:');
+            }
             for (const id of editingReviewers) {
                 const host = content.querySelector(`[data-agent-id="${id}"] [data-agent-reviewer-editor]`);
                 if (!host) continue;
@@ -416,10 +439,18 @@ export class BoardLaneAgents {
             }
         });
         panel.addEventListener('change', event => {
-            if (event.target.id === 'board-lane-agent-choice')
+            if (event.target.id === 'board-lane-agent-choice') {
+                addChoice = event.target.value;
                 content.querySelector('[data-agent-check-scope]').hidden = !event.target.value.startsWith('check:');
+                content.querySelector('[data-agent-script-fields]').hidden = addChoice !== 'script';
+                position();
+            }
         });
         panel.addEventListener('input', event => {
+            if (event.target.dataset.laneScript) {
+                scriptDraft[event.target.dataset.laneScript] = event.target.value;
+                return;
+            }
             if (!event.target.matches('[data-agent-description]') || busy) return;
             const row = event.target.closest('[data-agent-id]');
             const id = Number(row.dataset.agentId);
@@ -451,9 +482,22 @@ export class BoardLaneAgents {
             if (!event.target.matches('.board-lane-agents-add')) return;
             event.preventDefault();
             const choice = content.querySelector('#board-lane-agent-choice').value;
+            const isScript = choice === 'script';
             const kind = choice.startsWith('check:') ? Number(choice.slice(6)) : null;
             let id = Number(choice);
-            if ((!id && kind === null) || busy) return;
+            if ((!id && kind === null && !isScript) || busy) return;
+            let scriptAction;
+            if (isScript) {
+                try {
+                    if (!scriptDraft.name.trim()) throw new Error('Give this script Automation a name.');
+                    if (scriptDraft.name.trim().length > 100) throw new Error('Automation names can have at most 100 characters.');
+                    scriptAction = laneScriptAction(scriptDraft.path, scriptDraft.arguments);
+                } catch (error) {
+                    content.querySelector('[data-agent-error]').textContent = error.message;
+                    position();
+                    return;
+                }
+            }
             const checkScope = content.querySelector('[data-agent-scope]')?.value || 'working-tree';
             if (selectedIds(settings).some(value => !settings.jobs?.some(job => job.id === value && job.enabled))) {
                 content.querySelector('[data-agent-error]').textContent = 'Enable disabled Automations in the Automation editor, or remove disabled or unavailable selections before adding another.';
@@ -469,6 +513,19 @@ export class BoardLaneAgents {
                 return;
             }
             void run(async () => {
+                if (isScript) {
+                    const saved = await this.app.apiCall('/api/v1/jobs', 'POST', {
+                        name: scriptDraft.name.trim(), projectPath, llm: 0, prompt: '', environmentId: null,
+                        timeoutMinutes: null, enabled: true, triggers: [], actions: [scriptAction],
+                        description: `Runs ${scriptAction.scriptPath} when a card enters ${column.name}.`
+                    }, { showLoading: false, preferErrorResponseMessage: true });
+                    if (!alive()) return;
+                    id = saved.id;
+                    jobs = [...jobs, saved];
+                    settings.jobs = [...settings.jobs, saved];
+                    // A failed lane save can retry the created Automation without creating it twice.
+                    addChoice = String(id);
+                }
                 if (kind !== null) {
                     // Reuse a same-shape check, re-enabling it if needed: a second POST with its name is a 409.
                     let saved = existing?.job;
@@ -483,7 +540,7 @@ export class BoardLaneAgents {
                     jobs = [...jobs.filter(job => job.id !== id), saved];
                 }
                 if (!selectedIds(settings).includes(id)) await saveSelection([...selectedIds(settings), id]);
-                if (alive()) { adding = false; render(); }
+                if (alive()) { adding = false; addChoice = ''; render(); }
             }, () => Number.isFinite(id) ? `[data-agent-id="${id}"] [data-agent-action="edit"]` : '#board-lane-agent-choice');
         });
         const outside = event => {
