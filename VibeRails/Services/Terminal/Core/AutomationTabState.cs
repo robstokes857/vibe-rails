@@ -60,6 +60,13 @@ internal sealed class AutomationTabState(string runId, string name)
         return version is { } value && TryReserveForReclamation(value);
     }
 
+    /// <summary>
+    /// How long a finished run's outer wrapper session may outlive the run row before the host is
+    /// closed anyway. The wrapper normally exits within seconds of <c>vb --job-run</c> returning;
+    /// this only has to clear an ordinary slow host shutdown, not a healthy workflow.
+    /// </summary>
+    internal static readonly TimeSpan LingeringSessionGrace = TimeSpan.FromSeconds(60);
+
     public async Task<long?> CheckReclamationAsync(
         IJobStore store,
         ISessionStore sessions,
@@ -84,8 +91,24 @@ internal sealed class AutomationTabState(string runId, string name)
 
         // Failed/unavailable status must never look like an idle host eligible for removal.
         var status = await readStatus(cancellationToken);
-        if (status is not { HasActiveSession: false })
+        if (status is null)
             return null;
+
+        if (status.HasActiveSession)
+        {
+            // The run row is final, so the workflow process has finished its bookkeeping, yet the
+            // host's PTY still reports the run's own outer session: the wrapper shell never reached
+            // its `exit`, or an orphaned descendant keeps the console open. Nothing more can come
+            // out of it, but while it lives the Automation menu truthfully says Running and the
+            // agent never leaves the group (VIBE-45). After a grace window for an ordinary slow
+            // shutdown, close the host anyway; DeleteTabAsync stops the session first, which
+            // finalizes its recording, then tears down the whole child process tree.
+            if (!string.Equals(status.SessionId, sessionId, StringComparison.Ordinal))
+                return null;
+            if (run.EndedUtc is not { } ended || DateTime.UtcNow - ended < LingeringSessionGrace)
+                return null;
+            return version;
+        }
 
         // Inactive PTY state precedes output-writer disposal. Wait for the recorded session
         // to finish too, so reclaiming a host cannot interrupt its final replay-log flush.

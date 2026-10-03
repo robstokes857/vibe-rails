@@ -123,6 +123,58 @@ public sealed class AutomationTabCapacityTests
     }
 
     [Fact]
+    public async Task SchedulerClosesFinishedRunWhoseWrapperSessionLingersAndKeepsFreshAndRunningHosts()
+    {
+        // VIBE-45: a run reaches a final status while its outer `pwsh … vb --job-run …; exit` wrapper never
+        // exits, so the child keeps reporting the run's own session as active and the Automation menu shows
+        // the finished agent as Running indefinitely. Once the run row is older than the grace window the
+        // pass closes that host exactly like a dismissal: graceful stop first, then the process tree. A run
+        // that ended moments ago is still given the chance to exit by itself, and a Running run is untouched.
+        var past = DateTime.UtcNow - AutomationTabState.LingeringSessionGrace - TimeSpan.FromMinutes(1);
+        var jobs = new Mock<IJobStore>(MockBehavior.Strict);
+        jobs.Setup(s => s.GetRunAsync("lingering", It.IsAny<CancellationToken>())).ReturnsAsync(Run("lingering", JobRunStatus.Succeeded, past));
+        jobs.Setup(s => s.GetRunAsync("fresh", It.IsAny<CancellationToken>())).ReturnsAsync(Run("fresh", JobRunStatus.Succeeded));
+        jobs.Setup(s => s.GetRunAsync("running", It.IsAny<CancellationToken>())).ReturnsAsync(Run("running", JobRunStatus.Running));
+        // An active session has no finished recording to wait for, so the session store is never consulted.
+        var sessions = new Mock<ISessionStore>(MockBehavior.Strict);
+        using var services = new ServiceCollection().AddSingleton(jobs.Object).AddSingleton(sessions.Object).BuildServiceProvider();
+        var requests = new ConcurrentQueue<string>();
+        using var http = new StatusHandler(request =>
+        {
+            requests.Enqueue($"{request.Method} {request.RequestUri!.Port}{request.RequestUri.AbsolutePath}");
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"hasActiveSession\":true,\"sessionId\":\"outer\"}") };
+        });
+        var host = Host(services, http);
+        var registry = Registry(host);
+        using var placeholder = new Process();
+        using var fresh = StartHarmlessProcess();
+        using var lingering = StartHarmlessProcess();
+        try
+        {
+            AddChild(registry, "ordinary", placeholder, 0, null);
+            AddChild(registry, "running", placeholder, 1, Started("running"));
+            AddChild(registry, "fresh", fresh, 2, Started("fresh"));
+            AddChild(registry, "lingering", lingering, 3, Started("lingering"));
+            await host.CloseCompletedAutomationTabsAsync(TestContext.Current.CancellationToken);
+            Assert.False(registry.Contains("lingering"));
+            Assert.True(lingering.HasExited);
+            Assert.True(registry.Contains("ordinary"));
+            Assert.True(registry.Contains("running"));
+            Assert.True(registry.Contains("fresh"));
+            Assert.False(fresh.HasExited);
+            Assert.Equal(["GET 10002/api/v1/terminal/status", "GET 10003/api/v1/terminal/status", "POST 10003/api/v1/terminal/stop"], requests.Order());
+            jobs.VerifyAll();
+        }
+        finally
+        {
+            registry.Clear();
+            await host.DisposeAsync();
+            foreach (var process in new[] { fresh, lingering })
+                if (!process.HasExited) { process.Kill(entireProcessTree: true); await process.WaitForExitAsync(TestContext.Current.CancellationToken); }
+        }
+    }
+
+    [Fact]
     public async Task SchedulerClosePassNeverWaitsBehindTabCreation()
     {
         // A Worker launch holds the creation gate through its pre-launch steps; the scheduler's close pass
@@ -223,9 +275,9 @@ public sealed class AutomationTabCapacityTests
         return state;
     }
 
-    private static JobRunRecord Run(string id, JobRunStatus status) => new(id, 1, JobTriggerKind.Manual, $"manual:{id}",
+    private static JobRunRecord Run(string id, JobRunStatus status, DateTime? endedUtc = null) => new(id, 1, JobTriggerKind.Manual, $"manual:{id}",
         status, id, "/project", LLM.NotSet, null, null, null, null, DateTime.UtcNow, DateTime.UtcNow,
-        DateTime.UtcNow, 0, null, false, null, TerminalSessionId: "outer");
+        endedUtc ?? DateTime.UtcNow, 0, null, false, null, TerminalSessionId: "outer");
 
     private static Process StartHarmlessProcess()
     {

@@ -38,6 +38,15 @@ The close pass does not take the tab-creation gate (`TryReserveForReclamation` a
 close exclusive), stops confirmed hosts concurrently, and logs a failed close instead of throwing;
 the scheduler also isolates the pass, so a stuck child never delays new tabs or skips reaping,
 enqueueing and launching.
+VIBE-45 adds the lingering-wrapper rule to the same check: when the run row is final but the child
+still reports the run's *own* outer session as active more than `AutomationTabState.LingeringSessionGrace`
+(60 s) after `EndedUtc`, the pass closes the host anyway. A `pwsh … vb --job-run …; exit` wrapper whose
+workflow has returned has nothing left to say, yet while its PTY lived the robot menu truthfully showed
+the finished agent as Running until someone dismissed it or the root exited. The close goes through
+`DeleteTabAsync`, so the session is stopped first (recording finalized) and then the child's whole
+process tree is torn down; a run that ended moments ago is left to exit by itself, and a Running run
+or any session other than the run's own is never touched. Tests: `AutomationTabStateTests`,
+`AutomationTabCapacityTests`.
 Recordings and Board links remain available through Replay. Automation-launched Workers alone
 receive instructions to put progress logs and final results in Comments on every target card.
 
@@ -194,6 +203,14 @@ Authorization:
 - `SubscribeWithSnapshot(...)` / `PushSnapshotTo(...)` provide atomic snapshot + live attach for reconnect.
 - `CreateAsync(..., title)` sets PTY name; supports `app`/`argv` to spawn a specific program instead of an interactive shell.
 - Implements `IAsyncDisposable` and kills PTY on dispose.
+- Ends the session on the PTY process's **own exit**, not only on output-pipe EOF: `IPtyConnection.ProcessExited`
+  gives the read loop `DefaultExitDrainWindow` (2 s) to drain trailing output and reach EOF by itself, then
+  `Exited` fires exactly once (`RaiseExitedOnce`, shared with the read loop's finally). ConPTY keeps its output
+  pipe open while *any* client is still attached to the console, so a shell that exited after its Worker's
+  `dotnet test` left a Roslyn compiler server behind never produced EOF, and the Automation tab's session stayed
+  "active" for hours with a dead shell (VIBE-45). Disposal still closes the pseudoconsole, which is what finally
+  releases a read that EOF never did. Tests: `TerminalProcessExitTests` (fake PTY), `ConPtyOrphanedClientExitTests`
+  (real ConPTY with an attached orphan, Windows only).
 
 ### `ITerminalConsumer.cs`
 - Contract: `void OnOutput(ReadOnlyMemory<byte> data)`.
@@ -516,8 +533,9 @@ and opening a finished entry renders its retained read-only snapshot with scroll
 
 Finished Automation hosts stay available until dismissal, root exit or capacity reclamation.
 Capacity reclamation requires a terminal
-JobRun state, a successful inactive child-status response, and a finalized recording. Starting or
-active sessions, ordinary tabs, unavailable status, and unfinished recordings cannot be reclaimed.
+JobRun state, a successful inactive child-status response, and a finalized recording, or (VIBE-45) a
+terminal run whose own outer session the child still reports active more than 60 s after the run
+ended. Starting sessions, ordinary tabs, unavailable status, and unfinished recordings cannot be reclaimed.
 Closure removes only the host; saved sessions, Job history, and Board links remain intact.
 The root emits `automation_terminal_closed` after removal (including child exit); the browser
 disposes its viewer and removes its menu entry. A WebSocket disconnect alone is not completion.

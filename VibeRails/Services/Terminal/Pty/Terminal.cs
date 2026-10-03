@@ -34,11 +34,20 @@ public sealed class Terminal : IAsyncDisposable
     private readonly List<ITerminalConsumer> _consumers = [];
     private readonly TerminalEmulator.Terminal _emulator;
     private readonly Lock _emulatorLock = new();
+    private readonly TimeSpan _exitDrainWindow;
     private Task? _readLoop;
     private bool _disposed;
     private int _hasExited;
     private int _cols;
     private int _rows;
+
+    /// <summary>
+    /// How long the read loop may keep draining after the PTY process itself has exited before the
+    /// session is ended without waiting for EOF. ConPTY keeps its output pipe open while any client
+    /// is still attached to the console, so a shell that has exited would otherwise leave the session
+    /// "active" for as long as an orphaned descendant (a compiler server, an MCP server) lives.
+    /// </summary>
+    internal static readonly TimeSpan DefaultExitDrainWindow = TimeSpan.FromSeconds(2);
 
     public int Pid => _pty.Pid;
     public int ExitCode => _pty.ExitCode;
@@ -77,12 +86,68 @@ public sealed class Terminal : IAsyncDisposable
     /// </summary>
     public event EventHandler<int>? Exited;
 
-    internal Terminal(IPtyConnection pty, int cols, int rows)
+    internal Terminal(IPtyConnection pty, int cols, int rows, TimeSpan? exitDrainWindow = null)
     {
         _pty = pty;
         _emulator = new TerminalEmulator.Terminal(cols: cols, rows: rows, scrollbackSize: EmulatorScrollbackLines);
         _cols = cols;
         _rows = rows;
+        _exitDrainWindow = exitDrainWindow ?? DefaultExitDrainWindow;
+        _pty.ProcessExited += OnPtyProcessExited;
+    }
+
+    /// <summary>
+    /// The PTY process is gone, so the session is over whether or not the output pipe ever reaches
+    /// EOF. Trailing output is usually still in flight, so the read loop gets <see cref="_exitDrainWindow"/>
+    /// to drain it and end on its own; after that <see cref="Exited"/> is raised from here (VIBE-45: an
+    /// Automation wrapper shell whose `dotnet test` left a compiler server attached to the console kept
+    /// its finished agent "Running" for hours because EOF never came).
+    /// </summary>
+    private void OnPtyProcessExited(object? sender, PtyExitedEventArgs e)
+    {
+        if (HasExited || _disposed)
+            return;
+
+        var readLoop = _readLoop;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var drain = Task.Delay(_exitDrainWindow);
+                if (readLoop is not null && await Task.WhenAny(readLoop, drain) == readLoop)
+                    return;
+                if (readLoop is null)
+                    await drain;
+                if (HasExited || _disposed)
+                    return;
+
+                int pid;
+                try { pid = _pty.Pid; } catch { pid = -1; }
+                Log.Information(
+                    "[Terminal] PTY process {Pid} exited with code {ExitCode} but its output pipe stayed open; ending the session without waiting for EOF",
+                    pid, e.ExitCode);
+                RaiseExitedOnce(e.ExitCode);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "[Terminal] PTY exit watcher failed");
+            }
+        });
+    }
+
+    /// <summary>
+    /// Marks the terminal exited, lets consumers flush, and fires <see cref="Exited"/> exactly once,
+    /// whichever of the read loop's EOF or the PTY process exit gets here first.
+    /// </summary>
+    private void RaiseExitedOnce(int exitCode)
+    {
+        if (Interlocked.Exchange(ref _hasExited, 1) == 1)
+            return;
+
+        NotifyConsumersClosed();
+
+        try { Exited?.Invoke(this, exitCode); }
+        catch (Exception ex) { Log.Error(ex, "[Terminal] Error in exit handlers"); }
     }
 
     /// <summary>
@@ -554,6 +619,7 @@ public sealed class Terminal : IAsyncDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _pty.ProcessExited -= OnPtyProcessExited;
 
         await _cts.CancelAsync();
 
@@ -624,21 +690,20 @@ public sealed class Terminal : IAsyncDisposable
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            Log.Error(ex, "[Terminal] Read loop error");
+            // Disposing closes the pipe under a read that EOF never released; that is the expected
+            // way out for a read loop whose process-exit path already ended the session.
+            if (!_disposed)
+                Log.Error(ex, "[Terminal] Read loop error");
         }
         finally
         {
             // ExitCode can throw if the process hasn't fully exited yet (pipe EOF races process exit).
             // Always invoke Exited — use -1 as fallback so listeners can clean up.
-            Interlocked.Exchange(ref _hasExited, 1);
             int exitCode;
             try { exitCode = _pty.ExitCode; }
             catch { exitCode = -1; }
 
-            NotifyConsumersClosed();
-
-            try { Exited?.Invoke(this, exitCode); }
-            catch (Exception ex) { Log.Error(ex, "[Terminal] Error in exit handlers"); }
+            RaiseExitedOnce(exitCode);
         }
     }
 

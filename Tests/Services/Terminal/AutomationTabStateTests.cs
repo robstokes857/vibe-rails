@@ -42,14 +42,50 @@ public sealed class AutomationTabStateTests
             TestContext.Current.CancellationToken));
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task ActiveOrUnavailableChildIsNeverReclaimed(bool active)
+    [Fact]
+    public async Task UnavailableChildIsNeverReclaimed()
     {
         Assert.False(await Started().TryReserveForReclamationAsync(Jobs(JobRunStatus.Succeeded).Object,
             Mock.Of<ISessionStore>(MockBehavior.Strict),
-            _ => Task.FromResult<TerminalStatusResponse?>(active ? new(true, "outer") : null),
+            _ => Task.FromResult<TerminalStatusResponse?>(null),
+            TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task ActiveWrapperSessionOfAJustFinishedRunIsLeftToExitOnItsOwn()
+    {
+        // The run row is final but the wrapper shell has only had a moment to reach its `exit`.
+        Assert.False(await Started().TryReserveForReclamationAsync(Jobs(JobRunStatus.Succeeded, DateTime.UtcNow).Object,
+            Mock.Of<ISessionStore>(MockBehavior.Strict),
+            _ => Task.FromResult<TerminalStatusResponse?>(new(true, "outer")),
+            TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
+    [InlineData(JobRunStatus.Succeeded)]
+    [InlineData(JobRunStatus.Failed)]
+    [InlineData(JobRunStatus.Interrupted)]
+    public async Task LingeringWrapperSessionOfAFinishedRunIsReclaimedAfterTheGrace(JobRunStatus status)
+    {
+        // VIBE-45: the workflow finished long ago but its outer shell never exited, so the child still
+        // reports the run's own session as active. That recording is still open, so the session store
+        // must not be consulted: closing the host is what ends it.
+        var state = Started();
+        var ended = DateTime.UtcNow - AutomationTabState.LingeringSessionGrace - TimeSpan.FromSeconds(1);
+        Assert.True(await state.TryReserveForReclamationAsync(Jobs(status, ended).Object,
+            Mock.Of<ISessionStore>(MockBehavior.Strict),
+            _ => Task.FromResult<TerminalStatusResponse?>(new(true, "outer", "shell", "/project")),
+            TestContext.Current.CancellationToken));
+        Assert.Throws<InvalidOperationException>(state.BeginSessionStart);
+    }
+
+    [Fact]
+    public async Task ActiveSessionThatIsNotTheRunsOwnIsNeverReclaimed()
+    {
+        var ended = DateTime.UtcNow - AutomationTabState.LingeringSessionGrace - TimeSpan.FromMinutes(5);
+        Assert.False(await Started().TryReserveForReclamationAsync(Jobs(JobRunStatus.Succeeded, ended).Object,
+            Mock.Of<ISessionStore>(MockBehavior.Strict),
+            _ => Task.FromResult<TerminalStatusResponse?>(new(true, "another-session")),
             TestContext.Current.CancellationToken));
     }
 
@@ -155,12 +191,12 @@ public sealed class AutomationTabStateTests
         return state;
     }
 
-    private static Mock<IJobStore> Jobs(JobRunStatus status)
+    private static Mock<IJobStore> Jobs(JobRunStatus status, DateTime? endedUtc = null)
     {
         var jobs = new Mock<IJobStore>(MockBehavior.Strict);
         jobs.Setup(store => store.GetRunAsync("run", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new JobRunRecord("run", 1, JobTriggerKind.Manual, "manual:run", status, "workflow", "/project",
-                LLM.NotSet, null, null, null, null, DateTime.UtcNow, DateTime.UtcNow, DateTime.UtcNow, 0, null,
+                LLM.NotSet, null, null, null, null, DateTime.UtcNow, DateTime.UtcNow, endedUtc ?? DateTime.UtcNow, 0, null,
                 false, null, TerminalSessionId: "outer"));
         return jobs;
     }
