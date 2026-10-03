@@ -94,16 +94,38 @@ public sealed class Terminal : IAsyncDisposable
         _rows = rows;
         _exitDrainWindow = exitDrainWindow ?? DefaultExitDrainWindow;
         _pty.ProcessExited += OnPtyProcessExited;
+        // ProcessExited is a one-shot notification and Pty.Net arms its process watcher before the
+        // connection is handed over, so a fast exit can land before the subscription above. Probe
+        // once, after subscribing, so an already-exited PTY takes the same bounded-drain path.
+        if (HasPtyProcessExited())
+            BeginExitWatch();
     }
+
+    private bool HasPtyProcessExited()
+    {
+        try { return _pty.WaitForExit(0); }
+        catch { return false; }
+    }
+
+    private int ReadPtyExitCode()
+    {
+        // ExitCode can throw if the process hasn't fully exited yet (pipe EOF races process exit).
+        // Always invoke Exited — use -1 as fallback so listeners can clean up.
+        try { return _pty.ExitCode; }
+        catch { return -1; }
+    }
+
+    private void OnPtyProcessExited(object? sender, PtyExitedEventArgs e) => BeginExitWatch();
 
     /// <summary>
     /// The PTY process is gone, so the session is over whether or not the output pipe ever reaches
     /// EOF. Trailing output is usually still in flight, so the read loop gets <see cref="_exitDrainWindow"/>
     /// to drain it and end on its own; after that <see cref="Exited"/> is raised from here (VIBE-45: an
     /// Automation wrapper shell whose `dotnet test` left a compiler server attached to the console kept
-    /// its finished agent "Running" for hours because EOF never came).
+    /// its finished agent "Running" for hours because EOF never came). Reached from the exit event and
+    /// from the constructor's probe; <see cref="RaiseExitedOnce"/> makes a second arrival harmless.
     /// </summary>
-    private void OnPtyProcessExited(object? sender, PtyExitedEventArgs e)
+    private void BeginExitWatch()
     {
         if (HasExited || _disposed)
             return;
@@ -123,10 +145,11 @@ public sealed class Terminal : IAsyncDisposable
 
                 int pid;
                 try { pid = _pty.Pid; } catch { pid = -1; }
+                var exitCode = ReadPtyExitCode();
                 Log.Information(
                     "[Terminal] PTY process {Pid} exited with code {ExitCode} but its output pipe stayed open; ending the session without waiting for EOF",
-                    pid, e.ExitCode);
-                RaiseExitedOnce(e.ExitCode);
+                    pid, exitCode);
+                RaiseExitedOnce(exitCode);
             }
             catch (Exception ex)
             {
@@ -697,13 +720,7 @@ public sealed class Terminal : IAsyncDisposable
         }
         finally
         {
-            // ExitCode can throw if the process hasn't fully exited yet (pipe EOF races process exit).
-            // Always invoke Exited — use -1 as fallback so listeners can clean up.
-            int exitCode;
-            try { exitCode = _pty.ExitCode; }
-            catch { exitCode = -1; }
-
-            RaiseExitedOnce(exitCode);
+            RaiseExitedOnce(ReadPtyExitCode());
         }
     }
 

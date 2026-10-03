@@ -127,7 +127,7 @@ public sealed class TerminalEscapeRoutingTests
         public Stream WriterStream => writer;
         public int Pid => 0;
         public int ExitCode => 0;
-        public bool WaitForExit(int milliseconds) => true;
+        public bool WaitForExit(int milliseconds) => false; // a live PTY: Terminal probes this after subscribing to ProcessExited
         public void Kill() { }
         public void KillProcessTree() { }
         public void Resize(int cols, int rows) { }

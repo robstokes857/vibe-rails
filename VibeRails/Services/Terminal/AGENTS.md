@@ -205,7 +205,9 @@ Authorization:
 - Implements `IAsyncDisposable` and kills PTY on dispose.
 - Ends the session on the PTY process's **own exit**, not only on output-pipe EOF: `IPtyConnection.ProcessExited`
   gives the read loop `DefaultExitDrainWindow` (2 s) to drain trailing output and reach EOF by itself, then
-  `Exited` fires exactly once (`RaiseExitedOnce`, shared with the read loop's finally). ConPTY keeps its output
+  `Exited` fires exactly once (`RaiseExitedOnce`, shared with the read loop's finally). The event is one-shot and
+  Pty.Net arms it before handing the connection over, so the constructor also probes `WaitForExit(0)` right after
+  subscribing and sends an already-exited PTY down the same path. ConPTY keeps its output
   pipe open while *any* client is still attached to the console, so a shell that exited after its Worker's
   `dotnet test` left a Roslyn compiler server behind never produced EOF, and the Automation tab's session stayed
   "active" for hours with a dead shell (VIBE-45). Disposal still closes the pseudoconsole, which is what finally

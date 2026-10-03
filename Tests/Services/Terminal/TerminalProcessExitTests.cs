@@ -82,6 +82,42 @@ public sealed class TerminalProcessExitTests
     }
 
     [Fact]
+    public async Task ProcessThatExitedBeforeTheTerminalSubscribedStillEndsTheSession()
+    {
+        // Review finding on VIBE-45: ProcessExited is one-shot and Pty.Net arms it before the connection is
+        // handed over, so the event can already be gone when Terminal subscribes. The constructor probes
+        // WaitForExit(0) and routes an already-exited PTY through the same drain path.
+        var ct = TestContext.Current.CancellationToken;
+        using var output = new GatedReadStream();
+        var pty = new ExitingPty(output);
+        pty.MarkExited(9);
+        await using var terminal = new TerminalPty(pty, 80, 24, exitDrainWindow: TimeSpan.FromMilliseconds(50));
+        var exited = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        terminal.Exited += (_, code) => exited.TrySetResult(code);
+        terminal.StartReadLoop();
+
+        Assert.Equal(9, await exited.Task.WaitAsync(TimeSpan.FromSeconds(10), ct));
+        Assert.True(terminal.HasExited);
+    }
+
+    [Fact]
+    public async Task LivePtyIsNotEndedByTheConstructorProbe()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var output = new GatedReadStream();
+        var pty = new ExitingPty(output);
+        await using var terminal = new TerminalPty(pty, 80, 24, exitDrainWindow: TimeSpan.FromMilliseconds(50));
+        var exits = 0;
+        terminal.Exited += (_, _) => Interlocked.Increment(ref exits);
+        terminal.StartReadLoop();
+
+        await Task.Delay(300, ct);
+
+        Assert.False(terminal.HasExited);
+        Assert.Equal(0, exits);
+    }
+
+    [Fact]
     public async Task ProcessExitBeforeTheReadLoopStartsStillEndsTheSession()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -99,17 +135,31 @@ public sealed class TerminalProcessExitTests
 
     private sealed class ExitingPty(Stream reader) : IPtyConnection
     {
+        private volatile bool _exited;
+
         public event EventHandler<PtyExitedEventArgs>? ProcessExited;
         public Stream ReaderStream => reader;
         public Stream WriterStream => Stream.Null;
         public int Pid => 4242;
         public int ExitCode { get; set; }
-        public bool WaitForExit(int milliseconds) => true;
+        public bool WaitForExit(int milliseconds) => _exited;
         public void Kill() { }
         public void KillProcessTree() { }
         public void Resize(int cols, int rows) { }
         public void Dispose() => reader.Dispose();
-        public void RaiseExited(int exitCode) => ProcessExited?.Invoke(this, ExitArgs(exitCode));
+
+        /// <summary>The process is gone and its one-shot event has already fired, with nobody listening.</summary>
+        public void MarkExited(int exitCode)
+        {
+            ExitCode = exitCode;
+            _exited = true;
+        }
+
+        public void RaiseExited(int exitCode)
+        {
+            MarkExited(exitCode);
+            ProcessExited?.Invoke(this, ExitArgs(exitCode));
+        }
 
         // Pty.Net is vendored and frozen (its vc.rules.md STOPs every change there), so the internal
         // constructor is reached by reflection rather than by granting Tests InternalsVisibleTo.
