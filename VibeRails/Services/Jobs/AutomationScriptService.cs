@@ -190,12 +190,12 @@ public sealed class AutomationScriptService(IJobExecutableResolver executableRes
             });
     }
 
-    public string? GetRuntimeUnavailableMessage(JobScriptRuntime runtime)
-    {
-        if (executableResolver.Resolve(runtime) is not null)
-            return null;
+    public string? GetRuntimeUnavailableMessage(JobScriptRuntime runtime) =>
+        executableResolver.Resolve(runtime) is null ? MissingRuntimeMessage(runtime) : null;
 
-        return runtime switch
+    /// <summary>What to tell the user when no interpreter for <paramref name="runtime"/> was found.</summary>
+    internal static string MissingRuntimeMessage(JobScriptRuntime runtime) =>
+        runtime switch
         {
             JobScriptRuntime.PowerShell => "PowerShell 7 (pwsh) is required to run this script but was not found.",
             JobScriptRuntime.Bash when OperatingSystem.IsWindows() =>
@@ -204,7 +204,6 @@ public sealed class AutomationScriptService(IJobExecutableResolver executableRes
             JobScriptRuntime.Python => "Python 3 is required to run this script but was not found.",
             _ => "The selected script runtime is not available."
         };
-    }
 
     public bool ScriptExists(string projectRoot, string? scriptPath)
     {
@@ -338,7 +337,7 @@ public sealed class AutomationScriptService(IJobExecutableResolver executableRes
             ?? new AutomationScriptValidationException($"Script was not found: {action.ScriptPath}");
     }
 
-    private static string ToBashPath(string workingDirectory, string scriptPath)
+    internal static string ToBashPath(string workingDirectory, string scriptPath)
     {
         // A relative slash path works in Git Bash as well as POSIX Bash; passing a raw Windows
         // drive path to bash is not portable between those runtimes.

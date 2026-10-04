@@ -1,12 +1,19 @@
 import { confirmDialog, escapeHtml, formatRelativeTime, isConfirmDialogOpen } from './utils.js';
 import { formatFileExplorerSize } from './file-explorer.js';
 import { PythonRunWindow, formatPythonRunOutput, isPythonRunOk } from './python-run-window.js';
+import {
+    SCRIPT_NAME_PATTERN,
+    SCRIPT_NAME_RULE,
+    SCRIPT_RUNTIMES,
+    isScriptFileName,
+    newScriptTemplate,
+    scriptRuntimeById,
+    scriptRuntimeFor,
+    scriptStem,
+    withScriptExtension
+} from './script-runtimes.js';
 
 const API = '/api/v1/python-scripts';
-
-// Mirrors PythonScriptService.ScriptNamePattern. Client-side it only buys a better
-// message before the round trip; the backend is still the authority.
-const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._ -]{0,120}\.py$/;
 
 const REFRESH_THROTTLE_MS = 2000;
 const MAX_SCRIPT_BYTES = 5 * 1024 * 1024;
@@ -23,22 +30,14 @@ export const PYTHON_SCRIPT_STATUS_META = Object.freeze({
 });
 const STATUS_META = PYTHON_SCRIPT_STATUS_META;
 
-/**
- * A script that already demonstrates the two halves of the run window: arguments in
- * through sys.argv, and a return value out as JSON on the last line of stdout.
- */
-function newScriptTemplate(name) {
-    const stem = name.replace(/\.py$/i, '');
-    return `"""${stem}\n\nRuns from the VibeRails Automation page once you sign it with your PIN.\n\nArguments you pass in the run window arrive in sys.argv; printing a JSON\nobject on the last line makes it the return value the window shows.\n"""\n\nimport json\nimport sys\n\n\ndef main(argv: list[str]) -> dict:\n    print(f"${stem} ran with {len(argv)} argument(s)")\n    return {"ok": True, "arguments": argv}\n\n\nif __name__ == "__main__":\n    print(json.dumps(main(sys.argv[1:])))\n`;
-}
-
 // Both live with the run window, which is what renders a finished run; re-exported here
 // so the row drawer, the workbench and the tests keep one import site.
 export { isPythonRunOk, formatPythonRunOutput };
 
 /**
- * "Python scripts" section of the Automation page: single-file scripts from
- * ~/.vibe_rails/scripts, gated by hash pinning. Approving ("signing") always prompts
+ * "Scripts" section of the Automation page: single-file pwsh (.ps1), bash (.sh) or
+ * python (.py) scripts from ~/.vibe_rails/scripts — the extension picks the interpreter
+ * (script-runtimes.js) — gated by hash pinning. Approving ("signing") always prompts
  * for the PIN — deliberately no unlocked session — and Run is only offered while the
  * server reports the script's hash still matches its approval. The PIN modal posts
  * the PIN straight to the backend and never stores it anywhere client-side.
@@ -87,15 +86,15 @@ export class PythonScriptsController {
             <div class="jobs-section-heading">
                 <div class="python-scripts-heading-copy">
                     <div class="jobs-section-title-row">
-                        <h2 id="python-scripts-title"><i class="fa-brands fa-python me-2" aria-hidden="true"></i>Python scripts</h2>
+                        <h2 id="python-scripts-title"><i class="fa-solid fa-file-code me-2" aria-hidden="true"></i>Scripts</h2>
                         <span class="jobs-count" data-python-scripts-count>0 scripts</span>
                     </div>
-                    <p>Edit single-file Python scripts with an agent terminal beside the editor. Sign with your PIN to run.</p>
+                    <p>Edit single-file pwsh, bash, or python scripts with an agent terminal beside the editor. Sign with your PIN to run.</p>
                     <p class="python-scripts-directory">Folder: <code data-python-scripts-dir></code></p>
                 </div>
                 <div class="python-scripts-heading-actions">
                     <button class="btn btn-sm btn-primary" type="button" data-python-scripts-action="new">
-                        <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>New Python script
+                        <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>New script
                     </button>
                     ${this._canImportFromHost() ? `<button class="btn btn-sm btn-outline-secondary" type="button" data-python-scripts-action="import">
                         <i class="fa-solid fa-file-import me-1" aria-hidden="true"></i>Add from disk
@@ -111,9 +110,10 @@ export class PythonScriptsController {
                     </div>
                 </div>
             </div>
-            <p class="python-scripts-runtime-help">Automation workflows support <strong>Python <code>.py</code></strong>,
-                <strong>PowerShell <code>.ps1</code></strong>, and <strong>Bash <code>.sh</code></strong>.
-                For scripts in this repository, choose <strong>New automation → Add script</strong> above.</p>
+            <p class="python-scripts-runtime-help">The extension picks the interpreter: <strong>pwsh</strong> (PowerShell 7)
+                runs <code>.ps1</code>, <strong>bash</strong> runs <code>.sh</code> (Git Bash on Windows), and
+                <strong>python</strong> runs <code>.py</code>. For scripts that live in this repository, choose
+                <strong>New automation → Add script</strong> above.</p>
             <div class="python-scripts-list" data-python-scripts-list>
                 <div class="jobs-empty" role="status"><span class="spinner-border spinner-border-sm"></span> Loading scripts…</div>
             </div>`;
@@ -152,7 +152,7 @@ export class PythonScriptsController {
             this._applyState(state);
         } catch (error) {
             this._applyState(null);
-            if (!quiet) this.app.showError(error?.message || 'Could not load Python scripts.');
+            if (!quiet) this.app.showError(error?.message || 'Could not load scripts.');
         }
     }
 
@@ -206,7 +206,7 @@ export class PythonScriptsController {
             try {
                 listener(name);
             } catch (error) {
-                console.error('Python scripts run listener failed:', error);
+                console.error('Scripts run listener failed:', error);
             }
         }
     }
@@ -229,7 +229,7 @@ export class PythonScriptsController {
             try {
                 listener(state);
             } catch (error) {
-                console.error('Python scripts state listener failed:', error);
+                console.error('Scripts state listener failed:', error);
             }
         }
     }
@@ -250,7 +250,7 @@ export class PythonScriptsController {
 
         if (!this.state) {
             this._lastListHtml = null;
-            list.innerHTML = '<div class="jobs-empty">Could not load Python scripts.</div>';
+            list.innerHTML = '<div class="jobs-empty">Could not load scripts.</div>';
             return;
         }
 
@@ -261,8 +261,9 @@ export class PythonScriptsController {
 
         const html = scripts.length === 0
             ? `<div class="jobs-empty python-scripts-empty">
-                    <strong>No Python scripts yet</strong>
-                    <span>Write one here, copy one in from disk, or drop a <code>.py</code> file onto this panel.</span>
+                    <strong>No scripts yet</strong>
+                    <span>Write a pwsh, bash, or python script here, copy one in from disk, or drop a
+                        <code>.ps1</code>, <code>.sh</code> or <code>.py</code> file onto this panel.</span>
                     <div class="python-scripts-empty-actions">
                         <button class="btn btn-sm btn-primary" type="button" data-python-scripts-action="new">
                             <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>New script
@@ -283,6 +284,7 @@ export class PythonScriptsController {
 
     _renderRow(script) {
         const meta = STATUS_META[script.status] || STATUS_META.unapproved;
+        const runtime = scriptRuntimeFor(script.name);
         const name = escapeHtml(script.name);
         const running = this.runningNames.has(script.name);
         const canRun = script.status === 'approved' && !running;
@@ -305,7 +307,8 @@ export class PythonScriptsController {
                             <span>${name}</span>
                             <i class="fa-solid fa-pen-to-square" aria-hidden="true"></i>
                         </button>
-                        <span class="python-script-meta">${escapeHtml(details)}</span>
+                        <span class="python-script-meta"><span class="python-script-runtime" data-runtime="${runtime.id}"
+                              title="Runs with ${runtime.command} (${runtime.label})">${runtime.command}</span>${escapeHtml(details)}</span>
                     </div>
                     <span class="python-script-status" data-tone="${meta.tone}">
                         <i class="fa-solid ${meta.icon}" aria-hidden="true"></i>${meta.label}
@@ -508,21 +511,34 @@ export class PythonScriptsController {
     async newScript() {
         await this.ensureState();
         const values = await this._promptForm({
-            title: 'New Python script',
-            body: `The file is created in ${this.state?.scriptsDirectory || 'the scripts folder'}. It starts unsigned — sign it when you are ready to run it.`,
+            title: 'New script',
+            body: `Choose pwsh, bash, or python. The file is created in ${this.state?.scriptsDirectory || 'the scripts folder'}. It starts unsigned — sign it when you are ready to run it.`,
             fields: [{
+                key: 'runtime',
+                label: 'Runs with',
+                type: 'select',
+                value: SCRIPT_RUNTIMES[0].id,
+                options: SCRIPT_RUNTIMES.map((runtime) => ({
+                    value: runtime.id,
+                    label: `${runtime.command} — ${runtime.label} (${runtime.extension})`
+                }))
+            }, {
                 key: 'name',
                 label: 'File name',
                 type: 'text',
                 value: this._uniqueName('script.py'),
-                placeholder: 'script.py'
+                placeholder: 'script.py',
+                autofocus: true
             }],
             submitLabel: 'Create and edit',
-            validate: (data) => this._validateNewName(data.name)
+            // The two fields describe one choice: picking bash renames script.py to
+            // script.sh, and typing deploy.ps1 flips the picker to pwsh.
+            onFieldChange: (key, data) => this._syncRuntimeAndName(key, data),
+            validate: (data) => this._validateNewName(this._nameForRuntime(data.name, data.runtime))
         });
         if (values === null) return null;
 
-        const name = values.name.trim();
+        const name = this._nameForRuntime(values.name, values.runtime);
         try {
             await this.createScript(name, newScriptTemplate(name));
         } catch (error) {
@@ -555,9 +571,13 @@ export class PythonScriptsController {
         }
         const picked = await this.app.pickFileSystemEntry({
             mode: 'file',
-            title: 'Add a Python script',
+            title: 'Add a script',
             filters: [
-                { label: 'Python files', extensions: ['py'] },
+                { label: 'Scripts', extensions: ['ps1', 'sh', 'py'] },
+                ...SCRIPT_RUNTIMES.map((runtime) => ({
+                    label: `${runtime.label} files`,
+                    extensions: [runtime.extension.slice(1)]
+                })),
                 { label: 'All files', extensions: [] }
             ],
             triggerElement: trigger instanceof HTMLElement ? trigger : undefined
@@ -596,7 +616,7 @@ export class PythonScriptsController {
                 key: 'name',
                 label: 'Name for the copy',
                 type: 'text',
-                value: this._uniqueName(`${name.replace(/\.py$/i, '')}-copy.py`)
+                value: this._uniqueName(`${scriptStem(name)}-copy${scriptRuntimeFor(name).extension}`)
             }],
             submitLabel: 'Duplicate',
             validate: (data) => this._validateNewName(data.name)
@@ -704,31 +724,60 @@ export class PythonScriptsController {
         };
     }
 
+    /**
+     * A file name from disk turned into a script name. A .ps1, .sh or .py extension is kept
+     * (lower-cased, because it picks the interpreter); anything else becomes Python.
+     */
     _sanitizeName(rawName) {
         const base = String(rawName || '').split(/[\\/]/).pop() || '';
-        const stem = base.replace(/\.py$/i, '')
+        const extension = isScriptFileName(base) ? scriptRuntimeFor(base).extension : '.py';
+        const stem = scriptStem(base)
             .replace(/[^A-Za-z0-9._ -]/g, '-')
             .replace(/^[^A-Za-z0-9]+/, '')
             .slice(0, 100);
-        return `${stem || 'script'}.py`;
+        return `${stem || 'script'}${extension}`;
     }
 
     /** The candidate name, or the first "-2", "-3", … variant nothing else is using. */
     _uniqueName(candidate) {
         const taken = new Set((this.state?.scripts || []).map((script) => script.name.toLowerCase()));
         if (!taken.has(candidate.toLowerCase())) return candidate;
-        const stem = candidate.replace(/\.py$/i, '');
+        const stem = scriptStem(candidate);
+        const extension = isScriptFileName(candidate) ? scriptRuntimeFor(candidate).extension : '';
         for (let index = 2; index <= 999; index += 1) {
-            const next = `${stem}-${index}.py`;
+            const next = `${stem}-${index}${extension}`;
             if (!taken.has(next.toLowerCase())) return next;
         }
         return candidate;
     }
 
+    /**
+     * The New script dialog keeps its two fields in step: a runtime pick re-extends the
+     * name, and a typed name with a known extension moves the picker.
+     */
+    _syncRuntimeAndName(key, data) {
+        const typed = (data.name || '').trim();
+        if (key === 'runtime') {
+            const stem = scriptStem(typed) || 'script';
+            return { name: this._uniqueName(withScriptExtension(stem, scriptRuntimeById(data.runtime))) };
+        }
+        if (key === 'name' && isScriptFileName(typed)) {
+            return { runtime: scriptRuntimeFor(typed).id };
+        }
+        return null;
+    }
+
+    /** "deploy" + bash → "deploy.sh"; a name that already carries an extension is kept. */
+    _nameForRuntime(rawName, runtimeId) {
+        const name = (rawName || '').trim();
+        if (!name || isScriptFileName(name)) return name;
+        return `${name}${scriptRuntimeById(runtimeId).extension}`;
+    }
+
     _validateNewName(rawName, { allow = null } = {}) {
         const name = (rawName || '').trim();
-        if (!NAME_PATTERN.test(name)) {
-            return 'Use a plain .py file name — letters, digits, dots, dashes and spaces only.';
+        if (!SCRIPT_NAME_PATTERN.test(name)) {
+            return SCRIPT_NAME_RULE;
         }
         if (name.includes('..')) return 'File names cannot contain "..".';
         if (allow && name.toLowerCase() === allow.toLowerCase()) return null;
@@ -768,10 +817,10 @@ export class PythonScriptsController {
      * remote frontend too — unlike "Add from disk", which copies a path on the host.
      */
     async _acceptDroppedFiles(files) {
-        const scripts = files.filter((file) => /\.py$/i.test(file.name));
+        const scripts = files.filter((file) => isScriptFileName(file.name));
         const skipped = files.length - scripts.length;
         if (scripts.length === 0) {
-            return this.app.showToast('Nothing added', 'Drop .py files to add them as scripts.', 'warning');
+            return this.app.showToast('Nothing added', 'Drop .ps1, .sh or .py files to add them as scripts.', 'warning');
         }
 
         const added = [];
@@ -799,7 +848,7 @@ export class PythonScriptsController {
         this.app.showToast(
             added.length === 1 ? 'Script added' : `${added.length} scripts added`,
             `${added.join(', ')} — sign ${added.length === 1 ? 'it' : 'them'} before running.`
-            + (skipped > 0 ? ` (${skipped} non-.py file${skipped === 1 ? '' : 's'} skipped.)` : ''),
+            + (skipped > 0 ? ` (${skipped} other file${skipped === 1 ? '' : 's'} skipped.)` : ''),
             'success');
     }
 
@@ -904,14 +953,15 @@ export class PythonScriptsController {
             const tabId = String(result?.tabId || '').trim();
             if (!tabId) throw new Error('The interactive terminal did not return a tab id.');
 
+            const runtime = scriptRuntimeFor(name);
             this.app.terminalController?.rememberTabLaunch?.(tabId, {
                 selection: 'base:shell',
                 label: name,
-                title: `${name} · Python`,
-                icon: '🐍',
+                title: `${name} · ${runtime.label}`,
+                icon: runtime.tabIcon,
                 // NOT `python-script:${name}` — that key belongs to the script's AGENT
                 // tab (the workbench's "Ask agent"). Sharing it would make the agent
-                // flows adopt this python shell tab and paste briefs into a running script.
+                // flows adopt this script's shell tab and paste briefs into a running script.
                 taskKey: `python-script-run:${name}`,
                 workingDirectory: this.state?.scriptsDirectory || null
             });
@@ -957,8 +1007,8 @@ export class PythonScriptsController {
         const values = await this._promptForm({
             title: changing ? 'Change signing PIN' : 'Create signing PIN',
             body: changing
-                ? 'The signing PIN approves Python scripts to run. Enter the current PIN and the new one.'
-                : 'The signing PIN approves Python scripts to run. Only you should know it — agents are told they can never ask for it.',
+                ? 'The signing PIN approves scripts to run. Enter the current PIN and the new one.'
+                : 'The signing PIN approves scripts to run. Only you should know it — agents are told they can never ask for it.',
             fields: [
                 ...(changing ? [{ key: 'currentPin', label: 'Current PIN' }] : []),
                 { key: 'newPin', label: 'New PIN (4+ characters)' },
@@ -999,7 +1049,7 @@ export class PythonScriptsController {
      * land in the browser's saved passwords. Fields opt into plain "text" for names.
      * Resolves with the field values, or null on cancel/Escape.
      */
-    _promptForm({ title, body, fields, submitLabel, validate = null }) {
+    _promptForm({ title, body, fields, submitLabel, validate = null, onFieldChange = null }) {
         this._closeModal();
         const host = document.getElementById('modal-container');
         if (!host) return Promise.resolve(null);
@@ -1022,12 +1072,18 @@ export class PythonScriptsController {
                                     ${fields.map((field, index) => `
                                     <div class="mb-2">
                                         <label class="form-label" for="python-scripts-pin-${index}">${escapeHtml(field.label)}</label>
+                                        ${field.type === 'select' ? `
+                                        <select class="form-select" id="python-scripts-pin-${index}" data-pin-field="${escapeHtml(field.key)}">
+                                            ${(field.options || []).map((option) => `
+                                            <option value="${escapeHtml(option.value)}" ${option.value === field.value ? 'selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}
+                                        </select>` : `
                                         <input class="form-control${field.type === 'text' ? '' : ' python-pin-input'}" type="text"
                                                id="python-scripts-pin-${index}" data-pin-field="${escapeHtml(field.key)}"
                                                value="${escapeHtml(field.value || '')}"
                                                placeholder="${escapeHtml(field.placeholder || '')}"
+                                               ${field.autofocus ? 'data-pin-autofocus' : ''}
                                                autocomplete="${field.type === 'text' ? 'off' : 'one-time-code'}" autocapitalize="off" spellcheck="false"
-                                               data-1p-ignore data-lpignore="true" data-bwignore required>
+                                               data-1p-ignore data-lpignore="true" data-bwignore required>`}
                                     </div>`).join('')}
                                     <div class="alert alert-danger mt-2 mb-0 d-none" role="alert" data-pin-error></div>
                                 </div>
@@ -1059,12 +1115,28 @@ export class PythonScriptsController {
             document.addEventListener('keydown', onKeydown, true);
             layer.querySelectorAll('[data-pin-action="cancel"]')
                 .forEach((el) => el.addEventListener('click', () => finish(null)));
-            layer.querySelector('[data-pin-form]')?.addEventListener('submit', (event) => {
-                event.preventDefault();
+            const readValues = () => {
                 const values = {};
                 layer.querySelectorAll('[data-pin-field]').forEach((input) => {
                     values[input.dataset.pinField] = input.value;
                 });
+                return values;
+            };
+            if (typeof onFieldChange === 'function') {
+                // A select fires `input` too, so one listener covers typing and picking.
+                layer.querySelector('[data-pin-form]')?.addEventListener('input', (event) => {
+                    const changed = event.target?.dataset?.pinField;
+                    if (!changed) return;
+                    const updates = onFieldChange(changed, readValues()) || {};
+                    layer.querySelectorAll('[data-pin-field]').forEach((input) => {
+                        const key = input.dataset.pinField;
+                        if (key !== changed && Object.hasOwn(updates, key)) input.value = updates[key];
+                    });
+                });
+            }
+            layer.querySelector('[data-pin-form]')?.addEventListener('submit', (event) => {
+                event.preventDefault();
+                const values = readValues();
                 const problem = validate ? validate(values) : null;
                 const alert = layer.querySelector('[data-pin-error]');
                 if (problem) {
@@ -1079,7 +1151,7 @@ export class PythonScriptsController {
 
             this.modal = { layer, close: () => finish(null) };
             requestAnimationFrame(() => {
-                const first = layer.querySelector('[data-pin-field]');
+                const first = layer.querySelector('[data-pin-autofocus]') || layer.querySelector('[data-pin-field]');
                 first?.focus();
                 // Name fields open pre-filled with a suggestion; select it so typing
                 // replaces it. Masked PIN fields are always empty — nothing to select.

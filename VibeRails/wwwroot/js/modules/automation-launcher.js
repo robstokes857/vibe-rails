@@ -1,10 +1,11 @@
 import { escapeHtml, isConfirmDialogOpen } from './utils.js';
+import { scriptRuntimeFor } from './script-runtimes.js';
 
 const PREFERENCES_ENDPOINT = '/api/v1/automation-nav/preferences';
 
 /**
  * Shapes the server's launcher catalog into what the flyout and the customize modal
- * render: one entry per automation (`jobId`) or Python script (`status` = approved |
+ * render: one entry per automation (`jobId`) or script (`status` = approved |
  * modified | unapproved), malformed entries dropped, sorted by saved order.
  */
 export function normalizeLauncherItems(items) {
@@ -29,12 +30,13 @@ export function isLauncherItemRunnable(item) {
 }
 
 function launcherItemIcon(item) {
-    return item.kind === 'script' ? 'fa-brands fa-python' : 'fa-solid fa-play';
+    // A script's label is its file name, whose extension says python, pwsh or bash.
+    return item.kind === 'script' ? scriptRuntimeFor(item.label).icon : 'fa-solid fa-play';
 }
 
 /**
  * Nav-bar Automation launcher: a flyout on the play half of the merged Automation
- * nav entry, listing the project's automations and the Python scripts (run-now on
+ * nav entry, listing the project's automations and the pwsh, bash and python scripts (run-now on
  * click; unsigned scripts are
  * shown disabled until they are signed on the Automation page), plus a customization
  * modal giving each entry an order and show/hide switch — the same treatment Custom
@@ -234,7 +236,7 @@ export class AutomationNavLauncher {
     }
 
     /**
-     * Runs a Python script through the shared controller's run window. The flyout stands
+     * Runs a script through the shared controller's run window. The flyout stands
      * down first: the window is a modal, and leaving an anchored nav flyout open behind its
      * backdrop would leave two things claiming Escape.
      */

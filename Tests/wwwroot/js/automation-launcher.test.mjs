@@ -418,3 +418,19 @@ test('the customize modal offers Import from repository and New automation, and 
     buttons['new-automation'].handlers.click();
     assert.deepEqual(app.navigations[1], { view: 'jobs', data: { newJob: true } });
 });
+
+test('script rows carry their runtime icon: python, or the terminal glyph for pwsh and bash', () => {
+    const launcher = launcherWith([
+        { key: 'script:deploy.ps1', kind: 'script', label: 'deploy.ps1', jobId: 0, enabled: true, order: 0, status: 'approved' },
+        { key: 'script:backup.sh', kind: 'script', label: 'backup.sh', jobId: 0, enabled: true, order: 1, status: 'approved' },
+        { key: 'script:report.py', kind: 'script', label: 'report.py', jobId: 0, enabled: true, order: 2, status: 'approved' }
+    ]);
+    launcher._renderFlyoutItems();
+    const [pwsh, bash, python] = launcher.flyout.target.html.split('<button').slice(1);
+
+    assert.match(pwsh, /<i class="fa-solid fa-terminal"/);
+    assert.match(bash, /<i class="fa-solid fa-terminal"/);
+    assert.match(python, /<i class="fa-brands fa-python"/);
+    const css = readFileSync(stylePath, 'utf8');
+    assert.match(css, /\.automation-launch-item > \.fa-terminal/);
+});

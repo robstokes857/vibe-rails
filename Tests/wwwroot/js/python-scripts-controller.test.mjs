@@ -67,7 +67,9 @@ test('A row offers the whole file lifecycle, not just run and sign', () => {
     assert.equal(html.match(/data-python-scripts-action="edit"/g).length, 1, 'one Edit affordance besides the name');
     // The section copy says what opening does.
     const source = readFileSync(modulePath, 'utf8');
-    assert.match(source, /Edit single-file Python scripts with an agent terminal beside the editor\./);
+    assert.match(source, /Edit single-file pwsh, bash, or python scripts with an agent terminal beside the editor\./);
+    // Every row says which interpreter runs it (VIBE-56: "say pwsh, bash, or python").
+    assert.match(html, /<span class="python-script-runtime" data-runtime="python"[^>]*>python<\/span>/);
     // Size and edit time are on the row so "did my edit land?" needs no round trip.
     assert.match(html, /2\.00 KB/);
     assert.match(html, /edited /);
@@ -109,7 +111,7 @@ test('The empty state offers both ways to add a script', () => {
 
     assert.match(listHtml, /data-python-scripts-action="new"/);
     assert.match(listHtml, /data-python-scripts-action="import"/);
-    assert.match(listHtml, /drop a <code>\.py<\/code> file/);
+    assert.match(listHtml, /<code>\.ps1<\/code>, <code>\.sh<\/code> or <code>\.py<\/code> file/);
 });
 
 test('Clicking a script opens the workbench view in every host', () => {
@@ -303,6 +305,9 @@ test('Suggested names are sanitised, extended to .py, and made unique', () => {
     assert.equal(controller._sanitizeName('C:\\tmp\\weekly report(v2).txt'), 'weekly report-v2-.txt.py');
     assert.equal(controller._sanitizeName('/home/me/clean.py'), 'clean.py');
     assert.equal(controller._sanitizeName('.hidden.py'), 'hidden.py');
+    // pwsh and bash scripts keep their extension, lower-cased because it picks the interpreter.
+    assert.equal(controller._sanitizeName('C:\\ops\\Deploy.PS1'), 'Deploy.ps1');
+    assert.equal(controller._sanitizeName('/home/me/backup.sh'), 'backup.sh');
     assert.equal(controller._uniqueName('report.py'), 'report-3.py');
     assert.equal(controller._uniqueName('other.py'), 'other.py');
 });
@@ -311,15 +316,19 @@ test('Name validation mirrors the server rule and catches clashes before the rou
     const controller = controllerWith([{ ...SCRIPT, name: 'report.py' }]);
 
     assert.equal(controller._validateNewName('fresh.py'), null);
-    assert.match(controller._validateNewName('fresh.txt'), /plain \.py file name/);
-    assert.match(controller._validateNewName('sub/dir.py'), /plain \.py file name/);
-    assert.match(controller._validateNewName('..\\escape.py'), /plain \.py file name/);
+    assert.equal(controller._validateNewName('deploy.ps1'), null);
+    assert.equal(controller._validateNewName('test.sh'), null);
+    assert.match(controller._validateNewName('fresh.txt'), /plain \.py, \.ps1 or \.sh file name/);
+    // The extension picks the interpreter, so it is lower-case only, like the server rule.
+    assert.match(controller._validateNewName('TEST.SH'), /plain \.py, \.ps1 or \.sh file name/);
+    assert.match(controller._validateNewName('sub/dir.py'), /plain \.py, \.ps1 or \.sh file name/);
+    assert.match(controller._validateNewName('..\\escape.py'), /plain \.py, \.ps1 or \.sh file name/);
     assert.match(controller._validateNewName('REPORT.py'), /already exists/);
     // Renaming a file to the casing it already has is not a clash with itself.
     assert.equal(controller._validateNewName('report.py', { allow: 'report.py' }), null);
 });
 
-test('Dropped files are added by content, and non-Python files are skipped', async () => {
+test('Dropped files are added by content, and non-script files are skipped', async () => {
     const app = createApp();
     const controller = controllerWith([], app);
 
@@ -339,7 +348,7 @@ test('Dropped files are added by content, and non-Python files are skipped', asy
     assert.equal(app.calls.length, 1);
     assert.equal(app.calls[0].url, '/api/v1/python-scripts/create');
     assert.deepEqual(app.calls[0].body, { name: 'from-desktop.py', content: 'print("dropped")\n' });
-    assert.match(app.toasts.at(-1).message, /1 non-\.py file skipped/);
+    assert.match(app.toasts.at(-1).message, /1 other file skipped/);
 });
 
 test('Dropped scripts with invalid UTF-8 are rejected before upload', async () => {
@@ -645,4 +654,88 @@ test('Opening in VS Code tells a never-signed script to sign, and a signed one t
     } finally {
         delete globalThis.window;
     }
+});
+
+test('New script says pwsh, bash, or python and keeps the picker and the file name in step', async () => {
+    const app = createApp();
+    const controller = controllerWith([{ ...SCRIPT, name: 'script.sh' }], app);
+    let form = null;
+    controller._promptForm = async (options) => {
+        form = options;
+        return { runtime: 'bash', name: 'deploy' };
+    };
+
+    const name = await controller.newScript();
+
+    assert.equal(form.title, 'New script');
+    assert.match(form.body, /pwsh, bash, or python/);
+    const runtime = form.fields.find((field) => field.key === 'runtime');
+    assert.equal(runtime.type, 'select');
+    assert.deepEqual(runtime.options.map((option) => option.value), ['python', 'pwsh', 'bash']);
+    assert.deepEqual(runtime.options.map((option) => option.label), [
+        'python — Python (.py)',
+        'pwsh — PowerShell (.ps1)',
+        'bash — Bash (.sh)'
+    ]);
+    // createScript replaced the list with the API's; restore the clash for the checks below.
+    controller.state = { ...controller.state, scripts: [{ ...SCRIPT, name: 'script.sh' }] };
+    // Picking a runtime re-extends the typed name (and stays clear of existing files);
+    // typing a known extension moves the picker; anything else leaves it alone.
+    assert.deepEqual(form.onFieldChange('runtime', { runtime: 'bash', name: 'script.py' }), { name: 'script-2.sh' });
+    assert.deepEqual(form.onFieldChange('runtime', { runtime: 'pwsh', name: 'deploy' }), { name: 'deploy.ps1' });
+    assert.deepEqual(form.onFieldChange('name', { runtime: 'python', name: 'test.sh' }), { runtime: 'bash' });
+    assert.equal(form.onFieldChange('name', { runtime: 'python', name: 'test' }), null);
+    // A bare name takes the picked runtime's extension before validation and creation.
+    assert.equal(form.validate({ runtime: 'bash', name: 'deploy' }), null);
+    assert.equal(name, 'deploy.sh');
+    assert.equal(app.calls[0].body.name, 'deploy.sh');
+    assert.match(app.calls[0].body.content, /^#!\/usr\/bin\/env bash\n/);
+    assert.match(app.calls[0].body.content, /"\$@"/);
+});
+
+test('Starter scripts demonstrate argv in and a JSON return value out for every runtime', async () => {
+    const { newScriptTemplate } = await import(pathToFileURL(path.resolve('VibeRails/wwwroot/js/modules/script-runtimes.js')).href);
+
+    const pwsh = newScriptTemplate('deploy.ps1');
+    assert.match(pwsh, /\$args\.Count/);
+    assert.match(pwsh, /ConvertTo-Json -Compress\n$/);
+    const bash = newScriptTemplate('backup.sh');
+    assert.match(bash, /^#!\/usr\/bin\/env bash\n/);
+    assert.match(bash, /printf '\{"ok": true, "argumentCount": %d\}\\n' "\$#"\n$/);
+    assert.doesNotMatch(bash, /\r/);
+    assert.match(newScriptTemplate('job.py'), /print\(json\.dumps\(main\(sys\.argv\[1:\]\)\)\)/);
+});
+
+test('Script runtimes mirror the server: one name rule, extension picks the interpreter', async () => {
+    const runtimes = await import(pathToFileURL(path.resolve('VibeRails/wwwroot/js/modules/script-runtimes.js')).href);
+    const service = readFileSync(servicePath, 'utf8');
+
+    // The client pattern is the server's ScriptNamePattern, verbatim.
+    assert.ok(service.includes(`@"${runtimes.SCRIPT_NAME_PATTERN.source}"`), 'name rule drifted from PythonScriptService');
+    assert.equal(runtimes.scriptRuntimeFor('a.ps1').command, 'pwsh');
+    assert.equal(runtimes.scriptRuntimeFor('a.sh').command, 'bash');
+    assert.equal(runtimes.scriptRuntimeFor('a.py').command, 'python');
+    assert.equal(runtimes.scriptRuntimeFor('a.sh').monacoLanguage, 'shell');
+    assert.equal(runtimes.scriptRuntimeFor('a.ps1').monacoLanguage, 'powershell');
+    assert.match(service, /"\.ps1" => JobScriptRuntime\.PowerShell/);
+    assert.match(service, /"\.sh" => JobScriptRuntime\.Bash/);
+});
+
+test('Run in terminal titles the tab with the script runtime', async () => {
+    const app = createApp();
+    const remembered = [];
+    app.apiCall = async (url, method = 'GET', body = null) => {
+        app.calls.push({ url, method, body });
+        return url.endsWith('/run/interactive') ? { tabId: 'tab-7' } : { pinConfigured: true, scriptsDirectory: '/scripts', scripts: [] };
+    };
+    app.terminalController = {
+        rememberTabLaunch: (tabId, options) => remembered.push({ tabId, options }),
+        adoptLaunchedTab: async () => true
+    };
+    const controller = controllerWith([{ ...SCRIPT, name: 'deploy.ps1' }], app);
+
+    await controller.runInTerminal('deploy.ps1');
+
+    assert.equal(remembered[0].options.title, 'deploy.ps1 · PowerShell');
+    assert.equal(remembered[0].options.taskKey, 'python-script-run:deploy.ps1');
 });

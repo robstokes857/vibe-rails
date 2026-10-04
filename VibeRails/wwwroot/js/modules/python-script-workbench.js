@@ -2,6 +2,7 @@ import { ensureMonaco } from './monaco-loader.js';
 import { confirmDialog, escapeHtml, formatRelativeTime } from './utils.js';
 import { formatFileExplorerSize } from './file-explorer.js';
 import { PYTHON_SCRIPT_STATUS_META, formatPythonRunOutput } from './python-scripts-controller.js';
+import { scriptRuntimeFor } from './script-runtimes.js';
 
 const API = '/api/v1/python-scripts';
 const VIEW_NAME = 'python-script';
@@ -36,7 +37,7 @@ const AGENT_CONSTRAINTS = "It's a VibeRails Automation script: keep it a single 
  * "Change: " sentence themselves and presses Enter.
  */
 export function buildAskAgentBrief({ name, path }) {
-    return `Please help me change the Python script ${name} at ${path}.\n${AGENT_CONSTRAINTS}`;
+    return `Please help me change the ${scriptRuntimeFor(name).label} script ${name} at ${path}.\n${AGENT_CONSTRAINTS}`;
 }
 
 /**
@@ -316,7 +317,7 @@ export class PythonScriptWorkbench {
                         Back
                     </button>
                     <div class="python-workbench-identity">
-                        <i class="fa-brands fa-python" aria-hidden="true"></i>
+                        <i class="${scriptRuntimeFor(name).icon}" aria-hidden="true" data-workbench-runtime-icon></i>
                         <div class="python-workbench-identity-copy">
                             <div class="python-workbench-title-row">
                                 <h1 class="python-workbench-title">
@@ -502,8 +503,12 @@ export class PythonScriptWorkbench {
         const status = this.status || 'unapproved';
         const meta = PYTHON_SCRIPT_STATUS_META[status] || PYTHON_SCRIPT_STATUS_META.unapproved;
 
+        const runtime = scriptRuntimeFor(this.name);
         const nameEl = root.querySelector('[data-workbench-name]');
         if (nameEl) nameEl.textContent = this.name || '';
+        // Rail clicks and renames can change the runtime without rebuilding the shell.
+        const runtimeIcon = root.querySelector('[data-workbench-runtime-icon]');
+        if (runtimeIcon) runtimeIcon.className = runtime.icon;
         const pill = root.querySelector('[data-workbench-status]');
         if (pill) {
             pill.dataset.tone = meta.tone;
@@ -512,6 +517,7 @@ export class PythonScriptWorkbench {
         const details = root.querySelector('[data-workbench-meta]');
         if (details) {
             details.textContent = [
+                `runs with ${runtime.command}`,
                 script?.path || '',
                 script ? formatFileExplorerSize(script.sizeBytes) : '',
                 script?.modifiedUtc ? `edited ${formatRelativeTime(script.modifiedUtc).toLowerCase()}` : '',
@@ -740,6 +746,8 @@ export class PythonScriptWorkbench {
         const mounted = await this._ensureEditor(generation);
         if (generation !== this._generation || token !== this._loadToken || !mounted) return false;
         this._loadToken = null;
+        // One editor serves every script, so the highlighting follows the file loaded into it.
+        this._applyEditorLanguage(name);
         // The model normalizes line endings; the baseline must be what the editor reports,
         // otherwise a CRLF file reads as dirty before the first keystroke.
         this._setEditorText(response.content ?? '');
@@ -778,7 +786,7 @@ export class PythonScriptWorkbench {
             this.monaco = monaco;
             const editor = monaco.editor.create(mount, {
                 value: '',
-                language: 'python',
+                language: scriptRuntimeFor(this.name).monacoLanguage,
                 theme: 'viberails-dark',
                 automaticLayout: true,
                 minimap: { enabled: false },
@@ -808,6 +816,13 @@ export class PythonScriptWorkbench {
         });
         this._editorMounting = mounting;
         return mounting;
+    }
+
+    /** python, powershell or shell highlighting for `name` (Monaco ships all three). */
+    _applyEditorLanguage(name) {
+        const model = this.editor?.getModel?.();
+        if (!model || typeof this.monaco?.editor?.setModelLanguage !== 'function') return;
+        this.monaco.editor.setModelLanguage(model, scriptRuntimeFor(name).monacoLanguage);
     }
 
     /**
@@ -1212,6 +1227,8 @@ export class PythonScriptWorkbench {
         this._diskChange = null;
         this._hideBanner();
         this.app.updateCurrentViewData?.({ name: newName });
+        // report.py → report.sh keeps the text but changes what runs it.
+        this._applyEditorLanguage(newName);
         this._renderIdentity();
         this._renderRail();
         this._renderHint();

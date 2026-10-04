@@ -48,7 +48,8 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | [js/modules/code-report/viewer.js](js/modules/code-report/viewer.js) | Code Atlas / Quality Lab report inline in Project health's Code quality card: real repository graph, inline saved-details panel and explicit teardown; see [integration contract](js/modules/code-report/README.md) |
 | [js/modules/project-health-fix-launcher.js](js/modules/project-health-fix-launcher.js) | Inline shared agent/environment pickers beside Project health Fix actions; synchronizes and remembers the target for direct launch |
 | [js/modules/jobs-controller.js](js/modules/jobs-controller.js) | Automation page: ordered repository-script/Worker workflow editor, automation CRUD, per-action run details, recipes, and "Run now" (queues a native-terminal run; `launchFromNav` for the nav launcher); owns the shared `PythonScriptsController` |
-| [js/modules/python-scripts-controller.js](js/modules/python-scripts-controller.js) | "Python scripts" section of the Automation page + shared lifecycle and signing flows |
+| [js/modules/python-scripts-controller.js](js/modules/python-scripts-controller.js) | "Scripts" section of the Automation page (pwsh, bash and python) + shared lifecycle and signing flows |
+| [js/modules/script-runtimes.js](js/modules/script-runtimes.js) | The `.ps1`/`.sh`/`.py` → pwsh/bash/python table (labels, icons, Monaco language, starter templates, name rule) every script surface reads |
 | [js/modules/python-script-workbench.js](js/modules/python-script-workbench.js) | `python-script` view: Monaco editor beside a docked agent terminal for one script (see "Python script workbench" below) |
 | [js/modules/python-run-window.js](js/modules/python-run-window.js) | The little run window: argument rows + stdin in, exit code / output / return value out, no terminal (see "Python script run window" below) |
 | [js/modules/automation-launcher.js](js/modules/automation-launcher.js) | Nav "Launch" flyout (automations + Python scripts, unsigned ones disabled) and its order/show-hide customize modal over `/api/v1/automation-nav/preferences` |
@@ -890,12 +891,18 @@ See also: [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for back
   script name navigate here in every host; "Open in VS Code" is a secondary menu item
   when the extension bridge exists.
 - **Scripts section**: authoring/import actions and PIN/refresh controls have a separate
-  wrapping toolbar. The local signed workbench accepts Python (`.py`); visible guidance
-  points to **New automation → Add script** for repository Python (`.py`), PowerShell
-  (`.ps1`), and Bash (`.sh`) actions. Do not imply the local Python API accepts all three.
+  wrapping toolbar. Since VIBE-56 the signed library holds pwsh (`.ps1`), bash (`.sh`) and
+  python (`.py`) scripts; the extension picks the interpreter, and every surface says which
+  one through `script-runtimes.js` (row chip, workbench icon + "runs with", run-window command
+  line and argument hint, launcher icon, terminal tab title). New script has a **Runs with**
+  picker kept in step with the file name (picking bash renames `script.py` to `script.sh`;
+  typing `deploy.ps1` moves the picker; a bare name takes the picked extension). Repository
+  scripts still go through **New automation → Add script**. The API, view and class names
+  keep their historical `python` spelling.
 - **Layout**: Back bar (`data-action="go-back"`, bound globally) + identity/status pill +
   Run / Sign / kebab; a `.rules-section` card with a script rail and Monaco
-  (`viberails-dark`, Ctrl/⌘+S saves in place); an optional last-run drawer; a draggable
+  (`viberails-dark`, Ctrl/⌘+S saves in place; the shared model's language follows the
+  loaded file: python, powershell or shell); an optional last-run drawer; a draggable
   splitter (`role="separator"`, Arrow keys ±24px); and the agent terminal
   (`renderTerminalPanel({ workingDirectory })` + `bindTerminalActions(host, null,
   { defaultWorkingDirectory: scriptsDirectory })`, so sessions start in the **scripts

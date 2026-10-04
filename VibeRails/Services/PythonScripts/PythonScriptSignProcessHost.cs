@@ -55,7 +55,7 @@ public static class PythonScriptSignProcessHost
 
         if (string.IsNullOrWhiteSpace(name))
         {
-            Console.Error.WriteLine($"Usage: vb {Flag} <script-name>.py");
+            Console.Error.WriteLine($"Usage: vb {Flag} <script-name>.py|.ps1|.sh");
             return 1;
         }
 

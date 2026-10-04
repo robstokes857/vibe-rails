@@ -1,7 +1,7 @@
 // @ts-check
 //
 // Server-backed File Explorer dialog (js/modules/file-explorer.js): the desktop-style Open /
-// Select Folder modal reached from the Python scripts "Add file" button and from
+// Select Folder modal reached from the Scripts "Add from disk" button and from
 // window.app.pickFileSystemEntry(). READ-ONLY on purpose — the spec navigates, sorts, types
 // paths, and dismisses; it never imports a script or touches signing state. Only the final
 // directory-picker step accepts anything, and that only resolves a promise in the page.
@@ -59,7 +59,7 @@ test('the Add-file dialog is a navigable, sortable, keyboard-friendly Open dialo
 
     await trigger.click();
     const dialog = await waitForFolder(page);
-    await expect(dialog.locator('#vb-file-explorer-title')).toHaveText('Add a Python script');
+    await expect(dialog.locator('#vb-file-explorer-title')).toHaveText('Add a script');
 
     // Places sidebar: Project is always there; Home (when the host has one) moves the view.
     const places = dialog.locator('[data-file-explorer-places] .vb-file-explorer-place');
@@ -107,11 +107,11 @@ test('the Add-file dialog is a navigable, sortable, keyboard-friendly Open dialo
         expect(pathKey(await currentPath(dialog))).toBe(pathKey(root));
     }
 
-    // "Files of type" exists because the caller supplied filters, with Python files selected.
+    // "Files of type" exists because the caller supplied filters, with all three script types selected.
     const filter = dialog.locator('[data-file-explorer-filter]');
     await expect(filter).toBeVisible();
     await expect(filter).toHaveValue('0');
-    await expect(filter.locator('option:checked')).toHaveText(/^Python files/);
+    await expect(filter.locator('option:checked')).toHaveText(/^Scripts/);
     // The primary button reads Open in a file picker; a highlighted muted row never appears
     // here (that is the folder picker's case, covered below).
     await expect(dialog.locator('[data-file-explorer-select-label]')).toHaveText('Open');

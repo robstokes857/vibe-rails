@@ -43,14 +43,15 @@ test('approve without a valid PIN is always refused', async ({ context }) => {
     expect(status.pinConfigured === true || status.pinConfigured === false).toBeTruthy();
 });
 
-test('Automation page shows the Python scripts section', async ({ page, context }) => {
+test('Automation page shows the Scripts section (pwsh, bash and python)', async ({ page, context }) => {
     const status = await (await context.request.get(API)).json();
     await page.goto('/?view=terminal-focus', { waitUntil: 'domcontentloaded' });
     await page.locator('.app-subnav-link[data-view="jobs"]:visible').click();
 
     const section = page.locator('[data-python-scripts-root]');
     await expect(section).toBeVisible({ timeout: 15_000 });
-    await expect(section.locator('#python-scripts-title')).toContainText('Python scripts');
+    await expect(section.locator('#python-scripts-title')).toContainText('Scripts');
+    await expect(section.locator('.python-scripts-runtime-help')).toContainText('pwsh');
     await expect(section.locator('[data-python-scripts-dir]')).toContainText('.vibe_rails', { timeout: 10_000 });
     await expect(section.locator('[data-python-scripts-pin-label]'))
         .toHaveText(status.pinConfigured ? 'Change PIN' : 'Set PIN');
@@ -58,7 +59,7 @@ test('Automation page shows the Python scripts section', async ({ page, context 
     if (status.scripts.length > 0) {
         await expect(section.locator('.python-script-row')).toHaveCount(status.scripts.length);
     } else {
-        await expect(section.locator('.jobs-empty')).toContainText('No Python scripts yet');
+        await expect(section.locator('.jobs-empty')).toContainText('No scripts yet');
     }
 
     // Every script surfaces in the nav Launch flyout catalog, carrying its signing status

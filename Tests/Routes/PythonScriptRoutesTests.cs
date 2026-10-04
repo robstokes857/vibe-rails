@@ -132,7 +132,7 @@ public sealed class PythonScriptRoutesTests : IDisposable
                 AppJsonSerializerContext.Default.ErrorResponse,
                 TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-            Assert.Contains(".py file name", body!.Error);
+            Assert.Contains("plain .py, .ps1 or .sh file name", body!.Error);
             Assert.DoesNotContain(nameof(PythonScriptValidationException), body.Error, StringComparison.Ordinal);
         });
     }

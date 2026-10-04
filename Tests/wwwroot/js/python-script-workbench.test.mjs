@@ -1919,3 +1919,39 @@ test('A result that lands after the run window closes still reaches the workbenc
     scripts.emitRunChanged('nightly.py');
     assert.equal(workbench.lastRun, landed, 'and it stops listening once the view unloads');
 });
+
+test('A PowerShell script opens with PowerShell highlighting, its runtime icon and a matching brief', async (t) => {
+    const app = createApp();
+    app.apiCall = async (url, method) => {
+        app.calls.push({ url, method });
+        return { name: 'deploy.ps1', content: 'Write-Output 1\n', status: 'unapproved', version: 'v1' };
+    };
+    const monaco = fakeMonaco();
+    const languages = [];
+    monaco.editor.setModelLanguage = (model, language) => languages.push(language);
+    const script = { ...SCRIPT, name: 'deploy.ps1', path: '/scripts/deploy.ps1', status: 'unapproved' };
+    const { root } = await loadedWorkbench(t, { app, scripts: [script], name: 'deploy.ps1', monaco });
+
+    assert.equal(monaco.created[0].options.language, 'powershell');
+    assert.deepEqual(languages, ['powershell'], 'each load re-applies the language to the shared model');
+    assert.match(root.el('[data-workbench-meta]').textContent, /^runs with pwsh · \/scripts\/deploy\.ps1 · /);
+    assert.match(buildAskAgentBrief({ name: 'deploy.ps1', path: '/scripts/deploy.ps1' }),
+        /^Please help me change the PowerShell script deploy\.ps1 at \/scripts\/deploy\.ps1\./);
+    assert.match(buildAskAgentBrief({ name: 'backup.sh', path: '/scripts/backup.sh' }), /the Bash script backup\.sh/);
+});
+
+test('Renaming a script to another extension switches the editor to that runtime', async () => {
+    const { workbench, app, root } = mountedWorkbench();
+    const scripts = app.jobController.pythonScripts;
+    const languages = [];
+    workbench.monaco = { editor: { setModelLanguage: (model, language) => languages.push(language) } };
+    scripts.rename = async () => {
+        scripts.state.scripts = [{ ...SCRIPT, name: 'nightly.sh', status: 'unapproved', path: '/scripts/nightly.sh' }];
+        return 'nightly.sh';
+    };
+
+    assert.equal(await workbench.rename(), 'nightly.sh');
+
+    assert.deepEqual(languages, ['shell']);
+    assert.match(root.el('[data-workbench-meta]').textContent, /^runs with bash · /);
+});

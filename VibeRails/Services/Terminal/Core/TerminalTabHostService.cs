@@ -126,7 +126,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                 new StartTerminalRequest(
                     WorkingDirectory: scriptsDirectory,
                     Cli: "shell",
-                    Title: $"{canonicalName} · Python"),
+                    Title: $"{canonicalName} · {PythonScriptService.RuntimeDisplayName(canonicalName)}"),
                 cancellationToken);
 
             await SendInputAsync(
@@ -151,7 +151,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                 try { await DeleteTabAsync(tab.TabId, CancellationToken.None); }
                 catch (Exception ex)
                 {
-                    Log.Debug(ex, "[TerminalTabs] Failed to clean up Python script tab {TabId}", tab.TabId);
+                    Log.Debug(ex, "[TerminalTabs] Failed to clean up script tab {TabId}", tab.TabId);
                 }
             }
             throw;

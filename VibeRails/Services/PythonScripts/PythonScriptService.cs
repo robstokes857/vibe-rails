@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using PyBridge;
 using Serilog;
 using VibeRails.DTOs;
+using VibeRails.Services.Jobs;
 using VibeRails.Utils;
 
 namespace VibeRails.Services.PythonScripts;
@@ -51,7 +52,9 @@ public interface IPythonScriptService
 public sealed class PythonScriptValidationException(string message) : Exception(message);
 
 /// <summary>
-/// Single-file Python scripts in <c>~/.vibe_rails/scripts</c>, gated by hash pinning:
+/// Single-file scripts in <c>~/.vibe_rails/scripts</c> — Python (<c>.py</c>), PowerShell
+/// (<c>.ps1</c>, run by pwsh) or Bash (<c>.sh</c>), chosen by the file extension — gated by
+/// hash pinning:
 /// the user approves ("signs") a script by entering their PIN, which records the
 /// script's canonical SHA-256; a script only runs while its current content still
 /// hashes to an approved value, and the run executes the exact verified bytes (via a
@@ -116,13 +119,19 @@ public sealed class PythonScriptService : IPythonScriptService
     private static readonly UTF8Encoding StrictUtf8 = new(
         encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
+    // The extension picks the interpreter (see RuntimeFor), so it is part of the contract:
+    // lower-case only, matching what the dashboard writes and what the old .py rule accepted.
     private static readonly Regex ScriptNamePattern = new(
-        @"^[A-Za-z0-9][A-Za-z0-9._ -]{0,120}\.py$",
+        @"^[A-Za-z0-9][A-Za-z0-9._ -]{0,120}\.(?:py|ps1|sh)$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private const string ScriptNameRule =
+        "Script names must be a plain .py, .ps1 or .sh file name (letters, digits, dots, dashes, spaces).";
 
     private readonly string _installDirectory;
     private readonly Lazy<IPythonRunner?> _pythonRunner;
     private readonly Func<PythonRunnerOptions, IPythonRunner> _runnerFactory;
+    private readonly IJobExecutableResolver _executableResolver;
     private readonly SemaphoreSlim _documentLock = new(1, 1);
     private readonly object _historyLock = new();
     private readonly List<PythonScriptRunRecord> _runHistory = [];
@@ -131,14 +140,36 @@ public sealed class PythonScriptService : IPythonScriptService
         IPythonRunner? pythonRunner = null,
         string? installDirectory = null,
         Func<PythonRunnerOptions, IPythonRunner>? runnerFactory = null,
-        Func<IPythonRunner?>? pythonRunnerProvider = null)
+        Func<IPythonRunner?>? pythonRunnerProvider = null,
+        IJobExecutableResolver? executableResolver = null)
     {
         _pythonRunner = new Lazy<IPythonRunner?>(
             () => pythonRunner ?? pythonRunnerProvider?.Invoke(),
             LazyThreadSafetyMode.ExecutionAndPublication);
         _installDirectory = installDirectory ?? PathConstants.GetInstallDirPath();
         _runnerFactory = runnerFactory ?? (options => new PythonRunner(options));
+        // pwsh and Bash resolve exactly like repository Automation scripts (Git Bash on Windows,
+        // never the System32 WSL bridge). Resolution is per run, so listing never probes PATH.
+        _executableResolver = executableResolver ?? new JobExecutableResolver();
     }
+
+    /// <summary>The interpreter a script runs under, from its (validated) file extension.</summary>
+    public static JobScriptRuntime RuntimeFor(string scriptName) =>
+        Path.GetExtension(scriptName).ToLowerInvariant() switch
+        {
+            ".ps1" => JobScriptRuntime.PowerShell,
+            ".sh" => JobScriptRuntime.Bash,
+            _ => JobScriptRuntime.Python
+        };
+
+    /// <summary>The word the UI and terminal titles use for a script's runtime.</summary>
+    public static string RuntimeDisplayName(string scriptName) =>
+        RuntimeFor(scriptName) switch
+        {
+            JobScriptRuntime.PowerShell => "PowerShell",
+            JobScriptRuntime.Bash => "Bash",
+            _ => "Python"
+        };
 
     public string GetScriptsDirectory() => Path.Combine(_installDirectory, ScriptsSubdirectory);
 
@@ -322,21 +353,22 @@ public sealed class PythonScriptService : IPythonScriptService
         CancellationToken cancellationToken = default)
     {
         ValidateRunInputs(arguments, standardInput);
-        var baseRunner = GetPythonRunnerOrThrow();
+        var runtime = RuntimeFor(ValidateScriptName(requestedName));
+        var interpreter = ResolveInterpreterOrThrow(runtime);
 
         var verified = await ReadVerifiedScriptAsync(requestedName, cancellationToken);
         var name = verified.Name;
-        var content = verified.Content;
 
         var startedUtc = DateTime.UtcNow;
-        var verifiedCopy = Path.Combine(
-            Path.GetTempPath(),
-            $"viberails-script-{Guid.NewGuid():N}.py");
+        var verifiedCopy = VerifiedCopyPath(name);
         try
         {
-            await File.WriteAllBytesAsync(verifiedCopy, content, cancellationToken);
+            await File.WriteAllBytesAsync(
+                verifiedCopy, ExecutableBytes(runtime, verified.Content), cancellationToken);
 
-            var options = ClonedRunnerOptions(baseRunner);
+            // The PyBridge runner is a plain CliWrap process runner: pointed at pwsh or bash it
+            // gives those scripts the same argv, stdin, timeout and output capture as Python.
+            var options = interpreter.Options;
             options.WorkingDirectory = GetScriptsDirectory();
             options.Timeout = RunTimeout;
             var runner = _runnerFactory(options);
@@ -344,26 +376,24 @@ public sealed class PythonScriptService : IPythonScriptService
             PythonResult result;
             try
             {
-                var pythonArguments = new List<string>(1 + (arguments?.Count ?? 0))
-                {
-                    verifiedCopy
-                };
+                var interpreterArguments = new List<string>(interpreter.PrefixArguments);
+                interpreterArguments.AddRange(
+                    ScriptLaunchArguments(runtime, verifiedCopy, options.WorkingDirectory, interactive: false));
                 if (arguments is { Count: > 0 })
                 {
-                    pythonArguments.AddRange(arguments);
+                    interpreterArguments.AddRange(arguments);
                 }
                 result = await runner.RunAsync(
-                    pythonArguments,
+                    interpreterArguments,
                     standardInput: string.IsNullOrEmpty(standardInput) ? null : standardInput,
                     cancellationToken: cancellationToken);
             }
             catch (PythonExecutionException ex)
             {
-                // The interpreter itself could not be launched (missing or broken Python).
+                // The interpreter itself could not be launched (missing or broken install).
                 // Surface an actionable message so the route returns 400, not a raw 500.
-                Log.Warning(ex, "[PythonScripts] Python interpreter failed to launch for {Name}", name);
-                throw new PythonScriptValidationException(
-                    "Python could not be started. Make sure a Python interpreter is installed and on your PATH.");
+                Log.Warning(ex, "[PythonScripts] {Runtime} interpreter failed to launch for {Name}", runtime, name);
+                throw new PythonScriptValidationException(CouldNotStartMessage(runtime));
             }
 
             RecordRun(name, startedUtc, result.ExitCode, result.TimedOut, result.RunTime.TotalMilliseconds);
@@ -389,7 +419,7 @@ public sealed class PythonScriptService : IPythonScriptService
     }
 
     /// <summary>
-    /// Checks the same name/hash approval contract as a real run without launching Python. The
+    /// Checks the same name/hash approval contract as a real run without launching anything. The
     /// interactive terminal route uses this before reserving a tab; the helper process verifies
     /// again immediately before it executes, so a file change in between still fails closed.
     /// </summary>
@@ -402,28 +432,29 @@ public sealed class PythonScriptService : IPythonScriptService
     }
 
     /// <summary>
-    /// Runs approved bytes with Python attached to this process's inherited console/PTY. This is
-    /// intentionally concrete-service-only: the dashboard reaches it through the narrowly scoped
-    /// <c>--run-python-script</c> helper process, never through an API that accepts a command.
+    /// Runs approved bytes with the script's interpreter attached to this process's inherited
+    /// console/PTY. This is intentionally concrete-service-only: the dashboard reaches it through
+    /// the narrowly scoped <c>--run-python-script</c> helper process, never through an API that
+    /// accepts a command.
     /// </summary>
     public async Task<int> RunInteractiveAsync(
         string? requestedName,
         CancellationToken cancellationToken = default)
     {
-        var baseRunner = GetPythonRunnerOrThrow();
+        var runtime = RuntimeFor(ValidateScriptName(requestedName));
+        var interpreter = ResolveInterpreterOrThrow(runtime);
 
         var verified = await ReadVerifiedScriptAsync(requestedName, cancellationToken);
-        var verifiedCopy = Path.Combine(
-            Path.GetTempPath(),
-            $"viberails-script-{Guid.NewGuid():N}.py");
+        var verifiedCopy = VerifiedCopyPath(verified.Name);
         var startedUtc = DateTime.UtcNow;
         var stopwatch = Stopwatch.StartNew();
 
         try
         {
-            await File.WriteAllBytesAsync(verifiedCopy, verified.Content, cancellationToken);
+            await File.WriteAllBytesAsync(
+                verifiedCopy, ExecutableBytes(runtime, verified.Content), cancellationToken);
 
-            var options = ClonedRunnerOptions(baseRunner);
+            var options = interpreter.Options;
             var startInfo = new ProcessStartInfo
             {
                 FileName = options.PythonExecutable,
@@ -434,20 +465,23 @@ public sealed class PythonScriptService : IPythonScriptService
                 RedirectStandardError = false,
                 CreateNoWindow = false
             };
-            startInfo.ArgumentList.Add(verifiedCopy);
+            foreach (var argument in interpreter.PrefixArguments)
+                startInfo.ArgumentList.Add(argument);
+            foreach (var argument in ScriptLaunchArguments(
+                         runtime, verifiedCopy, startInfo.WorkingDirectory, interactive: true))
+                startInfo.ArgumentList.Add(argument);
             ApplyPythonEnvironment(startInfo, options);
 
             using var process = new Process { StartInfo = startInfo };
             try
             {
                 if (!process.Start())
-                    throw new InvalidOperationException("Python did not start.");
+                    throw new InvalidOperationException($"{runtime} did not start.");
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Log.Warning(ex, "[PythonScripts] Interactive Python failed to launch for {Name}", verified.Name);
-                throw new PythonScriptValidationException(
-                    "Python could not be started. Make sure a Python interpreter is installed and on your PATH.");
+                Log.Warning(ex, "[PythonScripts] Interactive {Runtime} failed to launch for {Name}", runtime, verified.Name);
+                throw new PythonScriptValidationException(CouldNotStartMessage(runtime));
             }
 
             try
@@ -462,7 +496,7 @@ public sealed class PythonScriptService : IPythonScriptService
                 }
                 catch (Exception ex)
                 {
-                    Log.Debug(ex, "[PythonScripts] Interactive Python cleanup failed for {Name}", verified.Name);
+                    Log.Debug(ex, "[PythonScripts] Interactive {Runtime} cleanup failed for {Name}", runtime, verified.Name);
                 }
                 throw;
             }
@@ -830,9 +864,93 @@ public sealed class PythonScriptService : IPythonScriptService
     // --- internals ---
 
     /// <summary>
-    /// A fresh options object per run so the per-run WorkingDirectory/Timeout never mutate
-    /// the injected runner's shared configuration.
+    /// The executable to launch and the arguments that precede the script path. The options are
+    /// always a fresh object, so the per-run WorkingDirectory/Timeout never mutate the injected
+    /// runner's shared configuration.
     /// </summary>
+    private sealed record ScriptInterpreter(PythonRunnerOptions Options, IReadOnlyList<string> PrefixArguments);
+
+    private ScriptInterpreter ResolveInterpreterOrThrow(JobScriptRuntime runtime)
+    {
+        if (runtime == JobScriptRuntime.Python)
+            return new ScriptInterpreter(ClonedRunnerOptions(GetPythonRunnerOrThrow()), []);
+
+        var executable = _executableResolver.Resolve(runtime)
+            ?? throw new PythonScriptValidationException(AutomationScriptService.MissingRuntimeMessage(runtime));
+        // No PYTHON* variables: they mean nothing to pwsh or bash.
+        return new ScriptInterpreter(
+            new PythonRunnerOptions
+            {
+                PythonExecutable = executable.Path,
+                UseUnbufferedOutput = false,
+                UseUtf8Io = false,
+                ThrowOnNonZeroExitCode = false
+            },
+            executable.PrefixArguments);
+    }
+
+    /// <summary>
+    /// The arguments that name the verified copy for its interpreter. PowerShell gets the same
+    /// switches as a repository Automation script: the hash pin is the trust decision, so the
+    /// machine's execution policy must not veto an approved script. A captured run also passes
+    /// -NonInteractive, turning a stray Read-Host into an error rather than a hung run; the
+    /// terminal path leaves it off because answering prompts is what that path is for.
+    /// </summary>
+    private static IEnumerable<string> ScriptLaunchArguments(
+        JobScriptRuntime runtime, string verifiedCopy, string workingDirectory, bool interactive)
+    {
+        switch (runtime)
+        {
+            case JobScriptRuntime.PowerShell:
+                yield return "-NoLogo";
+                yield return "-NoProfile";
+                if (!interactive) yield return "-NonInteractive";
+                yield return "-ExecutionPolicy";
+                yield return "Bypass";
+                yield return "-File";
+                yield return verifiedCopy;
+                break;
+            case JobScriptRuntime.Bash:
+                // Git Bash and POSIX bash both read a relative slash path; a raw Windows drive
+                // path is not portable between them.
+                yield return AutomationScriptService.ToBashPath(workingDirectory, verifiedCopy);
+                break;
+            default:
+                yield return verifiedCopy;
+                break;
+        }
+    }
+
+    /// <summary>
+    /// The verified copy keeps the script's extension: pwsh refuses -File on anything that is
+    /// not a .ps1, and a traceback naming a .py file reads as expected.
+    /// </summary>
+    private static string VerifiedCopyPath(string scriptName) =>
+        Path.Combine(
+            Path.GetTempPath(),
+            $"viberails-script-{Guid.NewGuid():N}{Path.GetExtension(scriptName).ToLowerInvariant()}");
+
+    /// <summary>
+    /// The bytes written to the verified copy. Bash gets the canonical text the approval was
+    /// computed over (BOM removed, LF line endings): a CRLF file is the same signed script, but
+    /// bash would read every '\r' as part of a command. Other interpreters take the bytes as-is.
+    /// </summary>
+    private static byte[] ExecutableBytes(JobScriptRuntime runtime, byte[] content) =>
+        runtime == JobScriptRuntime.Bash
+            ? StrictUtf8.GetBytes(CanonicalText(content))
+            : content;
+
+    private static string CouldNotStartMessage(JobScriptRuntime runtime) =>
+        runtime switch
+        {
+            JobScriptRuntime.PowerShell =>
+                "PowerShell (pwsh) could not be started. Make sure PowerShell 7 is installed and on your PATH.",
+            JobScriptRuntime.Bash when OperatingSystem.IsWindows() =>
+                "Bash could not be started. Make sure Git for Windows (Git Bash) is installed.",
+            JobScriptRuntime.Bash => "Bash could not be started. Make sure bash is installed and on your PATH.",
+            _ => "Python could not be started. Make sure a Python interpreter is installed and on your PATH."
+        };
+
     private IPythonRunner GetPythonRunnerOrThrow()
     {
         try
@@ -926,7 +1044,9 @@ public sealed class PythonScriptService : IPythonScriptService
         var scripts = new List<PythonScriptInfo>();
         if (Directory.Exists(scriptsDirectory))
         {
-            foreach (var path in Directory.EnumerateFiles(scriptsDirectory, "*.py", SearchOption.TopDirectoryOnly)
+            // Every entry is matched against the name rule below, which is what limits the list
+            // to .py, .ps1 and .sh (and skips the dot-prefixed temp files of an in-flight save).
+            foreach (var path in Directory.EnumerateFiles(scriptsDirectory, "*", SearchOption.TopDirectoryOnly)
                          .OrderBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase))
             {
                 var name = Path.GetFileName(path);
@@ -965,8 +1085,7 @@ public sealed class PythonScriptService : IPythonScriptService
         if (!ScriptNamePattern.IsMatch(trimmed)
             || trimmed.Contains("..", StringComparison.Ordinal))
         {
-            throw new PythonScriptValidationException(
-                "Script names must be a plain .py file name (letters, digits, dots, dashes, spaces).");
+            throw new PythonScriptValidationException(ScriptNameRule);
         }
 
         return trimmed;
@@ -1196,11 +1315,17 @@ public sealed class PythonScriptService : IPythonScriptService
         }
     }
 
-    /// <summary>A plain file name turned into a candidate script name (adds the .py).</summary>
+    /// <summary>
+    /// A plain file name turned into a candidate script name: a .py, .ps1 or .sh extension is
+    /// kept (lower-cased, since it selects the interpreter); anything else is treated as Python.
+    /// </summary>
     private static string SuggestScriptName(string fileName)
     {
         var trimmed = (fileName ?? string.Empty).Trim();
-        return trimmed.EndsWith(".py", StringComparison.OrdinalIgnoreCase) ? trimmed : trimmed + ".py";
+        var extension = Path.GetExtension(trimmed).ToLowerInvariant();
+        return extension is ".py" or ".ps1" or ".sh"
+            ? trimmed[..^extension.Length] + extension
+            : trimmed + ".py";
     }
 
     private static string ResolveStatus(
@@ -1304,13 +1429,17 @@ public sealed class PythonScriptService : IPythonScriptService
     /// </summary>
     internal static string ComputeCanonicalHash(string name, byte[] content)
     {
+        var preimage = $"viberails-script-v1\n{name}\n{CanonicalText(content)}";
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(preimage)));
+    }
+
+    /// <summary>Strict UTF-8 text with a leading BOM removed and CRLF/CR folded to LF.</summary>
+    private static string CanonicalText(byte[] content)
+    {
         var text = DecodeUtf8OrThrow(content);
         if (text.StartsWith('﻿')) text = text[1..];
-        text = text.Replace("\r\n", "\n", StringComparison.Ordinal)
+        return text.Replace("\r\n", "\n", StringComparison.Ordinal)
             .Replace('\r', '\n');
-
-        var preimage = $"viberails-script-v1\n{name}\n{text}";
-        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(preimage)));
     }
 
     private static bool NameEquals(string left, string right) =>

@@ -772,7 +772,8 @@ coordination; see the [database reference](../VibeRails.Data.Sqlite/DB/AGENTS.md
 - `DELETE /api/v1/sandboxes/{id}` - Delete sandbox (removes directory + DB record)
 - `POST /api/v1/sandboxes/{id}/launch/vscode` - Launch VS Code in sandbox directory
 
-**Python scripts** (single-file scripts in `~/.vibe_rails/scripts`, gated by PIN-backed hash pinning):
+**Python scripts** (single-file pwsh `.ps1`, bash `.sh` or python `.py` scripts in `~/.vibe_rails/scripts`,
+gated by PIN-backed hash pinning; the extension picks the interpreter):
 - `GET /api/v1/python-scripts` - List scripts with signing status
 - `POST /api/v1/python-scripts/pin` - Create or change the signing PIN
 - `POST /api/v1/python-scripts/approve` | `/revoke` - Sign / unsign a script (PIN required)
@@ -787,7 +788,7 @@ coordination; see the [database reference](../VibeRails.Data.Sqlite/DB/AGENTS.md
 
 **Nav Automation launcher** (the nav "Launch" flyout; preferences persist per install in GlobalCache):
 - `GET /api/v1/automation-nav/preferences` - Catalog of the current project's automations
-  (`job:{id}`) plus every Python script (`script:{name}`, with its signing `status`), each
+  (`job:{id}`) plus every signed-library script (`script:{name}`, with its signing `status`), each
   with its saved order and show/hide state
 - `PUT /api/v1/automation-nav/preferences` - Save order/visibility; the body must be the full
   current catalog (400 when it no longer matches, e.g. an automation was renamed meanwhile)

@@ -17631,13 +17631,15 @@ html.sidebar-collapsed .app-sidebar .app-subnav-split .app-subnav-link {
 
 .automation-launch-item > .fa-play,
 .automation-launch-item > .fa-python,
+.automation-launch-item > .fa-terminal,
 .automation-launch-item > .spinner-border {
     flex: 0 0 auto;
     font-size: 0.7rem;
     color: var(--color-success, #10b981);
 }
 
-.automation-launch-item > .fa-python {
+.automation-launch-item > .fa-python,
+.automation-launch-item > .fa-terminal {
     font-size: 0.85rem;
 }
 
@@ -17666,7 +17668,8 @@ html.sidebar-collapsed .app-sidebar .app-subnav-split .app-subnav-link {
     background: transparent;
 }
 
-.automation-launch-item:disabled > .fa-python {
+.automation-launch-item:disabled > .fa-python,
+.automation-launch-item:disabled > .fa-terminal {
     color: inherit;
 }
 
@@ -18349,6 +18352,19 @@ button.python-script-name:focus-visible > i {
     font-size: 0.72rem;
     color: var(--color-text-muted, #94a3b8);
     overflow-wrap: anywhere;
+}
+
+/* Which interpreter runs the script: pwsh, bash or python (the file extension decides). */
+.python-script-runtime {
+    display: inline-block;
+    margin-right: 6px;
+    padding: 0 5px;
+    border: 1px solid var(--color-border, #334155);
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.68rem;
+    line-height: 1.4;
+    color: var(--color-text-secondary, #94a3b8);
 }
 
 .python-script-menu-wrap {

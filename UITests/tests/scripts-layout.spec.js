@@ -125,3 +125,50 @@ test('script actions align and language guidance stays readable on narrow screen
     await actions.scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath('scripts-narrow.png') });
 });
+
+test('New script says pwsh, bash or python, keeps the extension in step and opens with shell highlighting', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await openScripts(page);
+    const created = [];
+    const deploy = { name: 'deploy.sh', path: 'C:/fixture/scripts/deploy.sh', status: 'unapproved',
+        sizeBytes: 64, modifiedUtc: '2026-10-03T01:00:00Z' };
+    const list = () => ({ scriptsDirectory: 'C:/fixture/scripts', pinConfigured: true, scripts: created.length ? [deploy] : [] });
+    // Registered after openScripts, so these win over its catch-all fixture.
+    await page.route('**/api/v1/python-scripts/create', route => {
+        created.push(route.request().postDataJSON());
+        return route.fulfill({ json: list() });
+    });
+    await page.route('**/api/v1/python-scripts', route => route.fulfill({ json: list() }));
+    await page.route('**/api/v1/python-scripts/content*', route =>
+        route.fulfill({ json: { ...deploy, version: 'one', content: created[0]?.content || '' } }));
+
+    await page.locator('[data-python-scripts-action="new"]').first().click();
+    const modal = page.locator('.python-scripts-pin-modal');
+    await expect(modal.locator('.modal-title')).toHaveText('New script');
+    await expect(modal).toContainText('Choose pwsh, bash, or python.');
+    const runtime = modal.locator('select[data-pin-field="runtime"]');
+    const name = modal.locator('input[data-pin-field="name"]');
+    await expect(runtime.locator('option')).toHaveText(['python — Python (.py)', 'pwsh — PowerShell (.ps1)', 'bash — Bash (.sh)']);
+    await expect(name).toBeFocused();
+    await expect(name).toHaveValue('script.py');
+
+    await runtime.selectOption('bash');
+    await expect(name).toHaveValue('script.sh');
+    await name.fill('deploy.ps1');
+    await expect(runtime).toHaveValue('pwsh');
+    await page.screenshot({ path: testInfo.outputPath('new-script-dialog.png') });
+    await name.fill('deploy');
+    await runtime.selectOption('bash');
+    await expect(name).toHaveValue('deploy.sh');
+    await modal.getByRole('button', { name: 'Create and edit' }).click();
+
+    await expect.poll(() => created.length).toBe(1);
+    expect(created[0].name).toBe('deploy.sh');
+    expect(created[0].content.startsWith('#!/usr/bin/env bash\n')).toBe(true);
+    await expect(page.locator('.monaco-editor')).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.monaco?.editor.getModels().map(model => model.getLanguageId())))
+        .toContain('shell');
+    await expect(page.locator('.python-workbench-identity > i')).toHaveClass(/fa-terminal/);
+    await expect(page.locator('[data-workbench-meta]')).toContainText('runs with bash');
+    await page.screenshot({ path: testInfo.outputPath('new-script-workbench.png') });
+});

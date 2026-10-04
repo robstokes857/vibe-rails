@@ -3,8 +3,8 @@ using PyBridge;
 namespace VibeRails.Services.PythonScripts;
 
 /// <summary>
-/// Lightweight host for an approved script launched inside a Web UI terminal. Python inherits
-/// this process's console handles, so <c>input()</c>, prompts, Ctrl+C, and live output all travel
+/// Lightweight host for an approved script launched inside a Web UI terminal. Its interpreter
+/// (python, pwsh or bash) inherits this process's console handles, so prompts, Ctrl+C, and live output all travel
 /// through the existing PTY/WebSocket instead of captured HTTP response buffers.
 /// </summary>
 public static class PythonScriptRunProcessHost
@@ -41,14 +41,16 @@ public static class PythonScriptRunProcessHost
 
         if (string.IsNullOrWhiteSpace(name))
         {
-            Console.Error.WriteLine($"Usage: vb {Flag} <script-name>.py");
+            Console.Error.WriteLine($"Usage: vb {Flag} <script-name>.py|.ps1|.sh");
             return 1;
         }
 
         var bootstrapService = new PythonScriptService(installDirectory: installDirectory);
         var scriptsDirectory = bootstrapService.GetScriptsDirectory();
-        var runner = new PythonRunner(PythonRunnerOptions.Discover(scriptsDirectory));
-        var service = new PythonScriptService(runner, installDirectory);
+        // Lazy: only a .py script needs the interpreter search; pwsh and bash resolve their own.
+        var service = new PythonScriptService(
+            installDirectory: installDirectory,
+            pythonRunnerProvider: () => new PythonRunner(PythonRunnerOptions.Discover(scriptsDirectory)));
 
         try
         {

@@ -314,3 +314,23 @@ test('the run window CSS keeps a fallback on every colour token and spends cyan 
     // Reduced motion stops the only animation in the window.
     assert.match(block, /@media \(prefers-reduced-motion: reduce\) \{\s*\.vb-run-status\.is-waiting \.vb-run-dot \{\s*animation: none;/);
 });
+
+test('the window names the interpreter that will run the script: pwsh, bash or python', () => {
+    const box = { innerHTML: '', classList: { toggle() {} } };
+    const layer = { querySelector: (selector) => (selector === '[data-run-command]' ? box : null) };
+    const cases = [
+        ['deploy.ps1', 'pwsh', '$args (or a param() block)', 'fa-solid fa-terminal'],
+        ['backup.sh', 'bash', '$1, $2, … ("$@")', 'fa-solid fa-terminal'],
+        ['report.py', 'python', 'sys.argv', 'fa-brands fa-python']
+    ];
+    for (const [name, command, hint, icon] of cases) {
+        const view = new PythonRunWindow({}, { runningNames: new Set() });
+        view.name = name;
+        view.extras = [];
+        view.layer = layer;
+        view._paintCommandLine();
+        assert.match(box.innerHTML, new RegExp(`^<span class="vb-run-exec">${command}</span> <span class="vb-run-script">`));
+        assert.ok(view._renderFields().includes(`<code>${hint.replace(/"/g, '&quot;')}</code>`), `${name} argument hint`);
+        assert.ok(view._shell().includes(`<i class="${icon}" aria-hidden="true"></i>`), `${name} header icon`);
+    }
+});

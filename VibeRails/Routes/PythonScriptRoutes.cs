@@ -61,7 +61,7 @@ public static class PythonScriptRoutes
                     return Results.Ok(new PythonScriptInteractiveRunResponse(
                         request.Name?.Trim() ?? string.Empty,
                         tab.TabId,
-                        "Python script started in an interactive terminal."));
+                        $"{PythonScriptService.RuntimeDisplayName(request.Name?.Trim() ?? string.Empty)} script started in an interactive terminal."));
                 }
                 catch (PythonScriptValidationException exception)
                 {
