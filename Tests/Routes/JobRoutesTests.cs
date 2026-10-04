@@ -5,6 +5,10 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
+using VibeRails.Auth;
+using VibeRails.DB;
+using VibeRails.Middleware;
+using VibeRails.Services.Board;
 using VibeRails.DTOs;
 using VibeRails.Routes;
 using VibeRails.Services;
@@ -42,6 +46,8 @@ public sealed class JobRoutesTests : IDisposable
             using var catalog = await SharedClient.GetAsync(
                 new Uri(baseUri, "/api/v1/jobs/catalog"), TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.NotFound, catalog.StatusCode);
+            using var scripts = await SharedClient.GetAsync(new Uri(baseUri, "/api/v1/jobs/scripts"), TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.NotFound, scripts.StatusCode);
 
             // 405 rather than 404: the HTTP-method policy is baked into the routing DFA ahead of
             // the {id:long} constraint, so "import" reaches the GET/PUT/DELETE /jobs/{id} node and
@@ -51,6 +57,31 @@ public sealed class JobRoutesTests : IDisposable
         }, isActiveRootBackend: false);
 
         _importService.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task ScriptCatalogRequiresBothCredentialsAndUsesAotJson()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_repoRoot, "check.py"), "print('ok')", TestContext.Current.CancellationToken);
+        await WithHostAsync(async baseUri =>
+        {
+            foreach (var credentials in new[] { (false, false), (true, false), (false, true), (true, true) })
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(baseUri, "/api/v1/jobs/scripts?projectPath=C:/ignored"));
+                if (credentials.Item1) request.Headers.Add("Cookie", "viberails_session=test-session");
+                if (credentials.Item2) request.Headers.Add("viberails_tab", "test-tab");
+                using var response = await SharedClient.SendAsync(request, TestContext.Current.CancellationToken);
+                if (!credentials.Item1 || !credentials.Item2) Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+                else
+                {
+                    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                    Assert.True(response.Headers.CacheControl!.NoStore);
+                    var catalog = await response.Content.ReadFromJsonAsync(AppJsonSerializerContext.Default.AutomationScriptCatalogResponse, TestContext.Current.CancellationToken);
+                    var script = Assert.Single(catalog!.Scripts);
+                    Assert.Equal("check.py", script.Path); Assert.False(script.Approved); Assert.Null(script.UnavailableReason);
+                }
+            }
+        }, protect: true);
     }
 
     [Fact]
@@ -203,19 +234,33 @@ public sealed class JobRoutesTests : IDisposable
             JsonContent.Create(body, AppJsonSerializerContext.Default.AutomationImportRequest),
             TestContext.Current.CancellationToken);
 
-    private async Task WithHostAsync(Func<Uri, Task> test, bool isActiveRootBackend = true)
+    private async Task WithHostAsync(Func<Uri, Task> test, bool isActiveRootBackend = true, bool protect = false)
     {
         var builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Services.AddSingleton(_importService.Object);
         builder.Services.AddSingleton(_jobService.Object);
+        var jobStore = new Mock<IJobStore>();
+        jobStore.Setup(j => j.GetJobsAsync(It.IsAny<string>(), false, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        builder.Services.AddSingleton(jobStore.Object);
+        builder.Services.AddSingleton<IBoardFileIndexService, BoardFileIndexService>();
+        var runtime = new Mock<IJobExecutableResolver>();
+        runtime.Setup(r => r.Resolve(JobScriptRuntime.Python)).Returns(new JobExecutable("python", []));
+        builder.Services.AddSingleton(runtime.Object);
+        builder.Services.AddSingleton<IAutomationScriptService, AutomationScriptService>();
+        builder.Services.AddSingleton<AutomationScriptCatalogService>();
+        var auth = new Mock<IAuthService>();
+        auth.Setup(a => a.ValidateToken(It.IsAny<string?>())).Returns((string? value) => value == "test-session");
+        auth.Setup(a => a.ValidateTabToken(It.IsAny<string?>())).Returns((string? value) => value == "test-tab");
+        builder.Services.AddSingleton(auth.Object);
         builder.Services.ConfigureHttpJsonOptions(options =>
         {
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonSerializerContext.Default);
         });
 
         await using var app = builder.Build();
+        if (protect) app.UseMiddleware<CookieAuthMiddleware>();
         JobRoutes.Map(app, _repoRoot, isActiveRootBackend);
         await app.StartAsync(TestContext.Current.CancellationToken);
         try

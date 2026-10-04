@@ -13,6 +13,25 @@ namespace Tests.Services.Terminal;
 public sealed class CompletedTerminalOutputTests
 {
     [Fact]
+    public async Task AgentCompletionStopsOnlyTheExpectedPtyIncludingExternallyOwnedWorkers()
+    {
+        var pty = new Mock<IPtyConnection>();
+        pty.SetupGet(p => p.ExitCode).Returns(137);
+        await using var terminal = new TerminalPty(pty.Object, 40, 5);
+        var service = new TerminalSessionService(Mock.Of<ITerminalStateService>(), null!, Mock.Of<ILocalClientTracker>());
+        service.RegisterExternalTerminal(terminal, "new-worker", "/project");
+        try
+        {
+            Assert.False(await service.CompleteAgentSessionAsync("old-worker"));
+            pty.Verify(p => p.KillProcessTree(), Times.Never);
+            Assert.True(await service.CompleteAgentSessionAsync("new-worker"));
+            pty.Verify(p => p.KillProcessTree(), Times.Once);
+            Assert.Equal(0, terminal.ExitCode);
+        }
+        finally { await service.UnregisterTerminalAsync(); }
+    }
+
+    [Fact]
     public async Task FinalOutputSurvivesPtyDisposalAndStopsBeingAvailableWhenTheHostIsReused()
     {
         var pty = new Mock<IPtyConnection>();

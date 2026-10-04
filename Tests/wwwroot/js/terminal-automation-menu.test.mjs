@@ -106,6 +106,13 @@ test('stale refresh cannot populate a manager destroyed during navigation', asyn
     assert.equal(manager.automationTabs.size, 0);
 });
 
+test('a completed workflow leaves the robot menu even while its wrapper shell remains active', () => {
+    const finished = { tabId: 'finished', jobRunId: 'run', hasActiveSession: true, sessionId: 'outer', automationCompleted: true };
+    const running = { tabId: 'running', hasActiveSession: true, automationCompleted: false };
+    assert.equal(automationStatus(finished), 'Finished');
+    assert.deepEqual(automationEntries(new Map([['finished', finished], ['running', running]])), [running]);
+});
+
 test('starting and unavailable agents stay visible until completion is confirmed', () => {
     const starting = { tabId: 'starting', hasActiveSession: false, sessionId: null };
     const unavailable = { tabId: 'unavailable', hasActiveSession: false, sessionId: 'session', statusAvailable: false };

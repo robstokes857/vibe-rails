@@ -15,6 +15,20 @@ namespace Tests.Services.Terminal;
 public sealed class TerminalProcessExitTests
 {
     [Fact]
+    public async Task AgentCompletionDrainsAndPublishesOneNormalExit()
+    {
+        using var output = new GatedReadStream();
+        var pty = new ExitingPty(output);
+        await using var terminal = new TerminalPty(pty, 80, 24, exitDrainWindow: TimeSpan.FromMilliseconds(50));
+        var exited = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        terminal.Exited += (_, code) => exited.TrySetResult(code);
+        terminal.StartReadLoop();
+        terminal.CompleteByAgent();
+        Assert.Equal(1, pty.TreeKills);
+        Assert.Equal(0, await exited.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+        Assert.True(terminal.HasExited);
+    }
+    [Fact]
     public async Task ProcessExitEndsTheSessionWhenTheOutputPipeNeverReachesEof()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -144,7 +158,8 @@ public sealed class TerminalProcessExitTests
         public int ExitCode { get; set; }
         public bool WaitForExit(int milliseconds) => _exited;
         public void Kill() { }
-        public void KillProcessTree() { }
+        public int TreeKills { get; private set; }
+        public void KillProcessTree() { TreeKills++; RaiseExited(137); }
         public void Resize(int cols, int rows) { }
         public void Dispose() => reader.Dispose();
 

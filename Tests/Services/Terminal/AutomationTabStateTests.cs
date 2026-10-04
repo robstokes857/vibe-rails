@@ -12,6 +12,42 @@ namespace Tests.Services.Terminal;
 public sealed class AutomationTabStateTests
 {
     [Theory]
+    [InlineData(JobRunStatus.Succeeded, true)]
+    [InlineData(JobRunStatus.Failed, true)]
+    [InlineData(JobRunStatus.Running, false)]
+    [InlineData(JobRunStatus.Queued, false)]
+    public async Task MenuUsesTheRunOutcomeEvenWhenTheWrapperRemainsAlive(JobRunStatus status, bool expected)
+    {
+        Assert.Equal(expected, await Started().HasCompletedRunAsync(Jobs(status).Object,
+            new(true, "outer"), TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task MenuCompletionNeverHidesAReplacementOrAnUnconfirmedSession()
+    {
+        var state = Started();
+        var store = Mock.Of<IJobStore>(MockBehavior.Strict);
+        Assert.False(await state.HasCompletedRunAsync(store, new(true, "other"), TestContext.Current.CancellationToken));
+        Assert.False(await state.HasCompletedRunAsync(store, null, TestContext.Current.CancellationToken));
+        state.BeginSessionStart();
+        state.EndSessionStart(null);
+        Assert.False(await state.HasCompletedRunAsync(store, new(true, "outer"), TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task SessionStartDuringRunReadInvalidatesMenuCompletion()
+    {
+        var state = Started();
+        var jobs = Jobs(JobRunStatus.Succeeded);
+        jobs.Setup(store => store.GetRunAsync("run", It.IsAny<CancellationToken>())).Callback(() =>
+        {
+            state.BeginSessionStart();
+            state.EndSessionStart(new(true, "other"));
+        }).ReturnsAsync((await Jobs(JobRunStatus.Succeeded).Object.GetRunAsync("run", TestContext.Current.CancellationToken))!);
+        Assert.False(await state.HasCompletedRunAsync(jobs.Object, new(true, "outer"), TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
     [InlineData(JobRunStatus.Succeeded)]
     [InlineData(JobRunStatus.Failed)]
     [InlineData(JobRunStatus.Cancelled)]

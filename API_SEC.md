@@ -1,5 +1,37 @@
 # API authentication coverage
 
+## VIBE-49 Automation editing and agent self-completion (2026-10-03, scoped amendment)
+
+Added root-only `GET /api/v1/jobs/scripts` under the existing session+tab middleware. It uses
+the server-derived current repository, returns no-store bounded path/runtime/approval metadata,
+and applies the existing script containment, link, size and runtime validation. Discovery reads
+at most 200 candidates and 32 MiB of script contents, persists no approval, and exposes no
+caller-selected root. Existing Job save/run hash approvals remain authoritative.
+
+Added `POST /llm/control/agent/end-session` on each backend's existing main Kestrel listener.
+CookieAuthMiddleware plus `ILlmProxyAuthGate` require both process-local session and tab
+credentials. The captured GUID must equal the current session; it is rechecked under the terminal
+lifecycle gate after a fixed 30-second grace. Repeated calls preserve the first deadline. The
+timer is process-local and disposed with the host; no daemon, listener, arbitrary PID or terminal
+target is introduced. The MCP `end_agent_session` tool accepts no target arguments and reads
+its inherited session/contact. Its HTTP client rejects non-loopback bases, proxies and redirects.
+Managed launches pin the process-local credentials independently of optional LLM proxy settings;
+Codex forwards only environment variable names in argv. The exact Board launch allowlist adds
+this own-session completion tool, with no wildcard or unrelated-tool grant.
+
+The tab list adds a run-completion flag only after matching the saved run's outer session and
+checking concurrent/uncertain starts. This controls menu visibility; existing guarded host cleanup
+still owns teardown. Two-second child status timeouts preserve unavailable/unknown state instead
+of freezing the list. Recordings and ordinary terminals are preserved. New validated comment
+purpose metadata uses existing storage, with no schema change or history rewrite.
+
+Scoped route enumeration and registration inspection covered the new paths and their middleware
+ordering. Both mandatory repository-wide listener searches included untracked files: only the
+approved main Kestrel host, the non-serving PortFinder probe and test-only Kestrel hosts matched;
+the cross-runtime search had no matches. Route tests exercise missing/single/both credentials,
+root-only catalog exposure, current/stale session IDs, source-generated serialization and the
+30-second deadline. No authentication exception or security violation was introduced.
+
 ## VIBE-46 bounded code maps and working-tree changes (2026-10-03, scoped amendment)
 
 The existing root-only `POST /api/v1/code-analyzer/graph` no longer accepts a dependency

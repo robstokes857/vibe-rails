@@ -26,6 +26,28 @@ Remote relay server (other repo):
 
 ## Core Architecture
 
+### Agent self-completion and terminal menu (VIBE-49)
+
+`end_agent_session` schedules only the calling CLI's current PTY for closure after 30 seconds.
+Reports, handoffs, card moves and `complete_board_agent` must precede it; it is the last tool
+call before the final response. `AgentSessionEndScheduler` is process-local, repeats retain the
+first deadline, and `CompleteAgentSessionAsync` rechecks the exact session under the lifecycle
+gate. It also handles native Worker PTYs. `Terminal.CompleteByAgent` uses normal exit/drain
+bookkeeping and logical exit code zero so later workflow actions can proceed; this is never a
+review approval. An already exited/failed PTY keeps its original outcome. Disposal cancels timers.
+
+CommandService supplies process-local `VIBERAILS_AGENT_CONTROL_*` contact credentials after
+custom Environment fields, independently of proxy settings and inherited root tool API routing.
+Codex forwards their names to its MCP subprocess; credential values never enter launch argv.
+The tool uses the existing backend listener at `POST /llm/control/agent/end-session`, behind
+the normal session/tab gate plus exact current-session validation. No background host is added.
+
+The tab list exposes `automationCompleted` only for the matching run/outer session, protected
+against concurrent and uncertain starts. The robot menu hides completed workflows even while
+their wrapper shell remains alive; the existing guarded cleanup below owns actual teardown.
+Child status reads have a two-second deadline, so one stalled host cannot freeze every row at
+Running. Unknown hosts remain Unavailable; ordinary tabs and recordings are retained.
+
 ### Completed Automation output (VB-60)
 
 VIBE-34 supersedes the retained-host policy: each root scheduler closes completed Automation
@@ -96,7 +118,7 @@ Start work also sets `StartTerminalRequest.AuthorizeBoardTools` for base and sav
 launches. It defaults to false everywhere else and travels through TerminalRoutes,
 TerminalSessionService, TerminalRunner and CommandService. The launch prompt explicitly
 authorizes the Board workflow for every provider. `Commands/BoardMcpAuthorization.cs` grants
-only the sixteen reviewed Board tools in `ToolNames`, using exact per-tool rules. Unrelated
+only the reviewed Board tools and own-session completion tool in `ToolNames`, using exact per-tool rules. Unrelated
 MCP tools retain their normal approval policy. Never add a server-wide grant: future tools must
 be reviewed individually before they enter this allowlist.
 

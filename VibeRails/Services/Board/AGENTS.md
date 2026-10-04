@@ -70,6 +70,24 @@ review purpose from names, retag history, or turn a successful exit into approva
 Both worker/reviewer prompts must name `get_board_reviews` and explain polling and fixing agreed
 findings. Save evidence/handoff before any human/LLM-chosen movement; keep existing lane execution.
 
+VIBE-49 adds optional testing/building/deploying/documentation/other purposes alongside work and
+code_review. New comments and handoff receipts snapshot purpose in existing `Changes.agentPurpose`
+metadata; review receipts use code_review. Queued Automations use their immutable run purpose;
+direct saved-environment sessions use the current Environment purpose when posting. Existing
+comments are never reclassified. The DTO and sync portable-field allowlist carry the metadata.
+Filters preserve attention comments regardless of purpose. No schema change or historical backfill.
+
+Completion instructions explicitly order report → handoff → intended movement → complete_board_agent
+→ end_agent_session → final response. Wait for any required review before ending your own session.
+Standalone Automation Workers get the self-exit guidance without requiring Board tools or a card.
+See the [terminal contract](../Terminal/AGENTS.md#agent-self-completion-and-terminal-menu-vibe-49).
+
+The lane add form has a separate body and type/Automation selectors. Lane VCA/Code quality additions
+use working-tree scope. `GET /api/v1/jobs/scripts` discovers bounded repository script candidates
+through the existing file index and validates them using `AutomationScriptService`. Saved content
+hashes identify approved scripts; discovery never approves a file. The normal save route still
+approves current contents. Catalog limits (200 candidates, 32 MiB total inspection) are explicit.
+
 ## Switch reviewer (VIBE-22)
 
 Keep coding attribution explicit per card. Never derive it from assignment, latest linked session

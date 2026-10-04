@@ -1056,7 +1056,7 @@ pending. Do not confuse testing current source with testing the installed MCP bi
 
 ## Explicit code reviews (VIBE-20)
 
-Workers and ordinary Environments have an explicit `Purpose` (`work` or `code_review`). The
+Workers and ordinary Environments have an explicit optional `Purpose` (`work`, `code_review`, `testing`, `building`, `deploying`, `documentation`, or `other`). The
 Environment editor offers Work / custom, Code review, and an editable Codex Code review preset.
 Switch reviewer uses the same purpose and report contract (see VIBE-22 below).
 Creating a preset does not enable lane triggers. Existing Automations still run

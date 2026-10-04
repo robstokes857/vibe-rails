@@ -425,4 +425,29 @@ public sealed class EnvironmentStepRoutesTests
 
         return events;
     }
+    [Theory]
+    [InlineData("testing", true)]
+    [InlineData("deploying", true)]
+    [InlineData("documentation", true)]
+    [InlineData("other", true)]
+    [InlineData("work", true)]
+    [InlineData("code_review", true)]
+    [InlineData("unknown", false)]
+    public async Task Put_OptionalPurposeIsValidatedAndReturned(string purpose, bool accepted)
+    {
+        var environment = NewEnvironment();
+        var repository = NewRepositoryMock(environment);
+        await WithEnvironmentHostAsync(repository, async baseUrl =>
+        {
+            using var response = await SharedClient.PutAsJsonAsync($"{baseUrl}/api/v1/environments/review",
+                new UpdateEnvironmentRequest("review", Purpose: purpose), TestContext.Current.CancellationToken);
+            Assert.Equal(accepted ? HttpStatusCode.OK : HttpStatusCode.BadRequest, response.StatusCode);
+            if (accepted)
+            {
+                var body = await response.Content.ReadFromJsonAsync<EnvironmentResponse>(TestContext.Current.CancellationToken);
+                Assert.Equal(purpose, body!.Purpose);
+            }
+            else repository.Verify(r => r.UpdateEnvironmentAsync(It.IsAny<LLM_Environment>(), It.IsAny<CancellationToken>()), Times.Never);
+        });
+    }
 }

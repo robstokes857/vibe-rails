@@ -289,11 +289,11 @@ public sealed class AppJsonSerializerContextTests
     {
         var json = JsonSerializer.Serialize(
             new BoardCommentDto("cm_1", new BoardAuthorDto("agent", "Claude VB-1", "claude", "sess-1"), "done",
-                new DateTime(2026, 9, 9, 12, 30, 0, DateTimeKind.Utc)),
+                new DateTime(2026, 9, 9, 12, 30, 0, DateTimeKind.Utc), Purpose: "testing"),
             AppJsonSerializerContext.Default.BoardCommentDto);
 
         Assert.Equal(
-            """{"id":"cm_1","author":{"kind":"agent","label":"Claude VB-1","cli":"claude","sessionId":"sess-1"},"body":"done","createdAt":"2026-09-09T12:30:00Z","isAttention":false}""",
+            """{"id":"cm_1","author":{"kind":"agent","label":"Claude VB-1","cli":"claude","sessionId":"sess-1"},"body":"done","createdAt":"2026-09-09T12:30:00Z","isAttention":false,"purpose":"testing"}""",
             json);
     }
 

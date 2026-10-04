@@ -123,13 +123,60 @@ public sealed class BoardReviewsTests : IAsyncLifetime
         Assert.Equal("Findings", (await reviews.SaveAsync(repo, card.Id, session, begun.Id, "No findings reported", "None", "None", "None", Ct)).Result);
         var reopened = new BoardStore(boardPath, state);
         Assert.Equivalent(saved, await reopened.GetReviewAsync(repo, card.Id, begun.Id, Ct));
-        Assert.Single((await reopened.GetCardDetailAsync(repo, card.Id, Ct))!.Comments);
+        Assert.Equal("code_review", BoardCommentPurpose.Read(Assert.Single((await reopened.GetCardDetailAsync(repo, card.Id, Ct))!.Comments).Changes));
         Assert.Empty(await reopened.GetReviewsAsync(Path.Combine(root, "foreign"), card.Id, 0, Ct));
         Assert.StartsWith("Current", (await reviews.ReportAsync(repo, card.Key, begun.Id, true, repo, Ct))!.Freshness);
         await File.WriteAllTextAsync(Path.Combine(repo, "new.txt"), "changed after review\n", Ct);
         Assert.StartsWith("Stale", (await reviews.ReportAsync(repo, card.Key, begun.Id, true, repo, Ct))!.Freshness);
         Assert.StartsWith("Unknown", (await reviews.ReportAsync(repo, card.Key, begun.Id, true, root, Ct))!.Freshness);
         Assert.Equal(saved.Findings, (await reopened.GetReviewAsync(repo, card.Id, begun.Id, Ct))!.Findings);
+    }
+
+    [Theory]
+    [InlineData("testing")]
+    [InlineData("building")]
+    [InlineData("deploying")]
+    [InlineData("documentation")]
+    [InlineData("other")]
+    [InlineData("code_review")]
+    public async Task CommentsSnapshotTheWorkerRunPurposeAndKeepItAfterEnvironmentEdits(string purpose)
+    {
+        var worker = new LLM_Environment { CustomName = "Worker", LLM = LLM.Codex, Purpose = purpose, AutomationWorker = true };
+        await repository.SaveEnvironmentAsync(worker, Ct);
+        var job = await jobs.CreateJobAsync(new("Any name", repo, LLM.Codex, worker.Id, "Work", null, true, []), Ct);
+        var runId = (await jobs.EnqueueBoardCardRunAsync(repo, job.Id, card.Key, Ct))!;
+        var run = (await jobs.GetRunAsync(runId, Ct))!;
+        var session = Guid.NewGuid().ToString();
+        await jobs.LinkRunTerminalSessionAsync(runId, Guid.NewGuid().ToString(), Ct);
+        await jobs.LinkRunActionSessionAsync(runId, Assert.Single(run.Actions!).Id, session, Ct);
+        await service.LinkSessionAsync(repo, card.Id, session, null, "Worker", "codex", "Worker", BoardSessionRecord.AutomationOrigin, Ct);
+        worker.Purpose = "work";
+        await repository.UpdateEnvironmentAsync(worker, Ct);
+        var posted = (await service.AddCommentAsync(repo, card.Id, BoardAuthor.Agent("Codex", "codex", session), "Result", Ct))!;
+        Assert.Equal(purpose, posted.Purpose);
+        var reopened = new BoardService(new BoardStore(boardPath, state), Mock.Of<IBoardCommitService>(), new NullBoardLiveSessionProbe());
+        Assert.Equal(purpose, Assert.Single((await reopened.GetCardAsync(repo, card.Id, Ct))!.Comments).Purpose);
+        Assert.Null(await store.FindSessionPurposeAsync(repo + "-other", card.Id, session, Ct));
+        var human = await service.AddCommentAsync(repo, card.Id, BoardAuthor.User(), "Human reply", Ct);
+        Assert.Null(human!.Purpose);
+        await store.SaveHandoffAsync(repo, card.Id, new("Done", "", "Checked", "", []), BoardAuthor.Agent("Codex", "codex", session), Ct);
+        Assert.Equal(purpose, (await reopened.GetCardAsync(repo, card.Id, Ct))!.Comments.Single(c => c.Body.StartsWith("Previous work")).Purpose);
+    }
+
+    [Fact]
+    public async Task DirectEnvironmentCommentsSnapshotPurposeWhenPosted()
+    {
+        var worker = await repository.SaveEnvironmentAsync(new() { CustomName = "Direct", LLM = LLM.Codex, Purpose = "building", ProjectPath = repo }, Ct);
+        var session = Guid.NewGuid().ToString();
+        await service.LinkSessionAsync(repo, card.Id, session, null, $"env:{worker.Id}:codex", "codex", "Direct", "work", Ct);
+        var posted = await service.AddCommentAsync(repo, card.Id, BoardAuthor.Agent("Codex", "codex", session), "Built", Ct);
+        Assert.Equal("building", posted!.Purpose);
+        worker.Purpose = "deploying";
+        await repository.UpdateEnvironmentAsync(worker, Ct);
+        Assert.Equal("building", Assert.Single((await service.GetCardAsync(repo, card.Id, Ct))!.Comments).Purpose);
+        worker.ProjectPath = repo + "-other";
+        await repository.UpdateEnvironmentAsync(worker, Ct);
+        Assert.Null((await service.AddCommentAsync(repo, card.Id, BoardAuthor.Agent("Codex", "codex", session), "Foreign Worker", Ct))!.Purpose);
     }
 
     [Theory]

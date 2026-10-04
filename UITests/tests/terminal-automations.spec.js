@@ -111,6 +111,16 @@ async function openFixture(page, total = 35) {
     return { tabs, connections, deleted, emit: (type, payload) => eventSocket.send(JSON.stringify({ type, payload })) };
 }
 
+test('finished workflows leave the robot menu even with an active wrapper shell', async ({ page }) => {
+    const fixture = await openFixture(page);
+    for (const tab of fixture.tabs.values()) if (tab.jobRunId) tab.automationCompleted = true;
+    await page.evaluate(() => window.app.terminalController.manager.refreshAutomationTabs());
+    await expect(page.locator('#vb-terminal-automations-wrapper')).toBeHidden();
+    await expect(page.locator(normalTabs)).toHaveCount(1);
+    expect(fixture.connections).toEqual(['ordinary']);
+    expect(fixture.deleted).toEqual([]); // The server's guarded cleanup owns host teardown.
+});
+
 test('many Automations stay in a scrollable robot menu and attach only when selected', async ({ page }, testInfo) => {
     const fixture = await openFixture(page);
     await expect(page.locator(normalTabs)).toHaveCount(1);

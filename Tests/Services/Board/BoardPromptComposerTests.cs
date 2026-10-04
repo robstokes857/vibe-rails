@@ -9,6 +9,23 @@ namespace Tests.Services.Board;
 public sealed class BoardPromptComposerTests
 {
     [Fact]
+    public void AutomationCompletionIsExplicitForBoardAndStandaloneWorkers()
+    {
+        foreach (var purpose in new[] { "code_review", "testing", "building", "deploying" })
+        {
+            var prompt = BoardPromptComposer.ComposeAutomationPrompt("VB-12", "Custom work", purpose);
+            Assert.Contains("end_agent_session LAST", prompt);
+            Assert.Contains("30 seconds", prompt);
+            Assert.Contains("complete_board_agent", prompt);
+        }
+        var standalone = BoardPromptComposer.ComposeStandaloneAutomationPrompt("Build {{git_branch}}");
+        Assert.Contains("end_agent_session as your last tool call", standalone);
+        Assert.Contains("workflow can continue", standalone);
+        Assert.DoesNotContain("complete_board_agent", standalone);
+        Assert.EndsWith("Build {{git_branch}}", standalone);
+    }
+
+    [Fact]
     public void LaunchesExplainAgentCompletionAndKeepOptionalDescriptionsInsideTheDataFence()
     {
         var context = new BoardPromptComposer.LaunchContext(["Review"], [], [],
@@ -207,7 +224,7 @@ public sealed class BoardPromptComposerTests
             new BoardPromptComposer.LaunchContext([], [], [], Activity: new(0, 0, 0)));
         // Resolver cap is 30 000 resolved chars; the Windows command line cap is 32 000 after quoting.
         // 4 000 of description + 6 000 of template + the generated activity and workflow guidance.
-        Assert.True(prompt.Length < 13_000, $"prompt was {prompt.Length} chars");
+        Assert.True(prompt.Length < 13_500, $"prompt was {prompt.Length} chars");
         Assert.Contains(new string('d', BoardPromptComposer.MaxDescriptionChars), prompt);
         Assert.DoesNotContain(new string('d', BoardPromptComposer.MaxDescriptionChars + 1), prompt);
     }

@@ -57,6 +57,7 @@ public class McpServerHttpTests : IAsyncLifetime
         builder.Services.AddScoped<SessionSearchTool>();
         builder.Services.AddHttpClient(TokenSaverTool.HttpClientName);
         builder.Services.AddScoped<TokenSaverTool>();
+        builder.Services.AddAgentSessionMcp();
         builder.Services.AddSingleton(Mock.Of<IBoardService>());
         builder.Services.AddSingleton(Mock.Of<IBoardProjectResolver>());
         builder.Services.AddSingleton(Mock.Of<IBoardStore>());

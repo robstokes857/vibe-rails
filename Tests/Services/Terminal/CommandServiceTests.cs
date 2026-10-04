@@ -5,6 +5,7 @@ using TokenSaver;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.LlmProxy;
 using VibeRails.Services.Terminal;
+using VibeRails.Services.Mcp.Tools;
 using VibeRails.Utils;
 using Xunit;
 
@@ -82,6 +83,23 @@ public partial class CommandServiceTests : IDisposable
             prepared.Environment.TryGetValue("CLAUDE_CODE_FORCE_SYNC_OUTPUT", out var value),
             "Expected CLAUDE_CODE_FORCE_SYNC_OUTPUT to be set for LLM.Claude.");
         Assert.Equal("1", value);
+    }
+
+    [Theory]
+    [InlineData(LLM.Claude)]
+    [InlineData(LLM.Codex)]
+    [InlineData(LLM.Copilot)]
+    [InlineData(LLM.Antigravity)]
+    [InlineData(LLM.OpenCode)]
+    [InlineData(LLM.Grok46)]
+    public async Task AgentSelfCompletionUsesProcessLocalCredentialsEvenWithoutProxy(LLM llm)
+    {
+        var prepared = await CreateService().PrepareSessionAsync(llm, null, null);
+        Assert.Equal("http://127.0.0.1:4321", prepared.Environment[AgentSessionTool.BaseUrlVariable]);
+        Assert.Equal("test-session-token", prepared.Environment[AgentSessionTool.SessionTokenVariable]);
+        Assert.Equal("test-tab-token", prepared.Environment[AgentSessionTool.TabTokenVariable]);
+        Assert.DoesNotContain("test-session-token", prepared.Command);
+        Assert.DoesNotContain("test-tab-token", prepared.Command);
     }
 
     [Theory]
@@ -200,7 +218,7 @@ public partial class CommandServiceTests : IDisposable
         var service = CreateService(codexLlmProxyEnabled: proxyEnabled);
         const string sessionId = "session-private-to-this-launch";
         var prepared = await service.PrepareSessionAsync(LLM.Codex, null, null, sessionId: sessionId);
-        const string forwarding = "mcp_servers.viberails-mcp.env_vars=[\"VIBERAILS_TOOL_CURRENT_SESSION_ID\",\"VIBERAILS_TOOL_CURRENT_TAB_ID\"]";
+        const string forwarding = "mcp_servers.viberails-mcp.env_vars=[\"VIBERAILS_TOOL_CURRENT_SESSION_ID\",\"VIBERAILS_TOOL_CURRENT_TAB_ID\",\"VIBERAILS_AGENT_CONTROL_BASE\",\"VIBERAILS_AGENT_CONTROL_SESSION_TOKEN\",\"VIBERAILS_AGENT_CONTROL_TAB_TOKEN\"]";
 
         Assert.Contains(forwarding, prepared.Argv!);
         Assert.Contains("mcp_servers.viberails-mcp.env_vars", prepared.LaunchCommand);

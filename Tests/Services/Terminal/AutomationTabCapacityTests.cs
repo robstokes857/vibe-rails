@@ -17,6 +17,40 @@ namespace Tests.Services.Terminal;
 
 public sealed class AutomationTabCapacityTests
 {
+    [Fact]
+    public async Task TabListReportsFinishedWorkflowAndBoundsAnUnresponsiveChild()
+    {
+        var jobs = new Mock<IJobStore>(MockBehavior.Strict);
+        jobs.Setup(s => s.GetRunAsync("finished", It.IsAny<CancellationToken>())).ReturnsAsync(Run("finished", JobRunStatus.Succeeded));
+        using var services = new ServiceCollection().AddSingleton(jobs.Object).BuildServiceProvider();
+        using var http = new StatusHandler(async (request, token) =>
+        {
+            if (request.RequestUri!.Port == 10002) await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"hasActiveSession\":true,\"sessionId\":\"outer\"}") };
+        });
+        var host = Host(services, http);
+        var registry = Registry(host);
+        using var child = StartHarmlessProcess();
+        try
+        {
+            AddChild(registry, "finished", child, 1, Started("finished"));
+            AddChild(registry, "stalled", child, 2, Started("stalled"));
+            var tabs = await host.ListTabsAsync(TestContext.Current.CancellationToken).WaitAsync(TimeSpan.FromSeconds(8), TestContext.Current.CancellationToken);
+            Assert.True(tabs.Single(t => t.TabId == "finished").AutomationCompleted);
+            Assert.True(tabs.Single(t => t.TabId == "finished").HasActiveSession);
+            Assert.False(tabs.Single(t => t.TabId == "stalled").AutomationCompleted);
+            Assert.False(tabs.Single(t => t.TabId == "stalled").StatusAvailable);
+            Assert.False(child.HasExited);
+            jobs.VerifyAll();
+        }
+        finally
+        {
+            registry.Clear();
+            await host.DisposeAsync();
+            if (!child.HasExited) { child.Kill(entireProcessTree: true); await child.WaitForExitAsync(TestContext.Current.CancellationToken); }
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

@@ -235,19 +235,24 @@ trigger-based run lifecycle apply: Board lane runs and runs started from a card 
 header corners, in the existing gutters. Each button belongs to the lane on its right: all
 entries to that lane count, including newly created cards. The badge counts assigned Automations,
 including disabled or unavailable ones. The first lane has its own accessible agent button too.
-The compact anchored panel (440px maximum, constrained to the viewport) groups agents in subtle
-cards and adds existing project Automations, links to the existing Automation
-editor for create/edit, and confirms removal from the lane without deleting the Automation.
-Each row shows a two-line preview of the existing 2,000-character Automation description. Edit
-description expands the field; Save description and Cancel collapse it, with Cancel discarding
-only that row's draft. This is the description read by Board consumers and included in agent launch
-context, shared wherever the Automation is used. Saving reads the latest definition, preserves
-the enabled state and workflow, and keeps other rows' drafts intact across refreshes and errors.
-There is no on/off switch in this panel and no new run/approval mode.
-Code review rows show their live mappings, expected Checks/report output and provider setup state.
-Choose reviewer mounts the shared routing editor, with editable mappings and a Code review — Codex
-choice. It saves only purpose/routing through the existing Environment update. Saving and removing
-never launch a run. Panel disposal also disposes every reviewer picker; row drafts survive rerenders.
+The anchored list panel is 440px maximum. Add replaces its body with a dedicated form and
+widens to 720px, constrained to the viewport; Back/Cancel restores the list. The type picker
+is separate from the existing-Automation picker. VCA and Code quality additions always use
+working-tree scope. Existing rows are read-only; their heading pencil opens the full Automation
+editor for description, workflow and reviewer changes. Removing a lane selection keeps the
+Automation and recordings. New Automation opens that same editor.
+
+`board-lane-agents.js` owns positioning/disposal, `board-lane-agent-body.js` owns asynchronous
+CRUD and drafts, `board-lane-agent-list.js` and `board-lane-agent-add.js` render each body, and
+`board-lane-agent-display.js` resolves Worker identity. Preserve a created Job ID through lane
+revision conflicts so retries do not duplicate it. Failed/stale script loads cannot repaint a
+closed form. The repository-script picker shows discovered paths and valid/approved counts;
+approval means the saved Automation hash matches current contents, not a digital signature.
+
+Worker purpose is optional (work/not specified, code_review, testing, building, deploying,
+documentation, other). The shared selector lives in `agent-purpose.js`; adding an existing
+Automation may update its shared Worker's purpose. Comment filters use each posted comment's
+purpose snapshot. Attention comments remain visible under every filter.
 Worker rows use the shared CLI brand logo and provider name, resolved from the Worker action
 and its Environment. Script-only workflows use a code icon; the lane-entry buttons keep robots.
 The panel loads the Environment catalog alongside Jobs so direct Board navigation also resolves
@@ -260,7 +265,7 @@ Lane selection saves use the existing revision check and cancel pending triggers
 endpoint only accepts enabled selections: an Add explains disabled selections that must first be
 enabled/removed, and a Remove confirmation lists other unavailable selections being cleared.
 Lane rerenders (including background pagination) reattach the existing panel to the replacement
-button, preserving description drafts, focus and pending panel requests. Navigation or removal of
+button, preserving creation drafts, focus and pending panel requests. Navigation or removal of
 the lane button disposes the panel, requests and document listeners; Escape restores focus to the
 current button. Theme-aware styling lives in `assets/board/board-lane-agents.css`.
 

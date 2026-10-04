@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { prepareLaneAutomation } from '../../../VibeRails/wwwroot/js/modules/board-lane-agent-add.js';
+import { matchesCommentFilter } from '../../../VibeRails/wwwroot/js/modules/agent-purpose.js';
 import { findCheckAutomation, laneScriptAction } from '../../../VibeRails/wwwroot/js/modules/board-lane-agents.js';
 
 test('lane scripts infer the interpreter and retain argument boundaries without shell parsing', () => {
@@ -46,16 +47,37 @@ test('a same-name Automation with another workflow blocks the check instead of P
     }
 });
 
-test('Add check focuses the saved row by its real id and re-enables a disabled match', () => {
-    const source = readFileSync(new URL('../../../VibeRails/wwwroot/js/modules/board-lane-agents.js', import.meta.url), 'utf8');
-    // run() reads a function focus target after the operation, once the new id exists.
-    assert.match(source, /content\.querySelector\(typeof focusSelector === 'function' \? focusSelector\(\) : focusSelector\)/);
-    const add = source.slice(source.indexOf("if (!event.target.matches('.board-lane-agents-add')) return;"), source.indexOf('const outside = event =>'));
-    assert.match(add, /\}, \(\) => Number\.isFinite\(id\) \? `\[data-agent-id="\$\{id\}"\] \[data-agent-action="edit"\]` : '#board-lane-agent-choice'\);/);
-    assert.doesNotMatch(add, /\}, `\[data-agent-id="\$\{id\}"\]/, 'no selector built before the id is known');
-    assert.match(add, /findCheckAutomation\(jobs, \{ name, kind, scope: checkScope \}\)/);
-    assert.match(add, /if \(existing && !existing\.reuse\) \{\s*content\.querySelector\('\[data-agent-error\]'\)\.textContent = `An Automation named/);
-    assert.match(add, /else if \(!saved\.enabled\) saved = await updateJob\(saved\.id, \{ enabled: true \}\);/);
-    // The re-enable shares the description save's PUT payload.
-    assert.match(source, /const saved = await updateJob\(id, \{ description \}\);/);
+test('new checks use working changes and creation survives lane-save retries', async () => {
+    for (const kind of ['check:2', 'check:3']) {
+        const requests = [];
+        const draft = { kind };
+        const context = { draft, settings: { jobIds: [], jobs: [] }, jobs: [], environments: [],
+            column: { name: 'Review' }, projectPath: '/repo', alive: () => true,
+            api: async (...args) => { requests.push(args); return { ...args[2], id: 42 }; } };
+        assert.equal(await prepareLaneAutomation(context), 42);
+        assert.deepEqual(requests[0][2].actions, [{ kind: Number(kind.slice(6)), arguments: ['working-tree'] }]);
+        assert.equal(await prepareLaneAutomation(context), 42);
+        assert.equal(requests.length, 1);
+    }
+});
+
+test('disabled matching check is re-enabled without reapproving actions', async () => {
+    const job = check(7, { enabled: false });
+    const updates = [];
+    const id = await prepareLaneAutomation({ draft: { kind: 'check:3' }, settings: { jobIds: [], jobs: [job] }, jobs: [job],
+        environments: [], column: { name: 'Review' }, alive: () => true,
+        updateJob: async (id, changes) => { updates.push([id, changes]); return { ...job, ...changes }; },
+        api: () => assert.fail('No new Automation needed') });
+    assert.equal(id, 7);
+    assert.deepEqual(updates, [[7, { enabled: true }]]);
+});
+
+test('purpose filters preserve attention and distinguish human and unclassified agents', () => {
+    const testComment = { author: { kind: 'agent' }, purpose: 'testing' };
+    assert.equal(matchesCommentFilter(testComment, 'testing'), true);
+    assert.equal(matchesCommentFilter(testComment, 'code_review'), false);
+    assert.equal(matchesCommentFilter(testComment, 'human'), false);
+    assert.equal(matchesCommentFilter({ author: { kind: 'agent' } }, 'work'), true);
+    assert.equal(matchesCommentFilter({ author: { kind: 'user' } }, 'work'), false);
+    assert.equal(matchesCommentFilter({ ...testComment, isAttention: true }, 'code_review'), true);
 });

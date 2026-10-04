@@ -148,6 +148,33 @@ test('remote image comments refresh their metadata and preserve composer drafts'
     await expect(comment).toHaveValue('Unsaved comment');
 });
 
+test('purpose filters keep relevant agent comments, attention and unsaved drafts on refresh', async ({ page }) => {
+    let current;
+    await openBoard(page, { onCard: card => {
+        current = card;
+        card.comments = [
+            { id: 'tests', body: 'Suite passed', purpose: 'testing', author: { kind: 'agent' }, createdAt: '2026-10-03' },
+            { id: 'review', body: 'Review result', purpose: 'code_review', author: { kind: 'agent' }, createdAt: '2026-10-03' }
+        ];
+    } });
+    await page.getByText('Description images', { exact: true }).click();
+    await page.locator('#board-card-title').fill('Unsaved title');
+    const draft = page.locator('[data-board-composer="comment"] textarea');
+    await draft.fill('Unsaved comment');
+    await page.getByLabel('Show comments').selectOption('testing');
+    const comments = page.locator('[data-board-comments]');
+    await expect(comments).toContainText('Suite passed');
+    await expect(comments).not.toContainText('Review result');
+    current.comments.push({ id: 'attention', body: 'Needs your decision', purpose: 'deploying', isAttention: true,
+        author: { kind: 'agent' }, createdAt: '2026-10-04' });
+    await page.evaluate(() => window.app.boardController.refreshSessionActivity());
+    await expect(comments).toContainText('Needs your decision');
+    await expect(comments).not.toContainText('Review result');
+    await expect(page.getByLabel('Show comments')).toHaveValue('testing');
+    await expect(page.locator('#board-card-title')).toHaveValue('Unsaved title');
+    await expect(draft).toHaveValue('Unsaved comment');
+});
+
 test('reference search routes GUIDs directly, finds card sessions and attaches commits without saving drafts', async ({ page }) => {
     let current;
     await openBoard(page, { onCard: card => { current = card; } });
@@ -212,7 +239,7 @@ test('draft image attachments survive creation', async ({ page }) => {
     await expect(page.locator('[data-board-attachments] .board-attachment-thumb')).toBeVisible();
 });
 
-test('lane Agents shows running agents and adds VCA and Code quality with explicit scope', async ({ page }) => {
+test('lane Agents shows running agents and adds VCA and Code quality for working changes', async ({ page }) => {
     const { jobs, settings } = await openLaneAgentsBoard(page);
     settings.lane_2.runningAgents = [{ runId: 'run_1', name: 'Code reviewer', cardId: 'card_test', cardLabel: 'VIBE-34 · My card', terminalSessionId: 'recording_1' }];
     const created = [];
@@ -225,14 +252,14 @@ test('lane Agents shows running agents and adds VCA and Code quality with explic
     await button.click();
     const panel = page.locator('.board-lane-agents-panel');
     await expect(panel.locator('[data-lane-running]')).toContainText('VIBE-34 · My card');
-    for (const [choice, scope] of [['check:3', 'working-tree'], ['check:2', 'unpushed']]) {
+    for (const [choice, scope] of [['check:3', 'working-tree'], ['check:2', 'working-tree']]) {
         await panel.getByRole('button', { name: 'Add agent', exact: true }).click();
-        await panel.getByLabel('Agent, check or script').selectOption(choice);
-        await panel.locator('[data-agent-scope]').selectOption(scope);
+        await panel.getByLabel('What would you like to add?').selectOption(choice);
+        await expect(panel.locator('[data-agent-scope]')).toHaveCount(0);
         await panel.getByRole('button', { name: 'Add to lane', exact: true }).click();
         await expect(panel.getByRole('button', { name: 'Add agent', exact: true })).toBeVisible();
     }
-    expect(created.map(job => job.actions)).toEqual([[{ kind: 3, arguments: ['working-tree'] }], [{ kind: 2, arguments: ['unpushed'] }]]);
+    expect(created.map(job => job.actions)).toEqual([[{ kind: 3, arguments: ['working-tree'] }], [{ kind: 2, arguments: ['working-tree'] }]]);
     expect(settings.lane_2.jobIds).toEqual([12, 14, 41, 42]);
     await page.evaluate(() => { window.app.boardController.goToCardAutomation = (...args) => { window.__openedLaneAgent = args; }; });
     await panel.locator('[data-lane-running-id="run_1"]').click();
@@ -982,9 +1009,35 @@ async function openLaneAgentsBoard(page) {
         }
         return route.fulfill({ json: { ...current, jobs: jobs.map(({ id, name, enabled, setup }) => ({ id, name, enabled, setup })) } });
     });
+    await page.route('**/api/v1/jobs/scripts', route => route.fulfill({ json: { scripts: [
+        { path: 'scripts/validate.ps1', runtime: 1, approved: true },
+        { path: 'scripts/test.py', runtime: 0, approved: false },
+        { path: 'scripts/missing.sh', runtime: 2, approved: false, unavailableReason: 'Bash unavailable' }
+    ], hasMore: false } }));
     await page.evaluate(() => window.app.boardController.refresh());
     return { jobs, settings, writes };
 }
+
+test('adding an Automation offers a separate optional Worker purpose', async ({ page }) => {
+    const { writes } = await openLaneAgentsBoard(page);
+    await page.route('**/api/v1/environments', route => route.fulfill({ json: { environments: [
+        { id: 7, name: 'Test Worker', cli: 'codex', purpose: 'work' }
+    ] } }));
+    const updates = [];
+    await page.route('**/api/v1/environments/Test%20Worker', route => {
+        updates.push(route.request().postDataJSON());
+        return route.fulfill({ json: { success: true } });
+    });
+    await page.getByRole('button', { name: 'Agents on entry to Backlog', exact: true }).click();
+    await page.getByRole('button', { name: 'Add agent', exact: true }).click();
+    await page.locator('#board-lane-agent-choice').selectOption('automation');
+    await page.locator('#board-lane-automation').selectOption('14');
+    await expect(page.locator('#board-lane-purpose')).toHaveValue('work');
+    await page.locator('#board-lane-purpose').selectOption('testing');
+    await page.getByRole('button', { name: 'Add to lane', exact: true }).click();
+    await expect.poll(() => updates).toEqual([{ purpose: 'testing' }]);
+    await expect.poll(() => writes.some(w => w.kind === 'selection' && w.body.jobIds.includes(14))).toBe(true);
+});
 
 for (const width of [1440, 390]) {
     test(`lane script creation and retry after a settings conflict at ${width}px`, async ({ page }, testInfo) => {
@@ -1005,23 +1058,25 @@ for (const width of [1440, 390]) {
         await page.getByRole('button', { name: 'Agents on entry to Review', exact: true }).click();
         const panel = page.locator('.board-lane-agents-panel');
         await panel.getByRole('button', { name: 'Add agent', exact: true }).click();
-        await panel.getByLabel('Agent, check or script').selectOption('script');
+        await panel.getByLabel('What would you like to add?').selectOption('script');
+        await panel.getByLabel('Script file', { exact: true }).selectOption('scripts/validate.ps1');
+        await expect(panel).toContainText('2 valid scripts · 1 approved');
         await expect(panel.getByLabel('Automation name', { exact: true })).toHaveAttribute('maxlength', '100');
         await panel.getByLabel('Automation name', { exact: true }).evaluate(input => {
             input.value = 'x'.repeat(101);
             input.dispatchEvent(new Event('input', { bubbles: true }));
         });
         await panel.getByRole('button', { name: 'Add to lane', exact: true }).click();
-        await expect(panel).toContainText('Automation names can have at most 100 characters.');
+        await expect(panel).toContainText('Give this script Automation a name of up to 100 characters.');
         expect(creates).toBe(0);
         await panel.getByLabel('Automation name', { exact: true }).fill('Validate release');
-        await panel.getByLabel('Script file', { exact: true }).fill('scripts/validate.ps1');
+        await panel.getByLabel('Script file', { exact: true }).selectOption('scripts/validate.ps1');
         await panel.getByLabel('Arguments — one per line').fill('--message\ntwo words\n$(literal)');
         expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
         await page.screenshot({ path: testInfo.outputPath(`lane-script-${width}.png`) });
         await panel.getByRole('button', { name: 'Add to lane', exact: true }).click();
         await expect(panel).toContainText('Selection changed. Retry.');
-        await expect(panel.getByLabel('Agent, check or script')).toHaveValue('71');
+        await expect(panel.getByLabel('Automation', { exact: true })).toHaveValue('71');
         await panel.getByRole('button', { name: 'Add to lane', exact: true }).click();
         await expect.poll(() => settings.lane_2.jobIds).toEqual([12, 14, 71]);
         expect(creates).toBe(1);
@@ -1095,21 +1150,9 @@ for (const width of [1440, 390]) {
         await expect(panel).toContainText('does not launch a run');
         await expect(panel).toContainText('Setup needed: Install/sign in to claude');
         expect(await page.evaluate(() => window.__setupXss)).toBeUndefined();
-        await panel.getByRole('button', { name: 'Choose reviewer / edit mappings' }).click();
-        await expect(panel.getByLabel('Coding provider')).toHaveCount(2);
-        await panel.getByLabel('Coding provider').first().fill('opencode');
-        await panel.getByRole('button', { name: 'Save reviewer', exact: true }).click();
-        await expect.poll(() => reviewerWrites.length).toBe(1);
-        expect(reviewerWrites[0].reviewerRouting.mappings[0].sourceProvider).toBe('opencode');
-        await expect(panel).toContainText('OpenCode → Codex');
-        await panel.getByRole('button', { name: 'Choose reviewer / edit mappings' }).click();
-        await panel.getByRole('button', { name: 'Code review — Codex', exact: true }).click();
-        await expect(panel.getByLabel('Coding provider')).toHaveCount(0);
-        await expect(panel.locator('[data-reviewer-fallback] select[data-reviewer-target]')).toHaveValue('base:codex');
-        await panel.getByRole('button', { name: 'Save reviewer', exact: true }).click();
-        await expect.poll(() => reviewerWrites.length).toBe(2);
-        expect(reviewerWrites[1].reviewerRouting).toMatchObject({ mappings: [], fallback: { selection: 'base:codex' } });
-        await expect(panel).toContainText('Reviewer: Codex for every coding source.');
+        await expect(panel.getByRole('button', { name: 'Choose reviewer / edit mappings' })).toHaveCount(0);
+        await expect(panel.getByRole('button', { name: 'Edit Code reviewer', exact: true })).toBeEnabled();
+        expect(reviewerWrites).toHaveLength(0);
         expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
         await page.screenshot({ path: testInfo.outputPath(`starter-reviewer-${width}.png`) });
         await panel.getByRole('button', { name: 'Remove Code reviewer from this lane' }).click();
@@ -1156,8 +1199,10 @@ for (const width of [1440, 390]) {
         expect(await button.evaluate(el => getComputedStyle(el, '::after').animationName)).toBe('none');
         expect(await page.locator('.board-automation-running').evaluate(el => getComputedStyle(el).animationName)).toBe('none');
         // Activity updates preserve the open panel and its text drafts.
-        await panel.getByRole('button', { name: 'Edit description for Code reviewer', exact: true }).click();
-        const draft = panel.getByRole('textbox', { name: 'Agent description for Code reviewer', exact: true });
+        await panel.getByRole('button', { name: 'Add agent', exact: true }).click();
+        await panel.getByLabel('What would you like to add?').selectOption('script');
+        await panel.getByLabel('Script file', { exact: true }).selectOption('scripts/validate.ps1');
+        const draft = panel.getByLabel('Automation name', { exact: true });
         await draft.fill('Keep this draft while the agent finishes');
         active = false;
         await page.evaluate(() => window.app.boardController.refreshSessionActivity());
@@ -1211,45 +1256,16 @@ for (const width of [1440, 390]) {
         await expect(panel.getByRole('switch')).toHaveCount(0);
         await expect(panel.locator('[data-agent-description]')).toHaveCount(0);
         await expect(panel.locator('[data-agent-id="12"] .board-lane-agent-description-preview')).toHaveText('Checks the changes');
-        const editDescription = panel.getByRole('button', { name: 'Edit description for Code reviewer', exact: true });
-        await editDescription.click();
-        const description = panel.getByRole('textbox', { name: 'Agent description for Code reviewer', exact: true });
-        const otherDescription = panel.getByRole('textbox', { name: 'Agent description for Test runner', exact: true });
-        await expect(description).toBeFocused();
-        await expect(otherDescription).toHaveCount(0);
-        // Resizing a description keeps the panel and its scrollable actions in the viewport.
-        await description.evaluate(el => { el.style.height = '250px'; });
-        await expect.poll(async () => {
-            const resized = await panel.boundingBox();
-            return resized.y >= 0 && resized.y + resized.height <= 900;
-        }).toBe(true);
-        await description.evaluate(el => { el.style.height = ''; });
-        await expect(description).toHaveValue('Checks the changes');
-        await expect(description).toHaveAttribute('maxlength', '2000');
-        await expect(panel.getByRole('button', { name: 'Save description for Code reviewer' })).toBeDisabled();
-        const savedDescription = 'Review the changes for correctness.\nReport findings on the Board card.';
-        await description.fill(savedDescription);
-        await panel.getByRole('button', { name: 'Edit description for Test runner', exact: true }).click();
-        await otherDescription.fill('Keep this unsaved test-runner description');
-        await panel.getByRole('button', { name: 'Save description for Code reviewer' }).click();
-        await expect(panel.locator('[data-agent-id="12"] [role="status"]')).toHaveText('Description saved');
-        await expect(description).toHaveCount(0);
-        await expect(editDescription).toBeFocused();
-        expect(jobs[0].description).toBe(savedDescription);
-        expect(jobs[0].enabled).toBe(true);
-        expect(writes[0].body.prompt).toBe('Keep this prompt');
-        expect(writes[0].body.actions).toBeUndefined();
-        expect(writes[0].body.triggers).toEqual([{ kind: 3 }]);
-        expect(settings.lane_2.jobIds).toEqual([12, 14]);
-        expect(settings.lane_2.revision).toBe(3);
-        await expect(otherDescription).toHaveValue('Keep this unsaved test-runner description');
+        await expect(panel.getByRole('button', { name: /Edit description|Choose reviewer/ })).toHaveCount(0);
         await panel.getByRole('button', { name: 'Add agent', exact: true }).click();
-        await expect(otherDescription).toHaveValue('Keep this unsaved test-runner description');
-        await panel.getByLabel('Agent, check or script').selectOption('15');
+        await expect(panel.locator('[data-agent-id]')).toHaveCount(0);
+        await expect(panel.locator('[data-lane-running]')).toBeHidden();
+        if (width > 720) expect((await panel.boundingBox()).width).toBeGreaterThan(600);
+        await panel.getByLabel('What would you like to add?').selectOption('automation');
+        await panel.getByLabel('Automation', { exact: true }).selectOption('15');
         await panel.getByRole('button', { name: 'Add to lane', exact: true }).click();
         await expect(button.locator('.board-lane-agents-count')).toHaveText('3');
         await expect(panel.locator('[data-agent-id="15"] .board-lane-agent-copy')).toContainText('Script workflow');
-        await expect(panel.locator('[data-agent-id="15"] .board-lane-agent-icon img')).toHaveCount(0);
         await panel.getByRole('button', { name: 'Remove Test runner from this lane', exact: true }).click();
         await page.getByRole('alertdialog').getByRole('button', { name: 'Remove', exact: true }).click();
         await expect(panel.getByText('Test runner', { exact: true })).toHaveCount(0);
@@ -1259,28 +1275,9 @@ for (const width of [1440, 390]) {
         await expect(panel).toHaveCount(0);
         await expect(button).toBeFocused();
         await button.click();
-        await expect(panel).toContainText('Release checks');
-        await expect(description).toHaveCount(0);
-        await editDescription.click();
-        await expect(description).toHaveValue(savedDescription);
-        const writesBeforeCancel = writes.length;
-        await description.fill('Discard this description draft');
-        await panel.getByRole('button', { name: 'Cancel description for Code reviewer', exact: true }).click();
-        await expect(description).toHaveCount(0);
-        await expect(editDescription).toBeFocused();
-        expect(writes).toHaveLength(writesBeforeCancel);
-        expect(jobs[0].description).toBe(savedDescription);
-        await editDescription.click();
-        await expect(description).toHaveValue(savedDescription);
-        await description.fill('');
-        await panel.getByRole('button', { name: 'Save description for Code reviewer' }).click();
-        await expect(panel.locator('[data-agent-id="12"] [role="status"]')).toHaveText('Description saved');
-        await expect(description).toHaveCount(0);
-        await expect(panel.locator('[data-agent-id="12"] .board-lane-agent-description-preview')).toHaveText('No description yet.');
-        expect(jobs[0].description).toBe('');
         await panel.getByRole('button', { name: 'Edit Code reviewer', exact: true }).click();
         await expect(page.locator('[data-job-editor] #job-name')).toHaveValue('Code reviewer');
-        await expect(page.locator('[data-job-editor] #job-description')).toHaveValue('');
+        await expect(page.locator('[data-job-editor] #job-description')).toHaveValue('Checks the changes');
         await expect(panel).toHaveCount(0);
     });
 }
@@ -1301,7 +1298,7 @@ test('lane agents recover from conflicts, escape text and discard late loads', a
     });
     await panel.getByRole('button', { name: 'Remove Test runner from this lane' }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel', exact: true }).click();
-    await expect(panel.locator('[data-agent-action="edit-description"]').first()).toBeEnabled();
+    await expect(panel.locator('[data-agent-action="edit"]').first()).toBeEnabled();
     await panel.getByRole('button', { name: 'Remove Test runner from this lane' }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Remove', exact: true }).click();
     await expect(panel.getByRole('alert')).toContainText('Lane changed');
@@ -1331,16 +1328,18 @@ test('lane agents handle paused selections, sync the settings badge, and open th
     await button.click();
     const panel = page.getByRole('dialog', { name: 'Lane agents', exact: true });
     await expect(panel).toContainText('Unavailable Automation (99)');
-    await expect(panel.locator('[data-agent-id="99"]')).toContainText('Description unavailable');
+    await expect(panel.locator('[data-agent-id="99"]')).toContainText('No description yet.');
     await expect(panel.locator('[data-agent-id="99"] textarea')).toHaveCount(0);
     await panel.getByRole('button', { name: 'Add agent', exact: true }).click();
-    await panel.getByLabel('Agent, check or script').selectOption('15');
+    await panel.getByLabel('What would you like to add?').selectOption('automation');
+        await panel.getByLabel('Automation', { exact: true }).selectOption('15');
     await panel.getByRole('button', { name: 'Add to lane', exact: true }).click();
-    await expect(panel.getByRole('alert')).toContainText('Enable disabled Automations in the Automation editor');
+    await expect(panel.getByRole('alert')).toContainText('Enable or remove disabled/unavailable selections');
     expect(writes).toHaveLength(0);
+    await panel.getByRole('button', { name: 'Cancel', exact: true }).click();
     await panel.getByRole('button', { name: 'Remove Test runner from this lane' }).click();
     const confirmation = page.getByRole('alertdialog');
-    await expect(confirmation).toContainText('Code reviewer, Automation 99');
+    await expect(confirmation).toContainText('Code reviewer, 99');
     await confirmation.getByRole('button', { name: 'Remove', exact: true }).click();
     await expect(panel).toContainText('No agents on entry');
     expect(settings.lane_2.jobIds).toEqual([]);
@@ -1353,51 +1352,22 @@ test('lane agents handle paused selections, sync the settings badge, and open th
     await page.locator('#modal-container [data-action="close-modal"]').first().click();
     await button.click();
     await panel.getByRole('button', { name: 'Add agent', exact: true }).click();
-    await panel.getByRole('button', { name: 'Create Automation…', exact: true }).click();
+    await panel.getByLabel('What would you like to add?').selectOption('new');
+    await panel.getByRole('button', { name: 'Open Automation editor', exact: true }).click();
     await expect(page.locator('[data-job-editor] #job-name')).toHaveValue('');
     await expect(page.locator('[data-job-editor]')).toContainText('Create automation');
     await expect(panel).toHaveCount(0);
 });
 
-test('lane agent loading and description-save failures preserve drafts for retry', async ({ page }) => {
-    const { jobs, writes } = await openLaneAgentsBoard(page);
+test('lane agent loading failures recover and navigation disposes the panel', async ({ page }) => {
+    const { jobs } = await openLaneAgentsBoard(page);
     await page.route('**/api/v1/jobs?**', route => route.fulfill({ status: 503, json: { error: 'Catalog unavailable' } }));
-    const button = page.getByRole('button', { name: 'Agents on entry to Review', exact: true });
-    await button.click();
+    await page.getByRole('button', { name: 'Agents on entry to Review', exact: true }).click();
     const panel = page.getByRole('dialog', { name: 'Lane agents', exact: true });
-    await expect(panel).toContainText('Catalog unavailable');
+    await expect(panel).toContainText('Could not load lane agents');
     await page.route('**/api/v1/jobs?**', route => route.fulfill({ json: { jobs } }));
     await panel.getByRole('button', { name: 'Retry', exact: true }).click();
-    await panel.getByRole('button', { name: 'Edit description for Code reviewer', exact: true }).click();
-    const description = panel.getByRole('textbox', { name: 'Agent description for Code reviewer', exact: true });
-    const save = panel.getByRole('button', { name: 'Save description for Code reviewer', exact: true });
-    await expect(description).toHaveValue('Checks the changes');
-    await description.fill('Keep my description draft');
-    await page.route('**/api/v1/jobs/12', route => route.request().method() === 'PUT'
-        ? route.fulfill({ status: 500, json: { error: 'Could not save Automation' } })
-        : route.fulfill({ json: jobs[0] }));
-    await save.click();
-    await expect(panel.getByRole('alert')).toContainText('Could not save Automation');
-    await expect(description).toHaveValue('Keep my description draft');
-    await expect(description).toBeFocused();
-    await expect(save).toBeEnabled();
-    expect(jobs[0].description).toBe('Checks the changes');
-    expect(writes).toHaveLength(0);
-    await panel.getByRole('button', { name: 'Reload', exact: true }).click();
-    await expect(panel.getByRole('alert')).toBeEmpty();
-    await expect(description).toHaveValue('Keep my description draft');
-    // The fresh read must preserve an enable-state change made in the Automation editor.
-    jobs[0].enabled = false;
-    await page.route('**/api/v1/jobs/12', route => {
-        if (route.request().method() === 'PUT') Object.assign(jobs[0], route.request().postDataJSON());
-        return route.fulfill({ json: jobs[0] });
-    });
-    await save.click();
-    await expect(panel.locator('[data-agent-id="12"] [role="status"]')).toHaveText('Description saved');
-    await expect(description).toHaveCount(0);
-    expect(jobs[0].description).toBe('Keep my description draft');
-    expect(jobs[0].enabled).toBe(false);
-    await expect(panel).toContainText('Disabled · manage in the Automation editor');
+    await expect(panel).toContainText('Code reviewer');
     await page.getByRole('button', { name: 'New card', exact: true }).click();
     await expect(panel).toHaveCount(0);
     await expect(page.locator('[data-board-card-editor]')).toBeVisible();
@@ -1430,63 +1400,39 @@ test('lane agent drafts survive a background pagination response and remain save
     const button = page.getByRole('button', { name: 'Agents on entry to Review', exact: true });
     await button.click();
     const panel = page.getByRole('dialog', { name: 'Lane agents', exact: true });
-    await panel.getByRole('button', { name: 'Edit description for Code reviewer', exact: true }).click();
-    const description = panel.getByRole('textbox', { name: 'Agent description for Code reviewer', exact: true });
-    await description.fill('Keep the reviewer draft');
-    await panel.getByRole('button', { name: 'Edit description for Test runner', exact: true }).click();
-    const otherDescription = panel.getByRole('textbox', { name: 'Agent description for Test runner', exact: true });
-    await otherDescription.fill('Keep the test runner draft');
-    await otherDescription.evaluate(el => el.setSelectionRange(5, 12));
-
+    await panel.getByRole('button', { name: 'Add agent', exact: true }).click();
+    await panel.getByLabel('What would you like to add?').selectOption('script');
+    await panel.getByLabel('Script file', { exact: true }).selectOption('scripts/validate.ps1');
+    const name = panel.getByLabel('Automation name', { exact: true });
+    await name.fill('Keep this script draft');
+    await name.evaluate(el => el.setSelectionRange(5, 12));
     release();
     await expect(page.locator('.board-card')).toHaveCount(60);
-    await expect(panel).toBeVisible();
-    await expect(description).toHaveValue('Keep the reviewer draft');
-    await expect(otherDescription).toHaveValue('Keep the test runner draft');
-    await expect(otherDescription).toBeFocused();
-    expect(await otherDescription.evaluate(el => [el.selectionStart, el.selectionEnd])).toEqual([5, 12]);
+    await expect(name).toHaveValue('Keep this script draft');
+    await expect(name).toBeFocused();
+    expect(await name.evaluate(el => [el.selectionStart, el.selectionEnd])).toEqual([5, 12]);
     await expect(button).toHaveAttribute('aria-expanded', 'true');
-    await expect(button).toHaveAttribute('aria-controls', 'board-lane-agents-panel');
     expect(writes).toHaveLength(0);
-
-    await panel.getByRole('button', { name: 'Save description for Code reviewer', exact: true }).click();
-    await expect(panel.locator('[data-agent-id="12"] [role="status"]')).toHaveText('Description saved');
-    await expect(otherDescription).toHaveValue('Keep the test runner draft');
-    expect(jobs[0].description).toBe('Keep the reviewer draft');
-    expect(jobs[1].description).toBe('Runs the test suite');
-    expect(writes).toHaveLength(1);
     await page.keyboard.press('Escape');
     await expect(panel).toHaveCount(0);
     await expect(button).toBeFocused();
-    await expect(button).toHaveAttribute('aria-expanded', 'false');
-    await button.click();
-    await expect(panel.locator('[data-agent-id="12"] .board-lane-agent-description-preview')).toHaveText('Keep the reviewer draft');
-    await page.evaluate(() => window.app.navigate('settings'));
-    await expect(panel).toHaveCount(0);
 });
 
-test('closing lane agents during the description pre-save read prevents a late write', async ({ page }) => {
-    const { jobs, writes } = await openLaneAgentsBoard(page);
+test('closing lane agents during script discovery discards the late result', async ({ page }) => {
+    const { writes } = await openLaneAgentsBoard(page);
+    let release, requested = false;
+    const gate = new Promise(resolve => { release = resolve; });
+    await page.route('**/api/v1/jobs/scripts', async route => {
+        requested = true; await gate;
+        await route.fulfill({ json: { scripts: [], hasMore: false } }).catch(() => {});
+    });
     await page.getByRole('button', { name: 'Agents on entry to Review', exact: true }).click();
     const panel = page.getByRole('dialog', { name: 'Lane agents', exact: true });
-    await panel.getByRole('button', { name: 'Edit description for Code reviewer', exact: true }).click();
-    await panel.getByRole('textbox', { name: 'Agent description for Code reviewer', exact: true }).fill('Not saved after closing');
-    let release;
-    let requested = false;
-    const gate = new Promise(resolve => { release = resolve; });
-    await page.route('**/api/v1/jobs/12', async route => {
-        requested = true;
-        await gate;
-        await route.fulfill({ json: jobs[0] }).catch(() => {});
-    });
-    await panel.getByRole('button', { name: 'Save description for Code reviewer' }).click();
+    await panel.getByRole('button', { name: 'Add agent', exact: true }).click();
+    await panel.getByLabel('What would you like to add?').selectOption('script');
     await expect.poll(() => requested).toBe(true);
-    await page.keyboard.press('Escape');
-    release();
+    await page.keyboard.press('Escape'); release();
     await expect(panel).toHaveCount(0);
-    await page.getByRole('button', { name: 'Agents on entry to Review', exact: true }).click();
-    await panel.getByRole('button', { name: 'Edit description for Code reviewer', exact: true }).click();
-    await expect(panel.getByRole('textbox', { name: 'Agent description for Code reviewer', exact: true })).toHaveValue('Checks the changes');
     expect(writes).toHaveLength(0);
 });
 
