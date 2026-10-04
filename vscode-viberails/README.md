@@ -11,40 +11,27 @@
   </p>
 </div>
 
-VibeRails puts your AI coding CLIs in one VS Code panel. Run Claude Code, Codex, Grok, OpenCode,
-GitHub Copilot and Antigravity side by side, plan their work on a Board, enforce your rules on
-every commit, and search everything your agents have done.
+VibeRails puts deterministic guardrails around Claude Code and Codex, right inside VS Code: rules
+the agents can't skip, a complete audit trail of every session, and far fewer wasted tokens.
 
 ![VibeRails running Claude Code, with Terminals, Board, Quality, Envs, Vibe AI, MCP, Automation and Settings in the top navigation](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/terminals.png)
 
 *Every screenshot here is VibeRails being used to build VibeRails.*
 
-## Every coding CLI in one place
+## Why VibeRails
 
-Launch any supported CLI in a real terminal tab. Sessions keep running when you switch pages, and
-tabs reconnect when you come back. **View/Edit all LLMs** chooses which CLIs and saved
-environments the launcher shows, and in what order, and can launch any of them.
-
-![The View/Edit all LLMs dialog, with a visibility toggle, ordering arrows and a Launch button for each CLI](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/all-llms.png)
-
-## Replay any session, or hand it to another agent
-
-Every session is saved to History. Replay it at up to 100× speed, download the raw session data,
-or use **Send to…** to continue in another CLI or environment: VibeRails summarizes the session
-and starts the new agent with that summary.
-
-![A session's menu in the History rail, with Send to listing custom environments and base CLIs](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/history-send-to.png)
-
-![Replaying a recorded Claude Code session at 10× and then 100× speed](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/session-replay.gif)
-
-## A Board built for agents
-
-Every card is a work item for an agent. Assign it to a CLI or environment and **Start work**
-launches the agent with the card as its brief; agents post comments, handoffs and linked commits
-back to the card over MCP. The robot button on each lane header attaches Automations, such as a
-code review or a quality scan, that run when a card enters the lane.
-
-![Board lanes with assigned cards, live agents and a running lane Automation](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/board.gif)
+- **Deterministic standards, not slop.** Rule engines and coding standards check every commit the
+  same way, whichever agent wrote the code.
+- **100% audit and tracing.** Every session is recorded for replay, work can carry your digital
+  signature, and rules are enforced on every commit.
+- **Token savings.** TokenSaver trims noisy tool output before it ever reaches the model.
+- **A better developer workflow.** Plan agent work on a Board, save your setups as environments,
+  and automate the repeatable parts.
+- **Better PRs and reviews.** Reviewers can see the entire session a developer used to make the
+  code, not just the diff.
+- **LLM as a judge.** Have an LLM review remote sessions.
+- **Multi-LLM.** Run Claude Code and Codex side by side, and send a conversation from one LLM to
+  another.
 
 ## Rules and code quality
 
@@ -58,19 +45,55 @@ an agent.
 
 ![The same report switched to connected module cards](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/code-quality-cards.gif)
 
+## Audit trail and replay
+
+Every session is recorded, from the first prompt to the last command. Replay any of them at up to
+100× speed, follow a Board card from each commit back to the session that produced it, and sign
+your work with your own keys. **Send to…** hands a session to another LLM: VibeRails summarizes
+it and starts the new agent with that summary.
+
+![Replaying a recorded Claude Code session at 10× and then 100× speed](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/session-replay.gif)
+
+![A session's menu in the History rail, with Send to listing custom environments and base CLIs](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/history-send-to.png)
+
+## TokenSaver
+
+Claude Code and Codex can route through TokenSaver, which trims noisy tool output, such as build
+logs, passing tests and repeated lines, before it reaches the model. Your prompts and the model's
+replies are never rewritten. The **tokens saved** meter shows the running total.
+
+![The live counter on viberails.ai, past 2.7 billion tokens saved](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/tokens-saved.png)
+
+## A Board built for agents
+
+Every card is a work item for an agent. Assign it to Claude Code, Codex or a saved environment
+and **Start work** launches the agent with the card as its brief; agents post comments, handoffs
+and linked commits back to the card over MCP. The robot button on each lane header attaches
+Automations, such as a code review or a quality scan, that run when a card enters the lane.
+
+![Board lanes with assigned cards, live agents and a running lane Automation](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/board.gif)
+
+## Claude Code and Codex, side by side
+
+Launch Claude Code, Codex or a plain shell in real terminal tabs. Sessions keep running when you
+switch pages, and tabs reconnect when you come back. **View/Edit all LLMs** chooses which CLIs and
+saved environments the launcher shows, and in what order.
+
+![The View/Edit all LLMs dialog, with a visibility toggle, ordering arrows and a Launch button for each CLI](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/all-llms.png)
+
 ## Environments and Workers
 
 Save a CLI with its model, arguments and initial prompt as a named environment, like Conda for
 LLMs. Run it in the project folder, in its own git clone or in a fresh clone each time. Workers are
 environments set aside for Automations, so unattended reviews always run with the same setup.
 
-![Saved Codex, Claude and Grok code-review environments above the Workers used by Automations](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/environments-workers.png)
+![Saved code-review environments above the Workers used by Automations](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/environments-workers.png)
 
 ## Vibe AI: search everything your agents have done
 
-Sessions from every CLI are captured and indexed locally. Search them by meaning or keyword, and
-let agents do the same through the `search_history` MCP tool, so a fix one CLI found is there for
-the next.
+Every session is captured and indexed locally. Search it by meaning or keyword, and let agents do
+the same through the `search_history` MCP tool, so a fix Codex found is there for Claude Code next
+time.
 
 ![Vibe AI Search with a learn rate of 97, 1,670 captured sessions and coverage for each CLI](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/vibe-ai-search.png)
 
@@ -82,32 +105,19 @@ Its tools cover Board cards, handoffs, reviews, session history, rule checks and
 
 ![The MCP Explorer inspecting the save_board_handoff tool, with its arguments and input schema](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/mcp-explorer.png)
 
-## Automations and TokenSaver
+## Automations
 
-- **Automations** run repository scripts (`.py`, `.ps1`, `.sh`) and an optional Worker on demand,
-  on a schedule, around commits, or when a card enters a Board lane. They run while VibeRails is
-  open, with the same permissions as VibeRails, so review every Worker and script.
-- **TokenSaver** trims noisy tool output, such as build logs, passing tests and repeated lines,
-  before it reaches the model, for Claude Code, Codex, OpenCode and Grok. The **tokens saved**
-  meter shows the running total.
-
-## Supported CLIs
-
-- Claude Code
-- Codex
-- Grok
-- OpenCode, plus GLM 5.2, GLM 5.3, DeepSeek V4 Pro and Kimi K3 through OpenCode
-- GitHub Copilot
-- Antigravity (`agy`)
-- A plain terminal
+Automations run repository scripts (`.py`, `.ps1`, `.sh`) and an optional Worker on demand, on a
+schedule, around commits, or when a card enters a Board lane. They run while VibeRails is open,
+with the same permissions as VibeRails, so review every Worker and script.
 
 ## Get Started
 
 1. Install the extension from the VS Code Marketplace.
 2. Click the **VibeRails** button in the status bar (bottom left), run `VibeRails: Open Dashboard`, or press `Ctrl+Alt+V` / `Cmd+Alt+V`.
-3. Pick a CLI or saved environment on the **Terminals** page and start shipping.
+3. Pick Claude Code, Codex or a saved environment on the **Terminals** page and start shipping.
 
-You need at least one coding CLI installed and signed in. Install options for Windows, Linux, and Mac are available at https://viberails.ai/.
+You need Claude Code or Codex installed and signed in. Install options for Windows, Linux, and Mac are available at https://viberails.ai/.
 
 ### Connect your viberails.ai account
 
