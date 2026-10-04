@@ -29,7 +29,7 @@ public sealed class AutomationScriptCatalogTests : IDisposable
         jobs.Setup(j => j.GetJobsAsync(root, false, It.IsAny<CancellationToken>())).ReturnsAsync([
             new JobDefinitionRecord(1, "Check", root, LLM.NotSet, null, null, "", null, true, DateTime.UtcNow, DateTime.UtcNow, null, [], Actions: [action])]);
         var files = new Mock<IBoardFileIndexService>();
-        files.Setup(f => f.GetScriptPathsAsync(root, It.IsAny<CancellationToken>())).ReturnsAsync(new BoardFileSearchResponse(["check.py", "check.sh", "../outside.py"], false));
+        files.Setup(f => f.GetScriptPathsAsync(root, It.IsAny<CancellationToken>(), null)).ReturnsAsync(new BoardFileSearchResponse(["check.py", "check.sh", "../outside.py"], false));
         var service = new AutomationScriptCatalogService(files.Object, scripts, jobs.Object);
         var catalog = await service.ReadAsync(root, Ct);
         Assert.True(catalog.Scripts[0].Approved);
@@ -51,6 +51,34 @@ public sealed class AutomationScriptCatalogTests : IDisposable
         var result = await files.GetScriptPathsAsync(root, Ct);
         Assert.Equal(3, result.Files.Count);
         Assert.False(result.Truncated);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SearchReachesScriptsBeyondCandidateAndContentBudgets(bool largeFiles)
+    {
+        var names = Enumerable.Range(0, largeFiles ? 7 : 220).Select(i => $"a{i:000}.py").Append("z-deploy.py").ToList();
+        if (largeFiles)
+            foreach (var name in names.Take(7))
+            {
+                await using var file = File.Create(Path.Combine(root, name));
+                file.SetLength(AutomationScriptService.MaxScriptBytes);
+            }
+        await File.WriteAllTextAsync(Path.Combine(root, "z-deploy.py"), "print('found')", Ct);
+        var files = new BoardFileIndexService(TimeProvider.System, (_, _) => Task.FromResult<IReadOnlyList<string>?>(names));
+        var resolver = new Mock<IJobExecutableResolver>();
+        resolver.Setup(r => r.Resolve(JobScriptRuntime.Python)).Returns(new JobExecutable("python", []));
+        var jobs = new Mock<IJobStore>();
+        jobs.Setup(j => j.GetJobsAsync(root, false, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        var catalog = new AutomationScriptCatalogService(files, new AutomationScriptService(resolver.Object), jobs.Object);
+        var first = await catalog.ReadAsync(root, Ct);
+        Assert.True(first.HasMore);
+        Assert.DoesNotContain(first.Scripts, s => s.Path == "z-deploy.py");
+        var found = await catalog.ReadAsync(root, Ct, "DEPLOY");
+        Assert.False(found.HasMore);
+        Assert.Equal("z-deploy.py", Assert.Single(found.Scripts).Path);
+        Assert.Null(found.Scripts[0].UnavailableReason);
     }
 
     public void Dispose() => Directory.Delete(root, recursive: true);

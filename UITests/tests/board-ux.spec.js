@@ -1359,6 +1359,52 @@ test('lane agents handle paused selections, sync the settings badge, and open th
     await expect(panel).toHaveCount(0);
 });
 
+test('script search reaches beyond a truncated catalog and ignores stale results without losing drafts', async ({ page }) => {
+    const { jobs } = await openLaneAgentsBoard(page);
+    let releaseOld, oldRequested = false;
+    const old = new Promise(resolve => { releaseOld = resolve; });
+    const prefix = Array.from({ length: 200 }, (_, i) => ({ path: `scripts/a${i}.py`, runtime: 0, approved: false }));
+    await page.route(/\/api\/v1\/jobs\/scripts(?:\?.*)?$/, async route => {
+        const q = new URL(route.request().url()).searchParams.get('q') || '';
+        if (q === 'old') { oldRequested = true; await old; }
+        await route.fulfill({ json: q === 'deploy' ? { scripts: [{ path: 'scripts/z-deploy.py', runtime: 0, approved: true }], hasMore: false }
+            : { scripts: prefix, hasMore: true } });
+    });
+    const creates = [];
+    await page.route('**/api/v1/jobs', route => {
+        const created = { ...route.request().postDataJSON(), id: 71 };
+        jobs.push(created); creates.push(created);
+        return route.fulfill({ json: created });
+    });
+    await page.getByRole('button', { name: 'Agents on entry to Backlog', exact: true }).click();
+    const panel = page.getByRole('dialog', { name: 'Lane agents', exact: true });
+    await panel.getByRole('button', { name: 'Add agent', exact: true }).click();
+    await panel.getByLabel('What would you like to add?').selectOption('script');
+    await expect(panel).toContainText('More matches exist');
+    await panel.getByLabel('Automation name', { exact: true }).fill('Deploy script');
+    await panel.getByLabel('Arguments — one per line').fill('--verify');
+    const search = panel.getByLabel('Find script', { exact: true });
+    await search.fill('old');
+    await search.press('Enter');
+    await expect.poll(() => oldRequested).toBe(true);
+    await expect(panel.getByRole('button', { name: 'Add to lane', exact: true })).toBeDisabled();
+    await search.fill('deploy');
+    await search.press('Enter');
+    const paths = panel.getByLabel('Script file', { exact: true });
+    await expect(paths.locator('option')).toHaveCount(2);
+    await paths.selectOption('scripts/z-deploy.py');
+    const staleResponse = page.waitForResponse('**/api/v1/jobs/scripts?q=old');
+    releaseOld();
+    await staleResponse;
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await expect(paths).toHaveValue('scripts/z-deploy.py');
+    await expect(search).toHaveValue('deploy');
+    await expect(panel.getByLabel('Automation name', { exact: true })).toHaveValue('Deploy script');
+    await panel.getByRole('button', { name: 'Add to lane', exact: true }).click();
+    await expect.poll(() => creates.length).toBe(1);
+    expect(creates[0].actions[0]).toMatchObject({ scriptPath: 'scripts/z-deploy.py', arguments: ['--verify'] });
+});
+
 test('lane agent loading failures recover and navigation disposes the panel', async ({ page }) => {
     const { jobs } = await openLaneAgentsBoard(page);
     await page.route('**/api/v1/jobs?**', route => route.fulfill({ status: 503, json: { error: 'Catalog unavailable' } }));

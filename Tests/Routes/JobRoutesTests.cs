@@ -141,6 +141,22 @@ public sealed class JobRoutesTests : IDisposable
     }
 
     [Fact]
+    public async Task ScriptCatalogSearchIsBoundedAndFiltersBeforeReturningCandidates()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_repoRoot, "check.py"), "print('ok')", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(_repoRoot, "deploy.py"), "print('deploy')", TestContext.Current.CancellationToken);
+        await WithHostAsync(async baseUri =>
+        {
+            using var found = await SharedClient.GetAsync(new Uri(baseUri, "/api/v1/jobs/scripts?q=DEPLOY"), TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.OK, found.StatusCode);
+            var catalog = await found.Content.ReadFromJsonAsync(AppJsonSerializerContext.Default.AutomationScriptCatalogResponse, TestContext.Current.CancellationToken);
+            Assert.Equal("deploy.py", Assert.Single(catalog!.Scripts).Path);
+            using var invalid = await SharedClient.GetAsync(new Uri(baseUri, "/api/v1/jobs/scripts?q=" + new string('a', 257)), TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        });
+    }
+
+    [Fact]
     public async Task ImportBindsTheRequestAndReturnsTheServiceResponse()
     {
         AutomationImportRequest? bound = null;

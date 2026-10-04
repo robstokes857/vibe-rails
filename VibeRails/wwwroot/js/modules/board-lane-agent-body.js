@@ -40,14 +40,14 @@ export function mountLaneAgentBody({ app, panel, column, signal, position, updat
         settings = lane; jobs = catalog?.jobs || []; environments = profiles?.environments || [];
         updateCount(settings);
     };
-    const showError = error => {
+    const showError = (error, retryAction = 'retry') => {
         if (!alive()) return;
         const host = content.querySelector('[data-agent-error]');
         if (host) {
             host.textContent = error?.message || 'Could not update lane agents.';
             const retry = document.createElement('button');
             retry.type = 'button'; retry.className = 'btn btn-sm btn-link';
-            retry.dataset.agentAction = 'retry'; retry.textContent = 'Reload'; host.append(retry);
+            retry.dataset.agentAction = retryAction; retry.textContent = 'Reload'; host.append(retry);
         }
     };
     const run = async (operation, focus) => {
@@ -70,15 +70,28 @@ export function mountLaneAgentBody({ app, panel, column, signal, position, updat
         await run(load, '[data-agent-action="add"]');
         if (alive() && !settings) content.innerHTML = '<p role="alert">Could not load lane agents.</p><button type="button" class="btn btn-outline-secondary" data-agent-action="retry">Retry</button>';
     };
+    const renderScriptResults = () => {
+        if (!adding || draft.kind !== 'script' || busy) return;
+        const active = document.activeElement;
+        const field = content.contains(active) ? active.dataset.laneDraft : null;
+        const start = active?.selectionStart, end = active?.selectionEnd;
+        render();
+        const restored = [...content.querySelectorAll('[data-lane-draft]')].find(el => el.dataset.laneDraft === field);
+        restored?.focus();
+        if (start != null && end != null) restored?.setSelectionRange?.(start, end);
+    };
     const loadScripts = async () => {
         const request = ++scriptRequest;
+        const query = (draft.scriptQuery || '').trim();
+        scripts = null;
+        renderScriptResults();
         try {
-            const catalog = await api('/api/v1/jobs/scripts');
+            const catalog = await api(`/api/v1/jobs/scripts${query ? `?q=${encodeURIComponent(query)}` : ''}`);
             if (!alive() || request !== scriptRequest) return;
             scripts = catalog;
             // Script discovery must not disturb a form the user has moved on to.
-            if (adding && draft.kind === 'script' && !busy) render();
-        } catch (error) { if (alive() && request === scriptRequest && adding && draft.kind === 'script') showError(error); }
+            renderScriptResults();
+        } catch (error) { if (alive() && request === scriptRequest && adding && draft.kind === 'script') showError(error, 'reload-scripts'); }
     };
     const saveSelection = async ids => {
         const saved = await BoardApi.saveLaneAutomationAsync(column.id, { jobIds: ids, expectedRevision: settings.revision });
@@ -88,6 +101,8 @@ export function mountLaneAgentBody({ app, panel, column, signal, position, updat
         // The mutation succeeded. Return to the list even if a catalog refresh fails.
         adding = false;
         draft = { kind: '', jobId: '', name: '', path: '', arguments: '' };
+        scriptRequest++;
+        scripts = null;
         await load();
     };
     const updateJob = async (id, changes) => {
@@ -134,6 +149,12 @@ export function mountLaneAgentBody({ app, panel, column, signal, position, updat
     panel.addEventListener('input', event => {
         const key = event.target.dataset.laneDraft;
         if (key && !busy) draft[key] = event.target.value;
+    }, { signal });
+    panel.addEventListener('keydown', event => {
+        if (event.key === 'Enter' && event.target.dataset.laneDraft === 'scriptQuery') {
+            event.preventDefault();
+            if (!busy) void loadScripts();
+        }
     }, { signal });
     panel.addEventListener('change', event => {
         const key = event.target.dataset.laneDraft;

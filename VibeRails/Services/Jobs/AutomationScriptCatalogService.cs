@@ -10,9 +10,12 @@ public sealed class AutomationScriptCatalogService(IBoardFileIndexService files,
     private const long MaxCatalogBytes = 32 * 1024 * 1024;
 
     /// <summary>Validate bounded repository candidates using the same rules as save/run.</summary>
-    public async Task<AutomationScriptCatalogResponse> ReadAsync(string project, CancellationToken ct)
+    public async Task<AutomationScriptCatalogResponse> ReadAsync(string project, CancellationToken ct, string? query = null)
     {
-        var candidates = await files.GetScriptPathsAsync(project, ct);
+        if ((query?.Trim().Length ?? 0) > BoardFileIndexService.MaxQueryLength)
+            throw JobServiceException.BadRequest($"Search must be {BoardFileIndexService.MaxQueryLength} characters or fewer.");
+        // Filter the cached path index before applying either the candidate or content budget.
+        var candidates = await files.GetScriptPathsAsync(project, ct, query);
         var definitions = await jobs.GetJobsAsync(project, cancellationToken: ct);
         var approvals = definitions.SelectMany(job => job.Actions ?? [])
             .Where(action => action.Kind == JobActionKind.Script && action.ApprovedHash is not null).ToList();

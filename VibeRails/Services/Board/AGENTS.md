@@ -87,6 +87,8 @@ use working-tree scope. `GET /api/v1/jobs/scripts` discovers bounded repository 
 through the existing file index and validates them using `AutomationScriptService`. Saved content
 hashes identify approved scripts; discovery never approves a file. The normal save route still
 approves current contents. Catalog limits (200 candidates, 32 MiB total inspection) are explicit.
+Optional `q` searches the cached script path index before either limit (256 characters maximum),
+so a valid script beyond the initial prefix can still be found without entering its whole path.
 
 ## Switch reviewer (VIBE-22)
 

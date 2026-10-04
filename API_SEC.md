@@ -6,7 +6,10 @@ Added root-only `GET /api/v1/jobs/scripts` under the existing session+tab middle
 the server-derived current repository, returns no-store bounded path/runtime/approval metadata,
 and applies the existing script containment, link, size and runtime validation. Discovery reads
 at most 200 candidates and 32 MiB of script contents, persists no approval, and exposes no
-caller-selected root. Existing Job save/run hash approvals remain authoritative.
+caller-selected root. Its optional `q` (at most 256 characters) filters the cached path index
+before both budgets, so scripts beyond a truncated prefix remain discoverable. Query text is
+only a case-insensitive substring match, never a filesystem path or command. Existing Job
+save/run hash approvals remain authoritative.
 
 Added `POST /llm/control/agent/end-session` on each backend's existing main Kestrel listener.
 CookieAuthMiddleware plus `ILlmProxyAuthGate` require both process-local session and tab

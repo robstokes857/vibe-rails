@@ -47,13 +47,15 @@ export function laneAgentAddMarkup(draft, settings, jobs, environments, scripts)
                 <select id="board-lane-purpose" class="form-select" data-lane-draft="purpose">${agentPurposeOptions(draft.purpose ?? worker.purpose)}</select>
                 <small>Saved on Worker “${escapeHtml(worker.name)}” wherever it is used. Future agent comments can be filtered by this purpose.</small>` : ''}` : ''}
         ${draft.kind.startsWith('check:') ? '<p class="board-lane-check-summary">Checks working changes, including staged and unstaged edits. Committed code is covered by Git Guard.</p>' : ''}
-        ${draft.kind === 'script' ? `<label for="board-lane-script">Script file</label>
+        ${draft.kind === 'script' ? `<label for="board-lane-script-search">Find script</label>
+            <input id="board-lane-script-search" type="search" class="form-control" data-lane-draft="scriptQuery" maxlength="256" value="${escapeHtml(draft.scriptQuery || '')}" placeholder="Search by file name or path">
+            <button type="button" class="btn btn-sm btn-link" data-agent-action="reload-scripts">Search scripts</button>
+            <label for="board-lane-script">Script file</label>
             <select id="board-lane-script" class="form-select" data-lane-draft="path" required ${scripts ? '' : 'disabled'}>
                 <option value="">${scripts ? 'Choose a repository script…' : 'Loading scripts…'}</option>
                 ${scriptOptions.map(script => `<option value="${escapeHtml(script.path)}"${draft.path === script.path ? ' selected' : ''} ${script.unavailableReason ? 'disabled' : ''}>${escapeHtml(script.path)} — ${escapeHtml(script.unavailableReason || (script.approved ? 'Approved' : 'Needs approval'))}</option>`).join('')}
             </select>
-            <small role="status">${scripts ? `${scriptOptions.filter(s => !s.unavailableReason).length} valid scripts · ${scriptOptions.filter(s => s.approved && !s.unavailableReason).length} approved${scripts.hasMore ? ' · Showing a bounded catalog; more scripts may exist.' : ''}` : 'Discovering Python, PowerShell and Bash scripts…'}</small>
-            <button type="button" class="btn btn-sm btn-link" data-agent-action="reload-scripts">Refresh scripts</button>
+            <small role="status">${scripts ? `${scriptOptions.filter(s => !s.unavailableReason).length} valid scripts · ${scriptOptions.filter(s => s.approved && !s.unavailableReason).length} approved${scripts.hasMore ? ' · More matches exist. Narrow your search to find them.' : ''}` : 'Discovering Python, PowerShell and Bash scripts…'}</small>
             <label for="board-lane-script-name">Automation name</label>
             <input id="board-lane-script-name" class="form-control" data-lane-draft="name" maxlength="100" value="${escapeHtml(draft.name)}" required placeholder="Run lane script">
             <label for="board-lane-script-arguments">Arguments — one per line</label>

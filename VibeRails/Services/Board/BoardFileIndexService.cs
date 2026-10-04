@@ -11,7 +11,7 @@ namespace VibeRails.Services.Board;
 public interface IBoardFileIndexService
 {
     /// <summary>Bounded repository script candidates, before runtime/approval validation.</summary>
-    Task<BoardFileSearchResponse> GetScriptPathsAsync(string projectPath, CancellationToken cancellationToken = default);
+    Task<BoardFileSearchResponse> GetScriptPathsAsync(string projectPath, CancellationToken cancellationToken = default, string? query = null);
     /// <summary>
     /// Case-insensitive contains match over repo-relative paths (forward slashes). File-name hits
     /// rank before directory-only hits; an empty query returns the first files alphabetically.
@@ -21,10 +21,14 @@ public interface IBoardFileIndexService
 
 public sealed class BoardFileIndexService : IBoardFileIndexService
 {
-    public async Task<BoardFileSearchResponse> GetScriptPathsAsync(string projectPath, CancellationToken cancellationToken = default)
+    public async Task<BoardFileSearchResponse> GetScriptPathsAsync(string projectPath, CancellationToken cancellationToken = default, string? query = null)
     {
+        var search = (query ?? "").Trim().Replace('\\', '/');
+        if (search.Length > MaxQueryLength)
+            throw new BoardValidationException($"Search must be {MaxQueryLength} characters or fewer.");
         var files = await GetFilesAsync(projectPath, cancellationToken);
         var scripts = files.Where(path => Path.GetExtension(path).ToLowerInvariant() is ".py" or ".ps1" or ".sh")
+            .Where(path => path.Contains(search, StringComparison.OrdinalIgnoreCase))
             .Take(201).ToList();
         return new(scripts.Take(200).ToList(), scripts.Count > 200);
     }

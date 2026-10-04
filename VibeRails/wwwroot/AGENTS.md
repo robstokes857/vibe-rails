@@ -248,6 +248,9 @@ CRUD and drafts, `board-lane-agent-list.js` and `board-lane-agent-add.js` render
 revision conflicts so retries do not duplicate it. Failed/stale script loads cannot repaint a
 closed form. The repository-script picker shows discovered paths and valid/approved counts;
 approval means the saved Automation hash matches current contents, not a digital signature.
+Its Find script field submits a bounded server search (Enter or Search scripts) before catalog
+limits. Preserve name/argv/query drafts and focus while results load; older searches cannot
+replace newer ones. A truncated catalog prompts the user to narrow the search.
 
 Worker purpose is optional (work/not specified, code_review, testing, building, deploying,
 documentation, other). The shared selector lives in `agent-purpose.js`; adding an existing

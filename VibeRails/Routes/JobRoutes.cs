@@ -17,12 +17,12 @@ public static class JobRoutes
         if (isActiveRootBackend)
         {
             app.MapGet("/api/v1/jobs/scripts", async (
-                AutomationScriptCatalogService service, HttpContext context, CancellationToken cancellationToken) =>
+                AutomationScriptCatalogService service, HttpContext context, CancellationToken cancellationToken, string? q = null) =>
                 await ExecuteAsync(async () =>
                 {
                     context.Response.Headers.CacheControl = "no-store";
                     var projectPath = await ResolveCurrentRepositoryAsync(launchDirectory, cancellationToken);
-                    return await service.ReadAsync(projectPath, cancellationToken);
+                    return await service.ReadAsync(projectPath, cancellationToken, q);
                 }))
                 .WithName("GetAutomationScripts");
 
