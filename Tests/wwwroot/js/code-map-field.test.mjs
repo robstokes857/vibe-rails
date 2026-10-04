@@ -70,6 +70,34 @@ test('semantic zoom fades declarations in by family as the camera closes and nev
     }
 });
 
+// The shipped placeLabels, run with a stub state: the field's app script is not a module, so the
+// function is cut out by its anchors the same way the renderer template is.
+function shippedPlaceLabels(zoom, items) {
+    const app = [...template.matchAll(/<script>([\s\S]*?)<\/script>/g)].find(match => match[1].includes('function placeLabels('))[1];
+    const source = app.slice(app.indexOf('    function placeLabels('), app.indexOf('    function fittedCamera('));
+    const context = { state: { layout: items, zoom, panX: 0, panY: 0, query: '', filter: 'all' }, field: { candidates: null },
+        dense: () => true, detailFor: () => 1, projectItem: item => item.lastPosition, $: () => ({ clientWidth: 1000, clientHeight: 800 }) };
+    vm.runInNewContext(source + '\nthis.placeLabels = placeLabels;', context);
+    context.placeLabels({ width: 1000, height: 800 });
+    return items;
+}
+
+test('zoomed out, a repeated directory name is labelled once, by a directory that actually receives the label', () => {
+    const module = (id, name, links, x, y) => ({ id, family: 'module', links, hidden: false, node: { name }, lastPosition: { x, y } });
+    const items = () => [
+        module('offscreen-src', 'src', 50, -2000, -2000), // the best-linked src lies outside the viewport
+        module('visible-src', 'src', 5, 600, 360),
+        module('another-src', 'src', 4, 600, 700),
+        module('tests', 'tests', 3, 900, 360)
+    ];
+    const zoomedOut = Object.fromEntries(shippedPlaceLabels(.5, items()).map(item => [item.id, item.named]));
+    assert.deepEqual(zoomedOut, { 'offscreen-src': false, 'visible-src': true, 'another-src': false, tests: true },
+        'an off-screen candidate never reserves the name; the first visible src carries it');
+    const zoomedIn = Object.fromEntries(shippedPlaceLabels(.9, items()).map(item => [item.id, item.named]));
+    assert.deepEqual(zoomedIn, { 'offscreen-src': false, 'visible-src': true, 'another-src': true, tests: true },
+        'closer in, every visible directory keeps its own label');
+});
+
 test('the force layout places every node of a dense snapshot in bounded time', () => {
     const { graph, index } = fixture(700);
     const view = scopeNodes(graph, index, null);
