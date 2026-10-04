@@ -1186,7 +1186,7 @@ audit line recording that executables in `~/.vibe_rails` had been replaced.
 `builder.Logging.SetMinimumLevel` does not affect these files — the host clears MEL providers and
 the file sink is the static Serilog logger in `Program.cs`.
 Routes are authenticated and mapped
-only on active root backends. See [README.md](../README.md#internal-tools-and-feature-logs) for
+only on active root backends. See [internal-tools.md](internal-tools.md) for
 the extension recipe, retention, status semantics, and best-effort persistence limits.
 
 ## Contributing Guidelines

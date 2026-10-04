@@ -1,7 +1,7 @@
 {
   "name": "vscode-viberails",
   "displayName": "VibeRails",
-  "description": "Launch and control VibeRails dashboard inside VS Code",
+  "description": "Run Claude Code, Codex, Grok, OpenCode, Copilot and Antigravity side by side, with an agent Board, commit rules, code quality, session replay and search.",
   "version": "10.11.10",
   "publisher": "viberails",
   "icon": "media/vs-logo.png",

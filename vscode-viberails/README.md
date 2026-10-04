@@ -3,98 +3,119 @@
   <h1>VibeRails</h1>
   <h3>An opinionated framework that keeps vibe coding from going off the rails</h3>
   <p>
-    <a href="https://marketplace.visualstudio.com/items?itemName=viberails.vscode-viberails"><img alt="Marketplace version" src="https://img.shields.io/visual-studio-marketplace/v/viberails.vscode-viberails?label=marketplace&color=0078D4" /></a>
-    <a href="https://marketplace.visualstudio.com/items?itemName=viberails.vscode-viberails"><img alt="Installs" src="https://img.shields.io/visual-studio-marketplace/i/viberails.vscode-viberails?color=0078D4" /></a>
+    <a href="https://marketplace.visualstudio.com/items?itemName=viberails.vscode-viberails"><img alt="Marketplace version" src="https://badgen.net/vs-marketplace/v/viberails.vscode-viberails?label=marketplace&color=0078D4" /></a>
+    <a href="https://marketplace.visualstudio.com/items?itemName=viberails.vscode-viberails"><img alt="Installs" src="https://badgen.net/vs-marketplace/i/viberails.vscode-viberails?color=0078D4" /></a>
     <a href="https://code.visualstudio.com/"><img alt="VS Code" src="https://img.shields.io/badge/VS%20Code-1.125%2B-007ACC" /></a>
     <a href="https://github.com/robstokes857/vibe-rails/blob/main/vscode-viberails/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-blue.svg" /></a>
     <a href="https://viberails.ai/"><img alt="Website" src="https://img.shields.io/badge/web-viberails.ai-c084fc" /></a>
   </p>
 </div>
 
-![VibeRails Board with fictional work assigned to multiple coding agents](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/vscode-viberails/media/screenshots/15-board-wide.png)
+VibeRails puts your AI coding CLIs in one VS Code panel. Run Claude Code, Codex, Grok, OpenCode,
+GitHub Copilot and Antigravity side by side, plan their work on a Board, enforce your rules on
+every commit, and search everything your agents have done.
 
-*Screenshots show the shared VibeRails dashboard with fictional demo content. Agent activity, quality scores, and terminal output are illustrative.*
+![VibeRails running Claude Code, with Terminals, Board, Quality, Envs, Vibe AI, MCP, Automation and Settings in the top navigation](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/terminals.png)
 
-## AI Coding, With Guardrails
+*Every screenshot here is VibeRails being used to build VibeRails.*
 
-VibeRails is the control layer for AI coding inside VS Code. Work faster with Claude, Codex, Antigravity, Copilot, and OpenCode while keeping output consistent, reviewable, and secure.
+## Every coding CLI in one place
 
-## Key Features
+Launch any supported CLI in a real terminal tab. Sessions keep running when you switch pages, and
+tabs reconnect when you come back. **View/Edit all LLMs** chooses which CLIs and saved
+environments the launcher shows, and in what order, and can launch any of them.
 
-- Environment Isolation: Like Conda for LLMs. Experiment with settings without breaking your primary setup.
-- Cross-LLM Learning: Share context and learnings across Claude, Codex, Antigravity, Copilot, and OpenCode.
-- RAG Without The Rot: Track repeated fixes, feature descriptions, and file changes so context stays useful.
-- Few Shot Prompting: Get Antigravity or Codex to code like Claude, with up to 20% better performance.
-- Rule Enforcement: Enforce standards before code gets pushed.
-- Token Savings: Use smarter file hints to reduce token usage and cost.
+![The View/Edit all LLMs dialog, with a visibility toggle, ordering arrows and a Launch button for each CLI](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/all-llms.png)
 
-## Secure by Design
+## Replay any session, or hand it to another agent
 
-- Secure local dashboard access.
-- Isolated environment profiles for each workflow.
-- Rule checks and session visibility help prevent risky changes from slipping through.
+Every session is saved to History. Replay it at up to 100× speed, download the raw session data,
+or use **Send to…** to continue in another CLI or environment: VibeRails summarizes the session
+and starts the new agent with that summary.
 
-## Built for Multi-LLM Workflows
+![A session's menu in the History rail, with Send to listing custom environments and base CLIs](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/history-send-to.png)
 
-- Claude
+![Replaying a recorded Claude Code session at 10× and then 100× speed](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/session-replay.gif)
+
+## A Board built for agents
+
+Every card is a work item for an agent. Assign it to a CLI or environment and **Start work**
+launches the agent with the card as its brief; agents post comments, handoffs and linked commits
+back to the card over MCP. The robot button on each lane header attaches Automations, such as a
+code review or a quality scan, that run when a card enters the lane.
+
+![Board lanes with assigned cards, live agents and a running lane Automation](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/board.gif)
+
+## Rules and code quality
+
+Rules live in `vc.rules.md` files in your repository, and Git Guard hooks enforce them on every
+commit: `WARN` reports, `COMMIT` needs an acknowledgment in the commit message, and `STOP` blocks.
+The code quality report grades the repository, ranks the files that need attention, and shows the
+code as a live graph or as connected module cards. **Fix code quality with…** hands the report to
+an agent.
+
+![The code quality report: an animated code graph beside a B grade, the quality radar and ranked report files](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/code-quality-graph.gif)
+
+![The same report switched to connected module cards](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/code-quality-cards.gif)
+
+## Environments and Workers
+
+Save a CLI with its model, arguments and initial prompt as a named environment, like Conda for
+LLMs. Run it in the project folder, in its own git clone or in a fresh clone each time. Workers are
+environments set aside for Automations, so unattended reviews always run with the same setup.
+
+![Saved Codex, Claude and Grok code-review environments above the Workers used by Automations](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/environments-workers.png)
+
+## Vibe AI: search everything your agents have done
+
+Sessions from every CLI are captured and indexed locally. Search them by meaning or keyword, and
+let agents do the same through the `search_history` MCP tool, so a fix one CLI found is there for
+the next.
+
+![Vibe AI Search with a learn rate of 97, 1,670 captured sessions and coverage for each CLI](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/vibe-ai-search.png)
+
+## Built-in MCP server
+
+VibeRails runs an MCP server inside the extension and registers it with every agent it launches.
+Its tools cover Board cards, handoffs, reviews, session history, rule checks and TokenSaver. The
+**MCP Explorer** shows each tool's description and input schema and calls it for you.
+
+![The MCP Explorer inspecting the save_board_handoff tool, with its arguments and input schema](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/mcp-explorer.png)
+
+## Automations and TokenSaver
+
+- **Automations** run repository scripts (`.py`, `.ps1`, `.sh`) and an optional Worker on demand,
+  on a schedule, around commits, or when a card enters a Board lane. They run while VibeRails is
+  open, with the same permissions as VibeRails, so review every Worker and script.
+- **TokenSaver** trims noisy tool output, such as build logs, passing tests and repeated lines,
+  before it reaches the model, for Claude Code, Codex, OpenCode and Grok. The **tokens saved**
+  meter shows the running total.
+
+## Supported CLIs
+
+- Claude Code
 - Codex
-- Antigravity
-- Copilot
-- OpenCode
-- GLM-5.2 (via OpenCode)
-- Grok 4.6 (via OpenCode)
-- VS Code
-
-## See It in Action
-
-### Board and lane agents
-
-Keep requirements, agent discussion, and workflow in one place. Configure reviews and checks for cards entering a lane.
-
-![Review lane with configured agents and checks](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/vscode-viberails/media/screenshots/03-lane-agents.png)
-
-### Code quality and source relationships
-
-Explore the code graph, switch to connected module cards, and inspect saved file measurements.
-
-![Code graph and sample quality report](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/vscode-viberails/media/screenshots/06-code-graph.png)
-
-![Connected module cards for the demo project](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/vscode-viberails/media/screenshots/07-code-cards.png)
-
-### Environments and Workers
-
-Reuse prompts and workspace settings across coding sessions and Automations.
-
-![VibeRails coding environments and Automation Workers](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/vscode-viberails/media/screenshots/10-environments.png)
-
-### Automations
-
-Create repeatable workflows with scripts and an optional Worker. Automations run while VibeRails is open.
-
-![Sample Automations and signed Python scripts](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/vscode-viberails/media/screenshots/11-automations.png)
-
-### Web UI Terminal
-
-Use the integrated terminal for CLI sessions. The example below contains a fictional transcript.
-
-![VibeRails terminal with a sample agent session](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/vscode-viberails/media/screenshots/14-terminal.png)
-
-[Browse the full screenshot collection](https://github.com/robstokes857/vibe-rails/blob/main/vscode-viberails/media/screenshots/README.md).
+- Grok
+- OpenCode, plus GLM 5.2, GLM 5.3, DeepSeek V4 Pro and Kimi K3 through OpenCode
+- GitHub Copilot
+- Antigravity (`agy`)
+- A plain terminal
 
 ## Get Started
 
 1. Install the extension from the VS Code Marketplace.
 2. Click the **VibeRails** button in the status bar (bottom left), run `VibeRails: Open Dashboard`, or press `Ctrl+Alt+V` / `Cmd+Alt+V`.
-3. Launch a base CLI or custom environment and start shipping.
+3. Pick a CLI or saved environment on the **Terminals** page and start shipping.
 
-Install options for Windows, Linux, and Mac are available at https://viberails.ai/.
+You need at least one coding CLI installed and signed in. Install options for Windows, Linux, and Mac are available at https://viberails.ai/.
 
 ### Connect your viberails.ai account
 
 Open **Settings → General → Account**, select **Sign in**, and choose **Open sign-in page**.
 Sign in through your browser; the code is submitted automatically. Check the computer and approve
 the request. VibeRails saves the connection automatically. The API-key field also accepts a
-key from your account if you prefer to paste one.
+key from your account if you prefer to paste one. While an account is connected, VibeRails
+uploads completed sessions to it.
 
 ## What's Bundled
 
@@ -143,4 +164,4 @@ The extension ships the whole VibeRails backend inside the VSIX — there is **n
 
 ---
 
-*Last checked: 2026-08-06T18:21:17Z by opencode (glm-5.2)*
+*Last checked: 2026-10-04 by Claude Code (claude-opus-5-5)*
