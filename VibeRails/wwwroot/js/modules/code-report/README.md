@@ -147,6 +147,24 @@ on two canvases inside `#stage`, with no DOM element per entity:
   whose ambient sway costs more than 18 ms for twelve frames holds still
   (`#stage[data-field="still"]`), keeping only the signals. The layout cache is keyed by scope,
   filter and reveal. Reduced motion stops all of it; the Cards view keeps its SVG curves.
+- Semantic zoom (VIBE-48): a dense field (more than `DENSE_VIEW_NODES` entities) draws only
+  its structure while zoomed out. `CodeAtlasLayout.detail` fades classes and types in between
+  40% and 65% zoom and functions between 55% and 90%; a link fades with the fainter of its
+  endpoints, labels and hit-testing follow the drawn set, and the ambient link alpha thins with
+  the zoom so thousands of overlapping hairlines stop summing to a fog. It is a filter inside
+  `paintField`, never a relayout, so clusters keep their places. The hovered, selected and
+  changed entities and every entity in the lit set always draw (tracing a file reveals its
+  declarations at any zoom), as does everything under a search or an explicit entity filter.
+  Zoomed out, a repeated directory name (`src`, `tests`) is labelled once. A notice overlaid in
+  the stage's corner (`#detail-notice`) says what zooming in reveals and the legend dims those
+  rows; it is an overlay because a notice in the summary row would change the stage height, and
+  the ResizeObserver refits the camera on every stage resize. `fieldStats()` reports `zoom`,
+  `shown` and the `hidden` counts, `locate(id)` whether a point is drawn.
+- Palette: the structure (modules, files, data) is cool and bright; declarations are a warm,
+  muted family (classes gold, functions desaturated teal) in both modes, so folders and files
+  read differently from the long tail at a glance. The legend dots use the `--node-*` tokens the
+  canvas paints with. The palette lives twice in the bundle (host-side and in the template);
+  change both.
 - `CodeAtlas.locate(id)` and `CodeAtlas.fieldStats()` exist on the frame's own global for
   browser tests and tracing; the host bridge does not expose them.
 

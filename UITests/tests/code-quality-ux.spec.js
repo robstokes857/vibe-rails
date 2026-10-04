@@ -515,6 +515,81 @@ test('a fully connected field draws within its link budget and lights every link
     expect(selected.signals).toBe(99);
 });
 
+test('a dense field hides its declarations zoomed out and reveals them on hover, zoom, search and filter', async ({ page }, testInfo) => {
+    await installQualityApi(page);
+    const graph = graphResponse();
+    for (let directory = 0; directory < 3; directory++) {
+        graph.nodes.push({ id: `area-${directory}`, name: `Area${directory}`, kind: 'module', path: `src/Area${directory}` });
+        for (let index = 0; index < 150; index++) {
+            const file = `f-${directory}-${index}`;
+            graph.nodes.push({ id: file, name: `Unit${index}.ts`, kind: 'file', path: `src/Area${directory}/Unit${index}.ts`, parentId: `area-${directory}` });
+            graph.edges.push({ id: `c-${file}`, source: `area-${directory}`, target: file, kind: 'contains' });
+            graph.nodes.push({ id: `${file}-class`, name: `Unit${index}`, kind: 'class', path: `src/Area${directory}/Unit${index}.ts:1`, parentId: file });
+            graph.edges.push({ id: `c-${file}-class`, source: file, target: `${file}-class`, kind: 'contains' });
+            for (const name of ['load', 'save']) {
+                graph.nodes.push({ id: `${file}-${name}`, name, kind: 'function', path: `src/Area${directory}/Unit${index}.ts:9`, parentId: file });
+                graph.edges.push({ id: `c-${file}-${name}`, source: file, target: `${file}-${name}`, kind: 'contains' });
+            }
+            if (index % 3 === 0) graph.edges.push({ id: `r-${file}`, source: file, target: `f-${(directory + 1) % 3}-${index}`, kind: 'references' });
+        }
+    }
+    await page.route('**/api/v1/code-analyzer/graph', route => route.fulfill({ json: graph }));
+    const report = await openDetails(page);
+    const map = page.frameLocator('.code-report iframe');
+    await expect(map.locator('body')).toHaveAttribute('data-startup', 'ready', { timeout: 60_000 });
+    await expect(map.locator('#stage')).toHaveClass(/dense/);
+    await expect(map.locator('#stage')).toHaveAttribute('data-motion', 'idle', { timeout: 15_000 });
+    const stats = () => map.locator('body').evaluate(() => CodeAtlas.fieldStats());
+    const locate = id => map.locator('body').evaluate((_, id) => CodeAtlas.locate(id), id);
+    // Zoomed all the way out only the structure is drawn: the layout keeps every position, the
+    // 450 classes and 900 functions wait for the camera, and the summary and legend say so.
+    for (let step = 0; step < 4; step++) await map.locator('#zoom-out').click();
+    await expect.poll(async () => (await stats()).zoom).toBeLessThan(.4);
+    await expect.poll(async () => (await stats()).hidden).toEqual({ class: 450, function: 900 });
+    expect((await stats()).shown).toBe(graph.nodes.length - 1350);
+    expect((await stats()).nodes).toBe(graph.nodes.length);
+    await expect(map.locator('#detail-notice')).toHaveText('Zoom in to show 900 functions and 450 classes and types');
+    await expect(map.locator('#view-summary')).toBeHidden();
+    await expect(map.locator('#count-function').locator('..')).toHaveClass(/zoomed-out/);
+    await expect(map.locator('#count-class').locator('..')).toHaveClass(/zoomed-out/);
+    await expect(map.locator('#count-module').locator('..')).not.toHaveClass(/zoomed-out/);
+    expect(await locate('f-0-0-load')).toMatchObject({ hidden: false, shown: false, named: false });
+    expect(await locate('f-0-0')).toMatchObject({ hidden: false, shown: true });
+    await report.locator('iframe').screenshot({ path: testInfo.outputPath('semantic-zoom-out.png') });
+    // Hovering a file lights every one of its links and raises its hidden declarations above the veil.
+    const target = await stagePoint(page, 'f-0-0');
+    await page.mouse.move(target.x - 30, target.y - 30);
+    await page.mouse.move(target.x, target.y);
+    await expect(map.locator('#node-tooltip')).toContainText('Unit0.ts');
+    await expect.poll(async () => (await stats()).hidden).toEqual({ class: 449, function: 898 });
+    expect(await locate('f-0-0-load')).toMatchObject({ shown: true });
+    expect((await stats()).lit).toBe(graph.edges.filter(edge => edge.source === 'f-0-0' || edge.target === 'f-0-0').length);
+    const corner = await stagePoint(page, { x: 4, y: 4 });
+    await page.mouse.move(corner.x, corner.y);
+    await expect.poll(async () => (await stats()).hidden).toEqual({ class: 450, function: 900 });
+    // A search shows every match at any zoom; an explicit entity filter shows that family at any zoom.
+    await map.locator('#search').fill('save');
+    await expect.poll(async () => (await stats()).hidden).toEqual({ class: 0, function: 0 });
+    await expect(map.locator('#detail-notice')).toBeHidden();
+    await map.locator('#search').press('Escape');
+    await expect.poll(async () => (await stats()).hidden).toEqual({ class: 450, function: 900 });
+    await map.locator('#entity-filter').selectOption('classes');
+    await expect(map.locator('#stage')).toHaveAttribute('data-motion', 'idle', { timeout: 15_000 });
+    for (let step = 0; step < 4; step++) await map.locator('#zoom-out').click();
+    await expect.poll(async () => (await stats()).hidden).toEqual({ class: 0, function: 0 });
+    expect((await stats()).nodes).toBe(graph.nodes.length - 900 - 452);
+    await map.locator('#entity-filter').selectOption('all');
+    await expect(map.locator('#stage')).toHaveAttribute('data-motion', 'idle', { timeout: 15_000 });
+    // Zooming in brings the declarations back and the notice goes with them.
+    for (let step = 0; step < 8; step++) await map.locator('#zoom-in').click();
+    await expect.poll(async () => (await stats()).zoom).toBeGreaterThanOrEqual(.9);
+    await expect.poll(async () => (await stats()).hidden).toEqual({ class: 0, function: 0 });
+    expect((await stats()).shown).toBe(graph.nodes.length);
+    await expect(map.locator('#detail-notice')).toBeHidden();
+    await expect(map.locator('#count-function').locator('..')).not.toHaveClass(/zoomed-out/);
+    await report.locator('iframe').screenshot({ path: testInfo.outputPath('semantic-zoom-in.png') });
+});
+
 test('the sidebar lists Git changes beside report files and opens the shared diff viewer', async ({ page }) => {
     const { diffRequests } = await installQualityApi(page);
     const report = await openDetails(page);

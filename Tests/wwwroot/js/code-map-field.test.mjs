@@ -10,7 +10,7 @@ const layoutScript = [...template.matchAll(/<script>([\s\S]*?)<\/script>/g)]
     .find(match => match[1].includes('root.CodeAtlasLayout ='))[1];
 const sandbox = {};
 vm.runInNewContext(layoutScript, sandbox);
-const { scopeNodes, ambientLinks, layout, VISIBLE_LIMIT, DENSE_VIEW_NODES, AMBIENT_LINK_LIMIT } = sandbox.CodeAtlasLayout;
+const { scopeNodes, ambientLinks, layout, detail, VISIBLE_LIMIT, DENSE_VIEW_NODES, AMBIENT_LINK_LIMIT, DETAIL_ZOOM } = sandbox.CodeAtlasLayout;
 
 function fixture(files = 500) {
     const nodes = [{ id: 'src', kind: 'module' }, { id: 'nested', kind: 'module', parentId: 'src' }];
@@ -50,6 +50,24 @@ test('the ambient link budget keeps every tree link, samples references determin
     assert.ok(firstBlock < 49, 'references are sampled by hash, not taken in supplier order');
     assert.equal(ambientLinks(edges, 100).length, 100, 'a budget below the tree count keeps the first tree links');
     assert.ok(ambientLinks(edges, 100).every(edge => edge.kind === 'contains'));
+});
+
+test('semantic zoom fades declarations in by family as the camera closes and never touches the structure', () => {
+    assert.deepEqual(structuredClone(DETAIL_ZOOM), { class: [.4, .65], function: [.55, .9] }); // Cloned: the sandbox realm has its own Object.
+    for (const family of ['module', 'file', 'data']) for (const zoom of [.12, .42, 1, 2.4]) assert.equal(detail(family, zoom), 1, `${family} at ${zoom}`);
+    assert.equal(detail('function', .42), 0, 'functions are hidden at a dense overview');
+    assert.equal(detail('class', .42), 0, 'a sliver of alpha at the start of the range counts as hidden');
+    assert.equal(detail('class', .525), .5, 'the midpoint of a range is half alpha');
+    assert.equal(detail('function', .725), .5);
+    assert.equal(detail('class', .65), 1);
+    assert.equal(detail('function', .9), 1);
+    assert.equal(detail('function', 2.4), 1);
+    let previous = 0;
+    for (let zoom = .12; zoom <= 1; zoom += .01) {
+        const value = detail('function', zoom);
+        assert.ok(value >= previous && value >= 0 && value <= 1, `monotonic at ${zoom.toFixed(2)}`);
+        previous = value;
+    }
 });
 
 test('the force layout places every node of a dense snapshot in bounded time', () => {

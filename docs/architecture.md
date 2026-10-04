@@ -426,7 +426,9 @@ filters from bounded omissions. Dependency folders (node_modules, vendor, assets
 output stay excluded, including report priorities. The Code graph view draws the whole snapshot
 on two canvases with no DOM per entity: a 4,500-link ambient budget (tree links first, hashed
 sample of references), hover and selection lighting every link of an entity, bounded signals, and
-adaptive thinning or stillness on slow machines. Root-only `GET /api/v1/code-analyzer/changes`
+adaptive thinning or stillness on slow machines, and semantic zoom in a dense field: declarations
+fade in as the camera closes while the structure, hover, selection, search and filters are
+unaffected and the layout never moves. Root-only `GET /api/v1/code-analyzer/changes`
 and `GET /api/v1/code-analyzer/changes/diff` list the working tree's changes against HEAD and
 serve one file's before/after text for the shared diff viewer; the sidebar switches between
 report files and Git changes, and the same list feeds the map's change highlight.
