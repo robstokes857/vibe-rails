@@ -256,7 +256,8 @@ public class LlmProxyClaudeConfigTests : IDisposable
             proxyContext.Object,
             proxySettings.Object,
             new LlmProxySessionState(),
-            fileService.Object);
+            fileService.Object,
+            () => false);
     }
 
     private static Mock<IFileService> CreateFileService()

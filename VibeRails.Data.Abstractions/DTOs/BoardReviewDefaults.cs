@@ -10,8 +10,9 @@ public static class BoardReviewDefaults
     public const string Prompt = """
         Review the originating card's code in the stated project checkout. Read its description, comments,
         linked commits and explicit coding attribution. Use get_board_reviews to inspect earlier reviews;
-        poll pending reviews and address or explain agreed findings. Use read_board_check to inspect the
-        saved Code quality and VCA evidence, including scope, coverage, failures and limitations.
+        poll pending reviews and follow the severity and follow-up policy in your launch instructions.
+        Use read_board_check to inspect saved Code quality and VCA evidence, including scope,
+        coverage, failures and limitations.
         Review the intended changes and tests; record actionable findings with file/line references and
         publish the canonical Code review report using the Board review tools. A successful process exit
         is not review approval. Save your evidence and handoff in the card before choosing the next action.

@@ -27,9 +27,10 @@ public class Settings
     // there is no saved cloud API key.
     public bool RouteThroughVibeRailsAi { get; set; } = false;
     public bool UseVsCodeTheme { get; set; } = false;
-    // The Vibe AI inspector is always in the nav. The property stays so older settings.json
-    // files still deserialize; readers and the settings route ignore a stored false.
-    public bool ShowVibeAiUi { get; set; } = true;
+    /// <summary>Suggest optional Vibe Story tracking to every managed LLM terminal.</summary>
+    public bool CreateVibeStoryTracking { get; set; } = true;
+    /// <summary>Show the Vibe AI inspector in navigation. Hidden by default.</summary>
+    public bool ShowVibeAiUi { get; set; } = false;
     // Retained for settings.json/API compatibility. MCP registration is always on.
     public bool McpEnabled { get; set; } = true;
     public string ComputerName { get; set; } = string.Empty;

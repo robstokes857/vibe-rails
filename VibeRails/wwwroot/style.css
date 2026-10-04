@@ -417,6 +417,7 @@ code {
     transition: all 0.2s ease;
 }
 
+.app-subnav-link[hidden],
 [data-account-nav][hidden] {
     display: none !important;
 }

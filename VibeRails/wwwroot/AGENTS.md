@@ -61,6 +61,14 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | [js/modules/board-card-label.js](js/modules/board-card-label.js) | The one card-naming rule: `cardDisplayId` (display ID, else key), `cardLabel` (`ID · Title`), `shortCardKey` and `cardSearchText`. Board, linked cards and chat history import it rather than composing labels themselves |
 | [js/modules/diff-modal.js](js/modules/diff-modal.js) | Shared Monaco diff viewer as a nested modal layer. Used by Board commits and the sandbox "View Diff" |
 
+## Vibe AI visibility
+
+General Settings includes **Show Vibe AI UI**, off by default. The persisted `ShowVibeAiUi`
+preference controls both top navigation and sidebar links through `applyVibeAiNavVisibility`.
+The links start hidden before settings load, and `.app-subnav-link[hidden]` overrides their
+display styles. Startup and unrelated settings updates preserve the preference; clients that
+omit `showVibeAiUi` do not overwrite it. Hiding the inspector does not disable search services.
+
 ## Navigation account sign-in
 
 The top navigation and sidebar offer **Sign in** only when no API key is saved. General Settings

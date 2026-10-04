@@ -1146,8 +1146,8 @@ namespace VibeRails.DTOs
         // HTTP-over-WSS proof toggle. Nullable on requests so a cached client that predates the
         // field leaves the persisted choice untouched. Responses always contain an explicit value.
         bool? RouteThroughVibeRailsAi = null,
-        // Vibe AI is always shown. Kept on the wire so older clients still deserialize; the
-        // settings route ignores a request value and always reports true.
+        // Navigation visibility, hidden by default. Nullable requests preserve the saved
+        // preference when an older client omits the field; responses contain an explicit value.
         bool? ShowVibeAiUi = null,
         // Native Grok proxy. Same stale-client nullable guard as the other proxy fields.
         bool? GrokLlmProxyEnabled = null,
@@ -1157,7 +1157,10 @@ namespace VibeRails.DTOs
         // the settings route ignores a request value and always reports true.
         bool? DataExportOptIn = null,
         // Response-only: approved display email, bound to the currently saved API key.
-        string? RemoteAccountEmail = null
+        string? RemoteAccountEmail = null,
+        // Nullable requests preserve the saved choice when an older client omits the field.
+        // Responses always contain an explicit value; new and older settings files default on.
+        bool? CreateVibeStoryTracking = null
     );
     // Append new fields at the END of this record, with a default. Inserting one in the middle
     // shifts every positional argument after it: call sites only fail to compile when the types

@@ -40,6 +40,8 @@ export class SettingsController {
             apiKey: '',
             routeThroughVibeRailsAi: false,
             useVsCodeTheme: false,
+            createVibeStoryTracking: true,
+            showVibeAiUi: false,
             mcpEnabled: true,
             computerName: '',
             codexLlmProxyEnabled: false,
@@ -101,6 +103,8 @@ export class SettingsController {
             const performanceModeToggle = root.querySelector('#setting-performance-mode');
             const useVsCodeThemeRow = root.querySelector('#setting-use-vscode-theme-row');
             const useVsCodeThemeToggle = root.querySelector('#setting-use-vscode-theme');
+            const createVibeStoryTrackingToggle = root.querySelector('#setting-create-vibe-story-tracking');
+            const showVibeAiUiToggle = root.querySelector('#setting-show-vibe-ai-ui');
             const mcpEnabledToggle = root.querySelector('#setting-enable-mcp');
             const computerNameInput = root.querySelector('#setting-computer-name');
             const codexLlmProxyEnabledToggle = root.querySelector('#setting-codex-llm-proxy-enabled');
@@ -154,6 +158,12 @@ export class SettingsController {
             }
             if (useVsCodeThemeToggle) {
                 useVsCodeThemeToggle.checked = settings.useVsCodeTheme || false;
+            }
+            if (createVibeStoryTrackingToggle) {
+                createVibeStoryTrackingToggle.checked = settings.createVibeStoryTracking !== false;
+            }
+            if (showVibeAiUiToggle) {
+                showVibeAiUiToggle.checked = settings.showVibeAiUi === true;
             }
             if (mcpEnabledToggle) {
                 mcpEnabledToggle.checked = true;
@@ -243,7 +253,9 @@ export class SettingsController {
                             opencodeTokenSaverToggle?.checked ?? true,
                             grokTokenSaverToggle?.checked ?? true,
                             routeThroughVibeRailsAiToggle?.checked ?? false,
-                            clearApiKey
+                            clearApiKey,
+                            showVibeAiUiToggle?.checked === true,
+                            createVibeStoryTrackingToggle?.checked ?? true
                         );
                         if (savedSettings) {
                             await this._reconcileSavedApiKey(savedSettings, linkedKeyVersion);
@@ -279,7 +291,7 @@ export class SettingsController {
         }
     }
 
-    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, openCodeLlmProxyEnabled, grokLlmProxyEnabled, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, routeThroughVibeRailsAi, clearApiKey = false) {
+    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, openCodeLlmProxyEnabled, grokLlmProxyEnabled, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, routeThroughVibeRailsAi, clearApiKey = false, showVibeAiUi = false, createVibeStoryTracking = true) {
         try {
             const savedSettings = await this.app.apiCall('/api/v1/settings', 'POST', {
                 remoteAccess: remoteAccess,
@@ -299,6 +311,8 @@ export class SettingsController {
                 grokTokenSaverEnabled: grokTokenSaverEnabled,
                 routeThroughVibeRailsAi: routeThroughVibeRailsAi,
                 clearApiKey: clearApiKey,
+                createVibeStoryTracking: createVibeStoryTracking,
+                showVibeAiUi: showVibeAiUi,
                 dataExportOptIn: true
             });
             this.app.setAppSettings(savedSettings);
@@ -400,6 +414,8 @@ export class SettingsController {
             '#setting-api-key',
             '#setting-route-through-viberails-ai',
             '#setting-use-vscode-theme',
+            '#setting-create-vibe-story-tracking',
+            '#setting-show-vibe-ai-ui',
             '#setting-computer-name',
             '#setting-codex-llm-proxy-enabled',
             'input[name="setting-codex-llm-proxy-mode"]',
@@ -423,6 +439,8 @@ export class SettingsController {
             apiKey: valueOf('#setting-api-key'),
             routeThroughVibeRailsAi: isChecked('#setting-route-through-viberails-ai'),
             useVsCodeTheme: isChecked('#setting-use-vscode-theme'),
+            createVibeStoryTracking: isChecked('#setting-create-vibe-story-tracking'),
+            showVibeAiUi: isChecked('#setting-show-vibe-ai-ui'),
             computerName: valueOf('#setting-computer-name'),
             codexLlmProxyEnabled: isChecked('#setting-codex-llm-proxy-enabled'),
             codexLlmProxyMode: this._getCodexLlmProxyMode(root),
@@ -512,6 +530,8 @@ export class SettingsController {
         const apiKeyInput = root.querySelector('#setting-api-key');
         const routeThroughVibeRailsAiToggle = root.querySelector('#setting-route-through-viberails-ai');
         const useVsCodeThemeToggle = root.querySelector('#setting-use-vscode-theme');
+        const createVibeStoryTrackingToggle = root.querySelector('#setting-create-vibe-story-tracking');
+        const showVibeAiUiToggle = root.querySelector('#setting-show-vibe-ai-ui');
         const computerNameInput = root.querySelector('#setting-computer-name');
         const codexLlmProxyEnabledToggle = root.querySelector('#setting-codex-llm-proxy-enabled');
         const codexLlmProxyModeSubscription = root.querySelector('#setting-codex-llm-proxy-mode-subscription');
@@ -535,6 +555,8 @@ export class SettingsController {
         }
         this._dataExportConfigured = settings.dataExportConfigured === true;
         if (useVsCodeThemeToggle) useVsCodeThemeToggle.checked = settings.useVsCodeTheme === true;
+        if (createVibeStoryTrackingToggle) createVibeStoryTrackingToggle.checked = settings.createVibeStoryTracking !== false;
+        if (showVibeAiUiToggle) showVibeAiUiToggle.checked = settings.showVibeAiUi === true;
         if (computerNameInput) {
             computerNameInput.value = settings.computerName || '';
             if (settings.machineName) computerNameInput.placeholder = settings.machineName;

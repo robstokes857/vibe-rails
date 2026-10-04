@@ -1096,7 +1096,14 @@ defaults and override picker send explicit `code_review` intent and leave assign
 have terminal/replay access and are excluded from ordinary Sessions/Automations counts. The
 review snapshot also classifies an early MCP-created link without rewriting its stored origin.
 The existing visible-page activity refresh updates the section; requests/pickers are disposed on
-editor replacement. Both launch prompts teach ten-second MCP polling and handling agreed findings.
+editor replacement. Both launch prompts teach ten-second MCP polling and handling findings by severity.
+High (including critical) and medium-high findings block completion of reviewed work. Medium-low
+and low findings are non-blocking notes; the worker chooses to fix now or create/reuse a backlog
+card. Deferral references the original card and finding in the backlog card and links its key in
+an original-card comment, with the choice saved in the handoff. These notes alone do not require
+another review. Reviewer guidance prioritizes concrete impact and keeps style preferences,
+speculative concerns and optional refactors non-blocking. This is shared launch guidance for direct
+and Automation reviews and their workers; saved reports and user-edited recipes are not rewritten.
 Reviewer prompts require saving the review and handoff before a move, discovering destination
 Automations, and reporting the move. Done alone never grants merge/publish permission.
 

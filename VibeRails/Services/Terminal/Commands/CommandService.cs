@@ -41,6 +41,7 @@ public class CommandService : ICommandService
     private readonly ILlmProxySettingsService _llmProxySettings;
     private readonly ILlmProxySessionState _llmProxySessionState;
     private readonly IFileService _fileService;
+    private readonly Func<bool> _createVibeStoryTrackingEnabled;
     private const string VibeRailsMcpServerName = BoardMcpAuthorization.ServerName;
 
     /// <summary>
@@ -76,12 +77,26 @@ public class CommandService : ICommandService
         ILlmProxySettingsService llmProxySettings,
         ILlmProxySessionState llmProxySessionState,
         IFileService fileService)
+        : this(envService, llmProxyContext, llmProxySettings, llmProxySessionState, fileService,
+            () => Config.LoadFresh().CreateVibeStoryTracking)
+    {
+    }
+
+    // Tests supply isolated settings; production always reads the normal shared settings file.
+    internal CommandService(
+        LlmCliEnvironmentService envService,
+        ILocalLlmProxyContext llmProxyContext,
+        ILlmProxySettingsService llmProxySettings,
+        ILlmProxySessionState llmProxySessionState,
+        IFileService fileService,
+        Func<bool> createVibeStoryTrackingEnabled)
     {
         _envService = envService;
         _llmProxyContext = llmProxyContext;
         _llmProxySettings = llmProxySettings;
         _llmProxySessionState = llmProxySessionState;
         _fileService = fileService;
+        _createVibeStoryTrackingEnabled = createVibeStoryTrackingEnabled;
     }
 
     public async Task<PreparedTerminalSession> PrepareSessionAsync(
@@ -168,6 +183,8 @@ public class CommandService : ICommandService
         var prompt = !string.IsNullOrWhiteSpace(summary)
             ? summary
             : initialPrompt;
+        if (_createVibeStoryTrackingEnabled())
+            prompt = VibeStoryTrackingPrompt.Compose(prompt);
 
         if (!string.IsNullOrWhiteSpace(prompt))
         {

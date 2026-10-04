@@ -49,7 +49,7 @@ public sealed class BoardPromptComposerTests
     }
 
     [Fact]
-    public void ReviewPromptsRequireCanonicalScopeAndReport_AndTeachBothAgentsToPoll()
+    public void ReviewPromptsRequireCanonicalScopeAndReport_AndTeachBothAgentsSeverityAndPolling()
     {
         var review = BoardPromptComposer.Compose(Card(), "Arbitrary lane", "codex", null, intent: "code_review");
         var automation = BoardPromptComposer.ComposeAutomationPrompt("VB-12", "Custom instructions", "code_review");
@@ -61,14 +61,23 @@ public sealed class BoardPromptComposerTests
             Assert.Contains("not automatically a Git diff boundary", prompt);
             Assert.Contains("Save the review and handoff before moving", prompt);
             Assert.Contains("Done alone is not permission to merge or publish", prompt);
+            Assert.Contains("severity follows demonstrated impact", prompt);
+            Assert.Contains("clearly separate blocking findings from non-blocking notes", prompt);
         }
-        foreach (var prompt in new[] { review, automation, BoardPromptComposer.Compose(Card(), "Build", "codex", null) })
+        foreach (var prompt in new[] { review, automation, BoardPromptComposer.Compose(Card(), "Build", "codex", null),
+            BoardPromptComposer.ComposeAutomationPrompt("VB-12", "Implement the task") })
         {
             Assert.Contains("flagReason", prompt);
             Assert.Contains("major bug", prompt);
             Assert.Contains("Routine progress, completion and review do not warrant a flag", prompt);
             Assert.Contains("get_board_reviews every 10 seconds", prompt);
-            Assert.Contains("fix findings you agree with", prompt);
+            Assert.Contains("Critical, high and medium-high findings block completion; fix them", prompt);
+            Assert.Contains("Medium-low and low findings are non-blocking notes", prompt);
+            Assert.Contains("the worker may fix now or defer to a backlog card", prompt);
+            Assert.Contains("Reference the original card/finding there", prompt);
+            Assert.Contains("link the backlog key in the original card's comment and handoff", prompt);
+            Assert.Contains("These notes alone need no re-review", prompt);
+            Assert.DoesNotContain("fix findings you agree with", prompt);
         }
         Assert.DoesNotContain("You are the code review agent.", BoardPromptComposer.ComposeAutomationPrompt("VB-12", "Named Code review"));
     }

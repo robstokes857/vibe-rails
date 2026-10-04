@@ -27,6 +27,25 @@ freshness, exact file/credential exclusions, retry behavior, size limits and rol
 General Settings displays per-dataset coverage. Restore/inspection instructions live in
 `vibe-books/vibe-data/docs/complete-backups.md`; no source retention policy changes.
 
+## Vibe AI navigation visibility
+
+General Settings exposes **Show Vibe AI UI**, hidden by default. `ShowVibeAiUi` persists in the
+shared settings file; GET/settings responses report it and nullable updates preserve it when
+omitted. Startup and computer-name updates leave it unchanged. The frontend applies saved
+visibility to both navigation layouts without disabling the inspector's search services.
+
+## Optional Vibe Story tracking
+
+General Settings exposes **Create Vibe Story Tracking**, enabled by default in new and older
+settings files. Nullable API updates preserve the saved choice when an older client omits it.
+`CommandService` reads the shared settings file for each launch and adds optional Board tracking
+guidance to every managed LLM's initial prompt, including base/default launches without a custom
+prompt and saved environments. Existing task/summary precedence and provider argv conventions
+are preserved. The guidance asks agents to use their discretion, reuse an existing story and
+record progress/results and session history when useful. A guidance-only launch waits for a user
+task. Plain shells are unaffected; toggling applies to new sessions and does not grant Board tools
+or change the CLI's approval policy. Tracking uses the existing Board MCP tools and storage.
+
 Moved verbatim from the root `AGENTS.md` on 2026-09-27 so the instructions file that every
 agent session loads stays small; the material below was last reviewed 2026-08-06 (v1.9.11).
 Treat dates, counts and "current" statements as records of that review and check the source

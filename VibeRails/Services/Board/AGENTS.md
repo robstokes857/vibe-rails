@@ -68,7 +68,12 @@ UI and MCP share that contract. Keep process outcome separate from report result
 review purpose from names, retag history, or turn a successful exit into approval. See
 [the review contract](ARCHITECTURE.md#explicit-code-reviews-vibe-20) for scope, freshness and storage.
 Both worker/reviewer prompts must name `get_board_reviews` and explain polling and fixing agreed
-findings. Save evidence/handoff before any human/LLM-chosen movement; keep existing lane execution.
+blocking findings. High (including critical) and medium-high findings block completion of reviewed
+work. Medium-low and low findings are non-blocking notes: the worker chooses to fix now or defer
+to a backlog card, referencing the originating card/finding there and linking the backlog key in
+an originating-card comment. These notes alone do not require another review. Judge severity by
+concrete impact and keep optional refactors and style preferences non-blocking. Save evidence/handoff
+before any human/LLM-chosen movement; keep existing lane execution.
 
 VIBE-49 adds optional testing/building/deploying/documentation/other purposes alongside work and
 code_review. New comments and handoff receipts snapshot purpose in existing `Changes.agentPurpose`

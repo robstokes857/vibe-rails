@@ -114,6 +114,14 @@ still launch. YOLO is a separate, explicit card toggle translated into the provi
 launch flag (`--dangerously-bypass-approvals-and-sandbox`, `--dangerously-skip-permissions`,
 `--yolo`, or `--auto`); it defaults off and never rewrites a provider configuration file.
 
+General Settings' **Create Vibe Story Tracking** defaults on. `CommandService` reads the shared
+settings file for each managed LLM launch and prepends optional story-tracking guidance to the
+selected task/summary, including default/base launches with no initial message. Guidance alone
+asks the agent to wait for a user task; story creation stays discretionary, and an existing story
+should be reused. This uses the normal provider prompt argv, never TUI input or rewritten provider
+config. Disabling it affects new sessions. It does not set `AuthorizeBoardTools`, grant tool
+permissions, remove explicit Board instructions, or apply to plain shell sessions.
+
 Start work also sets `StartTerminalRequest.AuthorizeBoardTools` for base and saved-environment
 launches. It defaults to false everywhere else and travels through TerminalRoutes,
 TerminalSessionService, TerminalRunner and CommandService. The launch prompt explicitly

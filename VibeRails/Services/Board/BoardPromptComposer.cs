@@ -28,10 +28,15 @@ public static class BoardPromptComposer
     public const int MaxDescriptionChars = 4_000;
     internal const string AttentionGuidance =
         "Set flagged=true with update_board_card only for an unresolved major bug, security/data-loss issue, or missing information blocking work that requires the user's intervention. Include flagReason explaining the issue and needed action; it saves a red comment and alerts this terminal. Routine progress, completion and review do not warrant a flag. Clear flagged once all reasons are resolved. ";
+    internal const string ReviewFindingGuidance =
+        "Critical, high and medium-high findings block completion; fix them. "
+        + "Medium-low and low findings are non-blocking notes: the worker may fix now or defer to a backlog card. Reference the original card/finding there; link the backlog key in the original card's comment and handoff. These notes alone need no re-review. ";
     internal const string AgentCompletionGuidance =
         "Before exiting, call complete_board_agent with your outcome and summary after the handoff and card moves. "
         + "To wait for a triggered agent, poll get_board_agent_status every 10 seconds for pending entries, run outcomes and completion reports. "
-        + "Poll get_board_reviews every 10 seconds for review status; read its report with reviewId, check scope and fix findings you agree with. Success without a report means report missing, never approved. "
+        + "Poll get_board_reviews every 10 seconds; read the report with reviewId and check scope. Fix agreed blockers; document disagreements with evidence. "
+        + ReviewFindingGuidance
+        + "Success without a report means report missing, never approved. "
         + "When completely finished (including any review you are waiting for), call end_agent_session LAST, then send your final response. It closes only your own PTY and child processes after 30 seconds, retaining recordings. Do not start more work after calling it. ";
 
     internal static string ComposeStandaloneAutomationPrompt(string? workerPrompt) =>
@@ -40,6 +45,7 @@ public static class BoardPromptComposer
         "You are the code review agent. Purpose: Code review. Expected output: a durable review on the originating card through begin_board_review and save_board_review, in addition to any destinations explicitly requested by the user. "
         + "Before reviewing code, call begin_board_review to capture the actual checkout, base/head or explicit change scope and dirty changes where applicable. A card is not automatically a Git diff boundary: identify the intended changes, and surface ambiguous scope as Incomplete instead of attributing unrelated edits to this card. "
         + "Inspect the captured scope and save findings with file/line references, validation performed and limitations using save_board_review. No findings reported is not approval. "
+        + "Review pragmatically: prioritize correctness, security and data-loss risks with concrete evidence. Keep style preferences, speculative concerns and optional refactors as non-blocking suggestions; severity follows demonstrated impact. Label each finding's severity and clearly separate blocking findings from non-blocking notes in the report. "
         + "Next action: use judgment and the user's Board workflow. Read get_board_card and list_board_columns for lane context and destination Automations. Save the review and handoff before moving, then report the move. Humans and LLMs decide movement; a lane named Done alone is not permission to merge or publish. "
         + "Finish explicitly: save_board_review, add_board_comment with the handoff, make any intended lane move, complete_board_agent, then end_agent_session as your last tool call. The PTY closes 30 seconds later; send your final response immediately. ";
 

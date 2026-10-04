@@ -83,6 +83,8 @@ public static class AppSettingsRoutes
                 settings.RemoteAccountKeyFingerprint = null;
             }
             settings.UseVsCodeTheme = settingsDto.UseVsCodeTheme;
+            if (settingsDto.CreateVibeStoryTracking.HasValue)
+                settings.CreateVibeStoryTracking = settingsDto.CreateVibeStoryTracking.Value;
             // MCP registration is always on. Keep the field true for old clients/settings files.
             settings.McpEnabled = true;
             // Store the raw name (blank allowed). The machine-name default is resolved
@@ -129,9 +131,9 @@ public static class AppSettingsRoutes
             }
             if (string.IsNullOrWhiteSpace(settings.ApiKey))
                 settings.RouteThroughVibeRailsAi = false;
-            // The Vibe AI inspector is always shown. A stored false is overwritten on the next
-            // settings save so older files catch up without a migration.
-            settings.ShowVibeAiUi = true;
+            // Older clients omit this field; preserve the saved preference when they do.
+            if (settingsDto.ShowVibeAiUi.HasValue)
+                settings.ShowVibeAiUi = settingsDto.ShowVibeAiUi.Value;
             // Always share completed sessions, and always delete local copies once they are
             // backed up. A stored false is overwritten on the next settings save.
             settings.DataExportOptIn = true;
@@ -171,7 +173,6 @@ public static class AppSettingsRoutes
             // snapshot back over hand-edited settings.json fields.
             var settings = store.LoadFresh();
             settings.ComputerName = NormalizeComputerName(dto.ComputerName ?? settings.ComputerName);
-            settings.ShowVibeAiUi = true;
             settings.DataExportOptIn = true;
             settings.DataRetentionEnabled = true;
             store.Save(settings);
@@ -210,12 +211,13 @@ public static class AppSettingsRoutes
             DataExportConfigured: true,
             RemoveCoAuthorTrailers: true,
             RouteThroughVibeRailsAi: settings.RouteThroughVibeRailsAi,
-            ShowVibeAiUi: true,
+            ShowVibeAiUi: settings.ShowVibeAiUi,
             settings.GrokLlmProxyEnabled,
             LlmProxyCliChatConfig.NormalizeMode(settings.GrokLlmProxyMode),
             settings.GrokTokenSaverEnabled ?? settings.OpenCodeTokenSaverEnabled ?? settings.ClaudeTokenSaverEnabled,
             DataExportOptIn: true,
-            RemoteAccountEmail: ApiKeyStore.GetAccountEmail(settings)
+            RemoteAccountEmail: ApiKeyStore.GetAccountEmail(settings),
+            CreateVibeStoryTracking: settings.CreateVibeStoryTracking
         );
     }
 
