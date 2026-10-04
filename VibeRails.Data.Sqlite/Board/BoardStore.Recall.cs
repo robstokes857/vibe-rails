@@ -46,6 +46,8 @@ public sealed partial class BoardStore
 
     public async Task<BoardHandoff?> SaveHandoffAsync(string projectPath, string cardId, BoardHandoff handoff, BoardAuthor author, CancellationToken cancellationToken = default)
     {
+        author = author with { Purpose = author.Kind == BoardAuthor.AgentKind && author.SessionId is { } session
+            ? await FindSessionPurposeAsync(projectPath, cardId, session, cancellationToken) : null };
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
         var card = await ReadCardAsync(connection, transaction, NormalizeProjectPath(projectPath), cardId, cancellationToken);
@@ -63,8 +65,8 @@ public sealed partial class BoardStore
         await using var receipt = connection.CreateCommand();
         receipt.Transaction = transaction;
         receipt.CommandText = """
-            INSERT INTO BoardComments(Id,CardId,AuthorKind,AuthorLabel,AuthorCli,SessionId,Body,CreatedUTC,Kind)
-            VALUES($id,$card,$kind,$label,$cli,$session,$body,$time,'comment')
+            INSERT INTO BoardComments(Id,CardId,AuthorKind,AuthorLabel,AuthorCli,SessionId,Body,CreatedUTC,Kind,Changes)
+            VALUES($id,$card,$kind,$label,$cli,$session,$body,$time,'comment',$purpose)
             """;
         receipt.Parameters.AddWithValue("$id", "cm_" + Guid.NewGuid().ToString("N"));
         receipt.Parameters.AddWithValue("$card", card.Id);
@@ -72,6 +74,7 @@ public sealed partial class BoardStore
         receipt.Parameters.AddWithValue("$label", author.Label);
         receipt.Parameters.AddWithValue("$cli", (object?)author.Cli ?? DBNull.Value);
         receipt.Parameters.AddWithValue("$session", (object?)author.SessionId ?? DBNull.Value);
+        receipt.Parameters.AddWithValue("$purpose", (object?)BoardCommentPurpose.Changes(author) ?? DBNull.Value);
         receipt.Parameters.AddWithValue("$time", ToDb(saved.CreatedUtc.Value));
         receipt.Parameters.AddWithValue("$body", $"Previous work ({saved.Id})\nOutcome: {saved.Outcome}\nDecisions: {saved.Decisions}\nValidation: {saved.Validation}\nOutstanding: {saved.Outstanding}\nStart here:\n" +
             string.Join("\n", saved.Files.Select(f => $"@{f.Path} [{f.Role}] {f.Symbol} — {f.Reason}; commit {f.Commit ?? "unspecified"}")));

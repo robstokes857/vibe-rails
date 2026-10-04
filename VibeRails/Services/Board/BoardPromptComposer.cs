@@ -31,16 +31,21 @@ public static class BoardPromptComposer
     internal const string AgentCompletionGuidance =
         "Before exiting, call complete_board_agent with your outcome and summary after the handoff and card moves. "
         + "To wait for a triggered agent, poll get_board_agent_status every 10 seconds for pending entries, run outcomes and completion reports. "
-        + "Poll get_board_reviews every 10 seconds for review status; read its report with reviewId, check scope and fix findings you agree with. Success without a report means report missing, never approved. ";
+        + "Poll get_board_reviews every 10 seconds for review status; read its report with reviewId, check scope and fix findings you agree with. Success without a report means report missing, never approved. "
+        + "When completely finished (including any review you are waiting for), call end_agent_session LAST, then send your final response. It closes only your own PTY and child processes after 30 seconds, retaining recordings. Do not start more work after calling it. ";
+
+    internal static string ComposeStandaloneAutomationPrompt(string? workerPrompt) =>
+        "This is an Automation Worker session. When your review, testing, build, deployment or other assigned work is completely finished, save all required results and handoffs, then call end_agent_session as your last tool call. Send your final response immediately; your PTY closes 30 seconds later so the workflow can continue. Do not call it while work or an approval you need is still pending.\n\n" + workerPrompt;
     internal const string ReviewGuidance =
         "You are the code review agent. Purpose: Code review. Expected output: a durable review on the originating card through begin_board_review and save_board_review, in addition to any destinations explicitly requested by the user. "
         + "Before reviewing code, call begin_board_review to capture the actual checkout, base/head or explicit change scope and dirty changes where applicable. A card is not automatically a Git diff boundary: identify the intended changes, and surface ambiguous scope as Incomplete instead of attributing unrelated edits to this card. "
         + "Inspect the captured scope and save findings with file/line references, validation performed and limitations using save_board_review. No findings reported is not approval. "
-        + "Next action: use judgment and the user's Board workflow. Read get_board_card and list_board_columns for lane context and destination Automations. Save the review and handoff before moving, then report the move. Humans and LLMs decide movement; a lane named Done alone is not permission to merge or publish. ";
+        + "Next action: use judgment and the user's Board workflow. Read get_board_card and list_board_columns for lane context and destination Automations. Save the review and handoff before moving, then report the move. Humans and LLMs decide movement; a lane named Done alone is not permission to merge or publish. "
+        + "Finish explicitly: save_board_review, add_board_comment with the handoff, make any intended lane move, complete_board_agent, then end_agent_session as your last tool call. The PTY closes 30 seconds later; send your final response immediately. ";
 
     /// <summary>Adds the Board workflow to a card-triggered Worker without replacing its instructions.</summary>
     internal static string ComposeAutomationPrompt(string cardKey, string? workerPrompt, string purpose = "work") =>
-        (purpose == "code_review" ? ReviewGuidance : "Purpose: Work. Expected output: the configured Worker output and a card handoff. ") +
+        (purpose == "code_review" ? ReviewGuidance : "Purpose: " + SanitizeLine(purpose, 40) + ". Expected output: the configured Worker output and a card handoff. Testing, building and deploying agents must save their results and explicitly call end_agent_session once all work and handoff steps are complete. ") +
         "This Automation was triggered for kanban card " + SanitizeLine(cardKey, 100) + ". "
         + "The user has authorized the viberails-mcp Board tools for this card session. "
         + "Read get_board_card for its task, linked commits and latest activity. Read its Checks summary and use read_board_check for full evidence. Findings and failed analysis are different; judge coverage and scope before deciding the next lane. Post your findings with add_board_comment. "

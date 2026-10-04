@@ -24,7 +24,17 @@ public static class McpToolRegistration
         .WithTools<RulesTool>(SerializerOptions)
         .WithTools<SessionSearchTool>(SerializerOptions)
         .WithTools<TokenSaverTool>(SerializerOptions)
+        .WithTools<AgentSessionTool>(SerializerOptions)
         .WithTools<BoardTool>(SerializerOptions);
+
+    /// <summary>Local control credentials must never follow redirects to another destination.</summary>
+    public static IServiceCollection AddAgentSessionMcp(this IServiceCollection services)
+    {
+        services.AddHttpClient(AgentSessionTool.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(10))
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false });
+        services.AddScoped<AgentSessionTool>();
+        return services;
+    }
 
     private static JsonSerializerOptions CreateSerializerOptions()
     {

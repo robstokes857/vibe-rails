@@ -895,7 +895,8 @@ public sealed partial class BoardStore : IBoardStore
 
         // Notes use their own id prefix so an agent can tell the two apart in tool output. A pulled
         // web comment keeps its remote id and time and is already marked sent (VB-51).
-        var comment = new BoardCommentRecord(stamp?.EntryId ?? NewId(kind == BoardCommentKinds.Note ? "note" : "cm"), card.Id, author, body, stamp?.CreatedUtc ?? DateTime.UtcNow, kind, stamp?.Changes);
+        var comment = new BoardCommentRecord(stamp?.EntryId ?? NewId(kind == BoardCommentKinds.Note ? "note" : "cm"), card.Id, author, body, stamp?.CreatedUtc ?? DateTime.UtcNow, kind,
+            stamp is null ? BoardCommentPurpose.Changes(author) : stamp.Changes);
         if (stamp is not null && await HasSyncStampAsync(connection, transaction, stamp, cancellationToken)) return comment;
         await using (var insert = connection.CreateCommand())
         {
@@ -905,7 +906,7 @@ public sealed partial class BoardStore : IBoardStore
                 VALUES ($id, $card, $kind, $label, $cli, $session, $body, $created, $rowKind, $remoteSeq, $changes);
                 """;
             insert.Parameters.AddWithValue("$remoteSeq", stamp is null ? DBNull.Value : stamp.RemoteSeq);
-            insert.Parameters.AddWithValue("$changes", (object?)stamp?.Changes ?? DBNull.Value);
+            insert.Parameters.AddWithValue("$changes", (object?)comment.Changes ?? DBNull.Value);
             insert.Parameters.AddWithValue("$id", comment.Id);
             insert.Parameters.AddWithValue("$card", card.Id);
             insert.Parameters.AddWithValue("$kind", author.Kind);

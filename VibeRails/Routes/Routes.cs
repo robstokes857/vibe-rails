@@ -35,6 +35,7 @@ public static class RouteExtensions
         LlmXaiProxyRoutes.Map(app);
         LlmCliChatProxyRoutes.Map(app);
         TokenSaverPauseRoutes.Map(app);
+        AgentSessionControlRoutes.Map(app);
         TokenSavingsRoutes.Map(app);
         CompressionRoutes.Map(app);
         TerminalRoutes.Map(app, launchDirectory);

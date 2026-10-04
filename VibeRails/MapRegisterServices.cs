@@ -197,6 +197,7 @@ namespace VibeRails
             serviceCollection.AddScoped<Services.Board.BoardChecksReader>();
             // Singleton: it holds the ten-second repo file-list cache behind the composer's `@` typeahead.
             serviceCollection.AddSingleton<Services.Board.IBoardFileIndexService, Services.Board.BoardFileIndexService>();
+            serviceCollection.AddSingleton<Services.Jobs.AutomationScriptCatalogService>();
             if (isActiveRootBackendProcess)
             {
                 serviceCollection.AddSingleton<Services.Board.IBoardLiveSessionProbe, Services.Board.TerminalTabLiveSessionProbe>();
@@ -310,6 +311,7 @@ namespace VibeRails
                     client.Timeout = TimeSpan.FromSeconds(10);
                 });
                 serviceCollection.AddScoped<TokenSaverTool>();
+                serviceCollection.AddAgentSessionMcp();
                 // Kanban board tools (ctor-injected board services). Registered here AND in
                 // McpStdioHost.ConfigureServices — the two transports must expose the same tools.
                 serviceCollection.AddScoped<BoardTool>();
@@ -344,6 +346,7 @@ namespace VibeRails
             serviceCollection.AddSingleton<IAutomationConsumer, AutomationConsumer>();
             serviceCollection.AddScoped<TerminalRunner>();
             serviceCollection.AddScoped<ITerminalSessionService, TerminalSessionService>();
+            serviceCollection.AddSingleton<AgentSessionEndScheduler>();
             serviceCollection.AddSingleton<ITerminalTabHostService, TerminalTabHostService>();
             serviceCollection.AddSingleton<ILocalClientTracker, LocalClientTracker>();
             serviceCollection.AddHostedService<LocalClientLifecycleWatchdogService>();

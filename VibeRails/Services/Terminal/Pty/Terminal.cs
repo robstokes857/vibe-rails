@@ -38,6 +38,7 @@ public sealed class Terminal : IAsyncDisposable
     private Task? _readLoop;
     private bool _disposed;
     private int _hasExited;
+    private int _completedByAgent;
     private int _cols;
     private int _rows;
 
@@ -50,7 +51,7 @@ public sealed class Terminal : IAsyncDisposable
     internal static readonly TimeSpan DefaultExitDrainWindow = TimeSpan.FromSeconds(2);
 
     public int Pid => _pty.Pid;
-    public int ExitCode => _pty.ExitCode;
+    public int ExitCode => Volatile.Read(ref _completedByAgent) == 1 ? 0 : _pty.ExitCode;
     public int Cols => _cols;
     public int Rows => _rows;
     public bool HasExited => Volatile.Read(ref _hasExited) == 1;
@@ -111,7 +112,7 @@ public sealed class Terminal : IAsyncDisposable
     {
         // ExitCode can throw if the process hasn't fully exited yet (pipe EOF races process exit).
         // Always invoke Exited — use -1 as fallback so listeners can clean up.
-        try { return _pty.ExitCode; }
+        try { return ExitCode; }
         catch { return -1; }
     }
 
@@ -637,6 +638,15 @@ public sealed class Terminal : IAsyncDisposable
     }
 
     internal void KillProcessTree() => _pty.KillProcessTree();
+
+    /// <summary>The agent explicitly finished. Drain/finalize through the ordinary process-exit path.</summary>
+    internal void CompleteByAgent()
+    {
+        if (HasExited || HasPtyProcessExited()) return;
+        Volatile.Write(ref _completedByAgent, 1);
+        try { _pty.KillProcessTree(); }
+        catch { Volatile.Write(ref _completedByAgent, 0); throw; }
+    }
 
     public async ValueTask DisposeAsync()
     {

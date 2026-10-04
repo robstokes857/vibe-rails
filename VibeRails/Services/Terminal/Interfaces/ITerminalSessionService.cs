@@ -20,6 +20,8 @@ public interface ITerminalSessionService
     Task HandleWebSocketAsync(WebSocket webSocket, CancellationToken cancellationToken, int? cols = null, int? rows = null);
     Task<TerminalInputResponse> SendInputAsync(TerminalInputRequest request, CancellationToken cancellationToken = default);
     Task StopSessionAsync();
+    /// <summary>End only the expected current agent PTY as an intentional completion, including native Workers.</summary>
+    Task<bool> CompleteAgentSessionAsync(string expectedSessionId);
     void RegisterExternalTerminal(Terminal terminal, string sessionId, string workingDirectory);
     Task UnregisterTerminalAsync();
     Task DisconnectLocalViewerAsync(string reason);

@@ -16,6 +16,16 @@ public static class JobRoutes
         // Registered ahead of /{id:long} only to keep the literal segments visibly grouped.
         if (isActiveRootBackend)
         {
+            app.MapGet("/api/v1/jobs/scripts", async (
+                AutomationScriptCatalogService service, HttpContext context, CancellationToken cancellationToken) =>
+                await ExecuteAsync(async () =>
+                {
+                    context.Response.Headers.CacheControl = "no-store";
+                    var projectPath = await ResolveCurrentRepositoryAsync(launchDirectory, cancellationToken);
+                    return await service.ReadAsync(projectPath, cancellationToken);
+                }))
+                .WithName("GetAutomationScripts");
+
             app.MapGet("/api/v1/jobs/catalog", async (
                 IAutomationImportService service,
                 CancellationToken cancellationToken) =>

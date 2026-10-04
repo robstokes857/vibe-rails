@@ -1,3 +1,4 @@
+import { agentPurposeOptions } from './agent-purpose.js';
 import { switchReviewerDefaults, routingEditorMarkup, mountRoutingEditor } from './reviewer-routing.js';
 import { parseCliArguments } from './cli-arguments.js';
 import { normalizeLlmModel, renderLlmModelOptions } from './llm-model-catalog.js';
@@ -666,12 +667,11 @@ export class EnvironmentController {
                     <label class="form-label">CLI Type</label>
                     ${cliField}
                 </div>
-                <div class="mb-3"><label class="form-label" for="env-purpose">Purpose</label>
+                <div class="mb-3"><label class="form-label" for="env-purpose">What kind of work? <span class="text-muted">(optional)</span></label>
                     <select id="env-purpose" class="form-select">
-                        <option value="work" ${env?.purpose !== 'code_review' ? 'selected' : ''}>Work / custom</option>
-                        <option value="code_review" ${env?.purpose === 'code_review' ? 'selected' : ''}>Code review</option>
+                        ${agentPurposeOptions(env?.purpose)}
                     </select>
-                    <small class="form-text text-muted">Code review saves a report on the originating card. Switch reviewer uses the mappings below; the fixed Code review preset starts with Codex. Instructions remain editable.</small>
+                    <small class="form-text text-muted">Leave unspecified, or classify this Worker so future Board comments can be filtered. Code review also saves a report on the originating card.</small>
                 </div>
                 <div data-reviewer-policy ${env?.purpose === 'code_review' ? '' : 'hidden'}>
                     <label class="form-label" for="env-reviewer-mode">Reviewer selection</label>

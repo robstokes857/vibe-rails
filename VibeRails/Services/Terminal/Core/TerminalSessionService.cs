@@ -388,6 +388,21 @@ public class TerminalSessionService : ITerminalSessionService
         return Task.FromResult<TerminalSnapshot?>(CreateSnapshot(sessionId, terminal.CaptureSnapshotData(), false));
     }
 
+    public async Task<bool> CompleteAgentSessionAsync(string expectedSessionId)
+    {
+        await s_lifecycleGate.WaitAsync();
+        try
+        {
+            lock (s_lock)
+            {
+                if (s_sessionId != expectedSessionId || s_terminal is null || s_terminal.HasExited) return false;
+                s_terminal.CompleteByAgent();
+                return true;
+            }
+        }
+        finally { s_lifecycleGate.Release(); }
+    }
+
     internal static TerminalSnapshot CreateSnapshot(string sessionId, TerminalSnapshotData capture, bool includesScrollback) =>
         new(
             sessionId,

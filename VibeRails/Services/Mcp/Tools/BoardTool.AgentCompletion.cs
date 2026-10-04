@@ -7,7 +7,7 @@ namespace VibeRails.Services.Mcp.Tools;
 
 public sealed partial class BoardTool
 {
-    [McpServerTool, Description("Report that this agent has finished its work, with a final summary and outcome. Call after posting your handoff and moving the card, just before exiting. Reports only the current VibeRails session; safe to repeat (the first report is retained). Does not stop a process, move a card, or complete an Automation's remaining actions.")]
+    [McpServerTool, Description("Report that this agent has finished its work, with a final summary and outcome. Call after posting your handoff and moving the card, just before exiting. Reports only the current VibeRails session; safe to repeat (the first report is retained). Does not stop a process, move a card, or complete an Automation's remaining actions. Once completely done, call end_agent_session LAST to close your PTY in 30 seconds, then send your final response.")]
     public async Task<string> CompleteBoardAgent(
         [Description("Final result and validation, up to 4,000 characters.")] string summary,
         [Description("succeeded | failed | cancelled. Defaults to succeeded.")] string outcome = "succeeded",

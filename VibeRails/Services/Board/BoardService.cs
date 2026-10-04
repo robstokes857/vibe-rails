@@ -388,18 +388,15 @@ public sealed partial class BoardService(
         var existing = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
         if (existing is null)
             return null;
+        author = author with { Purpose = author.Kind == BoardAuthor.AgentKind && author.SessionId is { } session
+            ? await store.FindSessionPurposeAsync(projectPath, existing.Id, session, cancellationToken) : null };
         var comment = await store.AddCommentAsync(projectPath, existing.Id, author, text, cancellationToken);
         return comment is null ? null : ToDto(comment);
     }
 
     public async Task<BoardCommentDto?> AddNoteAsync(string projectPath, string idOrKey, BoardAuthor author, string body, CancellationToken cancellationToken = default)
     {
-        var text = NormalizeCommentBody(body, "Note");
-        var existing = await store.FindCardAsync(projectPath, idOrKey, cancellationToken);
-        if (existing is null)
-            return null;
-        var note = await store.AddNoteAsync(projectPath, existing.Id, author, text, cancellationToken);
-        return note is null ? null : ToDto(note);
+        return await AddCommentAsync(projectPath, idOrKey, author, NormalizeCommentBody(body, "Note"), cancellationToken);
     }
 
     public async Task<List<BoardCommentDto>?> GetNotesAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default)
@@ -625,7 +622,7 @@ public sealed partial class BoardService(
             columns.Where(c => c.BoardId == board.Id).OrderBy(c => c.Position).Select(ToDto).ToList(), board.EffectiveDisplayPrefix);
 
     internal static BoardCommentDto ToDto(BoardCommentRecord comment) =>
-        new(comment.Id, new BoardAuthorDto(comment.Author.Kind, comment.Author.Label, comment.Author.Cli, comment.Author.SessionId), comment.Body, comment.CreatedUtc, BoardAttention.IsAttention(comment.Changes));
+        new(comment.Id, new BoardAuthorDto(comment.Author.Kind, comment.Author.Label, comment.Author.Cli, comment.Author.SessionId), comment.Body, comment.CreatedUtc, BoardAttention.IsAttention(comment.Changes), BoardCommentPurpose.Read(comment.Changes));
 
     internal static BoardAttachmentDto ToDto(BoardAttachmentRecord attachment) =>
         new(attachment.Id, attachment.Name, attachment.DataUrl, attachment.MimeType, attachment.Bytes, attachment.CreatedUtc);

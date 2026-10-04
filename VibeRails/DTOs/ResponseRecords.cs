@@ -215,7 +215,10 @@ namespace VibeRails.DTOs
     public record ReorderBoardColumnsRequest(List<string>? OrderedIds = null, string? BoardId = null);
     public record DeleteBoardColumnResponse(bool Ok, string MovedToColumnId, int MovedCards);
 
-    public record BoardCommentDto(string Id, BoardAuthorDto Author, string Body, DateTime CreatedAt, bool IsAttention = false);
+    public record BoardCommentDto(string Id, BoardAuthorDto Author, string Body, DateTime CreatedAt, bool IsAttention = false, string? Purpose = null);
+    public sealed record AutomationScriptCatalogEntry(string Path, JobScriptRuntime Runtime, bool Approved, string? UnavailableReason);
+    public sealed record AutomationScriptCatalogResponse(List<AutomationScriptCatalogEntry> Scripts, bool HasMore);
+    public sealed record AgentSessionEndResponse(DateTimeOffset ClosesAtUtc);
     public record BoardHistoryResponse(List<BoardHistoryRecord> Entries, bool HasMore, int NextOffset);
     public record BoardSessionDto(
         string Id,
@@ -944,7 +947,8 @@ namespace VibeRails.DTOs
         string? AutomationName = null,
         bool StatusAvailable = true,
         TerminalTabBoardCard? BoardCard = null,
-        bool? NeedsAttention = null
+        bool? NeedsAttention = null,
+        bool AutomationCompleted = false
     );
 
     /// <summary>The Board card a tab's session is linked to (VIBE-36); only the tab list fills it.</summary>
@@ -1828,6 +1832,8 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(DeleteBoardColumnResponse))]
     [JsonSerializable(typeof(BoardAuthorDto))]
     [JsonSerializable(typeof(BoardCommentDto))]
+    [JsonSerializable(typeof(AutomationScriptCatalogResponse))]
+    [JsonSerializable(typeof(AgentSessionEndResponse))]
     [JsonSerializable(typeof(List<BoardCommentDto>))]
     [JsonSerializable(typeof(BoardHistoryResponse))]
     [JsonSerializable(typeof(BoardSessionDto))]

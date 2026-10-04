@@ -156,7 +156,8 @@ public static class CliLoop
         string? initialPrompt = null;
         var runPurpose = jobRun?.Purpose ?? "work";
         var workerPrompt = jobRun?.ReviewLaunch is {} frozen ? frozen.WorkerPrompt + "\n" + environment?.CustomPrompt : environment?.CustomPrompt;
-        var promptTemplate = boardCardKey is null ? workerPrompt
+        var promptTemplate = boardCardKey is null
+            ? jobRun is null ? workerPrompt : Services.Board.BoardPromptComposer.ComposeStandaloneAutomationPrompt(workerPrompt)
             : Services.Board.BoardPromptComposer.ComposeAutomationPrompt(boardCardKey, workerPrompt, runPurpose);
         if (jobRun?.ReviewLaunch is {} routed) promptTemplate += Services.Board.ReviewRoutingService.Prompt(routed.Resolution);
         if (!string.IsNullOrWhiteSpace(promptTemplate))

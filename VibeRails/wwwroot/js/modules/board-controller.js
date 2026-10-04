@@ -1,3 +1,4 @@
+import { AGENT_PURPOSES, agentPurposeLabel, matchesCommentFilter } from './agent-purpose.js';
 import { cardChecksSection, bindCardChecks } from './board-card-checks.js';
 import { previousWorkHtml } from './board-previous-work.js';
 // ============================================
@@ -1266,6 +1267,7 @@ export class BoardController {
                             <option value="all">All comments</option>
                             <option value="human">Hide agent comments</option>
                             <option value="agent">Agent comments</option>
+                            ${AGENT_PURPOSES.map(([value, label]) => `<option value="${value}">${escapeHtml(label)} agent comments</option>`).join('')}
                         </select>
                         <p class="board-editor-muted">Attention comments always appear first.</p>` : ''}
                         <div class="board-comments" data-board-comments></div>
@@ -1871,8 +1873,7 @@ export class BoardController {
                 || String(a.createdAt).localeCompare(String(b.createdAt)) || String(a.id).localeCompare(String(b.id)));
         this.updateSectionCount(editor, 'comments', comments.length);
         const filter = editor.querySelector('[data-board-comment-filter]')?.value || 'all';
-        const visible = comments.filter(entry => entry.isAttention === true || filter === 'all'
-            || (filter === 'agent' ? entry.author?.kind === 'agent' : entry.author?.kind !== 'agent'));
+        const visible = comments.filter(entry => matchesCommentFilter(entry, filter));
         host.innerHTML = visible.length
             ? visible.map(entry => this.cardLogCommentHtml(entry, textOptions)).join('')
             : `<p class="board-editor-muted">${comments.length ? 'No comments match this filter.' : 'No comments yet.'}</p>`;
@@ -1917,6 +1918,7 @@ export class BoardController {
                 <div class="board-comment-content">
                     <div class="board-comment-meta">
                         <span class="board-comment-author">${escapeHtml(author?.label || 'Someone')}</span>
+                        ${entry.purpose && entry.purpose !== 'work' ? `<span class="badge text-bg-secondary">${escapeHtml(agentPurposeLabel(entry.purpose))}</span>` : ''}
                         <span class="board-comment-when">${jump}${escapeHtml(this.formatDateTime(entry.createdAt))}<button type="button" class="btn btn-link btn-sm text-danger" data-board-delete-comment="${escapeHtml(entry.id)}" aria-label="Delete comment" title="Delete comment"><i class="fa-solid fa-trash" aria-hidden="true"></i></button></span>
                     </div>
                     ${entry.isAttention === true ? '<div class="board-comment-attention"><i class="fa-solid fa-flag" aria-hidden="true"></i> Needs your attention</div>' : ''}

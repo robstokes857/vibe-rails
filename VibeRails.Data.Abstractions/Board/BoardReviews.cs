@@ -15,6 +15,8 @@ public sealed record BoardReviewRecord(
 
 public partial interface IBoardStore
 {
+    /// <summary>Read explicit immutable launch/run purpose for a linked session; never infer from names.</summary>
+    Task<string?> FindSessionPurposeAsync(string projectPath, string cardId, string sessionId, CancellationToken cancellationToken = default);
     /// <summary>Known discussion/planning/review provenance on any linked card in this project.</summary>
     Task<bool> IsNonCodingSessionAsync(string projectPath, string sessionId, CancellationToken cancellationToken = default);
     /// <summary>Explicit per-card coding source and scope; absent settings mean unknown source.</summary>

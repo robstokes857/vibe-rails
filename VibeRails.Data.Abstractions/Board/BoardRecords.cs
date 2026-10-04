@@ -116,7 +116,7 @@ public static class BoardCommentKinds
 /// </summary>
 public sealed record BoardSessionOutcomeRecord(string SessionId, DateTime? EndedUtc, int? ExitCode, string? Summary);
 
-public sealed record BoardAuthor(string Kind, string Label, string? Cli, string? SessionId)
+public sealed record BoardAuthor(string Kind, string Label, string? Cli, string? SessionId, string? Purpose = null)
 {
     public const string UserKind = "user";
     public const string AgentKind = "agent";

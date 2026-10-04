@@ -157,41 +157,6 @@
     margin: 0;
     color: var(--color-text-muted, #94a3b8);
 }
-.board-lane-agent-description-label { display: block; margin-bottom: 6px; font-size: 12px; color: var(--color-text-muted, #94a3b8); }
-.board-lane-agent-description {
-    min-height: 90px;
-    resize: vertical;
-    font: inherit;
-    line-height: 1.5;
-    border-color: var(--color-border, #334155);
-    background: var(--color-bg-elevated, #232323);
-    color: var(--color-text, #f8fafc);
-}
-.board-lane-agent-description:focus {
-    background: var(--color-bg-elevated, #232323);
-    color: var(--color-text, #f8fafc);
-}
-.board-lane-agent-description-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-.board-lane-agent-description-footer [role="status"] { font-size: 11px; color: var(--color-text-muted, #94a3b8); }
-.board-lane-agent-description-actions { display: flex; gap: 6px; }
-.board-lane-agents-panel .board-lane-agent-description-button {
-    padding: 3px 6px;
-    font-size: 12px;
-    color: var(--color-text-muted, #94a3b8);
-}
-.board-lane-agents-panel .board-lane-agent-description-button:hover {
-    color: var(--color-text, #f8fafc);
-    background: var(--color-bg-surface-hover, #2c2c2c);
-}
-.board-lane-agents-panel [data-agent-save-description] {
-    color: var(--color-text-muted, #94a3b8);
-    border-color: var(--color-border, #334155);
-}
-.board-lane-agents-panel [data-agent-save-description]:disabled { opacity: .65; }
-.board-lane-agents-panel [data-agent-save-description]:hover:not(:disabled) {
-    color: var(--color-text, #f8fafc);
-    background: var(--color-bg-surface-hover, #2c2c2c);
-}
 .board-lane-agents-action {
     display: grid;
     place-items: center;
@@ -222,6 +187,13 @@
 }
 .board-lane-agents-footer { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .board-lane-agents-add label { display: block; margin-bottom: 6px; }
+.board-lane-agents-panel.is-adding { width: min(720px, calc(100vw - 16px)); padding: 24px; }
+.board-lane-agents-add h3 { margin: 0 0 20px; font-size: 20px; }
+.board-lane-agents-add label:not(:first-child) { margin-top: 20px; }
+.board-lane-agents-add .form-select,
+.board-lane-agents-add .form-control { width: 100%; font-size: 14px; }
+.board-lane-agents-add .board-lane-agents-footer { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--color-border, #334155); }
+.board-lane-check-summary { margin: 20px 0; padding: 16px; border-radius: 8px; background: var(--color-bg-elevated, #232323); }
 .board-lane-agents-panel [data-agent-error]:not(:empty) { margin: 10px 0; color: var(--color-danger, #ef4444); }
 @media (max-width: 480px) {
     .board-lane-agents-panel { padding: 14px; }

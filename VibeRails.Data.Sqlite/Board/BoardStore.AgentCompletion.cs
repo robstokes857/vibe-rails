@@ -100,6 +100,43 @@ public sealed partial class BoardStore
     public Task<IReadOnlyList<BoardAgentRun>> GetAgentRunsAsync(string projectPath, string cardId,
         CancellationToken cancellationToken = default) => GetAgentRunsCoreAsync(projectPath, cardId, false, 0, cancellationToken);
 
+    public async Task<string?> FindSessionPurposeAsync(string projectPath, string cardId, string sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        var linked = (await GetAgentSessionsAsync(projectPath, cardId, sessionId, cancellationToken)).FirstOrDefault();
+        if (linked is null) return null;
+        if (await GetReviewForSessionAsync(projectPath, cardId, sessionId, cancellationToken) is not null) return "code_review";
+        await using var state = await OpenStateAsync(cancellationToken);
+        if (await _stateFeatures.HasTableAsync(state, "JobRuns", cancellationToken)
+            && _stateFeatures.HasColumn(state, "JobRuns", "Purpose"))
+        {
+            var workerMatch = await _stateFeatures.HasTableAsync(state, "JobRunActions", cancellationToken)
+                && _stateFeatures.HasColumn(state, "JobRunActions", "SessionId")
+                ? " OR EXISTS (SELECT 1 FROM JobRunActions a WHERE a.RunId = r.Id AND a.SessionId = $session)" : "";
+            await using var command = state.CreateCommand();
+            // Workflows and their Workers have distinct recordings. Both retain the queued purpose.
+            command.CommandText = $"SELECT Purpose FROM JobRuns r WHERE ProjectPath = $project{ProjectPathCollation} AND (SessionId = $session{workerMatch}) ORDER BY QueuedUTC DESC LIMIT 1;";
+            command.Parameters.AddWithValue("$project", NormalizeProjectPath(projectPath));
+            command.Parameters.AddWithValue("$session", sessionId);
+            var queuedPurpose = await command.ExecuteScalarAsync(cancellationToken) as string;
+            if (VibeRails.DTOs.AgentPurpose.IsValid(queuedPurpose)) return queuedPurpose;
+        }
+        // Direct saved-environment launches have no queued run. Snapshot their current purpose
+        // when commenting; never reclassify already posted comments when the Environment changes.
+        var selection = linked.Session.Selection?.Split(':');
+        if (selection is not ["env", var environmentText, _] || !int.TryParse(environmentText, out var environmentId)
+            || !await _stateFeatures.HasTableAsync(state, "Environments", cancellationToken)
+            || !_stateFeatures.HasColumn(state, "Environments", "Purpose")) return null;
+        await using var environment = state.CreateCommand();
+        var projectFilter = _stateFeatures.HasColumn(state, "Environments", "ProjectPath")
+            ? $" AND (ProjectPath IS NULL OR ProjectPath = '' OR ProjectPath = $project{ProjectPathCollation})" : "";
+        environment.CommandText = "SELECT Purpose FROM Environments WHERE Id = $id" + projectFilter;
+        environment.Parameters.AddWithValue("$id", environmentId);
+        if (projectFilter.Length > 0) environment.Parameters.AddWithValue("$project", NormalizeProjectPath(projectPath));
+        var purpose = await environment.ExecuteScalarAsync(cancellationToken) as string;
+        return VibeRails.DTOs.AgentPurpose.IsValid(purpose) ? purpose : null;
+    }
+
     public Task<IReadOnlyList<BoardAgentRun>> GetReviewRunsAsync(string projectPath, string cardId, int offset = 0,
         CancellationToken cancellationToken = default) => GetAgentRunsCoreAsync(projectPath, cardId, true, offset, cancellationToken);
 

@@ -10,6 +10,8 @@ namespace VibeRails.Services.Board;
 /// </summary>
 public interface IBoardFileIndexService
 {
+    /// <summary>Bounded repository script candidates, before runtime/approval validation.</summary>
+    Task<BoardFileSearchResponse> GetScriptPathsAsync(string projectPath, CancellationToken cancellationToken = default);
     /// <summary>
     /// Case-insensitive contains match over repo-relative paths (forward slashes). File-name hits
     /// rank before directory-only hits; an empty query returns the first files alphabetically.
@@ -19,6 +21,13 @@ public interface IBoardFileIndexService
 
 public sealed class BoardFileIndexService : IBoardFileIndexService
 {
+    public async Task<BoardFileSearchResponse> GetScriptPathsAsync(string projectPath, CancellationToken cancellationToken = default)
+    {
+        var files = await GetFilesAsync(projectPath, cancellationToken);
+        var scripts = files.Where(path => Path.GetExtension(path).ToLowerInvariant() is ".py" or ".ps1" or ".sh")
+            .Take(201).ToList();
+        return new(scripts.Take(200).ToList(), scripts.Count > 200);
+    }
     public const int MaxQueryLength = 256;
     public const int MaxResults = 50;
     /// <summary>A non-git project could be anything; stop walking rather than index a home directory.</summary>

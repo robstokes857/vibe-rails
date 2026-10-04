@@ -134,8 +134,8 @@ public static class EnvironmentRoutes
 
             try { VibeRails.Services.Board.ReviewRoutingService.Validate(request.ReviewerRouting, request.Purpose ?? "work"); }
             catch (VibeRails.Services.Board.BoardValidationException ex) { return Results.BadRequest(new ErrorResponse(ex.Message)); }
-            if (request.Purpose is not (null or "work" or "code_review"))
-                return Results.BadRequest(new ErrorResponse("Purpose must be work or code_review."));
+            if (request.Purpose is not null && !AgentPurpose.IsValid(request.Purpose))
+                return Results.BadRequest(new ErrorResponse("Choose a valid Worker purpose."));
             if (!TryParseWorkspaceMode(request.WorkspaceMode, out var workspaceMode))
             {
                 return Results.BadRequest(new ErrorResponse(UnknownWorkspaceModeMessage(request.WorkspaceMode)));
@@ -263,8 +263,8 @@ public static class EnvironmentRoutes
             var workspaceModeChanged = false;
             try { VibeRails.Services.Board.ReviewRoutingService.Validate(request.ReviewerRouting, request.Purpose ?? environment.Purpose); }
             catch (VibeRails.Services.Board.BoardValidationException ex) { return Results.BadRequest(new ErrorResponse(ex.Message)); }
-            if (request.Purpose is not (null or "work" or "code_review"))
-                return Results.BadRequest(new ErrorResponse("Purpose must be work or code_review."));
+            if (request.Purpose is not null && !AgentPurpose.IsValid(request.Purpose))
+                return Results.BadRequest(new ErrorResponse("Choose a valid Worker purpose."));
             if (request.Purpose is not null) environment.Purpose = request.Purpose;
             if (request.ReviewerRouting is not null) environment.ReviewerRouting = request.ReviewerRouting.Mode == "fixed" ? null : request.ReviewerRouting;
             if (environment.Purpose != "code_review") environment.ReviewerRouting = null;

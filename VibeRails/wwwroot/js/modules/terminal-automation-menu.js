@@ -5,16 +5,18 @@ export function isAutomationTab(tab) {
 }
 
 export function automationStatus(tab) {
+    if (tab.automationCompleted === true) return 'Finished';
     if (tab.statusAvailable === false) return 'Unavailable';
     if (tab.hasActiveSession) return 'Running';
     return tab.sessionId ? 'Finished' : 'Starting';
 }
 
 export function automationEntries(tabs) {
-    // Retain finished hosts for Board links and output viewing; only the menu is filtered.
+    // Cleanup tears down finished hosts separately; don't present a leftover shell as an agent.
     // A failed status read or a host still starting is not evidence that the agent finished.
     return [...tabs.values()].filter(tab =>
-        tab.statusAvailable === false || tab.hasActiveSession !== false || !tab.sessionId
+        tab.automationCompleted !== true &&
+        (tab.statusAvailable === false || tab.hasActiveSession !== false || !tab.sessionId)
     ).sort((a, b) => {
         const active = Number(b.hasActiveSession === true) - Number(a.hasActiveSession === true);
         return active || (Date.parse(b.createdUTC) || 0) - (Date.parse(a.createdUTC) || 0);

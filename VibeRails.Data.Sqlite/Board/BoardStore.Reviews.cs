@@ -55,8 +55,8 @@ public sealed partial class BoardStore
             await using var comment = connection.CreateCommand();
             comment.Transaction = transaction;
             comment.CommandText = """
-                INSERT INTO BoardComments (Id, CardId, AuthorKind, AuthorLabel, AuthorCli, SessionId, Body, CreatedUTC, Kind)
-                VALUES ($id, $card, 'agent', $label, $cli, $session, $body, $now, 'comment');
+                INSERT INTO BoardComments (Id, CardId, AuthorKind, AuthorLabel, AuthorCli, SessionId, Body, CreatedUTC, Kind, Changes)
+                VALUES ($id, $card, 'agent', $label, $cli, $session, $body, $now, 'comment', $purpose);
                 """;
             comment.Parameters.AddWithValue("$id", "cm_" + Guid.NewGuid().ToString("N"));
             comment.Parameters.AddWithValue("$card", review.CardId);
@@ -65,6 +65,7 @@ public sealed partial class BoardStore
             comment.Parameters.AddWithValue("$session", (object?)review.SessionId ?? DBNull.Value);
             comment.Parameters.AddWithValue("$body", $"Code review saved: {review.Result}. See Code reviews, report {review.Id} (get_board_reviews reviewId={review.Id}). Scope: {review.ScopeDescription}");
             comment.Parameters.AddWithValue("$now", ToDb(review.ReportedUtc.Value));
+            comment.Parameters.AddWithValue("$purpose", BoardCommentPurpose.Changes(new(BoardAuthor.AgentKind, review.Reviewer, review.Provider, review.SessionId, "code_review"))!);
             await comment.ExecuteNonQueryAsync(cancellationToken);
             await TouchCardAsync(connection, transaction, review.CardId, cancellationToken);
         }

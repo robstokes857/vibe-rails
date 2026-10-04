@@ -67,6 +67,30 @@ internal sealed class AutomationTabState(string runId, string name)
     /// </summary>
     internal static readonly TimeSpan LingeringSessionGrace = TimeSpan.FromSeconds(60);
 
+    /// <summary>The run is the authority for menu completion; its shell may still be alive.</summary>
+    public async Task<bool> HasCompletedRunAsync(IJobStore store, TerminalStatusResponse? status,
+        CancellationToken cancellationToken)
+    {
+        long version;
+        string sessionId;
+        lock (_gate)
+        {
+            if (status is null || _hasUnconfirmedStart || _startsInFlight != 0
+                || string.IsNullOrWhiteSpace(_lastSession?.SessionId)) return false;
+            version = _startVersion;
+            sessionId = _lastSession.SessionId;
+            if (status.SessionId is not null && status.SessionId != sessionId) return false;
+            if (status.HasActiveSession && status.SessionId != sessionId) return false;
+        }
+        var run = await store.GetRunAsync(RunId, cancellationToken);
+        lock (_gate)
+            return !_hasUnconfirmedStart && _startsInFlight == 0 && version == _startVersion
+                && run?.TerminalSessionId == sessionId && IsFinished(run.Status);
+    }
+
+    private static bool IsFinished(JobRunStatus status) => status is JobRunStatus.Succeeded
+        or JobRunStatus.Failed or JobRunStatus.Cancelled or JobRunStatus.TimedOut or JobRunStatus.Interrupted;
+
     public async Task<long?> CheckReclamationAsync(
         IJobStore store,
         ISessionStore sessions,
@@ -84,8 +108,7 @@ internal sealed class AutomationTabState(string runId, string name)
         }
 
         var run = await store.GetRunAsync(RunId, cancellationToken);
-        if (run?.Status is not (JobRunStatus.Succeeded or JobRunStatus.Failed or JobRunStatus.Cancelled
-                or JobRunStatus.TimedOut or JobRunStatus.Interrupted)
+        if (run is null || !IsFinished(run.Status)
             || !string.Equals(run.TerminalSessionId, sessionId, StringComparison.Ordinal))
             return null;
 

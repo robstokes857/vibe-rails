@@ -725,6 +725,20 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         var hasActiveSession = status?.HasActiveSession ?? false;
         var lastSession = child.Automation?.LastSession;
         var sessionId = status?.SessionId ?? lastSession?.SessionId;
+        var automationCompleted = false;
+        if (child.Automation is { } automation && status is not null)
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                automationCompleted = await automation.HasCompletedRunAsync(
+                    scope.ServiceProvider.GetRequiredService<IJobStore>(), status, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Log.Warning(ex, "[TerminalTabs] Could not read Automation completion for {TabId}", child.TabId);
+            }
+        }
 
         return new TerminalTabStatusResponse(
             child.TabId,
@@ -735,7 +749,8 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             status?.WorkingDirectory ?? lastSession?.WorkingDirectory,
             child.Automation?.RunId,
             child.Automation?.Name,
-            StatusAvailable: status is not null);
+            StatusAvailable: status is not null,
+            AutomationCompleted: automationCompleted);
     }
 
     private async Task<TerminalChildProcess> SpawnChildAsync(CancellationToken cancellationToken)
@@ -1114,18 +1129,21 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
 
         using var request = NewChildRequest(child, HttpMethod.Get, "/api/v1/terminal/status");
         var http = _httpClientFactory.CreateClient();
-        using var response = await http.SendAsync(request, cancellationToken);
+        // One stalled child must not freeze the whole menu at its last Running snapshot.
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(2));
+        using var response = await http.SendAsync(request, timeout.Token);
 
         if (!response.IsSuccessStatusCode)
         {
             return null;
         }
 
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
         return await JsonSerializer.DeserializeAsync(
             stream,
             AppJsonSerializerContext.Default.TerminalStatusResponse,
-            cancellationToken);
+            timeout.Token);
     }
 
     // Header-only base. No payload overload participates in its resolution, so — unlike the old

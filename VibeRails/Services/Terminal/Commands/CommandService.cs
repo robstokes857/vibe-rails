@@ -5,6 +5,7 @@ using VibeRails.Services.AgentTools;
 using VibeRails.Services.Environments;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.LlmProxy;
+using VibeRails.Services.Mcp.Tools;
 using VibeRails.Utils;
 using static VibeRails.Utils.ShellArgSanitizer;
 
@@ -152,7 +153,7 @@ public class CommandService : ICommandService
             var identityArgs = new List<string>(launchArgs);
             var delimiter = identityArgs.IndexOf("--");
             identityArgs.InsertRange(delimiter < 0 ? identityArgs.Count : delimiter,
-                ["--config", $"mcp_servers.{VibeRailsMcpServerName}.env_vars=[\"{LocalToolApiContext.CurrentSessionIdVariable}\",\"{LocalToolApiContext.CurrentTabIdVariable}\"]"]);
+                ["--config", $"mcp_servers.{VibeRailsMcpServerName}.env_vars=[\"{LocalToolApiContext.CurrentSessionIdVariable}\",\"{LocalToolApiContext.CurrentTabIdVariable}\",\"{AgentSessionTool.BaseUrlVariable}\",\"{AgentSessionTool.SessionTokenVariable}\",\"{AgentSessionTool.TabTokenVariable}\"]"]);
             launchArgs = identityArgs.ToArray();
         }
         // The Board sets this explicitly on Start work. Never infer permission from
@@ -226,6 +227,13 @@ public class CommandService : ICommandService
             foreach (var kvp in envVars)
                 environment[kvp.Key] = kvp.Value;
         }
+
+        // Every managed agent can finish its own PTY, including providers with no LLM proxy.
+        // Pin this process's control contact after custom environment fields, independently of
+        // the inherited root tool API contact. Never let an inherited contact target a parent.
+        environment[AgentSessionTool.BaseUrlVariable] = _llmProxyContext.ApiBaseUrl;
+        environment[AgentSessionTool.SessionTokenVariable] = _llmProxyContext.SessionToken;
+        environment[AgentSessionTool.TabTokenVariable] = _llmProxyContext.TabToken;
 
         // Codex reads proxy auth headers from environment variables named in its generated
         // provider config. Use process-local credentials here; the VIBERAILS_TOOL_* variables
