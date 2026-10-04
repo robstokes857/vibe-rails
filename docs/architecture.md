@@ -497,6 +497,13 @@ For Board UI, API, SQLite, launch and MCP work, start with the
 [architecture and VB-18 review](../VibeRails/Services/Board/ARCHITECTURE.md).
 The Board uses `~/.vibe_rails/board.db`; its contracts live in `VibeRails.Data.Abstractions/Board`
 and its store/migrations in `VibeRails.Data.Sqlite/Board`. REST and MCP share `BoardService`.
+VIBE-6 adds `BoardSearchService` for dashboard search, link candidates, `search_board_cards` and
+card recall: all local boards share current-text BGE/keyword retrieval with a bounded repository
+preference. Titles, descriptions, Comments, legacy notes and handoffs feed a versioned passage
+cache behind `IBoardStore`. Foreign cards have explicit board/project warnings and an authenticated
+local-card editor that resolves ownership from immutable identities. Related-card links can cross
+local projects; foreign links remain outside hosted publication. Moves, merges and repository
+launches keep their existing project scope. See the [search contract](../VibeRails/Services/Board/AGENTS.md#local-board-search-vibe-6).
 MCP discovers all local boards, with current-project boards first and other projects separately
 labeled. Explicit board IDs and full permanent card keys select other projects; omitted targets
 retain the launching card/current-project defaults. See the [local discovery contract](../VibeRails/Services/Board/ARCHITECTURE.md#local-mcp-discovery-vibe-28).

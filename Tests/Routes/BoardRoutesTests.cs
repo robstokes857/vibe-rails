@@ -32,7 +32,7 @@ namespace Tests.Routes;
 /// tab host (the composed InitialPrompt) and what the board records (the session link).
 /// </summary>
 [Collection("ProcessEnvIsolation")] // mutates ParserConfigs.SetGitState (process-global), like AutomationNavPreferenceServiceTests
-public sealed class BoardRoutesTests : IAsyncLifetime
+public sealed partial class BoardRoutesTests : IAsyncLifetime
 {
     [Fact]
     public async Task ReviewRoutingSettingsAndPreviewRequireCredentialsAndScope_AndValidateInputs()
@@ -252,6 +252,7 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         builder.Services.AddSingleton(commits.Object);
         builder.Services.AddSingleton<IBoardLiveSessionProbe, NullBoardLiveSessionProbe>();
         builder.Services.AddScoped<IBoardService, BoardService>();
+        builder.Services.AddScoped<BoardSearchService>(BoardSearchService.Create);
         // The temp project is not a repository; pin the non-git walk so the test never depends on git.
         builder.Services.AddSingleton<IBoardFileIndexService>(new BoardFileIndexService(TimeProvider.System, (_, _) => Task.FromResult<IReadOnlyList<string>?>(null)));
         builder.Services.AddSingleton(_tabHost.Object);
@@ -888,10 +889,11 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         await store.EnsureDefaultColumnsAsync(foreignProject, TestContext.Current.CancellationToken);
         var foreign = await store.CreateCardAsync(foreignProject, new(null, "Foreign", "", null, "medium", null, [], false), TestContext.Current.CancellationToken);
         using var foreignSearch = await GetJsonAsync("/api/v1/board/cards/link-candidates?q=Foreign");
-        Assert.Empty(foreignSearch.RootElement.GetProperty("cards").EnumerateArray());
-        using var foreignLink = await PostJsonAsync("/api/v1/board/cards", new { title = "Invalid draft", linkedCardIds = new[] { foreign.Id } });
-        Assert.Equal(HttpStatusCode.BadRequest, foreignLink.StatusCode);
-        Assert.Equal(2, (await store.GetCardsAsync(_project, TestContext.Current.CancellationToken)).Count);
+        Assert.Equal(foreign.Id, foreignSearch.RootElement.GetProperty("cards")[0].GetProperty("id").GetString());
+        Assert.False(foreignSearch.RootElement.GetProperty("cards")[0].GetProperty("isCurrentProject").GetBoolean());
+        using var foreignLink = await PostJsonAsync("/api/v1/board/cards", new { title = "Linked draft", linkedCardIds = new[] { foreign.Id } });
+        foreignLink.EnsureSuccessStatusCode();
+        Assert.Equal(3, (await store.GetCardsAsync(_project, TestContext.Current.CancellationToken)).Count);
     }
 
     [Fact]
@@ -953,14 +955,14 @@ public sealed class BoardRoutesTests : IAsyncLifetime
         await store.EnsureDefaultColumnsAsync(otherProject, TestContext.Current.CancellationToken);
         var foreign = await store.CreateCardAsync(otherProject, new NewBoardCard(null, "Foreign", "", null, "medium", null, [], false), TestContext.Current.CancellationToken);
         using var crossProject = await PostJsonAsync("/api/v1/board/cards/PROJ-1/links", new { card = foreign.Id });
-        Assert.Equal(HttpStatusCode.NotFound, crossProject.StatusCode);
+        crossProject.EnsureSuccessStatusCode();
         using var foreignSearch = await SendAsync(HttpMethod.Get, $"/api/v1/board/cards/{foreign.Id}/links/candidates", "test-session", "test-tab");
         Assert.Equal(HttpStatusCode.NotFound, foreignSearch.StatusCode);
 
         using var removed = await SendAsync(HttpMethod.Delete, "/api/v1/board/cards/PROJ-2/links/PROJ-1", "test-session", "test-tab");
         removed.EnsureSuccessStatusCode();
         using var after = await GetJsonAsync("/api/v1/board/cards/PROJ-1");
-        Assert.Equal(0, after.RootElement.GetProperty("linkedCards").GetArrayLength());
+        Assert.Equal(foreign.Id, Assert.Single(after.RootElement.GetProperty("linkedCards").EnumerateArray()).GetProperty("id").GetString());
     }
 
     [Fact]

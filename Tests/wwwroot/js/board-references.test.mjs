@@ -96,13 +96,17 @@ const delay = milliseconds => new Promise(resolve => setTimeout(resolve, millise
 /** Binds the real typeahead (once per test) to a fake textarea; `data` feeds the stubbed searches. */
 function bindPopup(t, { files = [], truncated = false, cards = [] } = {}) {
     const saved = { document: globalThis.document, getComputedStyle: globalThis.getComputedStyle,
-        searchFiles: BoardApi.searchFilesAsync, cards: BoardApi.getCardLinkCandidatesAsync };
-    const calls = { files: [], cards: [] };
+        searchFiles: BoardApi.searchFilesAsync, cards: BoardApi.getCardLinkCandidatesAsync,
+        projectCards: BoardApi.getProjectCardCandidatesAsync };
+    const calls = { files: [], cards: [], projectCards: [] };
     const data = { files, truncated, cards };
     globalThis.document = { body: new FakeElement('body'), createElement: tag => new FakeElement(tag) };
     globalThis.getComputedStyle = () => ({ lineHeight: '20px', fontSize: '16px' });
     BoardApi.searchFilesAsync = async query => { calls.files.push(query); return { files: data.files, truncated: data.truncated }; };
-    BoardApi.getCardLinkCandidatesAsync = async (_cardId, query) => { calls.cards.push(query); return data.cards; };
+    BoardApi.getCardLinkCandidatesAsync = async (_cardId, query) => { calls.cards.push(query); return data.cards.slice(0, 50); };
+    BoardApi.getProjectCardCandidatesAsync = async query => {
+        calls.projectCards.push(query); return data.cards.filter(card => card.isCurrentProject !== false).slice(0, 50);
+    };
     const host = new FakeElement();
     const input = new FakeElement('textarea');
     input.parentElement = host;
@@ -111,6 +115,7 @@ function bindPopup(t, { files = [], truncated = false, cards = [] } = {}) {
         dispose();
         BoardApi.searchFilesAsync = saved.searchFiles;
         BoardApi.getCardLinkCandidatesAsync = saved.cards;
+        BoardApi.getProjectCardCandidatesAsync = saved.projectCards;
         for (const key of ['document', 'getComputedStyle']) {
             if (saved[key] === undefined) delete globalThis[key]; else globalThis[key] = saved[key];
         }
@@ -131,7 +136,7 @@ const rowCount = html => (html.match(/data-board-file-row="\d+"/g) || []).length
 test('@board-api lists matching files first, then cards, and still offers Browse', async t => {
     const { calls, type } = bindPopup(t, { files: ['VibeRails/wwwroot/js/modules/board-api.js'], cards: [card(7, 'Split board-api')] });
     const html = await type('see @board-api');
-    assert.deepEqual(calls, { files: ['board-api'], cards: ['board-api'] });
+    assert.deepEqual(calls, { files: ['board-api'], cards: ['board-api'], projectCards: [] });
     assert.ok(html.indexOf('board-api.js') < html.indexOf('VB-7 · Split board-api'), 'files come before cards');
     assert.match(html, /data-board-file-browse/);
     assert.doesNotMatch(html, /No matches|Try a card ID/);
@@ -162,6 +167,35 @@ test('an exact card ID skips the file index, and merged results stay bounded', a
     assert.equal(rowCount(crowded), 50);
     assert.equal((crowded.match(/title="VB-\d+ · /g) || []).length, 10, 'room is kept for a few cards');
     assert.match(crowded, /Showing 50 matches/);
+});
+
+test('foreign card references are labeled and never read foreign sessions or commits through project routes', async t => {
+    const popup = bindPopup(t, { cards: [{ id: 'outside', key: 'OTHER-ABCDE-1', title: 'Related work',
+        boardName: 'Other board', projectPath: 'C:/other', isCurrentProject: false }] });
+    const direct = await popup.type('@OTHER-ABCDE-1');
+    assert.match(direct, /another project: Other board · C:\/other/);
+    assert.doesNotMatch(direct, /show sessions|not been called/);
+    const sessions = await popup.type('!OTHER-ABCDE-1');
+    assert.match(sessions, /No matching cards/);
+    const commits = await popup.type('#OTHER-ABCDE-1');
+    assert.match(commits, /No matching cards/);
+    assert.deepEqual(popup.calls.cards, ['OTHER-ABCDE-1']);
+    assert.deepEqual(popup.calls.projectCards, ['OTHER-ABCDE-1', 'OTHER-ABCDE-1']);
+});
+
+test('session and commit card pickers scope before the limit while @ card references remain global', async t => {
+    const foreign = Array.from({ length: 50 }, (_, index) => ({ ...card(index + 100, 'Foreign candidate'),
+        isCurrentProject: false, boardName: 'Other', projectPath: 'C:/other' }));
+    const popup = bindPopup(t, { cards: [...foreign, { ...card(9, 'Local candidate'), isCurrentProject: true }] });
+    const sessions = await popup.type('!VB-');
+    assert.match(sessions, /Local candidate · show sessions/);
+    assert.doesNotMatch(sessions, /Foreign candidate/);
+    const commits = await popup.type('#VB-');
+    assert.match(commits, /Local candidate · show commits/);
+    const cards = await popup.type('@VB-');
+    assert.match(cards, /Foreign candidate/);
+    assert.deepEqual(popup.calls.projectCards, ['VB-', 'VB-']);
+    assert.deepEqual(popup.calls.cards, ['VB-']);
 });
 
 test('posted comments always render Markdown alongside session and commit references', t => {

@@ -3313,6 +3313,50 @@
                 }
 
                 /* Canvas and lanes --------------------------------------- */
+                .board-view.is-searching .board-canvas {
+                    display: none;
+                }
+
+                .board-view .board-search-results {
+                    flex: 1 1 auto;
+                    min-height: 0;
+                    overflow-y: auto;
+                    padding: 1rem 0;
+                }
+
+                .board-search-results[hidden] { display: none; }
+
+                .board-search-result {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 0.3rem;
+                    width: 100%;
+                    text-align: left;
+                    padding: 0.9rem 1rem;
+                    margin-bottom: 0.6rem;
+                    background: var(--color-bg-surface, #1e1e1e);
+                    border: 1px solid var(--color-border, #334155);
+                    border-radius: 8px;
+                    color: var(--color-text, #f8fafc);
+                }
+
+                .board-search-result:hover, .board-search-result:focus-visible {
+                    border-color: var(--color-primary, #3b82f6);
+                }
+
+                .board-search-snippet, .board-search-warning, .board-local-project {
+                    overflow-wrap: anywhere;
+                    font-size: 0.8rem;
+                }
+
+                .board-search-warning {
+                    display: block;
+                    color: var(--color-warning, #f59e0b);
+                }
+
+                .board-local-comment-body { white-space: pre-wrap; overflow-wrap: anywhere; }
+                .board-local-card .board-comment { margin-top: 0.75rem; grid-template-columns: minmax(0, 1fr); }
+
                 .board-view .board-canvas {
                     display: flex;
                     align-items: stretch;
@@ -4990,7 +5034,7 @@
                     <div class="board-search">
                         <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
                         <input type="search" class="board-control board-search-input" data-board-search
-                            placeholder="Search cards" autocomplete="off" aria-label="Search cards">
+                            placeholder="Search all local boards" maxlength="300" autocomplete="off" aria-label="Search all local boards">
                     </div>
                     <select class="board-control" data-board-filter-type aria-label="Filter by type">
                         <option value="">Any type</option>
@@ -5021,6 +5065,11 @@
                 </div>
             </div>
 
+            <section class="board-search-results" data-board-search-results hidden aria-label="Card search results">
+                <p class="text-muted small mb-2">Search titles, descriptions, comments and previous work across all local boards. Clear search to return to lanes and filters.</p>
+                <p class="small" data-board-search-status role="status" aria-live="polite"></p>
+                <div data-board-search-list></div>
+            </section>
             <div class="board-canvas" data-board-canvas>
                 <div class="board-lanes" data-board-lanes></div>
                 <button type="button" class="board-add-lane" data-board-action="add-lane" title="Add a lane">

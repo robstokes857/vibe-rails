@@ -159,7 +159,7 @@ public sealed partial class BoardToolTests : IDisposable
         await _service.LinkCardAsync(_project, first.Id, second.Id, Ct);
         var text = await _tool.GetBoardCard(first.Key, since: DateTime.UtcNow.AddMinutes(1).ToString("O"), cancellationToken: Ct);
         Assert.Contains("Linked cards (1):\n- PROJ-2: Related work (Sprint 2 · Backlog)", BoardKeyText.Short(text));
-        Assert.Contains("Read a linked card by passing its key to get_board_card.", text);
+        Assert.Contains("Read a linked card by passing its row ID to get_board_card", text);
     }
 
     [Fact]

@@ -4,9 +4,9 @@ using VibeRails.Services.BertV2;
 
 namespace VibeRails.Services.Board;
 
-/// <summary>Project-scoped exact card recall followed by BGE/keyword card discovery.</summary>
+/// <summary>Exact card recall and shared all-local-board BGE/keyword discovery.</summary>
 public sealed partial class BoardRecallService(IBoardStore store, IBoardProjectResolver projects,
-    Func<IBertV2BgeEmbedder> embedder, ILogger<BoardRecallService> logger, IBertSearchDbService? history = null)
+    Func<IBertV2BgeEmbedder> embedder, ILogger<BoardRecallService> logger, IBertSearchDbService? history = null, BoardSearchService? search = null)
 {
     public BoardRecallService(IBoardStore store, IBoardProjectResolver projects, IBertV2BgeEmbedder embedder,
         ILogger<BoardRecallService> logger, IBertSearchDbService? history = null) : this(store, projects, () => embedder, logger, history) { }
@@ -15,7 +15,7 @@ public sealed partial class BoardRecallService(IBoardStore store, IBoardProjectR
     public static BoardRecallService Create(IServiceProvider services) => new(
         services.GetRequiredService<IBoardStore>(), services.GetRequiredService<IBoardProjectResolver>(),
         () => services.GetRequiredService<IBertV2BgeEmbedder>(), services.GetRequiredService<ILogger<BoardRecallService>>(),
-        services.GetRequiredService<IBertSearchDbService>());
+        services.GetRequiredService<IBertSearchDbService>(), services.GetRequiredService<BoardSearchService>());
     public sealed record Result(string Text, IReadOnlySet<string> SessionIds, bool Exact);
 
     public async Task<Result> SearchAsync(string query, int count, CancellationToken cancellationToken = default)
@@ -46,20 +46,26 @@ public sealed partial class BoardRecallService(IBoardStore store, IBoardProjectR
         {
             foreach (var key in keys.Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                // Even full permanent keys remain project-scoped for search. Explicit cross-project
-                // navigation continues to use the Board tools' existing discovery contract.
-                var card = await store.FindCardAsync(project, key, cancellationToken);
+                // Permanent keys resolve globally; ambiguous short/display aliases keep their local meaning.
+                var card = BoardKeys.TryParseStored(key, out _)
+                    ? await store.FindLocalCardAsync(key, cancellationToken)
+                    : await store.FindCardAsync(project, key, cancellationToken);
                 if (card is null) { text.AppendLine($"[exact card · project {project}] No card matches {key}."); continue; }
-                await AppendCardAsync(text, project, card, "exact card", linkedSessions, cancellationToken);
+                await AppendCardAsync(text, card.ProjectPath, card, SameProject(project, card.ProjectPath)
+                    ? "exact card" : "exact card · WARNING: another repository", linkedSessions, cancellationToken);
             }
         }
         else
         {
-            var ranked = await DiscoverAsync(project, query, count, cancellationToken);
-            foreach (var id in ranked)
+            var finder = search ?? new BoardSearchService(store, embedder, Microsoft.Extensions.Logging.Abstractions.NullLogger<BoardSearchService>.Instance);
+            var ranked = await finder.SearchAsync(project, query, Math.Min(count, 5), ct: cancellationToken);
+            foreach (var hit in ranked)
             {
-                var card = await store.FindCardAsync(project, id, cancellationToken);
-                if (card is not null) await AppendCardAsync(text, project, card, "card · BGE/keyword ranking", linkedSessions, cancellationToken);
+                var card = await store.FindCardAsync(hit.ProjectPath, hit.Id, cancellationToken);
+                if (card is null) continue;
+                text.AppendLine($"Match: {hit.Snippet}");
+                await AppendCardAsync(text, hit.ProjectPath, card, hit.IsCurrentProject
+                    ? "card · BGE/keyword ranking" : "card · BGE/keyword ranking · WARNING: another repository", linkedSessions, cancellationToken);
             }
         }
         return new(text.ToString(), linkedSessions, keys.Count > 0);
@@ -77,7 +83,9 @@ public sealed partial class BoardRecallService(IBoardStore store, IBoardProjectR
         var lane = await store.GetColumnAsync(project, card.ColumnId, ct);
         output.AppendLine($"[{source} · project {project} · {card.Key} ({card.DisplayId})]")
             .AppendLine($"{card.Title} · {lane?.Name ?? card.ColumnId}");
-        var handoff = BoardHandoffService.WithFileStatus(detail.PreviousWork, projects.GitWorkingDirectory);
+        var currentProject = await projects.ResolveAsync(ct);
+        var handoff = SameProject(currentProject, project)
+            ? BoardHandoffService.WithFileStatus(detail.PreviousWork, projects.GitWorkingDirectory) : detail.PreviousWork;
         output.AppendLine(Clip(handoff is null ? card.Description : BoardHandoffService.Format(handoff), 1800));
         if (handoff is null)
         {
@@ -109,72 +117,17 @@ public sealed partial class BoardRecallService(IBoardStore store, IBoardProjectR
             output.Length = start + 3600;
             output.AppendLine("\n[card summary truncated; continue with the tools below]");
         }
-        output.AppendLine($"More: get_board_card(card: \"{card.Key}\"); page older comments with before; read_board_session for linked captured discussion. File contents/diffs are fetched only when needed.");
+        var identity = BoardKeys.TryParseStored(card.Key, out _) ? card.Key : card.Id;
+        output.AppendLine($"More: get_board_card(card: \"{identity}\"); page older comments with before; read_board_session for linked captured discussion. File contents/diffs are fetched only when needed.");
         output.AppendLine();
     }
 
-    private async Task<IReadOnlyList<string>> DiscoverAsync(string project, string query, int count, CancellationToken ct)
-    {
-        var words = Words().Matches(query.ToLowerInvariant()).Select(m => m.Value)
-            .Where(w => w.Length > 2 && !StopWords.Contains(w)).Distinct().ToArray();
-        float[]? queryVector = null;
-        try { queryVector = embedder().GenerateEmbedding(query); }
-        catch (Exception ex) { logger.LogWarning(ex, "Card recall embedder unavailable; using keywords"); }
-        var lexical = new List<(string Id, double Score)>();
-        var semantic = new List<(string Id, double Score)>();
-        var generated = 0;
-        for (var offset = 0; ; offset += 100)
-        {
-            ct.ThrowIfCancellationRequested();
-            var page = await store.GetRecallDocumentsAsync(project, offset, ct);
-            foreach (var document in page)
-            {
-                var score = words.Sum(word => document.Title.Contains(word, StringComparison.OrdinalIgnoreCase) ? 3
-                    : document.Text.Contains(word, StringComparison.OrdinalIgnoreCase) ? 1 : 0);
-                if (score > 0) lexical.Add((document.CardId, score));
-                var vector = document.Embedding;
-                // Incremental derived index: cap model work per call, keep keyword coverage over
-                // the whole project, and never require an upgrade/backfill command.
-                if (vector is null && queryVector is not null && generated < 32)
-                {
-                    try
-                    {
-                        vector = embedder().GenerateEmbedding(document.Text[..Math.Min(document.Text.Length, 6000)]);
-                        await store.SaveRecallEmbeddingAsync(project, document.CardId, document.Version, vector, ct);
-                        generated++;
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
-                    { logger.LogWarning(ex, "Card recall indexing unavailable"); generated = 32; }
-                }
-                if (queryVector is not null && vector is not null)
-                {
-                    var similarity = Cosine(queryVector, vector);
-                    if (similarity >= .45) semantic.Add((document.CardId, similarity));
-                }
-            }
-            if (page.Count < 100) break;
-        }
-        // Same reciprocal rank fusion rule as captured-history retrieval; source stays explicit.
-        var scores = new Dictionary<string, double>();
-        foreach (var group in new[] { lexical, semantic })
-            foreach (var (hit, rank) in group.OrderByDescending(h => h.Score).ThenBy(h => h.Id).Take(count * 3).Select((h, i) => (h, i)))
-                scores[hit.Id] = scores.GetValueOrDefault(hit.Id) + 1d / (60 + rank + 1);
-        return scores.OrderByDescending(h => h.Value).ThenBy(h => h.Key).Take(Math.Min(count, 5)).Select(h => h.Key).ToList();
-    }
+    private static bool SameProject(string left, string right) =>
+        string.Equals(BoardPaths.NormalizeProjectPath(left), BoardPaths.NormalizeProjectPath(right), BoardPaths.ProjectPathComparison);
 
-    private static double Cosine(float[] left, float[] right)
-    {
-        if (left.Length != right.Length) return 0;
-        double dot = 0, l = 0, r = 0;
-        for (var i = 0; i < left.Length; i++) { dot += left[i] * right[i]; l += left[i] * left[i]; r += right[i] * right[i]; }
-        return l == 0 || r == 0 ? 0 : dot / Math.Sqrt(l * r);
-    }
     internal static string Clip(string text, int length) => text.Length <= length ? text : text[..length] + "… [continued in get_board_card]";
-    private static readonly HashSet<string> StopWords = ["the", "card", "where", "what", "that", "this", "about", "with", "did", "was", "for", "how", "have", "from"];
     [GeneratedRegex(@"(?<![\p{L}\p{N}_@./-])[A-Z][A-Z0-9]{0,7}-(?:[A-Z0-9]{5}-)?[1-9][0-9]{0,8}(?![\p{L}\p{N}_/-]|\.[\p{L}\p{N}])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex CardKey();
     [GeneratedRegex(@"(?<![\w-])card\s+([1-9][0-9]{0,8})(?![\w./-])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex CardNumber();
-    [GeneratedRegex(@"[\p{L}\p{N}]+")]
-    private static partial Regex Words();
 }

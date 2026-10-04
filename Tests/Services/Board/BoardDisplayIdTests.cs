@@ -220,7 +220,7 @@ public sealed class BoardDisplayIdTests : IDisposable
     }
 
     [Fact]
-    public async Task DraftLinksAreAtomicAndProjectScoped()
+    public async Task DraftLinksAreAtomicAcrossLocalProjects()
     {
         await store.EnsureDefaultColumnsAsync(project, Ct);
         var target = await store.CreateCardAsync(project, Card("Target"), Ct);
@@ -228,15 +228,17 @@ public sealed class BoardDisplayIdTests : IDisposable
         await store.EnsureDefaultColumnsAsync(otherProject, Ct);
         var foreign = await store.CreateCardAsync(otherProject, Card("Foreign"), Ct);
         var found = (await store.GetCardLinkCandidatesAsync(project, null, "", Ct))!;
-        Assert.Equal(target.Id, Assert.Single(found).Id);
+        Assert.Equal([target.Id, foreign.Id], found.Select(card => card.Id));
         await Assert.ThrowsAsync<BoardValidationException>(() => store.CreateCardAsync(project,
-            Card("Failed") with { LinkedCardIds = [target.Id, foreign.Id] }, Ct));
+            Card("Failed") with { LinkedCardIds = [target.Id, foreign.Id, "card_missing"] }, Ct));
         Assert.Single(await store.GetCardsAsync(project, Ct));
         Assert.Empty((await store.GetCardDetailAsync(project, target.Id, Ct))!.LinkedCards);
-        var created = await store.CreateCardAsync(project, Card() with { LinkedCardIds = [target.Id, target.Id] }, Ct);
+        Assert.Empty((await store.GetCardDetailAsync(otherProject, foreign.Id, Ct))!.LinkedCards);
+        var created = await store.CreateCardAsync(project, Card() with { LinkedCardIds = [target.Id, target.Id, foreign.Key] }, Ct);
         Assert.Equal("VIBE-2", created.DisplayId);
-        Assert.Equal(target.Id, Assert.Single((await store.GetCardDetailAsync(project, created.Id, Ct))!.LinkedCards).Id);
+        Assert.Equal([target.Id, foreign.Id], (await store.GetCardDetailAsync(project, created.Id, Ct))!.LinkedCards.Select(card => card.Id));
         Assert.Equal(created.Id, Assert.Single((await store.GetCardDetailAsync(project, target.Id, Ct))!.LinkedCards).Id);
+        Assert.Equal(created.Id, Assert.Single((await store.GetCardDetailAsync(otherProject, foreign.Id, Ct))!.LinkedCards).Id);
     }
 
     public void Dispose()

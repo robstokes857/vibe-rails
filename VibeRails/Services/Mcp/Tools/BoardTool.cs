@@ -30,7 +30,8 @@ public sealed partial class BoardTool(
     IBoardProjectResolver projects,
     IBoardStore store,
     BoardReviewService? reviews = null,
-    VibeRails.Services.BertV2.IBertSearchDbService? history = null)
+    VibeRails.Services.BertV2.IBertSearchDbService? history = null,
+    BoardSearchService? search = null)
 {
     /// <summary>
     /// MCP image payloads are base64 encoded and copied by the protocol stack. Keep this transfer
@@ -953,9 +954,14 @@ public sealed partial class BoardTool(
             var linkedStart = builder.Length;
             builder.Append("Linked cards (").Append(card.LinkedCards.Count).Append("):\n");
             foreach (var linked in card.LinkedCards)
+            {
                 builder.Append("- ").Append(linked.Key).Append(": ").Append(linked.Title)
-                    .Append(" (").Append(linked.BoardName).Append(" · ").Append(linked.ColumnName).Append(")\n");
-            builder.Append("Read a linked card by passing its key to get_board_card.\n\n");
+                    .Append(" (").Append(linked.BoardName).Append(" · ").Append(linked.ColumnName).Append(") — id ").Append(linked.Id);
+                if (!linked.IsCurrentProject)
+                    builder.Append(" — another repository: ").Append(BoardPromptComposer.SanitizeLine(linked.ProjectPath, 1000));
+                builder.Append('\n');
+            }
+            builder.Append("Read a linked card by passing its row ID to get_board_card; short/display keys are current-project only.\n\n");
             stats.LinkedCardsChars = builder.Length - linkedStart;
         }
 

@@ -29,6 +29,11 @@ test('Done loads 30 cards, scrolls for more, and searches unloaded history', asy
                 assignees: [], tags: []
             } });
         }
+        if (url.pathname === '/api/v1/board/cards/search') {
+            const query = (url.searchParams.get('q') || '').toLowerCase();
+            return route.fulfill({ json: { cards: cards.filter(card => card.title.toLowerCase().includes(query))
+                .map(card => ({ ...card, boardId: 'main', boardName: 'Main', columnName: 'Done', isCurrentProject: true })) } });
+        }
         return route.fulfill({ json: payload[url.pathname] || {} });
     });
     await page.goto('/?view=board', { waitUntil: 'domcontentloaded' });
@@ -46,8 +51,11 @@ test('Done loads 30 cards, scrolls for more, and searches unloaded history', asy
     await expect(page.locator('.board-card')).toHaveCount(60);
     expect(await lane.evaluate(element => element.scrollTop)).toBe(scrollTop);
     await page.locator('[data-board-search]').fill('Completed task 95');
-    await expect(page.locator('.board-card')).toHaveCount(1);
-    await expect(page.locator('.board-card')).toContainText('Completed task 95');
+    await expect(page.locator('[data-board-search-card]')).toHaveCount(1);
+    await expect(page.locator('[data-board-search-card]')).toContainText('Completed task 95');
+    await expect(page.locator('[data-board-canvas]')).toBeHidden();
+    await page.locator('[data-board-search]').fill('');
+    await expect(page.locator('[data-board-canvas]')).toBeVisible();
     await expect(page.locator('.board-card-count')).toHaveText('95');
     expect(requests.every(url => url.searchParams.get('pageSize') === '30')).toBeTruthy();
     expect(requests.some(url => url.searchParams.get('offset') === '30')).toBeTruthy();

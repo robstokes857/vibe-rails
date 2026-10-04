@@ -1,6 +1,7 @@
 import { escapeHtml } from './utils.js';
 import { BoardApi } from './board-api.js';
 import { cardLabel } from './board-card-label.js';
+import { cardLocationHtml } from './board-search.js';
 
 export function renderCardLinksSection(card) {
     return `<section class="board-side-section" data-board-card-links>
@@ -12,7 +13,7 @@ export function renderCardLinksSection(card) {
             <summary>Link a card</summary>
             <label class="board-editor-label" for="board-link-search">Find a card</label>
             <input type="search" id="board-link-search" class="form-control form-control-sm"
-                placeholder="Display ID or card title" maxlength="300" autocomplete="off" data-board-link-search>
+                placeholder="Search all local boards" maxlength="300" autocomplete="off" data-board-link-search>
             <p class="board-editor-muted" data-board-link-status role="status" aria-live="polite"></p>
             <div class="board-side-list" data-board-link-results></div>
         </details>
@@ -20,15 +21,15 @@ export function renderCardLinksSection(card) {
     </section>`;
 }
 
-function cardText(card) {
+function cardText(card, currentBoardId) {
     return `<span class="board-side-text">
         <span class="board-side-title">${escapeHtml(cardLabel(card))}</span>
-        <span class="board-side-sub">${escapeHtml(card.boardName)} · ${escapeHtml(card.columnName)}</span>
+        ${cardLocationHtml(card, currentBoardId)}
     </span>`;
 }
 
 /** Owns only the links rail. It never reloads or saves the surrounding card form. */
-export function bindCardLinks(editor, card, { openCard, showError, onChanged }) {
+export function bindCardLinks(editor, card, { openCard, showError, onChanged, api = BoardApi }) {
     const host = editor.querySelector('[data-board-card-links]');
     if (!host) return () => {};
     const list = host.querySelector('[data-board-linked-cards]');
@@ -51,7 +52,7 @@ export function bindCardLinks(editor, card, { openCard, showError, onChanged }) 
         list.innerHTML = links.length ? links.map(link => `<div class="board-side-row">
             <button type="button" class="board-side-main" data-board-open-linked-card="${escapeHtml(link.id)}"
                 title="${escapeHtml(cardLabel(link))}" aria-label="Open ${escapeHtml(cardLabel(link))}">
-                ${cardText(link)}
+                ${cardText(link, card.boardId)}
             </button>
             <button type="button" class="board-side-remove" data-board-unlink-card="${escapeHtml(link.id)}"
                 title="Unlink ${escapeHtml(link.displayId || link.key)}" aria-label="Unlink ${escapeHtml(link.displayId || link.key)}">
@@ -74,17 +75,17 @@ export function bindCardLinks(editor, card, { openCard, showError, onChanged }) 
         results.innerHTML = '';
         status.textContent = 'Finding cards…';
         try {
-            const found = await BoardApi.getCardLinkCandidatesAsync(card.id, search.value.trim(), { signal: searchAbort.signal });
+            const found = await api.getCardLinkCandidatesAsync(card.id, search.value.trim(), { signal: searchAbort.signal });
             if (disposed || current !== generation) return;
             const cards = candidates = found.filter(candidate => !links.some(link => link.id === candidate.id));
             results.innerHTML = cards.map(candidate => `<div class="board-side-row">
                 <button type="button" class="board-side-main" data-board-link-card="${escapeHtml(candidate.id)}"
                     title="${escapeHtml(cardLabel(candidate))}" aria-label="Link ${escapeHtml(cardLabel(candidate))}">
-                    <i class="fa-solid fa-plus board-side-icon" aria-hidden="true"></i>${cardText(candidate)}
+                    <i class="fa-solid fa-plus board-side-icon" aria-hidden="true"></i>${cardText(candidate, card.boardId)}
                 </button>
             </div>`).join('');
             status.textContent = cards.length
-                ? (cards.length === 50 ? 'Showing 50 cards. Refine your search to find more.' : 'Cards from all boards in this project.')
+                ? (cards.length === 50 ? 'Showing 50 cards. Refine your search to find more.' : 'Cards from all local boards. This project appears first.')
                 : 'No matching cards available to link.';
         } catch (error) {
             if (disposed || current !== generation || error?.name === 'AbortError') return;
@@ -108,10 +109,10 @@ export function bindCardLinks(editor, card, { openCard, showError, onChanged }) 
                 }
                 editor._boardHasEdits = true;
             } else if (remove) {
-                await BoardApi.unlinkCardAsync(card.id, targetId);
+                await api.unlinkCardAsync(card.id, targetId);
                 links = links.filter(link => link.id !== targetId);
             } else {
-                const linked = await BoardApi.linkCardAsync(card.id, targetId);
+                const linked = await api.linkCardAsync(card.id, targetId);
                 links = [...links.filter(link => link.id !== linked.id), linked];
             }
             if (disposed) return;

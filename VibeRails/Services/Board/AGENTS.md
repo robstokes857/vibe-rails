@@ -1,5 +1,26 @@
 # Working on Vibe Board
 
+## Local Board search (VIBE-6)
+
+`BoardSearchService` is shared by dashboard search, link candidates, `search_board_cards` and
+no-key `search_history` discovery. Search all local boards, prefer the current repository, and
+return explicit board/lane/project metadata. Full permanent keys and row IDs identify foreign
+cards; short aliases keep their project meaning. Search includes current descriptions, titles,
+Comments, retained notes and handoffs, excluding change history and deleted/hidden discussion.
+Derived BGE passage vectors live behind `IBoardStore` in the additive `board-search/1` cache;
+full keyword coverage is available while at most 32 vectors warm per search.
+Merge and `!`/`#` reference pickers request `currentProjectOnly=true` on the existing draft
+candidate route. Filter to the server-derived project before ranking and limiting results;
+keep already-linked cards eligible for these unbound searches. Ordinary links and `@` card
+references retain all-local search.
+
+Cross-project related-card links are local relationships and are excluded from hosted sync
+projection. Source operations remain scoped; foreign targets require immutable row IDs or full
+permanent keys and both ends are checked in the transaction. `/local-cards/{identity}` is an
+explicit authenticated edit/comment/link surface using stored ownership, with visible foreign
+repository context. Existing repository-scoped routes, moves/merges, launches and session links
+retain their scope. Never accept a client-selected project path to widen an operation.
+
 ## Attention requests (VIBE-40)
 
 Agent `flagged=true` updates require `flagReason`: the important unresolved issue and the
@@ -29,7 +50,7 @@ generated input into a live TUI. See [the recall contract](ARCHITECTURE.md#card-
 Explicit board IDs and unambiguous names can select any local board; duplicate names require IDs.
 Full stored permanent card keys and row IDs resolve across local projects. Short keys and display
 IDs keep their current-project meaning. Resolve the target's project from `IBoardStore` metadata
-before calling scoped services; REST and transactional membership checks stay project-scoped.
+before calling scoped services; ordinary REST and transactional membership checks stay project-scoped.
 Omitted targets keep the launching card/current-project defaults. Cross-project writes never
 auto-attach a session, and explicit session attachments remain within the current project.
 
@@ -464,7 +485,7 @@ Incoming labels can rename a local occupant and queue its correction atomically.
 Front change must ship for hosted label projection and server collision resolution.
 
 The new-card link picker searches through `GET /api/v1/board/cards/link-candidates`; selected
-`linkedCardIds` are saved in the creation transaction, with both ends scoped to the project.
+`linkedCardIds` are saved in the creation transaction, with the source project and each live local target validated.
 Canceling the draft writes nothing. Existing-card links still save immediately. Discussion has
 its own section with the shared agent picker followed by a text-style Chat button; its intent,
 independent assignment, save-before-launch and active-session guard remain unchanged.

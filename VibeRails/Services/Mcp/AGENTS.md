@@ -18,8 +18,11 @@ Previous work, file provenance/status and a description continuation at 12,000 c
 Comments receipt. `read_board_session` verifies card/session membership and pages captured
 messages or individual documents. Both are methods on the explicitly registered `BoardTool`,
 with exact grants in `BoardMcpAuthorization` for both transports. `search_history` puts exact
-current-project keys ahead of global history, reports misses, and discovers cards without keys
-via the existing BGE embedder and keyword/RRF ranking. See the
+cards ahead of global history (short/display keys stay project-scoped; permanent keys are global),
+reports misses, and discovers cards without keys across local boards through `BoardSearchService`.
+`search_board_cards` exposes the same BGE/keyword ranking directly, including comments, notes and
+handoffs, with repository preference and explicit foreign-project warnings. Its exact Board grant
+is registered on both transports. See the
 [Board contract](../Board/ARCHITECTURE.md#card-recall-vb-13) for limits and incremental indexing.
 
 ## Local board discovery (VIBE-28)

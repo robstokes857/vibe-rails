@@ -124,6 +124,7 @@ public static class McpStdioHost
         services.AddSingleton<IUnifiedSearchService, UnifiedSearchService>();
         services.AddScoped<SessionSearchTool>(SessionSearchTool.Create);
         services.AddScoped<VibeRails.Services.Board.BoardRecallService>(VibeRails.Services.Board.BoardRecallService.Create);
+        services.AddScoped<VibeRails.Services.Board.BoardSearchService>(VibeRails.Services.Board.BoardSearchService.Create);
         // The token-saver control tools. This is the transport that matters for them: the CLI
         // spawns this process and hands it the environment naming the proxy to call, so this child
         // can pause the exact tab whose output it is reading. Named client, short timeout — the

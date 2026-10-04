@@ -87,7 +87,8 @@ public sealed record BoardCardDetailRecord(
 /// <summary>A lightweight, current description of a related card, including its board and lane.</summary>
 public sealed record BoardLinkedCardRecord(
     string Id, int Number, string Title, string BoardId, string BoardName, string ColumnId, string ColumnName,
-    string KeyPrefix = BoardKeys.LegacyPrefix, string? StoredKey = null, string? StoredDisplayId = null)
+    string KeyPrefix = BoardKeys.LegacyPrefix, string? StoredKey = null, string? StoredDisplayId = null,
+    string? ProjectPath = null)
 {
     public string Key => StoredKey ?? BoardKeys.Format(KeyPrefix, Number);
     public string DisplayId => StoredDisplayId ?? Key;

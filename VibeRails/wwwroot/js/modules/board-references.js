@@ -44,7 +44,9 @@ export function bindBoardReferences(input, { app, host, card, onLink }) {
     const root = normalizePath(app.data?.configs?.rootPath);
     const sessionRow = (session, prefix = '') => ({ kind: 'session', session,
         label: `${prefix}${session.displayName || session.sessionDisplayName || session.id} · ${session.id}` });
-    const cardSearchRow = (c, token) => ({ kind: 'card-search', card: c, label: `${cardLabel(c)} · show ${token.kind === '#' ? 'commits' : 'sessions'}` });
+    const cardSearchRow = (c, token) => c.isCurrentProject === false
+        ? { kind: 'card', card: c, label: `${cardLabel(c)} · another project: ${c.boardName} · ${c.projectPath}` }
+        : { kind: 'card-search', card: c, label: `${cardLabel(c)} · show ${token.kind === '#' ? 'commits' : 'sessions'}` };
     const search = async (token, options) => {
         const kind = referenceSearchKind(token);
         const query = token.query.toLowerCase();
@@ -58,9 +60,15 @@ export function bindBoardReferences(input, { app, host, card, onLink }) {
             } catch (error) { if (error?.status === 404 || /not found|404/i.test(error?.message)) return { files: [] }; throw error; }
         }
         if (kind === 'card') {
-            const cards = await BoardApi.getCardLinkCandidatesAsync(null, token.query, options);
+            // A foreign card can be referenced directly, but its sessions/commits cannot
+            // be attached through this editor's current-project repository APIs.
+            const cards = (await (token.kind === '@'
+                ? BoardApi.getCardLinkCandidatesAsync(null, token.query, options)
+                : BoardApi.getProjectCardCandidatesAsync(token.query, options)))
+                .filter(candidate => token.kind === '@' || candidate.isCurrentProject !== false);
             const exact = cards.find(c => [c.key, c.displayId, c.key?.replace(/-[A-Z0-9]{5}-/i, '-')].some(id => id?.toLowerCase() === query));
             if (!exact) return { files: cards.map(c => cardSearchRow(c, token)) };
+            if (exact.isCurrentProject === false) return { files: [cardSearchRow(exact, token)] };
             if (token.kind === '#') {
                 const commits = await BoardApi.getCardCommitsAsync(exact.id, options);
                 return { files: (commits || []).map(commit => ({ kind: 'commit', commit, label: `${commit.shortSha} · ${commit.message}` })) };

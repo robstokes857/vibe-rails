@@ -274,10 +274,13 @@ namespace VibeRails.DTOs
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public long? RemainingPoints { get; init; }
     }
-    public record BoardLinkedCardDto(string Id, string Key, string Title, string BoardId, string BoardName, string ColumnId, string ColumnName, string? DisplayId = null);
+    public record BoardLinkedCardDto(string Id, string Key, string Title, string BoardId, string BoardName, string ColumnId, string ColumnName, string? DisplayId = null, string? ProjectPath = null, bool IsCurrentProject = true);
     public record BoardCardLinkCandidatesResponse(List<BoardLinkedCardDto> Cards);
     /// <summary>Repo-relative paths (forward slashes) for the composer's `@path` typeahead; <c>Truncated</c> when more matched than the cap.</summary>
     public record BoardFileSearchResponse(List<string> Files, bool Truncated);
+    public record BoardSearchResponse(IReadOnlyList<BoardSearchHit> Cards);
+    public record LocalBoardCardResponse(BoardCardResponse Card, string ProjectPath, string BoardName,
+        List<BoardColumnResponse> Columns, bool IsCurrentProject);
     public record LinkBoardCardRequest(string? Card = null);
     public record BoardCardResponse(
         string Id,
@@ -1853,6 +1856,8 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(BoardCardActivityListResponse))]
     [JsonSerializable(typeof(BoardCardLanePage))]
     [JsonSerializable(typeof(BoardCardResponse))]
+    [JsonSerializable(typeof(BoardSearchResponse))]
+    [JsonSerializable(typeof(LocalBoardCardResponse))]
     [JsonSerializable(typeof(BoardContextPartDto))]
     [JsonSerializable(typeof(List<BoardContextPartDto>))]
     [JsonSerializable(typeof(BoardContextBreakdown))]

@@ -302,6 +302,7 @@ namespace VibeRails
                 // from the per-request scope.
                 serviceCollection.AddScoped<SessionSearchTool>(SessionSearchTool.Create);
                 serviceCollection.AddScoped<Services.Board.BoardRecallService>(Services.Board.BoardRecallService.Create);
+                serviceCollection.AddScoped<Services.Board.BoardSearchService>(Services.Board.BoardSearchService.Create);
                 // Same story for TokenSaverTool (ctor-injected IHttpClientFactory). Its named client
                 // is short-timeout because every call is a loopback hop to this machine's proxy.
                 // Registered here AND in McpStdioHost.ConfigureServices — the two transports must

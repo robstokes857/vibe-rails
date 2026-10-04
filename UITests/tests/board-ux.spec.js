@@ -651,12 +651,17 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
     const linkedIds = new Set();
     const linkSummary = item => ({ id: item.id, key: item.key, displayId: item.displayId, title: item.title,
         boardId: item.boardId || 'brd_main', boardName: item.boardName || 'Main',
-        columnId: item.columnId, columnName: item.columnName || 'Ready' });
+        columnId: item.columnId, columnName: item.columnName || 'Ready', isCurrentProject: true, projectPath: 'C:/board-fixture' });
     await page.routeWebSocket('**/api/v1/events/ws*', () => {});
     await page.route('**/api/v1/**', async route => {
         const url = new URL(route.request().url());
         const path = url.pathname;
         requests.push({ path, method: route.request().method(), body: route.request().postDataJSON() });
+        if (path.startsWith('/api/v1/board/local-cards/')) {
+            const target = [card, ...related].find(item => path === `/api/v1/board/local-cards/${item.id}`);
+            if (target) return route.fulfill({ json: { card: target, isCurrentProject: true,
+                projectPath: 'C:/board-fixture', boardName: target.boardName || 'Main', columns } });
+        }
         if (path === '/api/v1/board/cards/link-candidates') {
             const query = (url.searchParams.get('q') || '').toLowerCase();
             return route.fulfill({ json: { cards: related.filter(item => `${item.displayId || item.key} ${item.title}`.toLowerCase().includes(query)).map(linkSummary) } });
@@ -2264,5 +2269,84 @@ for (const width of [1440, 390]) {
         await expect(editor.locator('#board-card-title')).toHaveValue('Keep this unsaved draft');
         expect(reviewReads).toBe(0);
         await page.screenshot({ path: testInfo.outputPath(`compact-card-${width}.png`) });
+    });
+}
+
+for (const width of [1440, 390]) {
+    test(`all-board search edits and links foreign cards with visible ownership at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        let current;
+        await openBoard(page, { onCard: card => { current = card; } });
+        const local = { ...current, boardName: 'Main', columnName: 'Ready', isCurrentProject: true, projectPath: 'C:/board-fixture' };
+        const foreign = { ...current, id: 'foreign-card', key: 'OTHER-ABCDE-2', title: 'Authentication recovery',
+            description: 'Original outside description', boardId: 'outside-board', columnId: 'outside-ready',
+            assignee: 'env:404:codex', comments: [], attachments: [], sessions: [], linkedCards: [] };
+        const ownership = { boardName: 'Outside <board>', columnName: 'Ready', projectPath: 'C:/other/<project>', isCurrentProject: false };
+        const requests = [];
+        await page.route('**/api/v1/board/cards/search?*', route => route.fulfill({ json: { cards: [
+            { ...local, snippet: 'Retry details from a comment' },
+            { ...foreign, ...ownership, snippet: 'Related recovery work from a note <script>window.__searchXss=1</script>' }
+        ] } }));
+        await page.route('**/api/v1/board/local-cards/**', route => {
+            const request = route.request(), path = new URL(request.url()).pathname, method = request.method();
+            expect(request.headers().viberails_tab).toBe('board-fixture');
+            requests.push({ path, method, body: request.postDataJSON() });
+            if (path.endsWith('/links/candidates')) return route.fulfill({ json: { cards: foreign.linkedCards.length ? [] : [local] } });
+            if (path.endsWith('/links') && method === 'POST') {
+                foreign.linkedCards = [local]; return route.fulfill({ json: local });
+            }
+            if (path.endsWith('/links/card_test') && method === 'DELETE') {
+                foreign.linkedCards = []; return route.fulfill({ json: { ok: true } });
+            }
+            if (path.endsWith('/comments')) {
+                const comment = { id: 'foreign-comment', author: { label: 'You' }, body: request.postDataJSON().body, createdAt: '2026-10-04T12:00:00Z' };
+                foreign.comments.push(comment); return route.fulfill({ json: comment });
+            }
+            if (path.endsWith('/card_test')) return route.fulfill({ json: { card: current, ...local } });
+            if (method === 'PUT') { Object.assign(foreign, request.postDataJSON()); return route.fulfill({ json: foreign }); }
+            return route.fulfill({ json: { card: foreign, ...ownership, columns: [{ id: 'outside-ready', name: 'Ready' }] } });
+        });
+        const search = page.locator('[data-board-search]');
+        await search.fill('retry behavior');
+        const results = page.locator('[data-board-search-card]');
+        await expect(results).toHaveCount(2);
+        await expect(results.first()).toContainText('Description images');
+        await expect(results.last()).toContainText('Another project');
+        await expect(results.last()).toContainText('C:/other/<project>');
+        await expect(page.locator('[data-board-filter-type]')).toBeDisabled();
+        await expect(page.locator('[data-board-canvas]')).toBeHidden();
+        expect(await page.evaluate(() => window.__searchXss)).toBeUndefined();
+        await results.last().click();
+        const editor = page.locator('[data-local-board-card-editor]');
+        await expect(editor).toContainText("another project's board");
+        await expect(editor).toContainText('Outside <board>');
+        await expect(editor.locator('#local-card-assignee')).toHaveValue('env:404:codex');
+        await page.evaluate(() => window.app.llmPickerController.refreshAll());
+        await expect(editor.locator('#local-card-assignee')).toHaveValue('env:404:codex');
+        await editor.getByLabel('Title', { exact: true }).fill('Edited outside card');
+        await editor.getByRole('button', { name: 'Save card', exact: true }).click();
+        await expect(editor.locator('[data-local-card-status]')).toContainText('Saved');
+        expect(requests.find(request => request.method === 'PUT').body).toEqual({ title: 'Edited outside card' });
+        await editor.getByLabel('Description', { exact: true }).fill('Preserve this unsaved description');
+        await editor.getByLabel('Add a comment').fill('Comment saved on outside card');
+        await editor.getByRole('button', { name: 'Post comment' }).click();
+        await expect(editor.locator('[data-local-card-comments]')).toContainText('Comment saved on outside card');
+        await expect(editor.getByLabel('Description', { exact: true })).toHaveValue('Preserve this unsaved description');
+        await editor.locator('[data-board-link-picker] > summary').click();
+        await editor.locator('[data-board-link-card="card_test"]').click();
+        await expect(editor.locator('[data-board-linked-cards]')).toContainText('Description images');
+        await editor.locator('[data-board-unlink-card="card_test"]').click();
+        await expect(editor.locator('[data-board-linked-cards]')).toContainText('No cards linked');
+        await editor.locator('[data-board-link-card="card_test"]').click();
+        expect(requests.filter(request => request.method === 'POST' && request.path.endsWith('/links')).length).toBe(2);
+        expect(await editor.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+        await page.screenshot({ path: testInfo.outputPath(`local-card-search-${width}.png`) });
+        await editor.locator('[data-board-open-linked-card="card_test"]').click();
+        await page.getByRole('alertdialog').getByRole('button', { name: 'Discard and open' }).click();
+        await expect(page.locator('[data-board-card-editor]')).toHaveAttribute('data-card-id', 'card_test');
+        await page.evaluate(() => window.app.closeModal());
+        await search.fill('');
+        await expect(page.locator('[data-board-canvas]')).toBeVisible();
+        await expect(page.locator('[data-board-filter-type]')).toBeEnabled();
     });
 }

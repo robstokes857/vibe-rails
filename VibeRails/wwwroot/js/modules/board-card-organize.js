@@ -39,9 +39,9 @@ export function bindCardOrganization(editor, card, { hasDraft, onChanged }) {
     async function find() {
         const current = ++generation;
         try {
-            const cards = await BoardApi.getCardLinkCandidatesAsync(null, search.value.trim(), { signal: abort.signal });
+            const cards = await BoardApi.getProjectCardCandidatesAsync(search.value.trim(), { signal: abort.signal });
             if (!alive() || generation !== current) return;
-            target.innerHTML = '<option value="">Choose a card</option>' + cards.filter(item => item.id !== card.id)
+            target.innerHTML = '<option value="">Choose a card</option>' + cards.filter(item => item.id !== card.id && item.isCurrentProject !== false)
                 .map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(cardLabel(item))} · ${escapeHtml(item.boardName)}</option>`).join('');
         } catch (error) { if (alive() && generation === current) status.textContent = error.message || 'Card search failed.'; }
     }

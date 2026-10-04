@@ -76,7 +76,7 @@ function renderCodeBlock({ lang, body }) {
  *        used as a src, so an image can only ever point at our own attachment.
  * @returns {string} HTML safe to assign to innerHTML
  */
-export function renderCommentHtml(text, { attachments = [], sessions = [], commits = [], markdown = true } = {}) {
+export function renderCommentHtml(text, { attachments = [], sessions = [], commits = [], markdown = true, interactiveReferences = true } = {}) {
     const source = stripControlChars(text);
     if (!source.trim()) return '';
 
@@ -94,6 +94,9 @@ export function renderCommentHtml(text, { attachments = [], sessions = [], commi
     // 3. Only source text is tokenized; generated attributes never enter a regex.
     work = work.replace(INLINE_TOKEN_RE, (match, ...args) => {
         const { code, quotedPath, barePath, alt, id, session, commit, cardId, cardLabel, label, href } = args.at(-1);
+        // A local card owned by another repository can display references without
+        // sending session/commit requests through the open repository's APIs.
+        if (!interactiveReferences && (cardId || session || commit)) return park(`<code class="board-inline-code">${match}</code>`);
         if (cardId) return park(`<button type="button" class="board-text-reference" data-board-ref-card="${cardId}">${cardLabel}</button>`);
         if (session) {
             const linked = sessions.find(item => item.id.replaceAll('-', '').toLowerCase() === session.replaceAll('-', '').toLowerCase());

@@ -892,7 +892,7 @@ public sealed class BoardStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task CardLinks_RejectSelfLinks_AndNeverCrossProjects()
+    public async Task CardLinks_AllowLocalProjectTargets_ButKeepTheSourceScoped()
     {
         await _store.EnsureDefaultColumnsAsync(_project, Ct);
         await _store.EnsureDefaultColumnsAsync(_otherProject, Ct);
@@ -900,12 +900,15 @@ public sealed class BoardStoreTests : IDisposable
         var second = await _store.CreateCardAsync(_project, NewCard("Second"), Ct);
         var outside = await _store.CreateCardAsync(_otherProject, NewCard("Outside"), Ct);
         await Assert.ThrowsAsync<BoardValidationException>(() => _store.LinkCardAsync(_project, first.Id, first.Key, Ct));
-        Assert.Null(await _store.LinkCardAsync(_project, first.Id, outside.Id, Ct));
+        Assert.Equal(outside.Id, (await _store.LinkCardAsync(_project, first.Id, outside.Id, Ct))!.Id);
         Assert.Null(await _store.LinkCardAsync(_otherProject, first.Id, outside.Id, Ct));
         Assert.Null(await _store.GetCardLinkCandidatesAsync(_otherProject, first.Id, "", Ct));
         Assert.Equal(second.Id, Assert.Single((await _store.GetCardLinkCandidatesAsync(_project, first.Id, "", Ct))!).Id);
         await _store.LinkCardAsync(_project, first.Id, second.Id, Ct);
         Assert.False(await _store.UnlinkCardAsync(_otherProject, first.Id, second.Id, Ct));
+        Assert.Equal(2, (await _store.GetCardDetailAsync(_project, first.Id, Ct))!.LinkedCards.Count);
+        Assert.Equal(first.Id, Assert.Single((await _store.GetCardDetailAsync(_otherProject, outside.Id, Ct))!.LinkedCards).Id);
+        Assert.True(await _store.UnlinkCardAsync(_otherProject, outside.Id, first.Key, Ct));
         Assert.Single((await _store.GetCardDetailAsync(_project, first.Id, Ct))!.LinkedCards);
     }
 

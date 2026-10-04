@@ -1,3 +1,5 @@
+using Microsoft.Data.Sqlite;
+
 namespace VibeRails.Services.Board;
 
 public sealed partial class BoardStore
@@ -18,14 +20,20 @@ public sealed partial class BoardStore
     public async Task<BoardCardRecord?> FindLocalCardAsync(string idOrKey, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);
+        return await ReadLocalCardAsync(connection, null, idOrKey, cancellationToken);
+    }
+
+    private static async Task<BoardCardRecord?> ReadLocalCardAsync(SqliteConnection connection,
+        SqliteTransaction? transaction, string idOrKey, CancellationToken cancellationToken)
+    {
         var input = idOrKey.Trim();
-        var byId = await ReadOneCardAsync(connection, null,
+        var byId = await ReadOneCardAsync(connection, transaction,
             CardSelectSql + " WHERE c.Id = $input AND c.DeletedUTC IS NULL LIMIT 1;",
             [("$input", input)], cancellationToken);
         // Imported shared boards can retain stored legacy keys such as VB-1. Those are
         // project-local aliases too, so only random permanent keys get global resolution.
         if (byId is not null || !BoardKeys.TryParseStored(input, out var key)) return byId;
-        return await ReadOneCardAsync(connection, null,
+        return await ReadOneCardAsync(connection, transaction,
             CardSelectSql + " WHERE c.CardKey = $input COLLATE NOCASE AND c.DeletedUTC IS NULL LIMIT 1;",
             [("$input", key)], cancellationToken);
     }

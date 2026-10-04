@@ -1,5 +1,19 @@
 # Board persistence
 
+`board-search/1` adds `BoardSearchEmbeddings`, a derived local BGE vector cache keyed by card
+and passage. `GetSearchDocumentsAsync` pages live cards across all local boards, current
+descriptions, visible comments/legacy notes and saved handoffs; change History is excluded.
+Content hashes, including the title and model version, reject stale vectors even after older
+writers change text without touching timestamps. Removed discussion and deleted cards never
+produce passages, so retained cache rows cannot become results. Format 2 uses 384-character bodies,
+64-character overlap, at most 96 characters of title context, and separate full-title passages.
+Surrogate boundaries stay intact; complete inputs fit BGE's 512-token window even for dense text.
+Original current source strings accompany the model passages for keyword matching, so long
+identifiers and phrases remain searchable across passage boundaries without reconstructing text.
+Model work happens after the store's deferred read transaction closes. Initialization
+is additive and automatic, with no conversion/backfill of user data. Shared UI/MCP retrieval
+uses `BoardSearchService`; legacy recall storage remains retained for older binaries.
+
 `board-attention/1` adds `BoardAttentionRequests` and a trigger that resolves its rows when
 `BoardCards.Flagged` is cleared, including by older binaries. No old rows are converted.
 Agent flag updates validate `FlagReason` and write the flag, comment and request in one

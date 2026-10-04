@@ -198,6 +198,39 @@ async function getBoardCardAsync(cardId, extra = {}) {
     return call(`/cards/${enc(cardId)}`, 'GET', null, extra);
 }
 
+/** Search every local board. Ownership labels and ordering come from the server. */
+async function searchBoardCardsAsync(query, extra = {}) {
+    const response = await call(`/cards/search?q=${enc(query)}`, 'GET', null, extra);
+    return response?.cards || [];
+}
+
+// Explicit local discovery routes resolve the card's owning project server-side.
+// Never send a project path or reuse current-project launch/file APIs for these cards.
+async function getLocalBoardCardAsync(cardId, extra = {}) {
+    return call(`/local-cards/${enc(cardId)}`, 'GET', null, extra);
+}
+
+async function updateLocalBoardCardAsync(cardId, patch) {
+    return call(`/local-cards/${enc(cardId)}`, 'PUT', patch);
+}
+
+async function addLocalBoardCommentAsync(cardId, { body }) {
+    return call(`/local-cards/${enc(cardId)}/comments`, 'POST', { body });
+}
+
+async function getLocalCardLinkCandidatesAsync(cardId, query = '', extra = {}) {
+    const response = await call(`/local-cards/${enc(cardId)}/links/candidates?q=${enc(query)}`, 'GET', null, extra);
+    return response?.cards || [];
+}
+
+async function linkLocalCardAsync(cardId, linkedCardId) {
+    return call(`/local-cards/${enc(cardId)}/links`, 'POST', { card: linkedCardId });
+}
+
+async function unlinkLocalCardAsync(cardId, linkedCardId) {
+    return call(`/local-cards/${enc(cardId)}/links/${enc(linkedCardId)}`, 'DELETE');
+}
+
 async function createBoardCardAsync(payload) {
     return call('/cards', 'POST', payload);
 }
@@ -224,6 +257,12 @@ async function launchBoardCardAsync(cardId, { selection, intent = 'work', review
 
 async function getCardLinkCandidatesAsync(cardId, query = '', extra = {}) {
     const response = await call(`${cardId ? `/cards/${enc(cardId)}/links/candidates` : '/cards/link-candidates'}?q=${enc(query)}`, 'GET', null, extra);
+    return response?.cards || [];
+}
+
+/** Merge and session/commit references stay in the open project, before the server result limit. */
+async function getProjectCardCandidatesAsync(query = '', extra = {}) {
+    const response = await call(`/cards/link-candidates?q=${enc(query)}&currentProjectOnly=true`, 'GET', null, extra);
     return response?.cards || [];
 }
 
@@ -380,12 +419,20 @@ export const BoardApi = {
     getBoardCardActivityAsync,
     getBoardCardPageAsync,
     getBoardCardAsync,
+    searchBoardCardsAsync,
+    getLocalBoardCardAsync,
+    updateLocalBoardCardAsync,
+    addLocalBoardCommentAsync,
+    getLocalCardLinkCandidatesAsync,
+    linkLocalCardAsync,
+    unlinkLocalCardAsync,
     createBoardCardAsync,
     updateBoardCardAsync,
     deleteBoardCardAsync,
     moveBoardCardAsync,
     launchBoardCardAsync,
     getCardLinkCandidatesAsync,
+    getProjectCardCandidatesAsync,
     linkCardAsync,
     unlinkCardAsync,
     searchFilesAsync,

@@ -152,7 +152,7 @@ public sealed partial class BoardStore
                 SELECT MIN($target, c.Id), MAX($target, c.Id) FROM BoardCardLinks l JOIN BoardCards c
                   ON c.Id = CASE WHEN l.CardId = $source THEN l.LinkedCardId ELSE l.CardId END
                 WHERE (l.CardId = $source OR l.LinkedCardId = $source) AND c.Id <> $target
-                  AND c.DeletedUTC IS NULL AND c.ProjectPath = $project{ProjectPathCollation};
+                  AND c.DeletedUTC IS NULL;
                 UPDATE BoardCards SET Description = $description, UpdatedUTC = $now WHERE Id = $target;
                 INSERT INTO BoardHandoffs(Id,CardId,Json,CreatedUTC)
                 SELECT 'handoff_' || lower(hex(randomblob(16))), $target, Json, CreatedUTC
@@ -163,7 +163,6 @@ public sealed partial class BoardStore
                 """;
             copy.Parameters.AddWithValue("$source", source.Id);
             copy.Parameters.AddWithValue("$target", target.Id);
-            copy.Parameters.AddWithValue("$project", project);
             copy.Parameters.AddWithValue("$description", description);
             copy.Parameters.AddWithValue("$now", ToDb(DateTime.UtcNow));
             await copy.ExecuteNonQueryAsync(cancellationToken);

@@ -37,15 +37,29 @@ pages with `descriptionOffset`; the existing activity budget and `before` cursor
 pages individual documents in 12,000-character chunks. A missing index is reported as unavailable.
 No Board tool types into a live terminal.
 
-`BoardRecallService` resolves explicit short, display and permanent keys within the current
-project before broad history ranking. It recognizes `card 10` only with a linked launching-card
+`BoardRecallService` resolves explicit short/display keys within the current project and full
+permanent keys across local projects before broad history ranking. It recognizes `card 10` only with a linked launching-card
 context. Short-key prefixes must belong to this project's permanent, legacy or current/historical
 display IDs, so incidental tokens such as `GPT-5` and `UTF-8` do not suppress discovery. Full
 permanent keys remain explicit. Recognized keys produce explicit misses when absent; multiple keys
-never substitute a foreign card. No-key queries rank current titles, descriptions and handoffs using keywords and the existing
-BGE embedder with reciprocal rank fusion. Full text participates in keywords; semantic vectors
-represent a bounded prefix under BGE's 512-token limit. Up to 32 stale vectors are refreshed per
-search, so a large project's semantic coverage warms over subsequent searches. Model failure
+never substitute a different card. No-key queries use `BoardSearchService`, shared with dashboard
+search, related-card candidates and the explicit `search_board_cards` MCP tool. It searches all
+local boards, preferring the current repository and labeling foreign projects. Current titles,
+descriptions, Comments, legacy notes and handoffs participate in keyword and BGE reciprocal rank
+fusion, weighted by lexical evidence and semantic similarity. Current-project matches receive a
+bounded 10% boost; a strong foreign match can outrank weak local matches. Exact immutable identities
+win, while ambiguous short/display aliases prefer their current-project meaning.
+Project-only consumers (merge and session/commit reference pickers) constrain eligibility before
+ranking and the 50-result limit, using `currentProjectOnly=true` on the draft candidate route.
+The filter uses the server's project, and unbound searches retain already-linked destinations.
+Change history,
+deleted cards and hidden/deleted discussion do not participate. Text uses 384-character passages
+with 64-character overlap and at most 96 characters of title context. Full titles have their own
+passages. Surrogate pairs remain intact, and even token-dense inputs fit BGE's 512-token window.
+Content hashes (index format 2) invalidate changed vectors, including edits made by older processes.
+`board-search/1` adds `BoardSearchEmbeddings` behind
+`IBoardStore` without rewriting existing data. Up to 32 stale vectors are refreshed per search,
+so a large corpus warms over subsequent searches while full keyword coverage is immediate. Model failure
 retains keyword discovery. Card and linked-session sources are labeled separately from broader
 captured history. All Board state remains behind `IBoardStore`.
 
@@ -75,10 +89,15 @@ labels still resolve within the current project. Foreign card lists include row 
 legacy cards whose computed or imported short keys are not globally unique. Reads include the owning project.
 
 MCP derives the selected project from stored metadata, then calls the existing scoped services.
-REST remains bound to the dashboard project. Moves/attachments still validate both endpoints;
+Ordinary REST remains bound to the dashboard project. VIBE-6 adds explicit authenticated
+`/api/v1/board/local-cards/{identity}` reads/edits/comments/links using server-resolved ownership.
+Foreign results open a separate editor with repository and board warnings. Related-card links
+can cross local projects using permanent keys/row IDs; foreign links are omitted from hosted
+activity publication. Moves/attachments still validate both endpoints;
 cross-project card transfer and cross-project session attachment are not introduced. Cross-project
 writes do not auto-link sessions or change omitted-target defaults. Commit capture still uses the
-caller's actual checkout. No migration, listener, tool name or provider grant is added.
+caller's actual checkout. VIBE-28 added no migration, listener, tool name or provider grant;
+VIBE-6 adds the derived search cache and explicit search tool/grant described above, without a new listener.
 
 ## New-board review defaults (VIBE-23)
 
@@ -849,7 +868,7 @@ and schema snapshot tests; altering already-applied migration SQL does not upgra
 | Boundary | Observed protection / limitation |
 | --- | --- |
 | Browser to backend | Production auth middleware precedes endpoints and static serving. Session cookie or session header plus `viberails_tab` are required on Board and HTTP MCP. Root-only registration is separate from authentication. |
-| Project scope | No REST/MCP project-path argument. REST uses the dashboard project; explicit MCP board IDs/permanent card keys resolve the owning project from local store metadata (VIBE-28). Cross-board links/moves stay within that selected project. This is local application scoping, not multi-user tenancy. |
+| Project scope | No REST/MCP project-path argument. Ordinary REST uses the dashboard project; explicit MCP targets and VIBE-6 local-card editor routes resolve ownership from stored metadata. Related-card links can cross local projects with immutable identities; moves remain within the selected project. This is local application scoping, not multi-user tenancy. |
 | SQL and Git | Values are SQL parameters. Variable SQL fragments are internal constants. SHA validation, argv-based Git and blob IDs avoid shell/path interpolation for snapshot capture. |
 | Browser content | Escape-first small text renderer; attachment images allow only raster data URLs. File response is an octet-stream attachment with `nosniff`, `no-store`, and restrictive CSP. Text uses `textContent`; PDF paints to canvas, not an active document iframe. |
 | Agent instructions | Launch composer bounds text, neutralizes template braces, flattens controls/bidi in metadata, and labels card content as data. Tool output is still untrusted text; fences are guidance, not an authorization boundary. |

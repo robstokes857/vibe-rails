@@ -179,6 +179,9 @@ CREATE TABLE BoardReviewSettings ( CardId TEXT PRIMARY KEY REFERENCES BoardCards
 -- table BoardReviews
 CREATE TABLE BoardReviews ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, CreatedUTC TEXT NOT NULL, ReportedUTC TEXT, RecordJson TEXT NOT NULL );
 
+-- table BoardSearchEmbeddings
+CREATE TABLE BoardSearchEmbeddings ( CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, PassageId TEXT NOT NULL, Version TEXT NOT NULL, Embedding TEXT NOT NULL, PRIMARY KEY(CardId, PassageId));
+
 -- table BoardSharedOrigins
 CREATE TABLE BoardSharedOrigins ( BoardId TEXT PRIMARY KEY REFERENCES Boards(Id) ON DELETE CASCADE, RemoteBoardId TEXT NOT NULL UNIQUE, DestinationKey TEXT NOT NULL, KeyPrefix TEXT NOT NULL );
 

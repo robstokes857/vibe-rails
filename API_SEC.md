@@ -1,5 +1,38 @@
 # API authentication coverage
 
+## VIBE-6 local Board search and related cards (2026-10-04, scoped amendment)
+
+Added root-only `GET /api/v1/board/cards/search` plus explicit
+`/api/v1/board/local-cards/{identity}` GET/PUT, POST `/move`, POST `/comments`,
+GET `/links/candidates`, POST `/links` and DELETE `/links/{linkedCard}`. All use the
+existing session-plus-tab gate and no-store responses. The local editor resolves only immutable
+row IDs or full permanent keys through `IBoardStore`, then scopes reads/writes to stored ownership.
+No request project path is accepted. Existing project-scoped routes remain scoped; launches,
+session attachment and cross-project moves/merges are not expanded.
+
+Search returns bounded current-text snippets with explicit board/lane/project metadata across
+the local user's boards, preferring the current repository. Shared BGE/keyword retrieval includes
+current descriptions, comments, legacy notes and handoffs; deleted/hidden discussion and change
+history are excluded. Query length is capped at 1,000 characters and results at 50. Vectors stay
+in an additive derived Board table, not an external service. MCP `search_board_cards` is on the
+existing BoardTool registrations and exact per-tool grants for both transports; `search_history`
+uses the same discovery. Short aliases retain project scope; full permanent keys resolve globally.
+
+Related-card operations keep source ownership checks and validate live local targets within the
+write transaction, including draft creation. Foreign targets require full permanent keys or IDs.
+Cross-project links and their target metadata are excluded from hosted activity publication.
+The browser visibly labels foreign boards/repositories and escapes result and discussion text.
+The existing draft candidate GET accepts `currentProjectOnly=true` for merge and `!`/`#`
+reference pickers. It narrows eligibility to the server-derived project before ranking and
+the result limit, never accepting a request-selected project path. Already-linked cards remain
+eligible in these unbound searches; ordinary related-card and `@` searches stay global.
+
+Scoped route enumeration and both mandatory repository-wide listener searches, including untracked
+files, found only the approved main Kestrel host, non-serving PortFinder probe and test hosts;
+the cross-runtime search had no matches. No listener, authentication exception or security violation
+was introduced. Fixture regressions cover both credentials, server-derived ownership, old-route
+isolation, foreign edits/comments/links, generated JSON, cache freshness and local-only link sync.
+
 ## VIBE-49 Automation editing and agent self-completion (2026-10-03, scoped amendment)
 
 Added root-only `GET /api/v1/jobs/scripts` under the existing session+tab middleware. It uses

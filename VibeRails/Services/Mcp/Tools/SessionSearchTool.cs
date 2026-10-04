@@ -39,9 +39,9 @@ public class SessionSearchTool
     [McpServerTool]
     [Description(
         "Recall previous work. When the user names a card, use get_board_card first. " +
-        "Explicit keys (e.g. 'what changed on VB-10?') return exact current-project cards before history, " +
+        "Explicit keys (e.g. 'what changed on VB-10?') return exact cards before history (short/display IDs are current-project; permanent keys search all local boards), " +
         "including previous work, file references, commits and linked-session summaries; missing keys are explicit. " +
-        "Queries without keys also discover current-project cards using BGE and keywords. Sources are labeled. " +
+        "Queries without keys also discover cards across all local boards using BGE and keywords, preferring the current repository. Foreign repositories are labeled. " +
         "Search the developer's own captured agent history — past user messages and whole-session " +
         "summaries from previous Claude/Codex/Copilot/Antigravity/OpenCode sessions in the local history corpus. Use this " +
         "to recall what was previously asked, decided, tried, or fixed before redoing work or asking the " +

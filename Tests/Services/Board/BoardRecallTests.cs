@@ -44,7 +44,7 @@ public sealed class BoardRecallTests : IDisposable
         Assert.Equal(expected, string.Join(',', BoardRecallService.ExtractKeys(query)));
 
     [Fact]
-    public async Task ExactKeysBeatHistoryAndNeverSubstituteACardFromAnotherProject()
+    public async Task ExactKeysBeatHistoryAndForeignPermanentKeysAreExplicitlyLabeled()
     {
         var local = await Card();
         var foreign = await Card("FOREIGN SECRET", root + "-other");
@@ -55,8 +55,8 @@ public sealed class BoardRecallTests : IDisposable
         Assert.Contains(local.Title, result);
         Assert.Contains("[exact card · project " + root, result);
         Assert.Contains("No card matches VB-999", result);
-        Assert.Contains("No card matches " + foreign.Key, result);
-        Assert.DoesNotContain("FOREIGN SECRET", result);
+        Assert.Contains(foreign.Title, result);
+        Assert.Contains("WARNING: another repository", result);
         embedder.Verify(e => e.GenerateEmbedding(It.IsAny<string>()), Times.Never);
     }
 
@@ -147,10 +147,10 @@ public sealed class BoardRecallTests : IDisposable
         var result = await Recall().SearchAsync("where did we fix description overflow", 1, Ct);
         Assert.Contains(relevant.Key, result.Text);
         Assert.Contains("card · BGE/keyword ranking", result.Text);
-        var docs = await store.GetRecallDocumentsAsync(root, 0, Ct);
-        Assert.All(docs, document => Assert.NotNull(document.Embedding));
+        var docs = await store.GetSearchDocumentsAsync(0, Ct);
+        Assert.All(docs.SelectMany(document => document.Passages), passage => Assert.NotNull(passage.Embedding));
         await store.SaveHandoffAsync(root, relevant.Id, new("Overflow is fixed", "Containment", "Browser checked", "", []), BoardAuthor.User(), Ct);
-        Assert.Null((await store.GetRecallDocumentsAsync(root, 0, Ct)).Single(d => d.CardId == relevant.Id).Embedding);
+        Assert.Contains((await store.GetSearchDocumentsAsync(0, Ct)).Single(d => d.Id == relevant.Id).Passages, p => p.Embedding is null);
         embedder.Setup(e => e.GenerateEmbedding(It.IsAny<string>())).Throws(new IOException("missing model"));
         Assert.Contains(relevant.Key, (await Recall().SearchAsync("containment", 1, Ct)).Text);
         await store.DeleteCardAsync(root, relevant.Id, Ct);

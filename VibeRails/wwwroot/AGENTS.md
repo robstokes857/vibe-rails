@@ -129,6 +129,19 @@ base64 encoding. The resulting JSON is for
 
 ## Board
 
+**Local search (VIBE-6).** Typing in Board search switches from lanes to ranked results across
+every local board, including other projects; clearing it restores lanes and their filters.
+`board-search.js` owns debouncing, cancellation, escaped snippets and ownership labels.
+Lane filters are disabled during global search. The linked-card picker uses the same local scope,
+while Move or merge and `!`/`#` card reference pickers request `currentProjectOnly=true` before
+the server's search limit; already-linked local cards stay eligible. `@` card references keep
+all-local search. Search and links visibly label the
+owning board and warn on another project. Current-project cards use the normal editor. Foreign
+cards use `board-local-card.js` through explicit authenticated `local-cards` routes, with ownership
+resolved on the server: fields, lane, comments and links can be edited without changing the open
+repository. It never sends a project path or invokes that repository's launch/file/session APIs.
+Both editors preserve drafts during discussion/link activity and send only edited card fields.
+
 Read the cross-layer [Board contributor guide](../Services/Board/AGENTS.md) and
 [architecture/review](../Services/Board/ARCHITECTURE.md) for API/storage contracts and open
 concurrency findings. Card saves intentionally accept the last write;

@@ -39,6 +39,8 @@ import { boardContextSection, laneAutomationSection, mountBoardContext, mountLan
 import { cardOrganizeSection, bindCardOrganization } from './board-card-organize.js';
 import { openBoardSharing, openSharedBoards } from './board-sharing.js';
 import { renderCardLinksSection, bindCardLinks } from './board-card-links.js';
+import { BoardSearch } from './board-search.js';
+import { openLocalCardEditor } from './board-local-card.js';
 import { cardAutomationControls, bindCardAutomations } from './board-card-automations.js';
 import { contextSectionMarkup, bindCardContext } from './board-card-context.js';
 import { cardDisplayId, cardLabel } from './board-card-label.js';
@@ -171,6 +173,10 @@ export class BoardController {
     }
 
     unload() {
+        this.boardSearch?.dispose();
+        this.boardSearch = null;
+        this.localCardDispose?.();
+        this.localCardDispose = null;
         this.laneAgents.dispose();
         this.sharingDispose?.();
         this.sharingDispose = null;
@@ -632,6 +638,12 @@ export class BoardController {
     }
 
     bindShell() {
+        this.boardSearch?.dispose();
+        this.boardSearch = new BoardSearch(this.root, {
+            currentBoardId: () => this.state.boardId,
+            openCard: card => card.isCurrentProject === true
+                ? this.openCardEditor(card.id) : this.openLocalCard(card.id)
+        });
         this.root.addEventListener('click', event => this.onClick(event));
         this.root.addEventListener('keydown', event => this.onKeydown(event));
 
@@ -714,6 +726,7 @@ export class BoardController {
 
         const search = this.query('[data-board-search]');
         if (search && document.activeElement !== search) search.value = this.state.filters.q;
+        this.boardSearch?.setQuery(this.state.filters.q);
 
         const clear = this.query('[data-board-clear-filters]');
         if (clear) clear.hidden = !this.hasActiveFilters();
@@ -872,6 +885,7 @@ export class BoardController {
     }
 
     filtersChanged(debounce = false) {
+        this.boardSearch?.setQuery(this.state.filters.q);
         this._boardPollAbort?.abort();
         clearTimeout(this._filterTimer);
         // Invalidate both list and page requests immediately, before the debounce.
@@ -1025,6 +1039,7 @@ export class BoardController {
     }
 
     async refresh({ restoreSelection = false } = {}) {
+        this.boardSearch?.setQuery(this.state.filters.q, { force: true });
         this._boardPollAbort?.abort();
         clearTimeout(this._filterTimer);
         this.cancelPageRequests();
@@ -1209,6 +1224,25 @@ export class BoardController {
     // thread at the bottom) and everything *about* the card — the fields, its
     // commits and its sessions — sits in the right-hand rail.
 
+    async openLocalCard(cardId) {
+        const generation = ++this._openCardGeneration;
+        this._openCardAbort?.abort();
+        const abort = this._openCardAbort = new AbortController();
+        try {
+            const detail = await BoardApi.getLocalBoardCardAsync(cardId, { signal: abort.signal });
+            if (abort.signal.aborted || generation !== this._openCardGeneration) return;
+            if (detail.isCurrentProject === true) return this.openCardEditor(detail.card.id);
+            this.localCardDispose?.();
+            this.localCardDispose = openLocalCardEditor(this.app, detail, {
+                openCard: id => this.openLocalCard(id),
+                onChanged: () => this.boardSearch?.setQuery(this.state.filters.q, { force: true })
+            });
+        } catch (error) {
+            if (!abort.signal.aborted && generation === this._openCardGeneration)
+                this.app.showToast('Board', error?.message || 'That card could not be opened.', 'error');
+        }
+    }
+
     async openCardEditor(cardId) {
         const generation = ++this._openCardGeneration;
         this._openCardAbort?.abort();
@@ -1237,6 +1271,7 @@ export class BoardController {
             <div class="board-card-editor" data-board-card-editor data-card-id="${escapeHtml(card?.id || '')}">
                 <div class="board-editor-scroll">
                 <div class="board-editor-main">
+                    ${card && card.boardId !== this.state.boardId ? `<div class="alert alert-info" role="note">This card is on another board: <strong>${escapeHtml(this.boardById(card.boardId)?.name || '')}</strong>. Changes are saved to that board.</div>` : ''}
                     <input type="text" class="form-control board-editor-title" id="board-card-title"
                         placeholder="What needs to happen" value="${escapeHtml(card?.title || '')}"
                         aria-label="Card title">
@@ -1606,7 +1641,7 @@ export class BoardController {
                 confirmLabel: 'Discard and open',
                 danger: true
             })) return;
-            if (editor.isConnected !== false) await this.openCardEditor(cardId);
+            if (editor.isConnected !== false) await this.openLocalCard(cardId);
         } finally {
             editor._boardOpeningLink = false;
         }

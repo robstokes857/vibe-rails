@@ -76,7 +76,8 @@ public sealed partial class BoardService(
     IBoardStore store,
     IBoardCommitService commits,
     IBoardLiveSessionProbe liveSessions,
-    BoardStarterWorkflowService? starterWorkflows = null) : IBoardService
+    BoardStarterWorkflowService? starterWorkflows = null,
+    BoardSearchService? searchService = null) : IBoardService
 {
     // Raised 2026-09-17 (description 20k→100k, comment 10k→50k, attachments 12→40 per card): the
     // first agents to work cards split multi-part reports across comments and hit the old caps.
@@ -580,7 +581,7 @@ public sealed partial class BoardService(
             notes, summary.Type, summary.BoardId, summary.Flagged, hasActiveAutomation, summary.DisplayId, summary.AgentMade,
             (await store.GetWaitingAutomationCardIdsAsync(detail.Card.ProjectPath, [detail.Card.Id], cancellationToken)).Count > 0)
         {
-            LinkedCards = detail.LinkedCards.Select(ToDto).ToList(),
+            LinkedCards = detail.LinkedCards.Select(card => ToDto(card, detail.Card.ProjectPath)).ToList(),
             PreviousWork = BoardHandoffService.WithFileStatus(detail.PreviousWork, detail.Card.ProjectPath),
             FileCandidates = detail.PreviousWork is null && detail.Commits.Count > 0
                 ? await store.GetHandoffCandidatesAsync(detail.Card.ProjectPath, detail.Card.Id, cancellationToken) : []

@@ -10,13 +10,15 @@ namespace VibeRails.Routes;
 /// <summary>
 /// Kanban board API. Every path contains <c>/api/</c>, so CookieAuthMiddleware already requires
 /// both the session and tab credentials — nothing to register here. Mapped on the active root
-/// backend only (terminal-tab children have no board UI). The project is always the dashboard's
-/// root path; it is never read from the request.
+/// backend only (terminal-tab children have no board UI). Ordinary routes use the dashboard's
+/// project; explicit local-card routes resolve ownership from stored identities. Project paths
+/// are never read from the request.
 /// </summary>
-public static class BoardRoutes
+public static partial class BoardRoutes
 {
     public static void Map(WebApplication app)
     {
+        MapLocalSearch(app);
         // Attachment uploads are not size-limited. This has to run as middleware, before model
         // binding reads the body: a RequestSizeLimitAttribute on the endpoint does nothing here,
         // because only the MVC filter pipeline honours it and a MapPost lambda never runs those —
@@ -247,8 +249,9 @@ public static class BoardRoutes
 
         // ---------------------------------------------------------------- rails
 
-        app.MapGet("/api/v1/board/cards/link-candidates", (IBoardService board, string? q, CancellationToken cancellationToken) =>
-            RunAsync(async () => Results.Ok(await board.GetCardLinkCandidatesAsync(Project(), null, q, cancellationToken))))
+        app.MapGet("/api/v1/board/cards/link-candidates", (IBoardService board, string? q, bool? currentProjectOnly, CancellationToken cancellationToken) =>
+            RunAsync(async () => Results.Ok(await board.GetCardLinkCandidatesAsync(Project(), null, q, cancellationToken,
+                currentProjectOnly: currentProjectOnly == true))))
             .WithName("GetNewBoardCardLinkCandidates");
 
         app.MapGet("/api/v1/board/cards/{card}/links/candidates", (IBoardService board, string card, string? q, CancellationToken cancellationToken) =>
