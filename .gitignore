@@ -412,6 +412,7 @@ FodyWeavers.xsd
 /TerminalEmulator.Tests/snapshots
 /fixtures
 /UITests/test-results/
+/UITests/test-results-*/
 /test-results/
 
 # Local-only investigative copies of build outputs (e.g., bin_check/ next to a
