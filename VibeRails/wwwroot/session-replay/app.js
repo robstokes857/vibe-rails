@@ -295,8 +295,8 @@ function renderMarkers() {
     $('timeline-markers').replaceChildren(fragment);
 }
 
-async function writeUntil(target, run) {
-    const endIndex = upperBound(frames, target);
+async function writeUntil(target, run, limit = Infinity) {
+    const endIndex = Math.min(upperBound(frames, target), limit);
     while (frameIndex < endIndex && run === version) {
         const first = frames[frameIndex], currentTerm = term;
         if (currentTerm.cols !== first.cols || currentTerm.rows !== first.rows) { currentTerm.resize(first.cols, first.rows); fitTerminal(); }
@@ -328,11 +328,12 @@ async function tick(now) {
     const run = version;
     const elapsed = Math.max(0, Math.min(now - lastTick, 250)); lastTick = now;
     const nextActivity = Math.min(frames[frameIndex]?.at ?? Infinity, events[upperBound(events, position)]?.at ?? Infinity, manifest.end);
-    const target = maxSpeed() ? maxSpeedTarget(frames, frameIndex, manifest.end)
+    const max = maxSpeed() ? maxSpeedTarget(frames, frameIndex, manifest.end) : null;
+    const target = max ? max.at
         : advancePosition(position, elapsed, Number($('speed').value), manifest.end, nextActivity, $('skip-idle').checked);
     busy = true;
     try {
-        await writeUntil(target, run);
+        await writeUntil(target, run, max ? max.endIndex : Infinity);
         if (run !== version) return;
         const old = position; position = target;
         if (playing) {

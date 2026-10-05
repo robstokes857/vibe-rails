@@ -55,10 +55,14 @@ export function advancePosition(position, elapsed, speed, end, nextActivity, ski
 
 // Max speed has no clock. Each tick writes the next bounded batch of output, so pause and
 // screen samples still interleave; once the output runs out the target is the recording end.
+// The frame boundary travels with the position: frames that share the boundary's timestamp but
+// fall outside the byte budget wait for the next tick instead of riding along with upperBound.
 export function maxSpeedTarget(frames, frameIndex, end, budget = 256 * 1024) {
     let index = frameIndex, bytes = 0;
     while (index < frames.length && bytes < budget) bytes += frames[index++].data.length;
-    return index < frames.length ? Math.min(end, frames[index - 1].at) : end;
+    return index < frames.length
+        ? { at: Math.min(end, frames[index - 1].at), endIndex: index }
+        : { at: end, endIndex: frames.length };
 }
 
 export function eventsFor(manifest, exchanges) {
