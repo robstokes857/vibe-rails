@@ -199,6 +199,33 @@ public class McpServerHttpTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task AddBoardComment_NamesTheClientFromItsRequest_OverHttp()
+    {
+        // VIBE-61: the current protocol carries clientInfo on every request rather than in a
+        // remembered handshake, and the stateless HTTP transport still hands the tool that name.
+        const string project = "author-test-project";
+        var ct = TestContext.Current.CancellationToken;
+        var card = new BoardCardRecord("author-card", project, 1, "lane", 0, "Author", "", null, "medium", null, [], false, 0, DateTime.UtcNow, DateTime.UtcNow);
+        Mock.Get(_app.Services.GetRequiredService<IBoardProjectResolver>())
+            .Setup(resolver => resolver.ResolveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(project);
+        var board = Mock.Get(_app.Services.GetRequiredService<IBoardService>());
+        board.Setup(service => service.FindCardAsync(project, "author-card", It.IsAny<CancellationToken>())).ReturnsAsync(card);
+        BoardAuthor? written = null;
+        board.Setup(service => service.AddCommentAsync(project, "author-card", It.IsAny<BoardAuthor>(), "Started", It.IsAny<CancellationToken>()))
+            .Callback<string, string, BoardAuthor, string, CancellationToken>((_, _, author, _, _) => written = author)
+            .ReturnsAsync(new BoardCommentDto("cm_author", new BoardAuthorDto("agent", "Codex", "Codex"), "Started", DateTime.UtcNow));
+        await using var client = await McpClient.CreateAsync(
+            new HttpClientTransport(new HttpClientTransportOptions { Endpoint = _endpoint, TransportMode = HttpTransportMode.StreamableHttp }, SharedClient,
+                NullLoggerFactory.Instance, ownsHttpClient: false),
+            new McpClientOptions { ClientInfo = new() { Name = "codex-mcp-client", Version = "1.0.0" } }, cancellationToken: ct);
+
+        var result = await client.CallToolAsync("add_board_comment", new Dictionary<string, object?> { ["body"] = "Started", ["card"] = "author-card" }, cancellationToken: ct);
+
+        Assert.Contains(" as Codex at ", Assert.Single(result.Content.OfType<TextContentBlock>()).Text);
+        Assert.Equal(BoardAuthor.Agent("Codex", "Codex", null), written);
+    }
+
+    [Fact]
     public async Task AttachBoardSession_RequiresLaunchingSessionContext()
     {
         await using var client = await ConnectAsync(TestContext.Current.CancellationToken);

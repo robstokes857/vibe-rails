@@ -113,7 +113,7 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 | `create_board_card` | `BoardTool.CreateBoardCard` | New card (title, description, lane, type, priority, tags); optional `board` as above. An agent author marks the card agent-made once; a person driving the tool does not, and nothing later changes the mark. |
 | `update_board_card` | `BoardTool.UpdateBoardCard` | Partial update, including `flagged=true` only for important unresolved owner decisions/intervention under the [attention policy](../../../AGENTS.md#board-attention-flags), or `false` once resolved (independent of `blocked`). Explain the issue and requested action in a comment; routine review and compatible additive schema changes do not warrant a flag. Description replacement accepts the last write; `descriptionAppend` appends to current text atomically with the other fields and cannot be combined with `description`. |
 | `move_board_card` | `BoardTool.MoveBoardCard` | Move a card to a lane (by name or id), optionally at a position. The unchanged first line is followed by the lane-entry report: `Queued:` / `Skipped:` per Automation (with the reason and any active run id), `Cancelled pending:` for replaced entries, or `No lane automations.` / `Same lane; …`. `skipAutomations=true` moves without recording the entries and comments the skip on the card; `preview=true` reports without moving (VB-34). |
-| `add_board_comment` | `BoardTool.AddBoardComment` | Append a comment, attributed to the launching session (or "Agent"). Returns the comment id. |
+| `add_board_comment` | `BoardTool.AddBoardComment` | Append a comment, attributed to the launching session, else to the MCP client's handshake name (see **Attribution**). Returns the comment id. |
 | `append_board_note` | `BoardTool.AppendBoardNote` | Append an entry to the card's **agent notes** — the scratchpad for checkpointing findings and working state as the agent goes. Same limits and attribution as a comment; never part of the comment stream or count. Returns the note id. |
 | `get_board_notes` | `BoardTool.GetBoardNotes` | All notes on a card, oldest first, with no budget (`get_board_card` previews older notes once a card outgrows its activity budget); optional `since`. |
 | `add_board_attachment` | `BoardTool.AddBoardAttachment` | Attach an agent-written `*.md` / `*.txt` file (UTF-8 text, ≤ 500,000 characters). |
@@ -156,10 +156,21 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
   card the session was launched for (or its oldest remaining attachment if that link is removed).
   Writes auto-link an entirely unlinked VibeRails session with origin `mcp`. To attach additional
   cards, explicitly call `attach_board_session`; it requires a card argument and retains the default.
-- **Attribution**: `add_board_comment` resolves the launching `Sessions` row's environment name
-  or CLI, falling back to its board session link, else "Agent". This works on the first comment
-  before auto-linking. Generic historical labels with a session id are resolved on read; comments
-  without a session id cannot be attributed retroactively. The dashboard UI comments as "You".
+- **Attribution**: every write (`create_board_card`, `update_board_card`, `move_board_card`,
+  `add_board_comment`, `append_board_note`, `add_board_attachment`, `save_board_handoff`) resolves
+  the launching `Sessions` row's environment name or CLI, falling back to its board session link.
+  This works on the first comment before auto-linking. With no VibeRails session (a CLI the user
+  started outside VibeRails), the author is the name the MCP client sent in its handshake, which
+  the protocol requires (VIBE-61, `BoardTool.Author.cs`). Each write method takes an `McpServer`
+  parameter for this; the SDK binds it, so it is in no tool's input schema. A word in the name
+  maps to the CLI's own label and logo: `claude-code` → Claude, `codex-mcp-client` → Codex,
+  `xai-grok-cli` → grok, `copilot-cli` → Copilot, `antigravity-client` → Antigravity, `opencode`
+  → OpenCode (names read from the installed binaries on 2026-10-05). Any other client keeps its
+  title or name as one bounded line. A blank or generic ("Agent") name is refused before any
+  write, so new Board writes are never anonymous. Only an in-process call (no MCP server, i.e.
+  tests) still records the generic "Agent". Generic historical labels with a session id are
+  resolved on read; older "Agent" rows without a session id are left as they are (no backfill).
+  The dashboard UI comments as "You".
   Managed Codex launches explicitly forward the current session/tab environment-variable names
   via the per-launch `mcp_servers.viberails-mcp.env_vars` override, because stdio inheritance is
   filtered. Values are not persisted in shared config. See the [official MCP reference](https://developers.openai.com/codex/mcp/).
@@ -382,7 +393,7 @@ record used by a tool must be reachable from `AppJsonSerializerContext`; a new t
 
 ---
 
-**Last checked**: 2026-10-03 by Claude (shared tool serializer options, VIBE-37)
+**Last checked**: 2026-10-05 by Claude (Board write attribution from the MCP handshake, VIBE-61)
 
 ### Reading card images
 

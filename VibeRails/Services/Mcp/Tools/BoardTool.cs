@@ -368,7 +368,8 @@ public sealed partial class BoardTool(
         [Description("Comma-separated tags. Optional.")] string? tags = null,
         [Description("task | bug | feature | research-spike | chore. Defaults to task.")] string? type = null,
         [Description(BoardArgumentHelp)] string? board = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        McpServer? server = null)
     {
         try
         {
@@ -386,7 +387,8 @@ public sealed partial class BoardTool(
                     return $"FAIL: lane not found: {column}. Use list_board_columns to see the lanes.";
                 columnId = lane.Id;
             }
-            var author = await ResolveAuthorAsync(cancellationToken);
+            if (await ResolveAuthorAsync(server, cancellationToken) is not { } author)
+                return UnnamedClientHint;
             var created = await service.CreateCardAsync(project, new CreateBoardCardRequest(
                 Title: title,
                 ColumnId: columnId,
@@ -423,13 +425,16 @@ public sealed partial class BoardTool(
         [Description("New type: task | bug | feature | research-spike | chore.")] string? type = null,
         [Description("Reserve true for an important unresolved issue requiring the user's decision or intervention: a major bug, security/data-loss issue, or missing information that prevents the work. Requires flagReason. Routine progress, completion and review do not need a flag. Clear with false once resolved.")] bool? flagged = null,
         [Description("Required with flagged=true: explain the major issue and the specific information, decision or action needed from the user. Saved as a red attention comment in the same operation.")] string? flagReason = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        McpServer? server = null)
     {
         try
         {
             var target = await ResolveCardAsync(card, cancellationToken);
             if (target.Error is not null)
                 return target.Error;
+            if (await ResolveAuthorAsync(server, cancellationToken) is not { } author)
+                return UnnamedClientHint;
             // One request, one store write: the append travels with the other fields, so an
             // invalid priority (or a lost writer lock) leaves nothing behind to duplicate on retry.
             var request = new UpdateBoardCardRequest(
@@ -441,7 +446,7 @@ public sealed partial class BoardTool(
                 Tags: tags is null ? null : SplitTags(tags) ?? [],
                 Blocked: blocked,
                 Type: type, Flagged: flagged, FlagReason: flagReason);
-            var updated = await service.UpdateCardAsync(target.Project, target.CardId!, request, cancellationToken, await ResolveAuthorAsync(cancellationToken));
+            var updated = await service.UpdateCardAsync(target.Project, target.CardId!, request, cancellationToken, author);
             if (updated is null)
                 return $"FAIL: card not found: {card}";
             await AutoLinkSessionAsync(target.Project, updated.Id, cancellationToken);
@@ -464,7 +469,8 @@ public sealed partial class BoardTool(
         [Description("0-based position within the lane. Defaults to the end.")] int? position = null,
         [Description("true: move the card but do not run the destination lane's Automations for this entry. Per call only; the skip and what it bypassed are recorded as a comment on the card. Use it for moves that need no run (a research spike, a card moved back and forth).")] bool skipAutomations = false,
         [Description("true: do not move; return what moving to this lane would queue, skip or cancel.")] bool preview = false,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        McpServer? server = null)
     {
         try
         {
@@ -481,7 +487,8 @@ public sealed partial class BoardTool(
                 return $"Preview: {current.Key} stays in {currentLane?.Name ?? current.ColumnId}; moving it to {report.LaneName} would do the following.\n"
                     + FormatLaneEntry(report, current.Key, preview: true);
             }
-            var author = await ResolveAuthorAsync(cancellationToken);
+            if (await ResolveAuthorAsync(server, cancellationToken) is not { } author)
+                return UnnamedClientHint;
             var result = await service.MoveCardAsync(target.Project, target.CardId!,
                 new BoardCardMoveRequest(column, position, skipAutomations, author), cancellationToken);
             if (result is null)
@@ -504,14 +511,16 @@ public sealed partial class BoardTool(
     public async Task<string> AddBoardComment(
         [Description("Comment text.")] string body,
         [Description(CardArgumentHelp)] string? card = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        McpServer? server = null)
     {
         try
         {
             var target = await ResolveCardAsync(card, cancellationToken);
             if (target.Error is not null)
                 return target.Error;
-            var author = await ResolveAuthorAsync(cancellationToken);
+            if (await ResolveAuthorAsync(server, cancellationToken) is not { } author)
+                return UnnamedClientHint;
             var comment = await service.AddCommentAsync(target.Project, target.CardId!, author, body, cancellationToken);
             if (comment is null)
                 return $"FAIL: card not found: {card}";
@@ -530,14 +539,16 @@ public sealed partial class BoardTool(
     public async Task<string> AppendBoardNote(
         [Description("Note text.")] string body,
         [Description(CardArgumentHelp)] string? card = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        McpServer? server = null)
     {
         try
         {
             var target = await ResolveCardAsync(card, cancellationToken);
             if (target.Error is not null)
                 return target.Error;
-            var author = await ResolveAuthorAsync(cancellationToken);
+            if (await ResolveAuthorAsync(server, cancellationToken) is not { } author)
+                return UnnamedClientHint;
             var note = await service.AddNoteAsync(target.Project, target.CardId!, author, body, cancellationToken);
             if (note is null)
                 return $"FAIL: card not found: {card}";
@@ -589,14 +600,16 @@ public sealed partial class BoardTool(
         [Description("File name ending in .md or .txt, e.g. findings.md.")] string name,
         [Description("The file's full text (UTF-8).")] string text,
         [Description(CardArgumentHelp)] string? card = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        McpServer? server = null)
     {
         try
         {
             var target = await ResolveCardAsync(card, cancellationToken);
             if (target.Error is not null)
                 return target.Error;
-            var author = await ResolveAuthorAsync(cancellationToken);
+            if (await ResolveAuthorAsync(server, cancellationToken) is not { } author)
+                return UnnamedClientHint;
             var attachment = await service.AddTextAttachmentAsync(target.Project, target.CardId!, name, text, cancellationToken);
             if (attachment is null)
                 return $"FAIL: card not found: {card}";
@@ -743,18 +756,6 @@ public sealed partial class BoardTool(
             }
         }
         return new CardTarget(project, null, null, NoCardHint);
-    }
-
-    /// <summary>Agent comments are attributed to the launching session when there is one, else to a generic agent.</summary>
-    private async Task<BoardAuthor> ResolveAuthorAsync(CancellationToken cancellationToken)
-    {
-        var sessionId = projects.CurrentSessionId;
-        if (sessionId is not null)
-        {
-            var author = await store.FindSessionAuthorAsync(sessionId, cancellationToken);
-            if (author is not null) return author;
-        }
-        return BoardAuthor.Agent("Agent", null, sessionId);
     }
 
     /// <summary>

@@ -46,14 +46,15 @@ public sealed partial class BoardTool
     [McpServerTool, Description("Save a concise previous-work handoff and up to 12 curated repository file references with reasons. Keeps the user's description unchanged, retains earlier handoffs, and posts a receipt in Comments. Use after implementation so fresh agents can start with the right files. File contents are never included. get_board_card returns the current handoff and linked-commit file candidates.")]
     public async Task<string> SaveBoardHandoff(
         [Description("Outcome, decisions, validation, outstanding issues and files (path, reason, role: implementation/test/docs, optional symbol and commit SHA). Provenance is assigned by the server.")] BoardHandoff handoff,
-        [Description(CardArgumentHelp)] string? card = null, CancellationToken cancellationToken = default)
+        [Description(CardArgumentHelp)] string? card = null, CancellationToken cancellationToken = default,
+        McpServer? server = null)
     {
         try
         {
             var normalized = BoardHandoffService.Validate(handoff);
             var target = await ResolveCardAsync(card, cancellationToken);
             if (target.Error is not null) return target.Error;
-            var author = await ResolveAuthorAsync(cancellationToken);
+            if (await ResolveAuthorAsync(server, cancellationToken) is not { } author) return UnnamedClientHint;
             var saved = await store.SaveHandoffAsync(target.Project, target.CardId!, normalized, author, cancellationToken);
             if (saved is null) return "FAIL: card not found.";
             await AutoLinkSessionAsync(target.Project, target.CardId!, cancellationToken);
