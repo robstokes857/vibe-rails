@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Reflection;
 using System.Text;
 using System.IO.Pipes;
@@ -133,6 +134,54 @@ public sealed class CompletedTerminalOutputTests
             Assert.NotNull(await service.CaptureSnapshotAsync(TestContext.Current.CancellationToken)); // Recording/snapshot survives the live session.
         }
         finally { output.Release(); await service.UnregisterTerminalAsync(); }
+    }
+
+    [Fact]
+    public async Task AgentClosureWaitsForAPostExitRunTheOtherEndOwnerStarted()
+    {
+        // VB-PRTTC-153 R1. Exit cleanup calls RunPostStepsAsync once its own shutdown returns; here
+        // it claims the post-exit context first, the losing order the review reproduced, so the
+        // stop finds nothing to run itself and must wait for that run before announcing closure.
+        var ct = TestContext.Current.CancellationToken;
+        var id = "post-exit-owner-" + Guid.NewGuid().ToString("N");
+        var tornDown = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var state = new Mock<ITerminalStateService>();
+        state.Setup(s => s.CompleteSessionAsync(id, It.IsAny<int>())).Returns(() => { tornDown.TrySetResult(); return Task.CompletedTask; });
+        var stepEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stepRelease = new TaskCompletionSource<StepRunSummary>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var steps = new Mock<IEnvironmentStepRunner>();
+        steps.Setup(s => s.RunPhaseAsync(17, EnvironmentStepPhase.PostExit, "/project", null, It.IsAny<CancellationToken>()))
+            .Returns(() => { stepEntered.TrySetResult(); return stepRelease.Task; });
+        var bus = new AppEventBus();
+        var closed = 0;
+        using var subscription = bus.Subscribe(e => { if (e.Type == "agent_session_closed") Interlocked.Increment(ref closed); });
+        var runner = new TerminalRunner(state.Object, Mock.Of<ICommandService>(), Mock.Of<ILocalToolApiContext>(),
+            Mock.Of<ILlmProxySessionState>(), Mock.Of<IAutomationConsumer>(), Mock.Of<IRepository>(), steps.Object, bus);
+        var service = new TerminalSessionService(state.Object, runner, Mock.Of<ILocalClientTracker>());
+        await using var terminal = new TerminalPty(Mock.Of<IPtyConnection>(), 80, 24);
+        // The launch path registers this context only for an environment with post-exit steps.
+        var contexts = (IDictionary)typeof(TerminalRunner).GetField("s_postStepContexts", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
+        contexts[id] = Activator.CreateInstance(typeof(TerminalRunner).GetNestedType("PostStepContext", BindingFlags.NonPublic)!, 17, "env", "/project")!;
+        service.RegisterExternalTerminal(terminal, id, "/project");
+        typeof(TerminalSessionService).GetField("s_externallyOwned", BindingFlags.NonPublic | BindingFlags.Static)!.SetValue(null, false);
+        try
+        {
+            terminal.CompleteByAgent();
+            var exitCleanup = runner.RunPostStepsAsync(id, 0, ct);
+            await stepEntered.Task.WaitAsync(TimeSpan.FromSeconds(5), ct);
+
+            var stop = service.StopSessionAsync();
+            await tornDown.Task.WaitAsync(TimeSpan.FromSeconds(5), ct);
+            await Task.Delay(100, ct);
+            Assert.False(stop.IsCompleted, "the stop must wait for the post-exit run already in flight");
+            Assert.Equal(0, Volatile.Read(ref closed));
+
+            stepRelease.SetResult(StepRunSummary.Empty);
+            await Task.WhenAll(stop, exitCleanup).WaitAsync(TimeSpan.FromSeconds(5), ct);
+            Assert.Equal(1, Volatile.Read(ref closed));
+            steps.Verify(s => s.RunPhaseAsync(17, EnvironmentStepPhase.PostExit, "/project", null, It.IsAny<CancellationToken>()), Times.Once);
+        }
+        finally { stepRelease.TrySetResult(StepRunSummary.Empty); await service.UnregisterTerminalAsync(); }
     }
 
     private sealed class CapturingConsumer(List<byte> bytes) : ITerminalConsumer

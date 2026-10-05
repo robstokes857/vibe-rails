@@ -352,14 +352,20 @@ after it fires, so async work started there would be killed mid-flight. Instead
 `ConcurrentDictionary` keyed by session id — static because the TerminalRunner instance that ends
 a session is frequently not the one that created it (it is scoped, and the browser-tab path
 finalizes from a background task after its request scope is gone). `RunPostStepsAsync(sessionId,
-exitCode, ct)` consumes the entry with `TryRemove`, so it is idempotent, and is awaited from
-exactly the two places that own a session's end:
+exitCode, ct)` consumes the entry with `TryRemove`, so the steps run once, and records the run per
+session under a lock: a caller that arrives while the run is in flight awaits that run instead of
+returning at once (VB-PRTTC-153 R1). It is awaited from the places that own a session's end:
 
 - `TerminalRunner.CompleteSessionAsync` — the CLI and Job paths. Runs **before** the session is
   stamped complete, so a Worker's "the agent finished" steps land before the run is marked done.
 - `TerminalSessionService.ScheduleExitCleanup` — the browser-tab path. Called from that method's
   existing background `Task.Run`, **after** `ShutdownActiveSessionAsync` returns, because that
   method holds `s_lifecycleGate` and a post-exit step can legitimately run for minutes.
+- `TerminalSessionService.ShutdownActiveSessionAsync` itself, for a session the agent ended, after
+  releasing the gate and **before** publishing `agent_session_closed`, because the parent kills the
+  host's process tree on that event. Exit cleanup races this call for the context; whichever wins,
+  the event waits for the steps. Tests: `PostExitStepsConcurrencyTests` and
+  `CompletedTerminalOutputTests.AgentClosureWaitsForAPostExitRunTheOtherEndOwnerStarted`.
 
 The entry is also removed in the rollback `catch`, so a launch that never started cannot fire its
 post-exit steps when the DB session is closed.
