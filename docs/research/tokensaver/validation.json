@@ -1,0 +1,19 @@
+{
+  "test_command": "dotnet test Tests/Tests.csproj --no-restore --filter \"FullyQualifiedName~Tests.TokenSaver.OutputMinifierTests|FullyQualifiedName~Tests.TokenSaver.OutputCondenserTests|FullyQualifiedName~Tests.TokenSaver.PipelineGoldenFixtureTests|FullyQualifiedName~Tests.TokenSaver.MinifierGoldenFixtureTests|FullyQualifiedName~Tests.TokenSaver.ShapeFilterTests|FullyQualifiedName~Tests.TokenSaver.FileReadTruncationTests|FullyQualifiedName~Tests.TokenSaver.CrLfNormalizeTests|FullyQualifiedName~Tests.TokenSaver.AnthropicMessagesRewriterTests|FullyQualifiedName~Tests.TokenSaver.CodexResponsesRewriterTests|FullyQualifiedName~Tests.TokenSaver.ChatCompletionsRewriterTests\" --verbosity minimal",
+  "working_directory": "C:\\source\\vibe-rails",
+  "sdk": "10.0.401",
+  "framework": "net10.0",
+  "passed": 475,
+  "failed": 0,
+  "skipped": 0,
+  "exit_code": 0,
+  "tree_note": "Shared dirty tree; unrelated edits present, no TokenSaver or Tests/TokenSaver modifications observed before run.",
+  "scope": "Finite existing tests; not task quality evidence. Three existing analyzer warnings outside selected area.",
+  "calculation_checks": [
+    "65 daily rows parsed",
+    "tier counts sum to stated denominators",
+    "weighted totals calculated by sum(delta)/sum(original)",
+    "missing classifications bound 146/467 through 165/467"
+  ],
+  "new_raw_traffic_measurement": false
+}

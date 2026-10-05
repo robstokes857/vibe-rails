@@ -1,0 +1,32 @@
+TOKENSAVER EDITABLE REVIEW PACKAGE
+Research version 0.2, October 5, 2026
+
+FOR ROBERT
+Open output/docx/tokensaver-research-editable.docx in Word. The prose, tables and
+six equations are editable. Track Changes is enabled for future changes.
+Charts are images; figure files and their aggregate data accompany the paper.
+
+FOR REVIEW AGENTS
+Start with REVIEW.md, then read tokensaver-research-review.md and the evidence.
+Use the stable TS-C01 through TS-C10 claim IDs in review notes. Return an edited
+copy or unified diff plus review-notes-<reviewer>.md. Include evidence and exact
+proposed wording for each finding. Bring those files back to the original chat.
+
+The manuscript is an export of version 0.2 with the same scientific claims.
+The Word and Markdown files do not synchronize automatically. The original
+builder is not an editor: rerunning it would overwrite changes. Reconcile review
+findings first, then update the canonical manuscript and regenerate formats.
+
+The evidence package contains aggregates, not private captured request bodies.
+Some cited local sources are not included. A reviewer must state unavailable
+sources and must not label a summary-only review independent replication.
+
+Recommended web placement (proposal, not implemented):
+- Public readable article at /research/tokensaver, with version and study dates,
+  measured results, limitations, proofs, charts, downloads and data/methods.
+- A 'Read the TokenSaver research' link below the public Tokens Saved counter.
+- A 'How savings are measured' link in the local app savings popover, pointing
+  to the article's measurement section.
+- A 'Research and methodology' link beside Settings > LLMs > Token Saver.
+The public aggregate meter and this single-workstation study have different
+populations. Display estimated tokens and measured bytes with explicit labels.

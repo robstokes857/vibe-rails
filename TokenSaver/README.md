@@ -6,6 +6,10 @@ Hey next time we go through the optimization process I want to look for re-runs.
 
 # TokenSaver
 
+The [compression savings research paper and review package](../docs/research/tokensaver/README.md)
+includes editable Word and Markdown copies, mathematical arguments, charts, aggregate evidence,
+and instructions for independent agent review.
+
 TokenSaver is the library that sits between a coding CLI (Claude Code, Codex,
 OpenCode) and its model provider, and makes the request smaller on the way up.
 

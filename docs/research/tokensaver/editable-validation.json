@@ -1,0 +1,16 @@
+{
+  "pages": 16,
+  "native_equations": 6,
+  "figures": 9,
+  "track_changes_enabled": true,
+  "renderer": "Microsoft Word 16.0 then Poppler",
+  "canonical_renderer_limitation": "Bundled LibreOffice unavailable on Windows",
+  "visual_review": "All 16 Word-rendered pages visually inspected. Corrected empty summation operands and title border. Changed pages inspected again.",
+  "changed_pages_final_render": [
+    1,
+    3,
+    13,
+    14
+  ],
+  "scientific_claims": "Version 0.2 preserved; reproduction table adds editable review files."
+}

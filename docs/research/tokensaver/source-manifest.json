@@ -1,0 +1,84 @@
+{
+  "date": "2026-10-05",
+  "product_commit": "336373c0c51b2dc68abb3350910cee533502651a",
+  "research_commit": "cf3253b99e6992e7b62564bfc3fb23f276a0e39c",
+  "files": [
+    {
+      "path": "C:\\source\\vibe-books\\token_saver\\research_2026-10-01.md",
+      "sha256": "94c99e4fd879a801411bff602bf754df18c59db9032a21e76741e62acdf0d11d"
+    },
+    {
+      "path": "C:\\source\\vibe-books\\token_saver\\review_2026-10-01.md",
+      "sha256": "b0288bb0c3e04aec218e2c834bcf733a05da1aca43b3fd3f5dfca5678189dcfe"
+    },
+    {
+      "path": "C:\\source\\vibe-books\\python-scripts\\token_saver\\tiered_rerun_audit.py",
+      "sha256": "0693da17fa007edbdcb80f4fa370b8d05192e84c21f9c778106926741881b71a"
+    },
+    {
+      "path": "C:\\source\\vibe-books\\python-scripts\\token_saver\\scan_conversations.py",
+      "sha256": "53ddc8a74fc1b2ded6ec509196859abb472f77b4cc10ee34363019dadc08313b"
+    },
+    {
+      "path": "C:\\source\\vibe-books\\python-scripts\\token_saver\\timeline_stats.py",
+      "sha256": "4f254eaa899a4e22f6af14856d5e39334c539aa73b4a2dcd361db8126f8aa13c"
+    },
+    {
+      "path": "C:\\source\\vibe-rails\\TokenSaver\\Minify\\AnthropicMessagesRewriter.cs",
+      "sha256": "210e658bce15ecfa251acddc5ede5fb97eb0d2172a77d9427b69fd40ff934f46"
+    },
+    {
+      "path": "C:\\source\\vibe-rails\\TokenSaver\\Minify\\CodexResponsesRewriter.cs",
+      "sha256": "ae73ea35375ffc82c554255c17c3b3ab2eca89b98e9a159300fd38b89694efb1"
+    },
+    {
+      "path": "C:\\source\\vibe-rails\\TokenSaver\\Minify\\ChatCompletionsRewriter.cs",
+      "sha256": "31434dba0c822f18fa6cca5308945560111c825a265fd68d61e6c7b27e939072"
+    },
+    {
+      "path": "C:\\source\\vibe-rails\\TokenSaver\\Minify\\OutputCondenser.cs",
+      "sha256": "bc5647befcaf1a27abbb6fcffe5154d0a973c52d9c7e6dcab858757317891d31"
+    },
+    {
+      "path": "C:\\source\\vibe-rails\\TokenSaver\\Pipeline\\CompressionCatalog.cs",
+      "sha256": "e3011e2b3624374f655fb372ea87e0e234fda901434402b130d5b5493ff52303"
+    },
+    {
+      "path": "C:\\source\\vibe-rails\\VibeRails.Data.Abstractions\\DB\\ITokenSavingsStore.cs",
+      "sha256": "c1006a8e56925dc47198c0570a28e22828e0bfa23259ef52ea392dd7f5394571"
+    },
+    {
+      "path": "C:\\source\\vibe-books\\python-scripts\\token_saver\\results\\codex-mine-0908\\findings.md",
+      "sha256": "796ceac398fbca23221c4a834ccdfb296c872e6804766ed180a311ae5e7bd9b2"
+    },
+    {
+      "path": "C:\\source\\vibe-books\\python-scripts\\token_saver\\results\\codex-mine-0908\\summary.json",
+      "sha256": "7e01d70035b46f7394341d3e725ccb56ed4d6963af50c75ece0a1941755901c3"
+    },
+    {
+      "path": "C:\\source\\vibe-books\\python-scripts\\token_saver\\results\\codex-mine-0908\\replay-output.jsonl",
+      "sha256": "c5897bb9d694f09b5512959a5ba932ba6685bc9f144ed4efc14692c8d9a8d370"
+    },
+    {
+      "path": "C:\\source\\vibe-books\\python-scripts\\token_saver\\replay_pipeline\\Program.cs",
+      "sha256": "aa37ed20142d4609e4f82594b8f55e2aa81e88501ff00372a88ad17c927eb528"
+    },
+    {
+      "path": "C:\\source\\vibe-books\\token_saver\\truncation_file_reads.md",
+      "sha256": "9416f0f648625c11b3fe0c61b47d3891243c10f219165a134604fe377d025d05"
+    },
+    {
+      "path": "C:\\source\\vibe-books\\token_saver\\v1_findings_claude_codex_response.md",
+      "sha256": "9dce1da0b8a724c39155890dc5a5aa235dd53bcc9fe5f94b207f040824cd9616"
+    },
+    {
+      "path": "C:\\source\\vibe-books\\vibe-data\\docs\\backup-coverage-audit.md",
+      "sha256": "69426251eac3215ff8602bc1fbf7c6ffb93ce247d3076ee5f7745c738e67011e"
+    }
+  ],
+  "web_sources": [
+    "https://platform.claude.com/docs/en/build-with-claude/prompt-caching",
+    "https://platform.claude.com/docs/en/build-with-claude/token-counting"
+  ],
+  "raw_database_recollection": false
+}

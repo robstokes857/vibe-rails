@@ -1,0 +1,533 @@
+\documentclass[10pt,letterpaper]{article}
+\usepackage[margin=.8in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern,amsmath,amssymb,booktabs,array,longtable,xcolor,graphicx,pgfplots,fancyhdr}
+\usepackage[breaklinks,hidelinks]{hyperref}
+\pgfplotsset{compat=1.18}
+\definecolor{navy}{HTML}{17324D}
+\definecolor{teal}{HTML}{087F8C}
+\setlength{\parindent}{0pt}\setlength{\parskip}{6pt}
+\setlength{\emergencystretch}{3em}
+\pagestyle{fancy}\fancyhf{}\fancyhead[L]{\scriptsize VIBERAILS / TOKENSAVER RESEARCH}
+\fancyhead[R]{\scriptsize DRAFT 0.2 / 2026-10-05}\fancyfoot[C]{\thepage}
+\setlength{\headheight}{14pt}
+\hypersetup{pdftitle={Measuring TokenSaver Compression Savings},pdfauthor={Prepared for Robert Stokes}}
+\begin{document}
+
+{\huge\bfseries\color{navy} Measuring TokenSaver Compression Savings}\[7pt]
+
+{\large\color{teal}Byte-level guarantees, cache-aware economics, and observed agent behavior}\[5pt]
+
+{\footnotesize\color{gray} RESEARCH DRAFT 0.2  |  5 OCTOBER 2026  |  Prepared for Robert Stokes}
+
+
+\subsection*{Abstract}
+
+TokenSaver rewrites selected tool-result strings before coding-agent requests reach a model provider. This paper examines whether those rewrites constitute useful savings. It combines a 65-day dossier, additional archived studies, a current source audit, nine figures, and formal accounting and correctness arguments. The first October 1 meter snapshot reports reductions of \textbf{3.45\% of request-body bytes for Codex CLI}, \textbf{0.20\% for Claude Code}, and \textbf{0.18\% for Grok CLI}. These are measurements of transmitted request bodies, not net billing-token effects. [1]
+
+
+Repeated history explains why wire removal exceeds distinct-content removal by 12.60x and 39.81x in two historical samples. The corrected follow-up audit finds a related call in the next assistant turn after 19/35 Claude truncations and 146/448 classified Codex truncations. These associations do not establish that truncation caused extra turns. A source-level proof establishes byte non-growth for accepted replacements, and 475 focused tests passed on October 5. A second proof characterizes exactly when a compressed observation can preserve a task answer; arbitrary truncation cannot satisfy that condition for every task.
+
+
+The evidence establishes gross transport reduction and specific engineering guarantees. It does not yet establish net billed-token savings or noninferior task success. We derive the break-even conditions and specify a paired experiment that can test both, without converting character counts or heuristic follow-ups into unsupported token claims.
+
+
+{\small\begin{longtable}{>{\raggedright\arraybackslash}p{0.298\linewidth}>{\raggedright\arraybackslash}p{0.638\linewidth}}	oprule
+\textbf{Claim} & \textbf{Evidence status}\\\midrule
+
+Smaller transmitted request bodies & Measured; provider and snapshot specific\\[4pt]
+
+Accepted rewrite cannot enlarge the body & Proved under the splice model; source checked\\[4pt]
+
+Stable rewriting and protocol behavior & Supported by focused regression tests\\[4pt]
+
+Lower total task cost with equal quality & Open empirical question; protocol specified\\[4pt]
+
+\bottomrule\end{longtable}}
+
+{\footnotesize\color{gray} Revision 0.2 adds a bounded September audit of 8,286 successful requests, a historical C\# replay of 8,177 output variants under four configurations, actual usage buckets, and the file-read mitigation study. Historical replay evidence is kept separate from the 475 tests run for this draft.}
+
+
+\clearpage
+{\Large\bfseries\color{navy} 1. System and study design}\[7pt]
+
+TokenSaver is a local proxy with provider-specific JSON rewriters. It correlates tool calls with their results, selects eligible text, runs deterministic cleanup, recognized-command reshaping and condensation stages, and accepts a replacement only if its serialized byte representation is smaller. The studied design passes provider responses through unchanged. System instructions, user messages and tool-call inputs are outside the selected tool-result spans. [1, 3]
+
+
+{\small\begin{longtable}{>{\raggedright\arraybackslash}p{0.191\linewidth}>{\raggedright\arraybackslash}p{0.745\linewidth}}	oprule
+\textbf{Mechanism} & \textbf{Current implementation boundary}\\\midrule
+
+Eligibility & Allowlisted shell results; dedicated Read/Grep scopes default off. Shell results can still contain source files.\\[4pt]
+
+Cleanup & Configured line-ending, trailing-space and blank-line normalization; not universal semantic equivalence.\\[4pt]
+
+Run collapse & At least three identical consecutive lines; replace only when the marker is smaller.\\[4pt]
+
+Truncation & Normally retain 150 head and 50 tail lines plus an elision marker.\\[4pt]
+
+File-read mitigation & Recognized file reads use 1,200 head and 200 tail lines if the post-dedupe text has at most 262,144 UTF-16 code units.\\[4pt]
+
+Activation threshold & Omitted middle must contain at least 10 lines and 4,096 UTF-16 code units. This is not a token or byte cap.\\[4pt]
+
+\bottomrule\end{longtable}}
+
+\subsection*{Populations and time windows}
+
+The dossier covers one developer's workstation from July 29 through October 1, 2026. Its derived sequence dataset contains 65,582 requests and 4,015 conversation keys; a separate historical corpus contains 49,851 content-hash-distinct tool outputs. These populations are not interchangeable. Conversation keys are derived from opening messages, and the sequence extractor retains the request with the most tool calls per conversation. Branches and segments after compaction can be missed. [1, sections 3-5]
+
+
+The primary meter table uses activity from September 4 through the first October 1 snapshot. The daily figure uses a later October 1 reread. The follow-up classifier uses conversations first observed on or after August 30. Study A's distinct-content comparison uses August 28 for Claude and August 28-29 for Codex. Each figure states its own denominator and window.
+
+
+{\footnotesize\color{gray} Current source audit: vibe-rails 336373c0c51b2dc68abb3350910cee533502651a. Historical research checkout: vibe-books cf3253b99e6992e7b62564bfc3fb23f276a0e39c. File hashes accompany the draft. No raw request bodies were copied into the paper.}
+
+
+\clearpage
+{\Large\bfseries\color{navy} 2. Accounting and a transport guarantee}\[7pt]
+
+Let $B_j$ and $A_j$ denote the UTF-8 byte lengths of the original and actually forwarded request body j. The gross transport reduction is the sum of accepted body differences. The byte-weighted share uses the sum of original bytes as its denominator; an unweighted mean of daily percentages estimates a different quantity.
+
+
+\begin{equation}D_B=\sum_{j=1}^{J}(B_j-A_j),\qquad S_B=\frac{D_B}{\sum_{j=1}^{J}B_j}\tag{1}\end{equation}
+
+For a fixed provider model m, let $\tau_m(x)$ be its input-token counting function. A paired request-level token difference requires counting both complete original and transformed requests with that same model. A byte reduction does not imply a token reduction: tokenization is not monotone in string byte length, and model-specific framing also matters. The TokenSaver savings field instead uses floor(BytesSaved / 4), an explicit estimate. [4, 7]
+
+
+\begin{equation}D_T=\sum_{j=1}^{J}\left[\tau_m(B_j^{\rm body})-\tau_m(A_j^{\rm body})\right]\tag{2}\end{equation}
+
+\subsection*{Proposition 1. Accepted splices cannot enlarge the body}
+
+Assume the parser identifies disjoint eligible JSON string spans $s_i$ and untouched intervening spans $v_i$. Let $c_i$ be an encoded candidate replacement, and let $a_i$ equal $c_i$ only when its UTF-8 byte length is strictly smaller than that of $s_i$; otherwise $a_i$ equals $s_i$. The rewrite copies each $v_i$ without modification. Then:
+
+
+\begin{equation}|R(B)|=\sum_i|v_i|+\sum_i|a_i|\ \leq\ \sum_i|v_i|+\sum_i|s_i|=|B|\tag{3}\end{equation}
+
+\textbf{Proof.} Every accepted span satisfies |$a_i$| < |$s_i$|, every rejected span satisfies equality, and disjoint concatenated byte lengths add. At least one accepted replacement makes the total inequality strict. All bytes outside accepted spans retain their original values. The three provider rewriters enforce the encoded-length comparison at the source locations listed in reference 3.
+
+
+This is a guarantee about the implemented splice contract, conditional on correct parsing and copying. It does not prove that every tool-result meaning is preserved, that tokenization shrinks, or that a complete task requires fewer requests. Candidate stage traces can include rejected rewrites; actual savings must be conditioned on RewriteAccepted or derived from the forwarded body.
+
+
+\clearpage
+{\Large\bfseries\color{navy} 3. Distinct content, replay, and cache weighting}\[7pt]
+
+For distinct removed result content i, let $d_i$ be the removed character count and $m_i$ its number of appearances in subsequent requests. Under stable rewriting, $D_{\mathrm{unique}}$ = sum $d_i$ and $D_{\mathrm{wire,char}}$ = sum $m_i$ $d_i$. Their ratio is a removal-weighted mean replay count, not a task-saving multiplier. [1, section 6.3]
+
+
+\begin{center}\begin{minipage}{.49\linewidth}\begin{tikzpicture}\begin{axis}[width=.96\linewidth,height=4.1cm,tick label style={font=\scriptsize},label style={font=\small},axis lines=left,grid=major,grid style={gray!15},ymin=0,ymax=4.1056416,xtick={1,2},xticklabels={Distinct,Resends},ylabel={Million characters},title={Claude (12.6x)},title style={font=\small},bar width=16pt]
+\addplot+[ybar,fill=teal!70] coordinates {(1,0.264898) (2,3.337920)};
+\end{axis}\end{tikzpicture}\end{minipage}\hfill\begin{minipage}{.49\linewidth}\begin{tikzpicture}\begin{axis}[width=.96\linewidth,height=4.1cm,tick label style={font=\scriptsize},label style={font=\small},axis lines=left,grid=major,grid style={gray!15},ymin=0,ymax=63.62588772,xtick={1,2},xticklabels={Distinct,Resends},ylabel={Million characters},title={Codex (39.8x)},title style={font=\small},bar width=16pt]
+\addplot+[ybar,fill=teal!70] coordinates {(1,1.299384) (2,51.728364)};
+\end{axis}\end{tikzpicture}\end{minipage}\end{center}
+{\footnotesize Figure 1. Historical Study A: character counts with and without replay weighting. Claude: August 28; Codex: August 28-29. Distinct content is content-hash deduplicated here. The two panels use different vertical scales.}
+
+
+Repeated input can be charged at a cache-read rate. For a block of d actual tokens, first-write multiplier w, read multiplier alpha, and m appearances, its gross avoided input cost is d[w + alpha(m - 1)] in units of the base input price. This identity assumes unchanged future requests, token counts, cache hits and cache boundaries. It is a conditional accounting model, not an observed net effect.
+
+
+\begin{center}\begin{tikzpicture}\begin{axis}[width=.96\linewidth,height=4.1cm,tick label style={font=\scriptsize},label style={font=\small},axis lines=left,grid=major,grid style={gray!15},xmin=1,xmax=40,ymin=0,ymax=42,xlabel={Appearances},ylabel={Multiplier per token},legend style={font=\tiny,at={(.02,.98)},anchor=north west}]
+\addplot[gray,domain=1:40] {x};\addplot[blue,domain=1:40] {1.25+.1*(x-1)};\addplot[teal,domain=1:40] {1.25+.05*(x-1)};\addplot[orange,domain=1:40] {1.25+.025*(x-1)};\legend{Raw appearances,$\alpha=.10$,$\alpha=.05$,$\alpha=.025$}
+\end{axis}\end{tikzpicture}\end{center}
+{\footnotesize Figure 2. Illustrative accounting with w = 1.25 and fixed cache-read multipliers. At m = 40 and alpha = 0.10, the cost multiplier is 5.15, versus 40 raw token appearances. These curves are not fitted to study traffic.}
+
+
+{\footnotesize\color{gray} Current provider documentation distinguishes cache-write and cache-read prices and includes model-specific exceptions. Rates must be pinned per model and date before calculating money. The study's historical provider-wide factors are not used here to claim current dollar savings. [6]}
+
+
+\clearpage
+{\Large\bfseries\color{navy} 4. Measured request-body reduction}\[7pt]
+
+\begin{center}\begin{tikzpicture}\begin{axis}[width=.96\linewidth,height=4.1cm,tick label style={font=\scriptsize},label style={font=\small},axis lines=left,grid=major,grid style={gray!15},xmin=0,xmax=4,ytick={1,2,3},yticklabels={Grok CLI,Codex CLI,Claude Code},xlabel={Request-body bytes removed (\%)},nodes near coords]
+\addplot+[xbar,fill=teal!75,draw=none] coordinates {(.20,3) (3.45,2) (.18,1)};
+\end{axis}\end{tikzpicture}\end{center}
+{\footnotesize Figure 3. Reported gross request-body byte reduction in the first October 1 meter snapshot, activity since September 4. Denominators: Claude 16,238 requests; Codex 16,227; Grok 1,212. Sizes in the dossier are rounded; percentages are reproduced as reported. [1, section 6.1]}
+
+
+{\small\begin{longtable}{>{\raggedright\arraybackslash}p{0.202\linewidth}>{\raggedright\arraybackslash}p{0.266\linewidth}>{\raggedright\arraybackslash}p{0.202\linewidth}>{\raggedright\arraybackslash}p{0.202\linewidth}}	oprule
+\textbf{Agent} & \textbf{Original body data} & \textbf{Removed} & \textbf{Share}\\\midrule
+
+Claude Code & 7.71 GB & 15.4 MB & 0.20\%\\[4pt]
+
+Codex CLI & 9.93 GB & 343 MB & 3.45\%\\[4pt]
+
+Grok CLI & 673 MB & 1.2 MB & 0.18\%\\[4pt]
+
+\bottomrule\end{longtable}}
+
+\begin{center}
+\begin{minipage}{\linewidth}\centering
+\begin{tikzpicture}\begin{axis}[width=.96\linewidth,height=4.1cm,tick label style={font=\scriptsize},label style={font=\small},axis lines=left,grid=major,grid style={gray!15},height=3.0cm,xmin=0,xmax=64,ymin=0,ymax=4.2,title={Claude Code},title style={font=\small},xtick={0,20,40,64},xticklabels={Jul 29,Aug 18,Sep 7,Oct 1},ylabel={Bytes removed (\%)}]
+\addplot[teal,mark=*,mark size=.65pt,unbounded coords=jump] coordinates {(0,0.08) (1,3.29) (2,0.01) (3,0.03) (4,nan) (5,0.52) (6,0.03) (7,0.17) (8,0.03) (9,0.05) (10,0.14) (11,0.0) (12,0.05) (13,0.02) (14,0.02) (15,0.74) (16,0.15) (17,0.7) (18,1.68) (19,1.6) (20,1.09) (21,nan) (22,0.2) (23,0.71) (24,0.05) (25,1.75) (26,0.11) (27,0.56) (28,nan) (29,1.45) (30,1.04) (31,1.15) (32,0.24) (33,0.01) (34,0.02) (35,0.24) (36,0.24) (37,0.24) (38,0.15) (39,0.83) (40,0.06) (41,0.02) (42,0.03) (43,0.4) (44,0.1) (45,0.34) (46,0.38) (47,0.07) (48,0.2) (49,0.11) (50,0.14) (51,0.23) (52,0.22) (53,nan) (54,0.07) (55,0.09) (56,0.12) (57,0.24) (58,0.01) (59,0.25) (60,0.28) (61,0.25) (62,0.07) (63,1.19) (64,0.08)};\addplot[orange,dashed,forget plot] coordinates {(20,0) (20,4.2)};\addplot[orange,dashed,forget plot] coordinates {(31,0) (31,4.2)};\node[font=\tiny,anchor=south] at (axis cs:20,3.6) {exec allowlisting};\node[font=\tiny,anchor=west] at (axis cs:31,3.1) {file-read protection};
+\end{axis}\end{tikzpicture}\\[-1mm]\begin{tikzpicture}\begin{axis}[width=.96\linewidth,height=4.1cm,tick label style={font=\scriptsize},label style={font=\small},axis lines=left,grid=major,grid style={gray!15},height=3.0cm,xmin=0,xmax=64,ymin=0,ymax=31,title={Codex CLI},title style={font=\small},xtick={0,20,40,64},xticklabels={Jul 29,Aug 18,Sep 7,Oct 1},ylabel={Bytes removed (\%)}]
+\addplot[blue,mark=*,mark size=.65pt,unbounded coords=jump] coordinates {(0,0.63) (1,16.88) (2,16.84) (3,0.0) (4,0.0) (5,0.0) (6,0.0) (7,0.0) (8,0.0) (9,0.0) (10,0.0) (11,0.0) (12,0.0) (13,0.0) (14,0.0) (15,0.0) (16,0.0) (17,0.0) (18,0.0) (19,0.94) (20,19.06) (21,5.03) (22,21.33) (23,16.41) (24,15.12) (25,9.91) (26,17.74) (27,20.04) (28,15.61) (29,22.35) (30,28.21) (31,18.16) (32,6.0) (33,5.88) (34,8.59) (35,3.27) (36,4.73) (37,4.84) (38,0.11) (39,1.01) (40,0.21) (41,12.14) (42,0.01) (43,6.69) (44,0.08) (45,0.0) (46,10.79) (47,1.83) (48,3.1) (49,1.67) (50,9.65) (51,4.11) (52,0.01) (53,3.54) (54,4.58) (55,10.04) (56,5.77) (57,2.47) (58,2.78) (59,7.34) (60,2.98) (61,5.59) (62,4.56) (63,2.93) (64,1.82)};\addplot[orange,dashed,forget plot] coordinates {(20,0) (20,31)};\addplot[orange,dashed,forget plot] coordinates {(31,0) (31,31)};
+\end{axis}\end{tikzpicture}
+\end{minipage}\end{center}
+{\footnotesize Figure 4. Daily reported byte-reduction percentages from the later October 1 meter reread. Missing Claude days remain gaps; October 1 is partial. Dashed lines mark reported rollout dates, not randomized interventions. Axis scales differ by panel. [1, Appendix A.1]}
+
+
+The later daily ledger gives approximately 0.19\% for Claude and 3.39\% for Codex when rounded daily byte totals are summed before division. Those later totals are not combined with the earlier Figure 3 counts. Provider mix, harness behavior and workload changed over time; the rollout annotations alone do not identify causal savings.
+
+
+\clearpage
+{\Large\bfseries\color{navy} 5. What agents do after truncation}\[7pt]
+
+The corrected audit assigns the strongest related-call tier found in the next assistant turn. T0 requires both an explicit acknowledgment of incomplete output and a related call; T1 requires an exact command repeat; T2 requires stronger path/range evidence; T3 retains a looser relation. T1 is zero in the plotted groups. These are classifier outputs, not observed extra-turn causes. [1, section 7.2; 2]
+
+
+\begin{center}\begin{tikzpicture}\begin{axis}[width=.96\linewidth,height=4.1cm,tick label style={font=\scriptsize},label style={font=\small},axis lines=left,grid=major,grid style={gray!15},xbar stacked,xmin=0,xmax=100,ytick={1,2,3,4},yticklabels={Codex grep (106),Codex diffs (284),Codex all (448),Claude (35)},xlabel={Classified instances (\%)},legend style={font=\tiny,at={(.5,-.35)},anchor=north,legend columns=2}]
+\addplot+[xbar,fill=teal!85,draw=none] coordinates {(8.571429,4) (0.000000,3) (0.000000,2) (0.000000,1)};
+\addplot+[xbar,fill=blue!65,draw=none] coordinates {(45.714286,4) (32.589286,3) (42.957746,2) (13.207547,1)};
+\addplot+[xbar,fill=orange!65,draw=none] coordinates {(20.000000,4) (11.830357,3) (11.971831,2) (13.207547,1)};
+\addplot+[xbar,fill=gray!25,draw=none] coordinates {(25.714286,4) (55.580357,3) (45.070423,2) (73.584906,1)};
+\legend{T0 explicit,T2 strict,T3 loose,No relation}
+\end{axis}\end{tikzpicture}\end{center}
+{\footnotesize Figure 5. Next-turn related-call classification after truncation. Codex excludes 19 of 467 unresolved command wrappers. Diff/show/log and grep are subsets of the Codex classified group; they are not additional independent populations.}
+
+
+{\small\begin{longtable}{>{\raggedright\arraybackslash}p{0.298\linewidth}>{\raggedright\arraybackslash}p{0.298\linewidth}>{\raggedright\arraybackslash}p{0.308\linewidth}}	oprule
+\textbf{Population} & \textbf{Strict T0-T2} & \textbf{Including loose T3}\\\midrule
+
+Claude, all truncations & 19 / 35 = 54.29\% & 26 / 35 = 74.29\%\\[4pt]
+
+Codex, classified & 146 / 448 = 32.59\% & 199 / 448 = 44.42\%\\[4pt]
+
+Codex, diff/show/log & 122 / 284 = 42.96\% & 156 / 284 = 54.93\%\\[4pt]
+
+Codex, grep & 14 / 106 = 13.21\% & 28 / 106 = 26.42\%\\[4pt]
+
+\bottomrule\end{longtable}}
+
+Treating all 19 unresolved Codex cases as negative or positive bounds the full-sample strict fraction between 146/467 = \textbf{31.26\%} and 165/467 = \textbf{35.33\%}. This is a sensitivity bound for missing classifications only. It does not cover classifier error, missed later recovery, missing conversation branches, or causality.
+
+
+The audit also reports 318 thousand removed characters and 152 thousand follow-up-output characters for Claude; Codex reports 8,255 thousand and 1,860 thousand. These are decoded-character sums over marked result instances in retained timelines, before replay weighting. They are not guaranteed globally distinct content. The follow-up may contain different information, and may have occurred anyway. Subtracting these columns would not measure net savings.
+
+
+{\footnotesize\color{gray} No population confidence intervals are attached to these counts: result instances cluster within conversations, the workload comes from one developer, and the classifier itself is imperfect. Silence after truncation is not evidence that the omitted content was irrelevant.}
+
+
+\clearpage
+{\Large\bfseries\color{navy} 6. The economics of recovery}\[7pt]
+
+Let G be the gross avoided input cost under a fixed baseline continuation, q the probability that compression causally adds a recovery episode, C the expected incremental cost conditional on such an episode, and K other incremental costs, including cache changes. All costs use the same currency or a fixed base-price unit. Under this explicitly simplified model:
+
+
+\begin{equation}E[N]=G-qC-K,\qquad q^*=\frac{G-K}{C}\quad(C>0)\tag{4}\end{equation}
+
+Positive expected net savings require q < q*. A threshold below zero means recovery is not needed to erase the gross benefit; a threshold above one means the modeled gross benefit exceeds all possible recovery incidence at the assumed C. The formula is algebra, not an estimate of q or C. The audit's related-call frequency is not q.
+
+
+\begin{center}\begin{tikzpicture}\begin{axis}[width=.96\linewidth,height=4.1cm,tick label style={font=\scriptsize},label style={font=\small},axis lines=left,grid=major,grid style={gray!15},xmin=0,xmax=1,ymin=-1.1,ymax=1.1,xlabel={Causally additional recovery probability $q$},ylabel={Net / gross},legend style={font=\scriptsize,at={(.02,.02)},anchor=south west}]
+\addplot[teal,domain=0:1] {1-x};\addplot[blue,domain=0:1] {1-2*x};\addplot[orange,domain=0:1] {1-4*x};\addplot[gray,domain=0:1] {0};\legend{$C/G=1$,$C/G=2$,$C/G=4$}
+\end{axis}\end{tikzpicture}\end{center}
+{\footnotesize Figure 6. Hypothetical break-even sensitivity: normalized net = 1 - q(C/G), with K = 0. Lines vary the assumed recovery cost. No observed follow-up rate is plotted on these curves; the causal probability and incremental cost have not been measured.}
+
+
+\subsection*{A worked example, with assumptions exposed}
+
+Assume a removed block has 1,000 actual model tokens, appears 20 times, is first written at w = 1.25, and is read 19 times at alpha = 0.10. Gross avoided input cost is G = 1,000(1.25 + 19 x 0.10) = \textbf{3,150 base-price units}. If one causally additional recovery episode costs 10,000 of those units and K = 0, then q* = 0.315. At q = 0.10, expected net is +2,150; at q = 0.50 it is -1,850. These values are illustrative, not study measurements.
+
+
+For actual bills, use the response usage categories and the price schedule effective at each call. Write total task cost as the sum over requests of $p_{\mathrm{uncached}}$ U + $p_{\mathrm{write}}$ W + $p_{\mathrm{read}}$ R + $p_{\mathrm{output}}$ O, plus any other billed fees. Model versions, caching tiers, long-context rules and subscription accounting must be recorded. A byte/4 meter cannot supply those terms.
+
+
+\clearpage
+{\Large\bfseries\color{navy} 7. What correctness can mean}\[7pt]
+
+\subsection*{Proposition 2. Exact task preservation has a necessary and sufficient condition}
+
+Let x be a full tool observation, C(x) its compressed form, and g(x) the correct answer to a specified task. There exists a decoder h that recovers the answer from the compressed form exactly when g is constant on each set of inputs that C maps to the same output:
+
+
+\begin{equation}\exists h:\ h(C(x))=g(x)\ \forall x\quad\Longleftrightarrow\quad C(x)=C(y)\Rightarrow g(x)=g(y)\tag{5}\end{equation}
+
+\textbf{Proof.} Necessity: if C(x) = C(y), the decoder receives the same input, so h must return the same answer. Sufficiency: for each compressed output z, define h(z) to be the common g-value of any input mapped to z. Constancy makes this definition unambiguous.
+
+
+\textbf{Counterexample for unrestricted truncation.} Choose two long outputs with identical retained head and tail, equal omitted line counts, and different omitted middle facts. A question about those facts has different correct answers, yet the compressed strings and markers can be identical. Therefore arbitrary lossy truncation cannot preserve every possible task. Even when an answer is preserved, a particular LLM may fail to extract it. A task-outcome comparison remains necessary.
+
+
+\subsection*{Implementation evidence collected for this draft}
+
+\textbf{475 tests passed, 0 failed, 0 skipped} in a focused run of ten existing TokenSaver test classes on October 5, 2026, using .NET SDK 10.0.401. The selection covered cleanup, condensation, golden fixtures, command shaping, file-read budgets, line endings, and all three provider rewriters. The shared tree contained unrelated edits; no TokenSaver or Tests/TokenSaver edits were present before the run. The exact selection is in validation.json. [5]
+
+
+{\small\begin{longtable}{>{\raggedright\arraybackslash}p{0.277\linewidth}>{\raggedright\arraybackslash}p{0.659\linewidth}}	oprule
+\textbf{Property} & \textbf{Evidence and scope}\\\midrule
+
+Byte non-growth and untouched spans & Encoded-length gates in three rewriters; provider regression tests.\\[4pt]
+
+Determinism and idempotence & Fixed configuration; cleanup flag combinations, condenser combinations and pipeline composition fixtures.\\[4pt]
+
+Protocol preservation & Provider-specific parsing/rewriting fixtures and original-byte fallback.\\[4pt]
+
+Downstream task quality & Not established by these tests or by the historical trace audit.\\[4pt]
+
+\bottomrule\end{longtable}}
+
+{\footnotesize\color{gray} Idempotence of individual stages does not imply idempotence of their composition. The suite explicitly includes composition cases. Historical research also reports a 108-combination sweep and zero compression-attributed divergences in 64 investigated close-in-time cache misses; those are bounded samples, not universal guarantees. [1, sections 5.6 and 8.2]}
+
+
+\clearpage
+{\Large\bfseries\color{navy} 8. A bounded September request audit}\[7pt]
+
+The expanded archive search found a September 8 mining report and its saved aggregates outside the main dossier, in an ignored experiment directory. Its extraction fixed the lower date at September 4 and the upper source row at 61,143, ending at 17:33:05 UTC on September 8. It retained 8,286 HTTP-200 model requests and 10 unsuccessful requests; model-list and count-token endpoints were excluded. The table and figure below use successful requests only. [9]
+
+
+\begin{center}\begin{tikzpicture}\begin{axis}[width=.96\linewidth,height=4.1cm,tick label style={font=\scriptsize},label style={font=\small},axis lines=left,grid=major,grid style={gray!15},xmin=0,xmax=1.7,ytick={1,2,3},yticklabels={Grok CLI,Codex CLI,Claude Code},xlabel={Recorded body bytes removed (\%)},nodes near coords]
+\addplot+[xbar,fill=teal!75,draw=none] coordinates {(0.228962,3) (1.409633,2) (0.128809,1)};
+\end{axis}\end{tikzpicture}\end{center}
+{\footnotesize Figure 7. A separate bounded population: observed original-minus-forwarded UTF-8 request-body bytes. These exact saved aggregate counts produce the plotted rates. The interval overlaps Figure 3; do not pool the two populations or treat this as an independent controlled replication.}
+
+
+{\small\begin{longtable}{>{\raggedright\arraybackslash}p{0.266\linewidth}>{\raggedright\arraybackslash}p{0.245\linewidth}>{\raggedright\arraybackslash}p{0.234\linewidth}>{\raggedright\arraybackslash}p{0.128\linewidth}}	oprule
+\textbf{Agent / requests} & \textbf{Original bytes} & \textbf{Removed bytes} & \textbf{Rate}\\\midrule
+
+Claude Code / 6,209 & 1,698,925,099 & 3,889,891 & 0.229\%\\[4pt]
+
+Codex CLI / 1,843 & 1,532,592,995 & 21,603,929 & 1.410\%\\[4pt]
+
+Grok CLI / 234 & 195,745,155 & 252,138 & 0.129\%\\[4pt]
+
+\bottomrule\end{longtable}}
+
+\subsection*{Production-source replay on recorded outputs}
+
+The saved study replayed \textbf{8,177 distinct provider/tool/command/raw/after variants} through C\# pipeline source from commit 2d4ee182. Four configurations covered defaults, ordinary cleanup, cleanup plus ANSI removal, and defaults plus ANSI removal: \textbf{32,708 variant/configuration cases}. The saved flags show zero character-growth, canonical-JSON-byte-growth, nondeterminism or idempotence failures, and the completed run reports no exceptions. This is historical corpus evidence, not a replay performed for this revision. [9]
+
+
+Inputs were recorded \textbf{after-texts}, with command metadata; character growth uses UTF-16 code units. Some replayed tool types were outside the live allowlist. The helper exercises the pipeline, not the complete HTTP adapter; canonical JSON is not each producer's escaping. Including after-text in the key preserves 28 raw-output groups with multiple transformed versions, which the older corpus could overwrite. This does not establish task success.
+
+
+\clearpage
+{\Large\bfseries\color{navy} 9. File-read preservation and stage interactions}\[7pt]
+
+An earlier investigation discovered that shell-based file reads were being truncated despite dedicated file-read tools being out of scope. The ensuing mitigation widened the line budget for detected file reads. Offline replay of the production predicate over 261 previously elided outputs detected 205 for protection (78.54\%); those outputs accounted for 2,960,996 of 4,056,231 characters removed before the fix (73.00\%). [10]
+
+
+\begin{center}\begin{minipage}{.49\linewidth}\begin{tikzpicture}\begin{axis}[width=.96\linewidth,height=4.1cm,tick label style={font=\scriptsize},label style={font=\small},axis lines=left,grid=major,grid style={gray!15},ymin=0,ymax=250,xtick={1,2},xticklabels={Detected reads,Other},ylabel={Output instances},title={Historical 261-output sample},title style={font=\scriptsize},bar width=16pt]
+\addplot+[ybar,fill=teal!70] coordinates {(1,205) (2,56)};
+\end{axis}\end{tikzpicture}\end{minipage}\hfill\begin{minipage}{.49\linewidth}\begin{tikzpicture}\begin{axis}[width=.96\linewidth,height=4.1cm,tick label style={font=\scriptsize},label style={font=\small},axis lines=left,grid=major,grid style={gray!15},ymin=0,ymax=3.7,xtick={1,2},xticklabels={Detected reads,Other},ylabel={Million characters},title={Pre-fix removal},title style={font=\scriptsize},bar width=16pt]
+\addplot+[ybar,fill=teal!70] coordinates {(1,2.960996) (2,1.095235)};
+\end{axis}\end{tikzpicture}\end{minipage}\end{center}
+{\footnotesize Figure 8. Historical detector replay, captured traffic August 26-29. The left panel counts outputs; the right associates their historical removal with the detector decision. This is mitigation coverage, not newly saved tokens or a task-quality effect. The panels use different units.}
+
+
+The August 30 rerun reproduced 205/261 on the same sample. An expanded 288-output sample detected 217 (75.35\%), associated with 3,153,691 characters of historical removal; the reported size ceiling excluded none of these 217. These are different denominators, so the percentage change is not evidence of a detector regression. The source notes that no live soak had yet been completed. [10]
+
+
+\subsection*{Why an apparently safe stage needs a complete-pipeline check}
+
+The September 4 review found that an ANSI-removal Python mirror used outdated blank-line and file-read rules. After correction, its opportunity estimate was about 22.69 million replay-weighted characters: 9.63 million from ANSI plus ordinary cleanup and 13.06 million from newly enabled lossy condensation. Those are candidate replay estimates, not measured wire savings. A stage that removes control codes can enable downstream truncation; the entire resulting change cannot be credited to harmless formatting cleanup. [11]
+
+
+The bounded September 8 production replay found only 4,830 additional replay-weighted UTF-16 code units from Codex ANSI cleanup over ordinary cleanup, across six outputs. A dedicated Read cleanup candidate offered 28,391 weighted code units for Claude. These are candidate opportunities in a different window, not comparable realized savings. They support testing each proposed expansion against the actual pipeline. [9]
+
+
+\clearpage
+{\Large\bfseries\color{navy} 10. Actual token usage is available, with limits}\[7pt]
+
+The September 8 extraction preserved provider-reported usage for every successful Claude request. This supplies a firmer accounting basis than characters divided by four. The following values cover the 6,209 Claude requests in Figure 7, including main and side requests. The categories describe actual usage under the observed system; there is no matching uncompressed token counterfactual. [9]
+
+
+\begin{center}\begin{minipage}{.49\linewidth}\begin{tikzpicture}\begin{axis}[width=.96\linewidth,height=4.1cm,tick label style={font=\scriptsize},label style={font=\small},axis lines=left,grid=major,grid style={gray!15},ymin=0,ymax=640,xtick={1,2,3},xticklabels={Uncached,Writes,Reads},ylabel={Million tokens},title={Reported input},title style={font=\scriptsize},bar width=13pt]
+\addplot+[ybar,fill=teal!70] coordinates {(1,0.408496) (2,18.718783) (3,539.740748)};
+\end{axis}\end{tikzpicture}\end{minipage}\hfill\begin{minipage}{.49\linewidth}\begin{tikzpicture}\begin{axis}[width=.96\linewidth,height=4.1cm,tick label style={font=\scriptsize},label style={font=\small},axis lines=left,grid=major,grid style={gray!15},ymin=0,ymax=12,xtick={1,2},xticklabels={5-minute,1-hour},ylabel={Million tokens},title={Cache-write buckets},title style={font=\scriptsize},bar width=13pt]
+\addplot+[ybar,fill=teal!70] coordinates {(1,9.985648) (2,8.733135)};
+\end{axis}\end{tikzpicture}\end{minipage}\end{center}
+{\footnotesize Figure 9. Actual provider-reported usage in the bounded September audit. Left: disjoint input categories; right: the cache-write category split by duration. Panels use different scales. Output tokens are reported separately in the table and are not included in the input bars.}
+
+
+{\small\begin{longtable}{>{\raggedright\arraybackslash}p{0.628\linewidth}>{\raggedright\arraybackslash}p{0.308\linewidth}}	oprule
+\textbf{Reported category} & \textbf{Tokens}\\\midrule
+
+Uncached input & 408,496\\[4pt]
+
+5-minute cache writes & 9,985,648\\[4pt]
+
+1-hour cache writes & 8,733,135\\[4pt]
+
+Cache reads & 539,740,748\\[4pt]
+
+Total input & 558,868,027\\[4pt]
+
+Output & 3,694,448\\[4pt]
+
+\bottomrule\end{longtable}}
+
+Duration buckets matter when pricing writes. A historical classifier-request family in the same study reported 4,634,900 cache-write tokens, all in the one-hour bucket. A blanket first-write factor of 1.25 cannot describe that family under a schedule that charges one-hour writes at a different rate. The illustrative equations in this paper keep rates explicit; a realized bill comparison must also retain each model's price and effective date. [6, 9]
+
+
+The archive reports usage missing from 100 successful Codex responses and 9 successful Grok responses in this bounded sample. Usage composition for those consumers is therefore incomplete. Across all providers, exact observed usage alone still cannot attribute the difference caused by compression: the paired task experiment must supply that missing comparison.
+
+
+\clearpage
+{\Large\bfseries\color{navy} 11. Source reconciliation and uncertainty}\[7pt]
+
+Several source phrases require stricter definitions before use in a paper. The draft preserves the historical findings while correcting the following interpretations. These corrections are measurement clarifications; no product changes or raw-data re-extraction were performed.
+
+
+{\small\begin{longtable}{>{\raggedright\arraybackslash}p{0.277\linewidth}>{\raggedright\arraybackslash}p{0.659\linewidth}}	oprule
+\textbf{Source phrase or shortcut} & \textbf{Treatment in this paper}\\\midrule
+
+"Tokens saved" from BytesSaved / 4 & Estimated tokens only. Actual model token counts and billable usage are separate.\\[4pt]
+
+Audit KB / MB values & Thousands / millions of decoded characters where the scripts use Python len(text). Meter bytes remain UTF-8 bytes.\\[4pt]
+
+"Unique" tiered-audit removal & Marked result instances from one retained timeline per conversation; no global content-hash deduplication.\\[4pt]
+
+11.2 MB = 0.23\% of 6,154 MB & Not a valid equality: the script uses tool-result character delta for the size, but serialized-request character delta for the percentage. Omitted from the figures.\\[4pt]
+
+Single October 1 total & Initial meter and later daily reread are distinct snapshots.\\[4pt]
+
+"Refetch cost" & A related next-turn call is observed; causally additional work and recovered content are unknown.\\[4pt]
+
+"Lossless" cleanup & Normalization under restricted text assumptions; not byte reversibility or all-language semantic preservation.\\[4pt]
+
+\bottomrule\end{longtable}}
+
+\subsection*{Threats to validity}
+
+\textbf{Selection and dependence.} One developer and workstation supply the traffic. Provider, task, model and harness differences are entangled. Requests and results are correlated within tasks. The authors of the original analysis were themselves coding agents whose traffic entered the dataset. The observation period was not randomized.
+
+
+\textbf{Incomplete trajectories and capture.} Conversation hashing and maximum-tool-count selection can omit branches and post-compaction segments. Command summaries stop at 400 characters; follow-up detection examines only the next turn. A separate backup audit documents possible capture loss, body-size limits and no durable inventory of capture gaps. Recorded traffic is not guaranteed to include every request. [12]
+
+
+\textbf{Unknown counterfactuals.} The logs do not reveal the uncompressed task trajectory, recovered information, incremental recovery cost or eventual task quality. Historical cost models used a loose classifier and a subsequently corrected output-price factor. Their net estimates are not reproduced as results here.
+
+
+\textbf{Freshness.} Current source checks and passing tests do not remeasure July-October workloads under today's configuration. No evidence here supports universal, product-wide or future-model savings rates.
+
+
+\clearpage
+{\Large\bfseries\color{navy} 12. An experiment that can establish net savings}\[7pt]
+
+Compare complete tasks under a fixed harness, frozen repository, explicit acceptance criteria and prespecified analysis. The primary questions are whether compression reduces total task cost and preserves task success within an agreed noninferiority margin. Output replay alone cannot reveal changes in agent behavior.
+
+
+{\small\begin{longtable}{>{\raggedright\arraybackslash}p{0.245\linewidth}>{\raggedright\arraybackslash}p{0.691\linewidth}}	oprule
+\textbf{Design element} & \textbf{Prespecified requirement}\\\midrule
+
+Arms & A: proxy pass-through; B: cleanup/shape without lossy condensation; C: current full pipeline. Optionally add a diff-preserving arm as a separate contrast.\\[4pt]
+
+Pairing and allocation & Run the same tasks from identical repository snapshots; randomize arm order and repeat stochastic runs. Pin provider/model, CLI, settings, tools and context budget.\\[4pt]
+
+Cache control & Define cold or standardized warm starts; isolate cache namespaces where supported; counterbalance order and log actual cache usage.\\[4pt]
+
+Primary cost & All request and response usage through task completion or a fixed stop rule, including recovery, summaries, retries and review work included in scope.\\[4pt]
+
+Primary quality & Blinded assessment against task acceptance criteria plus relevant checks. Include incomplete runs and failures in the assigned arm.\\[4pt]
+
+Secondary outcomes & Wall time, tool calls, follow-up episodes, exact per-stage token/byte changes and preservation of critical evidence.\\[4pt]
+
+\bottomrule\end{longtable}}
+
+For a task set with costs $C_{k,A}$ and $C_{k,C}$, report the ratio of total costs, not the mean of task-level percentage reductions:
+
+
+\begin{equation}\widehat{S}_{\rm cost}=1-\frac{\sum_{k=1}^{n}C_{k,C}}{\sum_{k=1}^{n}C_{k,A}}\tag{6}\end{equation}
+
+Resample tasks with all paired arm runs together; stratify by provider and task family. Requests within tasks are dependent. A pilot must estimate task-level variance and disagreement rates before setting the final sample size.
+
+
+Let Q be task-success probability. Prespecify an acceptable margin delta and require the lower confidence bound for $Q_C$ - $Q_A$ to exceed -delta. Require both a positive lower bound on cost savings and this quality criterion before claiming reliable net savings without material quality loss. Report all assigned tasks; selecting successful runs alone can hide compression-induced failures.
+
+
+{\footnotesize\color{gray} This is a proposed protocol. No randomized outcome experiment, new database logging, or paid model benchmark was initiated for this draft.}
+
+
+\clearpage
+{\Large\bfseries\color{navy} 13. Interpretation and reproducibility}\[7pt]
+
+The evidence supports a precise claim: \textbf{TokenSaver reduced transmitted request-body bytes in the observed workload, with different rates by provider.} Accepted encoded replacements cannot enlarge the rewritten request under the splice contract, and the focused regression suite passes.
+
+
+Net token economics remain unresolved. Claude's gross reduction is small in this window, while related follow-ups are common among its truncated results. Codex removes more data but shows a substantial diff-related follow-up signal. These patterns motivate further comparisons; they do not establish a monetary gain or loss caused by compression.
+
+
+Public claims should retain dates, workload and denominators. Bytes/4 are estimated tokens, not billed usage; absent follow-ups do not prove correctness. The preservation theorem explains why quality evidence must be tied to specific tasks.
+
+
+\subsection*{Reproduction package}
+
+{\small\begin{longtable}{>{\raggedright\arraybackslash}p{0.362\linewidth}>{\raggedright\arraybackslash}p{0.574\linewidth}}	oprule
+\textbf{File} & \textbf{Purpose}\\\midrule
+
+tokensaver-research-draft.tex & Standalone editable paper source; inline vector figure definitions and equations.\\[4pt]
+
+output/pdf/tokensaver-research-draft.pdf & Typeset reading copy generated from the same manuscript blocks.\\[4pt]
+
+evidence.json / daily-series.csv & Published aggregates, daily rows, computed ratios and explicit units.\\[4pt]
+
+source-manifest.json & SHA-256 hashes of source files, repository revisions and source locations.\\[4pt]
+
+validation.json & Exact focused test command, result, environment and calculation assertions.\\[4pt]
+
+build\_paper.py / figures/ & Offline paper builder; publication figures in PDF, SVG and PNG.\\[4pt]
+
+\bottomrule\end{longtable}}
+
+The builder parses the dossier's daily table and September 8 aggregates, recomputes ratios and produces nine figures. research-discovery.txt records the expanded search. No application database was queried; raw captured text is excluded. LaTeX embeds its plot data, while the PDF uses the same manuscript blocks and measurements.
+
+
+{\footnotesize\color{gray} Rebuild: run Python on build\_paper.py; plotting dependencies are in .deps. Internal source paths are local provenance pointers. External publication needs a redacted, immutable aggregate archive and independently runnable benchmark.}
+
+
+\clearpage
+{\Large\bfseries\color{navy} References and provenance}\[7pt]
+
+\textbf{[1]} VibeRails research archive. Does lossy tool-output compression save tokens, or just move them? A measurement dossier from 65 days of proxied coding-agent traffic. October 1, 2026. token\_saver/research\_2026-10-01.md; sections 3-9 and Appendix A.
+
+
+\textbf{[2]} VibeRails research archive. Tiered follow-up analysis and extraction code. python-scripts/token\_saver/tiered\_rerun\_audit.py (counts and character sums), scan\_conversations.py (string lengths and retained timelines), timeline\_stats.py (composition and daily grouping). Saved corrected aggregate: results/vibe6-paper/tiered\_rerun\_2026-08-30\_20261001\_201359.md.
+
+
+\textbf{[3]} VibeRails source. TokenSaver/Minify/AnthropicMessagesRewriter.cs:188, 201, 229; CodexResponsesRewriter.cs:209; ChatCompletionsRewriter.cs:176. Encoded replacement gates, accepted traces and fallback copying. TokenSaver/Minify/OutputCondenser.cs:55, 82, 165, 263, 351. Budgets, line collapse and truncation.
+
+
+\textbf{[4]} VibeRails source. VibeRails.Data.Abstractions/DB/ITokenSavingsStore.cs:9-26. Per-request byte accounting and integer BytesSaved / 4 estimate. TokenSaver/Pipeline/CompressionCatalog.cs:201. Default scopes.
+
+
+\textbf{[5]} VibeRails tests. Tests/TokenSaver/OutputMinifierTests.cs:487; OutputCondenserTests.cs:319; PipelineGoldenFixtureTests.cs:107; ShapeFilterTests.cs:877; file-read, CRLF and provider-rewriter test classes. Focused run October 5, 2026: 475 passed, no failures or skips. Full filter in validation.json.
+
+
+\textbf{[6]} Anthropic. Prompt caching. Official developer documentation; accessed October 5, 2026. Used for exact-prefix requirements and distinct cache write/read prices, with model exceptions.
+
+
+{\footnotesize\color{gray} \url{https://platform.claude.com/docs/en/build-with-claude/prompt-caching}}
+
+
+\textbf{[7]} Anthropic. Token counting. Official developer documentation; accessed October 5, 2026. Counts depend on the selected model and may differ slightly from actual message usage.
+
+
+{\footnotesize\color{gray} \url{https://platform.claude.com/docs/en/build-with-claude/token-counting}}
+
+
+\textbf{[8]} VibeRails research archive. Token saver effectiveness review, October 1, 2026, with October 2 follow-up. token\_saver/review\_2026-10-01.md. Historical interpretation and implementation handoff; the more cautious consolidated dossier governs empirical claims in this draft.
+
+
+\clearpage
+{\Large\bfseries\color{navy} References and provenance (continued)}\[7pt]
+
+\textbf{[9]} VibeRails research archive. TokenSaver mining, September 8, 2026. python-scripts/token\_saver/results/codex-mine-0908/findings.md and summary.json; saved replay-output.jsonl numeric flags. Production-source diagnostic: python-scripts/token\_saver/replay\_pipeline/Program.cs. Bounded request counts, replay invariants, usage buckets and candidate comparisons.
+
+
+\textbf{[10]} VibeRails research archive. truncate-long was cutting holes in source files: findings and fix. token\_saver/truncation\_file\_reads.md, sections 4-6. August 29-30, 2026. Production-predicate replay and sample-specific protection coverage.
+
+
+\textbf{[11]} VibeRails research archive. V1 TokenSaver findings: review of Claude's Codex analysis. token\_saver/v1\_findings\_claude\_codex\_response.md, September 4, 2026, sections 2-7. Corrected cost assumptions and ANSI-mirror estimates. Candidate estimates are not treated as realized wire savings.
+
+
+\textbf{[12]} VibeRails research archive. Backup coverage audit, September 14, 2026. vibe-data/docs/backup-coverage-audit.md, proxy-database and capture-limit sections. Archival Brotli ratios concern storage and are excluded from TokenSaver efficacy claims.
+
+
+\subsection*{Source fingerprint}
+
+{\footnotesize\color{gray} Consolidated dossier SHA-256: 94c99e4fd879a801411bff602bf754df18c59db9032a21e76741e62acdf0d11d}
+
+
+The complete file-level source manifest accompanies the paper. Source line references identify the checked local revision and may move in later versions. Internal research sources are not peer-reviewed publications. Historical aggregates were reused and recalculated; the October 5 source inspection, mathematical derivations, plots and focused test run are new work for this draft.
+
+
+\end{document}

@@ -1,0 +1,127 @@
+TOKENSAVER RESEARCH DISCOVERY RECORD
+Paper revision 0.2; search performed October 5, 2026
+
+PURPOSE AND SCOPE
+Expanded the original dossier-based review at the user's request to find
+additional research in C:/source/vibe-books and elsewhere in its local archive.
+This record describes inspected evidence, not an exhaustive guarantee that no
+other research exists. Inspection covered aggregate fields, reports, source and
+saved numeric replay flags. No application database was opened, diagnostic
+extraction script executed or paid model experiment launched in this search.
+
+SEARCH COVERAGE
+1. TokenSaver topic documents, plans, mining runbook, diagnostic/extractor source
+   and ignored experiment results in C:/source/vibe-books.
+2. All 57 files were inventoried across 18 immediate result directories under
+   python-scripts/token_saver/results. Relevant aggregate fields and methodology
+   were inspected; private transcript bodies were not exhaustively read.
+   Families: claude-full; claude-smoke; claude-plan; claude-mine-0903;
+   claude-mcp-0929; codex-review-0903; codex-review-0903-after; codex-mine-0908;
+   codex-review; codex-rereview; codex-final-review; codex-review-vibe5;
+   codex-review-vibe6-20261002; codex-vibe6-review; codex-vibe6-rereview;
+   review-check; vibe5-review; vibe6-paper.
+3. Outside the main token_saver topic and diagnostic tree, 101 candidate text
+   documents (71 Markdown, 16 HTML, 14 text) were searched; 23 matching documents
+   were inspected. Hidden/ignored research paths were included while excluding
+   raw captures, databases, credentials, dependencies, builds and cloned source.
+   Related areas included vibe-data, custom_envs, prompt-eval and root results.
+4. Reachable Git history across all refs contained 80 commits. The September 7
+   move at dcc62ae2 relocated six old runbooks into token_saver with 88-98%
+   similarity. No additional missing deleted study was identified in that
+   bounded history search. A local VibeData backup history contained five commits
+   and seven documentation paths now represented in vibe-data.
+
+NEW EVIDENCE ADDED TO THE PAPER
+A. Bounded September 4-8 request audit and actual C# replay (paper section 8)
+   python-scripts/token_saver/results/codex-mine-0908/findings.md
+   python-scripts/token_saver/results/codex-mine-0908/summary.json
+   python-scripts/token_saver/results/codex-mine-0908/replay-output.jsonl
+   python-scripts/token_saver/replay_pipeline/Program.cs
+   Fixed upper row 61,143; last observed time 2026-09-08T17:33:05 UTC.
+   Successful model requests: Claude 6,209, Codex 1,843, Grok 234 (total 8,286).
+   Original/removed UTF-8 request-body bytes:
+     Claude 1,698,925,099 / 3,889,891 (0.2289618890%)
+     Codex  1,532,592,995 / 21,603,929 (1.4096325032%)
+     Grok     195,745,155 / 252,138 (0.1288093184%)
+   This population overlaps the longer October 1 meter window; do not pool it.
+   8,177 distinct provider/tool/command/raw/after variants, four configurations,
+   32,708 variant/configuration cases. Independently recounted saved flags show
+   no growth, nondeterminism or idempotence failures. The historical completed
+   run reports no exceptions. Pipeline source was pinned to 2d4ee1828f4fae8d513f
+   b577e2bf36f6300ef04b. This was not rerun against the current product revision.
+   Recorded after-texts were input; some tools were outside the live allowlist.
+   Character counts are UTF-16 units; JSON bytes use canonical reserialization.
+
+B. File-read mitigation and stage interactions (paper section 9)
+   token_saver/truncation_file_reads.md, sections 4-6
+   Historical detector replay: 205/261 previously elided outputs detected as
+   file reads, associated with 2,960,996/4,056,231 removed characters. Expanded
+   sample: 217/288 and 3,153,691 characters. These are mitigation coverage counts,
+   not new token savings or task-quality measurements. No live soak was reported.
+   token_saver/v1_findings_claude_codex_response.md, sections 2-7
+   Corrected ANSI Python mirror estimate: 22.6938M replay-weighted characters,
+   including 9.6308M ANSI/cleanup and 13.0629M newly enabled lossy condensation.
+   This corrected candidate simulation is still not measured production savings.
+   September 8 C# replay: Codex ANSI candidate 4,830 additional weighted UTF-16
+   units across six outputs; Claude Read-cleanup candidate 28,391 weighted units.
+
+C. Actual provider token usage (paper section 10)
+   Same September 8 summary.json, all 6,209 successful Claude requests:
+     input_tokens 408,496
+     cache_creation_input_tokens 18,718,783
+       ephemeral_5m_input_tokens 9,985,648
+       ephemeral_1h_input_tokens 8,733,135
+     cache_read_input_tokens 539,740,748
+     total input 558,868,027
+     output_tokens 3,694,448
+   Classifier family: 4,634,900 cache-write tokens, all one-hour bucket.
+   Usage missing in 100 successful Codex and 9 successful Grok responses.
+   Observed token usage has no matched uncompressed counterfactual.
+
+D. Capture completeness (paper section 11)
+   vibe-data/docs/backup-coverage-audit.md
+   Documents request/response capture limits, possible capture loss and absence of a
+   durable capture-gap inventory. Stored traffic cannot be assumed complete.
+   Its September 14 mixed snapshot (67,138 exchanges, roughly 25.883 GB original
+   versus 24.815 GB forwarded) includes 19,703 empty model-list GET rows and
+   64,233 rows without session IDs. The implied pooled 4.13% from rounded sizes
+   is not promoted to a primary efficacy result in this paper.
+
+ADDITIONAL RESEARCH RETAINED AS CONTEXT
+- results/claude-mine-0903/read_minify_only_20260903_193020.json:
+  historical candidate, 1,992 considered, 1,962 fires, 30,829 distinct characters.
+- results/claude-full/dedupe_runs_of_two_20260816_095330.json and
+  strip_download_progress_20260816_095330.json: negative/low-benefit candidates
+  over 20,271 outputs. These support candidate selection, not current efficacy.
+- Early October tiered reports were superseded by corrected vibe6-paper,
+  codex-vibe6-rereview and October 2 reports already used in revision 0.1.
+
+SUPERSEDED OR EXCLUDED CLAIMS
+- About 43M replay-weighted ANSI characters in codex-review-0903 and
+  codex-review-0903-after came from an outdated Python mirror. The September 4
+  correction governs interpretation. Even its 22.6938M replacement is a
+  hypothetical replay estimate, distinct from September 8 actual C# replay.
+- claude-plan/curated_stages_mirror_20260816_100026.json through ...100029.json
+  contain historical scope-expansion simulations with old mirror semantics.
+- rerun_economics reports use heuristic classification and cost assumptions.
+  No causal net-savings conclusion is drawn from them.
+- An old file-read character percentage mixed denominators; this revision uses
+  explicitly stated counts and denominators instead.
+- Brotli archival compression ratios of about 7.4-16.7x describe disk storage,
+  not TokenSaver request savings. Excluded from efficacy figures.
+- custom_envs/claude_context_budget.md records schema/context deferral work.
+  User scope is TokenSaver compression, so it is excluded from savings totals.
+- A 222-turn prose token calibration was referenced, but no standalone saved
+  calibration dataset was identified. It cannot calibrate all tool-output types.
+- prompt-eval and root results concern Board prompting and Quality UI checks.
+
+UNRESOLVED EVIDENCE GAP
+No saved matched model-token counterfactual or randomized complete-task quality
+comparison was found in this search. The paper supplies conditional proofs and
+measured transport reductions, then specifies an experiment for net task cost
+and quality. The search does not justify a claim of measured billed-token savings
+or universal preservation of useful information.
+
+All paths above are relative to C:/source/vibe-books unless absolute.
+Source hashes for evidence used in the paper are in source-manifest.json.
+Current-product checks in validation.json are separate from historical replays.
