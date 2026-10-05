@@ -374,50 +374,51 @@
         <div class="view project-health-page" data-view="agents" data-rules-workspace>
             <header class="project-health-header">
                 <div class="project-health-heading">
-                    <span class="project-health-eyebrow">Project health</span>
                     <h1>Rules and code quality</h1>
-                    <p>See what needs attention, then hand the full fix to an agent.</p>
                 </div>
+                <section class="project-health-guard" data-hook-health data-tone="neutral" aria-busy="true"
+                    aria-label="Git Guard setting">
+                    <span class="project-health-guard-icon" aria-hidden="true">
+                        <i class="fa-solid fa-code-commit"></i>
+                    </span>
+                    <span class="project-health-guard-copy">
+                        <strong>Git Guard</strong>
+                        <small data-hook-status-message>Checking repository hooks…</small>
+                        <span class="visually-hidden" data-hook-status-title>Checking Git Guard</span>
+                    </span>
+                    <span class="hook-health-badge" data-hook-status-badge data-tone="neutral"
+                        aria-live="polite">Checking</span>
+                    <button class="btn btn-sm btn-outline-danger project-health-guard-remove"
+                        type="button" data-action="uninstall-hooks" data-repair-only
+                        data-idle-label="Remove" title="Remove broken Git Guard hooks" hidden disabled>
+                        <span class="spinner-border spinner-border-sm" data-button-spinner hidden
+                            aria-hidden="true"></span>
+                        <i class="fa-solid fa-trash-can" data-button-icon aria-hidden="true"></i>
+                        <span data-button-label>Remove</span>
+                    </button>
+                    <button class="rules-git-toggle" type="button" role="switch" aria-checked="false"
+                        data-action="toggle-hooks" data-idle-label="Turn Git Guard on" disabled>
+                        <span class="spinner-border spinner-border-sm" data-button-spinner hidden
+                            aria-hidden="true"></span>
+                        <span class="rules-git-toggle-track" data-button-icon aria-hidden="true"><span></span></span>
+                        <span class="visually-hidden" data-button-label>Turn Git Guard on</span>
+                    </button>
+                </section>
             </header>
-
-            <section class="project-health-guard" data-hook-health data-tone="neutral" aria-busy="true"
-                aria-label="Git Guard setting">
-                <span class="project-health-guard-icon" aria-hidden="true">
-                    <i class="fa-solid fa-code-commit"></i>
-                </span>
-                <span class="project-health-guard-copy">
-                    <strong>Git Guard</strong>
-                    <small data-hook-status-message>Checking repository hooks…</small>
-                    <span class="visually-hidden" data-hook-status-title>Checking Git Guard</span>
-                </span>
-                <span class="hook-health-badge" data-hook-status-badge data-tone="neutral"
-                    aria-live="polite">Checking</span>
-                <button class="btn btn-sm btn-outline-danger project-health-guard-remove"
-                    type="button" data-action="uninstall-hooks" data-repair-only
-                    data-idle-label="Remove" title="Remove broken Git Guard hooks" hidden disabled>
-                    <span class="spinner-border spinner-border-sm" data-button-spinner hidden
-                        aria-hidden="true"></span>
-                    <i class="fa-solid fa-trash-can" data-button-icon aria-hidden="true"></i>
-                    <span data-button-label>Remove</span>
-                </button>
-                <button class="rules-git-toggle" type="button" role="switch" aria-checked="false"
-                    data-action="toggle-hooks" data-idle-label="Turn Git Guard on" disabled>
-                    <span class="spinner-border spinner-border-sm" data-button-spinner hidden
-                        aria-hidden="true"></span>
-                    <span class="rules-git-toggle-track" data-button-icon aria-hidden="true"><span></span></span>
-                    <span class="visually-hidden" data-button-label>Turn Git Guard on</span>
-                </button>
-            </section>
 
             <main class="project-health-stack">
                 <section class="card project-health-card project-health-rules vca-console-card"
                     data-health-card="rules" data-vca-console data-tone="neutral" aria-busy="false">
                     <header class="project-health-card-header">
-                        <div>
-                            <span class="project-health-card-kicker">Repository policy</span>
-                            <h2>Rules</h2>
-                        </div>
+                        <h2>Rules</h2>
                         <div class="project-health-card-actions">
+                            <button class="btn btn-sm btn-outline-secondary" type="button"
+                                data-action="run-hook-preview" data-idle-label="Check again" disabled>
+                                <span class="spinner-border spinner-border-sm" data-button-spinner hidden
+                                    aria-hidden="true"></span>
+                                <i class="fa-solid fa-rotate-right" data-button-icon aria-hidden="true"></i>
+                                <span data-button-label>Check again</span>
+                            </button>
                             <button class="btn btn-sm btn-outline-secondary" type="button"
                                 data-action="manage-rules">
                                 <i class="fa-solid fa-sliders" aria-hidden="true"></i>
@@ -438,6 +439,8 @@
                         </div>
                     </header>
 
+                    <!-- The verdict row carries the outcome; the console state badge below it is
+                         kept for the VCA console but never shown on this page. -->
                     <div class="project-health-rules-summary" data-rules-card-status data-tone="neutral">
                         <span class="project-health-status-icon" aria-hidden="true">
                             <i class="fa-solid fa-spinner fa-spin" data-rules-card-icon></i>
@@ -452,29 +455,23 @@
                             <span><strong data-rule-count>0</strong><small>rules</small></span>
                             <span><strong data-stop-rule-count>0</strong><small>STOP</small></span>
                         </div>
-                    </div>
-
-                    <div class="project-health-card-toolbar">
                         <button class="btn btn-sm btn-outline-secondary project-health-details-toggle" type="button"
                             data-action="toggle-health-details" data-health-target="rules"
                             aria-expanded="false" aria-controls="project-health-rules-details">
-                            <span>View rule results</span>
+                            <span>Details</span>
                             <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
                         </button>
-                        <div class="project-health-check-actions">
-                            <span class="rules-check-running" data-vca-console-spinner hidden aria-hidden="true">
-                                <span class="spinner-border spinner-border-sm"></span>
-                            </span>
-                            <span class="vca-console-state" data-vca-console-state>Ready</span>
-                            <button class="btn btn-sm btn-outline-secondary" type="button"
-                                data-action="run-hook-preview" data-idle-label="Check again" disabled>
-                                <span class="spinner-border spinner-border-sm" data-button-spinner hidden
-                                    aria-hidden="true"></span>
-                                <i class="fa-solid fa-rotate-right" data-button-icon aria-hidden="true"></i>
-                                <span data-button-label>Check again</span>
-                            </button>
-                        </div>
                     </div>
+
+                    <!-- One chip per rule file: RuleController.renderRuleInventorySummary fills it. -->
+                    <div class="project-health-rule-files" data-rule-files role="group" aria-label="Rule files"></div>
+
+                    <span class="visually-hidden">
+                        <span class="rules-check-running" data-vca-console-spinner hidden aria-hidden="true">
+                            <span class="spinner-border spinner-border-sm"></span>
+                        </span>
+                        <span class="vca-console-state" data-vca-console-state>Ready</span>
+                    </span>
 
                     <div class="project-health-details" id="project-health-rules-details"
                         data-health-details="rules" hidden>
@@ -530,11 +527,9 @@
                 <section class="card project-health-card project-health-quality vca-console-card"
                     data-code-analyzer-console data-tone="neutral" aria-busy="false">
                     <header class="project-health-card-header">
-                        <div>
-                            <span class="project-health-card-kicker">Maintainability</span>
-                            <h2>Code quality</h2>
-                        </div>
+                        <h2>Code quality</h2>
                         <div class="project-health-card-actions">
+                            <span class="project-health-scan-meta" data-code-analyzer-meta aria-live="polite"></span>
                             <details class="rules-action-menu">
                                 <summary class="btn btn-sm btn-outline-secondary" aria-label="More scan options" title="More scan options">
                                     <i class="fa-solid fa-ellipsis" aria-hidden="true"></i>
@@ -553,6 +548,12 @@
                                     </button>
                                     <button type="button" data-action="manage-analyzer-ignores">
                                         <i class="fa-solid fa-eye-slash" aria-hidden="true"></i>Manage scan exclusions
+                                    </button>
+                                    <button type="button" data-action="toggle-map-coverage">
+                                        <i class="fa-solid fa-map" aria-hidden="true"></i>Map coverage
+                                    </button>
+                                    <button type="button" data-action="toggle-code-analyzer-log">
+                                        <i class="fa-solid fa-terminal" aria-hidden="true"></i>Scan log
                                     </button>
                                     <button type="button" data-action="copy-code-analyzer-output">
                                         <i class="fa-regular fa-copy" aria-hidden="true"></i>Copy scan summary
@@ -583,7 +584,8 @@
 
                     <!-- Code Atlas + Quality Lab, mounted inline by RuleController.attachRulesOverview. -->
                     <div class="project-health-quality-report" data-code-analyzer-report></div>
-                    <details class="rules-console-transcript project-health-scan-transcript">
+                    <!-- The scan log opens from the menu; the header line carries the scan's size and age. -->
+                    <details class="rules-console-transcript project-health-scan-transcript" data-code-analyzer-log hidden>
                         <summary>
                             <span class="vca-console-pulse" aria-hidden="true"></span>
                             <span class="rules-console-transcript-label">Technical details</span>

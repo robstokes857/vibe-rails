@@ -424,6 +424,22 @@ export function buildProjectHealthFixPrompt(scope = 'all', {
     return lines.join('\n');
 }
 
+/** One line for the Code quality header: when the scan ran, how many files it analyzed, how long it took. */
+export function describeCodeAnalyzerScan(response, now = Date.now()) {
+    if (!response || response.success === false) return '';
+    const parts = [];
+    const started = Date.parse(response.startedUtc);
+    const age = Number.isFinite(started) ? Math.max(0, now - started) : NaN;
+    const minutes = Math.round(age / 60_000), hours = Math.round(age / 3_600_000);
+    parts.push(!Number.isFinite(age) ? 'Scanned' : age < 45_000 ? 'Scanned just now' : minutes < 60 ? `Scanned ${minutes} min ago`
+        : hours < 24 ? `Scanned ${hours} h ago` : `Scanned ${Math.round(hours / 24)} d ago`);
+    const files = Number(response.analyzedFileCount);
+    if (Number.isInteger(files) && files >= 0) parts.push(`${files} ${files === 1 ? 'file' : 'files'}`);
+    const duration = Number(response.durationMs);
+    if (Number.isFinite(duration) && duration >= 0) parts.push(duration < 1000 ? `${Math.round(duration)} ms` : `${(duration / 1000).toFixed(1)} s`);
+    return parts.join(' · ');
+}
+
 export class RuleController {
     constructor(app) {
         this.app = app;
@@ -489,15 +505,49 @@ export class RuleController {
 
         root.querySelectorAll('[data-action="toggle-health-details"]').forEach(button => {
             button.addEventListener('click', () => {
-                const target = button.dataset.healthTarget;
-                const details = root.querySelector(`[data-health-details="${target}"]`);
-                if (!details) return;
-                const expanded = details.hidden;
-                details.hidden = !expanded;
-                button.setAttribute('aria-expanded', String(expanded));
-                button.closest('[data-health-card]')?.classList.toggle('is-expanded', expanded);
+                const details = root.querySelector(`[data-health-details="${button.dataset.healthTarget}"]`);
+                if (details) this.setHealthDetailsExpanded(button.dataset.healthTarget, details.hidden);
             });
         });
+        // Rule files are chips: one opens the manager at that file, the last starts a new rule file.
+        root.querySelector('[data-rule-files]')?.addEventListener('click', event => {
+            const chip = event.target.closest('[data-rule-file]');
+            if (chip) { this.openRuleFile(chip.dataset.ruleFile); return; }
+            if (event.target.closest('[data-action="add-rule-file"]')) this.app.navigate('agent-create', {});
+        });
+        this.app.bindAction(root, '[data-action="toggle-code-analyzer-log"]', () => this.toggleCodeAnalyzerLog());
+        this.app.bindAction(root, '[data-action="toggle-map-coverage"]', () => this.codeReportViewer?.toggleDiagnostics());
+    }
+
+    setHealthDetailsExpanded(target, expanded) {
+        const details = this.query(`[data-health-details="${target}"]`);
+        if (!details) return;
+        details.hidden = !expanded;
+        this.query(`[data-action="toggle-health-details"][data-health-target="${target}"]`)?.setAttribute('aria-expanded', String(expanded));
+        this.query(`[data-health-card="${target}"]`)?.classList?.toggle('is-expanded', expanded);
+    }
+
+    // The manager opens on the chosen rule file; the tree and the inline editor follow the selection.
+    openRuleFile(path) {
+        const agents = this.app.agentController;
+        if (!agents?.openRuleManager) return;
+        if (path) agents.selectedAgentPath = path;
+        agents.openRuleManager();
+        const root = document.getElementById('modal-container')?.querySelector('[data-rule-manager-modal]');
+        if (!root) return;
+        agents.updateAgentFileSelection?.(root.querySelector('[data-agent-file-tree]'));
+        agents.renderInlineRuleEditor?.(root);
+    }
+
+    toggleCodeAnalyzerLog() {
+        const log = this.query('[data-code-analyzer-log]');
+        if (!log) return;
+        const show = log.hidden;
+        log.hidden = !show;
+        if (show) {
+            log.open = true;
+            log.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+        }
     }
 
     renderRuleInventorySummary() {
@@ -507,6 +557,27 @@ export class RuleController {
         this.setText('[data-rule-file-count]', agents.length);
         this.setText('[data-rule-count]', rules.length);
         this.setText('[data-stop-rule-count]', stopCount);
+        this.renderRuleFileChips(agents);
+    }
+
+    // One chip per rule file: its repository-relative path, its rule count and its strictest level.
+    renderRuleFileChips(agents) {
+        const host = this.query('[data-rule-files]');
+        if (!host || typeof host.innerHTML !== 'string') return;
+        const esc = value => this.app.escapeHtml ? this.app.escapeHtml(String(value ?? '')) : String(value ?? '');
+        const chips = agents.map((agent, index) => {
+            const fileRules = Array.isArray(agent?.rules) ? agent.rules : [];
+            const levels = new Set(fileRules.map(rule => String(rule?.enforcement || '').toUpperCase()));
+            const strictest = ['STOP', 'COMMIT', 'WARN'].find(level => levels.has(level)) || '';
+            const path = String(agent?.path || '');
+            const label = this.app.getAgentFileViewModel?.(agent, index)?.relativePath
+                || path.replace(/\\/g, '/').split('/').pop() || 'vc.rules.md';
+            return `<button type="button" class="project-health-rule-file" data-rule-file="${esc(path)}" title="${esc(path || label)}">`
+                + `<b>${esc(label)}</b><small>${fileRules.length} ${fileRules.length === 1 ? 'rule' : 'rules'}</small>`
+                + (strictest ? `<em data-level="${strictest}">${strictest}</em>` : '') + '</button>';
+        });
+        chips.push('<button type="button" class="project-health-rule-file project-health-rule-file-add" data-action="add-rule-file">+ New rule file</button>');
+        host.innerHTML = chips.join('');
     }
 
     setRulesCardStatus({ tone = 'neutral', icon = 'fa-circle-info', title = '', message = '' } = {}) {
@@ -643,6 +714,8 @@ export class RuleController {
 
     unload() {
         this.hookStatusRequestId += 1;
+        clearInterval(this.scanMetaTimer);
+        this.scanMetaTimer = null;
         this.disposeHealthFixPickers?.();
         this.disposeHealthFixPickers = null;
         this.preflightRunner?.cancel();
@@ -1056,11 +1129,27 @@ export class RuleController {
     }
 
     renderCodeAnalyzerLoading() {
+        this.renderCodeAnalyzerMeta(null);
         this.codeReportViewer?.setLoading();
+    }
+
+    // "Scanned 3 min ago · 10 files · 4.2 s" beside the scan controls; the age refreshes while mounted.
+    renderCodeAnalyzerMeta(response) {
+        clearInterval(this.scanMetaTimer);
+        this.scanMetaTimer = null;
+        const host = this.query('[data-code-analyzer-meta]');
+        if (!host) return;
+        host.textContent = describeCodeAnalyzerScan(response);
+        if (!host.textContent) return;
+        this.scanMetaTimer = setInterval(() => {
+            if (host.isConnected) host.textContent = describeCodeAnalyzerScan(response);
+            else this.renderCodeAnalyzerMeta(null);
+        }, 60_000);
     }
 
     renderCodeAnalyzerSummary(response) {
         this.setHealthFixButtonsDisabled(!this.hookStatus?.inGitRepo);
+        this.renderCodeAnalyzerMeta(response);
         if (!response || response.success === false) {
             this.codeReportViewer?.setError(this.codeAnalyzerCache?.error || response?.output
                 || 'Code quality could not be scored. Open Technical details, then scan again.');
@@ -1528,6 +1617,8 @@ export class RuleController {
             title: model.title,
             message: model.message
         });
+        // Findings open on their own; a clean pass keeps the card to its verdict row.
+        this.setHealthDetailsExpanded('rules', model.tone === 'danger' || model.tone === 'warning');
 
         const verdict = this.query('[data-vca-explanation-verdict]');
         if (verdict) verdict.dataset.tone = model.tone;

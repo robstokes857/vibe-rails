@@ -441,7 +441,10 @@ root-only `POST /api/v1/code-analyzer/graph` supplies bounded working-tree struc
 lexical source references through `RepositoryCodeGraph`. Python package imports, Rust module
 trees, JS/TS imports/re-exports and namespace-scoped C#/PHP mentions provide link evidence;
 TypeScript interfaces and aliases appear in outlines. Coverage diagnostics distinguish source
-filters from bounded omissions. Dependency folders (node_modules, vendor, assets) and C# build
+filters from bounded omissions; they and the scan log open from the card's menu, while the
+header line carries the scan's count, duration and age. The page's status colors and the map
+palette are host tokens (`--quality-*`, `--node-*`, `--graph-*`) declared on `:root` and mapped
+from the editor theme by the VS Code theme bridge. Dependency folders (node_modules, vendor, assets) and C# build
 output stay excluded, including report priorities. The Code graph view draws the whole snapshot
 on two canvases with no DOM per entity: a 4,500-link ambient budget (tree links first, hashed
 sample of references), hover and selection lighting every link of an entity, bounded signals, and

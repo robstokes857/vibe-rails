@@ -206,6 +206,8 @@ async function openDetails(page) {
     const report = page.locator('.code-report');
     await expect(report).toBeVisible();
     await expect(report.locator('.qr')).toHaveAttribute('data-state', 'complete', { timeout: 25_000 });
+    // Git changes is the default list; these tests inspect the report list.
+    await report.locator('.qr-list-switch [data-list="report"]').click();
     return report;
 }
 
@@ -405,6 +407,9 @@ test('repository sized graphs light the hovered entity above a veil and rotate u
     expect(stats.links).toBe(graph.edges.length);
     await expect(map.locator('#view-summary')).toBeHidden();
     await report.locator('iframe').screenshot({ path: testInfo.outputPath('large-field.png') });
+    // Highlighting changes is on by default and dims instead of veiling; the veil belongs to a plain hover.
+    await map.locator('#highlight-changes').click();
+    await expect(map.locator('#highlight-changes')).toHaveAttribute('aria-pressed', 'false');
     // Hovering a module shows its tooltip, veils the field and lights every one of its links.
     const target = await stagePoint(page, 'dir-0');
     await page.mouse.move(target.x - 30, target.y - 30);
@@ -504,7 +509,7 @@ test('a fully connected field draws within its link budget and lights every link
     const stats = await map.locator('body').evaluate(() => CodeAtlas.fieldStats());
     expect(stats.linkTotal).toBe(4950);
     expect(stats.links).toBe(4500);
-    await expect(map.locator('#view-summary')).toContainText('Drawing 4,500 of 4,950 links');
+    await expect(map.locator('#view-summary')).toBeHidden(); // The budget is not a notice; hover or select to see every link.
     // Atlas treats both TypeScript kinds as types instead of its generic function fallback.
     await expect(map.locator('#count-class')).toHaveText('100');
     // Selecting an entity lights all 99 of its links, including ones outside the ambient sample.
@@ -548,6 +553,7 @@ test('a dense field hides its declarations zoomed out and reveals them on hover,
     await expect.poll(async () => (await stats()).hidden).toEqual({ class: 450, function: 900 });
     expect((await stats()).shown).toBe(graph.nodes.length - 1350);
     expect((await stats()).nodes).toBe(graph.nodes.length);
+    expect((await stats()).fileDetail).toBe(.35); // Files are dust at the overview, never hidden.
     await expect(map.locator('#detail-notice')).toHaveText('Zoom in to show 900 functions and 450 classes and types');
     await expect(map.locator('#view-summary')).toBeHidden();
     await expect(map.locator('#count-function').locator('..')).toHaveClass(/zoomed-out/);
@@ -581,8 +587,10 @@ test('a dense field hides its declarations zoomed out and reveals them on hover,
     await map.locator('#entity-filter').selectOption('all');
     await expect(map.locator('#stage')).toHaveAttribute('data-motion', 'idle', { timeout: 15_000 });
     // Zooming in brings the declarations back and the notice goes with them.
-    for (let step = 0; step < 8; step++) await map.locator('#zoom-in').click();
-    await expect.poll(async () => (await stats()).zoom).toBeGreaterThanOrEqual(.9);
+    // Files brighten first (dust until 45%, full at 80%), then classes (70% to 100%), then functions (90% to 130%).
+    for (let step = 0; step < 14 && (await stats()).zoom < 1.3; step++) await map.locator('#zoom-in').click();
+    await expect.poll(async () => (await stats()).zoom).toBeGreaterThanOrEqual(1.3);
+    await expect.poll(async () => (await stats()).fileDetail).toBe(1);
     await expect.poll(async () => (await stats()).hidden).toEqual({ class: 0, function: 0 });
     expect((await stats()).shown).toBe(graph.nodes.length);
     await expect(map.locator('#detail-notice')).toBeHidden();
@@ -592,13 +600,19 @@ test('a dense field hides its declarations zoomed out and reveals them on hover,
 
 test('the sidebar lists Git changes beside report files and opens the shared diff viewer', async ({ page }) => {
     const { diffRequests } = await installQualityApi(page);
-    const report = await openDetails(page);
+    await openQuality(page);
+    const report = page.locator('.code-report');
+    await expect(report.locator('.qr')).toHaveAttribute('data-state', 'complete', { timeout: 25_000 });
     const map = page.frameLocator('.code-report iframe');
     await expect(map.locator('body')).toHaveAttribute('data-startup', 'ready');
+    // What changed comes first: the Git changes list is the default and the map lights the changed files.
+    await expect(report.locator('[data-changes-list]')).toBeVisible();
+    await expect(report.locator('.qr-files')).toBeHidden();
+    await expect(map.locator('#highlight-changes')).toHaveAttribute('aria-pressed', 'true');
     const switcher = report.locator('.qr-list-switch');
     await expect(switcher.getByRole('button', { name: /Report files/ })).toContainText('2');
     await expect(switcher.getByRole('button', { name: /Git changes/ })).toContainText('3');
-    await expect(report.locator('[data-graph-note]')).toContainText('3 changed files in Git, 1 on the map');
+    await expect(map.locator('#change-summary')).toContainText('1 of 3 changed files on the map');
     await switcher.getByRole('button', { name: /Git changes/ }).click();
     const list = report.locator('[data-changes-list]');
     await expect(list).toBeVisible();
@@ -631,9 +645,10 @@ test('the sidebar lists Git changes beside report files and opens the shared dif
     await expect(modal.locator('[data-vb-diff-language]')).toHaveText('csharp');
     await page.keyboard.press('Escape');
     await expect(modal).toHaveCount(0);
-    // Highlight changes on the map uses the git list, not only the scanned sources.
+    // Highlight changes on the map uses the git list, not only the scanned sources; it is on by default.
     await map.locator('#highlight-changes').click();
-    await expect(map.locator('#change-summary')).toContainText('1/3 files matched');
+    await expect(map.locator('#highlight-changes')).toHaveAttribute('aria-pressed', 'false');
+    await expect(map.locator('#change-summary')).toContainText('1 of 3 changed files on the map · highlighting off');
 });
 
 test('change rows gain their map-locate action when the graph arrives after the change list', async ({ page }) => {
@@ -655,7 +670,7 @@ test('change rows gain their map-locate action when the graph arrives after the 
     await expect(map.locator('body')).toHaveAttribute('data-startup', 'ready');
     await expect(list.locator('.change-locate')).toHaveCount(1);
     await expect(list).toBeVisible();
-    await expect(report.locator('[data-graph-note]')).toContainText('3 changed files in Git, 1 on the map');
+    await expect(map.locator('#change-summary')).toContainText('1 of 3 changed files on the map');
     await list.locator('.change-locate').click();
     await expect(map.locator('#inspector h2')).toHaveText('PaymentProcessor.cs');
 });
@@ -689,10 +704,15 @@ test('map coverage explains permanent dependency exclusions and the drawing budg
         return route.fulfill({ json: graph });
     });
     const report = await openDetails(page);
-    await expect(report.locator('[data-graph-note]')).toContainText('2 source files mapped');
-    await expect(report.locator('[data-graph-note]')).toContainText('Partial map');
-    await report.getByText('Map coverage and filters', { exact: true }).click();
+    // Coverage stays out of the way until the card menu asks for it.
+    await expect(report.locator('[data-graph-options]')).toBeHidden();
+    const quality = page.locator('.project-health-quality');
+    await quality.getByLabel('More scan options', { exact: true }).click();
+    await quality.getByRole('button', { name: 'Map coverage', exact: true }).click();
     const coverage = report.locator('[data-map-diagnostics-body]');
+    await expect(coverage).toBeVisible();
+    await expect(coverage).toContainText('Partial map');
+    await expect(coverage).toContainText('2 source files mapped');
     await expect(coverage).toContainText('8 supported source files');
     await expect(coverage).toContainText('3 vendor/node_modules/assets files');
     await expect(coverage).toContainText('2 C# bin/obj files excluded');
@@ -916,7 +936,11 @@ test('an empty code scan completes its transcript and cannot launch a repair age
     const fix = quality.locator('[data-action="launch-health-fix"]');
     await expect(fix).toBeDisabled();
     await expect(fix).toHaveAttribute('title', /No changed source files to fix/);
-    await quality.getByText('Technical details', { exact: true }).click();
+    // The scan log opens from the card menu; the transcript itself is unchanged.
+    await expect(quality.locator('[data-code-analyzer-log]')).toBeHidden();
+    await quality.getByLabel('More scan options', { exact: true }).click();
+    await quality.getByRole('button', { name: 'Scan log', exact: true }).click();
+    await expect(quality.locator('[data-code-analyzer-log]')).toBeVisible();
     await expect(quality.locator('[data-vca-console-meta]')).toHaveText('Scan complete · No changed source files');
     await expect(quality.locator('[data-vca-console-output]')).toContainText('No changed source files to analyze');
     await expect(quality).toHaveAttribute('aria-busy', 'false');

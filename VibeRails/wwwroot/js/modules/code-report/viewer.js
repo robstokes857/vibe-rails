@@ -31,14 +31,14 @@ export class CodeReportViewer {
         this.window = this.document.defaultView;
         this.generation = 0;
         this.destroyed = false;
+        this.activeList = 'changes'; // What changed comes first; the report list is one click away.
         const titleId = `code-report-details-${++instanceId}`;
-        host.innerHTML = `<div class="code-report">
+        host.innerHTML = `<div class="code-report code-report-compact">
             <main aria-label="Interactive code report">
                 <div class="code-layout">
                     <section class="graph-panel" aria-label="Interactive code explorer">
                         <div data-code-map><p class="load-error" role="status">Preparing repository map…</p></div>
-                        <div class="graph-note" data-graph-note>Hover a domain to trace its connections. Select a report file to explore it in the map.</div>
-                        <div class="graph-options">
+                        <div class="graph-options" data-graph-options hidden>
                             <details data-map-diagnostics hidden><summary>Map coverage and filters</summary><div data-map-diagnostics-body></div></details>
                         </div>
                     </section>
@@ -103,7 +103,7 @@ export class CodeReportViewer {
         this.disposeGraph();
         this.changes = undefined;
         this.root.querySelector('[data-map-diagnostics]').hidden = true;
-        this.root.querySelector('[data-graph-note]').textContent = 'Preparing repository map…';
+        this.root.querySelector('[data-graph-options]').hidden = true;
         this.quality.setLoading();
         this.mapHost.innerHTML = '<p class="load-error" role="status">Preparing repository map…</p>';
     }
@@ -144,7 +144,6 @@ export class CodeReportViewer {
 
     async loadGraph(files, generation) {
         this.root.querySelector('[data-map-diagnostics]').hidden = true;
-        this.root.querySelector('[data-graph-note]').textContent = 'Preparing repository map…';
         const request = this.request = new AbortController();
         const cacheKey = JSON.stringify([this.response?.startedUtc ?? null, files.slice(0, 1000)]);
         try {
@@ -158,7 +157,7 @@ export class CodeReportViewer {
             this.mapHost.replaceChildren();
             const atlas = this.atlas = mountCodeAtlas(this.mapHost, {
                 graph, theme: readReportTheme(this.root), cspNonce: this.window.__viberails_NONCE__,
-                changedFiles: this.changedPaths() ?? files, highlightChanges: false,
+                changedFiles: this.changedPaths() ?? files, highlightChanges: true,
                 onOpenDetails: details => { if (this.isCurrent(generation)) this.showEntity(details); },
                 onError: error => { if (this.isCurrent(generation)) this.notify(error.message); }
             });
@@ -168,12 +167,12 @@ export class CodeReportViewer {
             this.syncChangedFiles();
             // The change rows' locate buttons depend on the graph; the list often answers first on a large repository.
             this.composeChanges();
-            this.updateGraphNote();
             const diagnostics = graph.diagnostics;
             if (diagnostics) {
                 const omissions = diagnostics.omissions || [];
                 const body = this.root.querySelector('[data-map-diagnostics-body]');
-                body.innerHTML = `<p>${esc(diagnostics.supportedFiles)} supported source files in the Git catalog.
+                body.innerHTML = `${graph.truncated ? '<p>Partial map: eligible files were left out of this snapshot; the counts below say which.</p>' : ''}
+                    <p>${esc(graph.fileCount)} source files mapped. ${esc(diagnostics.supportedFiles)} supported source files in the Git catalog.
                     ${esc(diagnostics.excludedDependencyFiles)} vendor/node_modules/assets files and
                     ${esc(diagnostics.excludedBuildOutputFiles)} C# bin/obj files excluded, including report paths.</p>
                     <p>Non-C# bin/obj sources remain eligible. The map draws every entity of this snapshot and a bounded sample of
@@ -234,7 +233,6 @@ export class CodeReportViewer {
         }
         this.composeChanges();
         this.syncChangedFiles();
-        this.updateGraphNote();
     }
 
     syncChangedFiles() {
@@ -247,19 +245,20 @@ export class CodeReportViewer {
         return new Set((this.graph?.nodes || []).filter(node => node.kind === 'file').map(node => reportPath(node.path)));
     }
 
-    updateGraphNote() {
-        const graph = this.graph;
-        if (!graph) return;
-        const note = this.root.querySelector('[data-graph-note]');
-        const parts = [`${graph.fileCount} source files mapped${graph.truncated ? ' · Partial map — see Map coverage and filters' : ''}`];
-        const changes = this.changes;
-        if (changes && !changes.error) {
-            const mapped = this.mappedFiles();
-            const onMap = changes.files.filter(file => mapped.has(file.path)).length;
-            parts.push(`${changes.count} changed ${changes.count === 1 ? 'file' : 'files'} in Git, ${onMap} on the map`);
+    // Map coverage opens from the card's menu and stays out of the way until asked for.
+    toggleDiagnostics() {
+        const options = this.root.querySelector('[data-graph-options]');
+        const details = this.root.querySelector('[data-map-diagnostics]');
+        if (!options || !details || this.destroyed) return false;
+        const show = options.hidden;
+        options.hidden = !show;
+        if (show) {
+            const body = details.querySelector('[data-map-diagnostics-body]');
+            if (!body.innerHTML.trim()) body.innerHTML = '<p>Coverage details arrive with the repository map.</p>';
+            details.hidden = false;
+            details.open = true;
         }
-        note.textContent = `${parts.join(' · ')}. Hover a node to trace its connections; Highlight changes lights up the changed files.`;
-        note.title = graph.description || '';
+        return show;
     }
 
     // Report files and Git changes share the sidebar list area behind one switch; both counts stay visible.

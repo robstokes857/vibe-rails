@@ -19,7 +19,7 @@
 .code-report .icon-button{display:inline-flex;align-items:center;justify-content:center;background:transparent;border:1px solid transparent;border-radius:5px;width:34px;height:34px}
 .code-report .icon-button:hover{background:var(--color-bg-surface-hover);border-color:var(--color-border)}
 .code-report main{padding:var(--code-report-padding,0);max-width:var(--code-report-max-width,none);margin:0 auto}
-.code-report .code-layout{display:grid;grid-template-columns:minmax(0,1fr) clamp(300px,22vw,360px);gap:20px;height:var(--code-report-height,clamp(560px,calc(100dvh - 200px),700px));align-items:stretch}
+.code-report .code-layout{display:grid;grid-template-columns:minmax(0,1fr) clamp(300px,22vw,360px);gap:20px;height:var(--code-report-height,clamp(600px,calc(100dvh - 180px),880px));align-items:stretch}
 .code-report .graph-panel{display:flex;flex-direction:column;min-width:0;min-height:0;border:1px solid var(--color-border);background:var(--surface-soft);border-radius:10px;overflow:hidden}
 .code-report [data-code-map]{flex:1;min-width:0;min-height:0}
 .code-report [data-code-map] iframe{display:block}
@@ -220,3 +220,14 @@ html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body:i
 .code-report .change-stat ins{text-decoration:none;color:var(--color-success)}
 .code-report .change-stat del{text-decoration:none;color:var(--color-danger)}
 .code-report .change-locate{border:0;border-left:1px solid var(--color-border);background:transparent;color:var(--color-text-muted);font-size:15px;width:36px;cursor:pointer}
+
+/* Compact chrome: the sidebar is the grade, the radar and the file list. The scan's counts and age
+   sit in the card header, the metric averages in a file's details, coverage behind the card menu. */
+.code-report.code-report-compact .qr-top,.code-report.code-report-compact .qr-kicker,.code-report.code-report-compact .qr-legend,
+.code-report.code-report-compact .qr-signals,.code-report.code-report-compact .qr-stats,.code-report.code-report-compact .qr-metrics-section,
+.code-report.code-report-compact .qr-meta{display:none}
+.code-report.code-report-compact .qr-hero{padding-top:18px}
+.code-report.code-report-compact .qr-files-section{margin-top:10px}
+.code-report .graph-options[hidden]{display:none}
+/* The grade, score track and rating read the page's tones, never the global success green. */
+.code-report .qr{--qr-good:var(--quality-pass,#b48cf7);--qr-warn:var(--quality-warn,#f5b74a);--qr-bad:var(--quality-stop,#ff7a70)}

@@ -15,6 +15,11 @@ or theme preference.
   File selection focuses Atlas and its inspector; **Open details** replaces the sidebar with an
   inline panel of saved measurements and captured excerpts (never a modal or window).
   **Show in code explorer** and Escape return to the map. Copy context is absent.
+- The chrome is compact: the sidebar is the grade, the radar and the file list, with **Git
+  changes** as the default list and the changed files lit on the map on load. The scan's count,
+  duration and age sit in the card header; the metric averages live in a file's details; map
+  coverage (`toggleDiagnostics()`) and the scan log open from the card's menu. The verdict, the
+  grade, the radar and the map read the host's `--quality-*`, `--node-*` and `--graph-*` tokens.
 - `radar-interactions.js` adds category explanations, hover sectors, roving category keys,
   detail activation and Escape dismissal. Capture-phase Escape handling precedes the app's
   document-level Back shortcut. Interactions wait for the quality reveal to finish.
@@ -81,7 +86,7 @@ resolves against the current module first, as Rust 2018 does. A local JS/TS impo
 (`./user.service`, `./app.module`) is a module stem and still probes the source extensions and
 `index` files. When the graph exceeds the
 byte limit, references and declarations give way before file nodes; exceptionally long paths can
-also reduce the file set. Truncation is disclosed in the map note. Search covers the supplied
+also reduce the file set. Truncation is disclosed in Map coverage. Search covers the supplied
 snapshot, not omitted repository files. **Map coverage and filters** explains file/node limits,
 per-file declaration caps, oversized or binary sources, total read budget, unreadable paths,
 depth limits, shortened evidence, edge limits and serialized trimming with separate counts.
@@ -135,7 +140,7 @@ on two canvases inside `#stage`, with no DOM element per entity:
 - Ambient links are budgeted: `CodeAtlasLayout.ambientLinks` keeps every tree link first and a
   hash-sampled set of references up to `AMBIENT_LINK_LIMIT` (4,500). Hovering or selecting an
   entity lights every link of that entity from the complete set, so the budget hides nothing
-  from inspection; the view summary discloses "Drawing N of M links".
+  from inspection; the budget is not announced, `fieldStats()` reports it.
 - The stage hit-tests projected points: hovering within a few pixels shows the tooltip and lights
   the neighbourhood (a dense field dims through one veil), a press right on a point in Pan mode
   drags it, a press near one selects it on release unless the pointer moves, and Rotate always
@@ -147,11 +152,16 @@ on two canvases inside `#stage`, with no DOM element per entity:
   whose ambient sway costs more than 18 ms for twelve frames holds still
   (`#stage[data-field="still"]`), keeping only the signals. The layout cache is keyed by scope,
   filter and reveal. Reduced motion stops all of it; the Cards view keeps its SVG curves.
-- Semantic zoom (VIBE-48): a dense field (more than `DENSE_VIEW_NODES` entities) draws only
-  its structure while zoomed out. `CodeAtlasLayout.detail` fades classes and types in between
-  40% and 65% zoom and functions between 55% and 90%; a link fades with the fainter of its
-  endpoints, labels and hit-testing follow the drawn set, and the ambient link alpha thins with
-  the zoom so thousands of overlapping hairlines stop summing to a fog. It is a filter inside
+- Semantic zoom (VIBE-48, retuned for readability): a dense field (more than `DENSE_VIEW_NODES`
+  entities) is its directories while zoomed out. `CodeAtlasLayout.detail` settles files to dust
+  (`FILE_FLOOR`, 35% alpha and smaller points) and brightens them between 45% and 80% zoom, then
+  fades classes and types in between 70% and 100% and functions between 90% and 130%; a link
+  fades with the fainter of its endpoints, and while the files are dust the field draws only the
+  tree spokes and the directory-to-directory references (the server's domain edges, stroked
+  wider), so a file's own references arrive with the file. A directory's point grows with the
+  files beneath it (`item.weight`) and keeps at least 88% brightness at any depth; labels go to
+  changed files first, then to directories by weight; the signals travel the directory references
+  first and never ride dust. Labels and hit-testing follow the drawn set. It is a filter inside
   `paintField`, never a relayout, so clusters keep their places. The hovered, selected and
   changed entities and every entity in the lit set always draw (tracing a file reveals its
   declarations at any zoom), as does everything under a search or an explicit entity filter.
@@ -159,12 +169,19 @@ on two canvases inside `#stage`, with no DOM element per entity:
   the stage's corner (`#detail-notice`) says what zooming in reveals and the legend dims those
   rows; it is an overlay because a notice in the summary row would change the stage height, and
   the ResizeObserver refits the camera on every stage resize. `fieldStats()` reports `zoom`,
-  `shown` and the `hidden` counts, `locate(id)` whether a point is drawn.
-- Palette: the structure (modules, files, data) is cool and bright; declarations are a warm,
-  muted family (classes gold, functions desaturated teal) in both modes, so folders and files
-  read differently from the long tail at a glance. The legend dots use the `--node-*` tokens the
-  canvas paints with. The palette lives twice in the bundle (host-side and in the template);
-  change both.
+  `fileDetail`, `shown` and the `hidden` counts, `locate(id)` whether a point is drawn.
+- Highlight changes is on by default and is emphasis, not a blackout: unchanged points keep
+  about half their brightness, links half their alpha and directory labels stay up, so the
+  changed files (ringed and labelled in `--graph-changed`) read against the structure they sit
+  in. Hovering while it is on keeps the hovered entity's neighbourhood lit. The summary row says
+  how many changed files are on the map; the link budget is no longer announced there.
+- Palette: the host owns it. `style.css` declares `--node-module/-file/-class/-function/-data`
+  and `--graph-edge/-cross-edge/-changed` on `:root` (the app theme: lavender-white directories,
+  violet files, sand declarations, teal data, amber changes) and maps them from the editor's
+  symbol, chart and git colors in the VS Code theme bridge; `theme-sync.js` passes them through
+  `themeFromCss`, and the legend dots use the same tokens the canvas paints with. The bundle's
+  own palettes (host-side and in the template; change both) are the fallback for a host that
+  declares none and match the app defaults.
 - `CodeAtlas.locate(id)` and `CodeAtlas.fieldStats()` exist on the frame's own global for
   browser tests and tracing; the host bridge does not expose them.
 

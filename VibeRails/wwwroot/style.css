@@ -36,6 +36,20 @@
     --color-border: #334155;
     /* Clearer borders */
 
+    /* QUALITY page tones and the Code Atlas palette: one block per theme. The VS Code bridge
+       below maps them from the editor theme; without a bridge the app theme applies. */
+    --quality-pass: #b48cf7;
+    --quality-warn: #f5b74a;
+    --quality-stop: #ff7a70;
+    --node-module: #ece4ff;
+    --node-file: #9d8be6;
+    --node-class: #e4c27f;
+    --node-function: #a99673;
+    --node-data: #7fd0dc;
+    --graph-edge: #3a3358;
+    --graph-cross-edge: #6a5bb0;
+    --graph-changed: #ffb03b;
+
     /* Layout */
     --border-radius: 4px;
     /* Squarer, cleaner look */
@@ -79,6 +93,19 @@ html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] {
     --color-warning: var(--vb-vscode-warning);
     --color-danger: var(--vb-vscode-danger);
     --color-border: var(--vb-vscode-border);
+
+    /* The editor's own symbol, chart and git colors paint the QUALITY page and the code map. */
+    --quality-pass: var(--vscode-charts-blue, #b48cf7);
+    --quality-warn: var(--vscode-charts-orange, var(--vb-vscode-warning));
+    --quality-stop: var(--vb-vscode-danger);
+    --node-module: var(--vscode-symbolIcon-moduleForeground, var(--vscode-editor-foreground, #ece4ff));
+    --node-file: var(--vscode-charts-purple, #9d8be6);
+    --node-class: var(--vscode-symbolIcon-classForeground, #e4c27f);
+    --node-function: var(--vscode-symbolIcon-methodForeground, #a99673);
+    --node-data: var(--vscode-symbolIcon-variableForeground, #7fd0dc);
+    --graph-edge: var(--vscode-tree-indentGuidesStroke, #3a3358);
+    --graph-cross-edge: var(--vscode-charts-lines, #6a5bb0);
+    --graph-changed: var(--vscode-gitDecoration-modifiedResourceForeground, #ffb03b);
 }
 
 html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body {
@@ -19033,47 +19060,195 @@ body.performance-mode .brand-text-sm {
 /* ── Unified Project health ────────────────────────────────────────────────
    Rules, VCA status, Git Guard, and Code quality share one intentionally
    shallow page. Detail-heavy work stays behind one disclosure or modal. */
+/* ============================================================================
+   QUALITY (view 'agents'): one header row, the Rules card and the Code quality card.
+   Every status color reads a --quality-* token (declared on :root and mapped from the
+   editor theme by the VS Code bridge), so a theme is one block of variables.
+   ============================================================================ */
 .project-health-page {
-    width: min(1120px, 100%);
+    width: min(1180px, 100%);
     margin: 0 auto;
-    padding: clamp(18px, 3vw, 36px) 0 clamp(32px, 5vw, 64px);
+    padding: 0 0 clamp(24px, 4vw, 48px);
+}
+
+/* The page shell pads every view generously; this page starts right under the nav. */
+.main-container:has(.project-health-page) {
+    padding-top: 14px;
 }
 
 .project-health-header {
     display: flex;
-    align-items: flex-end;
+    align-items: center;
     justify-content: space-between;
-    gap: 24px;
-    margin-bottom: 18px;
+    gap: 16px;
+    margin-bottom: 14px;
 }
 
 .project-health-heading {
     min-width: 0;
 }
 
-.project-health-eyebrow,
-.project-health-card-kicker {
-    display: block;
-    margin-bottom: 6px;
-    color: var(--color-accent, #06b6d4);
-    font-size: .72rem;
-    font-weight: 700;
-    letter-spacing: .12em;
-    text-transform: uppercase;
-}
-
 .project-health-heading h1 {
     margin: 0;
     color: var(--color-text, #f8fafc);
-    font-size: clamp(1.65rem, 4vw, 2.4rem);
+    font-size: clamp(1.25rem, 2.4vw, 1.5rem);
     font-weight: 700;
-    letter-spacing: -.035em;
+    letter-spacing: -.02em;
 }
 
-.project-health-heading p {
-    margin: 8px 0 0;
+/* Git Guard is a pill in the header; its message only shows when something needs attention. */
+.project-health-guard {
+    display: inline-grid;
+    grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+    align-items: center;
+    gap: 10px;
+    max-width: 100%;
+    margin: 0;
+    padding: 5px 8px 5px 10px;
+    border: 1px solid var(--color-border, #334155);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-bg-surface, #1e1e1e) 86%, transparent);
+}
+
+.project-health-guard[data-tone="success"] {
+    border-color: color-mix(in srgb, var(--quality-pass, #b48cf7) 38%, var(--color-border, #334155));
+}
+
+.project-health-guard[data-tone="warning"] {
+    border-color: color-mix(in srgb, var(--quality-warn, #f5b74a) 48%, var(--color-border, #334155));
+}
+
+.project-health-guard[data-tone="danger"] {
+    border-color: color-mix(in srgb, var(--quality-stop, #ff7a70) 48%, var(--color-border, #334155));
+}
+
+.project-health-guard-icon {
+    display: grid;
+    width: 26px;
+    height: 26px;
+    place-items: center;
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--color-primary, #3b82f6) 16%, transparent);
+    color: var(--color-primary, #3b82f6);
+    font-size: .8rem;
+}
+
+.project-health-guard-copy {
+    display: flex;
+    min-width: 0;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.project-health-guard-copy strong {
+    color: var(--color-text, #f8fafc);
+    font-size: .88rem;
+    white-space: nowrap;
+}
+
+.project-health-guard-copy small {
+    overflow: hidden;
     color: var(--color-text-muted, #94a3b8);
-    font-size: .98rem;
+    font-size: .74rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.project-health-guard[data-tone="success"] .project-health-guard-copy small {
+    display: none;
+}
+
+.project-health-guard-remove {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.project-health-guard .hook-health-badge[data-tone="success"] {
+    --badge-tone: var(--quality-pass, #b48cf7);
+}
+
+.project-health-guard .hook-health-badge[data-tone="warning"] {
+    --badge-tone: var(--quality-warn, #f5b74a);
+}
+
+.project-health-guard .hook-health-badge[data-tone="danger"] {
+    --badge-tone: var(--quality-stop, #ff7a70);
+}
+
+.project-health-guard .rules-git-toggle[aria-checked="true"] .rules-git-toggle-track {
+    border-color: color-mix(in srgb, var(--quality-pass, #b48cf7) 55%, transparent);
+    background: color-mix(in srgb, var(--quality-pass, #b48cf7) 30%, var(--color-bg-base, #121212));
+}
+
+.project-health-guard .rules-git-toggle[aria-checked="true"] .rules-git-toggle-track > span {
+    background: var(--quality-pass, #b48cf7);
+}
+
+.project-health-stack {
+    display: grid;
+    gap: 16px;
+}
+
+.project-health-card {
+    --health-tone: var(--color-primary, #3b82f6);
+    overflow: visible;
+    border: 1px solid var(--color-border, #334155);
+    border-radius: 14px;
+    background: var(--color-bg-surface, #1e1e1e);
+    box-shadow: none;
+}
+
+.project-health-card[data-tone="success"],
+.project-health-rules-summary[data-tone="success"] {
+    --health-tone: var(--quality-pass, #b48cf7);
+}
+
+.project-health-card[data-tone="warning"],
+.project-health-rules-summary[data-tone="warning"] {
+    --health-tone: var(--quality-warn, #f5b74a);
+}
+
+.project-health-card[data-tone="danger"],
+.project-health-rules-summary[data-tone="danger"] {
+    --health-tone: var(--quality-stop, #ff7a70);
+}
+
+.project-health-card.vca-console-card[data-tone="success"] {
+    --console-tone: var(--quality-pass, #b48cf7);
+}
+
+.project-health-card.vca-console-card[data-tone="warning"] {
+    --console-tone: var(--quality-warn, #f5b74a);
+}
+
+.project-health-card.vca-console-card[data-tone="danger"] {
+    --console-tone: var(--quality-stop, #ff7a70);
+}
+
+.project-health-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 14px 18px 10px;
+    border-bottom: 0;
+}
+
+.project-health-card-header h2 {
+    margin: 0;
+    color: var(--color-text, #f8fafc);
+    font-size: 1.15rem;
+    font-weight: 700;
+}
+
+.project-health-card-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    min-width: 0;
+    gap: 8px;
 }
 
 .project-health-card-actions .btn {
@@ -19082,6 +19257,16 @@ body.performance-mode .brand-text-sm {
     justify-content: center;
     gap: 8px;
     white-space: nowrap;
+}
+
+.project-health-scan-meta {
+    color: var(--color-text-muted, #94a3b8);
+    font-size: .78rem;
+    white-space: nowrap;
+}
+
+.project-health-scan-meta:empty {
+    display: none;
 }
 
 .project-health-fix-controls {
@@ -19104,141 +19289,28 @@ body.performance-mode .brand-text-sm {
 .project-health-fix-picker .ts-wrapper { width: 100%; }
 .project-health-fix-controls > .btn { flex: 0 0 auto; }
 
-.project-health-guard {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto auto auto;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 18px;
-    padding: 12px 14px;
-    border: 1px solid var(--color-border, #334155);
-    border-radius: 10px;
-    background: color-mix(in srgb, var(--color-bg-surface, #1e1e1e) 86%, transparent);
-}
-
-.project-health-guard[data-tone="success"] {
-    border-color: color-mix(in srgb, var(--color-success, #10b981) 42%, var(--color-border, #334155));
-}
-
-.project-health-guard[data-tone="warning"] {
-    border-color: color-mix(in srgb, var(--color-warning, #f59e0b) 48%, var(--color-border, #334155));
-}
-
-.project-health-guard[data-tone="danger"] {
-    border-color: color-mix(in srgb, var(--color-danger, #ef4444) 48%, var(--color-border, #334155));
-}
-
-.project-health-guard-icon {
-    display: grid;
-    width: 34px;
-    height: 34px;
-    place-items: center;
-    border-radius: 8px;
-    background: color-mix(in srgb, var(--color-primary, #3b82f6) 16%, transparent);
-    color: var(--color-primary, #3b82f6);
-}
-
-.project-health-guard-copy {
-    display: flex;
-    min-width: 0;
-    flex-direction: column;
-    gap: 1px;
-}
-
-.project-health-guard-copy strong {
-    color: var(--color-text, #f8fafc);
-    font-size: .9rem;
-}
-
-.project-health-guard-copy small {
-    overflow: hidden;
-    color: var(--color-text-muted, #94a3b8);
-    font-size: .76rem;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.project-health-guard-remove {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-}
-
-.project-health-stack {
-    display: grid;
-    gap: 18px;
-}
-
-.project-health-card {
-    --health-tone: var(--color-primary, #3b82f6);
-    overflow: visible;
-    border: 1px solid var(--color-border, #334155);
-    border-radius: 14px;
-    background: var(--color-bg-surface, #1e1e1e);
-    box-shadow: none;
-}
-
-.project-health-card[data-tone="success"],
-.project-health-rules-summary[data-tone="success"] {
-    --health-tone: var(--color-success, #10b981);
-}
-
-.project-health-card[data-tone="warning"],
-.project-health-rules-summary[data-tone="warning"] {
-    --health-tone: var(--color-warning, #f59e0b);
-}
-
-.project-health-card[data-tone="danger"],
-.project-health-rules-summary[data-tone="danger"] {
-    --health-tone: var(--color-danger, #ef4444);
-}
-
-.project-health-card-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 20px;
-    padding: 18px 20px 14px;
-    border-bottom: 0;
-}
-
-.project-health-card-header h2 {
-    margin: 0;
-    color: var(--color-text, #f8fafc);
-    font-size: 1.2rem;
-    font-weight: 700;
-}
-
-.project-health-card-actions {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    min-width: 0;
-    gap: 8px;
-}
-
+/* The verdict row: icon, title and message, the rule inventory and the Details toggle. */
 .project-health-rules-summary {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
     align-items: center;
-    gap: 16px;
-    margin: 0 20px 14px;
-    padding: clamp(18px, 3vw, 26px);
-    border: 1px solid color-mix(in srgb, var(--health-tone) 26%, var(--color-border, #334155));
+    gap: 14px;
+    margin: 0 18px 12px;
+    padding: 12px 16px;
+    border: 1px solid color-mix(in srgb, var(--health-tone, #3b82f6) 26%, var(--color-border, #334155));
     border-radius: 12px;
-    background: color-mix(in srgb, var(--health-tone) 8%, var(--color-bg-base, #121212));
+    background: color-mix(in srgb, var(--health-tone, #3b82f6) 6%, var(--color-bg-base, #121212));
 }
 
 .project-health-status-icon {
     display: grid;
-    width: 52px;
-    height: 52px;
+    width: 40px;
+    height: 40px;
     place-items: center;
     border-radius: 50%;
-    background: color-mix(in srgb, var(--health-tone) 18%, transparent);
-    color: var(--health-tone);
-    font-size: 1.35rem;
+    background: color-mix(in srgb, var(--health-tone, #3b82f6) 18%, transparent);
+    color: var(--health-tone, #3b82f6);
+    font-size: 1.1rem;
 }
 
 .project-health-status-copy {
@@ -19248,26 +19320,26 @@ body.performance-mode .brand-text-sm {
 .project-health-status-copy strong {
     display: block;
     color: var(--color-text, #f8fafc);
-    font-size: clamp(1.02rem, 2.5vw, 1.3rem);
+    font-size: 1.02rem;
     line-height: 1.25;
 }
 
 .project-health-status-copy p {
-    margin: 6px 0 0;
+    margin: 4px 0 0;
     color: var(--color-text-muted, #94a3b8);
-    font-size: .86rem;
+    font-size: .84rem;
     line-height: 1.45;
 }
 
 .project-health-inventory {
     display: flex;
-    gap: 8px;
+    gap: 6px;
 }
 
 .project-health-inventory > span {
     display: grid;
-    min-width: 62px;
-    padding: 8px 10px;
+    min-width: 56px;
+    padding: 6px 8px;
     place-items: center;
     border: 1px solid var(--color-border, #334155);
     border-radius: 9px;
@@ -19276,28 +19348,20 @@ body.performance-mode .brand-text-sm {
 
 .project-health-inventory strong {
     color: var(--color-text, #f8fafc);
-    font-size: 1rem;
+    font-size: .95rem;
 }
 
 .project-health-inventory small {
     color: var(--color-text-muted, #94a3b8);
-    font-size: .66rem;
+    font-size: .62rem;
     letter-spacing: .05em;
     text-transform: uppercase;
-}
-
-.project-health-card-toolbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 0 20px 16px;
 }
 
 .project-health-details-toggle {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 7px;
 }
 
 .project-health-details-toggle i {
@@ -19310,14 +19374,86 @@ body.performance-mode .brand-text-sm {
     transform: rotate(180deg);
 }
 
-.project-health-check-actions {
+/* Rule files as chips: the file, how many rules it holds and its strictest enforcement. */
+.project-health-rule-files {
     display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 18px 16px;
+}
+
+.project-health-rule-files:empty {
+    display: none;
+}
+
+.project-health-rule-file {
+    display: inline-flex;
     align-items: center;
-    gap: 9px;
+    gap: 8px;
+    max-width: 100%;
+    padding: 6px 10px;
+    border: 1px solid var(--color-border, #334155);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-bg-surface, #1e1e1e) 70%, transparent);
+    color: var(--color-text, #f8fafc);
+    font: inherit;
+    font-size: .8rem;
+    cursor: pointer;
+    transition: border-color .15s ease, background-color .15s ease;
+}
+
+.project-health-rule-file:hover,
+.project-health-rule-file:focus-visible {
+    border-color: color-mix(in srgb, var(--color-text, #f8fafc) 30%, var(--color-border, #334155));
+    background: color-mix(in srgb, var(--color-text, #f8fafc) 6%, transparent);
+}
+
+.project-health-rule-file:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-primary, #3b82f6) 70%, transparent);
+    outline-offset: 2px;
+}
+
+.project-health-rule-file b {
+    overflow: hidden;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.project-health-rule-file small {
+    color: var(--color-text-muted, #94a3b8);
+    font-size: .72rem;
+    white-space: nowrap;
+}
+
+.project-health-rule-file em {
+    --chip-tone: var(--color-text-muted, #94a3b8);
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--chip-tone, #94a3b8) 14%, transparent);
+    color: var(--chip-tone, #94a3b8);
+    font-family: var(--vb-font-mono, ui-monospace, monospace);
+    font-size: .6rem;
+    font-style: normal;
+    font-weight: 700;
+    letter-spacing: .06em;
+}
+
+.project-health-rule-file em[data-level="STOP"] {
+    --chip-tone: var(--quality-stop, #ff7a70);
+}
+
+.project-health-rule-file em[data-level="COMMIT"] {
+    --chip-tone: var(--quality-warn, #f5b74a);
+}
+
+.project-health-rule-file-add {
+    border-style: dashed;
+    color: var(--color-text-muted, #94a3b8);
 }
 
 .project-health-details {
-    padding: 0 20px 20px;
+    padding: 0 18px 18px;
     border-top: 1px solid var(--color-border, #334155);
 }
 
@@ -19325,19 +19461,24 @@ body.performance-mode .brand-text-sm {
     padding-top: 16px;
 }
 
+/* The verdict row already says it; the details keep the findings, actions and transcript. */
 .project-health-details .vca-explanation-verdict {
-    margin-top: 0;
+    display: none;
 }
 
 /* Code Atlas + Quality Lab render inline in the card; the viewer's own container
    queries take over below this box, so the host only supplies the gutter. */
 .project-health-quality-report {
     min-width: 0;
-    margin: 0 20px 18px;
+    margin: 0 18px 16px;
 }
 
 .project-health-scan-transcript {
-    margin: 0 20px 18px;
+    margin: 0 18px 16px;
+}
+
+.project-health-scan-transcript[hidden] {
+    display: none;
 }
 
 .project-health-rule-modal-dialog {
@@ -19383,6 +19524,11 @@ body.performance-mode .brand-text-sm {
         flex-direction: column;
     }
 
+    .project-health-guard {
+        width: 100%;
+        border-radius: 12px;
+    }
+
     .project-health-card-actions {
         width: 100%;
         flex-wrap: wrap;
@@ -19402,12 +19548,17 @@ body.performance-mode .brand-text-sm {
         grid-template-columns: auto minmax(0, 1fr);
     }
 
-    .project-health-inventory {
+    .project-health-inventory,
+    .project-health-details-toggle {
         grid-column: 1 / -1;
     }
 
     .project-health-inventory > span {
         flex: 1;
+    }
+
+    .project-health-details-toggle {
+        justify-self: start;
     }
 
     .project-health-rule-manager-grid {
@@ -19416,10 +19567,6 @@ body.performance-mode .brand-text-sm {
 }
 
 @media (max-width: 600px) {
-    .project-health-page {
-        padding-top: 14px;
-    }
-
     .project-health-guard {
         grid-template-columns: auto minmax(0, 1fr) auto;
     }
@@ -19440,12 +19587,14 @@ body.performance-mode .brand-text-sm {
     }
 
     .project-health-card-header {
-        padding: 16px 16px 12px;
+        padding: 14px 14px 10px;
     }
 
     .project-health-rules-summary,
-    .project-health-quality-report {
-        margin-inline: 16px;
+    .project-health-rule-files,
+    .project-health-quality-report,
+    .project-health-scan-transcript {
+        margin-inline: 14px;
     }
 
     .project-health-rules-summary {
@@ -19453,8 +19602,8 @@ body.performance-mode .brand-text-sm {
     }
 
     .project-health-status-icon {
-        width: 42px;
-        height: 42px;
+        width: 36px;
+        height: 36px;
     }
 
     .project-health-inventory {
@@ -19462,22 +19611,8 @@ body.performance-mode .brand-text-sm {
         width: 100%;
     }
 
-    .project-health-card-toolbar {
-        align-items: stretch;
-        flex-direction: column;
-        padding-inline: 16px;
-    }
-
-    .project-health-check-actions {
-        justify-content: space-between;
-    }
-
     .project-health-details {
-        padding-inline: 16px;
-    }
-
-    .project-health-scan-transcript {
-        margin-inline: 16px;
+        padding-inline: 14px;
     }
 }
 
