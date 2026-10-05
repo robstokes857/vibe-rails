@@ -16,7 +16,7 @@ test('settings page has no trailer-removal option or empty Git tab', () => {
     assert.doesNotMatch(source, /removeCoAuthorTrailers|setting-remove-co-author-trailers/);
 });
 
-test('Vibe AI is always shown in both navigation layouts and has no settings toggle', () => {
+test('Vibe AI is always shown in the top navigation and has no settings toggle', () => {
     const html = readFileSync(indexPath, 'utf8');
     const source = readFileSync(modulePath, 'utf8');
     const appSource = readFileSync(path.resolve('VibeRails/wwwroot/app.js'), 'utf8');
@@ -25,17 +25,17 @@ test('Vibe AI is always shown in both navigation layouts and has no settings tog
     assert.doesNotMatch(source, /showVibeAiUi|setting-show-vibe-ai-ui/);
     assert.doesNotMatch(appSource, /showVibeAiUi|applyVibeAiNavVisibility/);
     const links = html.match(/<button\b[^>]*data-view="vibe-rails-ai"[^>]*>/g);
-    assert.equal(links.length, 2);
+    assert.equal(links.length, 1);
     for (const link of links) assert.doesNotMatch(link, /\shidden/);
     // The retired preference stays in settings.json for older versions; startup never writes it.
     const initSource = readFileSync(path.resolve('VibeRails/Init.cs'), 'utf8');
     assert.doesNotMatch(initSource, /settings\.ShowVibeAiUi\s*=/);
 });
 
-test('account sign-in links start hidden in both navigation layouts', () => {
+test('the top navigation account sign-in link starts hidden', () => {
     const html = readFileSync(indexPath, 'utf8');
     const links = html.match(/<button\b[^>]*data-account-nav[^>]*>/g);
-    assert.equal(links.length, 2);
+    assert.equal(links.length, 1);
     for (const link of links) assert.match(link, /\shidden/);
     // Author display styles otherwise override the browser's hidden attribute rule.
     const css = readFileSync(path.resolve('VibeRails/wwwroot/style.css'), 'utf8');

@@ -675,6 +675,7 @@ public class TerminalSessionService : ITerminalSessionService
         string closeReason,
         bool requireExternalOwnership)
     {
+        string? agentClosedSessionId = null;
         await s_lifecycleGate.WaitAsync();
         try
         {
@@ -707,11 +708,23 @@ public class TerminalSessionService : ITerminalSessionService
             }
 
             TerminalResizeCoordinator.ClearSession(teardown.SessionId);
+            if (teardown.TerminalToDispose?.CompletedByAgent == true)
+                _stateService.RecordAgentSessionEnd(teardown.SessionId);
             await _stateService.CompleteSessionAsync(teardown.SessionId, exitCode);
+            if (teardown.TerminalToDispose?.CompletedByAgent == true)
+                agentClosedSessionId = teardown.SessionId;
         }
         finally
         {
             s_lifecycleGate.Release();
+        }
+
+        if (agentClosedSessionId is not null)
+        {
+            // A parent may remove this host as soon as it receives the event. Finish
+            // environment post-exit steps first, outside the session lifecycle gate.
+            try { await _runner.RunPostStepsAsync(agentClosedSessionId, exitCode, CancellationToken.None); }
+            finally { _runner.PublishAgentSessionClosed(agentClosedSessionId); }
         }
     }
 

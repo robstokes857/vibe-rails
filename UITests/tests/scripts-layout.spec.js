@@ -1,12 +1,14 @@
 const { test, expect } = process.env.VIBERAILS_SCRIPTS_STATIC === '1'
     ? require('@playwright/test') : require('./fixtures');
 
-async function openScripts(page, layout = 'top') {
-    await page.addInitScript(layout => {
+async function openScripts(page) {
+    await page.addInitScript(() => {
         sessionStorage.setItem('viberails_tab', 'scripts-fixture');
         sessionStorage.setItem('viberails_terminal_active_tab_id', 'agent');
-        localStorage.setItem('viberails_nav_layout', layout);
-    }, layout);
+        // A stored side-navigation preference must not bring the rail back.
+        localStorage.setItem('viberails_nav_layout', 'side');
+        localStorage.setItem('viberails_sidebar_collapsed', 'true');
+    });
     await page.routeWebSocket('**/api/v1/events/ws*', () => {});
     await page.routeWebSocket('**/api/v1/terminal/tabs/*/ws*', socket => {
         socket.send(Buffer.from('Agent ready\r\n'));
@@ -48,10 +50,9 @@ async function expectTerminalFits(page, minimumHeight = 100) {
     expect(await page.evaluate(() => document.documentElement.scrollHeight - innerHeight)).toBeLessThanOrEqual(1);
 }
 
-for (const layout of ['top', 'side']) {
-    test(`verbose run output leaves the editor usable with ${layout} navigation`, async ({ page }, testInfo) => {
+test('verbose run output leaves the editor usable under the top navigation', async ({ page }, testInfo) => {
         await page.setViewportSize({ width: 1000, height: 500 });
-        await openScripts(page, layout);
+        await openScripts(page);
         await page.locator('.python-script-name').first().click();
         await expect(page.locator('.monaco-editor')).toBeVisible();
         await page.locator('[data-workbench-action="run"]').click();
@@ -77,12 +78,12 @@ for (const layout of ['top', 'side']) {
             await expect(output).toHaveAttribute('open', '');
         }
         await output.scrollIntoViewIfNeeded();
-        await page.screenshot({ path: testInfo.outputPath(`output-${layout}.png`) });
-    });
+        await page.screenshot({ path: testInfo.outputPath('output-top.png') });
+});
 
-    test(`terminal prompt stays in the viewport with ${layout} navigation`, async ({ page }, testInfo) => {
+test('terminal prompt stays in the viewport under the top navigation', async ({ page }, testInfo) => {
         await page.setViewportSize({ width: 1440, height: 900 });
-        await openScripts(page, layout);
+        await openScripts(page);
         await page.locator('.python-script-name').first().click();
         await expect(page.locator('.monaco-editor')).toBeVisible();
         await expect.poll(() => page.evaluate(() =>
@@ -98,12 +99,11 @@ for (const layout of ['top', 'side']) {
         await page.locator('[data-workbench-splitter]').focus();
         await page.keyboard.press('ArrowLeft');
         await expectTerminalFits(page);
-        await page.screenshot({ path: testInfo.outputPath(`workbench-${layout}.png`) });
+        await page.screenshot({ path: testInfo.outputPath('workbench-top.png') });
         await page.locator('[data-action="go-back"]').click();
         await expect(page.locator('[data-python-scripts-root]')).toBeVisible();
         expect(await page.evaluate(() => document.body.classList.contains('vb-python-workbench-active'))).toBe(false);
-    });
-}
+});
 
 test('script actions align and language guidance stays readable on narrow screens', async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 1440, height: 900 });

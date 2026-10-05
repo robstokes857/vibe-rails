@@ -14,6 +14,38 @@ namespace Tests.Services.Terminal;
 /// </summary>
 public sealed class SessionOutputWriterTests
 {
+    [Theory]
+    [InlineData("final agent output")]
+    [InlineData("\x1b[?1049h\x1b[?2026h\x1b[31mfinal agent output")]
+    [InlineData("final agent output\x1b[?")]
+    public async Task AgentClosureFooterFollowsAllRawAndReplayOutputAndRendersAfterAKilledTui(string output)
+    {
+        var (repository, batches) = CreateRepository();
+        var writer = new SessionOutputWriter(repository.Object);
+        writer.Initialize(SessionId, 100, 10);
+        writer.Enqueue(System.Text.Encoding.UTF8.GetBytes(output));
+        writer.SetCompletionMessage(VibeRails.DTOs.AgentSessionClosedPayload.Reason);
+        writer.SetCompletionMessage("duplicate must not replace the first reason");
+        await writer.DisposeAsync();
+        await writer.DisposeAsync();
+
+        foreach (var kind in new[] { TerminalOutputKind.Legacy, TerminalOutputKind.Enriched })
+        {
+            var rows = Rows(batches).Where(row => row.Kind == kind).ToList();
+            Assert.Equal(2, rows.Count);
+            Assert.Equal(output, System.Text.Encoding.UTF8.GetString(rows[0].Data));
+            var footer = System.Text.Encoding.UTF8.GetString(rows[1].Data);
+            Assert.EndsWith(VibeRails.DTOs.AgentSessionClosedPayload.Reason + "\r\n", footer);
+            Assert.DoesNotContain("duplicate", footer);
+            Assert.True(rows[1].TimestampUtc >= rows[0].TimestampUtc);
+            var replay = new TerminalEmulator.Terminal(cols: 100, rows: 10, scrollbackSize: 100);
+            foreach (var row in rows) replay.Write(row.Data.AsSpan());
+            Assert.Contains(VibeRails.DTOs.AgentSessionClosedPayload.Reason, string.Join("\n", replay.GetScreenText()));
+            Assert.False(replay.SyncOutputActive);
+        }
+        Assert.Equal(new[] { 0, 1 }, Rows(batches).Where(row => row.Kind == TerminalOutputKind.Enriched).Select(row => row.Sequence));
+    }
+
     private const string SessionId = "7b2f3c1e-0000-4000-8000-000000000001";
 
     private static (Mock<IRepository> Repository, List<IReadOnlyList<TerminalOutputWrite>> Batches) CreateRepository(

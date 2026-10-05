@@ -29,7 +29,8 @@ public sealed record BoardCardPage(
     int TotalCount,
     int FilteredCount,
     int BlockedCount,
-    long RemainingPoints);
+    long RemainingPoints,
+    int FlaggedCount = 0);
 
 public partial interface IBoardStore
 {

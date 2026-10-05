@@ -312,10 +312,13 @@ serialization or tool discovery into the Native AOT path.
   `JobBoardContext` carries the card context into its terminal tab and recording link. Queued
   and failed-before-launch runs remain visible through the card Automations endpoint. Ordinary
   manual runs/retries retain their own context and native-terminal behavior.
-- New cards and ordinary card updates go to the top of their lane. Comments, notes, session,
+- Flagged cards always precede unflagged cards in a lane, including paged reads. New cards and
+  ordinary card updates go to the top of their flag group. Comments, notes, session,
   attachment, commit and linked-card changes promote the affected cards in the same transaction;
   dense position rewrites do not count as activity on the other cards. Explicit drag positions
-  remain authoritative. A lane move without a position goes to the top of its destination.
+  remain authoritative within each flag group. A lane move without a position goes to the top
+  of its destination flag group. Read ordering also covers positions written by older versions;
+  no migration or historical backfill is needed.
 - With a live working agent, Start work becomes **Go to agent** and focuses its existing terminal.
   The working agent (`activeSessionId`/`activeTabId`) is the first live linked session that is not
   an Automation's. A lane Automation and the CLI it spawned stay linked to the originating card but

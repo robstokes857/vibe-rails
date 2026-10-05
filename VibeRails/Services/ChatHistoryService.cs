@@ -41,10 +41,12 @@ public class ChatHistoryService(
             // remain intact. The client uses card labels as the automatic display default.
             items[i] = items[i] with
             {
-                BoardCards = cards[items[i].Id].Select(card => new ChatHistoryCard(card.CardId, card.Key, card.Title, card.DisplayId)).ToArray()
+                BoardCards = cards[items[i].Id].Select(ToCard).ToArray()
             };
         }
     }
+
+    private static ChatHistoryCard ToCard(BoardSessionCard card) => new(card.CardId, card.Key, card.Title, card.DisplayId);
 
     public Task<bool> RenameSessionAsync(string sessionId, string sessionDisplayName, CancellationToken cancellationToken)
         => repository.UpdateChatHistorySessionNameAsync(sessionId, sessionDisplayName, cancellationToken);
@@ -72,16 +74,20 @@ public class ChatHistoryService(
 
         var transcript = await sessionTranscriptService.GetOrBuildAsync(sessionId, cancellationToken, forceRebuild: regenerate);
 
+        // Local references stay outside the remote recap and its cached text.
+        var cards = (await boardStore.GetSessionCardsAsync([sessionId], cancellationToken))
+            .Select(ToCard).ToArray();
+
         if (!regenerate)
         {
             var summaries = await repository.GetChatSummariesBySessionAsync(sessionId, cancellationToken);
             var cached = summaries?.OrderByDescending(s => s.Date).FirstOrDefault();
             if (cached != null)
-                return new ChatSummaryResponse(cached.SummaryText, transcript);
+                return new ChatSummaryResponse(cached.SummaryText, transcript, cards);
         }
 
         if (string.IsNullOrWhiteSpace(transcript))
-            return new ChatSummaryResponse("No conversation output found for this session.", transcript);
+            return new ChatSummaryResponse("No conversation output found for this session.", transcript, cards);
 
         string summary = await summaryService.GetSummaryAsync(transcript, cancellationToken);
 
@@ -92,6 +98,6 @@ public class ChatHistoryService(
             Date = DateTime.UtcNow
         }, cancellationToken);
 
-        return new ChatSummaryResponse(summary, transcript);
+        return new ChatSummaryResponse(summary, transcript, cards);
     }
 }

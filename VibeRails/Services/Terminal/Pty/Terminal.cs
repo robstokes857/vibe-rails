@@ -37,6 +37,9 @@ public sealed class Terminal : IAsyncDisposable
     private readonly TimeSpan _exitDrainWindow;
     private Task? _readLoop;
     private bool _disposed;
+    // Guarded by _subscriberLock. A provider may leave a read pending even after disposal.
+    private bool _outputQuiesced;
+    private bool _consumersClosed;
     private int _hasExited;
     private int _completedByAgent;
     private int _cols;
@@ -55,6 +58,8 @@ public sealed class Terminal : IAsyncDisposable
     public int Cols => _cols;
     public int Rows => _rows;
     public bool HasExited => Volatile.Read(ref _hasExited) == 1;
+    /// <summary>True only when this PTY accepted an explicit agent completion.</summary>
+    public bool CompletedByAgent => Volatile.Read(ref _completedByAgent) == 1;
     public bool EncodeBareLineFeedAsWin32ShiftEnter { get; set; }
     public bool IsSyncOutputActive
     {
@@ -233,7 +238,8 @@ public sealed class Terminal : IAsyncDisposable
         if (_readLoop != null)
             throw new InvalidOperationException("Read loop already started");
 
-        _readLoop = Task.Run(ReadLoopAsync);
+        var token = _cts.Token;
+        _readLoop = Task.Run(() => ReadLoopAsync(token));
     }
 
     /// <summary>
@@ -515,6 +521,7 @@ public sealed class Terminal : IAsyncDisposable
         // with new subscribers joining via SubscribeWithSnapshot.
         lock (_subscriberLock)
         {
+            if (_outputQuiesced) return;
             foreach (var c in _consumers)
             {
                 try
@@ -642,8 +649,7 @@ public sealed class Terminal : IAsyncDisposable
     /// <summary>The agent explicitly finished. Drain/finalize through the ordinary process-exit path.</summary>
     internal void CompleteByAgent()
     {
-        if (HasExited || HasPtyProcessExited()) return;
-        Volatile.Write(ref _completedByAgent, 1);
+        if (HasExited || HasPtyProcessExited() || Interlocked.CompareExchange(ref _completedByAgent, 1, 0) != 0) return;
         try { _pty.KillProcessTree(); }
         catch { Volatile.Write(ref _completedByAgent, 0); throw; }
     }
@@ -680,13 +686,27 @@ public sealed class Terminal : IAsyncDisposable
         }
 
         _pty.Dispose();
+        // ConPTY normally releases its pending read here; a Unix non-owning synchronous
+        // stream need not. Give final bytes a bounded drain, then join only output dispatch,
+        // never the provider's potentially permanent read. The same lock/check in ReadLoop
+        // prevents a late completion from writing into an already finalized recording.
+        if (_readLoop != null)
+        {
+            try { await _readLoop.WaitAsync(TimeSpan.FromSeconds(1)); }
+            catch (TimeoutException) { Log.Warning("[Terminal] PTY reader remained blocked after disposal; quiescing output"); }
+            catch { }
+        }
+        lock (_subscriberLock)
+        {
+            NotifyConsumersClosed();
+            _outputQuiesced = true;
+        }
         _cts.Dispose();
     }
 
-    private async Task ReadLoopAsync()
+    private async Task ReadLoopAsync(CancellationToken token)
     {
         var buffer = new byte[4096];
-        var token = _cts.Token;
 
         try
         {
@@ -706,6 +726,7 @@ public sealed class Terminal : IAsyncDisposable
                 // non-blocking per the ITerminalConsumer contract.
                 lock (_subscriberLock)
                 {
+                    if (_outputQuiesced) break;
                     foreach (var consumer in _consumers)
                     {
                         try
@@ -742,6 +763,8 @@ public sealed class Terminal : IAsyncDisposable
     {
         lock (_subscriberLock)
         {
+            if (_consumersClosed) return;
+            _consumersClosed = true;
             foreach (var consumer in _consumers)
             {
                 try

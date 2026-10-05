@@ -272,21 +272,20 @@ test('flyout keyboard contract: menu roles, focus hand-off, Escape restores the 
     assert.match(source, /if \(isConfirmDialogOpen\(\)\) return;\s*if \(event\.key === 'Escape'\)/);
 });
 
-test('the customize modal restores focus to the button that opened it, not the first Launch button in the DOM', () => {
+test('the customize modal restores focus to its trigger or the visible top navigation Launch button', () => {
     const launcher = new AutomationNavLauncher(createApp());
     const focused = [];
     const trigger = { isConnected: true, focus() { focused.push('trigger'); } };
     launcher._restoreTriggerFocus(trigger);
     assert.deepEqual(focused, ['trigger']);
 
-    // Without a remembered trigger, pick the visible one of index.html's two buttons.
+    // Without a remembered trigger, fall back to the visible top navigation button.
     const originalDocument = globalThis.document;
     try {
-        const hiddenTop = { getClientRects: () => [], focus() { focused.push('hidden top nav'); } };
-        const sidebar = { getClientRects: () => [{}], focus() { focused.push('sidebar'); } };
-        globalThis.document = { querySelectorAll: () => [hiddenTop, sidebar] };
+        const topNav = { getClientRects: () => [{}], focus() { focused.push('top nav'); } };
+        globalThis.document = { querySelectorAll: () => [topNav] };
         launcher._restoreTriggerFocus(null);
-        assert.deepEqual(focused, ['trigger', 'sidebar']);
+        assert.deepEqual(focused, ['trigger', 'top nav']);
     } finally {
         globalThis.document = originalDocument;
     }
@@ -298,7 +297,7 @@ test('the customize modal restores focus to the button that opened it, not the f
     assert.equal((source.match(/launcherItemIcon\(item\)/g) || []).length, 3, 'one helper, used by both renderers plus its definition');
     assert.doesNotMatch(source, /fa-robot/);
     const index = readFileSync(indexPath, 'utf8');
-    assert.equal((index.match(/title="Launch an automation or script"/g) || []).length, 2);
+    assert.equal((index.match(/title="Launch an automation or script"/g) || []).length, 1);
     assert.doesNotMatch(index, /Launch an Automation now/);
 });
 

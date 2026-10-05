@@ -253,6 +253,16 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         await remoteConn.SendControlAsync(TerminalControlProtocol.BuildDisconnectBrowserCommand(reason));
     }
 
+    /// <inheritdoc />
+    public void RecordAgentSessionEnd(string sessionId)
+    {
+        lock (s_stateLock)
+        {
+            if (s_outputWriters.TryGetValue(sessionId, out var writer))
+                writer.SetCompletionMessage(DTOs.AgentSessionClosedPayload.Reason);
+        }
+    }
+
     public async Task CompleteSessionAsync(string sessionId, int exitCode)
     {
         ISessionOutputWriter? outputWriter;

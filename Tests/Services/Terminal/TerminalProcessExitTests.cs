@@ -14,6 +14,21 @@ namespace Tests.Services.Terminal;
 /// </summary>
 public sealed class TerminalProcessExitTests
 {
+    [Theory]
+    [InlineData(0)]
+    [InlineData(7)]
+    public async Task AgentCompletionDoesNotRelabelAnAlreadyExitedProcess(int exitCode)
+    {
+        using var output = new GatedReadStream();
+        var pty = new ExitingPty(output);
+        await using var terminal = new TerminalPty(pty, 80, 24);
+        pty.MarkExited(exitCode);
+        terminal.CompleteByAgent();
+        Assert.False(terminal.CompletedByAgent);
+        Assert.Equal(exitCode, terminal.ExitCode);
+        Assert.Equal(0, pty.TreeKills);
+    }
+
     [Fact]
     public async Task AgentCompletionDrainsAndPublishesOneNormalExit()
     {

@@ -25,6 +25,35 @@ namespace Tests.Routes;
 public sealed class TerminalRoutesPromptDeferralTests
 {
     private const string Prompt = "Deploy notes: {{step:2a1f0c4e-0000-4000-8000-000000000001}}";
+    // One client per class: a client per test leaks TCP ports across the suite.
+    private static readonly HttpClient SharedClient = new();
+
+    [Theory]
+    [InlineData("edited recap")]
+    [InlineData(null)]
+    public async Task ResumeAppendsBoardContextAfterEditedOrGeneratedRecap(string? editedRecap)
+    {
+        var (app, terminal, placeholders) = await StartAppAsync();
+        try
+        {
+            var resume = Mock.Get(app.Services.GetRequiredService<ISessionResumeService>());
+            var recap = editedRecap ?? "generated recap";
+            resume.Setup(s => s.GetResumeSummaryAsync("source", It.IsAny<CancellationToken>())).ReturnsAsync(recap);
+            resume.Setup(s => s.AppendBoardContextAsync("source", recap, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(recap + "\nBoard: VB-ABCDE-1 {{step:inert}}");
+            terminal.Setup(t => t.StartSessionAsync(LLM.Claude, It.IsAny<string>(), null, It.IsAny<string[]>(),
+                    It.IsAny<string>(), false, null, recap + "\nBoard: VB-ABCDE-1 {{step:inert}}", false)).ReturnsAsync(true);
+            var client = SharedClient;
+            using var response = await client.PostAsJsonAsync(new Uri(new Uri(app.Urls.First()), "/api/v1/terminal/start"),
+                new StartTerminalRequest(Cli: "Claude", ResumeSessionId: "source", ResumeSummary: editedRecap), TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            terminal.VerifyAll();
+            resume.Verify(s => s.AppendBoardContextAsync("source", recap, It.IsAny<CancellationToken>()), Times.Once);
+            resume.Verify(s => s.GetResumeSummaryAsync("source", It.IsAny<CancellationToken>()), editedRecap is null ? Times.Once() : Times.Never());
+            Assert.Empty(placeholders.Invocations);
+        }
+        finally { await StopAsync(app); }
+    }
 
     [Theory]
     [InlineData(false, null)]
@@ -39,7 +68,7 @@ public sealed class TerminalRoutesPromptDeferralTests
                     LLM.Claude, It.IsAny<string>(), environmentName, It.IsAny<string[]>(),
                     It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<string?>>>(), It.IsAny<string>(), authorizeBoardTools))
                 .ReturnsAsync(true);
-            using var client = new HttpClient();
+            var client = SharedClient;
             using var response = await client.PostAsJsonAsync(new Uri(new Uri(app.Urls.First()), "/api/v1/terminal/start"),
                 new StartTerminalRequest(WorkingDirectory: Path.GetTempPath(), Cli: "Claude", EnvironmentName: environmentName,
                     AuthorizeBoardTools: authorizeBoardTools), TestContext.Current.CancellationToken);
@@ -62,7 +91,7 @@ public sealed class TerminalRoutesPromptDeferralTests
                     It.Is<string[]>(args => args.SequenceEqual(new[] { "--model", "gpt-5.5", "-c", "model_reasoning_effort=xhigh" })),
                     It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<Func<Task<string?>>>(), It.IsAny<string>(), false))
                 .ReturnsAsync(true);
-            using var client = new HttpClient();
+            var client = SharedClient;
             using var response = await client.PostAsJsonAsync(new Uri(new Uri(app.Urls.First()), "/api/v1/terminal/start"),
                 new StartTerminalRequest(WorkingDirectory: Path.GetTempPath(), Cli: "Codex", InitialPrompt: "card",
                     BaseLlmOptions: new("gpt-5.5", "max", "plan")), TestContext.Current.CancellationToken);
@@ -78,7 +107,7 @@ public sealed class TerminalRoutesPromptDeferralTests
         var (app, terminal, _) = await StartAppAsync();
         try
         {
-            using var client = new HttpClient();
+            var client = SharedClient;
             using var response = await client.PostAsJsonAsync(new Uri(new Uri(app.Urls.First()), "/api/v1/terminal/start"),
                 new StartTerminalRequest(WorkingDirectory: Path.GetTempPath(), Cli: "Codex", EnvironmentName: "saved",
                     BaseLlmOptions: new("gpt-5.5")), TestContext.Current.CancellationToken);
@@ -194,7 +223,7 @@ public sealed class TerminalRoutesPromptDeferralTests
                     captured = resolve)
                 .ReturnsAsync(true);
 
-            using var client = new HttpClient();
+            var client = SharedClient;
             using var response = await client.PostAsJsonAsync(
                 new Uri(new Uri(app.Urls.First()), "/api/v1/terminal/start"),
                 new StartTerminalRequest(WorkingDirectory: Path.GetTempPath(), Cli: "Claude"),
@@ -250,7 +279,7 @@ public sealed class TerminalRoutesPromptDeferralTests
 
     private static Task<HttpResponseMessage> PostStartAsync(WebApplication app)
     {
-        var client = new HttpClient();
+        var client = SharedClient;
         return client.PostAsJsonAsync(
             new Uri(new Uri(app.Urls.First()), "/api/v1/terminal/start"),
             new StartTerminalRequest(

@@ -36,6 +36,23 @@ gate. It also handles native Worker PTYs. `Terminal.CompleteByAgent` uses normal
 bookkeeping and logical exit code zero so later workflow actions can proceed; this is never a
 review approval. An already exited/failed PTY keeps its original outcome. Disposal cancels timers.
 
+VIBE-78 appends `Terminal closed because the agent called end_agent_session` to raw logs and
+replay only after PTY disposal has quiesced the final output dispatch. Reader waits before and
+after provider disposal are each bounded to one second. If a provider leaves a read pending,
+the subscriber lock joins any dispatch in progress and bars late output/close callbacks before
+recording finalization; disposal never waits indefinitely for pipe EOF. `SessionOutputWriter` writes
+this footer after all buffered frames; no live PTY, emulator or viewer receives synthetic bytes.
+Web sessions announce `agent_session_closed` after recording completion and environment post-exit
+steps. The parent serializes exact-session validation/removal with tab starts, then emits
+`agent_terminal_closed`. Transient status failures retain the one-shot close request and retry
+outside the gate, with a delay that doubles from one second to a 30-second cap; every retry
+rechecks the original child object and session.
+Replacement/uncertain starts invalidate it, and service disposal cancels retries.
+Only that host/tab is removed; recordings and Board links remain.
+Ordinary exits keep their tabs. Native Workers record the footer without closing a containing
+Automation workflow. Tests: `CompletedTerminalOutputTests`, `SessionOutputWriterTests`,
+`AutomationTabCapacityTests`, `terminal-automation-menu.test.mjs`.
+
 CommandService supplies process-local `VIBERAILS_AGENT_CONTROL_*` contact credentials after
 custom Environment fields, independently of proxy settings and inherited root tool API routing.
 Codex forwards their names to its MCP subprocess; credential values never enter launch argv.

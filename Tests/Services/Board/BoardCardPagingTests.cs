@@ -21,6 +21,65 @@ public sealed class BoardCardPagingTests : IDisposable
     }
 
     [Fact]
+    public async Task FlaggedCardsLeadEveryLaneAfterActivityMovesAndFlagChanges()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var columns = await _store.GetColumnsAsync(_project, Ct);
+        foreach (var lane in columns)
+        {
+            var firstFlag = await _store.CreateCardAsync(_project, Card(lane.Id, "First flag") with { Flagged = true }, Ct);
+            var secondFlag = await _store.CreateCardAsync(_project, Card(lane.Id, "Second flag") with { Flagged = true }, Ct);
+            var plain = await _store.CreateCardAsync(_project, Card(lane.Id, "Plain"), Ct);
+            await _store.AddCommentAsync(_project, plain.Id, BoardAuthor.User(), "New activity", Ct);
+            await _store.MoveCardAsync(_project, plain.Id, lane.Id, 0, Ct);
+            await _store.MoveCardAsync(_project, secondFlag.Id, lane.Id, 99, Ct);
+            var cards = (await _store.GetCardsAsync(_project, Ct)).Where(c => c.ColumnId == lane.Id).ToArray();
+            Assert.Equal([firstFlag.Id, secondFlag.Id, plain.Id], cards.Select(c => c.Id));
+            Assert.Equal([0, 1, 2], cards.Select(c => c.Position));
+            var paged = await _store.GetCardsPageAsync(_project, new(1, lane.Id), Ct);
+            Assert.Equal(firstFlag.Id, Assert.Single(paged.Cards).Id);
+
+            await _store.UpdateCardAsync(_project, firstFlag.Id, new BoardCardPatch(Flagged: false), Ct);
+            cards = (await _store.GetCardsAsync(_project, Ct)).Where(c => c.ColumnId == lane.Id).ToArray();
+            Assert.Equal([secondFlag.Id, firstFlag.Id, plain.Id], cards.Select(c => c.Id));
+            var changed = await _store.GetCardsPageAsync(_project,
+                new(1, lane.Id, 1, ContinuationToken: paged.Lanes[0].ContinuationToken), Ct);
+            Assert.True(changed.Lanes[0].RestartRequired);
+            Assert.Equal(secondFlag.Id, Assert.Single(changed.Cards).Id);
+
+            var otherLane = columns.First(c => c.Id != lane.Id);
+            await _store.MoveCardAsync(_project, secondFlag.Id, otherLane.Id, 99, Ct);
+            await _store.MoveCardAsync(_project, secondFlag.Id, lane.Id, 99, Ct);
+            var reopened = new BoardStore(_connectionString, _connectionString);
+            Assert.Equal(secondFlag.Id, (await reopened.GetCardsAsync(_project, Ct)).First(c => c.ColumnId == lane.Id).Id);
+        }
+    }
+
+    [Fact]
+    public async Task PagingPromotesLegacyFlagPositionsBeforeLimitingAndInvalidatesContinuation()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var lane = (await _store.GetColumnsAsync(_project, Ct)).First(c => c.Name == "Done");
+        var oldest = await _store.CreateCardAsync(_project, Card(lane.Id, "Flagged by an older writer"), Ct);
+        for (var i = 0; i < 6; i++) await _store.CreateCardAsync(_project, Card(lane.Id, $"New {i}"), Ct);
+        var first = await _store.GetCardsPageAsync(_project, new(2, lane.Id), Ct);
+        // Disposable fixture only: model another version setting a flag without normalizing positions.
+        await using (var connection = new SqliteConnection(_connectionString))
+        {
+            await connection.OpenAsync(Ct);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE BoardCards SET Flagged = 1 WHERE Id = $id;";
+            command.Parameters.AddWithValue("$id", oldest.Id);
+            await command.ExecuteNonQueryAsync(Ct);
+        }
+        var next = await _store.GetCardsPageAsync(_project,
+            new(2, lane.Id, 2, ContinuationToken: first.Lanes[0].ContinuationToken), Ct);
+        Assert.True(next.Lanes[0].RestartRequired);
+        Assert.Equal(oldest.Id, next.Cards[0].Id);
+        Assert.Equal(oldest.Id, (await _store.GetCardsAsync(_project, Ct))[0].Id);
+    }
+
+    [Fact]
     public async Task CompletedLanes_PageInStableOrder_WhileOpenCardsStayComplete()
     {
         await _store.EnsureDefaultColumnsAsync(_project, Ct);
@@ -39,6 +98,7 @@ public sealed class BoardCardPagingTests : IDisposable
         Assert.Equal(138, first.TotalCount);
         Assert.Equal(138, first.FilteredCount);
         Assert.Equal(70, first.RemainingPoints);
+        Assert.Equal(0, first.FlaggedCount);
         Assert.Equal(1, first.BlockedCount);
         Assert.Contains("oldest", first.Tags);
         Assert.Contains("base:claude", first.Assignees);
@@ -106,13 +166,35 @@ public sealed class BoardCardPagingTests : IDisposable
     }
 
     [Fact]
+    public async Task FlaggedCountSharesThePointsScope_OpenLanesOnly_AndFollowsFlagChanges()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var columns = await _store.GetColumnsAsync(_project, Ct);
+        var backlog = columns.First();
+        var done = columns.First(c => c.Name == "Done");
+        var openFlag = await _store.CreateCardAsync(_project, Card(backlog.Id, "Open flag") with { Flagged = true, Points = 3 }, Ct);
+        var doneFlag = await _store.CreateCardAsync(_project, Card(done.Id, "Done flag") with { Flagged = true, Points = 5 }, Ct);
+        await _store.CreateCardAsync(_project, Card(backlog.Id, "Open plain"), Ct);
+
+        var page = await _store.GetCardsPageAsync(_project, new(30), Ct);
+        Assert.Equal(1, page.FlaggedCount);
+        Assert.Equal(3, page.RemainingPoints);
+
+        await _store.UpdateCardAsync(_project, openFlag.Id, new BoardCardPatch(Flagged: false), Ct);
+        Assert.Equal(0, (await _store.GetCardsPageAsync(_project, new(30), Ct)).FlaggedCount);
+
+        await _store.MoveCardAsync(_project, doneFlag.Id, backlog.Id, 0, Ct);
+        Assert.Equal(1, (await _store.GetCardsPageAsync(_project, new(30), Ct)).FlaggedCount);
+    }
+
+    [Fact]
     public async Task FiltersReachUnloadedCards_AndStatsAndChoicesCoverTheWholeBoard()
     {
         await _store.EnsureDefaultColumnsAsync(_project, Ct);
         var columns = await _store.GetColumnsAsync(_project, Ct);
         var done = columns.First(c => c.Name == "Done");
         var needle = await _store.CreateCardAsync(_project, Card(done.Id, "Hidden oldest") with
-        { Description = "Literal 100%_needle", Assignee = "base:claude", Type = "bug", Priority = "high", Tags = ["debug"], Points = 90, Blocked = true }, Ct);
+        { Description = "Literal 100%_needle", Assignee = "base:claude", Type = "bug", Priority = "high", Tags = ["debug"], Points = 90, Blocked = true, Flagged = true }, Ct);
         for (var index = 0; index < 35; index++)
             await _store.CreateCardAsync(_project, Card(done.Id, $"New {index}"), Ct);
         await _store.CreateCardAsync(_project, Card(columns.First().Id, "Open bug") with
@@ -124,6 +206,7 @@ public sealed class BoardCardPagingTests : IDisposable
         Assert.Equal(37, result.TotalCount);
         Assert.Equal(1, result.FilteredCount);
         Assert.Equal(1, result.BlockedCount);
+        Assert.Equal(0, result.FlaggedCount); // flagged, but Done: outside the attention total like its points
         Assert.Equal(0, result.RemainingPoints);
         Assert.Equal(["debug", "open"], result.Tags);
         Assert.Equal(["base:claude", "base:codex"], result.Assignees);

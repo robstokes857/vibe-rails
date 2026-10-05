@@ -38,6 +38,12 @@ public sealed class PromptTooLongException(string message, int actualChars, int 
         "Shorten the message, or reduce the output of the steps it references.",
         actualChars, maxChars);
 
+    /// <summary>A resumed session's recap plus its attached Board card references is over budget.</summary>
+    public static PromptTooLongException ForResumeContext(int actualChars, int maxChars, int cardCount) => new(
+        $"The resume recap plus its {cardCount:N0} attached Board card references total {actualChars:N0} characters, " +
+        $"over the {maxChars:N0} character limit. Shorten the recap, or detach cards from the source session.",
+        actualChars, maxChars);
+
     /// <summary>
     /// The message fits, but shell-escaping it pushed the assembled launch command past what the
     /// OS will accept. Quote-heavy prompts double (or quadruple) in size, so the two limits are

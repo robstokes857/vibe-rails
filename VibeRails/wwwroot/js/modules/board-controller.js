@@ -159,16 +159,21 @@ export class BoardController {
     async openCardFromNavigation(cardId) {
         const root = this.root;
         let card = null;
+        let isCurrentProject = false;
         try {
-            card = await BoardApi.getBoardCardAsync(cardId);
+            // History can refer to another local project. Resolve immutable identity first.
+            const detail = await BoardApi.getLocalBoardCardAsync(cardId);
+            card = detail.card;
+            isCurrentProject = detail.isCurrentProject === true;
         } catch (error) {
             if (root === this.root) this.app.showToast('Board', error?.message || 'That card could not be opened.', 'error');
         }
         if (root !== this.root || !root?.isConnected || this.app.currentView !== 'board') return;
-        if (card?.boardId) this.state.boardId = card.boardId;
-        await this.refresh({ restoreSelection: !card?.boardId });
+        if (card?.boardId && isCurrentProject) this.state.boardId = card.boardId;
+        await this.refresh({ restoreSelection: !card?.boardId || !isCurrentProject });
         if (card && root === this.root && root.isConnected && this.app.currentView === 'board') {
-            await this.openCardEditor(card.id);
+            if (isCurrentProject) await this.openCardEditor(card.id);
+            else await this.openLocalCard(card.id);
         }
     }
 
@@ -594,19 +599,22 @@ export class BoardController {
     }
 
     stats() {
+        // The flagged count replaced the remaining-points total and keeps its scope: active
+        // filters, cards that paging has not loaded yet, and open lanes only. A flag left on a
+        // completed card is not a call for attention. The server page applies the same lane rule.
         if (this.cardPage) return {
             cards: this.cardPage.filteredCount,
-            points: this.cardPage.remainingPoints,
+            flagged: Number(this.cardPage.flaggedCount) || 0,
             blocked: this.cardPage.blockedCount
         };
         const visible = this.filteredCards();
-        const remaining = visible.filter(card => {
+        const open = visible.filter(card => {
             const column = this.columnById(card.columnId);
             return column && !this.isDoneLane(column);
         });
         return {
             cards: visible.length,
-            points: remaining.reduce((sum, card) => sum + (Number(card.points) || 0), 0),
+            flagged: open.filter(card => card.flagged).length,
             blocked: visible.filter(card => card.blocked).length
         };
     }
@@ -702,7 +710,7 @@ export class BoardController {
         if (statsHost) {
             statsHost.innerHTML = `
                 <span class="board-stat"><strong>${stats.cards}</strong> ${stats.cards === 1 ? 'card' : 'cards'}</span>
-                <span class="board-stat"><strong>${stats.points}</strong> pts left</span>
+                <span class="board-stat${stats.flagged ? ' is-flagged' : ''}" title="Cards that need your attention"><strong>${stats.flagged}</strong> flagged</span>
                 <span class="board-stat${stats.blocked ? ' is-warn' : ''}"><strong>${stats.blocked}</strong> blocked</span>`;
         }
 
@@ -792,7 +800,6 @@ export class BoardController {
                             <span class="board-type-chip" data-type="${escapeHtml(type.value)}"
                                 title="${escapeHtml(type.label)}">${escapeHtml(type.label)}</span>
                             <span class="board-priority-chip" data-priority="${escapeHtml(card.priority)}">${escapeHtml(card.priority)}</span>
-                            ${card.points != null ? `<span class="board-points" title="Story points">${escapeHtml(card.points)}</span>` : ''}
                         </span>
                     </div>
                     <h3 class="board-card-title">${escapeHtml(card.title)}</h3>
@@ -831,7 +838,8 @@ export class BoardController {
             .map((column, index) => {
                 const cards = visible
                     .filter(card => card.columnId === column.id)
-                    .sort((a, b) => a.position - b.position);
+                    .sort((a, b) => Number(Boolean(b.flagged)) - Number(Boolean(a.flagged))
+                        || a.position - b.position);
                 const page = this.cardPage?.lanes?.find(lane => lane.columnId === column.id);
                 const total = page?.totalCount ?? this.state.cards.filter(card => card.columnId === column.id).length;
                 const more = page?.hasMore ? `<button type="button" class="btn btn-sm btn-outline-secondary board-load-more w-100"

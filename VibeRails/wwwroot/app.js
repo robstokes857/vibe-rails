@@ -107,8 +107,7 @@ export class VibeControlApp {
         // race the activity subscription during startup.
         this.appEventClient.start();
 
-        this.initSidebarToggle();
-        this.applyNavbarsCollapsedState(false);
+        this.applyNavbarsCollapsedState();
         // Git is optional. When not in a git repo, show a small non-blocking helper bar
         // but let the app load and run normally against the launch directory.
         if (!this.data.isInGit) {
@@ -265,7 +264,7 @@ export class VibeControlApp {
     }
 
     setupVSCodeIntegration() {
-        // Both the top nav and the sidebar render an exit button; wire them all.
+        // The top navigation renders the exit button.
         const exitBtns = document.querySelectorAll('.nav-exit-btn-sm');
         exitBtns.forEach((exitBtn) => {
             exitBtn.addEventListener('click', () => {
@@ -439,24 +438,7 @@ export class VibeControlApp {
                 this.navigate('settings', {}, { resetStack: true });
             }
 
-            const navLayoutSwitch = e.target.closest('[data-action="switch-nav-layout"]');
-            if (navLayoutSwitch) {
-                e.preventDefault();
-                const navLayout = window.VibeRailsNavLayout;
-                const nextLayout = navLayoutSwitch.dataset.navLayoutTarget === 'side'
-                    ? navLayout?.SIDE
-                    : navLayout?.TOP;
-                navLayout?.setLayout?.(nextLayout);
-
-                window.dispatchEvent(new Event('resize'));
-                this.terminalController?.refreshLayout?.();
-                setTimeout(() => {
-                    window.dispatchEvent(new Event('resize'));
-                    this.terminalController?.refreshLayout?.();
-                }, 260);
-            }
-
-            const goNav = e.target.closest('.app-sidebar [data-action="navigate"], .app-subnav [data-action="navigate"]');
+            const goNav = e.target.closest('.app-subnav [data-action="navigate"]');
             if (goNav) {
                 e.preventDefault();
                 const view = goNav.dataset.view;
@@ -465,58 +447,7 @@ export class VibeControlApp {
         });
     }
 
-    initSidebarToggle() {
-        const toggleBtn = document.getElementById('sidebar-toggle-btn');
-
-        // The sidebar collapse signal is the <html>.sidebar-collapsed class; the
-        // inline <head> script already applies it before first paint. Re-sync here
-        // in case storage changed elsewhere, then keep it in sync on toggle.
-        //
-        // The read is guarded like the write below and like nav-layout.js: a webview or
-        // browser with storage denied throws SecurityError on getItem, and this runs during
-        // init, so an unguarded throw would abort app startup. Fall back to whatever the
-        // pre-paint <head> script already put on <html>.
-        const readCollapsed = () => {
-            try {
-                return localStorage.getItem('viberails_sidebar_collapsed') === 'true';
-            } catch (_) {
-                return document.documentElement.classList.contains('sidebar-collapsed');
-            }
-        };
-
-        const syncFromStorage = () => {
-            const collapsed = readCollapsed();
-            document.documentElement.classList.toggle('sidebar-collapsed', collapsed);
-            return collapsed;
-        };
-
-        const toggleSidebar = () => {
-            if (!document.getElementById('app-sidebar')) return;
-            const collapsed = syncFromStorage();
-            const next = !collapsed;
-            document.documentElement.classList.toggle('sidebar-collapsed', next);
-            try {
-                localStorage.setItem('viberails_sidebar_collapsed', String(next));
-            } catch (_) { /* ignore storage errors */ }
-
-            // Notify terminal and responsive components of the size change, both
-            // immediately and after the CSS transition settles.
-            window.dispatchEvent(new Event('resize'));
-            this.terminalController?.refreshLayout?.();
-
-            setTimeout(() => {
-                window.dispatchEvent(new Event('resize'));
-                this.terminalController?.refreshLayout?.();
-            }, 260);
-        };
-
-        syncFromStorage();
-        toggleBtn?.addEventListener('click', toggleSidebar);
-        this.toggleSidebar = toggleSidebar;
-    }
-
     applyNavbarsCollapsedState() {
-        // Kept for compatibility; the sidebar collapse signal is now <html>.sidebar-collapsed.
         window.dispatchEvent(new Event('resize'));
         this.terminalController?.refreshLayout?.();
     }
@@ -1780,13 +1711,6 @@ export class VibeControlApp {
                 if (this.navigationStack.length > 1) {
                     this.goBack();
                 }
-            } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
-                const active = document.activeElement;
-                if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable || active.classList.contains('inputarea'))) {
-                    return;
-                }
-                e.preventDefault();
-                this.toggleSidebar?.();
             }
         });
     }

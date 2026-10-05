@@ -17,6 +17,271 @@ namespace Tests.Services.Terminal;
 
 public sealed class AutomationTabCapacityTests
 {
+    [Theory]
+    [InlineData("503")]
+    [InlineData("timeout")]
+    [InlineData("transport")]
+    [InlineData("json")]
+    public async Task AgentCloseRetriesTransientStatusFailureWithoutAnotherEvent(string failure)
+    {
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var probes = 0;
+        using var http = new StatusHandler(request =>
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith("/status") && Interlocked.Increment(ref probes) <= 2)
+            {
+                if (failure == "timeout") throw new TaskCanceledException("status deadline");
+                if (failure == "transport") throw new HttpRequestException("connection reset");
+                return new HttpResponseMessage(failure == "503" ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.OK)
+                    { Content = new StringContent("invalid json") };
+            }
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(
+                request.RequestUri.AbsolutePath.EndsWith("/start") ? "{\"hasActiveSession\":true,\"sessionId\":\"agent\"}" : "{\"hasActiveSession\":false}") };
+        });
+        var bus = new AppEventBus();
+        var closed = new TaskCompletionSource<AppEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var events = new ConcurrentQueue<AppEvent>();
+        using var subscription = bus.Subscribe(e => { events.Enqueue(e); closed.TrySetResult(e); });
+        var host = Host(services, http, bus);
+        var registry = Registry(host);
+        using var child = StartHarmlessProcess();
+        try
+        {
+            AddChild(registry, "caller", child, 1, null);
+            await host.StartSessionAsync("caller", new(Cli: "codex"), TestContext.Current.CancellationToken);
+            Assert.False(await host.CloseAgentTabAsync("caller", "agent"));
+            // A duplicate notification must not lose the pending request or remove twice.
+            Assert.False(await host.CloseAgentTabAsync("caller", "agent"));
+            var result = await closed.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+            Assert.Equal("agent_terminal_closed", result.Type);
+            Assert.Equal("agent", result.Payload.GetProperty("sessionId").GetString());
+            Assert.Single(events);
+            Assert.False(registry.Contains("caller"));
+            Assert.True(child.HasExited);
+        }
+        finally
+        {
+            registry.Clear();
+            await host.DisposeAsync();
+            if (!child.HasExited) { child.Kill(entireProcessTree: true); await child.WaitForExitAsync(TestContext.Current.CancellationToken); }
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PendingAgentCloseDoesNotFollowAReplacementOrUncertainStart(bool startFails)
+    {
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var starts = 0;
+        var probes = 0;
+        using var http = new StatusHandler(request =>
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith("/start"))
+            {
+                if (++starts == 2 && startFails) throw new HttpRequestException("unknown start result");
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(
+                    starts == 1 ? "{\"hasActiveSession\":true,\"sessionId\":\"agent\"}" : "{\"hasActiveSession\":true,\"sessionId\":\"replacement\"}") };
+            }
+            Assert.EndsWith("/status", request.RequestUri.AbsolutePath);
+            Interlocked.Increment(ref probes);
+            return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+        });
+        var host = Host(services, http);
+        var registry = Registry(host);
+        using var child = StartHarmlessProcess();
+        try
+        {
+            AddChild(registry, "caller", child, 1, null);
+            await host.StartSessionAsync("caller", new(Cli: "codex"), TestContext.Current.CancellationToken);
+            Assert.False(await host.CloseAgentTabAsync("caller", "agent"));
+            var replacement = host.StartSessionAsync("caller", new(Cli: "codex"), TestContext.Current.CancellationToken);
+            if (startFails) await Assert.ThrowsAsync<InvalidOperationException>(() => replacement);
+            else await replacement;
+            var pending = (HashSet<string>)registry["caller"]!.GetType().GetProperty("PendingAgentClosures")!.GetValue(registry["caller"])!;
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            while (pending.Count != 0) await Task.Delay(20, timeout.Token);
+            Assert.Equal(1, probes); // A stale retry cannot probe or close the replacement.
+            Assert.True(registry.Contains("caller"));
+            Assert.False(child.HasExited);
+        }
+        finally
+        {
+            registry.Clear();
+            await host.DisposeAsync();
+            if (!child.HasExited) { child.Kill(entireProcessTree: true); await child.WaitForExitAsync(TestContext.Current.CancellationToken); }
+        }
+    }
+
+    [Fact]
+    public async Task AgentCloseRemovesOnlyItsHostOnceAndAnnouncesRetainedSessionIdentity()
+    {
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var requests = new List<string>();
+        using var http = new StatusHandler(request =>
+        {
+            requests.Add(request.RequestUri!.AbsolutePath);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(
+                request.RequestUri.AbsolutePath.EndsWith("/start") ? "{\"hasActiveSession\":true,\"sessionId\":\"agent\"}" : "{\"hasActiveSession\":false}") };
+        });
+        var bus = new AppEventBus();
+        var events = new List<AppEvent>();
+        using var subscription = bus.Subscribe(events.Add);
+        var host = Host(services, http, bus);
+        var registry = Registry(host);
+        using var child = StartHarmlessProcess();
+        using var unrelated = new Process();
+        try
+        {
+            AddChild(registry, "caller", child, 1, null);
+            AddChild(registry, "ordinary", unrelated, 2, null);
+            await host.StartSessionAsync("caller", new(Cli: "codex"), TestContext.Current.CancellationToken);
+            Assert.False(await host.CloseAgentTabAsync("caller", "old-agent"));
+            Assert.False(child.HasExited);
+            Assert.True(await host.CloseAgentTabAsync("caller", "agent"));
+            Assert.False(await host.CloseAgentTabAsync("caller", "agent"));
+            Assert.True(child.HasExited);
+            Assert.True(registry.Contains("ordinary"));
+            Assert.False(registry.Contains("caller"));
+            var closed = Assert.Single(events);
+            Assert.Equal("agent_terminal_closed", closed.Type);
+            Assert.Equal("caller", closed.Payload.GetProperty("tabId").GetString());
+            Assert.Equal("agent", closed.Payload.GetProperty("sessionId").GetString());
+            Assert.Equal(new[] { "/api/v1/terminal/start", "/api/v1/terminal/status", "/api/v1/terminal/stop" }, requests);
+            // No session/Board store is registered: removal never deletes recordings or links.
+        }
+        finally
+        {
+            registry.Clear();
+            await host.DisposeAsync();
+            if (!child.HasExited) { child.Kill(entireProcessTree: true); await child.WaitForExitAsync(TestContext.Current.CancellationToken); }
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DelayedAgentCloseCannotKillAReplacementOrAnUncertainStart(bool startFails)
+    {
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var starts = 0;
+        using var http = new StatusHandler(async (request, _) =>
+        {
+            Assert.EndsWith("/start", request.RequestUri!.AbsolutePath); // Stale close must not even query/stop it.
+            if (++starts == 2)
+            {
+                started.TrySetResult();
+                await release.Task;
+                if (startFails) throw new HttpRequestException("start result unknown");
+            }
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(
+                starts == 1 ? "{\"hasActiveSession\":true,\"sessionId\":\"old\"}" : "{\"hasActiveSession\":true,\"sessionId\":\"replacement\"}") };
+        });
+        var host = Host(services, http);
+        var registry = Registry(host);
+        using var child = StartHarmlessProcess();
+        try
+        {
+            AddChild(registry, "caller", child, 1, null);
+            await host.StartSessionAsync("caller", new(Cli: "codex"), TestContext.Current.CancellationToken);
+            var replacement = host.StartSessionAsync("caller", new(Cli: "codex"), TestContext.Current.CancellationToken);
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+            var close = host.CloseAgentTabAsync("caller", "old");
+            Assert.False(close.IsCompleted);
+            release.TrySetResult();
+            if (startFails) await Assert.ThrowsAsync<InvalidOperationException>(() => replacement);
+            else await replacement;
+            Assert.False(await close);
+            Assert.False(await host.CloseAgentTabAsync("caller", "old"));
+            Assert.True(registry.Contains("caller"));
+            Assert.False(child.HasExited);
+        }
+        finally
+        {
+            release.TrySetResult();
+            registry.Clear();
+            await host.DisposeAsync();
+            if (!child.HasExited) { child.Kill(entireProcessTree: true); await child.WaitForExitAsync(TestContext.Current.CancellationToken); }
+        }
+    }
+
+    [Fact]
+    public async Task SessionStartCannotSlipBetweenAgentCloseValidationAndHostRemoval()
+    {
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var checking = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var starts = 0;
+        using var http = new StatusHandler(async (request, _) =>
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith("/start"))
+            {
+                starts++;
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"hasActiveSession\":true,\"sessionId\":\"agent\"}") };
+            }
+            if (request.RequestUri.AbsolutePath.EndsWith("/status"))
+            {
+                checking.TrySetResult();
+                await release.Task;
+            }
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"hasActiveSession\":false}") };
+        });
+        var host = Host(services, http);
+        var registry = Registry(host);
+        using var child = StartHarmlessProcess();
+        try
+        {
+            AddChild(registry, "caller", child, 1, null);
+            await host.StartSessionAsync("caller", new(Cli: "codex"), TestContext.Current.CancellationToken);
+            var close = host.CloseAgentTabAsync("caller", "agent");
+            await checking.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+            var start = host.StartSessionAsync("caller", new(Cli: "codex"), TestContext.Current.CancellationToken);
+            Assert.False(start.IsCompleted);
+            release.TrySetResult();
+            Assert.True(await close);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => start);
+            Assert.Equal(1, starts);
+            Assert.True(child.HasExited);
+        }
+        finally
+        {
+            release.TrySetResult();
+            registry.Clear();
+            await host.DisposeAsync();
+            if (!child.HasExited) { child.Kill(entireProcessTree: true); await child.WaitForExitAsync(TestContext.Current.CancellationToken); }
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AgentCloseKeepsAnActiveOrUnavailableChild(bool active)
+    {
+        using var services = new ServiceCollection().BuildServiceProvider();
+        using var http = new StatusHandler(request => new HttpResponseMessage(
+            request.RequestUri!.AbsolutePath.EndsWith("/start") || active ? HttpStatusCode.OK : HttpStatusCode.ServiceUnavailable)
+        { Content = new StringContent("{\"hasActiveSession\":true,\"sessionId\":\"agent\"}") });
+        var host = Host(services, http);
+        var registry = Registry(host);
+        using var child = StartHarmlessProcess();
+        try
+        {
+            AddChild(registry, "caller", child, 1, null);
+            await host.StartSessionAsync("caller", new(Cli: "codex"), TestContext.Current.CancellationToken);
+            Assert.False(await host.CloseAgentTabAsync("caller", "agent"));
+            Assert.True(registry.Contains("caller"));
+            Assert.False(child.HasExited);
+        }
+        finally
+        {
+            registry.Clear();
+            await host.DisposeAsync();
+            if (!child.HasExited) { child.Kill(entireProcessTree: true); await child.WaitForExitAsync(TestContext.Current.CancellationToken); }
+        }
+    }
+
     [Fact]
     public async Task TabListReportsFinishedWorkflowAndBoundsAnUnresponsiveChild()
     {
@@ -278,11 +543,11 @@ public sealed class AutomationTabCapacityTests
         }
     }
 
-    private static TerminalTabHostService Host(ServiceProvider services, HttpMessageHandler http)
+    private static TerminalTabHostService Host(ServiceProvider services, HttpMessageHandler http, IAppEventBus? events = null)
     {
         var factory = new Mock<IHttpClientFactory>();
         factory.Setup(value => value.CreateClient(It.IsAny<string>())).Returns(() => new HttpClient(http, disposeHandler: false));
-        return new TerminalTabHostService(factory.Object, Mock.Of<ILocalClientTracker>(), Mock.Of<IAppEventBus>(),
+        return new TerminalTabHostService(factory.Object, Mock.Of<ILocalClientTracker>(), events ?? Mock.Of<IAppEventBus>(),
             Mock.Of<ILocalToolApiContext>(), Mock.Of<ITokenSavingsStore>(), services.GetRequiredService<IServiceScopeFactory>());
     }
 

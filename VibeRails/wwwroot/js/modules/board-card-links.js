@@ -1,7 +1,7 @@
 import { escapeHtml } from './utils.js';
 import { BoardApi } from './board-api.js';
 import { cardLabel } from './board-card-label.js';
-import { cardLocationHtml } from './board-search.js';
+import { CardSearchPicker, cardPickerText } from './board-card-search-picker.js';
 
 export function renderCardLinksSection(card) {
     return `<section class="board-side-section" data-board-card-links>
@@ -21,13 +21,6 @@ export function renderCardLinksSection(card) {
     </section>`;
 }
 
-function cardText(card, currentBoardId) {
-    return `<span class="board-side-text">
-        <span class="board-side-title">${escapeHtml(cardLabel(card))}</span>
-        ${cardLocationHtml(card, currentBoardId)}
-    </span>`;
-}
-
 /** Owns only the links rail. It never reloads or saves the surrounding card form. */
 export function bindCardLinks(editor, card, { openCard, showError, onChanged, api = BoardApi }) {
     const host = editor.querySelector('[data-board-card-links]');
@@ -35,24 +28,27 @@ export function bindCardLinks(editor, card, { openCard, showError, onChanged, ap
     const list = host.querySelector('[data-board-linked-cards]');
     const picker = host.querySelector('[data-board-link-picker]');
     const search = host.querySelector('[data-board-link-search]');
-    const results = host.querySelector('[data-board-link-results]');
-    const status = host.querySelector('[data-board-link-status]');
     const lifetime = new AbortController();
-    let searchAbort = null;
-    let timer = null;
-    let generation = 0;
     let busy = false;
     let disposed = false;
     // Other rail operations may fetch fresh card data; keep this rail's current list independent.
     let links = [...(card?.linkedCards || [])];
-    let candidates = [];
+    const cardSearch = new CardSearchPicker(host, {
+        search: async (query, options) => (await api.getCardLinkCandidatesAsync(card.id, query, options))
+            .filter(candidate => !links.some(link => link.id === candidate.id)),
+        onSelect: candidate => changeLink(candidate.id, false),
+        isActive: () => !busy && picker.open,
+        currentBoardId: card.boardId,
+        action: 'Link',
+        emptyText: 'No matching cards available to link.'
+    });
 
     function renderLinks() {
         host.querySelector('[data-board-count="linked-cards"]').textContent = String(links.length);
         list.innerHTML = links.length ? links.map(link => `<div class="board-side-row">
             <button type="button" class="board-side-main" data-board-open-linked-card="${escapeHtml(link.id)}"
                 title="${escapeHtml(cardLabel(link))}" aria-label="Open ${escapeHtml(cardLabel(link))}">
-                ${cardText(link, card.boardId)}
+                ${cardPickerText(link, card.boardId)}
             </button>
             <button type="button" class="board-side-remove" data-board-unlink-card="${escapeHtml(link.id)}"
                 title="Unlink ${escapeHtml(link.displayId || link.key)}" aria-label="Unlink ${escapeHtml(link.displayId || link.key)}">
@@ -61,48 +57,16 @@ export function bindCardLinks(editor, card, { openCard, showError, onChanged, ap
         </div>`).join('') : (card?.id ? '<p class="board-side-empty">No cards linked.</p>' : '');
     }
 
-    function cancelSearch() {
-        generation++;
-        clearTimeout(timer);
-        searchAbort?.abort();
-    }
-
-    async function loadCandidates() {
-        cancelSearch();
-        if (disposed || busy || !picker?.open) return;
-        const current = generation;
-        searchAbort = new AbortController();
-        results.innerHTML = '';
-        status.textContent = 'Finding cards…';
-        try {
-            const found = await api.getCardLinkCandidatesAsync(card.id, search.value.trim(), { signal: searchAbort.signal });
-            if (disposed || current !== generation) return;
-            const cards = candidates = found.filter(candidate => !links.some(link => link.id === candidate.id));
-            results.innerHTML = cards.map(candidate => `<div class="board-side-row">
-                <button type="button" class="board-side-main" data-board-link-card="${escapeHtml(candidate.id)}"
-                    title="${escapeHtml(cardLabel(candidate))}" aria-label="Link ${escapeHtml(cardLabel(candidate))}">
-                    <i class="fa-solid fa-plus board-side-icon" aria-hidden="true"></i>${cardText(candidate, card.boardId)}
-                </button>
-            </div>`).join('');
-            status.textContent = cards.length
-                ? (cards.length === 50 ? 'Showing 50 cards. Refine your search to find more.' : 'Cards from all local boards. This project appears first.')
-                : 'No matching cards available to link.';
-        } catch (error) {
-            if (disposed || current !== generation || error?.name === 'AbortError') return;
-            status.textContent = error?.message || 'Could not find cards. Try searching again.';
-        }
-    }
-
     async function changeLink(targetId, remove) {
         if (busy || disposed) return;
         busy = true;
-        cancelSearch();
+        cardSearch.cancel();
         host.querySelectorAll('button, input').forEach(control => { control.disabled = true; });
         try {
             if (!card.id) {
                 if (remove) links = links.filter(link => link.id !== targetId);
                 else {
-                    const target = candidates.find(candidate => candidate.id === targetId);
+                    const target = cardSearch.candidates.find(candidate => candidate.id === targetId);
                     if (!target || links.some(link => link.id === targetId)) return;
                     if (links.length >= 50) throw new Error('A new card can link up to 50 cards.');
                     links = [...links, target];
@@ -126,7 +90,7 @@ export function bindCardLinks(editor, card, { openCard, showError, onChanged, ap
             busy = false;
             if (!disposed) {
                 host.querySelectorAll('button, input').forEach(control => { control.disabled = false; });
-                void loadCandidates();
+                void cardSearch.load();
             }
         }
     }
@@ -135,26 +99,19 @@ export function bindCardLinks(editor, card, { openCard, showError, onChanged, ap
         const button = event.target.closest('button');
         if (!button || busy || disposed) return;
         if (button.dataset.boardOpenLinkedCard) void openCard(button.dataset.boardOpenLinkedCard);
-        if (button.dataset.boardLinkCard) void changeLink(button.dataset.boardLinkCard, false);
         if (button.dataset.boardUnlinkCard) void changeLink(button.dataset.boardUnlinkCard, true);
     }, { signal: lifetime.signal });
     picker?.addEventListener('toggle', () => {
-        cancelSearch();
+        cardSearch.cancel();
         if (picker.open) {
             search.focus();
-            void loadCandidates();
+            void cardSearch.load();
         }
-    }, { signal: lifetime.signal });
-    search?.addEventListener('input', () => {
-        cancelSearch();
-        results.innerHTML = '';
-        status.textContent = 'Finding cards…';
-        timer = setTimeout(() => void loadCandidates(), 200);
     }, { signal: lifetime.signal });
     renderLinks();
     return () => {
         disposed = true;
-        cancelSearch();
+        cardSearch.dispose();
         lifetime.abort();
     };
 }

@@ -681,7 +681,28 @@ export class TerminalManager {
     }
 
     removeAutomationTab(tabId) {
+        this.removeClosedTab(tabId);
+    }
+
+    removeAgentTab(tabId, sessionId) {
+        const state = this.tabs.get(tabId)?.state;
+        if (state?.sessionId && state.sessionId !== sessionId) return false;
+        if (this.closedAutomationTabs.has(tabId)) return true;
+        this.removeClosedTab(tabId);
+        this.automationMenu.refresh();
+        this.updateUi();
+        return true;
+    }
+
+    removeClosedTab(tabId) {
+        // Includes agent-closed ordinary tabs: all restore/adoption paths consult this set.
         this.closedAutomationTabs.add(tabId);
+        const pending = this._pendingCloses?.get(tabId);
+        if (pending) {
+            clearTimeout(pending.timeoutId);
+            this._pendingCloses.delete(tabId);
+            this._refreshUndoControl();
+        }
         this.automationTabs.delete(tabId);
         const tab = this.tabs.get(tabId);
         if (tab) {
@@ -3312,6 +3333,7 @@ export class TerminalController {
             focusView: options.focusView === true || !!container.closest('[data-view="terminal-focus"]')
         });
         this.manager = manager;
+        for (const tabId of this._agentClosedTabs || []) manager.closedAutomationTabs.add(tabId);
 
         const initPromise = manager.initialize();
         this.managerInitPromise = initPromise;
@@ -3342,6 +3364,19 @@ export class TerminalController {
      * Safe to call before the manager is created — handlers null-check this.manager.
      */
     bindSessionEvents(appEventClient) {
+        appEventClient.on('agent_terminal_closed', payload => {
+            const tabId = cleanString(payload?.tabId);
+            const sessionId = cleanString(payload?.sessionId);
+            if (!tabId || !sessionId) return;
+            this._agentClosedTabs ??= new Set();
+            if (this._agentClosedTabs.has(tabId)) return;
+            if (this.manager?.removeAgentTab(tabId, sessionId) === false) return;
+            this._agentClosedTabs.add(tabId);
+            this.manager?._touchHistory(sessionId);
+            this.app?.showToast('Terminal closed',
+                'Terminal closed because the agent called end_agent_session. Recording remains available in Replay and linked Board cards.',
+                'info', { requireDismiss: true });
+        });
         appEventClient.on('automation_terminal_closed', payload => {
             const tabId = cleanString(payload?.tabId);
             if (!tabId) return;

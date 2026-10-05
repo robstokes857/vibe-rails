@@ -62,6 +62,13 @@ The tests cover compact actions, file-to-map selection, visible domain links and
 saved metrics, radar keyboard access, themes/reduced motion, independent scrolling, narrow layouts,
 failure/empty states, request cancellation and cleanup, exclusion/restore flow, and agent choice.
 
+### Focused Page Header Tests (No Backend Required)
+
+From `UITests`, run `npx playwright test --config playwright.page-headers.config.js`.
+Uses all five production views with intercepted APIs to compare title typography and header
+treatment at desktop, tablet and phone widths, exercise retained controls, and verify theme colors.
+The static fixture never opens application databases or launches a CLI.
+
 ### Focused Board UX Tests (No Backend Required)
 
 ```powershell
@@ -109,10 +116,10 @@ It opens no application database and launches no CLI.
 
 From `UITests`, run `npx playwright test --config playwright.scripts.config.js`.
 Uses the production Automation page, Monaco and xterm with intercepted APIs/WebSockets.
-Checks the terminal prompt stays inside desktop and short windows with top/side navigation,
+Checks the terminal prompt stays inside desktop and short windows under the top navigation,
 splitter resizing, navigation cleanup, scripts toolbar alignment and narrow-screen guidance.
 Verbose Run/Close flows also check usable editor space and drawer scrolling at 1000×500
-and 1000×400 with both navigation layouts.
+and 1000×400. A stored side-navigation preference must leave the top bar in place.
 It never reads or changes real scripts, signing state, terminals or application databases.
 
 ### Focused account sign-in tests (No Backend Required)
@@ -120,8 +127,7 @@ It never reads or changes real scripts, signing state, terminals or application 
 From `UITests`, run `npx playwright test --config playwright.remote-link.config.js`.
 This serves the real frontend with local API fixtures and an intercepted sign-in page. It covers
 browser popup behavior, copy code, the VS Code bridge, narrow layout, completion alongside unsaved
-settings, cancellation, and unavailable/denied/expired requests. It also checks signed-out nav
-links in both layouts, the Settings account summary after reload, cross-tab completion and escaped
+settings, cancellation, and unavailable/denied/expired requests. It also checks the signed-out top-navigation link, the Settings account summary after reload, cross-tab completion and escaped
 emails. It opens no application database
 and creates no account or API key.
 

@@ -273,6 +273,8 @@ namespace VibeRails.DTOs
         public int? BlockedCount { get; init; }
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public long? RemainingPoints { get; init; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? FlaggedCount { get; init; }
     }
     public record BoardLinkedCardDto(string Id, string Key, string Title, string BoardId, string BoardName, string ColumnId, string ColumnName, string? DisplayId = null, string? ProjectPath = null, bool IsCurrentProject = true);
     public record BoardCardLinkCandidatesResponse(List<BoardLinkedCardDto> Cards);
@@ -1431,7 +1433,8 @@ namespace VibeRails.DTOs
     // Chat History DTOs
     public record ChatSummaryResponse(
         string Summary,
-        string Transcript
+        string Transcript,
+        IReadOnlyList<ChatHistoryCard>? BoardCards = null
     );
 
     public record ChatHistoryTranscriptResponse(
@@ -1749,6 +1752,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(TerminalTabStatusResponse))]
     [JsonSerializable(typeof(AutomationTerminalStartedPayload))]
     [JsonSerializable(typeof(AutomationTerminalClosedPayload))]
+    [JsonSerializable(typeof(AgentSessionClosedPayload))]
     [JsonSerializable(typeof(List<TerminalTabStatusResponse>))]
     [JsonSerializable(typeof(TerminalTabListResponse))]
     [JsonSerializable(typeof(StartTerminalRequest))]

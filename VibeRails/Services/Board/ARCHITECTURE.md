@@ -393,11 +393,17 @@ does not offer the flag yet; the REST shape is ready for it.
 
 ## VB-29: activity ordering and Automation sessions (2026-09-23)
 
-New cards start at position zero in their selected lane (Backlog by default). Card field updates,
+Flagged cards precede unflagged cards in every lane (VIBE-78). Store reads, page selection and
+continuation hashes all use flag first, then position/number; rendering preserves that order.
+Position writes stably group flagged cards first, including explicit drag moves. Clearing a flag
+returns the card to the unflagged group. Older writers are handled by the read projection without
+a schema change or backfill.
+
+New cards start at the top of their flag group in their selected lane (Backlog by default). Card field updates,
 comments, notes, files, session links, commit links and linked-card changes move the affected card
-to the top in the same store transaction. Other cards retain their relative ordering and activity
+to the top of their flag group in the same store transaction. Other cards retain their relative ordering and activity
 timestamps. Positions stay dense. An explicit drag position is preserved until the next card
-update; moves without an explicit position enter at the top of the destination lane.
+update, within its flag group; moves without an explicit position enter at the top of that group.
 
 The active-session action is **Go to agent**. It focuses the existing tab without saving the card
 or launching another agent. The same action handles a session discovered during Start work's

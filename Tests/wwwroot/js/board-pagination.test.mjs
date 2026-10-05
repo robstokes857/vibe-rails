@@ -19,12 +19,35 @@ function harness() {
     controller.cardPage = {
         lanes: [{ columnId: 'done', totalCount: 120, filteredCount: 120, nextOffset: 30, hasMore: true,
             continuationToken: 'order-a' }],
-        filteredCount: 120, blockedCount: 2, remainingPoints: 8,
+        filteredCount: 120, blockedCount: 2, remainingPoints: 8, flaggedCount: 3,
         tags: ['tag-on-unloaded-card'], assignees: []
     };
     controller._cardPageGeneration = controller._refreshGeneration;
     return { controller, requests, toasts };
 }
+
+test('each lane renders flagged cards first while preserving order within each group', () => {
+    const { controller } = harness();
+    const host = { innerHTML: '' };
+    controller.state.columns = ['open', 'done'].map((id, position) => ({ id, position, name: id, color: '#123456' }));
+    controller.state.cards = controller.state.columns.flatMap(({ id }) => [
+        { id: `${id}-plain-first`, columnId: id, position: 0 },
+        { id: `${id}-flag-second`, columnId: id, position: 8, flagged: true },
+        { id: `${id}-plain-second`, columnId: id, position: 1, flagged: false },
+        { id: `${id}-flag-first`, columnId: id, position: 3, flagged: true }
+    ]);
+    controller.query = selector => selector === '[data-board-lanes]' ? host : null;
+    controller.captureScroll = () => ({});
+    controller.restoreScroll = () => {};
+    controller.bindDragAndDrop = () => {};
+    controller.bindLaneInfiniteScroll = () => {};
+    controller.laneAgents = { button: () => '', mount() {}, updateActivity() {} };
+    const rendered = [];
+    controller.renderCard = card => { rendered.push(card.id); return card.id; };
+    BoardController.prototype.renderLanes.call(controller);
+    assert.deepEqual(rendered, ['open', 'done'].flatMap(id =>
+        [`${id}-flag-first`, `${id}-flag-second`, `${id}-plain-first`, `${id}-plain-second`]));
+});
 
 test('scroll requests one page at a time, deduplicates activity, and advances server offset', async () => {
     const { controller, requests } = harness();
@@ -119,10 +142,36 @@ test('scroll cannot start an old-offset request while a full refresh is pending'
     assert.deepEqual(controller.state.cards.map(card => card.id), ['fresh', 'next']);
 });
 
+test('the header shows a labeled flagged count for open lanes, including unloaded cards', () => {
+    const { controller } = harness();
+    const stats = { innerHTML: '' };
+    controller.query = selector => selector === '[data-board-stats]' ? stats : null;
+    controller.renderToolbar();
+    assert.match(stats.innerHTML, /<strong>3<\/strong> flagged/);
+    assert.match(stats.innerHTML, /is-flagged/);
+    assert.match(stats.innerHTML, /Cards that need your attention/);
+    assert.doesNotMatch(stats.innerHTML, /pts/);
+
+    controller.cardPage = null;
+    controller.state.columns = [
+        { id: 'open', name: 'In Progress' },
+        { id: 'done', name: 'Done' }
+    ];
+    controller.state.cards = [
+        { id: 'open-flag', columnId: 'open', flagged: true, blocked: false, points: 5 },
+        { id: 'done-flag', columnId: 'done', flagged: true, blocked: false, points: 8 },
+        { id: 'open-plain', columnId: 'open', flagged: false, blocked: true, points: 2 }
+    ];
+    // Same scope as the points total it replaced: the flag on the Done card is not counted.
+    assert.deepEqual(controller.stats(), { cards: 3, blocked: 1, flagged: 1 });
+    controller.renderToolbar();
+    assert.match(stats.innerHTML, /<strong>1<\/strong> flagged/);
+});
+
 test('counts, filter options, and search results include unloaded cards', async () => {
     const { controller, requests } = harness();
     controller.state.filters.q = 'deep history';
-    assert.deepEqual(controller.stats(), { cards: 120, blocked: 2, points: 8 });
+    assert.deepEqual(controller.stats(), { cards: 120, blocked: 2, flagged: 3 });
     assert.equal(controller.filteredCards().length, 1, 'server-filtered results are not filtered a second time');
     const pending = controller.loadMoreCards('done');
     assert.equal(new URL(requests[0].url, 'http://local').searchParams.get('q'), 'deep history');

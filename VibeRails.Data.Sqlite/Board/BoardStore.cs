@@ -351,7 +351,8 @@ public sealed partial class BoardStore : IBoardStore
         if (columns.Count <= 1)
             throw new BoardConflictException("The board needs at least one lane.");
 
-        // Cards fall to the left-most remaining lane, appended after its existing cards.
+        // Cards fall to the left-most remaining lane, appended after its existing cards within each
+        // attention group; RenumberColumnAsync then makes the positions dense.
         var destination = columns.Where(c => c.Id != target.Id).OrderBy(c => c.Position).First();
         var destinationCards = await ReadColumnCardIdsAsync(connection, transaction, destination.Id, cancellationToken);
         var movingCards = await ReadColumnCardIdsAsync(connection, transaction, target.Id, cancellationToken);
@@ -389,6 +390,7 @@ public sealed partial class BoardStore : IBoardStore
         }
 
         var remaining = columns.Where(c => c.Id != target.Id).OrderBy(c => c.Position).Select(c => c.Id).ToList();
+        await RenumberColumnAsync(connection, transaction, destination.Id, cancellationToken);
         await WriteColumnPositionsAsync(connection, transaction, remaining, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new BoardColumnDeleteResult(target.Id, destination.Id, movingCards.Count);
@@ -434,7 +436,7 @@ public sealed partial class BoardStore : IBoardStore
              WHERE c.ProjectPath = $project{ProjectPathCollation}
                AND c.ColumnId IN (SELECT k.Id FROM BoardColumns k WHERE k.BoardId = $board)
                AND c.DeletedUTC IS NULL
-             ORDER BY c.ColumnId, c.Position, c.Number;
+             ORDER BY c.ColumnId, c.Flagged DESC, c.Position, c.Number;
             """;
         command.Parameters.AddWithValue("$project", project);
         command.Parameters.AddWithValue("$board", board);
@@ -1614,7 +1616,7 @@ public sealed partial class BoardStore : IBoardStore
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT Id FROM BoardCards WHERE ColumnId = $column AND DeletedUTC IS NULL ORDER BY Position, Number;";
+        command.CommandText = "SELECT Id FROM BoardCards WHERE ColumnId = $column AND DeletedUTC IS NULL ORDER BY Flagged DESC, Position, Number;";
         command.Parameters.AddWithValue("$column", columnId);
         var ids = new List<string>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -1631,6 +1633,22 @@ public sealed partial class BoardStore : IBoardStore
 
     private static async Task WriteCardPositionsAsync(SqliteConnection connection, SqliteTransaction transaction, IReadOnlyList<string> orderedIds, CancellationToken cancellationToken)
     {
+        // Attention always wins over activity and explicit drag positions. Preserve the requested
+        // order within each group, and keep dense positions consistent with the read projection.
+        var groupedIds = new List<string>(orderedIds.Count);
+        await using (var order = connection.CreateCommand())
+        {
+            order.Transaction = transaction;
+            order.CommandText = """
+                SELECT c.Id FROM json_each($ids) requested
+                JOIN BoardCards c ON c.Id = requested.value
+                ORDER BY c.Flagged DESC, CAST(requested.key AS INTEGER);
+                """;
+            order.Parameters.AddWithValue("$ids", JsonSerializer.Serialize(orderedIds.ToList(), StorageJsonSerializerContext.Default.ListString));
+            await using var reader = await order.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken)) groupedIds.Add(reader.GetString(0));
+        }
+        orderedIds = groupedIds;
         for (var index = 0; index < orderedIds.Count; index++)
         {
             await using var command = connection.CreateCommand();
@@ -1668,7 +1686,7 @@ public sealed partial class BoardStore : IBoardStore
         await PromoteCardAsync(connection, transaction, cardId, cancellationToken);
     }
 
-    // Card activity belongs at the top, while explicit drag positions still use
+    // Card activity belongs at the top of its attention group, while explicit drag positions use
     // WriteCardPositionsAsync directly. Only the touched card's timestamp changes.
     private static async Task PromoteCardAsync(SqliteConnection connection, SqliteTransaction transaction, string cardId, CancellationToken cancellationToken)
     {

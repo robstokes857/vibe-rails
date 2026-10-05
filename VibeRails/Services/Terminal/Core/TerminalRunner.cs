@@ -658,6 +658,10 @@ public class TerminalRunner
         }
     }
 
+    internal void PublishAgentSessionClosed(string sessionId) => _appEventBus.Publish(
+        "agent_session_closed", new AgentSessionClosedPayload(sessionId),
+        AppJsonSerializerContext.Default.AgentSessionClosedPayload);
+
     /// <summary>
     /// Finalizes a session created by <see cref="CreateSessionAsync"/> when the caller owns the
     /// terminal's lifetime (the CLI and Job paths, which never register with
@@ -873,6 +877,7 @@ public class TerminalRunner
             try { exitCode = terminal.ExitCode; } catch { }
         }
 
+        if (terminal.CompletedByAgent) _stateService.RecordAgentSessionEnd(sessionId);
         await CompleteSessionAsync(sessionId, exitCode);
         return exitCode;
     }
@@ -968,6 +973,7 @@ public class TerminalRunner
             try { exitCode = terminal.ExitCode; } catch { }
         }
 
+        if (terminal.CompletedByAgent) _stateService.RecordAgentSessionEnd(sessionId);
         await CompleteSessionAsync(sessionId, exitCode);
         return exitCode;
     }

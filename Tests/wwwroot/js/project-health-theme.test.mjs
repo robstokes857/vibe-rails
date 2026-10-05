@@ -79,8 +79,8 @@ test('the report viewer and the grade read the page tones, open with Git changes
 
 test('the QUALITY page is one header row, chips for the rule files and a menu for the log and coverage', () => {
     const template = indexHtml.match(/<template id="agents-template">([\s\S]*?)<\/template>/)[1];
-    const header = template.match(/<header class="project-health-header">([\s\S]*?)<\/header>/)[1];
-    assert.match(header, /<h1>Rules and code quality<\/h1>/);
+    const header = template.match(/<header class="vb-page-header project-health-header">([\s\S]*?)<\/header>/)[1];
+    assert.match(header, /<h1 class="vb-page-title">Rules and code quality<\/h1>/);
     assert.match(header, /<section class="project-health-guard"/, 'Git Guard is a pill in the header');
     assert.doesNotMatch(template, /project-health-eyebrow|project-health-card-kicker|project-health-card-toolbar/);
     assert.doesNotMatch(template, /See what needs attention/);
@@ -95,7 +95,7 @@ test('the QUALITY page is one header row, chips for the rule files and a menu fo
     assert.match(quality, /data-action="toggle-map-coverage"/);
     assert.match(quality, /data-action="toggle-code-analyzer-log"/);
     assert.match(quality, /<details class="rules-console-transcript project-health-scan-transcript" data-code-analyzer-log hidden>/);
-    assert.match(styleCss, /\.main-container:has\(\.project-health-page\) \{\s*padding-top: 14px;/);
+    assert.match(styleCss, /\.main-container:has\(\.vb-page-header\) \{\s*padding-top: 14px;/);
 });
 
 test('the scan line says when, how many and how long', () => {

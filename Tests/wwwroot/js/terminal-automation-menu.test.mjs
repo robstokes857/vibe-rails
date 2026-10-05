@@ -182,6 +182,85 @@ for (const failedRead of [false, true]) {
     });
 }
 
+test('agent closure removes only the calling tab, cancels undo, and leaves a clear replay notice', () => {
+    const handlers = new Map();
+    const { manager } = managerWithSnapshot({});
+    let disposed = 0;
+    let removed = 0;
+    const notices = [];
+    const history = [];
+    manager.app.showToast = (...args) => notices.push(args);
+    manager._touchHistory = id => history.push(id);
+    manager.tabs.set('caller', {
+        instance: { dispose() { disposed++; } },
+        state: { sessionId: 'recording', pinned: true, ui: {
+            item: { remove() { removed++; } }, panel: { remove() { removed++; } }
+        } }
+    });
+    const ordinary = { state: { sessionId: 'unrelated' } };
+    manager.tabs.set('ordinary', ordinary);
+    manager.tabOrder = ['caller', 'ordinary'];
+    manager.activeTabId = 'caller';
+    manager._nextVisibleTabId = () => 'ordinary';
+    manager.activateTab = id => { manager.activeTabId = id; };
+    const timeoutId = setTimeout(() => assert.fail('a closed host must not be deleted again by undo'), 1000);
+    manager._pendingCloses = new Map([['caller', { timeoutId }]]);
+    let undoRefresh = 0;
+    manager._refreshUndoControl = () => undoRefresh++;
+    const controller = Object.assign(Object.create(TerminalController.prototype), { manager, app: manager.app });
+    controller.bindSessionEvents({ on: (name, handler) => handlers.set(name, handler) });
+    handlers.get('agent_terminal_closed')({ tabId: 'caller', sessionId: 'recording' });
+    handlers.get('agent_terminal_closed')({ tabId: 'caller', sessionId: 'recording' });
+    assert.equal(disposed, 1);
+    assert.equal(removed, 2);
+    assert.equal(manager.tabs.has('caller'), false);
+    assert.equal(manager.tabs.get('ordinary'), ordinary);
+    assert.equal(manager.activeTabId, 'ordinary');
+    assert.deepEqual(manager.tabOrder, ['ordinary']);
+    assert.equal(manager._pendingCloses.size, 0);
+    assert.equal(undoRefresh, 1);
+    assert.deepEqual(history, ['recording']);
+    assert.equal(notices.length, 1);
+    assert.match(notices[0][1], /Terminal closed because the agent called end_agent_session/);
+    assert.match(notices[0][1], /Replay.*Board/);
+    assert.equal(notices[0][3].requireDismiss, true);
+});
+
+test('an agent closure for an older session leaves a replacement tab intact', () => {
+    const { manager } = managerWithSnapshot({});
+    const replacement = { state: { sessionId: 'new-session' } };
+    manager.tabs.set('same-tab', replacement);
+    assert.equal(manager.removeAgentTab('same-tab', 'old-session'), false);
+    assert.equal(manager.tabs.get('same-tab'), replacement);
+    assert.equal(manager.closedAutomationTabs.has('same-tab'), false);
+});
+
+test('agent closure during restore cannot resurrect an ordinary tab or alter another one', async () => {
+    const { manager, added } = managerWithSnapshot({});
+    let resolve;
+    manager.app.apiCall = () => new Promise(done => { resolve = done; });
+    const pending = manager.restoreTabs();
+    manager.removeAgentTab('caller', 'recording');
+    resolve({ tabs: [{ tabId: 'caller', sessionId: 'recording' }, { tabId: 'ordinary' }] });
+    await pending;
+    assert.deepEqual(added, [{ tabId: 'ordinary' }]);
+    assert.equal(TerminalManager.prototype.addLocalTab.call(manager, { tabId: 'caller', sessionId: 'recording' }), null);
+});
+
+test('agent closure during adoption rejects its late list response', async () => {
+    const { manager, added } = managerWithSnapshot({});
+    manager.container = { isConnected: true };
+    let resolve;
+    manager.app.apiCall = () => new Promise(done => { resolve = done; });
+    const controller = new TerminalController(manager.app);
+    controller.manager = manager;
+    const pending = controller.adoptLaunchedTab('caller', { focus: false });
+    manager.removeAgentTab('caller', 'recording');
+    resolve({ tabs: [{ tabId: 'caller', sessionId: 'recording', hasActiveSession: true }] });
+    assert.equal(await pending, false);
+    assert.equal(added.length, 0);
+});
+
 test('adding a viewer for a closed Automation never creates a terminal', () => {
     const { manager } = managerWithSnapshot({});
     manager.removeAutomationTab('auto');

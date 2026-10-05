@@ -70,8 +70,18 @@ card labels for those session IDs through `IBoardStore.GetSessionCardsAsync`, wh
 from `board.db` and includes primary/additional attachments without deleted cards. The existing
 history endpoints retain their global local-session scope and session-plus-tab authentication.
 No cross-database SQL join, schema migration or historical-data rewrite is needed. The sidebar
-uses these labels for automatic titles, card metadata and combined filters; see the
+uses these labels for automatic titles and card metadata. Its provider/folder filters intersect
+with a selected immutable card ID; the shared Board `Find a card` picker searches all local boards
+before selection, independently of loaded history pages. See the
 [frontend contract](../VibeRails/wwwroot/AGENTS.md#chat-history-sidebar).
+
+Send To returns those card labels alongside the recap for linked-card navigation. At terminal
+launch, `SessionResumeService.AppendBoardContextAsync` reads the source session's current cards
+again and appends stable keys/row IDs, display labels, local card references and VibeRails MCP
+retrieval/review guidance after the edited or generated recap. References remain outside the remote
+summary request and cached recap. The recap retains its 6,000-character limit and the complete
+launch prompt keeps the normal cap; no cards are silently omitted. This read-only enrichment
+does not attach the new session or change tool authorization.
 
 ## Project Overview
 
@@ -342,6 +352,17 @@ Each environment defines isolated config directories
 ```
 
 #### Web Terminal Environment Integration Flow
+
+Agent self-close (`end_agent_session`, VIBE-78) follows PTY exit and final output drain, appends
+the closure reason as the final recording-only raw/replay frame, and finalizes the session.
+After environment post-exit steps, the child publishes `agent_session_closed`. The parent checks
+the exact session under the tab's start/close gate, removes the host, and publishes
+`agent_terminal_closed`; the frontend removes that tab and shows the reason outside xterm.
+Ordinary exits stay open. Session recordings and Board links retain their existing replay paths.
+Disposal bounds reader joins and quiesces dispatch under the subscriber lock if a provider keeps
+its read blocked, so no late bytes follow the recording footer. A transient child-status failure
+retains the closure request for retry; every attempt checks the original child and session again.
+
 ```
 User navigates to Environments page
   ↓
@@ -423,7 +444,7 @@ retain the received key in memory for retry until cancellation, replacement or s
 The masked `remote-account-linked` event updates open Settings views without replacing
 their unrelated drafts. Closing the account modal stops UI polling; reopening it resumes the attempt.
 
-The top and side navigation show **Sign in** only without a saved API key. General Settings
+The top navigation shows **Sign in** only without a saved API key. General Settings
 has an Account card with **Sign in**, or **Logged in {email}** and **Switch account**.
 Both open the shared device-approval modal. `ApiKeyStore` saves the approved display email
 and a SHA-256 fingerprint alongside the key in the existing settings file. The settings
@@ -877,8 +898,12 @@ const state = {
 #### index.html ([wwwroot/index.html](../VibeRails/wwwroot/index.html))
 **Purpose**: Main UI dashboard (Single Page Application)
 
+Quality, ENVs, Vibe AI, MCP and Settings share the `vb-page-header` template pattern and
+`h1.vb-page-title`. Shared styles in `style.css` own title typography, theme colors, divider,
+spacing and responsive stacking; page controllers retain their existing status and action controls.
+
 **Structure**:
-- Navigation sidebar with icons
+- Top navigation bar with icons
 - Main content area with view templates
 - Modal dialogs for create/edit operations
 - XTerm.js terminal integration for session logs

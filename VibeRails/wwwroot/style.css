@@ -411,7 +411,7 @@ code {
 
 /* Keep the two edge groups stable. Without an explicit flex contract the
    browser preserves the wide center menu by squeezing the brand group, which
-   wraps the product name and crowds the layout switch at laptop/webview widths. */
+   wraps the product name at laptop/webview widths. */
 .app-subnav-brand,
 .app-subnav-actions {
     flex: 0 0 auto;
@@ -500,61 +500,32 @@ code {
     transform: translateY(-1px);
 }
 
-.top-layout-switch-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 26px;
-    height: 26px;
-    margin-left: 0.35rem;
-    padding: 0;
-    color: var(--color-text-muted);
-    background: rgba(255, 255, 255, 0.035);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 6px;
-    font-size: 0.68rem;
-    cursor: pointer;
-    transition: all 0.18s ease;
-    flex-shrink: 0;
-}
-
-.top-layout-switch-btn:hover {
-    color: #ffffff;
-    background: rgba(6, 182, 212, 0.12);
-    border-color: rgba(6, 182, 212, 0.4);
-}
-
 /* Compact the full-label top navigation before it reaches the icon-only mobile
-   treatment. This preserves the switch's square hit target in narrow editor
-   webviews without introducing horizontal page scrolling. */
+   treatment, without introducing horizontal page scrolling. */
 @media (max-width: 1500px) and (min-width: 993px) {
-    html.nav-layout-top .app-subnav {
+    .app-subnav {
         padding: 0 0.75rem;
         gap: 0.5rem;
     }
 
-    html.nav-layout-top .app-subnav-links {
+    .app-subnav-links {
         gap: 0 !important;
     }
 
-    html.nav-layout-top .app-subnav .app-subnav-link {
+    .app-subnav .app-subnav-link {
         padding-inline: 0.5rem;
-    }
-
-    html.nav-layout-top .top-layout-switch-btn {
-        margin-left: 0.2rem;
     }
 }
 
 @media (max-width: 1200px) and (min-width: 993px) {
-    html.nav-layout-top .app-subnav-brand .brand-text-sm {
+    .app-subnav-brand .brand-text-sm {
         display: none;
     }
 }
 
 @media (max-width: 1120px) and (min-width: 993px) {
-    html.nav-layout-top .app-subnav-link span,
-    html.nav-layout-top .nav-exit-btn-sm span {
+    .app-subnav-link span,
+    .nav-exit-btn-sm span {
         display: none;
     }
 }
@@ -7797,6 +7768,37 @@ input.form-control:disabled {
     width: 100%;
 }
 
+.ch-card-results {
+    max-height: min(220px, 25vh);
+    overflow-y: auto;
+    flex-shrink: 0;
+    padding: 6px;
+    border: 1px solid var(--color-border, #334155);
+    border-radius: 6px;
+    background: var(--color-bg-secondary, #1e293b);
+}
+
+.ch-card-results .board-editor-muted { margin: 0 0 6px; font-size: 0.7rem; }
+.ch-card-results .board-side-main {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    width: 100%;
+    padding: 8px 4px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--color-text-primary, #e2e8f0);
+    text-align: left;
+}
+.ch-card-results .board-side-main:is(:hover, :focus-visible) { background: var(--color-hover, #334155); }
+.ch-card-results .board-side-text { min-width: 0; overflow-wrap: anywhere; }
+.ch-card-results :is(.board-side-title, .board-side-sub, .board-search-warning) { display: block; }
+.ch-card-results .board-side-sub { color: var(--color-text-secondary, #94a3b8); font-size: 0.7rem; }
+.ch-card-results .board-search-warning { color: var(--color-warning, #fbbf24); font-size: 0.7rem; }
+.ch-card-selection:not([hidden]) { display: flex; align-items: flex-start; gap: 6px; }
+.ch-card-selection span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
 .ch-filter-summary {
     display: flex;
     align-items: center;
@@ -8662,6 +8664,30 @@ input.form-control:disabled {
     line-height: 1.3;
 }
 
+.ch-card-link {
+    border: 0;
+    padding: 2px 0;
+    background: none;
+    color: var(--color-accent, #06b6d4);
+    font: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+    overflow-wrap: anywhere;
+    min-width: 0;
+    text-align: left;
+}
+
+.ch-card-link:hover {
+    color: var(--color-text, #f8fafc);
+}
+
+.ch-card-link:focus-visible {
+    outline: 2px solid var(--color-accent, #06b6d4);
+    outline-offset: 2px;
+    border-radius: 2px;
+}
+
 .ch-meta-label {
     color: #7f849c;
     font-weight: 600;
@@ -8792,6 +8818,71 @@ input.form-control:disabled {
     min-height: 1em;
     margin-bottom: 0.75rem;
     transition: opacity 0.15s;
+}
+
+/* Shared page headers: Quality, ENVs, Vibe AI, MCP and Settings. */
+.main-container:has(.vb-page-header) {
+    padding-top: 14px;
+}
+
+.vb-page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin: 0 0 1rem;
+    padding: 0 0 1rem;
+    border-bottom: 1px solid var(--color-border, #334155);
+}
+
+.vb-page-heading {
+    flex: 1 1 16rem;
+    min-width: 0;
+}
+
+.vb-page-title {
+    margin: 0;
+    color: var(--color-text, #f8fafc);
+    font-family: inherit;
+    font-size: clamp(1.25rem, 2.4vw, 1.5rem);
+    font-weight: 700;
+    line-height: 1.25;
+    letter-spacing: -.02em;
+    text-transform: none;
+    overflow-wrap: anywhere;
+}
+
+.vb-page-description {
+    max-width: 60ch;
+    margin: .35rem 0 0;
+    color: var(--color-text-muted, #94a3b8);
+    font-size: .825rem;
+    line-height: 1.5;
+}
+
+.vb-page-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: .75rem;
+    min-width: 0;
+}
+
+/* Grid workspaces already supply the gap after their header. */
+:where(.insp, .mcp-workbench) > .vb-page-header {
+    margin-bottom: 0;
+}
+
+@media (max-width: 820px) {
+    .vb-page-header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .vb-page-heading {
+        flex-basis: auto;
+    }
 }
 
 /* ── Application Settings ────────────────────────────────────────────────── */
@@ -10978,10 +11069,6 @@ button.git-guard-menu-button:focus-visible {
    split) and the board (lanes fill the height and scroll sideways). The class
    name is historical; it is not limited to the rules workspace. */
 body.vb-rules-workspace-active .app-main {
-    min-height: 100dvh;
-}
-
-html.nav-layout-top body.vb-rules-workspace-active .app-main {
     min-height: calc(100dvh - var(--navbar-height));
 }
 
@@ -11012,12 +11099,8 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 /* A minimum height alone lets long lanes grow the entire page. Bound the Board
    shell so each lane owns its scrollbar and can request the next page. */
 body.vb-rules-workspace-active.vb-board-active .app-main {
-    height: 100dvh;
-    min-height: 0;
-}
-
-html.nav-layout-top body.vb-rules-workspace-active.vb-board-active .app-main {
     height: calc(100dvh - var(--navbar-height));
+    min-height: 0;
 }
 
 body.vb-board-active .main-container,
@@ -15492,17 +15575,13 @@ body.git-guard-focus-active #app-content {
 .job-run-status[data-tone="success"] { background-color: color-mix(in srgb, var(--color-success) 13%, var(--color-bg-base, #121212)); color: var(--color-success); }
 .job-run-status[data-tone="danger"] { background-color: color-mix(in srgb, var(--color-danger) 13%, var(--color-bg-base, #121212)); color: var(--color-danger); }
 
-/* ── App layout & navigation (side bar / top bar) ────────────────────────────
-   Two nav surfaces live in the DOM: .app-sidebar (side) and .app-subnav (top).
-   The <html> element carries exactly one of .nav-layout-side (default) or
-   .nav-layout-top; the other nav is display:none. The sidebar rail collapse is
-   signalled by <html>.sidebar-collapsed. Both classes are applied before first
-   paint by an inline <head> script and managed at runtime by VibeRailsNavLayout
-   / VibeControlApp.initSidebarToggle. */
+/* ── App layout ──────────────────────────────────────────────────────────────
+   The top navigation bar (.app-subnav) is the only application navigation.
+   It is a sticky sibling; the main workspace flows full-width beneath it. */
 
 .app-layout {
     display: flex;
-    min-height: 100vh;
+    min-height: calc(100vh - var(--navbar-height));
     width: 100%;
     position: relative;
 }
@@ -15512,412 +15591,33 @@ body.git-guard-focus-active #app-content {
     flex-direction: column;
     min-width: 0;
     flex: 1;
-    min-height: 100vh;
-    /* The sidebar is fixed and side navigation is the default. Keep content
-       clear of it even before the runtime nav-layout class is applied. */
-    margin-left: 240px;
-    width: calc(100% - 240px);
-    transition: margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1), width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* Side layout: main content offsets for the fixed sidebar. */
-html.nav-layout-side .app-main {
-    margin-left: 240px;
-    width: calc(100% - 240px);
-}
-/* Keep the main workspace in sync with the fixed rail even if the nav-layout
-   preference has not been restored yet. The top-layout rule below overrides
-   this and remains full-width. */
-html.sidebar-collapsed .app-main {
-    margin-left: 64px;
-    width: calc(100% - 64px);
-}
-
-/* Top layout: the top bar is a sticky sibling; main flows full-width beneath it. */
-html.nav-layout-top .app-layout {
-    min-height: calc(100vh - var(--navbar-height));
-}
-html.nav-layout-top .app-main {
     margin-left: 0;
     width: 100%;
     min-height: calc(100vh - var(--navbar-height));
 }
-html.nav-layout-top .app-sidebar { display: none; }
-html.nav-layout-side .app-subnav { display: none; }
 
-/* In top layout, the terminal-focus workspace sits below the top bar. */
-html.nav-layout-top body.vb-terminal-focus-active .main-container {
+/* The terminal-focus workspace sits below the top bar. */
+body.vb-terminal-focus-active .main-container {
     height: calc(100dvh - var(--navbar-height));
     min-height: calc(100dvh - var(--navbar-height));
 }
 
 /* Compact the top bar in terminal-focus mode (logo would otherwise overflow
-   the reduced navbar height). Scoped to top layout so the sidebar is unaffected. */
-html.nav-layout-top body.vb-terminal-focus-active .app-subnav {
+   the reduced navbar height). */
+body.vb-terminal-focus-active .app-subnav {
     padding: 0 0.65rem;
     gap: 0.65rem;
 }
-html.nav-layout-top body.vb-terminal-focus-active .app-subnav .app-subnav-link {
+body.vb-terminal-focus-active .app-subnav .app-subnav-link {
     padding: 0.3rem 0.6rem;
 }
-html.nav-layout-top body.vb-terminal-focus-active .app-subnav .brand-logo-sm {
+body.vb-terminal-focus-active .app-subnav .brand-logo-sm {
     height: 42px;
 }
-html.nav-layout-top body.vb-terminal-focus-active .app-subnav .nav-exit-btn-sm {
+body.vb-terminal-focus-active .app-subnav .nav-exit-btn-sm {
     height: 30px;
     padding: 0 0.65rem;
 }
-
-/* ── Side navigation bar ─────────────────────────────────────────────────── */
-.app-sidebar {
-    width: 240px;
-    min-width: 240px;
-    border-right: 1px solid rgba(255, 255, 255, 0.08);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-    position: fixed;
-    top: 0;
-    left: 0;
-    bottom: 0;
-    z-index: 1019;
-    padding: 1rem 0.75rem;
-    gap: 1rem;
-    opacity: 1;
-    transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1), min-width 0.25s cubic-bezier(0.4, 0, 0.2, 1), padding 0.25s ease, opacity 0.2s ease;
-    user-select: none;
-    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.25);
-}
-
-html.sidebar-collapsed .app-sidebar {
-    width: 64px;
-    min-width: 64px;
-    padding: 1rem 0.4rem;
-}
-
-/* Sidebar header */
-.sidebar-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.25rem 0.35rem 0.75rem 0.35rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    gap: 0.5rem;
-}
-
-html.sidebar-collapsed .sidebar-header {
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 0.25rem 0 0.75rem 0;
-}
-
-.sidebar-header .navbar-brand-sm {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    padding: 0;
-    background: none;
-    border: none;
-    cursor: pointer;
-    text-decoration: none;
-    color: inherit;
-    min-width: 0;
-}
-
-.sidebar-header .brand-logo-sm {
-    width: 32px;
-    height: 32px;
-    max-width: 32px;
-    max-height: 32px;
-    object-fit: contain;
-    flex-shrink: 0;
-    padding: 0;
-    margin: 0;
-}
-
-html.sidebar-collapsed .sidebar-header .navbar-brand-sm {
-    justify-content: center;
-    width: 100%;
-}
-
-html.sidebar-collapsed .sidebar-header .brand-text-sm {
-    display: none;
-}
-
-.sidebar-toggle-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 30px;
-    height: 30px;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    color: var(--color-text-muted);
-    cursor: pointer;
-    transition: all 0.2s ease;
-    flex-shrink: 0;
-}
-
-.sidebar-toggle-btn:hover {
-    background: rgba(255, 255, 255, 0.12);
-    color: var(--color-text);
-    border-color: var(--color-accent);
-    transform: scale(1.05);
-}
-
-.sidebar-toggle-icon {
-    font-size: 0.8rem;
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-html.sidebar-collapsed .sidebar-toggle-icon {
-    transform: rotate(180deg);
-}
-
-/* Sidebar nav links container */
-.sidebar-nav {
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-    flex: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
-    padding-right: 2px;
-}
-
-.sidebar-nav::-webkit-scrollbar {
-    width: 4px;
-}
-
-.sidebar-nav::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.15);
-    border-radius: 4px;
-}
-
-/* Sidebar links — scoped to .app-sidebar so the top nav's .app-subnav-link
-   rules (defined earlier in this file) are not clobbered. */
-.app-sidebar .app-subnav-link {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.65rem 0.85rem;
-    color: rgba(226, 232, 240, 0.72);
-    font-size: 0.8rem;
-    font-weight: 600;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    background: transparent;
-    border: 1px solid transparent;
-    border-left: 3px solid transparent;
-    border-radius: 8px;
-    cursor: pointer;
-    font-family: inherit;
-    white-space: nowrap;
-    transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
-    text-align: left;
-    width: 100%;
-    position: relative;
-    overflow: hidden;
-}
-
-html.sidebar-collapsed .app-sidebar .app-subnav-link {
-    justify-content: center;
-    padding: 0.65rem 0;
-    gap: 0;
-}
-
-.app-sidebar .app-subnav-link .nav-icon {
-    width: 20px;
-    height: 20px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1rem;
-    opacity: 0.75;
-    color: #94a3b8;
-    flex-shrink: 0;
-    transition: opacity 0.2s ease, transform 0.2s ease, color 0.2s ease, filter 0.2s ease;
-}
-
-.app-sidebar .app-subnav-link .nav-label {
-    transition: opacity 0.2s ease;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-html.sidebar-collapsed .app-sidebar .app-subnav-link .nav-label {
-    display: none;
-    opacity: 0;
-}
-
-.app-sidebar .app-subnav-link:hover {
-    color: #ffffff;
-    background: rgba(255, 255, 255, 0.07);
-    border-left-color: rgba(6, 182, 212, 0.5);
-}
-
-.app-sidebar .app-subnav-link:hover .nav-icon {
-    opacity: 1;
-    color: #38bdf8;
-    transform: scale(1.1);
-}
-
-.app-sidebar .app-subnav-link.active {
-    color: #ffffff;
-    background: linear-gradient(135deg, rgba(167, 123, 243, 0.16) 0%, rgba(6, 182, 212, 0.14) 100%);
-    border: 1px solid rgba(167, 123, 243, 0.25);
-    border-left: 3px solid #06b6d4;
-    box-shadow: 0 4px 14px rgba(6, 182, 212, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-    font-weight: 700;
-}
-
-.app-sidebar .app-subnav-link.active .nav-icon {
-    opacity: 1;
-    color: #38bdf8;
-    filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.4));
-}
-
-/* Sidebar footer controls */
-.sidebar-footer {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    padding-top: 0.75rem;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.sidebar-layout-switch-btn {
-    display: flex;
-    align-items: center;
-    gap: 0.55rem;
-    padding: 0.38rem 0.7rem;
-    width: 100%;
-    color: var(--color-text-muted);
-    background: rgba(255, 255, 255, 0.035);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-    font-size: 0.7rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    white-space: nowrap;
-    overflow: hidden;
-}
-
-.sidebar-layout-switch-btn .nav-icon {
-    width: 16px;
-    flex-shrink: 0;
-    text-align: center;
-}
-
-html.sidebar-collapsed .sidebar-layout-switch-btn {
-    justify-content: center;
-    padding: 0.38rem 0;
-}
-
-html.sidebar-collapsed .sidebar-layout-switch-btn .nav-label {
-    display: none;
-}
-
-.sidebar-layout-switch-btn:hover {
-    color: #ffffff;
-    background: rgba(6, 182, 212, 0.12);
-    border-color: rgba(6, 182, 212, 0.4);
-}
-
-.app-sidebar .nav-exit-btn-sm {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.6rem 0.85rem;
-    width: 100%;
-    color: var(--color-danger);
-    background: rgba(239, 68, 68, 0.08);
-    border: 1px solid rgba(239, 68, 68, 0.2);
-    border-radius: 8px;
-    font-size: 0.8rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    white-space: nowrap;
-    overflow: hidden;
-}
-
-html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm {
-    justify-content: center;
-    padding: 0.6rem 0;
-}
-
-html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
-    display: none;
-}
-
-.app-sidebar .nav-exit-btn-sm:hover {
-    background: rgba(239, 68, 68, 0.2);
-    border-color: rgba(239, 68, 68, 0.4);
-    color: #ff8888;
-}
-
-/* Responsive: narrow the sidebar to a rail on small screens (side layout only). */
-@media (max-width: 992px) {
-    html.nav-layout-side .app-sidebar {
-        width: 64px;
-        min-width: 64px;
-        padding: 1rem 0.4rem;
-    }
-
-    html.nav-layout-side .app-main {
-        margin-left: 64px;
-        width: calc(100% - 64px);
-    }
-
-    html.nav-layout-side .app-sidebar .nav-label,
-    html.nav-layout-side .app-sidebar .brand-text-sm {
-        display: none;
-    }
-
-    html.nav-layout-side .app-sidebar .sidebar-header {
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        padding: 0.25rem 0 0.75rem 0;
-        gap: 0.5rem;
-    }
-
-    html.nav-layout-side .app-sidebar .app-subnav-link,
-    html.nav-layout-side .app-sidebar .sidebar-layout-switch-btn,
-    html.nav-layout-side .app-sidebar .nav-exit-btn-sm {
-        justify-content: center;
-        padding: 0.65rem 0;
-        gap: 0;
-    }
-
-    html.nav-layout-side .app-sidebar .sidebar-layout-switch-btn {
-        padding: 0.38rem 0;
-    }
-
-    html.nav-layout-side .app-sidebar .sidebar-toggle-icon {
-        transform: rotate(180deg);
-    }
-
-    /* The 64px rail is icon-only, same as the user-collapsed rail: the Automation
-       entry's play half hides (launching stays one click away on the Automation
-       page) and the lone icon gets its full rounding back. */
-    html.nav-layout-side .app-sidebar .app-subnav-split-trigger {
-        display: none;
-    }
-
-    html.nav-layout-side .app-sidebar .app-subnav-split .app-subnav-link {
-        border-top-right-radius: 8px;
-        border-bottom-right-radius: 8px;
-    }
-}
-
 
 .job-run-status[data-tone="warning"] { background-color: color-mix(in srgb, var(--color-warning) 14%, var(--color-bg-base, #121212)); color: var(--color-warning); }
 .job-run-status[data-tone="info"] { background-color: color-mix(in srgb, var(--color-accent) 13%, var(--color-bg-base, #121212)); color: var(--color-accent); }
@@ -17570,34 +17270,6 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
     background: rgba(255, 255, 255, 0.06);
 }
 
-/* Sidebar variant: the pair fills the rail's width like every other entry. */
-.app-sidebar .app-subnav-split {
-    display: flex;
-    width: 100%;
-}
-
-.app-sidebar .app-subnav-split .app-subnav-link {
-    flex: 1 1 auto;
-    min-width: 0;
-}
-
-.app-sidebar .app-subnav-split-trigger {
-    flex: 0 0 34px;
-    border-radius: 0 8px 8px 0;
-}
-
-/* The collapsed rail is icon-only: the play half hides; launching stays one
-   click away on the Automation page itself. With the trigger gone the link is
-   the whole entry again, so it gets its full rounding back. */
-html.sidebar-collapsed .app-sidebar .app-subnav-split-trigger {
-    display: none;
-}
-
-html.sidebar-collapsed .app-sidebar .app-subnav-split .app-subnav-link {
-    border-top-right-radius: 8px;
-    border-bottom-right-radius: 8px;
-}
-
 .automation-launch-btn.is-flyout-open {
     background: var(--color-bg-surface-hover, #2c2c2c);
     color: var(--color-text, #f8fafc);
@@ -18845,12 +18517,8 @@ button.python-script-name:focus-visible > i {
    to the viewport so xterm fits the available space and its prompt stays visible. */
 @media (min-width: 880px) {
     body.vb-python-workbench-active .app-main {
-        height: 100dvh;
-        min-height: 0;
-    }
-
-    html.nav-layout-top body.vb-python-workbench-active .app-main {
         height: calc(100dvh - var(--navbar-height, 60px));
+        min-height: 0;
     }
 
     body.vb-python-workbench-active .main-container,
@@ -18990,8 +18658,7 @@ button.python-script-name:focus-visible > i {
    software):
 
    1. backdrop-filter — every use forces a compositor "backdrop root" that
-      re-blurs on any change behind it. One transparent fixed sidebar alone
-      re-blurred 240px × viewport at animation rate.
+      re-blurs on any change behind it.
    2. Infinite decorative animations — each one keeps repainting its layer
       forever, even when the app is idle.
 
@@ -19002,7 +18669,6 @@ button.python-script-name:focus-visible > i {
 body.performance-mode .card,
 body.performance-mode .menu-card,
 body.performance-mode .app-subnav,
-body.performance-mode .app-sidebar,
 body.performance-mode .context-header-card,
 body.performance-mode .vb-terminal-log,
 body.performance-mode .modal-content,
@@ -19016,13 +18682,6 @@ body.performance-mode .ch-context-menu,
 body.performance-mode .git-guard-focus-bar {
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
-}
-
-/* The sidebar has no background of its own — it normally shows the blurred page
-   behind it. With the blur off it needs a solid coat (matches .app-subnav). */
-body.performance-mode .app-sidebar {
-    background: #16161c;
-    box-shadow: none;
 }
 
 body.performance-mode .card {
@@ -19069,31 +18728,6 @@ body.performance-mode .brand-text-sm {
     width: min(1180px, 100%);
     margin: 0 auto;
     padding: 0 0 clamp(24px, 4vw, 48px);
-}
-
-/* The page shell pads every view generously; this page starts right under the nav. */
-.main-container:has(.project-health-page) {
-    padding-top: 14px;
-}
-
-.project-health-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    margin-bottom: 14px;
-}
-
-.project-health-heading {
-    min-width: 0;
-}
-
-.project-health-heading h1 {
-    margin: 0;
-    color: var(--color-text, #f8fafc);
-    font-size: clamp(1.25rem, 2.4vw, 1.5rem);
-    font-weight: 700;
-    letter-spacing: -.02em;
 }
 
 /* Git Guard is a pill in the header; its message only shows when something needs attention. */
@@ -19517,7 +19151,6 @@ body.performance-mode .brand-text-sm {
 }
 
 @media (max-width: 820px) {
-    .project-health-header,
     .project-health-card-header,
     .project-health-rule-manager-header {
         align-items: stretch;

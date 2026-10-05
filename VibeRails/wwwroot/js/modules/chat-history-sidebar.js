@@ -7,6 +7,8 @@ import {
 } from './utils.js';
 import * as SessionDebug from './session-viewer.js';
 import { cardDisplayId, cardLabel, cardSearchText } from './board-card-label.js';
+import { BoardApi } from './board-api.js';
+import { CardSearchPicker } from './board-card-search-picker.js';
 
 const DEFAULT_PAGE_SIZE = 20;
 const SCROLL_LOAD_THRESHOLD_PX = 48;
@@ -30,10 +32,7 @@ export class ChatHistorySidebar {
         this.allItems = [];
         this.filterText = '';
         this.llmFilters = new Set();
-        this.environmentFilter = '';
-        this.boardFilter = '';
-        this.cardFilter = '';
-        this.statusFilter = '';
+        this.selectedCard = null;
         this._generation = 0;
         this._requestController = new AbortController();
         this._pendingLookups = 0;
@@ -101,26 +100,19 @@ export class ChatHistorySidebar {
                                     <span class="ch-current-dir-toggle-label">This folder</span>
                                 </button>
                                 <div class="ch-llm-filter-group" id="ch-llm-filter-group"></div>
-                                <div class="ch-filter-field"><label for="ch-environment-filter">Environment</label>
-                                    <select id="ch-environment-filter" class="form-select form-select-sm"></select>
-                                </div>
-                                <div class="ch-filter-field"><label for="ch-board-filter">Board</label>
-                                    <select id="ch-board-filter" class="form-select form-select-sm">
-                                        <option value="">All sessions</option>
-                                        <option value="linked">Linked to a card</option>
-                                        <option value="unlinked">No linked card</option>
-                                    </select>
-                                </div>
-                                <div class="ch-filter-field"><label for="ch-card-filter">Card key or title</label>
-                                    <input id="ch-card-filter" class="form-control form-control-sm" type="search" placeholder="e.g. VB-64 or sidebar" autocomplete="off">
-                                </div>
-                                <div class="ch-filter-field"><label for="ch-status-filter">Status</label>
-                                    <select id="ch-status-filter" class="form-select form-select-sm">
-                                        <option value="">All statuses</option>
-                                        <option value="live">Live</option>
-                                        <option value="ended">Ended</option>
-                                        <option value="failed">Failed (nonzero exit)</option>
-                                    </select>
+                                <div class="ch-filter-field ch-card-picker" data-history-card-picker>
+                                    <label for="ch-card-search">Find a card</label>
+                                    <input id="ch-card-search" class="form-control form-control-sm" type="search"
+                                        placeholder="Search all local boards" maxlength="300" autocomplete="off"
+                                        aria-expanded="false" aria-controls="ch-card-results" data-board-link-search>
+                                    <div class="ch-card-selection" data-history-card-selection hidden>
+                                        <span data-history-card-label></span>
+                                        <button type="button" class="ch-current-dir-toggle" data-history-card-clear aria-label="Clear card filter">Clear</button>
+                                    </div>
+                                    <div id="ch-card-results" class="ch-card-results" hidden>
+                                        <p class="board-editor-muted" data-board-link-status role="status" aria-live="polite"></p>
+                                        <div class="board-side-list" data-board-link-results></div>
+                                    </div>
                                 </div>
                             </div>
                             <div class="ch-filter-summary">
@@ -148,7 +140,6 @@ export class ChatHistorySidebar {
                     <div class="ch-context-menu-item text-danger" data-action="delete">Delete</div>
                     <div class="ch-context-menu-divider"></div>
                     <div class="ch-context-menu-item" data-action="get-session">Replay Session</div>
-                    <div class="ch-context-menu-item" data-action="get-raw-session">Session Data Dump</div>
                 </div>
             </div>`;
     }
@@ -168,29 +159,17 @@ export class ChatHistorySidebar {
         this.llmFilterContainer = root.querySelector('#ch-llm-filter-group');
         this.currentDirToggle = root.querySelector('#ch-current-dir-toggle');
         this.searchInput = root.querySelector('#ch-search-input');
-        this.environmentSelect = root.querySelector('#ch-environment-filter');
-        this.boardSelect = root.querySelector('#ch-board-filter');
-        this.cardInput = root.querySelector('#ch-card-filter');
-        this.statusSelect = root.querySelector('#ch-status-filter');
+        this.cardPickerHost = root.querySelector('[data-history-card-picker]');
         this.clearFiltersButton = root.querySelector('#ch-clear-filters');
         this.resultsLabel = root.querySelector('#ch-filter-results');
-        for (const [element, property] of [
-            [this.environmentSelect, 'environmentFilter'], [this.boardSelect, 'boardFilter'],
-            [this.cardInput, 'cardFilter'], [this.statusSelect, 'statusFilter']
-        ]) {
-            if (!element) continue;
-            element.value = this[property];
-            element.addEventListener(property === 'cardFilter' ? 'input' : 'change', () => {
-                this[property] = element.value.trim();
-                this._filtersChanged();
-            });
-        }
+        this._mountCardPicker();
         this.clearFiltersButton?.addEventListener('click', () => this._clearFilters());
         this.filterDrawerToggle = root.querySelector('#ch-filter-drawer-toggle');
         this.filterDrawerContent = root.querySelector('#ch-filter-drawer-content');
         this.filterDrawerToggle?.addEventListener('click', () => {
             const isOpen = this.filterDrawerContent.classList.toggle('is-open');
             this.filterDrawerToggle.setAttribute('aria-expanded', String(isOpen));
+            if (!isOpen) this._closeCardSearch();
         });
         const syncCloseButtonState = () => {
             if (!sidebar || !this.closeButton) {
@@ -276,16 +255,6 @@ export class ChatHistorySidebar {
             e.stopPropagation();
             this._closeContextMenu();
             if (this.activeItem) void SessionDebug.showReplayModal(this.activeItem.id);
-        });
-        contextMenu?.querySelector('[data-action="get-raw-session"]')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this._closeContextMenu();
-            if (this.activeItem) {
-                void SessionDebug.downloadRawSession(this.activeItem.id).catch(error => {
-                    const message = error?.message || 'Unknown error';
-                    this.app.showError(`Failed to download raw session: ${message}`);
-                });
-            }
         });
         const searchInput = root.querySelector('#ch-search-input');
         if (searchInput) searchInput.value = this.filterText;
@@ -402,7 +371,6 @@ export class ChatHistorySidebar {
 
         syncCloseButtonState();
         this._syncLlmFilterControls();
-        this._syncEnvironmentOptions();
         this._syncCurrentDirToggle();
 
         // Initial state: first-time visitors get a collapsed sidebar (so the
@@ -418,6 +386,11 @@ export class ChatHistorySidebar {
     }
 
     destroy() {
+        this._cardSearch?.dispose();
+        this._cardSearch = null;
+        this._cardPickerLifetime?.abort();
+        this.cardPickerHost = null;
+        this._resumeAbort?.abort();
         this._invalidateRequests();
         if (this._documentClickHandler) {
             document.removeEventListener('click', this._documentClickHandler);
@@ -447,11 +420,6 @@ export class ChatHistorySidebar {
         this.filterDrawerToggle = null;
         this.filterDrawerContent = null;
         this.searchInput = null;
-        this.environmentSelect = null;
-        this._environmentOptionsHtml = null;
-        this.boardSelect = null;
-        this.cardInput = null;
-        this.statusSelect = null;
         this.clearFiltersButton = null;
         this.resultsLabel = null;
     }
@@ -781,7 +749,7 @@ export class ChatHistorySidebar {
 
         let badge = this.filterDrawerToggle.querySelector('.ch-filter-count-badge');
         const totalActive = this.llmFilters.size + [this.filterText, this.currentDirOnly,
-            this.environmentFilter, this.boardFilter, this.cardFilter, this.statusFilter].filter(Boolean).length;
+            this.selectedCard].filter(Boolean).length;
         if (this.clearFiltersButton) this.clearFiltersButton.disabled = totalActive === 0;
         if (totalActive > 0) {
             if (!badge) {
@@ -829,52 +797,82 @@ export class ChatHistorySidebar {
         this.filterText = '';
         this.llmFilters.clear();
         this.currentDirOnly = false;
-        this.environmentFilter = this.boardFilter = this.cardFilter = this.statusFilter = '';
-        for (const input of [this.searchInput, this.environmentSelect, this.boardSelect, this.cardInput, this.statusSelect]) {
-            if (input) input.value = '';
-        }
+        this.selectedCard = null;
+        if (this.searchInput) this.searchInput.value = '';
+        this._closeCardSearch();
+        if (this._cardSearch) this._cardSearch.input.value = '';
+        this._syncSelectedCard();
         this._syncLlmFilterControls();
         this._filtersChanged();
     }
 
-    // A self-describing option value, beside the fixed 'base' and 'custom'. CLI names hold no ':'.
-    _environmentKey(cli, name) {
-        return `env:${canonicalLlmCli(cli)}:${(name || '').trim().toLowerCase()}`;
+    _mountCardPicker() {
+        const host = this.cardPickerHost;
+        if (!host) return;
+        BoardApi.attach(this.app);
+        const popup = host.querySelector('#ch-card-results');
+        const lifetime = this._cardPickerLifetime = new AbortController();
+        const options = { signal: lifetime.signal };
+        this._cardSearch = new CardSearchPicker(host, {
+            search: (query, extra) => BoardApi.getCardLinkCandidatesAsync(null, query, extra),
+            isActive: () => !popup.hidden,
+            onResults: () => {
+                // Keep the dropdown visible inside the independently scrolling filter drawer.
+                const drawer = this.filterDrawerContent;
+                if (drawer) drawer.scrollTop += Math.max(0, host.getBoundingClientRect().bottom - drawer.getBoundingClientRect().bottom);
+            },
+            onSelect: card => {
+                this.selectedCard = card;
+                this._cardSearch.input.value = '';
+                this._closeCardSearch();
+                this._syncSelectedCard();
+                host.querySelector('[data-history-card-clear]').focus();
+                this._filtersChanged();
+            }
+        });
+        const input = this._cardSearch.input;
+        const open = () => {
+            popup.hidden = false;
+            input.setAttribute('aria-expanded', 'true');
+        };
+        input.addEventListener('focus', () => {
+            // Focus returning from the results (ArrowUp, Escape) must not wipe the list being read.
+            if (!popup.hidden) return;
+            open();
+            void this._cardSearch.load();
+        }, options);
+        input.addEventListener('input', open, options);
+        host.addEventListener('focusout', event => {
+            if (!host.contains(event.relatedTarget)) this._closeCardSearch();
+        }, options);
+        host.addEventListener('keydown', event => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            input.focus();
+            this._closeCardSearch();
+        }, options);
+        host.querySelector('[data-history-card-clear]').addEventListener('click', () => {
+            this.selectedCard = null;
+            input.value = '';
+            this._syncSelectedCard();
+            this._filtersChanged();
+            input.focus();
+        }, options);
+        this._syncSelectedCard();
     }
 
-    _syncEnvironmentOptions() {
-        if (!this.environmentSelect) return;
-        // Replacing the options of an open select closes it under the pointer while filter pages
-        // stream in; the list catches up once the select loses focus.
-        if (this.environmentSelect.ownerDocument?.activeElement === this.environmentSelect) {
-            if (!this._environmentSyncDeferred) {
-                this._environmentSyncDeferred = true;
-                this.environmentSelect.addEventListener('blur', () => {
-                    this._environmentSyncDeferred = false;
-                    this._syncEnvironmentOptions();
-                }, { once: true });
-            }
-            return;
-        }
-        const choices = new Map();
-        const add = (cli, name) => {
-            if (!name?.trim()) return;
-            choices.set(this._environmentKey(cli, name), `${name.trim()} (${this.app.getCliBrand(cli).label})`);
-        };
-        for (const env of this.app.data?.environments || []) add(env.cli, env.name);
-        for (const item of this.allItems) add(item.cli, item.environmentName);
-        // Keep a selected historical environment even while a refresh replaces its rows.
-        if (this.environmentFilter.startsWith('env:') && !choices.has(this.environmentFilter)) {
-            choices.set(this.environmentFilter, this.environmentSelect.selectedOptions?.[0]?.textContent || 'Selected environment');
-        }
-        const options = [['', 'All environments'], ['base', 'Base CLI (no custom environment)'], ['custom', 'Any custom environment'],
-            ...[...choices].sort((a, b) => a[1].localeCompare(b[1]))];
-        const html = options.map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join('');
-        if (this._environmentOptionsHtml !== html) {
-            this.environmentSelect.innerHTML = html;
-            this._environmentOptionsHtml = html;
-        }
-        this.environmentSelect.value = this.environmentFilter;
+    _closeCardSearch() {
+        this._cardSearch?.cancel();
+        const popup = this.cardPickerHost?.querySelector('#ch-card-results');
+        if (popup) popup.hidden = true;
+        this._cardSearch?.input.setAttribute('aria-expanded', 'false');
+    }
+
+    _syncSelectedCard() {
+        const selection = this.cardPickerHost?.querySelector('[data-history-card-selection]');
+        if (!selection) return;
+        selection.hidden = !this.selectedCard;
+        selection.querySelector('[data-history-card-label]').textContent = this.selectedCard ? cardLabel(this.selectedCard) : '';
     }
 
     _getRawDisplayName(item) {
@@ -1129,7 +1127,11 @@ export class ChatHistorySidebar {
             for (const card of item.boardCards || []) {
                 // The label is what the Board shows; the tooltip keeps the permanent key when they differ.
                 const tooltip = cardLabel(card) + (card.displayId && card.displayId !== card.key ? ` (${card.key})` : '');
-                metaLines.push(`<div class="ch-meta-row ch-card-meta" title="${escapeHtml(tooltip)}"><span class="ch-meta-label">Card</span> ${escapeHtml(cardDisplayId(card))}</div>`);
+                const label = escapeHtml(cardDisplayId(card));
+                const link = card.id
+                    ? `<button type="button" class="ch-card-link" data-history-card="${escapeHtml(card.id)}" aria-label="${escapeHtml(`Open Board card ${cardLabel(card)}`)}">${label}</button>`
+                    : label;
+                metaLines.push(`<div class="ch-meta-row ch-card-meta" title="${escapeHtml(tooltip)}"><span class="ch-meta-label">Card</span> ${link}</div>`);
             }
             if (item.environmentName?.trim()) {
                 metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">Env</span> ${escapeHtml(item.environmentName.trim())}</div>`);
@@ -1170,6 +1172,14 @@ export class ChatHistorySidebar {
                 </div>`;
         }).join('')}${this._renderFooter()}`;
         this._bindRetry();
+
+        this.body.querySelectorAll('[data-history-card]').forEach(cardLink => {
+            cardLink.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this._closeContextMenu();
+                this.app.navigate('board', { openCardId: cardLink.dataset.historyCard });
+            });
+        });
 
         // Bind menu buttons
         const itemElements = this.body.querySelectorAll('.ch-item');
@@ -1229,9 +1239,10 @@ export class ChatHistorySidebar {
 
         const CHAR_LIMIT = 6000;
         const sessionId = this.activeItem.id;
-        const chatName = this._getDisplayName(this.activeItem);
         const activeItemSnapshot = this.activeItem;
         this._closeContextMenu();
+        this._resumeAbort?.abort();
+        const abort = this._resumeAbort = new AbortController();
 
         this.app.showModal(`Sending to ${llmDisplayLabel}`, `
             <div class="text-muted small mb-3">${escapeHtml(sessionId)}</div>
@@ -1255,7 +1266,15 @@ export class ChatHistorySidebar {
                     </button>
                 </div>
             </div>
-        `);
+        `, { onClose: () => abort.abort() });
+
+        const resumeBody = document.getElementById('ch-resume-body');
+        const actionsBar = document.getElementById('ch-resume-actions');
+        const regenerateBtn = document.getElementById('ch-resume-regenerate-btn');
+        const launchBtn = document.getElementById('ch-resume-launch-btn');
+        const isCurrent = () => !abort.signal.aborted && resumeBody?.isConnected
+            && document.getElementById('ch-resume-body') === resumeBody;
+        let loadGeneration = 0;
 
         const showSpinner = (container) => {
             container.innerHTML = `
@@ -1269,11 +1288,8 @@ export class ChatHistorySidebar {
         };
 
         const loadSummary = async (regenerate) => {
-            const resumeBody = document.getElementById('ch-resume-body');
-            const actionsBar = document.getElementById('ch-resume-actions');
-            const regenerateBtn = document.getElementById('ch-resume-regenerate-btn');
-            const launchBtn = document.getElementById('ch-resume-launch-btn');
-            if (!resumeBody) return;
+            if (!isCurrent()) return;
+            const generation = ++loadGeneration;
 
             showSpinner(resumeBody);
             if (actionsBar) actionsBar.style.cssText = 'display:none !important;';
@@ -1282,10 +1298,10 @@ export class ChatHistorySidebar {
 
             try {
                 const url = `/api/v1/chatHistory/${encodeURIComponent(sessionId)}/summary${regenerate ? '?regenerate=true' : ''}`;
-                const result = await this.app.apiCall(url, 'GET', null, { showLoading: false });
+                const result = await this.app.apiCall(url, 'GET', null, { showLoading: false, signal: abort.signal });
+                if (!isCurrent() || generation !== loadGeneration) return;
 
                 const summary = result?.summary ?? '';
-                const transcript = this._stripAnsi(result?.transcript ?? '');
 
                 resumeBody.innerHTML = `
                     <div class="mb-2">
@@ -1296,13 +1312,14 @@ export class ChatHistorySidebar {
                             <small id="ch-resume-char-count" class="${summary.length > CHAR_LIMIT ? 'text-danger' : 'text-muted'}">${summary.length} / ${CHAR_LIMIT}</small>
                         </div>
                     </div>
-                    <details class="mb-2">
-                        <summary class="fw-semibold small text-muted text-uppercase" style="letter-spacing:.05em;cursor:pointer;">
-                            Raw Transcript
-                        </summary>
-                        <textarea class="form-control mt-2" id="ch-resume-transcript" rows="6"
-                            style="font-size:0.8rem;resize:vertical;">${escapeHtml(transcript || '(empty)')}</textarea>
-                    </details>`;
+                    ${this._renderResumeCards(result?.boardCards || [])}`;
+
+                resumeBody.querySelectorAll('[data-resume-card]').forEach(link => {
+                    link.addEventListener('click', () => {
+                        if (!isCurrent()) return;
+                        this.app.navigate('board', { openCardId: link.dataset.resumeCard });
+                    });
+                });
 
                 // Wire character counter + validation
                 const summaryTextarea = document.getElementById('ch-resume-summary');
@@ -1321,6 +1338,7 @@ export class ChatHistorySidebar {
                 if (regenerateBtn) regenerateBtn.disabled = false;
                 if (launchBtn) launchBtn.disabled = summary.length === 0 || summary.length > CHAR_LIMIT;
             } catch (error) {
+                if (!isCurrent() || generation !== loadGeneration) return;
                 resumeBody.innerHTML = `<div class="text-danger small">Failed to generate summary: ${escapeHtml(error.message)}</div>`;
                 if (actionsBar) actionsBar.style.cssText = '';
                 if (regenerateBtn) regenerateBtn.disabled = false;
@@ -1330,6 +1348,7 @@ export class ChatHistorySidebar {
         // Wire buttons
         document.getElementById('ch-resume-regenerate-btn')?.addEventListener('click', () => loadSummary(true));
         document.getElementById('ch-resume-launch-btn')?.addEventListener('click', () => {
+            if (!isCurrent() || launchBtn.disabled) return;
             const summaryText = document.getElementById('ch-resume-summary')?.value?.trim() || '';
             if (!summaryText || summaryText.length > CHAR_LIMIT) return;
 
@@ -1352,14 +1371,16 @@ export class ChatHistorySidebar {
         await loadSummary(false);
     }
 
-    _stripAnsi(text) {
-        if (!text) return text;
-        // Strip ANSI escape sequences and other common control chars
-        return text
-            .replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
-            .replace(/\x1b[()][A-Z0-9]/g, '')
-            .replace(/\x1b[^[\]]/g, '')
-            .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
+    _renderResumeCards(cards) {
+        if (!cards.length) return '';
+        return `<div class="mt-3">
+            <div class="form-label fw-semibold small text-muted text-uppercase">Associated Board cards</div>
+            <ul class="list-unstyled mb-2">${cards.map(card => `<li class="mb-1">
+                <button type="button" class="btn btn-link p-0 text-start" data-resume-card="${escapeHtml(card.id)}">${escapeHtml(cardLabel(card))}</button>
+                <div class="small text-muted">${escapeHtml(card.key)}</div>
+            </li>`).join('')}</ul>
+            <p class="small text-muted mb-0">These card references and guidance for reviewing them through VibeRails MCP will be added after the summary when the terminal launches.</p>
+        </div>`;
     }
 
     _populateLlmSubmenu(submenu) {
@@ -1418,7 +1439,7 @@ export class ChatHistorySidebar {
         return Boolean(this.filterText)
             || this.llmFilters.size > 0
             || this.currentDirOnly
-            || Boolean(this.environmentFilter || this.boardFilter || this.cardFilter || this.statusFilter);
+            || Boolean(this.selectedCard);
     }
 
     _looksLikeSessionId(text) {
@@ -1552,17 +1573,8 @@ export class ChatHistorySidebar {
                 return false;
             }
 
-            const envName = item.environmentName?.trim() || '';
-            if (this.environmentFilter === 'base' && envName) return false;
-            if (this.environmentFilter === 'custom' && !envName) return false;
-            if (this.environmentFilter.startsWith('env:') && this._environmentKey(item.cli, envName) !== this.environmentFilter) return false;
             const cards = item.boardCards || [];
-            if (this.boardFilter === 'linked' && !cards.length) return false;
-            if (this.boardFilter === 'unlinked' && cards.length) return false;
-            if (this.cardFilter && !cards.some(card => this._matchesCard(card, this.cardFilter))) return false;
-            if (this.statusFilter === 'live' && item.endedUTC) return false;
-            if (this.statusFilter === 'ended' && !item.endedUTC) return false;
-            if (this.statusFilter === 'failed' && (!item.endedUTC || item.exitCode == null || item.exitCode === 0)) return false;
+            if (this.selectedCard && !cards.some(card => card.id === this.selectedCard.id)) return false;
 
             if (this.currentDirOnly && preferredDir) {
                 const itemDir = this._normalizeDirectoryKey(this._getItemWorkingDirectoryKey(item));
@@ -1592,12 +1604,6 @@ export class ChatHistorySidebar {
         });
     }
 
-    // Display ID, permanent key, its short form and title all match (wwwroot/AGENTS.md).
-    _matchesCard(card, query) {
-        const text = cardSearchText(card).toLowerCase();
-        return query.toLowerCase().split(/\s+/).every(part => text.includes(part));
-    }
-
     _mergeItems(items) {
         const merged = new Map(this.allItems.map(item => [item.id, item]));
         items.forEach((item) => {
@@ -1613,7 +1619,6 @@ export class ChatHistorySidebar {
 
         this.allItems = Array.from(merged.values());
         this._sortItemsInMemory();
-        this._syncEnvironmentOptions();
         this._syncLlmFilterControls();
     }
 

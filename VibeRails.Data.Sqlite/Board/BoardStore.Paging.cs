@@ -29,13 +29,13 @@ public sealed partial class BoardStore
         // the writer lock. The limit selects ids before loading descriptions and card rails.
         await using var transaction = connection.BeginTransaction(deferred: true);
         var board = await ResolveBoardIdAsync(connection, transaction, project, boardId, cancellationToken);
-        if (board is null) return new([], [], [], [], 0, 0, 0, 0);
+        if (board is null) return new([], [], [], [], 0, 0, 0, 0, 0);
         var columns = await ReadColumnsAsync(connection, transaction, project, board, cancellationToken);
         if (query.ColumnId is not null && !columns.Any(column => column.Id == query.ColumnId))
             throw new BoardValidationException("Lane not found on this board.");
 
         var filter = CardPageFilterSql.Replace("{KEY}", CardDisplayIdSql + " || ' ' || " + CardKeySql, StringComparison.Ordinal);
-        var counts = new Dictionary<string, (int Total, int Filtered, int Blocked, long Points)>();
+        var counts = new Dictionary<string, (int Total, int Filtered, int Blocked, long Points, int Flagged)>();
         await using (var count = connection.CreateCommand())
         {
             count.Transaction = transaction;
@@ -43,7 +43,8 @@ public sealed partial class BoardStore
                 SELECT c.ColumnId, COUNT(*),
                        SUM(CASE WHEN {filter} THEN 1 ELSE 0 END),
                        SUM(CASE WHEN {filter} THEN c.Blocked ELSE 0 END),
-                       SUM(CASE WHEN {filter} THEN COALESCE(c.Points, 0) ELSE 0 END)
+                       SUM(CASE WHEN {filter} THEN COALESCE(c.Points, 0) ELSE 0 END),
+                       SUM(CASE WHEN {filter} AND c.Flagged <> 0 THEN 1 ELSE 0 END)
                 FROM BoardCards c
                 {CardPrefixJoinSql}
                 WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.DeletedUTC IS NULL
@@ -53,7 +54,7 @@ public sealed partial class BoardStore
             AddPageParameters(count, project, board, query);
             await using var reader = await count.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
-                counts[reader.GetString(0)] = (reader.GetInt32(1), reader.GetInt32(2), reader.GetInt32(3), reader.GetInt64(4));
+                counts[reader.GetString(0)] = (reader.GetInt32(1), reader.GetInt32(2), reader.GetInt32(3), reader.GetInt64(4), reader.GetInt32(5));
         }
 
         var cards = new List<BoardCardRecord>();
@@ -80,9 +81,9 @@ public sealed partial class BoardStore
                      {CardPrefixJoinSql}
                      WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.DeletedUTC IS NULL
                        AND c.ColumnId = $column AND {filter}
-                     ORDER BY c.Position, c.Number
+                     ORDER BY c.Flagged DESC, c.Position, c.Number
                      LIMIT $limit OFFSET $offset)
-                 ORDER BY c.Position, c.Number;
+                 ORDER BY c.Flagged DESC, c.Position, c.Number;
                 """;
             AddPageParameters(command, project, board, query);
             command.Parameters.AddWithValue("$column", column.Id);
@@ -101,8 +102,12 @@ public sealed partial class BoardStore
         var tags = await ReadPageChoicesAsync(connection, transaction, project, board,
             "SELECT DISTINCT tag.value FROM BoardCards c, json_each(c.Tags) tag", "1 = 1", cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        // The flagged total replaced the remaining-points total and keeps its scope (VIBE-73):
+        // completed lanes are excluded, so a flag left on a Done card does not demand attention.
+        var openLanes = columns.Where(c => !IsCompletedLane(c.Name)).ToList();
         return new(cards, lanes, assignees, tags, counts.Values.Sum(c => c.Total), counts.Values.Sum(c => c.Filtered),
-            counts.Values.Sum(c => c.Blocked), columns.Where(c => !IsCompletedLane(c.Name)).Sum(c => counts.GetValueOrDefault(c.Id).Points));
+            counts.Values.Sum(c => c.Blocked), openLanes.Sum(c => counts.GetValueOrDefault(c.Id).Points),
+            openLanes.Sum(c => counts.GetValueOrDefault(c.Id).Flagged));
     }
 
     private static void AddPageParameters(SqliteCommand command, string project, string board, BoardCardPageQuery query)
@@ -128,7 +133,7 @@ public sealed partial class BoardStore
             {CardPrefixJoinSql}
             WHERE c.ProjectPath = $project{ProjectPathCollation} AND c.DeletedUTC IS NULL
               AND c.ColumnId = $column AND {filter}
-            ORDER BY c.Position, c.Number;
+            ORDER BY c.Flagged DESC, c.Position, c.Number;
             """;
         AddPageParameters(command, project, board, query);
         command.Parameters.AddWithValue("$column", columnId);

@@ -40,7 +40,8 @@ public sealed partial class BoardService
             TotalCount = page.TotalCount,
             FilteredCount = page.FilteredCount,
             BlockedCount = page.BlockedCount,
-            RemainingPoints = page.RemainingPoints
+            RemainingPoints = page.RemainingPoints,
+            FlaggedCount = page.FlaggedCount
         };
     }
 }

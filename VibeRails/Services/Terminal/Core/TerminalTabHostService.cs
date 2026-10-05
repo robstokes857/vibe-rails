@@ -34,7 +34,12 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         string SessionToken,
         string TabToken,
         DateTime CreatedUtc,
-        AutomationTabState? Automation = null);
+        AutomationTabState? Automation = null)
+    {
+        public SemaphoreSlim SessionGate { get; } = new(1, 1);
+        public string? LastStartedSessionId { get; set; }
+        public HashSet<string> PendingAgentClosures { get; } = new(StringComparer.Ordinal);
+    }
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILocalClientTracker _localClientTracker;
@@ -43,6 +48,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
     private readonly ITokenSavingsStore _tokenSavings;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly SemaphoreSlim _createGate = new(1, 1);
+    private readonly CancellationTokenSource _agentCloseRetriesCts = new();
     private readonly Lock _lock = new();
     private readonly Dictionary<string, TerminalChildProcess> _tabs = new(StringComparer.Ordinal);
     private readonly Dictionary<string, CancellationTokenSource> _tabRelayCts = new(StringComparer.Ordinal);
@@ -364,10 +370,16 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         // Resolved here rather than in the browser: the frontend always sends the project root,
         // and an environment's workspace mode is server state. Doing the swap at this seam keeps
         // in-app tabs consistent with external launches without the client knowing about clones.
-        child.Automation?.BeginSessionStart();
+        await child.SessionGate.WaitAsync(cancellationToken);
         TerminalStatusResponse? session = null;
+        var startBegan = false;
         try
         {
+            if (!ReferenceEquals(GetChildOrNull(tabId), child))
+                throw new InvalidOperationException("Terminal tab has closed.");
+            child.LastStartedSessionId = null; // An uncertain start must never inherit an old close.
+            child.Automation?.BeginSessionStart();
+            startBegan = true;
             request = await ApplyWorkspaceAsync(request, cancellationToken);
             session = await SendTerminalStatusRequestAsync(
                 child,
@@ -380,11 +392,13 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                 // work being waited on: each step carries its own TimeoutSeconds, and the browser's
                 // RequestAborted still cancels the whole thing.
                 timeout: System.Threading.Timeout.InfiniteTimeSpan);
+            child.LastStartedSessionId = session.SessionId;
             return session;
         }
         finally
         {
-            child.Automation?.EndSessionStart(session);
+            if (startBegan) child.Automation?.EndSessionStart(session);
+            child.SessionGate.Release();
         }
     }
 
@@ -559,6 +573,13 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                         var appEvent = JsonSerializer.Deserialize(json, AppJsonSerializerContext.Default.AppEvent);
                         if (appEvent != null)
                         {
+                            if (appEvent.Type == "agent_session_closed")
+                            {
+                                var closure = appEvent.Payload.Deserialize(AppJsonSerializerContext.Default.AgentSessionClosedPayload);
+                                if (closure is not null)
+                                    await CloseAgentTabAsync(child, closure.SessionId);
+                                continue;
+                            }
                             var savings = appEvent.Type == ActivityEventBusExtensions.ProxyActivityEventType
                                 ? await ReadAppWideSavingsAsync()
                                 : null;
@@ -594,6 +615,79 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         Log.Warning(
             "[TerminalTabs] AppEvent relay loop exited. tabId={TabId} pid={Pid} childAlive={ChildAlive} cancelled={Cancelled} reconnects={Reconnects}",
             child.TabId, TryGetPid(child), !child.Process.HasExited, ct.IsCancellationRequested, reconnects);
+    }
+
+    // The completion event is emitted only after the child's PTY drain, recording flush and
+    // post-exit steps. Serialize validation/removal with every parent-mediated session start.
+    internal Task<bool> CloseAgentTabAsync(string tabId, string sessionId)
+    {
+        var child = GetChildOrNull(tabId);
+        return child is null ? Task.FromResult(false) : CloseAgentTabAsync(child, sessionId);
+    }
+
+    private async Task<bool> CloseAgentTabAsync(TerminalChildProcess child, string sessionId)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId)) return false;
+        var result = await TryCloseAgentTabAsync(child, sessionId, CancellationToken.None);
+        if (result == AgentTabCloseResult.Retry)
+        {
+            lock (_lock)
+            {
+                if (!_agentCloseRetriesCts.IsCancellationRequested && child.PendingAgentClosures.Add(sessionId))
+                    _ = RetryAgentTabCloseAsync(child, sessionId, _agentCloseRetriesCts.Token);
+            }
+        }
+        return result == AgentTabCloseResult.Closed;
+    }
+
+    private enum AgentTabCloseResult { Closed, Stale, Retry }
+
+    private async Task<AgentTabCloseResult> TryCloseAgentTabAsync(
+        TerminalChildProcess child, string sessionId, CancellationToken ct)
+    {
+        await child.SessionGate.WaitAsync(ct);
+        try
+        {
+            if (!ReferenceEquals(GetChildOrNull(child.TabId), child) || child.LastStartedSessionId != sessionId)
+                return AgentTabCloseResult.Stale;
+            TerminalStatusResponse? status;
+            try { status = await GetTerminalStatusFromChildAsync(child, ct); }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                Log.Warning(ex, "[TerminalTabs] Agent closure status unavailable; will retry {TabId}", child.TabId);
+                return AgentTabCloseResult.Retry;
+            }
+            if (status is null) return AgentTabCloseResult.Retry;
+            if (status.HasActiveSession || status.SessionId is not null)
+                return AgentTabCloseResult.Stale;
+            if (!await DeleteTabAsync(child.TabId)) return AgentTabCloseResult.Stale;
+            _appEventBus.Publish("agent_terminal_closed", new AgentSessionClosedPayload(sessionId, child.TabId),
+                AppJsonSerializerContext.Default.AgentSessionClosedPayload);
+            return AgentTabCloseResult.Closed;
+        }
+        finally { child.SessionGate.Release(); }
+    }
+
+    private async Task RetryAgentTabCloseAsync(TerminalChildProcess child, string sessionId, CancellationToken ct)
+    {
+        try
+        {
+            // Retain the one-shot event across transient HTTP failures without blocking the relay
+            // or holding SessionGate during backoff. Every attempt validates the original child
+            // object and session, including after a failed/uncertain replacement start. The delay
+            // doubles to a 30-second cap so a live child whose status endpoint stays broken is not
+            // polled every second for the life of the tab.
+            var delay = TimeSpan.FromSeconds(1);
+            do
+            {
+                await Task.Delay(delay, ct);
+                delay = TimeSpan.FromSeconds(Math.Min(delay.TotalSeconds * 2, 30));
+            }
+            while (await TryCloseAgentTabAsync(child, sessionId, ct) == AgentTabCloseResult.Retry);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        catch (Exception ex) { Log.Warning(ex, "[TerminalTabs] Agent closure retry failed {TabId}", child.TabId); }
+        finally { lock (_lock) child.PendingAgentClosures.Remove(sessionId); }
     }
 
     private static int TryGetPid(TerminalChildProcess child)
@@ -681,6 +775,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
 
     public async ValueTask DisposeAsync()
     {
+        await _agentCloseRetriesCts.CancelAsync();
         try
         {
             await StopAllAsync(CancellationToken.None);
@@ -689,6 +784,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         {
             ReleaseTabsOwner();
             _createGate.Dispose();
+            _agentCloseRetriesCts.Dispose();
         }
     }
 

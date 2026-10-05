@@ -34,6 +34,10 @@ public sealed class ChatHistoryRoutesTests
             .ReturnsAsync([item]);
         repository.Setup(r => r.GetChatHistoryItemAsync("session", It.IsAny<CancellationToken>())).ReturnsAsync(item);
         repository.Setup(r => r.GetChatHistoryItemAsync("missing", It.IsAny<CancellationToken>())).ReturnsAsync((ChatHistoryItem?)null);
+        repository.Setup(r => r.GetSessionOutputAsync("session", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SessionOutputDetailResponse("session", "codex", null, "C:/project", DateTime.UtcNow, null, true, "transcript"));
+        repository.Setup(r => r.GetChatSummariesBySessionAsync("session", It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new ChatSummary { SessionId = "session", SummaryText = "cached recap", Date = DateTime.UtcNow }]);
         board.Setup(s => s.GetSessionCardsAsync(It.Is<IReadOnlyList<string>>(ids => ids.Count == 1 && ids[0] == "session"), It.IsAny<CancellationToken>()))
             .ReturnsAsync([new("session", "card", "VB-M66G2-64", "Filters <&>", "VIBE-7"), new("session", "second", "VB-OTHER-65", "Second card")]);
 
@@ -58,7 +62,7 @@ public sealed class ChatHistoryRoutesTests
         await app.StartAsync(ct);
         try
         {
-            foreach (var path in new[] { "/api/v1/chatHistory", "/api/v1/chatHistory/session" })
+            foreach (var path in new[] { "/api/v1/chatHistory", "/api/v1/chatHistory/session", "/api/v1/chatHistory/session/summary" })
             {
                 foreach (var credential in new[] { "none", "session", "tab", "both" })
                 {
@@ -73,9 +77,14 @@ public sealed class ChatHistoryRoutesTests
                     }
                     response.EnsureSuccessStatusCode();
                     using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
-                    var row = path.EndsWith("/session") ? json.RootElement : json.RootElement.GetProperty("items")[0];
-                    Assert.Equal("My renamed chat", row.GetProperty("sessionDisplayName").GetString());
-                    Assert.Equal("Review", row.GetProperty("environmentName").GetString());
+                    var row = path == "/api/v1/chatHistory" ? json.RootElement.GetProperty("items")[0] : json.RootElement;
+                    if (path.EndsWith("/summary"))
+                        Assert.Equal("cached recap", row.GetProperty("summary").GetString());
+                    else
+                    {
+                        Assert.Equal("My renamed chat", row.GetProperty("sessionDisplayName").GetString());
+                        Assert.Equal("Review", row.GetProperty("environmentName").GetString());
+                    }
                     var cards = row.GetProperty("boardCards");
                     Assert.Equal(2, cards.GetArrayLength());
                     Assert.Equal("VB-M66G2-64", cards[0].GetProperty("key").GetString());
@@ -84,7 +93,7 @@ public sealed class ChatHistoryRoutesTests
                 }
             }
             Assert.Null(await app.Services.GetRequiredService<IChatHistoryService>().GetSessionAsync("missing", ct));
-            board.Verify(s => s.GetSessionCardsAsync(It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+            board.Verify(s => s.GetSessionCardsAsync(It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
         }
         finally { await app.StopAsync(CancellationToken.None); }
     }

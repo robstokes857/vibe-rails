@@ -255,11 +255,10 @@ export class AutomationNavLauncher {
         const anchor = triggerElement?.closest?.('.app-subnav-split') || triggerElement;
         const rect = anchor?.getBoundingClientRect?.();
         if (!rect) return;
-        const inSidebar = Boolean(triggerElement.closest?.('.app-sidebar'));
         // Measure after render so clamping uses the real size.
         const { offsetWidth: width, offsetHeight: height } = flyout;
-        let left = inSidebar ? rect.right + 8 : rect.left;
-        let top = inSidebar ? rect.top : rect.bottom + 6;
+        let left = rect.left;
+        let top = rect.bottom + 6;
         left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
         top = Math.max(8, Math.min(top, window.innerHeight - height - 8));
         flyout.style.left = `${Math.round(left)}px`;

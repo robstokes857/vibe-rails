@@ -140,7 +140,7 @@ test('opening a card from navigation selects its board before opening the editor
         currentView: 'board',
         apiCall: async (url) => {
             calls.push(`GET ${url}`);
-            return { id: 'card-1', boardId: 'board-2', title: 'Link back' };
+            return { isCurrentProject: true, card: { id: 'card-1', boardId: 'board-2', title: 'Link back' } };
         },
         showToast: (...args) => calls.push(['toast', ...args])
     };
@@ -152,9 +152,28 @@ test('opening a card from navigation selects its board before opening the editor
 
     await controller.openCardFromNavigation('card-1');
     assert.deepEqual(calls, [
-        'GET /api/v1/board/cards/card-1',
+        'GET /api/v1/board/local-cards/card-1',
         ['refresh', 'board-2', { restoreSelection: false }],
         ['open', 'card-1']
+    ]);
+});
+
+test('a foreign history card opens the local editor without selecting a foreign board', async () => {
+    const calls = [];
+    const controller = new BoardController({
+        currentView: 'board',
+        apiCall: async () => ({ isCurrentProject: false, card: { id: 'foreign', boardId: 'foreign-board' } }),
+        showToast() { assert.fail('The linked card is available'); }
+    });
+    controller.root = { isConnected: true };
+    controller.state.boardId = 'current-board';
+    controller.refresh = async options => { calls.push(['refresh', controller.state.boardId, options]); };
+    controller.openLocalCard = async id => { calls.push(['local', id]); };
+    controller.openCardEditor = async () => { assert.fail('Foreign cards must not use the scoped editor'); };
+    await controller.openCardFromNavigation('foreign');
+    assert.deepEqual(calls, [
+        ['refresh', 'current-board', { restoreSelection: true }],
+        ['local', 'foreign']
     ]);
 });
 

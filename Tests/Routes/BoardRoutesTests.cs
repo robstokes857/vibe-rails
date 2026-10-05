@@ -1132,7 +1132,7 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         await store.EnsureDefaultColumnsAsync(_project, ct);
         var done = (await store.GetColumnsAsync(_project, ct)).First(column => column.Name == "Done");
         for (var index = 0; index < 4; index++)
-            await store.CreateCardAsync(_project, new NewBoardCard(done.Id, $"Done {index}", "", "base:codex", "medium", 5, ["debug"], index == 0), ct);
+            await store.CreateCardAsync(_project, new NewBoardCard(done.Id, $"Done {index}", "", "base:codex", "medium", 5, ["debug"], index == 0, Flagged: index == 1), ct);
         using var unauthorized = await SendAsync(HttpMethod.Get, "/api/v1/board/cards?pageSize=2", "test-session");
         Assert.Equal(HttpStatusCode.Unauthorized, unauthorized.StatusCode);
         using var initial = await GetJsonAsync("/api/v1/board/cards?pageSize=2");
@@ -1141,6 +1141,7 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         Assert.Equal(4, response.GetProperty("totalCount").GetInt32());
         Assert.Equal(4, response.GetProperty("filteredCount").GetInt32());
         Assert.Equal(1, response.GetProperty("blockedCount").GetInt32());
+        Assert.Equal(0, response.GetProperty("flaggedCount").GetInt32()); // the flagged card is in Done: excluded like its points
         Assert.Equal(0, response.GetProperty("remainingPoints").GetInt64());
         Assert.Equal("base:codex", response.GetProperty("assignees")[0].GetString());
         Assert.Equal("debug", response.GetProperty("tags")[0].GetString());

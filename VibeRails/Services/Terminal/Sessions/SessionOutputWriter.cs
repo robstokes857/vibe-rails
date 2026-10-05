@@ -46,6 +46,7 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
     private Task? _worker;
     private string? _sessionId;
     private int _disposed;
+    private string? _completionMessage;
 
     // Drain-loop state (single-reader, no locking needed)
     private MemoryStream _mainBuffer = new();
@@ -89,6 +90,9 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
         _channel.Writer.TryWrite(new WriterMessage(WriterMessageKind.Line, payload,
             IsError: isError, TimestampUtc: timestampUtc));
     }
+
+    /// <inheritdoc />
+    public void SetCompletionMessage(string message) => Interlocked.CompareExchange(ref _completionMessage, message, null);
 
     public void NotifyResize(int cols, int rows)
     {
@@ -165,6 +169,17 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
         }
         FlushBuffer(_mainBuffer, false, batch);
         FlushBuffer(_altBuffer, true, batch);
+        if (_completionMessage is { } message)
+        {
+            // Recording only: never send this to a PTY, live viewer, or the live emulator.
+            // Cancel a partial escape, release synchronized output/style/scroll margins and
+            // move below the final screen so even a killed full-screen TUI shows the reason.
+            var footer = System.Text.Encoding.UTF8.GetBytes(
+                $"\x18\x1b[?2026l\x1b[0m\x1b[r\x1b[?7h\x1b[{_rows};1H\r\n{message}\r\n");
+            var now = DateTime.UtcNow;
+            batch.Add(TerminalOutputWrite.Legacy(footer, false, now));
+            batch.Add(TerminalOutputWrite.Enriched(_sequence++, footer, _inAltScreen, _cols, _rows, now));
+        }
         await PersistBatchAsync(batch).ConfigureAwait(false);
     }
 

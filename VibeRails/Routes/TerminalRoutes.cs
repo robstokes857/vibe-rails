@@ -124,6 +124,9 @@ public static class TerminalRoutes
             // Start the terminal session with the LLM CLI
             try
             {
+                if (!string.IsNullOrEmpty(request.ResumeSessionId))
+                    summary = await sessionResumeService.AppendBoardContextAsync(request.ResumeSessionId, summary, cancellationToken);
+
                 var success = await terminalService.StartSessionAsync(llm, workDir, request.EnvironmentName, extraArgs, request.Title, request.MakeRemote, resolveInitialPrompt, summary,
                     authorizeBoardTools: request.AuthorizeBoardTools);
 

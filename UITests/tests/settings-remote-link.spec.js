@@ -158,35 +158,35 @@ test('unavailable site and denied or expired requests offer retry while preservi
     }
 });
 
-for (const layout of ['top', 'side']) {
-    test(`signed-out ${layout} navigation and Settings both offer sign in`, async ({ page }) => {
-        const { root } = await openSettings(page);
-        await page.evaluate(layout => window.VibeRailsNavLayout.setLayout(layout), layout);
-        await expect(page.locator('[data-account-nav]:visible')).toHaveText('Sign in');
-        await expect(root.locator('[data-account-settings-action]')).toHaveText('Sign in');
-        await page.locator('[data-account-nav]:visible').click();
-        await expect(page.locator('[data-remote-link-start]')).toBeEnabled();
-    });
+test('signed-out top navigation and Settings both offer sign in', async ({ page }) => {
+    const { root } = await openSettings(page);
+    await expect(page.locator('.app-sidebar, [data-action="switch-nav-layout"]')).toHaveCount(0);
+    await expect(page.locator('[data-account-nav]:visible')).toHaveText('Sign in');
+    await expect(root.locator('[data-account-settings-action]')).toHaveText('Sign in');
+    await page.locator('[data-account-nav]:visible').click();
+    await expect(page.locator('[data-remote-link-start]')).toBeEnabled();
+});
 
-    test(`saved account stays in Settings after reload in ${layout} navigation`, async ({ page }, testInfo) => {
-        const email = 'a-very-long-account-email-for-narrow-layouts@example.com';
-        const { root } = await openSettings(page, { signedIn: true, email });
-        await page.evaluate(layout => window.VibeRailsNavLayout.setLayout(layout), layout);
-        await page.reload();
-        await page.locator('[data-action="navigate-settings"]:visible').click();
-        await expect(page.locator('[data-account-nav]:visible')).toHaveCount(0);
-        await expect(root.locator('[data-account-status]')).toHaveText(`Logged in ${email}`);
-        await expect(root.locator('[data-account-settings-action]')).toHaveText('Switch account');
-        await page.setViewportSize({ width: 420, height: 900 });
-        const card = root.getByRole('region', { name: 'Account', exact: true });
-        expect(await card.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
-        await card.screenshot({ path: testInfo.outputPath(`account-${layout}-narrow.png`) });
-        await root.locator('[data-account-settings-action]').click();
-        await expect(page.locator('[data-remote-link-status]')).toHaveText(`Logged in ${email}`);
-        await page.locator('[data-remote-link-start]').click();
-        await expect(page.locator('[data-remote-link-code]')).toHaveText('BXQK-2M7T');
-    });
-}
+test('saved account stays in Settings after reload', async ({ page }, testInfo) => {
+    const email = 'a-very-long-account-email-for-narrow-layouts@example.com';
+    const { root } = await openSettings(page, { signedIn: true, email });
+    await page.addInitScript(() => localStorage.setItem('viberails_nav_layout', 'side'));
+    await page.reload();
+    await expect(page.locator('.app-subnav')).toBeVisible();
+    await expect(page.locator('.app-sidebar')).toHaveCount(0);
+    await page.locator('[data-action="navigate-settings"]:visible').click();
+    await expect(page.locator('[data-account-nav]:visible')).toHaveCount(0);
+    await expect(root.locator('[data-account-status]')).toHaveText(`Logged in ${email}`);
+    await expect(root.locator('[data-account-settings-action]')).toHaveText('Switch account');
+    await page.setViewportSize({ width: 420, height: 900 });
+    const card = root.getByRole('region', { name: 'Account', exact: true });
+    expect(await card.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+    await card.screenshot({ path: testInfo.outputPath('account-top-narrow.png') });
+    await root.locator('[data-account-settings-action]').click();
+    await expect(page.locator('[data-remote-link-status]')).toHaveText(`Logged in ${email}`);
+    await page.locator('[data-remote-link-start]').click();
+    await expect(page.locator('[data-remote-link-code]')).toHaveText('BXQK-2M7T');
+});
 
 test('sign-in completed from another tab updates Settings and nav without discarding drafts', async ({ page }) => {
     const { root, approve } = await openSettings(page);

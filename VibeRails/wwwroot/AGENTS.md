@@ -14,7 +14,7 @@ starting a different session clears local state. Clearing the card flag clears i
 `board-card-organize.js` renders the saved card's **Move or merge** section. It offers project
 boards/lanes and a card search, confirms the destination and lane Automation count, and refuses
 to replace an editor with unsaved drafts. Dispose it on close/replacement/unload. The existing
-navbar **Sign in** opens the device approval flow in both layouts when signed out.
+navbar **Sign in** opens the device approval flow when signed out. The top navigation is the only application navigation.
 
 Comments includes agent checkpoints and legacy note rows. Attention entries appear first; the
 remaining entries stay chronological. All / Hide agent comments / Agent comments filters keep
@@ -25,6 +25,15 @@ The complete viberails.ai settings section is removed; the backend still publish
 These rules supersede the older separate-notes and no-cross-board-transfer descriptions below.
 
 Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
+
+## Page headings (VIBE-70)
+
+Quality, ENVs, Vibe AI, MCP and Settings use `vb-page-header`, `vb-page-heading` and
+one `h1.vb-page-title` in their view templates. `style.css` owns the shared title typography,
+left alignment, divider, shared top inset, spacing and narrow-screen stacking. Optional supporting text uses
+`vb-page-description`; grouped controls use `vb-page-actions`. Grid workspaces supply their
+own gap after the header. Keep page-specific status/action styles, but do not restore local
+title rules, uppercase utilities, inline letter spacing or gradient page titles.
 
 **Terminology:** "Web UI Chat" refers to the xterm.js-based terminal, NOT a separate chat UI.
 
@@ -64,14 +73,14 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 
 ## Vibe AI navigation
 
-The Vibe AI links in the top navigation and sidebar are always visible; there is no setting to
-hide them, and none should be added back. The retired `ShowVibeAiUi` key stays in `settings.json`
+The Vibe AI link in the top navigation is always visible; there is no setting to
+hide it, and none should be added back. The retired `ShowVibeAiUi` key stays in `settings.json`
 for older versions that still read it: the settings route ignores a requested value, preserves
 the stored one, and always reports `showVibeAiUi: true`. The frontend neither sends nor reads it.
 
 ## Navigation account sign-in
 
-The top navigation and sidebar offer **Sign in** only when no API key is saved. General Settings
+The top navigation offers **Sign in** only when no API key is saved. General Settings
 always has an **Account** card: **Sign in** when signed out, or **Logged in {email}** and
 **Switch account** when linked. Manual/older keys without an approved email say **API key
 configured**. Both entry points open the shared modal from `remote-account-template`.
@@ -165,13 +174,19 @@ so a promoted unloaded card cannot be skipped. Aborted or stale pages cannot rep
 and append still deduplicates card IDs. Drag ordering is disabled while filters are active.
 Board-only viewport sizing and non-shrinking cards keep scrolling inside each lane.
 
-New cards and ordinary card activity rise to the top of the current lane. Explicit drag positions
-remain authoritative. This ordering is persisted, including comments, notes, session links/renames,
+Flagged cards always lead each lane, including before server pagination. New cards and ordinary
+card activity rise to the top of their flag group. Explicit drag positions remain authoritative
+within that group. This ordering is persisted, including comments, notes, session links/renames,
 attachments and commit links, rather than being a browser-only sort.
 
 The compact **Vibe Board** header groups the title, name-only **board picker**, `+` for a new
 board (default lanes; opens at once), and a settings cog for rename/delete. New card and the
-optional Jira pull sit on the right alongside board statistics; search and filters share a second
+optional Jira pull sit on the right alongside board statistics (card count, flagged count, blocked
+count). The flagged count is cards with `flagged=true` in the scope the remaining-points total
+used: the active filters, cards paging has not loaded, and open lanes only; completed lanes are
+excluded by the server page and the client fallback alike. The ten-second board poll
+rewrites it when a card is flagged or unflagged. Stored story points stay on the card and are
+not shown. Search and filters share a second
 row on the same surface. Lane headers retain their card counts. There are no lane-bottom entry
 fields: **New card** opens the editor, whose Lane selector chooses the destination.
 The settings modal also includes **Agent context**: a default message plus default-only,
@@ -320,7 +335,7 @@ in a footer **below** the textarea, not in its toolbar.
 
 **Linked cards** sits below the fields in the right rail. Saved cards can link to cards on any
 board in the same project; each relation appears on both cards. The full card response carries
-`linkedCards[]` with current key/title, board and lane names. `board-card-links.js` owns the
+`linkedCards[]` with current key/title, board and lane names. `board-card-links.js` uses the shared `board-card-search-picker.js`
 search picker (up to 50 matches by key or title), immediate link/unlink calls, and its abortable
 search lifecycle. Self/already-linked cards are omitted. All displayed metadata is escaped.
 Opening a linked card checks for unsaved fields, description or comment text first; cancel
@@ -487,12 +502,32 @@ which is why those two controls stop propagation before the card's own open hand
 
 ## Chat history sidebar
 
-`chat-history-sidebar.js` combines provider, environment, Board association, card key/title,
-session status and current-folder filters. Provider selections are OR; the other filters intersect.
-Environment identity is the recorded provider/name pair, including historical environments;
-the dropdown combines configured environments with names discovered as history pages load.
-Search covers names, session IDs, project/path, environments and every attached card. Full card
-keys and shorthand such as `VB-64` both match. Clear all resets every filter, including search.
+Each associated card's metadata label is a keyboard-accessible link (VIBE-72), using its display
+ID with the permanent key and title in the tooltip. It navigates to `board` with `openCardId`
+set to the immutable row ID; the existing Board navigation handles local and cross-project cards.
+All associations get separate links, while unlinked sessions have none. Replay stays in Actions.
+
+The three-dot menu offers session replay but no Session Data Dump action. Send to keeps the
+editable summary, regeneration and terminal launch; it does not display the raw transcript.
+These are presentation choices only: stored session data, transcripts and backend APIs remain intact.
+
+Send To displays the summary response's associated card links and permanent keys separately from
+the editable recap. `SessionResumeService.AppendBoardContextAsync` re-reads all source-session
+attachments through `IBoardStore` at launch and appends IDs, local references and MCP retrieval/review
+guidance after the recap. Card labels never enter the remote summarizer or recap cache. Keep the
+6,000-character recap limit separate from the overall prompt cap; never silently drop cards to fit.
+Opening a card uses the existing local-card editor for cross-project history. Closing, replacing or
+destroying the modal invalidates late summary responses. No Board grants or attachments are inferred.
+
+`chat-history-sidebar.js` combines provider, selected Board card and current-folder filters.
+Provider selections are OR; the other filters intersect. The **Find a card** dropdown reuses
+`board-card-search-picker.js` and the Board's all-local link-candidate search (ID or words,
+board/lane/project metadata, 50-result limit, debouncing and abort/generation guards).
+Typing searches candidates; selecting applies an exact immutable card-ID filter across every
+session attachment, including secondary cards. Clear card filter removes only that selection;
+Clear all resets every filter, including free-text search. Environment, Board-association and
+status selectors are removed. General search still covers names, session IDs, project/path,
+environments and every attached card; full keys, display IDs and shorthand such as `VB-64` match.
 
 `ChatHistoryService` enriches pages and individual session lookups with `boardCards` through
 `IBoardStore.GetSessionCardsAsync` in batches. The default attachment comes first, additional
@@ -1076,6 +1111,12 @@ including in chat history, which shows the display ID and keeps the key in the t
 and are sent as `linkedCardIds` only on Create; link search and disposal retain generation guards.
 
 ### Agent completion and Automation navigation (VIBE-9)
+
+VIBE-78: `agent_terminal_closed` removes the agent's exact tab/session after the backend has
+finalized its recording. A persistent notification explains that the agent called
+`end_agent_session` and points to Replay/linked Board cards. The same closed-tab guards reject
+late restore/adoption responses, and pending close/undo timers are cancelled. Session completion
+or socket disconnection alone never closes an ordinary tab. No status line is written to xterm.
 
 The blinking robot on a Board tile is a button that focuses the active Automation session.
 Its lookup ignores responses after navigation. Ordinary working-agent selection is unchanged.

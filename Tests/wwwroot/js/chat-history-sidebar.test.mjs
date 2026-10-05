@@ -110,61 +110,42 @@ test('Board labels replace automatic names and preserve explicit renames', () =>
     assert.equal(sidebar._getDisplayName(session('a')), 'First prompt');
 });
 
-test('filters intersect provider, exact environment, attached card, folder and outcome', () => {
+test('provider, selected card and folder intersect without environment or outcome filtering', () => {
     const sidebar = historySidebar();
     sidebar.allItems = [
         session('match', { boardCards: cards, environmentName: 'Review', exitCode: 2 }),
-        session('other-provider', { cli: 'claude', boardCards: cards, environmentName: 'Review', exitCode: 2 }),
-        session('base', { boardCards: cards, exitCode: 2 }),
-        session('no-card', { environmentName: 'Review', exitCode: 2 }),
-        session('other-dir', { boardCards: cards, environmentName: 'Review', workingDirectory: 'C:/other', exitCode: 2 }),
-        session('success', { boardCards: cards, environmentName: 'Review' }),
-        session('live', { boardCards: cards, environmentName: 'Review', endedUTC: null, exitCode: 2 })
+        session('other-provider', { cli: 'claude', boardCards: cards }),
+        session('base', { boardCards: cards }),
+        session('no-card'),
+        session('other-dir', { boardCards: cards, workingDirectory: 'C:/other' }),
+        session('live', { boardCards: cards, endedUTC: null }),
+        session('same-title', { boardCards: [{ ...cards[1], id: 'different-card' }] })
     ];
     sidebar.llmFilters.add('codex');
-    sidebar.environmentFilter = sidebar._environmentKey('codex', 'review');
-    sidebar.boardFilter = 'linked';
-    sidebar.cardFilter = 'VB-65 additional';
+    sidebar.selectedCard = cards[1]; // A secondary attachment also matches.
     sidebar.currentDirOnly = true;
-    sidebar.statusFilter = 'failed';
-    assert.deepEqual(sidebar._getFilteredItems().map(x => x.id), ['match']);
-    sidebar.statusFilter = 'live';
-    assert.deepEqual(sidebar._getFilteredItems().map(x => x.id), ['live']);
+    assert.deepEqual(sidebar._getFilteredItems().map(x => x.id), ['match', 'base', 'live']);
+    sidebar.llmFilters.add('claude');
+    assert.deepEqual(sidebar._getFilteredItems().map(x => x.id), ['match', 'other-provider', 'base', 'live']);
     sidebar._clearFilters();
     assert.equal(sidebar._hasActiveFilters(), false);
     assert.equal(sidebar._getFilteredItems().length, 7);
 });
 
-test('cards show their display ID, and both the display ID and the permanent key match', () => {
+test('selected card identity survives title and display ID changes while free text searches labels', () => {
     const sidebar = historySidebar();
-    const labelled = [{ id: 'card-a', key: 'VB-M66G2-64', displayId: 'VIBE-7', title: 'Better filters' }];
-    const item = session('a', { boardCards: labelled });
+    const card = { id: 'card-a', key: 'VB-M66G2-64', displayId: 'VIBE-7', title: 'Better filters' };
+    const item = session('a', { boardCards: [card] });
     sidebar.allItems = [item];
+    sidebar.selectedCard = { ...card, displayId: 'OLD-1', title: 'Old title' };
     assert.equal(sidebar._getDisplayName(item), 'VIBE-7 · Better filters');
-    for (const query of ['vibe-7', 'VB-M66G2-64', 'VB-64', 'better']) {
-        sidebar.cardFilter = query;
-        assert.deepEqual(sidebar._getFilteredItems().map(x => x.id), ['a'], `card filter ${query}`);
-    }
-    sidebar.cardFilter = '';
-    sidebar.filterText = 'vibe-7';
     assert.deepEqual(sidebar._getFilteredItems().map(x => x.id), ['a']);
+    for (const query of ['vibe-7', 'VB-M66G2-64', 'VB-64', 'better']) {
+        sidebar.filterText = query;
+        assert.deepEqual(sidebar._getFilteredItems().map(x => x.id), ['a'], `search ${query}`);
+    }
     sidebar.filterText = 'VIBE-8';
     assert.deepEqual(sidebar._getFilteredItems().map(x => x.id), []);
-});
-
-test('environment filter values are self-describing, and an open select is not rebuilt under the pointer', () => {
-    const sidebar = historySidebar();
-    assert.equal(sidebar._environmentKey('codex', ' Review '), 'env:codex:review');
-    const select = { innerHTML: '', value: '', selectedOptions: [], listeners: {},
-        addEventListener(type, handler) { this.listeners[type] = handler; } };
-    select.ownerDocument = { activeElement: select };
-    sidebar.environmentSelect = select;
-    sidebar.allItems = [session('a', { environmentName: 'Review' })];
-    sidebar._syncEnvironmentOptions();
-    assert.equal(select.innerHTML, '', 'no rebuild while focused');
-    select.ownerDocument.activeElement = null;
-    select.listeners.blur();
-    assert.match(select.innerHTML, /value="env:codex:review"/);
 });
 
 test('search finds card shorthand and metadata even after a chat is renamed', () => {
@@ -179,7 +160,7 @@ test('search finds card shorthand and metadata even after a chat is renamed', ()
 });
 
 test('provider-only and card-only filters scan older pages without a text query', async () => {
-    for (const configure of [s => s.llmFilters.add('codex'), s => { s.cardFilter = 'VB-64'; }]) {
+    for (const configure of [s => s.llmFilters.add('codex'), s => { s.selectedCard = cards[0]; }]) {
         const calls = [];
         const sidebar = historySidebar(async url => {
             const page = Number(new URL(url, 'http://test').searchParams.get('page'));
@@ -201,7 +182,7 @@ test('clearing filters during a request stops the older-page scan', async () => 
     let calls = 0;
     const sidebar = historySidebar(() => { calls++; return new Promise(resolve => { complete = resolve; }); });
     sidebar.pageSize = 1;
-    sidebar.boardFilter = 'linked';
+    sidebar.selectedCard = cards[0];
     const loading = sidebar._loadRemainingPagesForFilters();
     sidebar._clearFilters();
     complete({ items: [session('a')] });
@@ -230,22 +211,12 @@ test('failed older pages keep matches and report incomplete results', async () =
     const sidebar = historySidebar(async () => { throw new Error('offline'); });
     sidebar.allItems = [session('kept')];
     sidebar.currentPage = 1;
-    sidebar.statusFilter = 'ended';
+    sidebar.llmFilters.add('codex');
     await sidebar._loadRemainingPagesForFilters();
     assert.deepEqual(sidebar._getFilteredItems().map(x => x.id), ['kept']);
     assert.equal(sidebar.loadFailed, true);
     assert.match(sidebar._renderFooter(), /incomplete.*data-history-retry/);
     assert.equal(sidebar.currentPage, 1);
-});
-
-test('base, custom and unlinked filters handle legacy rows with no metadata', () => {
-    const sidebar = historySidebar();
-    sidebar.allItems = [session('base'), session('custom', { environmentName: 'old deleted env', boardCards: cards })];
-    sidebar.environmentFilter = 'custom';
-    assert.deepEqual(sidebar._getFilteredItems().map(x => x.id), ['custom']);
-    sidebar.environmentFilter = 'base';
-    sidebar.boardFilter = 'unlinked';
-    assert.deepEqual(sidebar._getFilteredItems().map(x => x.id), ['base']);
 });
 
 test('overlapping direct lookups keep loading feedback until both finish', async () => {

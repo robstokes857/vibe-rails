@@ -16,7 +16,7 @@ public sealed partial class BoardStore
             await using var command = connection.CreateCommand();
             var parameters = string.Join(",", batch.Select((_, index) => $"$s{index}"));
             command.CommandText = $"""
-                SELECT s.SessionId, c.Id, {CardKeySql}, c.Title, {CardDisplayIdSql}
+                SELECT s.SessionId, c.Id, {CardKeySql}, c.Title, {CardDisplayIdSql}, c.ProjectPath
                 FROM {AllSessionsSql} s JOIN BoardCards c ON c.Id = s.CardId
                 {CardPrefixJoinSql}
                 WHERE s.SessionId IN ({parameters}) AND c.DeletedUTC IS NULL
@@ -25,7 +25,7 @@ public sealed partial class BoardStore
             for (var i = 0; i < batch.Length; i++) command.Parameters.AddWithValue($"$s{i}", batch[i]);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
-                result.Add(new BoardSessionCard(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4)));
+                result.Add(new BoardSessionCard(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetString(5)));
         }
         return result;
     }

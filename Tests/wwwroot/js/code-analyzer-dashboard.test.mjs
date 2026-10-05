@@ -517,11 +517,12 @@ test('NPath saturation is described as a capped estimate rather than an exact me
 test('Rules and Code quality share one Project health destination without a docked terminal', () => {
     const index = readFileSync(path.resolve('VibeRails/wwwroot/index.html'), 'utf8');
 
-    // One QUALITY entry appears in both nav layouts. The old top-level RULES link is gone.
+    // One QUALITY entry lives in the top navigation. The old top-level RULES link is gone.
     const rulesNavLinks = index.match(/data-action="navigate" data-view="rule-files"/g) || [];
     assert.equal(rulesNavLinks.length, 0);
-    assert.equal((index.match(/<span(?: class="nav-label")?>QUALITY<\/span>/g) || []).length, 2);
-    assert.equal((index.match(/data-action="navigate-home"/g) || []).length, 2);
+    assert.equal((index.match(/<span>QUALITY<\/span>/g) || []).length, 1);
+    assert.equal((index.match(/data-action="navigate-home"/g) || []).length, 1);
+    assert.equal((index.match(/class="app-sidebar"|switch-nav-layout|nav-layout\.js/g) || []).length, 0);
 
     // The unified page carries both summaries and the card-level agent actions, but never xterm.
     const agentsTemplate = index.match(/<template id="agents-template">([\s\S]*?)<\/template>/)[1];
