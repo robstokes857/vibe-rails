@@ -858,7 +858,7 @@ public partial class CommandServiceTests : IDisposable
         string codexLlmProxyMode = CodexLlmProxySettings.ModeSubscription,
         ILlmProxySessionState? sessionState = null,
         Action<Mock<IFileService>>? configureFiles = null,
-        Func<bool>? createVibeStoryTrackingEnabled = null)
+        Func<Settings>? storyTrackingSettings = null)
     {
         var fileService = new Mock<IFileService>();
         fileService.Setup(x => x.GetUserProfilePath()).Returns(Path.Combine(Path.GetTempPath(), "viberails-grok-tests"));
@@ -906,7 +906,7 @@ public partial class CommandServiceTests : IDisposable
             proxySettings.Object,
             sessionState ?? new LlmProxySessionState(),
             fileService.Object,
-            createVibeStoryTrackingEnabled ?? (() => false));
+            storyTrackingSettings ?? (() => new Settings { CreateVibeStoryTracking = false }));
     }
 
     private static string ExpectedQuietRedirect() =>

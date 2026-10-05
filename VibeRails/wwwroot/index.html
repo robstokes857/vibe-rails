@@ -1456,11 +1456,20 @@
                             <div class="mb-4">
                                 <div class="form-check form-switch">
                                     <input class="form-check-input" type="checkbox" id="setting-create-vibe-story-tracking" checked>
-                                    <label class="form-check-label" for="setting-create-vibe-story-tracking">Create Vibe Story Tracking</label>
+                                    <label class="form-check-label" for="setting-create-vibe-story-tracking">Vibe Board Nudge</label>
                                 </div>
-                                <small class="form-text text-muted">For launches without an initial message or continuation summary, ask the LLM to consider
+                                <small class="form-text text-muted">For default LLM launches without an initial message or continuation summary, ask the LLM to consider
                                     tracking terminal work with a Vibe Story. Creating a story is at the agent's discretion.
                                     On by default; applies to new sessions.</small>
+                            </div>
+                            <div class="mb-4">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="setting-create-vibe-story-tracking-custom-envs">
+                                    <label class="form-check-label" for="setting-create-vibe-story-tracking-custom-envs">Vibe Board Nudge - Custom Envs</label>
+                                </div>
+                                <small class="form-text text-muted">For custom environment launches without an initial message or continuation summary, ask the LLM to consider
+                                    tracking terminal work with a Vibe Story. Creating a story is at the agent's discretion.
+                                    Off by default; applies to new sessions.</small>
                             </div>
                             <div class="mb-4">
                                 <label class="form-label" for="setting-api-key">API Key</label>

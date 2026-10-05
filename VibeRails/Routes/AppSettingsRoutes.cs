@@ -85,6 +85,8 @@ public static class AppSettingsRoutes
             settings.UseVsCodeTheme = settingsDto.UseVsCodeTheme;
             if (settingsDto.CreateVibeStoryTracking.HasValue)
                 settings.CreateVibeStoryTracking = settingsDto.CreateVibeStoryTracking.Value;
+            if (settingsDto.CreateVibeStoryTrackingCustomEnvs.HasValue)
+                settings.CreateVibeStoryTrackingCustomEnvs = settingsDto.CreateVibeStoryTrackingCustomEnvs.Value;
             // MCP registration is always on. Keep the field true for old clients/settings files.
             settings.McpEnabled = true;
             // Store the raw name (blank allowed). The machine-name default is resolved
@@ -216,7 +218,8 @@ public static class AppSettingsRoutes
             settings.GrokTokenSaverEnabled ?? settings.OpenCodeTokenSaverEnabled ?? settings.ClaudeTokenSaverEnabled,
             DataExportOptIn: true,
             RemoteAccountEmail: ApiKeyStore.GetAccountEmail(settings),
-            CreateVibeStoryTracking: settings.CreateVibeStoryTracking
+            CreateVibeStoryTracking: settings.CreateVibeStoryTracking,
+            CreateVibeStoryTrackingCustomEnvs: settings.CreateVibeStoryTrackingCustomEnvs
         );
     }
 

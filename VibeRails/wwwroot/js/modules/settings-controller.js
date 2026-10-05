@@ -40,6 +40,7 @@ export class SettingsController {
             routeThroughVibeRailsAi: false,
             useVsCodeTheme: false,
             createVibeStoryTracking: true,
+            createVibeStoryTrackingCustomEnvs: false,
             mcpEnabled: true,
             computerName: '',
             codexLlmProxyEnabled: false,
@@ -102,6 +103,7 @@ export class SettingsController {
             const useVsCodeThemeRow = root.querySelector('#setting-use-vscode-theme-row');
             const useVsCodeThemeToggle = root.querySelector('#setting-use-vscode-theme');
             const createVibeStoryTrackingToggle = root.querySelector('#setting-create-vibe-story-tracking');
+            const createVibeStoryTrackingCustomEnvsToggle = root.querySelector('#setting-create-vibe-story-tracking-custom-envs');
             const mcpEnabledToggle = root.querySelector('#setting-enable-mcp');
             const computerNameInput = root.querySelector('#setting-computer-name');
             const codexLlmProxyEnabledToggle = root.querySelector('#setting-codex-llm-proxy-enabled');
@@ -158,6 +160,9 @@ export class SettingsController {
             }
             if (createVibeStoryTrackingToggle) {
                 createVibeStoryTrackingToggle.checked = settings.createVibeStoryTracking !== false;
+            }
+            if (createVibeStoryTrackingCustomEnvsToggle) {
+                createVibeStoryTrackingCustomEnvsToggle.checked = settings.createVibeStoryTrackingCustomEnvs === true;
             }
             if (mcpEnabledToggle) {
                 mcpEnabledToggle.checked = true;
@@ -248,7 +253,8 @@ export class SettingsController {
                             grokTokenSaverToggle?.checked ?? true,
                             routeThroughVibeRailsAiToggle?.checked ?? false,
                             clearApiKey,
-                            createVibeStoryTrackingToggle?.checked ?? true
+                            createVibeStoryTrackingToggle?.checked ?? true,
+                            createVibeStoryTrackingCustomEnvsToggle?.checked ?? false
                         );
                         if (savedSettings) {
                             await this._reconcileSavedApiKey(savedSettings, linkedKeyVersion);
@@ -282,7 +288,7 @@ export class SettingsController {
         }
     }
 
-    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, openCodeLlmProxyEnabled, grokLlmProxyEnabled, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, routeThroughVibeRailsAi, clearApiKey = false, createVibeStoryTracking = true) {
+    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, openCodeLlmProxyEnabled, grokLlmProxyEnabled, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, routeThroughVibeRailsAi, clearApiKey = false, createVibeStoryTracking = true, createVibeStoryTrackingCustomEnvs = false) {
         try {
             const savedSettings = await this.app.apiCall('/api/v1/settings', 'POST', {
                 remoteAccess: remoteAccess,
@@ -303,6 +309,7 @@ export class SettingsController {
                 routeThroughVibeRailsAi: routeThroughVibeRailsAi,
                 clearApiKey: clearApiKey,
                 createVibeStoryTracking: createVibeStoryTracking,
+                createVibeStoryTrackingCustomEnvs: createVibeStoryTrackingCustomEnvs,
                 dataExportOptIn: true
             });
             this.app.setAppSettings(savedSettings);
@@ -403,6 +410,7 @@ export class SettingsController {
             '#setting-route-through-viberails-ai',
             '#setting-use-vscode-theme',
             '#setting-create-vibe-story-tracking',
+            '#setting-create-vibe-story-tracking-custom-envs',
             '#setting-computer-name',
             '#setting-codex-llm-proxy-enabled',
             'input[name="setting-codex-llm-proxy-mode"]',
@@ -427,6 +435,7 @@ export class SettingsController {
             routeThroughVibeRailsAi: isChecked('#setting-route-through-viberails-ai'),
             useVsCodeTheme: isChecked('#setting-use-vscode-theme'),
             createVibeStoryTracking: isChecked('#setting-create-vibe-story-tracking'),
+            createVibeStoryTrackingCustomEnvs: isChecked('#setting-create-vibe-story-tracking-custom-envs'),
             computerName: valueOf('#setting-computer-name'),
             codexLlmProxyEnabled: isChecked('#setting-codex-llm-proxy-enabled'),
             codexLlmProxyMode: this._getCodexLlmProxyMode(root),
@@ -517,6 +526,7 @@ export class SettingsController {
         const routeThroughVibeRailsAiToggle = root.querySelector('#setting-route-through-viberails-ai');
         const useVsCodeThemeToggle = root.querySelector('#setting-use-vscode-theme');
         const createVibeStoryTrackingToggle = root.querySelector('#setting-create-vibe-story-tracking');
+        const createVibeStoryTrackingCustomEnvsToggle = root.querySelector('#setting-create-vibe-story-tracking-custom-envs');
         const computerNameInput = root.querySelector('#setting-computer-name');
         const codexLlmProxyEnabledToggle = root.querySelector('#setting-codex-llm-proxy-enabled');
         const codexLlmProxyModeSubscription = root.querySelector('#setting-codex-llm-proxy-mode-subscription');
@@ -541,6 +551,7 @@ export class SettingsController {
         this._dataExportConfigured = settings.dataExportConfigured === true;
         if (useVsCodeThemeToggle) useVsCodeThemeToggle.checked = settings.useVsCodeTheme === true;
         if (createVibeStoryTrackingToggle) createVibeStoryTrackingToggle.checked = settings.createVibeStoryTracking !== false;
+        if (createVibeStoryTrackingCustomEnvsToggle) createVibeStoryTrackingCustomEnvsToggle.checked = settings.createVibeStoryTrackingCustomEnvs === true;
         if (computerNameInput) {
             computerNameInput.value = settings.computerName || '';
             if (settings.machineName) computerNameInput.placeholder = settings.machineName;

@@ -36,16 +36,21 @@ report `true`.
 
 ## Optional Vibe Story tracking
 
-General Settings exposes **Create Vibe Story Tracking**, enabled by default in new and older
-settings files. Nullable API updates preserve the saved choice when an older client omits it.
+General Settings exposes **Vibe Board Nudge** for default/base LLM launches (on by default) and
+**Vibe Board Nudge - Custom Envs** for saved/custom environments (off by default). The existing
+`CreateVibeStoryTracking` setting keeps the base choice; `CreateVibeStoryTrackingCustomEnvs` is
+independent and defaults off in new and older settings files. Nullable API updates preserve
+each saved choice when an older client omits its field.
 For managed LLM launches with no nonblank initial message or continuation summary, `CommandService`
 reads the shared settings file and uses optional Board tracking guidance as the default prompt.
-This applies to base and saved-environment launches; custom, Board, Automation and continuation
+Each launch uses only its corresponding switch; explicit task, Board, Automation and continuation
 prompts pass through unchanged. Existing task/summary precedence and provider argv conventions
 are preserved. The guidance asks agents to use their discretion, reuse an existing story and
 record progress/results and session history when useful. A guidance-only launch waits for a user
 task. Plain shells are unaffected; toggling applies to new sessions and does not grant Board tools
 or change the CLI's approval policy. Tracking uses the existing Board MCP tools and storage.
+Focused browser save/reload coverage: from `UITests`, run
+`npx playwright test --config playwright.board-nudge.config.js` (static frontend with mocked APIs).
 
 Moved verbatim from the root `AGENTS.md` on 2026-09-27 so the instructions file that every
 agent session loads stays small; the material below was last reviewed 2026-08-06 (v1.9.11).

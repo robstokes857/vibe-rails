@@ -257,7 +257,7 @@ public class LlmProxyClaudeConfigTests : IDisposable
             proxySettings.Object,
             new LlmProxySessionState(),
             fileService.Object,
-            () => false);
+            () => new VibeRails.Utils.Settings { CreateVibeStoryTracking = false });
     }
 
     private static Mock<IFileService> CreateFileService()

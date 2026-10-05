@@ -86,7 +86,8 @@ test('saving settings omits retired options and preserves following arguments', 
         /* grokTokenSaverEnabled */ true,
         /* routeThroughVibeRailsAi */ true,
         /* clearApiKey */ true,
-        /* createVibeStoryTracking */ false);
+        /* createVibeStoryTracking */ false,
+        /* createVibeStoryTrackingCustomEnvs */ true);
 
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, '/api/v1/settings');
@@ -96,12 +97,14 @@ test('saving settings omits retired options and preserves following arguments', 
     assert.equal(calls[0].body.routeThroughVibeRailsAi, true);
     assert.equal(calls[0].body.clearApiKey, true);
     assert.equal(calls[0].body.createVibeStoryTracking, false);
+    assert.equal(calls[0].body.createVibeStoryTrackingCustomEnvs, true);
     assert.equal(calls[0].body.dataExportOptIn, true);
 
     await controller.saveSettings(false, '', false, true, '', false, 'subscription',
         false, false, false, 'subscription', true, true, true, true, false, false);
     assert.equal(calls[1].body.clearApiKey, false);
     assert.equal(calls[1].body.createVibeStoryTracking, true);
+    assert.equal(calls[1].body.createVibeStoryTrackingCustomEnvs, false);
 });
 
 test('settings page groups its cards under a section tab bar', () => {

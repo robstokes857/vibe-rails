@@ -114,10 +114,14 @@ still launch. YOLO is a separate, explicit card toggle translated into the provi
 launch flag (`--dangerously-bypass-approvals-and-sandbox`, `--dangerously-skip-permissions`,
 `--yolo`, or `--auto`); it defaults off and never rewrites a provider configuration file.
 
-General Settings' **Create Vibe Story Tracking** defaults on. When a managed LLM launch has no
+General Settings' **Vibe Board Nudge** defaults on for default/base LLM launches; the independent
+**Vibe Board Nudge - Custom Envs** defaults off for saved/custom environments. The existing
+`CreateVibeStoryTracking` saved key controls base launches, and `CreateVibeStoryTrackingCustomEnvs`
+controls custom environments; older settings files retain the base choice and default custom off.
+When a managed LLM launch has no
 nonblank initial message or continuation summary, `CommandService` reads the shared settings file
-and uses optional story-tracking guidance as its default prompt (base or saved environment).
-Custom, Board, Automation and continuation prompts pass through unchanged. The default guidance
+and uses optional story-tracking guidance as its default prompt only if that launch's switch is on.
+Explicit tasks, Board, Automation and continuation prompts pass through unchanged. The default guidance
 asks the agent to wait for a user task; story creation stays discretionary, and an existing story
 should be reused. This uses the normal provider prompt argv, never TUI input or rewritten provider
 config. Disabling it affects new sessions. It does not set `AuthorizeBoardTools`, grant tool

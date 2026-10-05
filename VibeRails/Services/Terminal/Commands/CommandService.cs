@@ -41,7 +41,7 @@ public class CommandService : ICommandService
     private readonly ILlmProxySettingsService _llmProxySettings;
     private readonly ILlmProxySessionState _llmProxySessionState;
     private readonly IFileService _fileService;
-    private readonly Func<bool> _createVibeStoryTrackingEnabled;
+    private readonly Func<Settings> _storyTrackingSettings;
     private const string VibeRailsMcpServerName = BoardMcpAuthorization.ServerName;
 
     /// <summary>
@@ -78,7 +78,7 @@ public class CommandService : ICommandService
         ILlmProxySessionState llmProxySessionState,
         IFileService fileService)
         : this(envService, llmProxyContext, llmProxySettings, llmProxySessionState, fileService,
-            () => Config.LoadFresh().CreateVibeStoryTracking)
+            Config.LoadFresh)
     {
     }
 
@@ -89,14 +89,14 @@ public class CommandService : ICommandService
         ILlmProxySettingsService llmProxySettings,
         ILlmProxySessionState llmProxySessionState,
         IFileService fileService,
-        Func<bool> createVibeStoryTrackingEnabled)
+        Func<Settings> storyTrackingSettings)
     {
         _envService = envService;
         _llmProxyContext = llmProxyContext;
         _llmProxySettings = llmProxySettings;
         _llmProxySessionState = llmProxySessionState;
         _fileService = fileService;
-        _createVibeStoryTrackingEnabled = createVibeStoryTrackingEnabled;
+        _storyTrackingSettings = storyTrackingSettings;
     }
 
     public async Task<PreparedTerminalSession> PrepareSessionAsync(
@@ -185,8 +185,15 @@ public class CommandService : ICommandService
             : initialPrompt;
         // Story tracking is the default prompt only. Explicit tasks (including Board and
         // Automation prompts) and continuation summaries already own their instructions.
-        if (string.IsNullOrWhiteSpace(prompt) && _createVibeStoryTrackingEnabled())
-            prompt = VibeStoryTrackingPrompt.Guidance;
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            var settings = _storyTrackingSettings();
+            var nudgeEnabled = string.IsNullOrEmpty(envName)
+                ? settings.CreateVibeStoryTracking
+                : settings.CreateVibeStoryTrackingCustomEnvs;
+            if (nudgeEnabled)
+                prompt = VibeStoryTrackingPrompt.Guidance;
+        }
 
         if (!string.IsNullOrWhiteSpace(prompt))
         {

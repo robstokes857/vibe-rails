@@ -27,8 +27,10 @@ public class Settings
     // there is no saved cloud API key.
     public bool RouteThroughVibeRailsAi { get; set; } = false;
     public bool UseVsCodeTheme { get; set; } = false;
-    /// <summary>Suggest optional Vibe Story tracking to every managed LLM terminal.</summary>
+    /// <summary>Suggest optional Vibe Board tracking for default/base LLM launches.</summary>
     public bool CreateVibeStoryTracking { get; set; } = true;
+    /// <summary>Suggest optional Vibe Board tracking for saved/custom environment launches.</summary>
+    public bool CreateVibeStoryTrackingCustomEnvs { get; set; } = false;
     // Retired setting, retained for older settings.json files and writers. Vibe AI navigation is
     // always shown; neither the frontend nor the settings API reads this value.
     public bool ShowVibeAiUi { get; set; } = false;

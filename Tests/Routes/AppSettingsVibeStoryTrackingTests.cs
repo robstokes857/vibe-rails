@@ -10,14 +10,17 @@ namespace Tests.Routes;
 public sealed class AppSettingsVibeStoryTrackingTests
 {
     [Fact]
-    public void NewAndOlderSettingsFiles_DefaultStoryTrackingOn()
+    public void NewAndOlderSettingsFiles_DefaultBaseNudgeOnAndCustomEnvsOff()
     {
         Assert.True(new Settings().CreateVibeStoryTracking);
+        Assert.False(new Settings().CreateVibeStoryTrackingCustomEnvs);
         var settings = JsonSerializer.Deserialize("{}", ConfigJsonContext.Default.Settings);
         Assert.True(settings!.CreateVibeStoryTracking);
+        Assert.False(settings.CreateVibeStoryTrackingCustomEnvs);
 
         var disabled = JsonSerializer.Deserialize("""{"CreateVibeStoryTracking":false}""", ConfigJsonContext.Default.Settings);
         Assert.False(disabled!.CreateVibeStoryTracking);
+        Assert.False(disabled.CreateVibeStoryTrackingCustomEnvs);
     }
 
     [Fact]
@@ -25,15 +28,30 @@ public sealed class AppSettingsVibeStoryTrackingTests
     {
         var dto = JsonSerializer.Deserialize("{}", AppJsonSerializerContext.Default.AppSettingsDto);
         Assert.Null(dto!.CreateVibeStoryTracking);
+        Assert.Null(dto.CreateVibeStoryTrackingCustomEnvs);
+    }
+
+    public static TheoryData<bool, bool, bool?, bool?> NudgeSettingsUpdates
+    {
+        get
+        {
+            var data = new TheoryData<bool, bool, bool?, bool?>();
+            foreach (var storedBase in new[] { false, true })
+            foreach (var storedCustom in new[] { false, true })
+            foreach (var requestedBase in new bool?[] { null, false, true })
+            foreach (var requestedCustom in new bool?[] { null, false, true })
+                data.Add(storedBase, storedCustom, requestedBase, requestedCustom);
+            return data;
+        }
     }
 
     [Theory]
-    [InlineData(true, null, true)]
-    [InlineData(false, null, false)]
-    [InlineData(true, false, false)]
-    [InlineData(false, true, true)]
-    public void SettingsReadsAndWrites_PersistAndReportStoryTracking(bool stored, bool? requested, bool expected)
+    [MemberData(nameof(NudgeSettingsUpdates))]
+    public void SettingsReadsAndWrites_PersistAndReportIndependentNudges(
+        bool storedBase, bool storedCustom, bool? requestedBase, bool? requestedCustom)
     {
+        var expectedBase = requestedBase ?? storedBase;
+        var expectedCustom = requestedCustom ?? storedCustom;
         var directory = Path.Combine(Path.GetTempPath(), $"viberails-story-settings-{Guid.NewGuid():N}");
         var remoteAccess = ParserConfigs.GetRemoteAccess();
         var apiKey = ParserConfigs.GetApiKey();
@@ -43,18 +61,30 @@ public sealed class AppSettingsVibeStoryTrackingTests
         try
         {
             using var store = new SettingsFile(Path.Combine(directory, "settings.json"));
-            store.Save(new Settings { CreateVibeStoryTracking = stored });
+            store.Save(new Settings
+            {
+                CreateVibeStoryTracking = storedBase,
+                CreateVibeStoryTrackingCustomEnvs = storedCustom
+            });
             var read = AppSettingsRoutes.UpdateComputerName(new UpdateComputerNameDto("Fixture"), store);
-            Assert.Equal(stored, read.CreateVibeStoryTracking);
-            Assert.Equal(stored, store.LoadFresh().CreateVibeStoryTracking);
+            Assert.Equal(storedBase, read.CreateVibeStoryTracking);
+            Assert.Equal(storedCustom, read.CreateVibeStoryTrackingCustomEnvs);
 
-            var saved = AppSettingsRoutes.UpdateSettings(read with { CreateVibeStoryTracking = requested }, store);
-            Assert.Equal(expected, saved.CreateVibeStoryTracking);
-            Assert.Equal(expected, store.LoadFresh().CreateVibeStoryTracking);
+            var saved = AppSettingsRoutes.UpdateSettings(read with
+            {
+                CreateVibeStoryTracking = requestedBase,
+                CreateVibeStoryTrackingCustomEnvs = requestedCustom
+            }, store);
+            Assert.Equal(expectedBase, saved.CreateVibeStoryTracking);
+            Assert.Equal(expectedCustom, saved.CreateVibeStoryTrackingCustomEnvs);
+            using var reopenedStore = new SettingsFile(Path.Combine(directory, "settings.json"));
+            Assert.Equal(expectedBase, reopenedStore.LoadFresh().CreateVibeStoryTracking);
+            Assert.Equal(expectedCustom, reopenedStore.LoadFresh().CreateVibeStoryTrackingCustomEnvs);
 
             var json = JsonSerializer.Serialize(saved, AppJsonSerializerContext.Default.AppSettingsDto);
             using var document = JsonDocument.Parse(json);
-            Assert.Equal(expected, document.RootElement.GetProperty("createVibeStoryTracking").GetBoolean());
+            Assert.Equal(expectedBase, document.RootElement.GetProperty("createVibeStoryTracking").GetBoolean());
+            Assert.Equal(expectedCustom, document.RootElement.GetProperty("createVibeStoryTrackingCustomEnvs").GetBoolean());
         }
         finally
         {
