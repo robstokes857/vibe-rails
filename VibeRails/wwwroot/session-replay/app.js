@@ -1,4 +1,4 @@
-import { durationLabel, prepareFrames, upperBound, advancePosition, maxSpeedTarget, eventsFor } from './timeline.mjs';
+import { durationLabel, prepareFrames, upperBound, advancePosition, maxSpeedTarget, playbackComplete, eventsFor } from './timeline.mjs';
 import { ScreenPreview } from './screen-preview.mjs';
 
 let disposed = false, host = null;
@@ -38,6 +38,7 @@ for (const id of ['speed', 'activity-filter']) {
 }
 
 const maxSpeed = () => $('speed').value === 'max';
+const finished = () => playbackComplete(frames, frameIndex, position, manifest.end);
 
 function setInspectorTab(tab, focus = false) {
     for (const name of ['code', 'events']) {
@@ -104,7 +105,7 @@ function pause() {
     if (!busy) sampleScreen(true);
 }
 function updatePlaybackStatus() {
-    if (ready && manifest) text('playback-status', position >= manifest.end ? 'End of recording'
+    if (ready && manifest) text('playback-status', finished() ? 'End of recording'
         : playing ? (maxSpeed() ? 'Playing at max speed to the end' : 'Playing') : 'Paused · ready to play');
 }
 function clearToasts() {
@@ -341,7 +342,7 @@ async function tick(now) {
             for (const event of calls.slice(-3)) showToast(event);
         }
         renderPosition(false);
-        if (position >= manifest.end) { pause(); sampleScreen(true); }
+        if (finished()) { pause(); sampleScreen(true); }
     } catch (error) { pause(); notice(error.message, true); }
     finally {
         if (run === version) { busy = false; enableControls(); if (playing) tickHandle = requestAnimationFrame(tick); }
@@ -351,7 +352,7 @@ async function togglePlay() {
     if (!ready) return;
     if (playing) { pause(); return; }
     if (busy) return;
-    if (position >= manifest.end) await seek(manifest.session.started);
+    if (finished()) await seek(manifest.session.started);
     if (disposed || !ready) return;
     playing = true; emitState(); lastTick = performance.now();
     sampleScreen(true);

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { maxSpeedTarget, upperBound } from '../../../VibeRails/wwwroot/session-replay/timeline.mjs';
+import { maxSpeedTarget, playbackComplete, upperBound } from '../../../VibeRails/wwwroot/session-replay/timeline.mjs';
 
 const read = path => readFileSync(new URL(`../../../VibeRails/wwwroot/${path}`, import.meta.url), 'utf8');
 const frames = sizes => sizes.map((size, index) => ({ at: 1000 + index * 100, data: new Uint8Array(size) }));
@@ -10,7 +10,7 @@ test('max speed writes bounded batches and then lands on the recording end', () 
     const recording = frames([100, 100, 100, 100, 100]);
     let frameIndex = 0, position = 1000;
     const targets = [];
-    while (position < 9000) {
+    while (!playbackComplete(recording, frameIndex, position, 9000)) {
         // writeUntil stops at the boundary the target carries, never past the budget.
         const target = maxSpeedTarget(recording, frameIndex, 9000, 250);
         position = target.at;
@@ -45,6 +45,27 @@ test('max speed keeps its byte budget when many frames share one timestamp', () 
         'the next tick continues from the boundary at the same instant');
     assert.deepEqual(maxSpeedTarget(recording, 1024, 5000), { at: 5000, endIndex: 1025 },
         'once the output runs out the target is the recording end');
+});
+
+// Review of VB-PRTTC-153 (finding R3): with the boundary in place, Max reaches the end timestamp
+// while frames at that instant are still unwritten. Playback is complete only once they are.
+test('max speed drains a final timestamp group larger than its byte budget', () => {
+    const recording = [{ at: 1000, data: new Uint8Array(10) },
+        ...Array.from({ length: 1024 }, () => ({ at: 5000, data: new Uint8Array(4096) }))];
+    let frameIndex = 0, position = 1000, ticks = 0;
+    while (!playbackComplete(recording, frameIndex, position, 5000)) {
+        const target = maxSpeedTarget(recording, frameIndex, 5000);
+        const next = Math.min(upperBound(recording, target.at), target.endIndex);
+        const bytes = recording.slice(frameIndex, next).reduce((sum, frame) => sum + frame.data.length, 0);
+        assert.ok(bytes <= 256 * 1024 + 4096, `tick ${ticks} wrote ${bytes} bytes`);
+        position = target.at; frameIndex = next; ticks++;
+        if (ticks === 1) assert.equal(position, 5000, 'the first tick already reaches the end timestamp');
+        if (ticks === 1) assert.ok(!playbackComplete(recording, frameIndex, position, 5000), 'reaching the end timestamp is not the end of playback');
+    }
+    assert.equal(frameIndex, recording.length);
+    assert.equal(ticks, 16, 'the small first frame plus 1,024 frames of 4 KiB, 64 per tick');
+    assert.ok(playbackComplete([], 0, 5000, 5000));
+    assert.ok(!playbackComplete(recording, recording.length, 4999, 5000));
 });
 
 test('the only replay view is the full one, and Max replaces 100x', () => {

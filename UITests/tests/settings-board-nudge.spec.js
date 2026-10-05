@@ -61,6 +61,9 @@ for (const baseEnabled of [false, true]) {
             await expect(custom).toBeChecked({ checked: customEnabled });
 
             await page.reload({ waitUntil: 'domcontentloaded' });
+            // Navigation is bound only after startup has loaded its settings and initial view,
+            // so a click on the already visible button before then is lost.
+            await expect(page.locator('#app-content > *').first()).toBeAttached();
             await page.locator('[data-action="navigate-settings"]:visible').click();
             await expect(base).toBeChecked({ checked: baseEnabled });
             await expect(custom).toBeChecked({ checked: customEnabled });

@@ -47,6 +47,9 @@ it. Recording errors appear inside the viewer and emit `error`; inspect `state.r
 Methods: `load(id)`, `play()`, `pause()`, `seek(utcMilliseconds)`, `setSpeed(1|2|5|10|25|'max')`,
 `setSkipIdle(boolean)`, `reload()`, and idempotent `dispose()`. Max has no clock: each animation
 frame writes the next ~256 KB of output until the recording end, so Pause still stops it part way.
+The batch boundary is a frame index, not a timestamp, so frames that share an instant can span
+ticks; playback ends (and Play restarts) only when `position` is at the end **and** every frame up
+to it has been written (`playbackComplete` in `timeline.mjs`), not merely when the end is reached.
 There is one layout (terminal, code and events together); the Simple view, `setView`, the `view`
 option and `getState().view` were removed in VIBE-65.
 Async controls wait for initialization. Pause also cancels pending initial autoplay.

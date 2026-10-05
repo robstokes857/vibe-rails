@@ -202,3 +202,25 @@ test('one full view: no view switch, the inspector always shows, and Max replace
     await expect(frame.locator('#position')).toHaveText(await frame.locator('#total').textContent());
     await expect(frame.locator('#play')).toContainText('Play');
 });
+// Review of VB-PRTTC-153 (finding R3): Max reached the end timestamp while frames at that instant
+// were still past its byte boundary, then stopped there and never wrote them.
+test('max speed plays a final timestamp group larger than its byte budget to the last frame',async({page})=>{
+    await page.setViewportSize({width:390,height:844});
+    await shell(page);
+    await page.evaluate(async started=>{
+        const {mountSessionViewer}=await import('/session-replay/viewer.mjs');
+        const {createEnvelopeSource}=await import('/session-replay/envelope.mjs');
+        const at=offset=>new Date(started+offset).toISOString(), line='x'.repeat(4094)+'\r\n';
+        // 159 frames of 4 KiB share the final instant: about 2.5 ticks of the 256 KiB budget.
+        const sessionLogs=[{id:1,timestampUtc:at(0),rawBytes:btoa('initial\r\n')}];
+        for(let id=2;id<=160;id++) sessionLogs.push({id,timestampUtc:at(10000),rawBytes:btoa(id===160?'TAIL_SENTINEL\r\n':line)});
+        const envelope={session:{id:'end-batch',cli:'codex',startedUtc:at(0),endedUtc:at(10000),sessionDisplayName:'End batch'},sessionLogs,terminalSessionLogs:[],userInputs:[]};
+        window.viewer=mountSessionViewer(document.getElementById('host'),{request:createEnvelopeSource(envelope),sessionId:'end-batch'});
+        await viewer.ready; await viewer.setSpeed('max'); await viewer.play();
+    },started);
+    const frame=page.frameLocator('#host iframe');
+    await expect(frame.locator('#playback-status')).toHaveText('End of recording');
+    expect(await page.evaluate(()=>{const state=viewer.getState();return {playing:state.playing,atEnd:state.position===state.end,frameIndex:state.frameIndex,frameCount:state.frameCount};}))
+        .toEqual({playing:false,atEnd:true,frameIndex:160,frameCount:160});
+    await expect(frame.locator('#html-screen')).toContainText('TAIL_SENTINEL');
+});

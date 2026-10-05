@@ -65,6 +65,12 @@ export function maxSpeedTarget(frames, frameIndex, end, budget = 256 * 1024) {
         : { at: end, endIndex: frames.length };
 }
 
+// Reaching the end timestamp is not the end of playback: Max speed can land on it with frames at
+// that instant still beyond the byte boundary, so playback is complete only once they are written.
+export function playbackComplete(frames, frameIndex, position, end) {
+    return position >= end && frameIndex >= upperBound(frames, end);
+}
+
 export function eventsFor(manifest, exchanges) {
     const events = [
         ...manifest.prompts.map(prompt => ({ kind: 'prompt', at: prompt.at, title: prompt.text, prompt })),
