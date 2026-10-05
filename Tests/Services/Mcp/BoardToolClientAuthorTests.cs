@@ -57,6 +57,7 @@ public sealed class BoardToolClientAuthorTests : IAsyncDisposable
     [InlineData("antigravity-client", "Google Antigravity", "Antigravity")]
     [InlineData("opencode", null, "OpenCode")]
     [InlineData("some-wrapper", "Claude Code", "Claude")]
+    [InlineData("clau\u200Bde-code", null, "Claude")]
     public void ClientAuthor_NamesARecognisedCli_WithItsLogo(string name, string? title, string expected)
     {
         var author = BoardTool.ClientAuthor(new Implementation { Name = name, Title = title, Version = "1.0.0" }, "sess-1");
@@ -76,14 +77,35 @@ public sealed class BoardToolClientAuthorTests : IAsyncDisposable
         Assert.Null(titled.Cli);
 
         Assert.Equal("acme-runner", BoardTool.ClientAuthor(new Implementation { Name = " acme-runner ", Version = "1" }, null)!.Label);
+        Assert.Equal("Acme Runner Pro", BoardTool.ClientAuthor(new Implementation { Name = "Acme\u2028Runner\u00A0\u2029Pro\u202E", Version = "1" }, null)!.Label);
         Assert.Equal(60, BoardTool.ClientAuthor(new Implementation { Name = new string('x', 200), Version = "1" }, null)!.Label.Length);
+
+        // A cut never splits a surrogate pair: the emoji straddling the limit is dropped whole.
+        var cut = BoardTool.ClientAuthor(new Implementation { Name = new string('x', 59) + "\U0001F600tail", Version = "1" }, null)!.Label;
+        Assert.Equal(new string('x', 59), cut);
+    }
+
+    [Theory]
+    [InlineData("Café Runner ☕")]
+    [InlineData("日本語クライアント")]
+    [InlineData("Ünïcödé \U0001F680 Tool")]
+    public void ClientAuthor_KeepsLegitimateUnicodeNames(string name)
+    {
+        Assert.Equal(name, BoardTool.ClientAuthor(new Implementation { Name = name, Version = "1" }, null)!.Label);
     }
 
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
     [InlineData("Agent")]
+    [InlineData(" Agent\u00A0")]
+    [InlineData("Agent\u200B session")]
     [InlineData("\u0007")]
+    [InlineData("\u200B")]
+    [InlineData("\u202E")]
+    [InlineData("\uFEFF\u200D\u2060")]
+    [InlineData("\u2028\u2029\u00A0\u3000")]
+    [InlineData("\U000E0041\U000E0042")]
     public void ClientAuthor_IsNullWithoutAUsableName(string name)
     {
         Assert.Null(BoardTool.ClientAuthor(new Implementation { Name = name, Version = "1.0.0" }, null));
@@ -120,6 +142,7 @@ public sealed class BoardToolClientAuthorTests : IAsyncDisposable
     [Theory]
     [InlineData("   ")]
     [InlineData("Agent")]
+    [InlineData("\u200B")]
     public async Task ClientWithoutAName_IsRefused_AndNothingIsWritten(string clientName)
     {
         var client = await ConnectAsync(clientName);

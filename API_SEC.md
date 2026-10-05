@@ -1,5 +1,18 @@
 # API authentication coverage
 
+## VIBE-61 MCP HTTP session mode for handshake clients (2026-10-05, scoped amendment)
+
+The existing `MapMcp("/mcp")` transport now uses the SDK's `StatefulForInitializeClients`
+session mode (`McpToolRegistration.WithVibeRailsHttpTransport`) instead of SDK 2.x's stateless
+default. Clients on protocol 2025-11-25 or earlier get an in-memory MCP session (`Mcp-Session-Id`,
+SDK idle timeout and idle-session cap), so the `clientInfo` they send once in `initialize` reaches
+later tool calls. Board writes record that agent name and refuse a nameless client. 2026-07-28
+clients remain stateless. No route, method mapping, listener or credential rule changed:
+`CookieAuthMiddleware` still requires session plus tab credentials on every `/mcp` method, and a
+session id grants nothing without them. The stdio `vb mcp` host is unchanged. Coverage:
+`McpServerHttpTests` (both protocol paths, through the production transport registration),
+`BoardToolClientAuthorTests`, and the existing `CookieAuthMiddlewareTests`.
+
 ## VIBE-6 local Board search and related cards (2026-10-04, scoped amendment)
 
 Added root-only `GET /api/v1/board/cards/search` plus explicit

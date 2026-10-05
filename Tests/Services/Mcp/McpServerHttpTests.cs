@@ -68,7 +68,7 @@ public class McpServerHttpTests : IAsyncLifetime
             {
                 options.ServerInfo = new() { Name = "viberails-mcp-test", Version = "1.0.0" };
             })
-            .WithHttpTransport()
+            .WithVibeRailsHttpTransport()
             .WithVibeRailsTools();
 
         _app = builder.Build();
@@ -198,11 +198,15 @@ public class McpServerHttpTests : IAsyncLifetime
         Assert.Contains("FAIL: card not found: VB-2", result.Text);
     }
 
-    [Fact]
-    public async Task AddBoardComment_NamesTheClientFromItsRequest_OverHttp()
+    [Theory]
+    [InlineData(null)]          // 2026-07-28: clientInfo on every request, served statelessly
+    [InlineData("2025-11-25")]  // initialize handshake: clientInfo sent once, kept by the session
+    [InlineData("2025-06-18")]  // the revision Codex 0.160 negotiates
+    public async Task AddBoardComment_NamesTheClient_OverHttp_OnEitherProtocolPath(string? protocolVersion)
     {
-        // VIBE-61: the current protocol carries clientInfo on every request rather than in a
-        // remembered handshake, and the stateless HTTP transport still hands the tool that name.
+        // VIBE-61: a sessionless Board write takes the client's handshake name. A legacy client sends it
+        // only in initialize, so the production transport keeps a session for it (the SDK's stateless
+        // default dropped the name and the write was refused); the current protocol repeats it per request.
         const string project = "author-test-project";
         var ct = TestContext.Current.CancellationToken;
         var card = new BoardCardRecord("author-card", project, 1, "lane", 0, "Author", "", null, "medium", null, [], false, 0, DateTime.UtcNow, DateTime.UtcNow);
@@ -217,7 +221,8 @@ public class McpServerHttpTests : IAsyncLifetime
         await using var client = await McpClient.CreateAsync(
             new HttpClientTransport(new HttpClientTransportOptions { Endpoint = _endpoint, TransportMode = HttpTransportMode.StreamableHttp }, SharedClient,
                 NullLoggerFactory.Instance, ownsHttpClient: false),
-            new McpClientOptions { ClientInfo = new() { Name = "codex-mcp-client", Version = "1.0.0" } }, cancellationToken: ct);
+            new McpClientOptions { ClientInfo = new() { Name = "codex-mcp-client", Version = "1.0.0" }, ProtocolVersion = protocolVersion }, cancellationToken: ct);
+        Assert.Equal(protocolVersion ?? "2026-07-28", client.NegotiatedProtocolVersion);
 
         var result = await client.CallToolAsync("add_board_comment", new Dictionary<string, object?> { ["body"] = "Started", ["card"] = "author-card" }, cancellationToken: ct);
 

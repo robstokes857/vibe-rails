@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
@@ -47,14 +49,16 @@ public sealed partial class BoardTool
     /// <summary>
     /// The author an MCP handshake names. A recognised CLI gets the same label and CLI a
     /// VibeRails session of that CLI would, so the Board shows its name and logo; any other
-    /// client keeps its own title or name. Null for a blank or generic ("Agent") name.
+    /// client keeps its own title or name. Null for a blank, invisible or generic ("Agent") name.
     /// </summary>
     internal static BoardAuthor? ClientAuthor(Implementation? client, string? sessionId)
     {
-        foreach (var name in new[] { client?.Name, client?.Title })
+        var name = CleanClientLabel(client?.Name);
+        var title = CleanClientLabel(client?.Title);
+        foreach (var text in new[] { name, title })
         {
-            if (string.IsNullOrWhiteSpace(name)) continue;
-            foreach (var word in NonAlphanumeric().Split(name.ToLowerInvariant()))
+            if (text is null) continue;
+            foreach (var word in NonAlphanumeric().Split(text.ToLowerInvariant()))
             {
                 if (ClientNameWords.TryGetValue(word, out var llm))
                 {
@@ -64,17 +68,33 @@ public sealed partial class BoardTool
             }
         }
 
-        var label = CleanClientLabel(client?.Title) ?? CleanClientLabel(client?.Name);
+        var label = title ?? name;
         return label is null ? null : BoardAuthor.Agent(label, null, sessionId);
     }
 
+    /// <summary>
+    /// Client-supplied text the Board displays as an author: format characters (zero-width,
+    /// bidi overrides) are dropped, and controls plus every Unicode space or line separator
+    /// become single spaces, so the label is one visible, bounded line. Checked against the
+    /// generic label after that, so " Agent\u00A0" is still "Agent".
+    /// </summary>
     private static string? CleanClientLabel(string? value)
     {
-        if (string.IsNullOrWhiteSpace(value)) return null;
-        // The name is client-supplied text that the Board displays: no control characters, one line, bounded.
-        var label = string.Join(' ', new string(value.Select(c => char.IsControl(c) ? ' ' : c).ToArray())
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries));
-        if (label.Length > MaxClientLabelLength) label = label[..MaxClientLabelLength].TrimEnd();
+        if (value is null) return null;
+        var text = new StringBuilder(value.Length);
+        Span<char> utf16 = stackalloc char[2];
+        foreach (var rune in value.EnumerateRunes())
+        {
+            if (Rune.GetUnicodeCategory(rune) == UnicodeCategory.Format) continue;
+            if (Rune.IsControl(rune) || Rune.IsWhiteSpace(rune)) text.Append(' ');
+            else text.Append(utf16[..rune.EncodeToUtf16(utf16)]);
+        }
+        var label = string.Join(' ', text.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries));
+        if (label.Length > MaxClientLabelLength)
+        {
+            var cut = char.IsHighSurrogate(label[MaxClientLabelLength - 1]) ? MaxClientLabelLength - 1 : MaxClientLabelLength;
+            label = label[..cut].TrimEnd();
+        }
         return BoardAuthor.IsGenericAgentLabel(label) ? null : label;
     }
 

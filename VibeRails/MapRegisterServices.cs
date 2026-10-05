@@ -325,7 +325,7 @@ namespace VibeRails
                     {
                         options.ServerInfo = new() { Name = "viberails-mcp", Version = "1.0.0" };
                     })
-                    .WithHttpTransport()
+                    .WithVibeRailsHttpTransport()
                     .WithVibeRailsTools();
             }
 

@@ -85,7 +85,12 @@ path registers its own minimal services in `McpStdioHost.ConfigureServices`.
   `CookieAuthMiddleware` gates it at the **same bar as `/api/`** — **both** the
   `viberails_session` token (cookie or header) **and** the `viberails_tab` per-tab token
   (header) are required. A leaked session token alone must never be enough to reach
-  these capabilities. Used by the Explorer.
+  these capabilities. Used by the Explorer. The transport is registered through
+  `McpToolRegistration.WithVibeRailsHttpTransport()` (production and `McpServerHttpTests` alike)
+  in `StatefulForInitializeClients` mode. SDK 2.x defaults to stateless, which forgets the
+  `clientInfo` that an `initialize`-handshake client (2025-11-25 and earlier) sends once, so its
+  Board writes lost their agent name and were refused (VIBE-61). 2026-07-28 clients repeat
+  `clientInfo` per request and stay stateless.
 - **stdio** (`ModelContextProtocol`, `WithStdioServerTransport`): the CLI spawns `vb mcp` and talks
   JSON-RPC over the child's stdin/stdout. The MCP transport itself has no listening socket or auth
   challenge because it is scoped to the spawning process. `McpStdioHost` clears the default console
@@ -166,8 +171,10 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
   maps to the CLI's own label and logo: `claude-code` → Claude, `codex-mcp-client` → Codex,
   `xai-grok-cli` → grok, `copilot-cli` → Copilot, `antigravity-client` → Antigravity, `opencode`
   → OpenCode (names read from the installed binaries on 2026-10-05). Any other client keeps its
-  title or name as one bounded line. A blank or generic ("Agent") name is refused before any
-  write, so new Board writes are never anonymous. Only an in-process call (no MCP server, i.e.
+  title or name as one bounded line: format characters (zero-width, bidi) are dropped and Unicode
+  spaces and line separators collapse to single spaces, before the CLI-word match and before the
+  generic-name check. A blank, invisible or generic ("Agent") name is refused before any write,
+  so new Board writes are never anonymous. Only an in-process call (no MCP server, i.e.
   tests) still records the generic "Agent". Generic historical labels with a session id are
   resolved on read; older "Agent" rows without a session id are left as they are (no backfill).
   The dashboard UI comments as "You".

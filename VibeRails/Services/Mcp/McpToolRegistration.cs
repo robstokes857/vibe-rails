@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol;
+using ModelContextProtocol.AspNetCore;
 using VibeRails.DTOs;
 using VibeRails.Services.Mcp.Tools;
 
@@ -26,6 +27,16 @@ public static class McpToolRegistration
         .WithTools<TokenSaverTool>(SerializerOptions)
         .WithTools<AgentSessionTool>(SerializerOptions)
         .WithTools<BoardTool>(SerializerOptions);
+
+    /// <summary>
+    /// The root backend's Streamable HTTP transport. SDK 2.x serves every request statelessly by default, which drops the
+    /// clientInfo an <c>initialize</c>-handshake client (protocol 2025-11-25 and earlier) sends only once, so its Board
+    /// writes would have no agent name and be refused (VIBE-61). StatefulForInitializeClients keeps a session for those
+    /// clients only; 2026-07-28 clients repeat clientInfo on every request and stay stateless. CookieAuthMiddleware gates
+    /// every /mcp method with both credentials in either mode.
+    /// </summary>
+    public static IMcpServerBuilder WithVibeRailsHttpTransport(this IMcpServerBuilder builder) =>
+        builder.WithHttpTransport(options => options.SessionMode = HttpServerSessionMode.StatefulForInitializeClients);
 
     /// <summary>Local control credentials must never follow redirects to another destination.</summary>
     public static IServiceCollection AddAgentSessionMcp(this IServiceCollection services)
