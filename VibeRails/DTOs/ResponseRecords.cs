@@ -1149,8 +1149,8 @@ namespace VibeRails.DTOs
         // HTTP-over-WSS proof toggle. Nullable on requests so a cached client that predates the
         // field leaves the persisted choice untouched. Responses always contain an explicit value.
         bool? RouteThroughVibeRailsAi = null,
-        // Navigation visibility, hidden by default. Nullable requests preserve the saved
-        // preference when an older client omits the field; responses contain an explicit value.
+        // Vibe AI navigation is always shown. Retained for older clients; requests are ignored
+        // and responses always report true. The legacy stored value is preserved.
         bool? ShowVibeAiUi = null,
         // Native Grok proxy. Same stale-client nullable guard as the other proxy fields.
         bool? GrokLlmProxyEnabled = null,
@@ -1322,7 +1322,10 @@ namespace VibeRails.DTOs
         long VocabFileSizeBytes,
         int SessionDocumentCount,
         int SessionVectorCount
-    );
+    )
+    {
+        public VibeRails.Services.BertV2.SearchIndexProgress? Indexing { get; init; }
+    }
 
     public record BertCaptureSummaryResponse(
         string DocumentId,

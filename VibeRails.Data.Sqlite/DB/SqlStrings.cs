@@ -1078,8 +1078,8 @@ namespace VibeRails.DB
             LIMIT 1;
             """;
         public const string InsertUserInput = """
-            INSERT INTO UserInputs (SessionId, Sequence, InputText, GitCommitHash, TimestampUTC)
-            VALUES ($sessionId, $sequence, $inputText, $gitCommitHash, $timestampUTC)
+            INSERT INTO UserInputs (SessionId, Sequence, InputText, GitCommitHash, TimestampUTC, SearchComponent)
+            VALUES ($sessionId, $sequence, $inputText, $gitCommitHash, $timestampUTC, 'search/1')
             RETURNING Id;
             """;
         public const string InsertFileChange = """

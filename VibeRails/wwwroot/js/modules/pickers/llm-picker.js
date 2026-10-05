@@ -7,8 +7,8 @@
  * 'environment-provider'.
  *
  * Automation Workers NEVER appear in these pickers — the server excludes them
- * from the preferences catalog regardless of `hidden`. The automation editor
- * uses `mountWorkerPicker` from ./worker-picker.js instead.
+ * from the preferences catalog regardless of `hidden`. The Automation editor
+ * configures its Worker through the shared 'environment-provider' form.
  */
 export function mountLlmPicker(app, selectEl, options = {}) {
     return app.llmPickerController.mount(selectEl, options);

@@ -1,5 +1,4 @@
 import { showDataExportModal } from './data-export-modal.js';
-import { BackupStatusPanel } from './backup-status.js';
 import { confirmDialog } from './utils.js';
 import { SettingsKeysPanel } from './settings-keys.js';
 import { SettingsJiraPanel } from './settings-jira.js';
@@ -41,7 +40,6 @@ export class SettingsController {
             routeThroughVibeRailsAi: false,
             useVsCodeTheme: false,
             createVibeStoryTracking: true,
-            showVibeAiUi: false,
             mcpEnabled: true,
             computerName: '',
             codexLlmProxyEnabled: false,
@@ -104,7 +102,6 @@ export class SettingsController {
             const useVsCodeThemeRow = root.querySelector('#setting-use-vscode-theme-row');
             const useVsCodeThemeToggle = root.querySelector('#setting-use-vscode-theme');
             const createVibeStoryTrackingToggle = root.querySelector('#setting-create-vibe-story-tracking');
-            const showVibeAiUiToggle = root.querySelector('#setting-show-vibe-ai-ui');
             const mcpEnabledToggle = root.querySelector('#setting-enable-mcp');
             const computerNameInput = root.querySelector('#setting-computer-name');
             const codexLlmProxyEnabledToggle = root.querySelector('#setting-codex-llm-proxy-enabled');
@@ -161,9 +158,6 @@ export class SettingsController {
             }
             if (createVibeStoryTrackingToggle) {
                 createVibeStoryTrackingToggle.checked = settings.createVibeStoryTracking !== false;
-            }
-            if (showVibeAiUiToggle) {
-                showVibeAiUiToggle.checked = settings.showVibeAiUi === true;
             }
             if (mcpEnabledToggle) {
                 mcpEnabledToggle.checked = true;
@@ -254,7 +248,6 @@ export class SettingsController {
                             grokTokenSaverToggle?.checked ?? true,
                             routeThroughVibeRailsAiToggle?.checked ?? false,
                             clearApiKey,
-                            showVibeAiUiToggle?.checked === true,
                             createVibeStoryTrackingToggle?.checked ?? true
                         );
                         if (savedSettings) {
@@ -282,8 +275,6 @@ export class SettingsController {
         // full RTT on every Settings visit. The PIN section just pops in when its
         // status lands.
         content.appendChild(fragment);
-        const backupStatus = content.querySelector('[data-backup-status]');
-        if (backupStatus) this._backupStatusPanel = new BackupStatusPanel(this.app, backupStatus);
         this.app.updateAccountNav?.();
 
         if (root) {
@@ -291,7 +282,7 @@ export class SettingsController {
         }
     }
 
-    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, openCodeLlmProxyEnabled, grokLlmProxyEnabled, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, routeThroughVibeRailsAi, clearApiKey = false, showVibeAiUi = false, createVibeStoryTracking = true) {
+    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, openCodeLlmProxyEnabled, grokLlmProxyEnabled, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, routeThroughVibeRailsAi, clearApiKey = false, createVibeStoryTracking = true) {
         try {
             const savedSettings = await this.app.apiCall('/api/v1/settings', 'POST', {
                 remoteAccess: remoteAccess,
@@ -312,7 +303,6 @@ export class SettingsController {
                 routeThroughVibeRailsAi: routeThroughVibeRailsAi,
                 clearApiKey: clearApiKey,
                 createVibeStoryTracking: createVibeStoryTracking,
-                showVibeAiUi: showVibeAiUi,
                 dataExportOptIn: true
             });
             this.app.setAppSettings(savedSettings);
@@ -325,8 +315,6 @@ export class SettingsController {
     }
 
     unload() {
-        this._backupStatusPanel?.dispose();
-        this._backupStatusPanel = null;
         this._keysPanel?.unload();
         this._keysPanel = null;
         this._jiraPanel?.clearSecrets();
@@ -415,7 +403,6 @@ export class SettingsController {
             '#setting-route-through-viberails-ai',
             '#setting-use-vscode-theme',
             '#setting-create-vibe-story-tracking',
-            '#setting-show-vibe-ai-ui',
             '#setting-computer-name',
             '#setting-codex-llm-proxy-enabled',
             'input[name="setting-codex-llm-proxy-mode"]',
@@ -440,7 +427,6 @@ export class SettingsController {
             routeThroughVibeRailsAi: isChecked('#setting-route-through-viberails-ai'),
             useVsCodeTheme: isChecked('#setting-use-vscode-theme'),
             createVibeStoryTracking: isChecked('#setting-create-vibe-story-tracking'),
-            showVibeAiUi: isChecked('#setting-show-vibe-ai-ui'),
             computerName: valueOf('#setting-computer-name'),
             codexLlmProxyEnabled: isChecked('#setting-codex-llm-proxy-enabled'),
             codexLlmProxyMode: this._getCodexLlmProxyMode(root),
@@ -531,7 +517,6 @@ export class SettingsController {
         const routeThroughVibeRailsAiToggle = root.querySelector('#setting-route-through-viberails-ai');
         const useVsCodeThemeToggle = root.querySelector('#setting-use-vscode-theme');
         const createVibeStoryTrackingToggle = root.querySelector('#setting-create-vibe-story-tracking');
-        const showVibeAiUiToggle = root.querySelector('#setting-show-vibe-ai-ui');
         const computerNameInput = root.querySelector('#setting-computer-name');
         const codexLlmProxyEnabledToggle = root.querySelector('#setting-codex-llm-proxy-enabled');
         const codexLlmProxyModeSubscription = root.querySelector('#setting-codex-llm-proxy-mode-subscription');
@@ -556,7 +541,6 @@ export class SettingsController {
         this._dataExportConfigured = settings.dataExportConfigured === true;
         if (useVsCodeThemeToggle) useVsCodeThemeToggle.checked = settings.useVsCodeTheme === true;
         if (createVibeStoryTrackingToggle) createVibeStoryTrackingToggle.checked = settings.createVibeStoryTracking !== false;
-        if (showVibeAiUiToggle) showVibeAiUiToggle.checked = settings.showVibeAiUi === true;
         if (computerNameInput) {
             computerNameInput.value = settings.computerName || '';
             if (settings.machineName) computerNameInput.placeholder = settings.machineName;

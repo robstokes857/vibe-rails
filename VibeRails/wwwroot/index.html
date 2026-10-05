@@ -103,7 +103,7 @@
                 <span>ENVS</span>
             </button>
             <button class="app-subnav-link" data-action="navigate" data-view="vibe-rails-ai"
-                title="Vibe Rails AI — search captured sessions" hidden>
+                title="Vibe Rails AI — search captured sessions">
                 <i class="fa-solid fa-brain me-1"></i>
                 <span>Vibe AI</span>
             </button>
@@ -184,7 +184,7 @@
                     <span class="nav-label">ENVIRONMENTS</span>
                 </button>
                 <button class="app-subnav-link" data-action="navigate" data-view="vibe-rails-ai"
-                    title="Vibe Rails AI — search captured sessions" hidden>
+                    title="Vibe Rails AI — search captured sessions">
                     <i class="fa-solid fa-brain nav-icon"></i>
                     <span class="nav-label">Vibe AI</span>
                 </button>
@@ -1361,11 +1361,6 @@
                         <button type="button" class="btn btn-outline-primary btn-sm" data-action="remote-account"
                             data-account-settings-action>Sign in</button>
                     </section>
-                    <section class="sandbox-item-card text-start mt-3" aria-labelledby="settings-backup-heading">
-                        <h5 class="sandbox-item-name mb-2" id="settings-backup-heading">Automatic backups</h5>
-                        <p class="small text-muted">Board changes are captured at most every 15 minutes, configuration hourly, and application and proxy databases daily while VibeRails is open. Uploads resume automatically.</p>
-                        <div data-backup-status aria-live="polite">Loading backup coverage…</div>
-                    </section>
                 </div>
             </div>
             <div class="row justify-content-center">
@@ -1460,18 +1455,10 @@
                             </div>
                             <div class="mb-4">
                                 <div class="form-check form-switch">
-                                    <input class="form-check-input" type="checkbox" id="setting-show-vibe-ai-ui">
-                                    <label class="form-check-label" for="setting-show-vibe-ai-ui">Show Vibe AI UI</label>
-                                </div>
-                                <small class="form-text text-muted">Show the Vibe AI inspector in the navigation bar.
-                                    Off by default.</small>
-                            </div>
-                            <div class="mb-4">
-                                <div class="form-check form-switch">
                                     <input class="form-check-input" type="checkbox" id="setting-create-vibe-story-tracking" checked>
                                     <label class="form-check-label" for="setting-create-vibe-story-tracking">Create Vibe Story Tracking</label>
                                 </div>
-                                <small class="form-text text-muted">Ask all LLMs, including default launches, to consider
+                                <small class="form-text text-muted">For launches without an initial message or continuation summary, ask the LLM to consider
                                     tracking terminal work with a Vibe Story. Creating a story is at the agent's discretion.
                                     On by default; applies to new sessions.</small>
                             </div>

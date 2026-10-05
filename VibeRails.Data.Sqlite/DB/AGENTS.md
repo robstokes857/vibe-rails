@@ -123,6 +123,17 @@ This document describes the database layer: Environments, Sandboxes, AgentMetada
 
 ---
 
+## Shared search component (VIBE-55)
+
+Current search documents, FTS, sqlite-vec chunks, result metadata, reconciliation cursors,
+claims and failures live in `~/.vibe_rails/search.db` in every configuration. Background jobs
+read canonical history incrementally; normal retrieval does not query/enrich from state.db.
+Legacy search tables and embedding-mark columns remain stored but unused by current jobs.
+The additive `search-component-writer/1` migration adds nullable `UserInputs.SearchComponent`:
+current inserts use `search/1` and skip the old pending queue; older inserts omit the column and
+retain their existing trigger behavior. No old row is backfilled. Startup no longer drains
+legacy search work. See the [search contract](../../VibeRails/Services/BertV2/README.md).
+
 ## Database Overview
 
 | Property | Value |
@@ -490,7 +501,7 @@ CREATE TABLE IF NOT EXISTS Sessions (
 `OwnershipTracked`, `JobRunId`, and `ExportedUTC` are added via `ALTER TABLE` migrations (safe to
 re-run). `ExportedUTC` is the independent remote-upload acknowledgement cursor; `Processed`
 remains exclusively for transcript generation. Two further migration columns —
-`AggregateEmbeddedUTC` and `AggregateEmbedFailureCount` — drive the session-level BERT aggregate
+`AggregateEmbeddedUTC` and `AggregateEmbedFailureCount` — are retained legacy marks for the former session-level BERT aggregate
 embedding backfill job.
 
 When `JobRunId` is not NULL the session belongs to an Automated Job; a trigger
@@ -550,7 +561,7 @@ CREATE TABLE IF NOT EXISTS SessionLogs (
 | **Fire and forget** | Recording is invoked from an `InputAccumulator` callback so it doesn't block the user's terminal; call sites `await` the method, not `Task.Run` |
 | **Error tolerance** | Recording failures are logged to stderr but don't interrupt the CLI session |
 | **Secret filtering** | `InputEtlFilter.Process` strips secrets before text lands in the **FTS index** only. `UserInputs` itself holds the canonical raw row (transcript replay needs it). |
-| **BERT embeddings** | `BertEmbeddedUTC` / `BertEmbedFailureCount` (migration columns) drive the embedding backfill job |
+| **BERT embeddings** | `BertEmbeddedUTC` / `BertEmbedFailureCount` (migration columns) are retained for older binaries; current work is in search.db |
 
 ### Schema
 
@@ -582,7 +593,7 @@ CREATE TABLE IF NOT EXISTS InputFileChanges (
 ```
 
 **Migration columns** (added via `ALTER TABLE`, safe to re-run):
-- `BertEmbeddedUTC TEXT` — set when the BERT embedding backfill processes the row
+- `BertEmbeddedUTC TEXT` — legacy completion mark, retained and no longer written by the current job
 - `BertEmbedFailureCount INTEGER NOT NULL DEFAULT 0` — poison-pill skip counter (threshold: 3 consecutive failures)
 
 **Indexes:**

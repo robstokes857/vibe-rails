@@ -14,6 +14,8 @@ using VibeRails.DTOs;
 using VibeRails.Middleware;
 using VibeRails.Routes;
 using VibeRails.Services;
+using VibeRails.Services.BertV2;
+using Tests.Services.BertV2;
 using VibeRails.Services.Board;
 using VibeRails.Services.Board.Sync;
 using VibeRails.Services.Diagnostics;
@@ -238,6 +240,8 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         commits.Setup(c => c.GetDiffAsync(It.IsAny<string>(), "abc1234abc1234abc1234abc1234abc1234abc12", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new BoardCommitDiff([new BoardCommitDiffFile("a.cs", "csharp", "old", "new")], 1));
         builder.Services.AddSqliteBoardStorage(_ => Path.Combine(_root, "state.db"));
+        builder.Services.AddSingleton<ISearchIndexStore>(new SqliteSearchIndexStore(
+            Path.Combine(_root, "search.db"), Path.Combine(_root, "state.db")));
         builder.Services.AddSqliteJobStorage(_ => Path.Combine(_root, "state.db"));
         builder.Services.AddScoped<BoardAutomationService>();
         builder.Services.AddScoped<BoardCardAutomationService>();
@@ -867,6 +871,7 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         using var target = await ReadJsonAsync(targetResponse);
         var targetId = target.RootElement.GetProperty("id").GetString()!;
         Assert.Equal("VIBE-1", target.RootElement.GetProperty("displayId").GetString());
+        IndexBoard();
         using var candidates = await GetJsonAsync("/api/v1/board/cards/link-candidates?q=vibe-1");
         Assert.Equal(targetId, Assert.Single(candidates.RootElement.GetProperty("cards").EnumerateArray()).GetProperty("id").GetString());
         using var response = await PostJsonAsync("/api/v1/board/cards", new { title = "Linked draft", linkedCardIds = new[] { targetId } });
@@ -888,6 +893,7 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         var foreignProject = Path.Combine(_root, "foreign");
         await store.EnsureDefaultColumnsAsync(foreignProject, TestContext.Current.CancellationToken);
         var foreign = await store.CreateCardAsync(foreignProject, new(null, "Foreign", "", null, "medium", null, [], false), TestContext.Current.CancellationToken);
+        IndexBoard();
         using var foreignSearch = await GetJsonAsync("/api/v1/board/cards/link-candidates?q=Foreign");
         Assert.Equal(foreign.Id, foreignSearch.RootElement.GetProperty("cards")[0].GetProperty("id").GetString());
         Assert.False(foreignSearch.RootElement.GetProperty("cards")[0].GetProperty("isCurrentProject").GetBoolean());
@@ -931,6 +937,7 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         first.EnsureSuccessStatusCode();
         using var second = await PostJsonAsync("/api/v1/board/cards", new { title = "Second" });
         second.EnsureSuccessStatusCode();
+        IndexBoard();
         using var candidates = await GetJsonAsync("/api/v1/board/cards/PROJ-1/links/candidates?q=second");
         Assert.Equal("PROJ-2", BoardKeyText.Short(candidates.RootElement.GetProperty("cards")[0].GetProperty("key").GetString()));
         using var linked = await PostJsonAsync("/api/v1/board/cards/PROJ-1/links", new { card = "vb-2" });
@@ -1192,6 +1199,10 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         response.EnsureSuccessStatusCode();
         return await ReadJsonAsync(response);
     }
+
+    private void IndexBoard() => SearchTestIndex.Reconcile(
+        (SqliteSearchIndexStore)_app.Services.GetRequiredService<ISearchIndexStore>(),
+        _app.Services.GetRequiredService<IBoardStore>());
 
     private static async Task<JsonDocument> ReadJsonAsync(HttpResponseMessage response) =>
         JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));

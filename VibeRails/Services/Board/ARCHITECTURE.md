@@ -52,16 +52,14 @@ win, while ambiguous short/display aliases prefer their current-project meaning.
 Project-only consumers (merge and session/commit reference pickers) constrain eligibility before
 ranking and the 50-result limit, using `currentProjectOnly=true` on the draft candidate route.
 The filter uses the server's project, and unbound searches retain already-linked destinations.
-Change history,
-deleted cards and hidden/deleted discussion do not participate. Text uses 384-character passages
-with 64-character overlap and at most 96 characters of title context. Full titles have their own
-passages. Surrogate pairs remain intact, and even token-dense inputs fit BGE's 512-token window.
-Content hashes (index format 2) invalidate changed vectors, including edits made by older processes.
-`board-search/1` adds `BoardSearchEmbeddings` behind
-`IBoardStore` without rewriting existing data. Up to 32 stale vectors are refreshed per search,
-so a large corpus warms over subsequent searches while full keyword coverage is immediate. Model failure
-retains keyword discovery. Card and linked-session sources are labeled separately from broader
-captured history. All Board state remains behind `IBoardStore`.
+Change history, deleted cards and hidden/deleted discussion do not participate. VIBE-55 moves
+retrieval to the shared `search.db`: full sources and FTS, token-aware BGE chunks, sqlite-vec,
+result metadata and durable work all live there. The existing root jobs reconcile bounded
+source pages and claim resumable work fairly across cards, inputs and sessions. Queries never
+populate embeddings or enrich results from state.db. Legacy Board JSON caches remain stored
+but unused. Content/model versions and fenced completions reject stale vectors; changed sources
+lose old searchable chunks before replacement inference. See the
+[shared search contract](../BertV2/README.md). Source access remains behind `IBoardStore`.
 
 The existing **Chat with agent** control accepts an optional 1,000-character question. Discussion
 launches carry a short MCP bootstrap, at most 2,000 characters of environment initial message and
@@ -1220,9 +1218,12 @@ the display without changing drafts or scheduling work.
 
 ## Composer and lane activity (VIBE-34)
 
-`board-references.js` extends the shared composer popup to project card IDs, exact session GUIDs
-and commit SHAs using existing authenticated APIs. Name-based session suggestions read one bounded
-recent-history page; exact GUID/card queries skip unrelated indexes. Saved cards link selected
+`board-references.js` extends the shared composer popup using existing authenticated APIs.
+`@` is file-only; `!` searches current-project card titles, keywords and IDs, then lists the
+chosen card’s sessions with agent/time/status metadata or inserts a card reference. Only a
+complete GUID after `!` reads session history; no recent-history page is fetched (VIBE-59).
+`#` retains commit lookup. New card references use `![label](card:id)`; saved `@` references
+remain readable without conversion. Saved cards link selected
 sessions/commits immediately; draft cards queue them until Create. Card text carries reference
 syntax; no new schema or historical conversion is involved. `board-markdown.js` styles already
 escaped text and never permits raw HTML or arbitrary image sources. `board-composer-preview.js`

@@ -1,12 +1,10 @@
+import { automationWorkerName } from './environment-editor.js';
 import { isCheck, checkName, checkFields, validCheckScope } from './job-checks.js';
 import {
-    buildLlmSelectionValue,
     confirmDialog,
     getLlmName,
-    isConfirmDialogOpen,
     parseLlmSelection
 } from './utils.js';
-import { mountWorkerPicker } from './pickers/worker-picker.js';
 import { showReplayModal } from './session-viewer.js';
 import { PythonScriptsController } from './python-scripts-controller.js';
 
@@ -119,8 +117,11 @@ export class JobController {
         this.pollTimer = null;
         this.logTimer = null;
         this.runModalGeneration = 0;
-        this.editorModalCleanup = null;
+        this.editorRoot = null;
+        this.editorRequestGeneration = 0;
         this.editorActions = [];
+        this.editorWorkerOptional = false;
+        this.workerEditor = null;
         this.activeEditorJob = null;
         this.activeEditorSource = null;
         this.activeEditorPreferredTrigger = null;
@@ -165,10 +166,10 @@ export class JobController {
     }
 
     unload() {
+        this.closeEditor();
         this.pythonScripts.unmount();
         this.runModalGeneration += 1;
         this.historyRequestGeneration += 1;
-        this.disposeEditorModal();
         this.activeEditorJob = null;
         this.activeEditorSource = null;
         this.activeEditorPreferredTrigger = null;
@@ -177,47 +178,6 @@ export class JobController {
         this.pollTimer = null;
         this.logTimer = null;
         this.root = null;
-    }
-
-    disposeEditorModal() {
-        const cleanup = this.editorModalCleanup;
-        this.editorModalCleanup = null;
-        cleanup?.();
-    }
-
-    registerEditorModalCleanup(selection, pickerDisposer = null) {
-        this.disposeEditorModal();
-
-        let disposed = false;
-        const keydownTarget = typeof window !== 'undefined' ? window : document;
-        const handleEscape = event => {
-            if (event.key !== 'Escape') return;
-            // A confirm overlay owns Escape while it is up. Both listeners sit on
-            // window in the capture phase and this one registered first (FIFO), so
-            // its stopImmediatePropagation cannot shield us — without this check,
-            // Escape on "Delete?" would also silently wipe the open editor.
-            if (isConfirmDialogOpen()) return;
-            const modalContainer = typeof document !== 'undefined' ? document.getElementById?.('modal-container') : null;
-            if (modalContainer?.firstElementChild) return;
-            // The nav Launch flyout lives on <body>, outside #modal-container, and closes
-            // itself on Escape; that keypress must not also wipe the open editor.
-            if (typeof document !== 'undefined' && document.querySelector?.('.automation-launch-flyout')) return;
-            this.closeEditor();
-        };
-        const cleanup = () => {
-            if (disposed) return;
-            disposed = true;
-            keydownTarget?.removeEventListener?.('keydown', handleEscape, true);
-            if (pickerDisposer) pickerDisposer();
-            else if (selection?.tomselect && typeof selection.tomselect.destroy === 'function') selection.tomselect.destroy();
-            if (this.editorModalCleanup === cleanup) {
-                this.editorModalCleanup = null;
-            }
-        };
-
-        keydownTarget?.addEventListener?.('keydown', handleEscape, true);
-        this.editorModalCleanup = cleanup;
-        return cleanup;
     }
 
     renderPage() {
@@ -253,7 +213,6 @@ export class JobController {
                             <p>Run, edit, pause, or remove an automation from one place.</p>
                         </div>
                     </div>
-                    <div class="job-inline-editor" data-job-editor hidden></div>
                     <div class="jobs-grid" data-jobs-list>
                         <div class="jobs-empty" role="status"><span class="spinner-border spinner-border-sm"></span> Loading automations…</div>
                     </div>
@@ -371,10 +330,9 @@ export class JobController {
         this.renderJobs();
     }
 
-    async environmentChanged({ selectedEnvironmentId = null } = {}) {
+    async environmentChanged() {
         this.environments = this.app.data.environments || [];
         this.renderJobs();
-        this.refreshEditorEnvironmentPicker(selectedEnvironmentId);
     }
 
     renderJobs() {
@@ -858,17 +816,33 @@ export class JobController {
         return ' title="Approximate — measured to when VibeRails noticed the terminal had closed, not to when it closed."';
     }
 
-    openEditor(job = null, preferredTrigger = null, editorState = null) {
-        this.disposeEditorModal();
-        const editor = this.root?.querySelector('[data-job-editor]');
-        if (!editor) return;
-
+    async openEditor(job = null, preferredTrigger = null, editorState = null) {
+        this.closeEditor();
+        if (!this.root) return;
+        const origin = this.root;
+        const generation = ++this.editorRequestGeneration;
+        const previousModal = this.app.modalState;
         const isEdit = Boolean(job);
         const source = editorState || job || {};
+        const actions = this.normalizeJobActions(source, { defaultWorker: true });
+        // New forms and Worker workflows include their configuration; users never name a separate
+        // Worker. An existing script/check-only workflow (such as a lane VCA check) opens as it is
+        // and saves unchanged: Add instructions converts it, and only that added Worker is removable.
+        const workerOptional = isEdit && !actions.some(action => action.kind === JOB_ACTION.WORKER);
+        if (!workerOptional && !actions.some(action => action.kind === JOB_ACTION.WORKER)) {
+            actions.push({ id: this.newActionId(), kind: JOB_ACTION.WORKER, environmentId: null });
+        }
+        const worker = actions.find(action => action.kind === JOB_ACTION.WORKER);
+        const environment = worker ? this.findEnvironment(worker.environmentId) : null;
+        const cliSettings = environment ? await this.app.environmentController.loadEditorSettings(environment) : {};
+        if (generation !== this.editorRequestGeneration || this.root !== origin || this.app.modalState !== previousModal) return;
+        this.editorActions = actions;
+        this.editorWorkerOptional = workerOptional;
         this.activeEditorJob = job;
         this.activeEditorSource = source;
         this.activeEditorPreferredTrigger = preferredTrigger;
-        this.root.dataset.editorOpen = 'true';
+        this.editorEnvironment = environment;
+        this.editorCliSettings = cliSettings;
 
         const triggers = source.triggers || [];
         const scheduled = triggers.find(trigger => Number(trigger.kind) === TRIGGER.SCHEDULE);
@@ -876,40 +850,35 @@ export class JobController {
         const hasPreCommit = triggers.some(trigger => Number(trigger.kind) === TRIGGER.PRECOMMIT) || preferredTrigger === TRIGGER.PRECOMMIT;
         const timezone = scheduled?.timeZoneId || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
         const scheduleKind = Number(scheduled?.scheduleKind ?? SCHEDULE.INTERVAL);
-        this.editorActions = this.normalizeJobActions(source, { defaultWorker: !isEdit && !editorState });
         const projectPath = this.currentProjectPath();
 
-        editor.hidden = false;
-        editor.innerHTML = `
-            <form data-job-form class="job-inline-form">
-                <div class="job-inline-form-header">
-                    <div>
-                        <h3>${isEdit ? `Edit ${this.escape(source.name)}` : 'New automation'}</h3>
-                        <p>Name it, arrange its scripts and optional Worker, then decide when it runs.</p>
-                    </div>
-                    <button class="btn btn-sm btn-outline-secondary" type="button" data-job-action="cancel-editor" aria-label="Close automation editor"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
-                </div>
+        this.app.showModal(isEdit ? `Edit ${source.name}` : 'New automation', `
+            <div data-job-editor>
+            <form data-job-form class="job-inline-form job-creation-form">
                 <div class="job-form-fields">
                     <div><label class="form-label" for="job-name">Name</label><input class="form-control" id="job-name" maxlength="100" required value="${this.escape(source.name || '')}" placeholder="Security review after commit"></div>
-                    <div><label class="form-label" for="job-description">Description <span class="text-muted">(optional)</span></label><textarea class="form-control" id="job-description" maxlength="2000" rows="3" placeholder="Tell agents what this automation does when a card enters its lane.">${this.escape(source.description || '')}</textarea></div>
+
                 </div>
 
                 <fieldset class="job-actions-fieldset">
-                    <legend>Workflow <small>Runs from top to bottom</small></legend>
-                    <div class="job-actions-toolbar">
-                        <p>Scripts run from this repository with explicit arguments. Add at most one Worker anywhere in the sequence.</p>
+                    <legend>Task <small>Runs from top to bottom</small></legend>
+                    <div class="job-actions-list" data-job-actions aria-live="polite"></div>
+                    <div class="job-actions-toolbar"><label class="form-label">Additional steps <span class="text-muted">(optional)</span></label>
                         <div>
+                            <button class="btn btn-sm btn-outline-primary" type="button" data-job-action="add-worker-action" hidden><i class="fa-solid fa-robot me-1" aria-hidden="true"></i>Add instructions</button>
                             <button class="btn btn-sm btn-outline-primary" type="button" data-job-action="add-quality-action">Add Code quality</button>
                             <button class="btn btn-sm btn-outline-primary" type="button" data-job-action="add-vca-action">Add VCA</button>
                             <button class="btn btn-sm btn-outline-primary" type="button" data-job-action="add-script-action"><i class="fa-solid fa-code me-1" aria-hidden="true"></i>Add script</button>
-                            <button class="btn btn-sm btn-outline-primary" type="button" data-job-action="add-worker-action"><i class="fa-solid fa-robot me-1" aria-hidden="true"></i>Add Worker</button>
                         </div>
                     </div>
-                    <div class="job-actions-list" data-job-actions aria-live="polite"></div>
+
                 </fieldset>
 
-                <fieldset class="job-trigger-fieldset"><legend>Run automatically <small>Optional</small></legend>
+                <fieldset class="job-trigger-fieldset"><legend>When should it run? <small>Run now is always available</small></legend><div class="job-trigger-choices">
                     <label class="job-trigger-option"><span><strong>On a schedule</strong><small>Run every few minutes, daily, or weekly.</small></span><input class="job-switch-input" type="checkbox" id="job-trigger-schedule" ${scheduled ? 'checked' : ''}></label>
+                    <label class="job-trigger-option"><span><strong>Before each commit</strong><small>Queue when Git starts a commit. The commit is not delayed while the automation runs.</small></span><input class="job-switch-input" type="checkbox" id="job-trigger-precommit" ${hasPreCommit ? 'checked' : ''}></label>
+                    <label class="job-trigger-option"><span><strong>After each commit</strong><small>Run after a successful Git commit in this repository.</small></span><input class="job-switch-input" type="checkbox" id="job-trigger-commit" ${hasCommit ? 'checked' : ''}></label>
+                    </div>
                     <div class="job-schedule-editor" data-schedule-editor ${scheduled ? '' : 'hidden'}>
                         <div class="row g-2">
                             <div class="col-md-4"><label class="form-label" for="job-schedule-kind">Schedule</label><select class="form-select" id="job-schedule-kind"><option value="0" ${scheduleKind === 0 ? 'selected' : ''}>Every interval</option><option value="1" ${scheduleKind === 1 ? 'selected' : ''}>Daily</option><option value="2" ${scheduleKind === 2 ? 'selected' : ''}>Weekly</option></select></div>
@@ -919,10 +888,10 @@ export class JobController {
                             <div class="col-12" data-timezone-field><label class="form-label" for="job-timezone">Time zone</label><input class="form-control" id="job-timezone" value="${this.escape(timezone)}"></div>
                         </div>
                     </div>
-                    <label class="job-trigger-option"><span><strong>Before each commit</strong><small>Queue when Git starts a commit. The commit is not delayed while the automation runs.</small></span><input class="job-switch-input" type="checkbox" id="job-trigger-precommit" ${hasPreCommit ? 'checked' : ''}></label>
-                    <label class="job-trigger-option"><span><strong>After each commit</strong><small>Run after a successful Git commit in this repository.</small></span><input class="job-switch-input" type="checkbox" id="job-trigger-commit" ${hasCommit ? 'checked' : ''}></label>
-                    <div class="job-manual-note"><i class="fa-solid fa-play" aria-hidden="true"></i>You can always use Run now, even with these switches off.</div>
+
                 </fieldset>
+
+                <section class="job-more-options" aria-label="Run options">
 
                 <div class="job-run-options">
                     <div class="job-timeout-option">
@@ -934,12 +903,15 @@ export class JobController {
                     <label class="job-option-toggle" for="job-launch-minimized"><span><strong>Launch minimized</strong><small>Keep the run in the background</small></span><input class="job-switch-input" type="checkbox" id="job-launch-minimized" ${source.launchMinimized === true ? 'checked' : ''}></label>
                 </div>
 
+                </section>
                 <div class="job-repository-context" title="Automations always run in the repository VibeRails is open in."><i class="fa-solid fa-code-branch" aria-hidden="true"></i>${projectPath
                     ? `<span>Runs in</span><code>${this.escape(projectPath)}</code>`
                     : '<span>No Git repository detected — open one to run automations.</span>'}</div>
                 <div class="job-inline-form-actions"><button class="btn btn-outline-secondary" type="button" data-job-action="cancel-editor">Cancel</button><button class="btn btn-primary" type="submit">${isEdit ? 'Save automation' : 'Create automation'}</button></div>
-            </form>`;
-
+            </form></div>`, { onClose: () => this.resetEditor() });
+        const editor = document.querySelector('#modal-container [data-job-editor]');
+        this.editorRoot = editor;
+        editor.closest('.modal').classList.add('job-creation-modal');
         const form = editor.querySelector('[data-job-form]');
         this.renderEditorActions();
 
@@ -955,10 +927,10 @@ export class JobController {
             form.querySelector('#job-local-time').disabled = !enabled || kind === SCHEDULE.INTERVAL;
             form.querySelector('#job-timezone').disabled = !enabled || kind === SCHEDULE.INTERVAL;
         };
+        form?.querySelector('[data-job-action="add-worker-action"]')?.addEventListener('click', () => this.addEditorAction(JOB_ACTION.WORKER));
         form?.querySelector('[data-job-action="add-quality-action"]')?.addEventListener('click', () => this.addEditorAction(JOB_ACTION.QUALITY));
         form?.querySelector('[data-job-action="add-vca-action"]')?.addEventListener('click', () => this.addEditorAction(JOB_ACTION.VCA));
         form?.querySelector('[data-job-action="add-script-action"]')?.addEventListener('click', () => this.addEditorAction(JOB_ACTION.SCRIPT));
-        form?.querySelector('[data-job-action="add-worker-action"]')?.addEventListener('click', () => this.addEditorAction(JOB_ACTION.WORKER));
         form?.querySelectorAll('[data-job-action="cancel-editor"]')?.forEach(button => button.addEventListener('click', () => this.closeEditor()));
         form?.querySelector('#job-trigger-schedule')?.addEventListener('change', updateScheduleFields);
         form?.querySelector('#job-schedule-kind')?.addEventListener('change', updateScheduleFields);
@@ -972,9 +944,7 @@ export class JobController {
         });
         form?.addEventListener('submit', event => this.saveJob(event, job));
         updateScheduleFields();
-        this.updateEditorEnvironmentPreview();
 
-        editor.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
         form?.querySelector('#job-name')?.focus?.();
     }
 
@@ -1044,17 +1014,15 @@ export class JobController {
     }
 
     renderEditorActions() {
-        const form = this.root?.querySelector('[data-job-editor] [data-job-form]');
+        const form = this.editorRoot?.querySelector('[data-job-form]');
         const target = form?.querySelector('[data-job-actions]');
         if (!target) return;
 
         const hasWorker = this.editorActions.some(action => action.kind === JOB_ACTION.WORKER);
         const addWorker = form.querySelector('[data-job-action="add-worker-action"]');
-        if (addWorker) {
-            addWorker.disabled = hasWorker;
-            addWorker.title = hasWorker ? 'This workflow already has its one Worker.' : '';
-        }
-
+        if (addWorker) addWorker.hidden = !this.editorWorkerOptional || hasWorker;
+        this.workerEditor?.element.remove();
+        form.classList.toggle('job-simple-workflow', this.editorActions.length === 1 && hasWorker);
         target.innerHTML = this.editorActions.length > 0
             ? this.editorActions.map((action, index) => this.renderEditorAction(action, index)).join('')
             : `<div class="job-actions-empty"><i class="fa-solid fa-diagram-project" aria-hidden="true"></i><strong>No actions yet</strong><span>Add a repository script or Worker to build the workflow.</span></div>`;
@@ -1063,13 +1031,7 @@ export class JobController {
         target.onchange = event => this.updateEditorActionField(event);
         target.onclick = event => { void this.handleEditorActionClick(event); };
 
-        const worker = this.editorActions.find(action => action.kind === JOB_ACTION.WORKER);
-        if (worker) {
-            this.refreshEditorEnvironmentPicker(worker.environmentId);
-        } else {
-            this.disposeEditorModal();
-            this.registerEditorModalCleanup(null);
-        }
+        this.mountWorkerEditor();
     }
 
     renderEditorAction(action, index) {
@@ -1078,24 +1040,14 @@ export class JobController {
             <div class="job-action-order-controls" aria-label="Reorder action">
                 <button class="btn btn-sm btn-outline-secondary" type="button" data-workflow-action="move-up" ${index === 0 ? 'disabled' : ''} aria-label="Move action up"><i class="fa-solid fa-arrow-up" aria-hidden="true"></i></button>
                 <button class="btn btn-sm btn-outline-secondary" type="button" data-workflow-action="move-down" ${index === this.editorActions.length - 1 ? 'disabled' : ''} aria-label="Move action down"><i class="fa-solid fa-arrow-down" aria-hidden="true"></i></button>
-                <button class="btn btn-sm btn-outline-danger" type="button" data-workflow-action="remove" aria-label="Remove action"><i class="fa-solid fa-trash" aria-hidden="true"></i></button>
+                ${action.kind !== JOB_ACTION.WORKER || this.editorWorkerOptional ? '<button class="btn btn-sm btn-outline-danger" type="button" data-workflow-action="remove" aria-label="Remove action"><i class="fa-solid fa-trash" aria-hidden="true"></i></button>' : ''}
             </div>`;
 
         if (action.kind === JOB_ACTION.WORKER) {
-            return `
-                <article class="job-action-card" data-job-action-id="${actionId}" data-kind="worker">
-                    <header><span class="job-action-number">${index + 1}</span><div><strong><i class="fa-solid fa-robot" aria-hidden="true"></i>Worker</strong><small>Runs the Environment’s CLI and Initial Message.</small></div>${controls}</header>
-                    <div class="job-action-body">
-                        <label class="form-label" for="job-llm-selection">Worker Environment</label>
-                        <div class="job-environment-picker-row">
-                            <div class="job-environment-picker"><select class="form-select" id="job-llm-selection"></select></div>
-                            <button class="btn btn-outline-primary text-nowrap" type="button" data-workflow-action="new-worker"><i class="fa-solid fa-plus me-1" aria-hidden="true"></i>New Worker</button>
-                            <button class="btn btn-outline-secondary text-nowrap" type="button" data-workflow-action="edit-worker" hidden disabled>Edit</button>
-                        </div>
-                        <small class="form-text text-muted">The Worker contains the CLI, model, permissions, workspace policy, and instructions.</small>
-                        <div class="job-environment-preview" data-job-environment-preview aria-live="polite"></div>
-                    </div>
-                </article>`;
+            return `<article class="job-action-card job-worker-card" data-job-action-id="${actionId}" data-kind="worker">
+                <header><span class="job-action-number">${index + 1}</span><div><strong>Instructions</strong></div>${controls}</header>
+                <div class="job-action-body"><div data-inline-worker></div></div>
+            </article>`;
         }
 
         if (isCheck(action.kind)) return `<article class="job-action-card" data-job-action-id="${actionId}">
@@ -1181,7 +1133,8 @@ export class JobController {
                 if (index >= 0 && index < this.editorActions.length - 1) [this.editorActions[index + 1], this.editorActions[index]] = [this.editorActions[index], this.editorActions[index + 1]];
                 return this.renderEditorActions();
             case 'remove':
-                if (index >= 0) this.editorActions.splice(index, 1);
+                // A removed optional Worker keeps its detached draft, so adding it back restores it.
+                if (index >= 0 && (action.kind !== JOB_ACTION.WORKER || this.editorWorkerOptional)) this.editorActions.splice(index, 1);
                 return this.renderEditorActions();
             case 'add-argument':
                 if (action && action.arguments.length < 64) action.arguments.push('');
@@ -1195,10 +1148,6 @@ export class JobController {
                 return this.pickEditorScript(action, button);
             case 'browse-working-directory':
                 return this.pickEditorWorkingDirectory(action, button);
-            case 'new-worker':
-                return this.createEnvironmentFromEditor();
-            case 'edit-worker':
-                return this.editSelectedEnvironment();
             default:
                 return undefined;
         }
@@ -1240,151 +1189,59 @@ export class JobController {
         this.renderEditorActions();
     }
 
-    refreshEditorEnvironmentPicker(selectedEnvironmentId = null, selectedValue = null) {
-        const selection = this.root?.querySelector('[data-job-editor] #job-llm-selection');
-        if (!selection) return;
-        const worker = this.editorActions.find(action => action.kind === JOB_ACTION.WORKER);
-        if (!worker) return;
+    disposeWorkerEditor() {
+        this.workerEditor?.dispose();
+        this.workerEditor = null;
+    }
 
-        const currentValue = selectedValue
-            || (selectedEnvironmentId == null
-                ? (selection.tomselect?.getValue?.() || selection.value)
-                : null)
-            || (worker.environmentId
-                ? buildLlmSelectionValue(
-                    this.findEnvironment(worker.environmentId)?.cli || getJobCliForLlm(worker.llm) || '',
-                    worker.environmentId)
-                : '');
-        const preferredEnvironment = this.findEnvironment(selectedEnvironmentId);
-        const valueToRestore = preferredEnvironment
-            ? buildLlmSelectionValue(preferredEnvironment.cli, preferredEnvironment.id)
-            : currentValue || '';
-
-        if (preferredEnvironment) {
-            worker.environmentId = Number(preferredEnvironment.id);
-            worker.environmentName = preferredEnvironment.name || null;
-            worker.llm = getJobLlmForCli(preferredEnvironment.cli) || 0;
+    mountWorkerEditor() {
+        const host = this.editorRoot?.querySelector('[data-inline-worker]');
+        if (!host) return;
+        if (!this.workerEditor) {
+            const element = document.createElement('div');
+            host.append(element);
+            this.workerEditor = this.app.environmentController.mountEditor(element, {
+                env: this.editorEnvironment,
+                cliSettings: this.editorCliSettings,
+                automationWorker: true,
+                getName: () => automationWorkerName(this.editorRoot?.querySelector('#job-name')?.value, this.environments)
+            });
+            const message = element.querySelector('#env-initial-message');
+            message.required = true;
+            message.rows = 5;
+            message.placeholder = 'Describe what should happen each time this runs.';
+            element.querySelector('label[for="env-initial-message"]').textContent = 'Instructions';
+        } else {
+            host.append(this.workerEditor.element);
         }
-
-        this.disposeEditorModal();
-        const parsedValue = parseLlmSelection(valueToRestore, this.environments);
-        const missingEnvironment = valueToRestore.startsWith('env:')
-            && !this.findEnvironment(parsedValue.envId);
-        const pickerDisposer = mountWorkerPicker(this.app, selection, {
-            selectedValue: valueToRestore,
-            selectedFallback: missingEnvironment ? {
-                value: valueToRestore,
-                label: `${worker.environmentName || this.activeEditorJob?.environmentName || 'Deleted Worker'} (missing)`,
-                cli: parsedValue.cli || '',
-                environmentId: parsedValue.envId,
-                environmentName: worker.environmentName || this.activeEditorJob?.environmentName || null
-            } : null
-        });
-        selection.addEventListener('change', () => {
-            const parsed = parseLlmSelection(
-                selection.tomselect?.getValue?.() || selection.value,
-                this.environments);
-            const environment = parsed.kind === 'environment' ? this.findEnvironment(parsed.envId) : null;
-            worker.environmentId = environment ? Number(environment.id) : null;
-            worker.environmentName = environment?.name || null;
-            worker.llm = environment ? (getJobLlmForCli(environment.cli) || 0) : 0;
-            this.updateEditorEnvironmentPreview();
-        });
-        this.registerEditorModalCleanup(selection, pickerDisposer);
-        this.updateEditorEnvironmentPreview();
     }
 
-    updateEditorEnvironmentPreview() {
-        const form = this.root?.querySelector('[data-job-editor] [data-job-form]');
-        if (!form) return;
-        const selection = form.querySelector('#job-llm-selection');
-        const preview = form.querySelector('[data-job-environment-preview]');
-        const editButton = form.querySelector('[data-workflow-action="edit-worker"]');
-        const parsed = parseLlmSelection(selection?.tomselect?.getValue?.() || selection?.value, this.environments);
-        const environment = parsed.kind === 'environment' ? this.findEnvironment(parsed.envId) : null;
-
-        if (editButton) {
-            editButton.hidden = !environment;
-            editButton.disabled = !environment;
-        }
-        if (!preview) return;
-
-        if (environment) {
-            const prompt = (environment.customPrompt || '').trim();
-            preview.dataset.tone = prompt ? 'ready' : 'warning';
-            preview.innerHTML = prompt
-                ? `<div><span><i class="fa-regular fa-message" aria-hidden="true"></i><strong>Initial message</strong></span><button class="btn btn-link btn-sm p-0" type="button" data-job-action="edit-preview-environment">Edit Worker</button></div><pre></pre>`
-                : `<div><span><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>This Worker needs an initial message.</span><button class="btn btn-link btn-sm p-0" type="button" data-job-action="edit-preview-environment">Add message</button></div>`;
-            const promptTarget = preview.querySelector('pre');
-            if (promptTarget) promptTarget.textContent = prompt;
-            preview.querySelector('[data-job-action="edit-preview-environment"]')?.addEventListener('click', () => this.editSelectedEnvironment());
-            return;
-        }
-
-        preview.dataset.tone = 'empty';
-        preview.innerHTML = '<span>Choose a Worker to continue.</span>';
-    }
-
-    async createEnvironmentFromEditor() {
-        const controller = this.app.environmentController;
-        if (!controller) return;
-
-        // The Worker is named in its own modal. The automation name, when already
-        // typed and legal as an environment identifier (backend charset), rides
-        // along as an editable prefill — a convenient default, not a rule. An
-        // unusable or empty automation name simply means a blank name field.
-        const automationName = (this.root?.querySelector('[data-job-editor] #job-name')?.value || '').trim();
-        const prefill = /^[A-Za-z0-9][A-Za-z0-9_\- ]{0,63}$/.test(automationName)
-            && !this.environments.some(environment =>
-                (environment.name || '').toLowerCase() === automationName.toLowerCase())
-            ? automationName
-            : '';
-
-        const knownIds = new Set(this.environments.map(environment => Number(environment.id)));
-        const selection = this.root?.querySelector('[data-job-editor] #job-llm-selection');
-        const current = parseLlmSelection(selection?.tomselect?.getValue?.() || selection?.value, this.environments);
-        controller.createEnvironment({
-            initialName: prefill,
-            automationWorker: true,
-            onChanged: async () => {
-                const latest = this.app.data.environments || [];
-                const created = latest.find(environment => !knownIds.has(Number(environment.id)));
-                // Starting nameless is fine: adopt the new Worker's name as the
-                // automation-name default, still editable before saving.
-                const nameInput = this.root?.querySelector('[data-job-editor] #job-name');
-                if (created?.name && nameInput && !nameInput.value.trim()) {
-                    nameInput.value = created.name;
-                }
-                await this.environmentChanged({ selectedEnvironmentId: created?.id ?? current.envId });
-            }
-        });
-    }
-
-    async editSelectedEnvironment() {
-        const controller = this.app.environmentController;
-        const selection = this.root?.querySelector('[data-job-editor] #job-llm-selection');
-        const parsed = parseLlmSelection(selection?.tomselect?.getValue?.() || selection?.value, this.environments);
-        const environment = this.findEnvironment(parsed.envId);
-        if (!controller || !environment) return;
-        await controller.editEnvironment(environment.name, {
-            onChanged: () => this.environmentChanged({ selectedEnvironmentId: environment.id })
-        });
-    }
-
-    closeEditor() {
-        this.disposeEditorModal();
+    resetEditor() {
+        this.editorRequestGeneration += 1;
+        this.disposeWorkerEditor();
+        this.editorRoot = null;
+        this.editorEnvironment = null;
+        this.editorCliSettings = null;
         this.activeEditorJob = null;
         this.activeEditorSource = null;
         this.activeEditorPreferredTrigger = null;
         this.editorActions = [];
-        const editor = this.root?.querySelector('[data-job-editor]');
-        if (!editor) return;
-        editor.innerHTML = '';
-        editor.hidden = true;
-        delete this.root.dataset.editorOpen;
+        this.editorWorkerOptional = false;
     }
 
-    captureEditorState(form, { validate = false } = {}) {
+    closeEditor() {
+        const ownsModal = this.editorRoot?.isConnected;
+        this.resetEditor();
+        if (ownsModal) this.app.closeModal();
+    }
+
+    captureEditorState(form, { validate = false, draftEnvironment = null } = {}) {
+        const name = form.querySelector('#job-name').value.trim();
+        if (validate && !name) {
+            this.app.showError('Give this automation a name.');
+            form.querySelector('#job-name').focus?.();
+            return null;
+        }
         let actions = this.editorActions.map(action => ({
             ...action,
             arguments: [...(action.arguments || [])]
@@ -1420,7 +1277,7 @@ export class JobController {
         const normalizedActions = [];
         for (const action of actions) {
             if (action.kind === JOB_ACTION.WORKER) {
-                selectedEnvironment = this.findEnvironment(action.environmentId);
+                selectedEnvironment = draftEnvironment || this.findEnvironment(action.environmentId);
                 if (!selectedEnvironment) {
                     if (validate) this.app.showError('The selected Worker no longer exists. Choose another Worker.');
                     return null;
@@ -1432,7 +1289,7 @@ export class JobController {
                     return null;
                 }
                 if (!prompt) {
-                    if (validate) this.app.showError('Edit this Worker and add an Initial Message before saving the automation.');
+                    if (validate) this.app.showError('Add instructions before saving the automation.');
                     return null;
                 }
                 normalizedActions.push({
@@ -1521,8 +1378,8 @@ export class JobController {
         }
 
         return {
-            name: form.querySelector('#job-name').value.trim(),
-            description: form.querySelector('#job-description')?.value.trim() || '',
+            name,
+            description: form.querySelector('#job-description')?.value.trim() ?? this.activeEditorSource?.description ?? '',
             projectPath,
             llm,
             environmentId: selectedEnvironment ? Number(selectedEnvironment.id) : null,
@@ -1542,18 +1399,38 @@ export class JobController {
         event.preventDefault();
         const form = event.currentTarget;
         const submit = form.querySelector('[type="submit"]');
-        const payload = this.captureEditorState(form, { validate: true });
+        if (submit.disabled) return;
+        const worker = this.editorActions.find(action => action.kind === JOB_ACTION.WORKER);
+        const inlineEditor = worker ? this.workerEditor : null;
+        const draft = inlineEditor?.read();
+        const draftEnvironment = draft ? { id: worker.environmentId, cli: draft.cli, customPrompt: draft.payload.customPrompt } : null;
+        let payload = this.captureEditorState(form, { validate: true, draftEnvironment });
         if (!payload) return;
 
         submit.disabled = true;
         submit.textContent = existingJob ? 'Saving…' : 'Creating…';
+        form.inert = true;
         try {
+            if (inlineEditor) {
+                const environment = await inlineEditor.save();
+                if (!form.isConnected) return;
+                this.environments = [...this.environments.filter(item => item.id !== environment.id), environment];
+                this.app.environmentController.setEnvironments(this.environments);
+                // Keep the draft mounted after a failed job save; save() remembers the created
+                // Worker and writes changes to it on retry instead of creating a duplicate.
+                payload.environmentId = Number(environment.id);
+                payload.actions = payload.actions.map(action => action.kind === JOB_ACTION.WORKER
+                    ? { ...action, environmentId: Number(environment.id) } : action);
+            }
             await this.app.apiCall(existingJob ? `/api/v1/jobs/${existingJob.id}` : '/api/v1/jobs', existingJob ? 'PUT' : 'POST', payload);
+            if (!form.isConnected) return;
             this.closeEditor();
             this.app.showToast('Automation', existingJob ? 'Saved.' : 'Created.', 'success');
             await this.refreshAll({ quiet: true });
         } catch (error) {
-            this.app.showError(error?.message || 'Could not save the automation.');
+            if (form.isConnected) this.app.showError(error?.message || 'Could not save the automation.');
+        } finally {
+            form.inert = false;
             submit.disabled = false;
             submit.textContent = existingJob ? 'Save automation' : 'Create automation';
         }

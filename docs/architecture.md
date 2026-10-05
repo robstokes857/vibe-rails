@@ -27,20 +27,21 @@ freshness, exact file/credential exclusions, retry behavior, size limits and rol
 General Settings displays per-dataset coverage. Restore/inspection instructions live in
 `vibe-books/vibe-data/docs/complete-backups.md`; no source retention policy changes.
 
-## Vibe AI navigation visibility
+## Vibe AI navigation
 
-General Settings exposes **Show Vibe AI UI**, hidden by default. `ShowVibeAiUi` persists in the
-shared settings file; GET/settings responses report it and nullable updates preserve it when
-omitted. Startup and computer-name updates leave it unchanged. The frontend applies saved
-visibility to both navigation layouts without disabling the inspector's search services.
+Vibe AI is always shown in both navigation layouts; there is no visibility setting. The retired
+`ShowVibeAiUi` key stays in the shared settings file for older versions. Settings updates ignore
+a requested value and preserve the stored one, startup leaves it unchanged, and responses always
+report `true`.
 
 ## Optional Vibe Story tracking
 
 General Settings exposes **Create Vibe Story Tracking**, enabled by default in new and older
 settings files. Nullable API updates preserve the saved choice when an older client omits it.
-`CommandService` reads the shared settings file for each launch and adds optional Board tracking
-guidance to every managed LLM's initial prompt, including base/default launches without a custom
-prompt and saved environments. Existing task/summary precedence and provider argv conventions
+For managed LLM launches with no nonblank initial message or continuation summary, `CommandService`
+reads the shared settings file and uses optional Board tracking guidance as the default prompt.
+This applies to base and saved-environment launches; custom, Board, Automation and continuation
+prompts pass through unchanged. Existing task/summary precedence and provider argv conventions
 are preserved. The guidance asks agents to use their discretion, reuse an existing story and
 record progress/results and session history when useful. A guidance-only launch waits for a user
 task. Plain shells are unaffected; toggling applies to new sessions and does not grant Board tools
@@ -502,8 +503,10 @@ The Board uses `~/.vibe_rails/board.db`; its contracts live in `VibeRails.Data.A
 and its store/migrations in `VibeRails.Data.Sqlite/Board`. REST and MCP share `BoardService`.
 VIBE-6 adds `BoardSearchService` for dashboard search, link candidates, `search_board_cards` and
 card recall: all local boards share current-text BGE/keyword retrieval with a bounded repository
-preference. Titles, descriptions, Comments, legacy notes and handoffs feed a versioned passage
-cache behind `IBoardStore`. Foreign cards have explicit board/project warnings and an authenticated
+preference. VIBE-55 feeds full titles, descriptions, Comments, retained notes and handoffs through
+`IBoardStore` into the shared per-user `search.db`. Existing root jobs reconcile sources and build
+token-aware BGE/sqlite-vec chunks. Queries read only this search component; full lexical text,
+result metadata, work claims and progress live there too. See the [shared search contract](../VibeRails/Services/BertV2/README.md). Foreign cards have explicit board/project warnings and an authenticated
 local-card editor that resolves ownership from immutable identities. Related-card links can cross
 local projects; foreign links remain outside hosted publication. Moves, merges and repository
 launches keep their existing project scope. See the [search contract](../VibeRails/Services/Board/AGENTS.md#local-board-search-vibe-6).
@@ -518,7 +521,9 @@ The review records open concurrency and workflow findings; documentation is not 
 those findings have been fixed.
 Card text can reference repository files as `@path` (VB-35): the text is the only storage,
 `GET /api/v1/board/files?q=` (root-only) backs the composer's typeahead, and the launch prompt
-lists the references next to linked commits and attachments.
+lists the references next to linked commits and attachments. The composer keeps `@` file-only;
+`!` searches card titles/keywords and opens a session picker with agent/time/status metadata.
+Only complete GUIDs use exact session-history lookup; partial GUIDs never query that catalog.
 Keep all Board persistence behind `IBoardStore`, including pending lane Automation events, so a
 future shared API-backed store can replace local storage. Local Jobs and terminal history remain
 in `state.db`; queuing an Automation run and acknowledging its Board event are separate commits.
@@ -645,6 +650,16 @@ An Automation is an ordered, fail-fast list of actions. An action is either a re
 (`.py`, `.ps1`, or `.sh`) or a Worker Environment; a workflow may contain zero or one Worker and
 up to 20 total actions. Existing Worker-only Automations migrate to a one-Worker action without
 changing their behavior.
+
+The frontend creates and edits the Automation and its required Worker in one modal using
+the shared `environment-editor.js` controls. Existing script/check-only workflows open without a
+Worker until **Add instructions** converts them. It derives the internal Worker name from the
+Automation name (stepping around built-in CLI, numeric and device names the backend rejects),
+validates the workflow, then saves through the existing Environment, CLI settings and Job
+endpoints. Successful intermediate writes are retained for retries within the open editor, and
+an existing Worker whose controls are unchanged is not written at all.
+The Environments modal mounts the same editor; model catalogs and launch argument handling
+remain in their existing shared modules.
 
 - `JobService` validates and normalizes the editor payload. Script and working-directory paths are
   persisted relative to the repository, arguments stay as discrete argv values, and saving pins

@@ -72,6 +72,16 @@ Uses the real frontend with mocked board APIs to verify compact board controls, 
 image rendering/editing/upload/deletion, save/reopen, running-agent controls, and desktop/narrow layouts.
 It starts a temporary static server and never touches the machine's board database.
 
+### Focused Automation editor tests (No Backend Required)
+
+From `UITests`, run `npx playwright test --config playwright.automation-editor.config.js`.
+The real frontend runs against intercepted API fixtures and a temporary static server.
+Coverage includes one-name creation, shared Environment editing, provider switching, draft
+preservation, clickable prompt tokens, modal focus/cleanup, cancellation, save retries and narrow layouts. No application database or CLI
+is used. It also pins VIBE-58: a rename writes no Worker, Worker edits keep unrepresented
+Codex arguments, reserved CLI names get a valid Worker identifier (the fixture rejects them like
+`EnvironmentRoutes`), and check-only workflows save unchanged until instructions are added.
+
 ### Focused Automation terminal menu tests (No Backend Required)
 
 ```powershell

@@ -14,6 +14,7 @@ public sealed record SqliteStoragePaths(string StatePath, string? VectorPath = n
 {
     internal string ProxyDatabasePath => ProxyPath ?? Path.Combine(Path.GetDirectoryName(StatePath) ?? ".", "proxy_exchanges.db");
     public string BoardDatabasePath => Path.Combine(Path.GetDirectoryName(StatePath) ?? ".", "board.db");
+    public string SearchDatabasePath => Path.Combine(Path.GetDirectoryName(StatePath) ?? ".", "search.db");
 }
 
 /// <summary>The application composition boundary for SQLite; consumers resolve storage interfaces.</summary>
@@ -22,19 +23,14 @@ public static class SqliteStorage
     public static IServiceCollection AddSqliteStorage(this IServiceCollection services,
         Func<IServiceProvider, SqliteStoragePaths> pathsFactory)
     {
-        // Registration ORDER must not decide whether vector search works. AddSqliteStateStorage --
-        // which AddAutomationRuntime also calls, with a SqliteStoragePaths carrying no VectorPath --
-        // only TryAdds the paths. If that ran first, the TryAdd inside it below would be a no-op
-        // here and every vector store would fail at resolve time with "The vector database path has
-        // not been configured." This overload is the one that knows about vectors, so it wins
-        // outright rather than depending on which extension method was called first.
+        // The full host owns the shared per-user search component. State-only hosts need
+        // neither a model nor a search writer; registration order must not change these paths.
         services.Replace(ServiceDescriptor.Singleton(pathsFactory));
         services.TryAddSingleton<VibeRails.Data.Replay.IReplayStore, Replay.ReplayStore>();
         services.AddSqliteStateStorage(pathsFactory);
-        services.TryAddSingleton<IBertV2VectorStore>(sp => new BertV2VectorStore(VectorPath(sp)));
-        services.TryAddSingleton<IBertV2SessionVectorStore>(sp => new BertV2SessionVectorStore(VectorPath(sp)));
-        services.TryAddSingleton<IBertSearchDbService>(sp => new BertSearchDbService(
-            VectorPath(sp), sp.GetRequiredService<SqliteStoragePaths>().StatePath));
+        services.TryAddSingleton<ISearchIndexStore>(sp => new SqliteSearchIndexStore(
+            sp.GetRequiredService<SqliteStoragePaths>().SearchDatabasePath, sp.GetRequiredService<SqliteStoragePaths>().StatePath));
+        services.TryAddSingleton<IBertSearchDbService, BertSearchDbService>();
         return services;
     }
 
@@ -60,7 +56,6 @@ public static class SqliteStorage
         services.TryAddScoped<ISandboxStore>(sp => sp.GetRequiredService<IRepository>());
         services.TryAddScoped<IMetadataStore>(sp => sp.GetRequiredService<IRepository>());
         services.TryAddScoped<IChatSummaryStore>(sp => sp.GetRequiredService<IRepository>());
-        services.TryAddScoped<IEmbeddingProgressStore>(sp => sp.GetRequiredService<IRepository>());
         services.TryAddSingleton<IBoardStore>(sp => CreateBoardStore(sp.GetRequiredService<SqliteStoragePaths>().StatePath));
         services.TryAddSingleton<IJobStore>(sp => new JobStore(StateConnectionString(sp), sp.GetService<BoardAutomationEventSource>()?.Store, sp.GetService<IReviewRunSnapshotFactory>()));
         services.TryAddSingleton<ITokenSavingsStore>(sp => new TokenSavingsStore(StateConnectionString(sp)));
@@ -68,13 +63,11 @@ public static class SqliteStorage
         services.TryAddSingleton<ILlmExchangeLogStore>(sp => new LlmExchangeLogStore(ConnectionString(
             sp.GetRequiredService<SqliteStoragePaths>().ProxyDatabasePath)));
         services.TryAddSingleton<IDatabaseSnapshotStore, SqliteDatabaseSnapshotStore>();
-        services.TryAddSingleton<ISearchIndexMaintenanceStore>(sp => new SqliteSearchIndexMaintenanceStore(StateConnectionString(sp)));
-        // The vector path is optional here (AddSqliteStateStorage callers such as
-        // AddAutomationRuntime have none) but must be passed when it exists: without it retention
-        // clears state.db and leaves the embeddings, so pruned conversations stay searchable.
+        // Search reconciliation propagates retention from canonical source records. Retired
+        // standalone vector databases are retained; current roots no longer maintain them.
         services.TryAddSingleton<IDataRetentionStore>(sp => new SqliteDataRetentionStore(StateConnectionString(sp),
             sp.GetRequiredService<SqliteStoragePaths>().ProxyDatabasePath,
-            sp.GetRequiredService<SqliteStoragePaths>().VectorPath));
+            vectorDatabasePath: null));
         return services;
     }
 
@@ -127,14 +120,12 @@ public static class SqliteStorage
 
         if (paths.VectorPath is not null)
             BertVectorDatabase.Initialize(paths.VectorPath);
+        SearchDatabaseSchema.Ensure(paths.SearchDatabasePath);
+        SearchDatabaseSchema.EnsureVectors(paths.SearchDatabasePath);
     }
 
     private static string StateConnectionString(IServiceProvider provider) =>
         ConnectionString(provider.GetRequiredService<SqliteStoragePaths>().StatePath);
-
-    private static string VectorPath(IServiceProvider provider) =>
-        provider.GetRequiredService<SqliteStoragePaths>().VectorPath
-            ?? throw new InvalidOperationException("The vector database path has not been configured.");
 
     private static string ConnectionString(string path) => new SqliteConnectionStringBuilder
     {

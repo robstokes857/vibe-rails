@@ -1,4 +1,5 @@
 using VibeRails.Services;
+using VibeRails.Services.Board;
 using VibeRails.Services.Terminal;
 using VibeRails.Utils;
 using Xunit;
@@ -23,7 +24,7 @@ public partial class CommandServiceTests
 
     [Theory]
     [MemberData(nameof(StoryTrackingLaunches))]
-    public async Task StoryTracking_DefaultAndSavedEnvironmentLaunchesReceiveOptionalGuidance(LLM llm, string? envName)
+    public async Task StoryTracking_LaunchesWithoutAnInitialMessageReceiveOptionalGuidance(LLM llm, string? envName)
     {
         var service = CreateService(createVibeStoryTrackingEnabled: () => new Settings().CreateVibeStoryTracking);
         var prepared = await service.PrepareSessionAsync(llm, envName, null);
@@ -48,7 +49,7 @@ public partial class CommandServiceTests
         var prepared = await CreateService(createVibeStoryTrackingEnabled: () => true)
             .PrepareSessionAsync(llm, envName, ["--model", "chosen"], initialPrompt: task);
 
-        var expectedPrompt = VibeStoryTrackingPrompt.Compose(task);
+        var expectedPrompt = task;
         var expectedArgument = llm switch
         {
             LLM.Copilot => "--interactive=" + expectedPrompt,
@@ -57,7 +58,7 @@ public partial class CommandServiceTests
             _ => expectedPrompt
         };
         Assert.Equal(expectedArgument, prepared.Argv![^1]);
-        Assert.EndsWith(task, prepared.Argv[^1]);
+        Assert.DoesNotContain("Creating a story is optional", prepared.LaunchCommand);
         Assert.Contains("--model", prepared.Argv);
         Assert.Contains("chosen", prepared.Argv);
     }
@@ -81,9 +82,48 @@ public partial class CommandServiceTests
                 authorizeBoardTools: true);
 
         Assert.Equal("--", prepared.Argv![^2]);
-        Assert.Equal(VibeStoryTrackingPrompt.Compose("Continue the existing story"), prepared.Argv[^1]);
+        Assert.Equal("Continue the existing story", prepared.Argv[^1]);
         Assert.DoesNotContain("Old task", prepared.Argv[^1]);
+        Assert.DoesNotContain("Creating a story is optional", prepared.LaunchCommand);
         Assert.Contains(prepared.Argv, arg => arg.StartsWith("--allowedTools="));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" \r\n\t")]
+    public async Task StoryTracking_BlankInitialMessageAndSummaryUseTheDefaultPrompt(string? initialPrompt)
+    {
+        var prepared = await CreateService(createVibeStoryTrackingEnabled: () => true)
+            .PrepareSessionAsync(LLM.Codex, null, null, initialPrompt: initialPrompt, summary: " \r\n\t");
+
+        Assert.Equal(VibeStoryTrackingPrompt.Guidance, prepared.Argv![^1]);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StoryTracking_BoardAndAutomationPromptsRemainUnchanged(bool trackingEnabled)
+    {
+        var card = new BoardCardRecord("card_1", "/p", 12, "col_build", 0, "Fix prompts", "Keep custom instructions",
+            "base:codex", "medium", null, [], false, 0, DateTime.UtcNow, DateTime.UtcNow);
+        var prompts = new[]
+        {
+            BoardPromptComposer.Compose(card, "Build", "codex", null),
+            BoardPromptComposer.ComposeDiscussion(card, null, "Explain this task"),
+            BoardPromptComposer.Compose(card, "Review", "codex", null, intent: "code_review"),
+            BoardPromptComposer.ComposeAutomationPrompt("VB-12", "Implement this task"),
+            BoardPromptComposer.ComposeAutomationPrompt("VB-12", "Review this task", "code_review"),
+            BoardPromptComposer.ComposeStandaloneAutomationPrompt(null)
+        };
+        var service = CreateService(createVibeStoryTrackingEnabled: () => trackingEnabled);
+        foreach (var prompt in prompts)
+        {
+            var prepared = await service.PrepareSessionAsync(LLM.Codex, null, null, initialPrompt: prompt);
+
+            Assert.Equal(prompt, prepared.Argv![^1]);
+            Assert.DoesNotContain("Creating a story is optional", prepared.LaunchCommand);
+        }
     }
 
     [Fact]
@@ -101,8 +141,9 @@ public partial class CommandServiceTests
             // A separate root saves the setting after this service has already launched a CLI.
             using var otherRoot = new SettingsFile(Path.Combine(directory, "settings.json"));
             otherRoot.Save(new Settings { CreateVibeStoryTracking = false });
-            var disabled = await service.PrepareSessionAsync(LLM.Codex, null, null, initialPrompt: "Keep working");
-            Assert.Equal("Keep working", disabled.Argv![^1]);
+            var disabled = await service.PrepareSessionAsync(LLM.Codex, null, null);
+            Assert.Empty(disabled.Argv!);
+            Assert.DoesNotContain("create_board_card", disabled.LaunchCommand);
         }
         finally
         {

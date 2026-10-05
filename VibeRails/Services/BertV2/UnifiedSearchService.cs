@@ -11,7 +11,7 @@ namespace VibeRails.Services.BertV2;
 /// </summary>
 public sealed class UnifiedSearchService : IUnifiedSearchService
 {
-    private readonly IBertV2BgeEmbedder _embedder;
+    private readonly Func<IBertV2BgeEmbedder> _embedder;
     private readonly IBertSearchDbService _searchDb;
     private readonly IBertDocumentResponseMapper _responseMapper;
     private readonly ILogger<UnifiedSearchService>? _logger;
@@ -21,12 +21,21 @@ public sealed class UnifiedSearchService : IUnifiedSearchService
         IBertSearchDbService searchDb,
         IBertDocumentResponseMapper responseMapper,
         ILogger<UnifiedSearchService>? logger = null)
+        : this(() => embedder, searchDb, responseMapper, logger) { }
+
+    public UnifiedSearchService(Func<IBertV2BgeEmbedder> embedder, IBertSearchDbService searchDb,
+        IBertDocumentResponseMapper responseMapper, ILogger<UnifiedSearchService>? logger = null)
     {
         _embedder = embedder;
         _searchDb = searchDb;
         _responseMapper = responseMapper;
         _logger = logger;
     }
+
+    /// <summary>Keep model construction inside the keyword fallback boundary.</summary>
+    public static UnifiedSearchService Create(IServiceProvider services) => new(
+        () => services.GetRequiredService<IBertV2BgeEmbedder>(), services.GetRequiredService<IBertSearchDbService>(),
+        services.GetRequiredService<IBertDocumentResponseMapper>(), services.GetService<ILogger<UnifiedSearchService>>());
 
     public UnifiedSearchResponse Search(string query, int topK)
     {
@@ -42,7 +51,7 @@ public sealed class UnifiedSearchService : IUnifiedSearchService
         float[]? embedding = null;
         try
         {
-            embedding = _embedder.GenerateEmbedding(query);
+            embedding = _embedder().GenerateEmbedding(query);
         }
         catch (Exception ex)
         {

@@ -123,7 +123,7 @@ test('Navigation calls the feature Automation and the Rules page stays out of it
     assert.doesNotMatch(ruleController, /post-commit Jobs/);
 });
 
-test('Automation inline editor exposes an ordered workflow with scripts and an optional Worker', () => {
+test('Automation modal includes its configuration and optional script actions', () => {
     const source = readFileSync(modulePath, 'utf8');
 
     assert.doesNotMatch(source, /id=["']job-project["']/);
@@ -131,12 +131,11 @@ test('Automation inline editor exposes an ordered workflow with scripts and an o
     // The repository is stated, not asked for.
     assert.match(source, /job-repository-context/);
     assert.match(source, /Runs in<\/span>/);
-    // The picker facade lists Workers only — no base-CLI entries.
-    assert.match(source, /mountWorkerPicker/);
-    assert.match(source, /<legend>Workflow <small>Runs from top to bottom<\/small><\/legend>/);
+    assert.doesNotMatch(source, /mountWorkerPicker/);
+    assert.match(source, /<legend>Task <small>Runs from top to bottom<\/small><\/legend>/);
     assert.match(source, />Add script<\/button>/);
-    assert.match(source, />Add Worker<\/button>/);
-    assert.match(source, />Worker Environment<\/label>/);
+    assert.doesNotMatch(source, />Add Worker<\/button>/);
+    assert.doesNotMatch(source, />Saved Worker<\/label>/);
     assert.match(source, /Each row is one argv value/);
     assert.doesNotMatch(source, /Environment \/ Worker/);
 });
@@ -479,66 +478,28 @@ test('The poll keeps Next run honest: it refetches jobs, and identical markup sk
     assert.equal(assignments, 2);
 });
 
-test('environmentChanged rerenders automations and the active Environment picker', async () => {
+test('environmentChanged refreshes the automation list', async () => {
     const app = createApp();
     const nextEnvironments = [{ id: 73, name: 'Updated Environment', cli: 'codex', customPrompt: 'Review security.' }];
     app.data.environments = nextEnvironments;
     const controller = new JobController(app);
     const calls = [];
     controller.renderJobs = () => calls.push('automations');
-    controller.refreshEditorEnvironmentPicker = environmentId => calls.push(`picker:${environmentId}`);
 
     await controller.environmentChanged({ selectedEnvironmentId: 73 });
 
     assert.equal(controller.environments, nextEnvironments);
-    assert.deepEqual(calls, ['automations', 'picker:73']);
+    assert.deepEqual(calls, ['automations']);
 });
 
-test('Automation destroys its Tom Select picker on Escape and navigation unload', (t) => {
-    const originalDocument = globalThis.document;
-    const originalWindow = globalThis.window;
-    t.after(() => {
-        globalThis.document = originalDocument;
-        globalThis.window = originalWindow;
-    });
 
-    let escapeHandler = null;
-    const keyboardTarget = {
-        addEventListener(type, handler, capture) {
-            if (type === 'keydown' && capture === true) escapeHandler = handler;
-        },
-        removeEventListener(type, handler, capture) {
-            if (type === 'keydown' && capture === true && escapeHandler === handler) escapeHandler = null;
-        }
-    };
-    globalThis.document = keyboardTarget;
-    globalThis.window = keyboardTarget;
-
-    const controller = new JobController(createApp());
-    let escapeDestroyCount = 0;
-    controller.registerEditorModalCleanup({
-        tomselect: { destroy() { escapeDestroyCount += 1; } }
-    });
-    const handlerForEscape = escapeHandler;
-
-    handlerForEscape({ key: 'Escape' });
-    assert.equal(escapeDestroyCount, 1);
-    assert.equal(escapeHandler, null);
-
-    let unloadDestroyCount = 0;
-    controller.registerEditorModalCleanup({
-        tomselect: { destroy() { unloadDestroyCount += 1; } }
-    });
-    controller.unload();
-
-    assert.equal(unloadDestroyCount, 1);
-    assert.equal(escapeHandler, null);
-});
 
 function installEnvironmentFormDom(extraElements = {}) {
     const listeners = new Map();
     const closeListeners = new Set();
     const form = {
+        isConnected: true,
+        querySelector() { return {}; },
         addEventListener(type, handler) { listeners.set(type, handler); }
     };
     const closeButton = {
@@ -596,6 +557,7 @@ function createEnvironmentControllerForForm(appOverrides = {}) {
         ...appOverrides
     };
     const controller = new EnvironmentController(app);
+    controller.mountEditor = () => ({ dispose() {}, async save() {} });
     controller.buildCliSettingsHtml = () => '';
     controller.bindCliSettingsInteractions = () => {};
     return controller;
@@ -700,54 +662,6 @@ test('An environment settings load cannot replace a newer modal or navigated vie
 
     assert.equal(await pending, false);
     assert.equal(opened, 0);
-});
-
-test('Creating an environment uses one trimmed name for both the record and CLI settings', async (t) => {
-    const originalDocument = globalThis.document;
-    const originalWindow = globalThis.window;
-    t.after(() => {
-        globalThis.document = originalDocument;
-        globalThis.window = originalWindow;
-    });
-
-    const cliSelect = { value: 'codex', addEventListener() {} };
-    const dom = installEnvironmentFormDom({
-        'env-name': { value: '  Nightly review  ' },
-        'env-purpose': { value: 'work', addEventListener() {} },
-        'env-cli': cliSelect,
-        'env-hidden': { checked: false }
-    });
-    globalThis.document = dom.document;
-    globalThis.window = dom.document;
-
-    const apiCalls = [];
-    const settingsNames = [];
-    const controller = createEnvironmentControllerForForm({
-        async apiCall(url, method, body) { apiCalls.push({ url, method, body }); },
-        showError(error) { throw new Error(error); }
-    });
-    controller.extractCliSettingsPayload = () => ({ model: 'gpt-5.4' });
-    controller.buildEnvironmentSavePayload = () => ({ customArgs: '--model gpt-5.4' });
-    controller.saveCliSettings = async (_cli, name) => { settingsNames.push(name); };
-    controller.refreshEnvironments = async () => {};
-
-    controller.showEnvironmentForm({ mode: 'create', onChanged() {} });
-    await dom.listeners.get('submit')({ preventDefault() {} });
-
-    assert.equal(apiCalls.length, 1);
-    assert.deepEqual(apiCalls[0], {
-        url: '/api/v1/environments',
-        method: 'POST',
-        body: {
-            name: 'Nightly review',
-            cli: 'codex',
-            purpose: 'work',
-            customArgs: '--model gpt-5.4',
-            // environment-controller.js always sends an explicit visibility flag on create.
-            hidden: false
-        }
-    });
-    assert.deepEqual(settingsNames, ['Nightly review']);
 });
 
 test('Run now and enable actions call the durable Automation API with Environment-owned fields', async () => {
@@ -1477,6 +1391,7 @@ test('An Automation cannot save both before-commit and after-commit triggers', (
 
     const controls = new Map([
         ['#job-llm-selection', { value: 'env:42:opencode' }],
+        ['#job-name', { value: 'Commit review' }],
         ['#job-trigger-schedule', { checked: false }],
         ['#job-trigger-precommit', { checked: true }],
         ['#job-trigger-commit', { checked: true }]
@@ -1796,71 +1711,9 @@ test('Deleting an automation confirms in-app — window.confirm is dead in the w
     const deleteCall = app.calls.find(call => call.method === 'DELETE');
     assert.equal(deleteCall?.url, '/api/v1/jobs/5');
 
-    // The inline editor's capture-phase Escape handler registered before the
-    // dialog's, so it must stand down while a confirm is open — otherwise Escape
-    // on "Delete?" also wipes the open editor.
-    assert.match(source, /if \(isConfirmDialogOpen\(\)\) return;/);
-});
-
-test('Add Worker opens with or without an automation name; the name is a prefill, not a rule', async () => {
-    const app = createApp();
-    let errorToasts = 0;
-    app.showError = () => { errorToasts += 1; };
-    const openings = [];
-    app.environmentController = { createEnvironment(options) { openings.push(options); } };
-    const controller = new JobController(app);
-    controller.environments = [{ id: 9, name: 'Taken Name', cli: 'claude' }];
-
-    const input = { value: '' };
-    controller.root = {
-        querySelector(selector) {
-            if (selector === '[data-job-editor] #job-name') return input;
-            return null;
-        }
-    };
-
-    // Nameless: the modal still opens, with a blank Worker name to fill in there.
-    await controller.createEnvironmentFromEditor();
-    // A typed name that is legal as an environment identifier rides along as a prefill.
-    input.value = '  Doc drift  ';
-    await controller.createEnvironmentFromEditor();
-    // Illegal-charset and already-taken names prefill nothing instead of pre-arming
-    // a doomed create.
-    input.value = 'Bad!!Name';
-    await controller.createEnvironmentFromEditor();
-    input.value = 'taken name';
-    await controller.createEnvironmentFromEditor();
-
-    assert.equal(errorToasts, 0, 'no name state is an error');
-    assert.deepEqual(openings.map(options => options.initialName), ['', 'Doc drift', '', '']);
-    assert.ok(openings.every(options => options.automationWorker === true));
-});
-
-test('A Worker created nameless hands its name back to the empty automation field', async () => {
-    const app = createApp();
-    app.data.environments = [{ id: 61, name: 'Fresh Worker', cli: 'claude', automationWorker: true }];
-    let opened = null;
-    app.environmentController = { createEnvironment(options) { opened = options; } };
-    const controller = new JobController(app);
-    controller.environments = [];
-    controller.environmentChanged = async () => {};
-
-    const input = { value: '' };
-    controller.root = {
-        querySelector(selector) {
-            if (selector === '[data-job-editor] #job-name') return input;
-            return null;
-        }
-    };
-
-    await controller.createEnvironmentFromEditor();
-    await opened.onChanged();
-    assert.equal(input.value, 'Fresh Worker');
-
-    // A name the user already typed is never overwritten.
-    input.value = 'My own name';
-    await opened.onChanged();
-    assert.equal(input.value, 'My own name');
+    // The shared top-level modal now owns Escape and nested-confirm handling.
+    const appSource = readFileSync(path.join(path.dirname(modulePath), '../../app.js'), 'utf8');
+    assert.ok(appSource.includes("document.querySelector?.('.vb-confirm-overlay')"));
 });
 
 test('No first-party frontend module calls window.confirm', async () => {
@@ -1952,97 +1805,7 @@ test('Automation boolean and multi-select controls replace native checkbox styli
     assert.match(css, /\.env-workspace-choice > input:checked \+ \.env-workspace-choice-card\s*\{/);
 });
 
-test('The Worker modal is one plain form with no two-field Advanced disclosure', (t) => {
-    const originalDocument = globalThis.document;
-    const originalWindow = globalThis.window;
-    t.after(() => {
-        globalThis.document = originalDocument;
-        globalThis.window = originalWindow;
-    });
 
-    const cliSelect = { value: 'claude', addEventListener() {} };
-    const dom = installEnvironmentFormDom({ 'env-cli': cliSelect });
-    globalThis.document = dom.document;
-    globalThis.window = dom.document;
-
-    let workerHtml = '';
-    const workerController = createEnvironmentControllerForForm({
-        data: { environments: [], isInGit: true },
-        showModal(_title, html) { workerHtml = html; }
-    });
-    workerController.showEnvironmentForm({
-        mode: 'create',
-        initialName: 'Doc drift',
-        automationWorker: true,
-        onChanged() {}
-    });
-
-    // The Worker is named IN the modal; a prefilled automation name is an editable
-    // default, so the name input must exist and carry the prefill.
-    assert.match(workerHtml, /id="env-name"[^>]*value="Doc drift"/);
-    assert.match(workerHtml, /Worker Name/);
-    assert.match(workerHtml, /id="env-form" class="env-worker-form"/);
-    assert.match(workerHtml, /<legend class="form-label">Workspace<\/legend>/);
-    assert.match(workerHtml, /id="env-workspace-project"[^>]*value="0"[^>]*checked/);
-    assert.match(workerHtml, /id="env-workspace-per-run"[^>]*value="2"/);
-    assert.match(workerHtml, /Run in the project directory on whatever Git branch is checked out when the automation starts/);
-    assert.match(workerHtml, /Changes from one run do not carry into the next/);
-    assert.doesNotMatch(workerHtml, /<select[^>]*id="env-workspace-mode"|Its own clone/);
-    assert.match(workerHtml, />Extra CLI arguments<\/label>/);
-    assert.doesNotMatch(workerHtml, /env-advanced-settings|<summary>Advanced<\/summary>/);
-
-    let environmentHtml = '';
-    const environmentController = createEnvironmentControllerForForm({
-        data: { environments: [], isInGit: true },
-        showModal(_title, html) { environmentHtml = html; }
-    });
-    environmentController.showEnvironmentForm({ mode: 'create', onChanged() {} });
-    assert.doesNotMatch(environmentHtml, /env-advanced-settings/);
-    assert.match(environmentHtml, /<select[^>]*id="env-workspace-mode"/);
-    assert.match(environmentHtml, /Its own clone/);
-});
-
-test('Escape closing the nav Launch flyout does not also wipe the open Automation editor', (t) => {
-    const originalDocument = globalThis.document;
-    const originalWindow = globalThis.window;
-    t.after(() => {
-        globalThis.document = originalDocument;
-        globalThis.window = originalWindow;
-    });
-
-    // The flyout lives on <body>, outside #modal-container, and closes itself on
-    // Escape (document capture); the editor's window-capture handler runs first and
-    // must stand down while the flyout is present.
-    let flyoutPresent = true;
-    let escapeHandler = null;
-    const documentStub = {
-        getElementById() { return null; },
-        querySelector(selector) {
-            return selector === '.automation-launch-flyout' && flyoutPresent ? { className: 'automation-launch-flyout' } : null;
-        },
-        addEventListener(type, handler, capture) {
-            if (type === 'keydown' && capture === true) escapeHandler = handler;
-        },
-        removeEventListener(type, handler, capture) {
-            if (type === 'keydown' && capture === true && escapeHandler === handler) escapeHandler = null;
-        }
-    };
-    globalThis.document = documentStub;
-    globalThis.window = documentStub;
-
-    const controller = new JobController(createApp());
-    let destroyCount = 0;
-    controller.registerEditorModalCleanup({ tomselect: { destroy() { destroyCount += 1; } } });
-
-    escapeHandler({ key: 'Escape' });
-    assert.equal(destroyCount, 0, 'the editor survives the Escape that closed the flyout');
-    assert.notEqual(escapeHandler, null);
-
-    flyoutPresent = false;
-    escapeHandler({ key: 'Escape' });
-    assert.equal(destroyCount, 1, 'with no flyout up, Escape closes the editor as before');
-    assert.equal(escapeHandler, null);
-});
 
 test('recipe export reads Grok --effort and --reasoning-effort as effort', () => {
     const controller = new JobController(createApp());
@@ -2131,7 +1894,7 @@ test('Automation page header groups the three ways to add an automation', () => 
     assert.match(html, /<div class="jobs-page-actions"[^>]*>[\s\S]*?data-job-action="import-from-repository"[\s\S]*?data-job-action="import-recipe"[\s\S]*?data-job-action="new"[\s\S]*?<\/div>\s*<\/header>/);
     assert.equal(html.match(/data-job-action="import-recipe"/g).length, 1);
     assert.ok(html.indexOf('data-job-action="import-recipe"') < html.indexOf('jobs-section-heading'), 'Import recipe moved out of the section heading');
-    const heading = html.slice(html.indexOf('jobs-section-heading'), html.indexOf('data-job-editor'));
+    const heading = html.slice(html.indexOf('jobs-section-heading'), html.indexOf('class="jobs-grid"'));
     assert.doesNotMatch(heading, /<button/);
 
     const source = readFileSync(modulePath, 'utf8');
@@ -2319,4 +2082,45 @@ test('Run history displays an escaped copyable session ID and copies the full va
     await controller.copySessionId('full-session-id');
     assert.deepEqual(copied, ['full-session-id']);
     assert.match(controller.renderHistoryRow({ id: 'run', status: 0 }), /No session recorded/);
+});
+
+
+test('Automation derives legal unique Worker identifiers without changing the display name', async () => {
+    const { automationWorkerName } = await import(pathToFileURL(path.resolve('VibeRails/wwwroot/js/modules/environment-editor.js')).href);
+    const environments = [{name: 'Security review'}, {name: 'Security review 2'}];
+    assert.equal(automationWorkerName('Security review', environments), 'Security review 3');
+    assert.equal(automationWorkerName('Security/review: nightly!'), 'Securityreview nightly');
+    assert.equal(automationWorkerName('---'), 'Automation');
+    assert.equal(automationWorkerName('a'.repeat(100), [{name:'a'.repeat(64)}]), 'a'.repeat(62) + ' 2');
+    // VIBE-58 F2: EnvironmentRoutes rejects built-in CLI names (any casing, numbers too) and
+    // Windows device names, and this form has no separate Worker name to fix it with.
+    for (const [display, worker] of [['Codex', 'Codex Worker'], ['claude', 'claude Worker'], ['GROK', 'GROK Worker'],
+        ['kimi-k3', 'kimi-k3 Worker'], ['Deepseek-V4-Pro', 'Deepseek-V4-Pro Worker'], ['Grok46', 'Grok46 Worker'],
+        ['3', '3 Worker'], ['007', '007 Worker'], ['CON', 'CON Worker'], ['lpt9', 'lpt9 Worker'], ['Codex!', 'Codex Worker']]) {
+        assert.equal(automationWorkerName(display), worker, display);
+    }
+    assert.equal(automationWorkerName('Codex', [{ name: 'codex worker' }]), 'Codex Worker 2');
+    assert.equal(automationWorkerName('Codex review'), 'Codex review');
+    assert.equal(automationWorkerName('3 nightly checks'), '3 nightly checks');
+});
+
+
+
+
+test('closing the Automation modal disposes its shared form and pending editor request', () => {
+    const controller = new JobController(createApp());
+    let disposed = 0;
+    let closed = 0;
+    controller.app.closeModal = () => { closed++; };
+    controller.workerEditor = { dispose() { disposed++; } };
+    controller.editorRoot = { isConnected: true };
+    controller.editorActions = [{ kind: 0 }];
+    const generation = controller.editorRequestGeneration;
+    controller.closeEditor();
+    controller.closeEditor();
+    assert.equal(disposed, 1);
+    assert.equal(closed, 1);
+    assert.equal(controller.editorRoot, null);
+    assert.deepEqual(controller.editorActions, []);
+    assert.ok(controller.editorRequestGeneration > generation);
 });

@@ -31,7 +31,7 @@ public sealed class SqliteStorageRegistrationTests
             Assert.Same(repository, first.ServiceProvider.GetRequiredService<ISandboxStore>());
             Assert.Same(repository, first.ServiceProvider.GetRequiredService<IMetadataStore>());
             Assert.Same(repository, first.ServiceProvider.GetRequiredService<IChatSummaryStore>());
-            Assert.Same(repository, first.ServiceProvider.GetRequiredService<IEmbeddingProgressStore>());
+            Assert.Null(first.ServiceProvider.GetService<IEmbeddingProgressStore>());
             Assert.NotSame(repository, second.ServiceProvider.GetRequiredService<IRepository>());
             Assert.Same(first.ServiceProvider.GetRequiredService<IProxyExchangeArchiveReader>(),
                 second.ServiceProvider.GetRequiredService<IProxyExchangeArchiveReader>());

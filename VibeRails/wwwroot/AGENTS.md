@@ -62,13 +62,12 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | [js/modules/board-card-label.js](js/modules/board-card-label.js) | The one card-naming rule: `cardDisplayId` (display ID, else key), `cardLabel` (`ID · Title`), `shortCardKey` and `cardSearchText`. Board, linked cards and chat history import it rather than composing labels themselves |
 | [js/modules/diff-modal.js](js/modules/diff-modal.js) | Shared Monaco diff viewer as a nested modal layer. Used by Board commits and the sandbox "View Diff" |
 
-## Vibe AI visibility
+## Vibe AI navigation
 
-General Settings includes **Show Vibe AI UI**, off by default. The persisted `ShowVibeAiUi`
-preference controls both top navigation and sidebar links through `applyVibeAiNavVisibility`.
-The links start hidden before settings load, and `.app-subnav-link[hidden]` overrides their
-display styles. Startup and unrelated settings updates preserve the preference; clients that
-omit `showVibeAiUi` do not overwrite it. Hiding the inspector does not disable search services.
+The Vibe AI links in the top navigation and sidebar are always visible; there is no setting to
+hide them, and none should be added back. The retired `ShowVibeAiUi` key stays in `settings.json`
+for older versions that still read it: the settings route ignores a requested value, preserves
+the stored one, and always reports `showVibeAiUi: true`. The frontend neither sends nor reads it.
 
 ## Navigation account sign-in
 
@@ -135,8 +134,8 @@ every local board, including other projects; clearing it restores lanes and thei
 `board-search.js` owns debouncing, cancellation, escaped snippets and ownership labels.
 Lane filters are disabled during global search. The linked-card picker uses the same local scope,
 while Move or merge and `!`/`#` card reference pickers request `currentProjectOnly=true` before
-the server's search limit; already-linked local cards stay eligible. `@` card references keep
-all-local search. Search and links visibly label the
+the server's search limit; already-linked local cards stay eligible. `@` is file-only.
+Search and links visibly label the
 owning board and warn on another project. Current-project cards use the normal editor. Foreign
 cards use `board-local-card.js` through explicit authenticated `local-cards` routes, with ownership
 resolved on the server: fields, lane, comments and links can be edited without changing the open
@@ -357,18 +356,18 @@ the next render after a failed fetch. New-card image tokens use temporary IDs re
 upload; failed saves preserve the unfinished queue. Markdown/TXT file attachments still preview as source.
 
 **Reference typeahead** is shared by descriptions/comments/new cards. `board-references.js`
-uses the disposable/debounced popup in `board-file-refs.js`: `@` keeps repository file search,
-card identifiers show a card and its attached sessions, `!` searches recent project sessions or
-an exact session/card ID, and `#` chooses a linked commit, a SHA to link, or another card’s commits.
-A full GUID takes the exact history lookup (canonical dashed form), complete card IDs take the card
-catalog, and neither loads the file index. An `@` token that is only partly card-shaped (`@VB-`,
-`@board-api`) searches files and cards together (files first, at most 50 rows) and keeps Browse;
-`!`/`#` send it to the card catalog. Email, fences and inline code suppress lookup. Recent
-session-name search is bounded to the first 100 history results; use a GUID or card ID for older
-recordings. Selected sessions/commits link immediately on saved cards and queue on drafts.
-References remain plain source: `!GUID`, `#SHA`, `@[display ID](card:row-id)` and the existing
-`@path` forms. Navigation uses existing replay/diff/unsaved-draft guards. Abort and generation
-checks prevent stale results or asynchronous selections from overwriting edited text.
+uses the disposable/debounced popup in `board-file-refs.js`. `@` searches files only, even when
+the query resembles a card ID or GUID, and always offers Browse. `!` searches current-project
+cards by title, keywords (including spaces), or card ID. Choosing a card opens its sessions,
+showing names, agent, available time and status, plus an option to reference the card itself.
+Only a complete dashed or 32-hex GUID after `!` reads an exact session from history; partial
+GUIDs and ordinary text never query session history. `#` keeps linked commit/SHA/card lookup.
+Email, fences and inline code suppress lookup. Selected sessions/commits link immediately on
+saved cards and queue on drafts. References remain plain source: `!GUID`, `#SHA`,
+`![display ID](card:row-id)` and `@path`. Previously saved `@[display ID](card:row-id)` still
+renders without rewriting stored text. Navigation uses existing replay/diff/unsaved-draft
+guards. Abort and generation checks prevent stale results or asynchronous selections from
+overwriting edited text.
 
 The card keeps the latest Checks summary and optional saved report. Run checks, Earlier results
 and the Code reviews panel are unmounted; evidence and review APIs remain available. Lane Agents
@@ -630,12 +629,44 @@ argument rows. Each row is one argv value; never replace the rows with a command
 join them into shell text. The backend remains authoritative for containment, links, runtime
 availability, and SHA-256 approval.
 
-The workflow is state-backed in `editorActions`. Text/select input updates the matching object
-without rerendering so the caret survives. Structural operations (add/remove/move action, add/remove
-argument, file/folder picker) rerender the list. A rerender also recreates the one Worker picker,
-so `renderEditorActions` must dispose/remount its Tom Select instance and restore the selected
-Environment. Add Worker is disabled as soon as one Worker exists; scripts may appear before or
-after it, or form a script-only workflow.
+The Automation editor opens through `app.showModal`, with focus trapping, inert background,
+scrollable content and one submit action. Both creation and editing mount `environment-editor.js`,
+the same provider form used by Environments. New Automations and existing Worker workflows
+include one required Worker action; there is no Worker picker, second name or nested
+configuration save. Existing script/check-only workflows (lane VCA/Code quality checks among
+them) open without one and save unchanged; their **Add instructions** button converts them
+explicitly, and only that added Worker can be removed again (VIBE-58 F3).
+New Worker names derive from the Automation name, normalized for the identifier rules, existing
+names, and the names `EnvironmentRoutes` rejects: a built-in CLI name, any number or a Windows
+device name gets a ` Worker` suffix (`Codex` → `Codex Worker`) while the Automation keeps its
+display name. Editing loads that action's Environment through `loadEditorSettings` and saves its
+settings along with the Automation. Existing descriptions are retained on save.
+
+**A save writes only what changed.** An existing Worker's loaded form is the editor's baseline,
+so a save that touched none of its controls (an Automation rename, a schedule change) sends no
+Environment or settings write. Codex and Claude flags without a control (`--sandbox read-only`,
+`--search`, unknown `-c` keys, `--permission-mode`) load into their **Additional Arguments**
+field, as the other providers' already did, and are appended again when supported controls
+change; an unlisted saved effort stays selected as `(custom)`. Rebuilding `CustomArgs` from the
+controls alone silently removed launch restrictions from every user of a shared Worker
+(VB-8WE2S-129 F1); keep both guards and their `jobs-environment.spec.js` round-trip tests.
+
+Model, Effort and YOLO sit beside the LLM picker. Work type, workspace, provider settings and
+prompt helpers are normal visible form fields. Prompt-variable buttons insert at the instruction
+cursor, replace selections and dispatch input. Keep catalogs, normalization and argument handling
+shared; form lookups are scoped to the host. Provider-specific controls retain their native meaning.
+
+Validate the workflow before saving. Environment, settings and Job writes still use separate
+existing endpoints; remember successful writes so later failures retry against the same Worker.
+Canceling an unsaved draft writes nothing. These writes are not a backend transaction.
+
+The workflow is state-backed in `editorActions`. Text/select input updates state without a rerender.
+Structural operations (add/remove/move script/check action, argument rows, file/folder picker)
+rerender the list. Detach and reattach the shared editor so text, provider drafts and step edits
+survive. The required Worker can move in the sequence but cannot be removed from this form; a
+removed optional Worker keeps its detached draft until the modal closes.
+Dispose the form when the modal closes, is replaced, or navigation unloads the page. Late settings
+loads must not open a dialog after navigation or supersede a newer modal.
 
 Run details fetch the individual run and render its immutable action snapshot: per-action status,
 argv, error, and captured stdout/stderr. Worker actions link to their own normal terminal replay.
@@ -668,8 +699,8 @@ must keep explicit `var(--token, #fallback)` colors in every theme scope.
 `environment-steps.js` is the editor for an Environment's ordered shell commands — the ones that
 run in their own native terminal window before the CLI launches or after its PTY exits.
 
-`environment-controller.js` is one ~2,150-line class and `showEnvironmentForm` already composes
-CLI settings, workspace mode, and args, so steps are **not** inlined into it. The form gets a
+`environment-editor.js` composes CLI settings, workspace mode, and args for both
+Automation creation and `showEnvironmentForm`; steps stay in their own module. The form gets a
 `Steps (2 before · 1 after)` summary button; the editor lives in its own module and opens over the
 form.
 
@@ -682,6 +713,10 @@ copies the same hand-rolled HTML5 DnD — drag handle only, `is-dragging` / `is-
 side from `clientY > rect.top + height/2` — plus its ArrowUp/ArrowDown handling and explicit move
 buttons. (The vendored `sortable.min.js` in `index.html` is still unused by any first-party
 module. Keep it that way.)
+
+Pass the Steps button as `triggerElement` so focus returns to that button on close. The layer
+uses the existing modal container; callers outside a modal mount on `document.body` instead
+and make body siblings inert.
 
 Things that will otherwise bite:
 
@@ -755,8 +790,9 @@ The controller applies one of four contexts after the global ordering is resolve
 
 Consumers import the facades in `js/modules/pickers/` instead of touching the controller:
 `llm-picker.js` (`mountLlmPicker` / `setLlmPickerValue` / `getEnabledLlmItems`) for the contexts
-above, and `worker-picker.js` (`mountWorkerPicker`) for the Automation editor. The Worker picker
-is NOT a controller context: it lists environments flagged `automationWorker` straight from
+above. Automation creation now uses `environment-provider` through the shared form, with no
+separate Worker picker. The reusable `worker-picker.js` facade is not a controller context:
+it lists environments flagged `automationWorker` straight from
 `app.data.environments`, ignores `hidden` entirely (a Worker can never be hidden there), and has
 no customization footer. Workers, in turn, never appear in any launch context — the server
 excludes them from the preferences catalog.

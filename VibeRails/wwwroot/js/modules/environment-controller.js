@@ -1,16 +1,10 @@
-import { agentPurposeOptions } from './agent-purpose.js';
-import { switchReviewerDefaults, routingEditorMarkup, mountRoutingEditor } from './reviewer-routing.js';
+import { mountEnvironmentEditor, environmentField } from './environment-editor.js';
 import { parseCliArguments } from './cli-arguments.js';
 import { normalizeLlmModel, renderLlmModelOptions } from './llm-model-catalog.js';
-import { getEnabledLlmItems, mountLlmPicker, setLlmPickerValue } from './pickers/llm-picker.js';
 import { isConfirmDialogOpen } from './utils.js';
 import {
     normalizeSteps,
-    openStepsEditor,
-    renderStepsSummaryButton,
-    serializeSteps,
-    stepDisplayName,
-    summarizeSteps
+    stepDisplayName
 } from './environment-steps.js';
 
 // Mirrors EnvironmentWorkspaceMode in the backend. Persistent and PerRun are the same
@@ -454,11 +448,16 @@ export class EnvironmentController {
         const requestGeneration = this.beginEnvironmentFormRequest();
         const origin = this.captureEnvironmentFormOrigin();
 
-        const cliSettings = await this.loadCliSettings(env.cli, env.name);
-        if (!this.environmentFormOriginIsCurrent(origin, requestGeneration)) {
-            return false;
-        }
+        const cliSettings = await this.loadEditorSettings(env);
+        if (!this.environmentFormOriginIsCurrent(origin, requestGeneration)) return false;
 
+        this.showEnvironmentForm({ mode: 'edit', env, cliSettings, ...options });
+        return true;
+    }
+
+    /** Shared loading and launch-argument normalization for either editing surface. */
+    async loadEditorSettings(env) {
+        const cliSettings = await this.loadCliSettings(env.cli, env.name);
         // For Codex, env.customPrompt is the source of truth for terminal launch
         // (TerminalRoutes.cs threads it into the initial prompt). The settings panel's
         // "prompt" field represents the same concept; preload it from env.customPrompt
@@ -509,392 +508,81 @@ export class EnvironmentController {
             }
         }
 
-        this.showEnvironmentForm({ mode: 'edit', env, cliSettings, ...options });
-        return true;
+        return cliSettings;
     }
 
     showEnvironmentForm({ mode, env = null, cliSettings = {}, initialName = null, automationWorker = false, onChanged = null, onCancel = null }) {
         this.disposeEnvironmentFormLifecycle();
         const isEdit = mode === 'edit';
-        // Automation Workers share this modal but are never launch-picker visible,
-        // so the "Hide from launch pickers" switch is meaningless for them.
-        const workerOnly = automationWorker === true || Boolean(env?.automationWorker);
-
-        // Provider creation reuses the centralized catalog/order, but deliberately
-        // ignores launch visibility preferences and never includes plain Terminal.
-        const cliOptions = getEnabledLlmItems(this.app, 'environment-provider');
-        const initialCli = isEdit ? env.cli : (cliOptions[0]?.cli || 'claude');
-        // showModal escapes the title itself — pass it raw.
-        const title = isEdit
-            ? `${workerOnly ? 'Edit Worker' : 'Edit Environment / Worker'}: ${env.name}`
-            : (workerOnly ? 'Create Worker' : 'Create Environment / Worker');
-        // Say what will actually be created. Only the Automation editor's flow passes
-        // automationWorker, so labelling this button "Create Worker" everywhere promised a
-        // Worker while the Environments page produced a plain Environment — one that the
-        // Worker picker then refused to list.
-        const submitLabel = isEdit
-            ? 'Save Changes'
-            : (workerOnly ? 'Create Worker' : 'Create Environment');
-        const submitIcon = isEdit
-            ? `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0m-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z"/>
-              </svg>`
-            : `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
-              </svg>`;
-
-        // The name is an immutable backend identifier, so the input renders only at
-        // creation; edit mode carries the name in the title. A Worker created from
-        // the Automation editor may arrive with a prefill (the automation's name as
-        // a convenient default), but the field stays editable — the Worker's name
-        // belongs to this modal, not to the automation.
-        const nameRow = isEdit
-            ? ''
-            : `<div class="mb-3">
-                    <label class="form-label">${workerOnly ? 'Worker Name' : 'Environment / Worker Name'}</label>
-                    <input type="text" class="form-control" id="env-name" required value="${this.app.escapeHtml(initialName || '')}">
-                </div>`;
-
-        const cliField = isEdit
-            ? `<input type="text" class="form-control" value="${this.app.escapeHtml(env.cli)}" disabled>`
-            : '<select class="form-select" id="env-cli" required></select>';
-
-        const customArgsValue = isEdit ? this.app.escapeHtml(env.customArgs || '') : '';
-        const usesManagedArgs = this.usesManagedCustomArgs(initialCli);
-        const hiddenChecked = isEdit ? Boolean(env.hidden) : false;
-        // Workers are excluded from launch pickers unconditionally, so the switch
-        // would be a no-op for them.
-        const hiddenRow = workerOnly ? '' : `
-                <div class="mb-3">
-                    <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" id="env-hidden" ${hiddenChecked ? 'checked' : ''}>
-                        <label class="form-check-label" for="env-hidden">Hide from launch pickers</label>
-                    </div>
-                    <small class="form-text text-muted">Keeps this environment out of the terminal/sandbox LLM dropdowns when they get too full. It can still be launched from here and used by Automations, and you can change this later from the picker's "View/Edit all LLMs".</small>
-                </div>`;
-
-        // Automation Workers only need two honest choices: run in the live project or start
-        // from a clean checkout for every run. Persistent clones remain supported by the
-        // backend and the regular Environment editor, but are intentionally not offered here.
-        const currentWorkspaceMode = isEdit
-            ? (env.workspaceMode || WORKSPACE_MODE.PROJECT)
-            : WORKSPACE_MODE.PROJECT;
-        const workspaceLabel = workerOnly ? 'Workspace' : 'Where it runs';
-        const workspaceHelp = 'A clone is made on first launch, on its own branch, and gets Diff / Merge / Push buttons on this list. Fresh each run clones the last commit only — no uncommitted work and no gitignored files such as .env — and only the newest few runs are kept. Changing this later releases the old workspace as a standalone sandbox rather than deleting it.';
-        const workspaceRow = this.app.data.isInGit
-            ? (workerOnly
-                ? `<fieldset class="mb-3 env-workspace-fieldset">
-                        <legend class="form-label">Workspace</legend>
-                        <div class="env-workspace-choices">
-                            <label class="env-workspace-choice">
-                                <input type="radio" name="env-workspace-mode" id="env-workspace-project" value="${WORKSPACE_MODE.PROJECT}" ${currentWorkspaceMode === WORKSPACE_MODE.PROJECT ? 'checked' : ''} required>
-                                <span class="env-workspace-choice-card">
-                                    <span class="env-workspace-choice-copy">
-                                        <strong>Project directory</strong>
-                                        <small>Run in the project directory on whatever Git branch is checked out when the automation starts.</small>
-                                    </span>
-                                </span>
-                            </label>
-                            <label class="env-workspace-choice">
-                                <input type="radio" name="env-workspace-mode" id="env-workspace-per-run" value="${WORKSPACE_MODE.PER_RUN}" ${currentWorkspaceMode === WORKSPACE_MODE.PER_RUN ? 'checked' : ''} required>
-                                <span class="env-workspace-choice-card">
-                                    <span class="env-workspace-choice-copy">
-                                        <strong>Clean Git checkout every run</strong>
-                                        <small>Create a clean checkout of the current branch for every run. Changes from one run do not carry into the next.</small>
-                                    </span>
-                                </span>
-                            </label>
-                        </div>
-                    </fieldset>`
-                : `<div class="mb-3">
-                        <label class="form-label" for="env-workspace-mode">${workspaceLabel}</label>
-                        <select class="form-select" id="env-workspace-mode">
-                            <option value="${WORKSPACE_MODE.PROJECT}" ${currentWorkspaceMode === WORKSPACE_MODE.PROJECT ? 'selected' : ''}>Project directory — run directly in this project</option>
-                            <option value="${WORKSPACE_MODE.PERSISTENT}" ${currentWorkspaceMode === WORKSPACE_MODE.PERSISTENT ? 'selected' : ''}>Its own clone — one workspace, reused every launch</option>
-                            <option value="${WORKSPACE_MODE.PER_RUN}" ${currentWorkspaceMode === WORKSPACE_MODE.PER_RUN ? 'selected' : ''}>Git clone and start fresh each run</option>
-                        </select>
-                        <small class="form-text text-muted d-block">${workspaceHelp}</small>
-                    </div>`)
-            : `<div class="mb-3">
-                    <label class="form-label">${workspaceLabel}</label>
-                    <div class="form-control-plaintext text-muted small">This project is not a git repository, so it can only run in the project directory.</div>
-                </div>`;
-
-        const customArgsRow = `
-                <div class="mb-3" data-custom-args-group ${usesManagedArgs ? 'style="display: none;"' : ''}>
-                    <label class="form-label">${workerOnly ? 'Extra CLI arguments' : 'Custom Arguments'}</label>
-                    <input type="text" class="form-control" id="env-custom-args" value="${customArgsValue}" placeholder="e.g., --yolo --sandbox">
-                    <small class="form-text text-muted">Optional arguments passed directly to the CLI.</small>
-                </div>`;
-
-        // Steps are edited in their own nested modal — this form is dense enough already, and a
-        // step list with drag-reordering and a test console does not belong inlined in it.
-        // `editedSteps` stays null until that editor is actually opened and saved, which is what
-        // lets the PUT's nullable guard leave stored steps untouched.
-        const initialSteps = isEdit ? normalizeSteps(env.steps) : [];
-        let editedSteps = null;
-        const stepsRow = renderStepsSummaryButton(initialSteps);
-
-        // One shared Initial Message field, rendered directly under the CLI picker rather than
-        // inside the per-CLI settings block: it maps to the single Environments.CustomPrompt
-        // column whichever CLI is chosen, and it is the first thing a Worker exists to say.
-        // Living outside [data-cli-settings-slot] also means typed text survives switching CLI.
-        // Codex's settings payload calls the same concept "prompt" — accept either key.
-        const initialMessageValue = this.app.escapeHtml(
-            cliSettings?.initialMessage ?? cliSettings?.prompt ?? '');
-        const initialMessageRow = this.renderInitialMessageField(initialCli, initialMessageValue);
-
-        // Worker creation is already a small CRUD form. Keep every field in one clear
-        // flow instead of hiding two ordinary settings behind an "Advanced" disclosure.
-        const formBody = workerOnly
-            ? `
-                <div data-cli-settings-slot>${this.buildCliSettingsHtml(initialCli, cliSettings || {})}</div>
-                ${workspaceRow}
-                ${customArgsRow}
-                ${stepsRow}`
-            : `
-                ${hiddenRow}
-                ${workspaceRow}
-                ${customArgsRow}
-                ${stepsRow}
-                <div data-cli-settings-slot>${this.buildCliSettingsHtml(initialCli, cliSettings || {})}</div>`;
-
-        this.app.showModal(title, `
-            <form id="env-form" class="${workerOnly ? 'env-worker-form' : ''}">
-                ${nameRow}
-                ${!isEdit ? '<button type="button" class="btn btn-sm btn-outline-secondary mb-3" data-switch-reviewer-preset>Switch reviewer preset</button> <button type="button" class="btn btn-sm btn-outline-secondary mb-3" data-code-review-preset>Code review preset</button>' : ''}
-                <div class="mb-3">
-                    <label class="form-label">CLI Type</label>
-                    ${cliField}
-                </div>
-                <div class="mb-3"><label class="form-label" for="env-purpose">What kind of work? <span class="text-muted">(optional)</span></label>
-                    <select id="env-purpose" class="form-select">
-                        ${agentPurposeOptions(env?.purpose)}
-                    </select>
-                    <small class="form-text text-muted">Leave unspecified, or classify this Worker so future Board comments can be filtered. Code review also saves a report on the originating card.</small>
-                </div>
-                <div data-reviewer-policy ${env?.purpose === 'code_review' ? '' : 'hidden'}>
-                    <label class="form-label" for="env-reviewer-mode">Reviewer selection</label>
-                    <select id="env-reviewer-mode" class="form-select mb-2"><option value="fixed">Fixed provider</option><option value="switch" ${env?.reviewerRouting?.mode === 'switch' ? 'selected' : ''}>Switch reviewer</option></select>
-                    <div data-reviewer-routing ${env?.reviewerRouting?.mode === 'switch' ? '' : 'hidden'}>${routingEditorMarkup()}</div>
-                </div>
-                ${initialMessageRow}
-                ${formBody}
-                <button type="submit" class="btn btn-primary d-flex align-items-center gap-2">
-                    ${submitIcon}
-                    ${submitLabel}
-                </button>
-            </form>
-        `);
-
-        const slot = document.querySelector('[data-cli-settings-slot]');
-        let cliSelect = null;
-        let cliPickerDisposer = null;
-
-        if (!isEdit) {
-            cliSelect = document.getElementById('env-cli');
-            cliPickerDisposer = mountLlmPicker(this.app, cliSelect, {
-                context: 'environment-provider',
-                placeholder: null,
-                selectedValue: initialCli,
-                includeGroups: false
-            });
-            cliSelect.addEventListener('change', () => {
-                const cli = cliSelect.value;
-                const customArgsGroup = document.querySelector('[data-custom-args-group]');
-                if (customArgsGroup) {
-                    customArgsGroup.style.display = this.usesManagedCustomArgs(cli) ? 'none' : '';
-                }
-                slot.innerHTML = this.buildCliSettingsHtml(cli, {});
-                this.bindCliSettingsInteractions(cli);
-                // The shared Initial Message field lives outside the slot, so its typed text
-                // survives the switch; only the CLI-specific wording follows the picker.
-                const initialMessage = document.getElementById('env-initial-message');
-                if (initialMessage) initialMessage.placeholder = this.initialMessagePlaceholder(cli);
-                const cliNameSpan = document.querySelector('[data-initial-message-cli]');
-                if (cliNameSpan) cliNameSpan.textContent = this.cliDisplayName(cli);
-            });
-        }
-
-        const routingHost = document.querySelector('[data-reviewer-routing]');
-        const routingEditor = mountRoutingEditor(this.app, routingHost, env?.reviewerRouting || switchReviewerDefaults());
-        const reviewerMode = document.getElementById('env-reviewer-mode');
-        reviewerMode?.addEventListener('change', () => { routingHost.hidden = reviewerMode.value !== 'switch'; });
-        document.querySelector('[data-switch-reviewer-preset]')?.addEventListener('click', () => {
-            const purpose = document.getElementById('env-purpose');
-            purpose.value = 'code_review'; purpose.dispatchEvent(new Event('change', { bubbles: true }));
-            reviewerMode.value = 'switch'; reviewerMode.dispatchEvent(new Event('change'));
-            const name = document.getElementById('env-name');
-            if (name && !name.value.trim()) name.value = 'Switch reviewer';
-        });
-        document.querySelector('[data-code-review-preset]')?.addEventListener('click', () => {
-            reviewerMode.value = 'fixed'; reviewerMode.dispatchEvent(new Event('change'));
-            const purpose = document.getElementById('env-purpose');
-            purpose.value = 'code_review';
-            purpose.dispatchEvent(new Event('change', { bubbles: true }));
-            const name = document.getElementById('env-name');
-            if (name && !name.value.trim()) name.value = 'Code review';
-        });
-        document.getElementById('env-purpose')?.addEventListener('change', event => {
-            document.querySelector('[data-reviewer-policy]').hidden = event.target.value !== 'code_review';
-            if (!isEdit && event.target.value === 'code_review') {
-                setLlmPickerValue(this.app, cliSelect, 'codex');
-                cliSelect.dispatchEvent(new Event('change', { bubbles: true }));
-                const message = document.getElementById('env-initial-message');
-                if (message && !message.value.trim()) message.value = 'Review the intended changes for correctness, regressions and missing validation. Establish scope from the card handoff and actual checkout. Save the review on the originating card, then follow its workflow instructions.';
-            }
-        });
-        this.bindCliSettingsInteractions(initialCli);
-        const refreshInitialMessageRefs = this.bindInitialMessageField(() => editedSteps ?? initialSteps);
-
+        const workerOnly = automationWorker || Boolean(env?.automationWorker);
+        const title = isEdit ? `Edit ${workerOnly ? 'Worker' : 'Environment / Worker'}: ${env.name}`
+            : workerOnly ? 'Create Worker' : 'Create Environment / Worker';
+        this.app.showModal(title, `<form id="env-form"><div data-environment-editor></div>
+            <button type="submit" class="btn btn-primary">${isEdit ? 'Save Changes' : workerOnly ? 'Create Worker' : 'Create Environment'}</button></form>`);
         const form = document.getElementById('env-form');
+        const editor = this.mountEditor(form.querySelector('[data-environment-editor]'), { env, cliSettings, initialName, automationWorker });
         const modalContainer = document.getElementById('modal-container');
         const closeButtons = [...(modalContainer?.querySelectorAll('[data-action="close-modal"]') || [])];
         const keydownTarget = typeof window !== 'undefined' ? window : document;
         let completed = false;
-        let lifecycleDisposed = false;
-        let stepsEditor = null;
-
-        document.querySelector('[data-env-steps-open]')?.addEventListener('click', () => {
-            stepsEditor = openStepsEditor(this.app, {
-                steps: editedSteps ?? initialSteps,
-                // An environment with a clone runs its steps inside the clone, so a test should
-                // too. Null lets the server fall back to the project root.
-                workingDirectory: isEdit ? (env.workspacePath || null) : null,
-                onSave: steps => {
-                    editedSteps = steps;
-                    stepsEditor = null;
-                    const summary = document.querySelector('[data-env-steps-summary]');
-                    if (summary) summary.textContent = summarizeSteps(steps);
-                    // Step names/deletions may have changed what the Initial Message references.
-                    refreshInitialMessageRefs();
-                }
-            });
-        });
-
-        const cleanupLifecycle = () => {
-            if (lifecycleDisposed) return;
-            lifecycleDisposed = true;
+        const cleanup = () => {
+            completed = true;
+            editor.dispose();
             keydownTarget.removeEventListener('keydown', handleEscape, true);
-            closeButtons.forEach(button => button.removeEventListener('click', handleClose));
-            cliPickerDisposer?.();
-            routingEditor.dispose();
-            // The nested layer lives in #modal-container beside this form; closing the form
-            // without it would leave an orphan modal (and a live test stream) behind.
-            stepsEditor?.close({ restoreFocus: false });
-            stepsEditor = null;
-            if (this.environmentFormLifecycleCleanup === disposeLifecycle) {
-                this.environmentFormLifecycleCleanup = null;
-            }
+            closeButtons.forEach(button => button.removeEventListener('click', handleCancel));
+            if (this.environmentFormLifecycleCleanup === cleanup) this.environmentFormLifecycleCleanup = null;
         };
         const handleCancel = () => {
             if (completed) return;
             completed = true;
             this.environmentFormRequestGeneration += 1;
-            cleanupLifecycle();
+            cleanup();
             onCancel?.();
         };
-        const handleClose = () => handleCancel();
         const handleEscape = event => {
             if (event.key !== 'Escape' || completed) return;
-            // A confirmDialog overlay owns Escape while it is up; this listener
-            // registered earlier on the same window/capture phase, so it must
-            // stand down itself (see utils.js).
             if (isConfirmDialogOpen()) return;
-            if (modalContainer && form && !modalContainer.contains(form)) {
-                completed = true;
-                cleanupLifecycle();
-                return;
+            if (document.querySelector('.env-steps-modal-layer, .env-step-output-menu')) return;
+            if (onCancel) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                this.app.closeModal();
             }
-
-            if (!onCancel) {
-                handleCancel();
-                return;
-            }
-
-            event.preventDefault();
-            event.stopImmediatePropagation();
-            this.app.closeModal();
             handleCancel();
         };
-        const disposeLifecycle = () => {
-            completed = true;
-            cleanupLifecycle();
-        };
-
         keydownTarget.addEventListener('keydown', handleEscape, true);
-        closeButtons.forEach(button => button.addEventListener('click', handleClose));
-        this.environmentFormLifecycleCleanup = disposeLifecycle;
-
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const submissionGeneration = this.environmentFormRequestGeneration;
-
+        closeButtons.forEach(button => button.addEventListener('click', handleCancel));
+        this.environmentFormLifecycleCleanup = cleanup;
+        form.addEventListener('submit', async event => {
+            event.preventDefault();
+            const button = form.querySelector('[type="submit"]');
+            if (button.disabled) return;
+            button.disabled = true;
+            form.inert = true;
+            const generation = this.environmentFormRequestGeneration;
             try {
-                // Absent for Workers — omit `hidden` so the PUT's nullable guard
-                // leaves the stored value untouched.
-                const hiddenInput = document.getElementById('env-hidden');
-                // Absent outside a git repo, where the only legal mode is Project. Omitting it
-                // means the PUT's nullable guard leaves the stored mode alone, so opening the
-                // editor in a non-git project can never silently downgrade a clone environment.
-                const workspaceInput = document.querySelector('input[name="env-workspace-mode"]:checked')
-                    || document.getElementById('env-workspace-mode');
-                const workspaceMode = workspaceInput ? Number(workspaceInput.value) : null;
-                if (isEdit) {
-                    const settingsPayload = this.extractCliSettingsPayload(env.cli);
-                    const payload = this.buildEnvironmentSavePayload(env.cli, settingsPayload);
-                    payload.purpose = document.getElementById('env-purpose').value;
-                    payload.reviewerRouting = payload.purpose === 'code_review' && reviewerMode?.value === 'switch' ? routingEditor.read() : { ...switchReviewerDefaults(), mode: 'fixed' };
-                    if (hiddenInput) payload.hidden = hiddenInput.checked;
-                    if (workspaceMode !== null) payload.workspaceMode = workspaceMode;
-                    // Omitted entirely when the steps editor was never opened, so the PUT's
-                    // nullable guard leaves the stored list alone.
-                    if (editedSteps) payload.steps = serializeSteps(editedSteps);
-                    await this.app.apiCall(`/api/v1/environments/${encodeURIComponent(env.name)}`, 'PUT', payload);
-                    await this.saveCliSettings(env.cli, env.name, settingsPayload);
-                } else {
-                    const name = document.getElementById('env-name').value.trim();
-                    const cli = document.getElementById('env-cli').value;
-                    const settingsPayload = this.extractCliSettingsPayload(cli);
-                    const payload = {
-                        name,
-                        cli,
-                        purpose: document.getElementById('env-purpose').value,
-                        ...(document.getElementById('env-purpose').value === 'code_review' && reviewerMode?.value === 'switch' ? { reviewerRouting: routingEditor.read() } : {}),
-                        ...this.buildEnvironmentSavePayload(cli, settingsPayload),
-                        ...(hiddenInput ? { hidden: hiddenInput.checked } : {}),
-                        ...(workspaceMode !== null ? { workspaceMode } : {}),
-                        ...(editedSteps ? { steps: serializeSteps(editedSteps) } : {}),
-                        ...(automationWorker === true ? { automationWorker: true } : {})
-                    };
-                    await this.app.apiCall('/api/v1/environments', 'POST', payload);
-                    await this.saveCliSettings(cli, name, settingsPayload);
-                }
-
-                if (submissionGeneration !== this.environmentFormRequestGeneration
-                    || (modalContainer && form && !modalContainer.contains(form))) {
-                    return;
-                }
+                await editor.save();
+                if (completed || generation !== this.environmentFormRequestGeneration || !form.isConnected) return;
                 completed = true;
-                cleanupLifecycle();
+                cleanup();
                 this.app.closeModal();
                 await this.refreshEnvironments();
-                if (submissionGeneration !== this.environmentFormRequestGeneration) {
-                    return;
-                }
-                if (onChanged) {
-                    await onChanged();
-                } else {
-                    this.app.navigate('environments');
-                }
+                if (generation !== this.environmentFormRequestGeneration) return;
+                if (onChanged) await onChanged();
+                else this.app.navigate('environments');
             } catch (error) {
-                if (submissionGeneration !== this.environmentFormRequestGeneration) {
-                    return;
-                }
-                const verb = isEdit ? 'update' : 'create';
-                this.app.showError(`Failed to ${verb} environment: ${error.message}`);
+                if (completed || generation !== this.environmentFormRequestGeneration || !form.isConnected) return;
+                this.app.showError(`Failed to ${isEdit ? 'update' : 'create'} environment: ${error.message}`);
+            } finally {
+                form.inert = false;
+                button.disabled = false;
             }
         });
+    }
+
+    /** Mount the same Environment editor inside another form, with caller-owned saving. */
+    mountEditor(host, options = {}) {
+        return mountEnvironmentEditor(this, host, options);
     }
 
     cliSettingsEndpoint(cli) {
@@ -963,10 +651,10 @@ export class EnvironmentController {
         await this.app.apiCall(`/api/v1/${endpoint}/settings/${encodeURIComponent(envName)}`, 'PUT', settingsPayload);
     }
 
-    buildEnvironmentSavePayload(cli, settingsPayload = null) {
+    buildEnvironmentSavePayload(cli, settingsPayload = null, root = document) {
         const cliLower = (cli || '').toLowerCase();
         if (cliLower === 'codex') {
-            const codexSettings = settingsPayload || this.extractCliSettingsPayload(cli);
+            const codexSettings = settingsPayload || this.extractCliSettingsPayload(cli, root);
             return {
                 customArgs: this.buildCodexCustomArgs(codexSettings),
                 customPrompt: codexSettings?.prompt ?? ''
@@ -974,7 +662,7 @@ export class EnvironmentController {
         }
 
         if (cliLower === 'claude') {
-            const claudeSettings = settingsPayload || this.extractCliSettingsPayload(cli);
+            const claudeSettings = settingsPayload || this.extractCliSettingsPayload(cli, root);
             return {
                 customArgs: this.buildClaudeCustomArgs(claudeSettings),
                 customPrompt: claudeSettings?.initialMessage ?? ''
@@ -982,7 +670,7 @@ export class EnvironmentController {
         }
 
         if (cliLower === 'antigravity') {
-            const antigravitySettings = settingsPayload || this.extractCliSettingsPayload(cli);
+            const antigravitySettings = settingsPayload || this.extractCliSettingsPayload(cli, root);
             return {
                 customArgs: this.buildAntigravityCustomArgs(antigravitySettings),
                 customPrompt: antigravitySettings?.initialMessage ?? ''
@@ -990,7 +678,7 @@ export class EnvironmentController {
         }
 
         if (cliLower === 'copilot') {
-            const copilotSettings = settingsPayload || this.extractCliSettingsPayload(cli);
+            const copilotSettings = settingsPayload || this.extractCliSettingsPayload(cli, root);
             return {
                 customArgs: this.buildCopilotCustomArgs(copilotSettings),
                 customPrompt: copilotSettings?.initialMessage ?? ''
@@ -998,7 +686,7 @@ export class EnvironmentController {
         }
 
         if (this.isNativeGrokCli(cliLower)) {
-            const grokSettings = settingsPayload || this.extractCliSettingsPayload(cli);
+            const grokSettings = settingsPayload || this.extractCliSettingsPayload(cli, root);
             return {
                 customArgs: this.buildGrokCustomArgs(grokSettings),
                 customPrompt: grokSettings?.initialMessage ?? ''
@@ -1006,7 +694,7 @@ export class EnvironmentController {
         }
 
         if (this.isOpencodeBackedCli(cliLower)) {
-            const opencodeSettings = settingsPayload || this.extractCliSettingsPayload(cli);
+            const opencodeSettings = settingsPayload || this.extractCliSettingsPayload(cli, root);
             // Pseudo-CLIs always pin their model — override whatever the form had so the
             // saved CustomArgs carry the right --model value.
             const pinnedModel = this.pinnedModelForCli(cliLower);
@@ -1020,7 +708,7 @@ export class EnvironmentController {
         }
 
         return {
-            customArgs: document.getElementById('env-custom-args')?.value || ''
+            customArgs: environmentField(root, 'env-custom-args')?.value || ''
         };
     }
 
@@ -1052,7 +740,9 @@ export class EnvironmentController {
             args.push('--enable', 'fast_mode');
         }
 
-        return args.join(' ');
+        args.push(...this.parseArgString(s.additionalArgs || ''));
+
+        return args.map(arg => this.quoteCustomArg(arg)).join(' ');
     }
 
     renderAntigravityModelOptions(selectedModel) {
@@ -1126,11 +816,11 @@ export class EnvironmentController {
         return settings;
     }
 
-    bindCliSettingsInteractions(cli) {
+    bindCliSettingsInteractions(cli, root = document) {
         if ((cli || '').toLowerCase() !== 'codex') return;
 
-        const modelSelect = document.getElementById('codex-model');
-        const effortSelect = document.getElementById('codex-effort');
+        const modelSelect = environmentField(root, 'codex-model');
+        const effortSelect = environmentField(root, 'codex-effort');
         const maxOption = effortSelect?.querySelector('option[value="max"]');
         if (!modelSelect || !effortSelect || !maxOption) return;
 
@@ -1154,6 +844,9 @@ export class EnvironmentController {
 
         let sawFastFeature = false;
         let sawFastTier = false;
+        // Flags without a control (--sandbox read-only, --search, other -c keys) must survive
+        // an edit of the controls that do exist, so they come back as Additional Arguments.
+        const additionalArgs = [];
 
         for (let i = 0; i < args.length; i++) {
             const arg = args[i];
@@ -1170,12 +863,12 @@ export class EnvironmentController {
                 const cleanValue = value.replace(/^["']|["']$/g, '');
                 if (key === 'model_reasoning_effort') {
                     settings.effort = cleanValue;
-                }
-                if (key === 'service_tier' && cleanValue === 'fast') {
+                } else if (key === 'service_tier' && cleanValue === 'fast') {
                     sawFastTier = true;
-                }
-                if (key === 'features.fast_mode' && cleanValue.toLowerCase() !== 'false') {
-                    sawFastFeature = true;
+                } else if (key === 'features.fast_mode') {
+                    if (cleanValue.toLowerCase() !== 'false') sawFastFeature = true;
+                } else {
+                    additionalArgs.push(arg, next);
                 }
                 i++;
                 continue;
@@ -1197,6 +890,8 @@ export class EnvironmentController {
                 settings.noAltScreen = true;
                 continue;
             }
+
+            additionalArgs.push(arg);
         }
 
         // Older VibeRails builds wrote only `--enable fast_mode`; keep the user's
@@ -1204,6 +899,10 @@ export class EnvironmentController {
         // current `service_tier=fast` launch args.
         if (sawFastFeature || sawFastTier) {
             settings.fastMode = true;
+        }
+
+        if (additionalArgs.length > 0) {
+            settings.additionalArgs = additionalArgs.map(arg => this.quoteCustomArg(arg)).join(' ');
         }
 
         return settings;
@@ -1584,6 +1283,9 @@ export class EnvironmentController {
         const args = this.parseArgString(customArgs);
         if (args.length === 0) return settings;
 
+        // As for Codex: flags without a control survive an edit as Additional Arguments.
+        const additionalArgs = [];
+
         for (let i = 0; i < args.length; i++) {
             const arg = args[i];
             const next = args[i + 1];
@@ -1624,7 +1326,14 @@ export class EnvironmentController {
 
             if (arg === '--debug') {
                 settings.debug = true;
+                continue;
             }
+
+            additionalArgs.push(arg);
+        }
+
+        if (additionalArgs.length > 0) {
+            settings.additionalArgs = additionalArgs.map(arg => this.quoteCustomArg(arg)).join(' ');
         }
 
         return settings;
@@ -1661,6 +1370,8 @@ export class EnvironmentController {
         if (s.debug) {
             args.push('--debug');
         }
+
+        args.push(...this.parseArgString(s.additionalArgs || ''));
 
         return args.map(arg => this.quoteCustomArg(arg)).join(' ');
     }
@@ -1719,72 +1430,74 @@ export class EnvironmentController {
         return `"${text.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
     }
 
-    extractCliSettingsPayload(cli) {
+    extractCliSettingsPayload(cli, root = document) {
         const cliLower = (cli || '').toLowerCase();
         // The Initial Message is one shared field under the CLI picker (see
         // renderInitialMessageField); every payload keeps its historical key — `prompt` for
         // Codex, `initialMessage` elsewhere — so the settings PUT endpoints stay untouched.
-        const initialMessage = document.getElementById('env-initial-message')?.value ?? '';
+        const initialMessage = environmentField(root, 'env-initial-message')?.value ?? '';
         if (cliLower === 'antigravity') {
             return {
                 initialMessage,
-                model: document.getElementById('antigravity-model').value,
-                sandboxEnabled: document.getElementById('antigravity-sandbox').checked,
-                yoloMode: document.getElementById('antigravity-yolo').checked,
-                additionalArgs: document.getElementById('antigravity-additional-args').value
+                model: environmentField(root, 'antigravity-model').value,
+                sandboxEnabled: environmentField(root, 'antigravity-sandbox').checked,
+                yoloMode: environmentField(root, 'antigravity-yolo').checked,
+                additionalArgs: environmentField(root, 'antigravity-additional-args').value
             };
         }
         if (cliLower === 'codex') {
-            const model = this.normalizeCodexModel(document.getElementById('codex-model').value);
+            const model = this.normalizeCodexModel(environmentField(root, 'codex-model').value);
             return {
-                yolo: document.getElementById('codex-yolo').checked,
-                noAltScreen: document.getElementById('codex-no-alt-screen').checked,
+                yolo: environmentField(root, 'codex-yolo').checked,
+                noAltScreen: environmentField(root, 'codex-no-alt-screen').checked,
                 prompt: initialMessage,
                 model,
-                effort: this.normalizeCodexEffort(model, document.getElementById('codex-effort').value),
-                fastMode: document.getElementById('codex-fast-mode').checked
+                effort: this.normalizeCodexEffort(model, environmentField(root, 'codex-effort').value),
+                fastMode: environmentField(root, 'codex-fast-mode').checked,
+                additionalArgs: environmentField(root, 'codex-additional-args')?.value ?? ''
             };
         }
         if (cliLower === 'claude') {
             return {
-                model: this.normalizeClaudeModel(document.getElementById('claude-model').value),
-                effort: document.getElementById('claude-effort').value,
-                fastMode: document.getElementById('claude-fast-mode').checked,
+                model: this.normalizeClaudeModel(environmentField(root, 'claude-model').value),
+                effort: environmentField(root, 'claude-effort').value,
+                fastMode: environmentField(root, 'claude-fast-mode').checked,
                 initialMessage,
-                noSessionPersistence: document.getElementById('claude-no-session-persistence').checked,
-                systemPrompt: document.getElementById('claude-system-prompt').value,
-                dangerouslySkipPermissions: document.getElementById('claude-dangerously-skip-permissions').checked,
-                bare: document.getElementById('claude-bare').checked,
-                debug: document.getElementById('claude-debug').checked
+                noSessionPersistence: environmentField(root, 'claude-no-session-persistence').checked,
+                systemPrompt: environmentField(root, 'claude-system-prompt').value,
+                dangerouslySkipPermissions: environmentField(root, 'claude-dangerously-skip-permissions').checked,
+                bare: environmentField(root, 'claude-bare').checked,
+                debug: environmentField(root, 'claude-debug').checked,
+                additionalArgs: environmentField(root, 'claude-additional-args')?.value ?? ''
             };
         }
         if (cliLower === 'copilot') {
             return {
                 initialMessage,
-                mode: this.normalizeCopilotMode(document.getElementById('copilot-mode').value),
-                model: document.getElementById('copilot-model').value.trim(),
-                permissionPreset: this.normalizeCopilotPermissionPreset(document.getElementById('copilot-permission-preset').value),
-                noAskUser: document.getElementById('copilot-no-ask-user').checked,
-                additionalArgs: document.getElementById('copilot-additional-args').value
+                mode: this.normalizeCopilotMode(environmentField(root, 'copilot-mode').value),
+                model: environmentField(root, 'copilot-model').value.trim(),
+                permissionPreset: this.normalizeCopilotPermissionPreset(environmentField(root, 'copilot-permission-preset').value),
+                noAskUser: environmentField(root, 'copilot-no-ask-user').checked,
+                additionalArgs: environmentField(root, 'copilot-additional-args').value
             };
         }
         if (this.isNativeGrokCli(cliLower)) {
             return {
                 initialMessage,
-                model: (document.getElementById('grok-model')?.value || '').trim(),
-                effort: this.normalizeGrokEffort(document.getElementById('grok-effort').value),
-                yoloMode: document.getElementById('grok-yolo').checked,
-                additionalArgs: document.getElementById('grok-additional-args').value
+                model: (environmentField(root, 'grok-model')?.value || '').trim(),
+                effort: this.normalizeGrokEffort(environmentField(root, 'grok-effort').value),
+                yoloMode: environmentField(root, 'grok-yolo').checked,
+                additionalArgs: environmentField(root, 'grok-additional-args').value
             };
         }
         if (this.isOpencodeBackedCli(cliLower)) {
             return {
                 initialMessage,
-                model: document.getElementById('opencode-model').value.trim(),
-                agent: document.getElementById('opencode-agent').value.trim(),
-                yoloMode: document.getElementById('opencode-yolo').checked,
-                pureMode: document.getElementById('opencode-pure')?.checked ?? false,
-                additionalArgs: document.getElementById('opencode-additional-args').value
+                model: environmentField(root, 'opencode-model').value.trim(),
+                agent: environmentField(root, 'opencode-agent').value.trim(),
+                yoloMode: environmentField(root, 'opencode-yolo').checked,
+                pureMode: environmentField(root, 'opencode-pure')?.checked ?? false,
+                additionalArgs: environmentField(root, 'opencode-additional-args').value
             };
         }
         return null;
@@ -1854,6 +1567,7 @@ export class EnvironmentController {
                         <option value="xhigh" ${codexEffort === 'xhigh' ? 'selected' : ''}>XHigh</option>
                         <option value="max" ${codexEffort === 'max' ? 'selected' : ''} ${codexMaxEffortDisabled ? 'disabled' : ''}>Max</option>
                         <option value="ultra" ${codexEffort === 'ultra' ? 'selected' : ''}>Ultra</option>
+                        ${this.renderCustomEffortOption(codexEffort, ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'])}
                     </select>
                     <small class="form-text text-muted">Passed as <code>-c model_reasoning_effort=&lt;level&gt;</code></small>
                 </div>
@@ -1877,6 +1591,11 @@ export class EnvironmentController {
                         <label class="form-check-label" for="codex-no-alt-screen">No Alternate Screen</label>
                     </div>
                     <small class="form-text text-muted">Disable alternate screen mode for the TUI</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="codex-additional-args">Additional Arguments</label>
+                    <input type="text" class="form-control" id="codex-additional-args" value="${this.app.escapeHtml(s.additionalArgs || '')}" placeholder="Optional extra Codex flags (e.g. --sandbox read-only)">
+                    <small class="form-text text-muted">Preserves advanced flags not covered above</small>
                 </div>
             `;
         }
@@ -2048,6 +1767,7 @@ export class EnvironmentController {
                         <option value="high" ${effort === 'high' ? 'selected' : ''}>High</option>
                         <option value="xhigh" ${effort === 'xhigh' ? 'selected' : ''}>XHigh</option>
                         <option value="max" ${effort === 'max' ? 'selected' : ''}>Max</option>
+                        ${this.renderCustomEffortOption(effort, ['low', 'medium', 'high', 'xhigh', 'max'])}
                     </select>
                     <small class="form-text text-muted">Sets the effort level for this session</small>
                 </div>
@@ -2084,10 +1804,22 @@ export class EnvironmentController {
                     </div>
                     <small class="form-text text-muted">Enable --debug for this launch</small>
                 </div>
+                <div class="mb-3">
+                    <label class="form-label" for="claude-additional-args">Additional Arguments</label>
+                    <input type="text" class="form-control" id="claude-additional-args" value="${this.app.escapeHtml(s.additionalArgs || '')}" placeholder="Optional extra Claude flags (e.g. --permission-mode plan)">
+                    <small class="form-text text-muted">Preserves advanced flags not covered above</small>
+                </div>
             `;
         }
 
         return '';
+    }
+
+    // A saved effort the select does not list stays selected rather than silently becoming Default.
+    renderCustomEffortOption(effort, known) {
+        if (!effort || known.includes(effort)) return '';
+        const value = this.app.escapeHtml(effort);
+        return `<option value="${value}" selected>${value} (custom)</option>`;
     }
 
     // The display names the Initial Message wording uses — matching the product's own voice
@@ -2130,12 +1862,20 @@ export class EnvironmentController {
                     <textarea class="form-control" id="env-initial-message" rows="6" maxlength="6000"
                               placeholder="${this.app.escapeHtml(this.initialMessagePlaceholder(cli))}">${escapedValue}</textarea>
                     <div class="env-initial-message-refs text-muted small d-none" data-initial-message-refs></div>
-                    <small class="form-text text-muted">
-                        Sent to <span data-initial-message-cli>${cliName}</span> as your first chat message the moment the session starts — exactly as if you typed it.
-                        <code>{{name}}</code> asks you for a value at launch (<code>{{name default=&quot;…&quot;}}</code> pre-fills it);
-                        <code>{{datetime}}</code>, <code>{{date}}</code>, <code>{{time}}</code>, <code>{{git_branch}}</code> and <code>{{env_name}}</code> fill in automatically;
-                        <code>{{board_card}}</code> is the triggering card number for Board lane Automations (empty for other launches).
-                    </small>
+                    <div class="env-message-help">
+                        <p>Sent to <span data-initial-message-cli>${cliName}</span> when the session starts. Click a variable to insert it at the cursor.</p>
+                        <div class="env-prompt-variables" role="group" aria-label="Insert a prompt variable">
+                            ${[
+                                ['{{name}}', 'Ask for a value at launch'],
+                                ['{{name default="…"}}', 'Ask for a value with a prefilled answer'],
+                                ['{{datetime}}', 'Current date and time'], ['{{date}}', 'Current date'],
+                                ['{{time}}', 'Current time'], ['{{git_branch}}', 'Current Git branch'],
+                                ['{{env_name}}', 'Saved configuration name'],
+                                ['{{board_card}}', 'Triggering Board card number; empty for other launches']
+                            ].map(([token, hint]) => `<button type="button" class="env-prompt-variable" data-prompt-variable="${this.app.escapeHtml(token)}" title="${hint}" aria-label="Insert ${this.app.escapeHtml(token)}: ${hint}"><code>${this.app.escapeHtml(token)}</code></button>`).join('')}
+                        </div>
+                        <p>Name variables ask for a value at launch; a default pre-fills it. Other values fill in automatically. The Board card number is available for Board lane Automations (empty for other launches).</p>
+                    </div>
                 </div>`;
     }
 
@@ -2145,15 +1885,26 @@ export class EnvironmentController {
      * (editedSteps ?? initialSteps) so steps added in the editor are insertable before saving.
      * Returns the caption refresher so the steps editor's onSave can re-run it.
      */
-    bindInitialMessageField(getSteps) {
-        const textarea = document.getElementById('env-initial-message');
+    bindInitialMessageField(getSteps, root = document) {
+        const textarea = environmentField(root, 'env-initial-message');
         if (!textarea) return () => { };
 
-        const refresh = () => this.updateInitialMessageStepRefs(textarea.value, getSteps());
+        const refresh = () => this.updateInitialMessageStepRefs(textarea.value, getSteps(), root);
         textarea.addEventListener('input', refresh);
+        root.querySelectorAll('[data-prompt-variable]').forEach(button => {
+            button.addEventListener('click', () => {
+                const token = button.dataset.promptVariable;
+                const start = textarea.selectionStart ?? textarea.value.length;
+                const end = textarea.selectionEnd ?? start;
+                if (textarea.maxLength > 0 && textarea.value.length - (end - start) + token.length > textarea.maxLength) return;
+                textarea.setRangeText(token, start, end, 'end');
+                textarea.focus({ preventScroll: true });
+                textarea.dispatchEvent(new Event('input', { bubbles: true }));
+            });
+        });
         refresh();
 
-        document.querySelector('[data-insert-step-output]')?.addEventListener('click', event => {
+        root.querySelector('[data-insert-step-output]')?.addEventListener('click', event => {
             this.toggleStepOutputMenu(event.currentTarget, textarea, getSteps, refresh);
         });
 
@@ -2161,8 +1912,8 @@ export class EnvironmentController {
     }
 
     /** "Uses step output: Run Tests" under the textarea, with a warning for dangling references. */
-    updateInitialMessageStepRefs(value, steps) {
-        const refs = document.querySelector('[data-initial-message-refs]');
+    updateInitialMessageStepRefs(value, steps, root = document) {
+        const refs = root.querySelector('[data-initial-message-refs]');
         if (!refs) return;
 
         const tokens = [...String(value ?? '').matchAll(/\{\{\s*step\s*:\s*([0-9a-fA-F-]+)\s*\}\}/gi)];

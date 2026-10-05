@@ -22,7 +22,9 @@ cards ahead of global history (short/display keys stay project-scoped; permanent
 reports misses, and discovers cards without keys across local boards through `BoardSearchService`.
 `search_board_cards` exposes the same BGE/keyword ranking directly, including comments, notes and
 handoffs, with repository preference and explicit foreign-project warnings. Its exact Board grant
-is registered on both transports. See the
+is registered on both transports. VIBE-55 serves both tools from the shared `search.db`, populated
+by existing root indexing jobs. Queries do no corpus embedding or state.db enrichment. Progress
+and failures appear only in Vibe AI; there are no new MCP tools or status fields. See the
 [Board contract](../Board/ARCHITECTURE.md#card-recall-vb-13) for limits and incremental indexing.
 
 ## Local board discovery (VIBE-28)

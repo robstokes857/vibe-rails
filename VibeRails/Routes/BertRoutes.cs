@@ -8,9 +8,10 @@ public static class BertRoutes
 {
     public static void Map(WebApplication app)
     {
-        app.MapGet("/api/v1/bert/status", (IBertSearchDbService searchDb, IBertSettings settings) =>
+        app.MapGet("/api/v1/bert/status", (IBertSearchDbService searchDb, IBertSettings settings, IServiceProvider services) =>
         {
-            return Results.Ok(BuildStatusResponse(searchDb, settings));
+            return Results.Ok(BuildStatusResponse(searchDb, settings) with
+            { Indexing = services.GetService<ISearchIndexStore>()?.GetProgress() });
         }).WithName("GetBertStatus");
 
         app.MapGet("/api/v1/bert/captures", (IBertCaptureQueryService captures, int? skip, int? take) =>

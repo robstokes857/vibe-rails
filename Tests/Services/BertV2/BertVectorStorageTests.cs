@@ -14,12 +14,11 @@ public sealed class BertVectorStorageTests : IDisposable
     [Fact]
     public void LinkedSessionRecallUsesExactSessionPrefixAndBoundsRowsAndText()
     {
-        using var store = new BertV2VectorStore(DatabasePath);
-        var capture = new BertV2InputService(CreateEmbedder().Object, store);
-        capture.Capture("session_1", 1, new string('a', 3000));
-        capture.Capture("session_1", 2, "Most recent");
-        capture.Capture("sessionX1", 3, "Foreign wildcard lookalike");
-        var search = new BertSearchDbService(DatabasePath, Path.Combine(_directory, "absent-state.db"));
+        var history = new SearchHistoryFixture(_directory, CreateEmbedder().Object);
+        history.Capture("session_1", 1, new string('a', 3000));
+        history.Capture("session_1", 2, "Most recent");
+        history.Capture("sessionX1", 3, "Foreign wildcard lookalike");
+        var search = history.Search;
         Assert.Equal("session_1:2", Assert.Single(search.GetSessionRecallPage("session_1", 0, 1)).DocumentId);
         Assert.Equal(1000, Assert.Single(search.GetSessionRecallPage("session_1", 1, 1)).RawText.Length);
         Assert.Empty(search.GetSessionRecallPage("session", 0, 20));
@@ -121,10 +120,13 @@ public sealed class BertVectorStorageTests : IDisposable
             Assert.True(sessionStore.ContainsCurrentSession($"session-{i}", [$"session text {i}"]));
         }));
         await Task.WhenAll(tasks);
-        var search = new BertSearchDbService(DatabasePath, Path.Combine(_directory, "absent-state.db"));
-        Assert.Equal(12, search.CountDocuments());
-        Assert.Equal(12, search.CountVectors());
-        Assert.Equal(12, search.CountSessionVectors());
+        using var connection = OpenConnection();
+        using var count = connection.CreateCommand();
+        foreach (var table in new[] { "bert_input_documents", "vec_bert_input_documents", "vec_bert_session_documents" })
+        {
+            count.CommandText = "SELECT count(*) FROM " + table;
+            Assert.Equal(12L, count.ExecuteScalar());
+        }
     }
 
     [Fact]

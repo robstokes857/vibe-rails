@@ -45,7 +45,7 @@ const IMAGE_RE = /!\[([^\]\n]*)\]\(attachment:([A-Za-z0-9_-]+)\)/g;
 // ever be part of a token: an `@<img onerror>` stays literal text. Like URLs, a
 // trailing period/comma/bracket stays outside the reference. A bare reference
 // must also contain a slash or a dot (see the callback), so it looks like a path.
-const INLINE_TOKEN_RE = /`(?<code>[^`\n\u0000]+)`|@\[(?<cardLabel>[^\]\n\u0000]+)\]\(card:(?<cardId>[A-Za-z0-9_-]+)\)|(?<![^\s])@(?:&quot;(?<quotedPath>[^\n\u0000]+?)&quot;|(?<barePath>[^\s&`\u0000]*[^\s&`\u0000.,;:!?)\]}]))|!\[(?<alt>[^\]\n\u0000]*)\]\(attachment:(?<id>[A-Za-z0-9_-]+)\)|(?<![^\s])!(?<session>[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}|[a-fA-F0-9]{32})(?![\w-])|(?<![^\s])#(?<commit>[a-fA-F0-9]{7,40})(?![\w-])|(?<!!)(?<!\[)\[(?<label>[^\]\n\u0000]+)\]\((?<href>https?:\/\/[^\s()\u0000]+)\)|\bhttps?:\/\/[^\s<>"'`\u0000]+[^\s<>"'`.,;:!?)\]}\u0000]/g;
+const INLINE_TOKEN_RE = /`(?<code>[^`\n\u0000]+)`|[@!]\[(?<cardLabel>[^\]\n\u0000]+)\]\(card:(?<cardId>[A-Za-z0-9_-]+)\)|(?<![^\s])@(?:&quot;(?<quotedPath>[^\n\u0000]+?)&quot;|(?<barePath>[^\s&`\u0000]*[^\s&`\u0000.,;:!?)\]}]))|!\[(?<alt>[^\]\n\u0000]*)\]\(attachment:(?<id>[A-Za-z0-9_-]+)\)|(?<![^\s])!(?<session>[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}|[a-fA-F0-9]{32})(?![\w-])|(?<![^\s])#(?<commit>[a-fA-F0-9]{7,40})(?![\w-])|(?<!!)(?<!\[)\[(?<label>[^\]\n\u0000]+)\]\((?<href>https?:\/\/[^\s()\u0000]+)\)|\bhttps?:\/\/[^\s<>"'`\u0000]+[^\s<>"'`.,;:!?)\]}\u0000]/g;
 const BARE_FILE_REF_LOOKS_LIKE_A_PATH = /[./]/;
 const RASTER_DATA_URL_RE = /^data:image\/(?:png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=\s]+$/i;
 

@@ -115,20 +115,19 @@ namespace VibeRails
                 var settings = sp.GetRequiredService<IBertSettings>();
                 return new BertV2BgeEmbedder(settings.ModelPath, settings.VocabPath);
             });
-            serviceCollection.AddSqliteStorage(sp => new SqliteStoragePaths(
-                ParserConfigs.GetStatePath(),
-                Path.Combine(sp.GetRequiredService<IBertSettings>().DataDirectory, BertSearchSchema.DatabaseFileName)));
-            serviceCollection.AddSingleton<IBertV2InputService, BertV2InputService>();
-            serviceCollection.AddSingleton<IBertV2SessionEmbeddingService, BertV2SessionEmbeddingService>();
-            serviceCollection.AddScoped<IBertV2InputDBService, BertV2InputDBService>();
+            serviceCollection.AddSqliteStorage(_ => new SqliteStoragePaths(ParserConfigs.GetStatePath()));
+            serviceCollection.AddSingleton<SearchTextChunker>();
+            serviceCollection.AddSingleton<SearchIndexingService>(SearchIndexingService.Create);
             serviceCollection.AddSingleton<IBertDocumentResponseMapper, BertDocumentResponseMapper>();
             serviceCollection.AddSingleton<IBertCaptureQueryService, BertCaptureQueryService>();
-            serviceCollection.AddSingleton<IBertSearchStrategy, SemanticBertSearchStrategy>();
+            serviceCollection.AddSingleton<IBertSearchStrategy>(sp => new SemanticBertSearchStrategy(
+                () => sp.GetRequiredService<IBertV2BgeEmbedder>(), sp.GetRequiredService<IBertSearchDbService>()));
             serviceCollection.AddSingleton<IBertSearchStrategy, TextBertSearchStrategy>();
-            serviceCollection.AddSingleton<IBertSearchStrategy, SemanticSessionBertSearchStrategy>();
+            serviceCollection.AddSingleton<IBertSearchStrategy>(sp => new SemanticSessionBertSearchStrategy(
+                () => sp.GetRequiredService<IBertV2BgeEmbedder>(), sp.GetRequiredService<IBertSearchDbService>()));
             serviceCollection.AddSingleton<IBertSearchStrategy, TextSessionBertSearchStrategy>();
             serviceCollection.AddSingleton<IBertSearchServiceV2, BertSearchServiceV2>();
-            serviceCollection.AddSingleton<IUnifiedSearchService, UnifiedSearchService>();
+            serviceCollection.AddSingleton<IUnifiedSearchService>(UnifiedSearchService.Create);
 
             serviceCollection.AddSingleton<IGitDiffCaptureService, GitDiffCaptureService>();
             serviceCollection.AddSingleton<ILlmParser, LlmParser>();
@@ -371,14 +370,13 @@ namespace VibeRails
                 serviceCollection.AddHostedService<UpdateCheckJob>();
                 serviceCollection.AddHostedService<StaleSessionCleanupJob>();
                 serviceCollection.AddHostedService<ProjectCacheRefreshJob>();
-                serviceCollection.AddHostedService<BertEmbeddingBackfillJob>();
-                serviceCollection.AddHostedService<SessionAggregateEmbeddingBackfillJob>();
                 // Token-savings publish job — active root backends only. Multiple supported roots
                 // can coexist (for example browser + VS Code), so the job also holds an OS-backed
                 // lock across its refresh and absolute upsert. This branch still excludes
                 // LMBootstrap (--env) processes, which have no global background-job role.
                 if (isActiveRootBackendProcess)
                 {
+                    serviceCollection.AddHostedService<BertEmbeddingBackfillJob>();
                     // A named client, not AddHttpClient<TokenSavingsPublishJob>: that registers a
                     // transient typed client nothing resolves, while AddHostedService<T> activates
                     // its own singleton from the container — which would silently get the default

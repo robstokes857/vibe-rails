@@ -6,7 +6,7 @@ namespace VibeRails.Services.BertV2;
 
 /// <summary>
 /// Generates embeddings using BGE-small-en-v1.5 via ONNX Runtime.
-/// Uses CLS pooling and case-sensitive tokenization.
+/// Uses CLS pooling and the model's uncased WordPiece vocabulary.
 /// </summary>
 public class BertV2BgeEmbedder : IBertV2BgeEmbedder
 {
@@ -52,7 +52,7 @@ public class BertV2BgeEmbedder : IBertV2BgeEmbedder
         using var vocabStream = File.OpenRead(vocabPath);
         _tokenizer = BertTokenizer.Create(vocabStream, new BertOptions
         {
-            LowerCaseBeforeTokenization = false,
+            LowerCaseBeforeTokenization = true,
             SeparatorToken = "[SEP]",
             ClassificationToken = "[CLS]",
             UnknownToken = "[UNK]",

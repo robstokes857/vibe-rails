@@ -76,11 +76,8 @@ public sealed class BertCaptureQueryService : IBertCaptureQueryService
             return _responseMapper.ToSessionCaptureDetail(sessionDoc, sessionMeta);
         }
 
-        // Lexical (FTS5) hits are produced from state.db UserInputs, which may not
-        // yet have been picked up by the periodic BertEmbeddingBackfillJob — in that
-        // window the vector document table has no row for the documentId, and a
-        // strict lookup would 404 the click. Fall back to synthesizing a document
-        // straight from state.db so the detail view still renders.
+        // Lexical documents and metadata are in the shared derived search component.
+        // Retain metadata fallback for providers that expose it before document text.
         var document = _searchDb.GetCapture(documentId);
         var metadata = _searchDb.GetMetadataByDocumentIds([documentId])?.GetValueOrDefault(documentId);
         if (document is null)

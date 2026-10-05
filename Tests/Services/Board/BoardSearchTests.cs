@@ -25,7 +25,7 @@ public sealed class BoardSearchTests : IDisposable
         embedder.Setup(model => model.GenerateEmbedding(It.IsAny<string>())).Throws(new IOException("No model"));
     }
 
-    private BoardSearchService Search() => new(store, embedder.Object, NullLogger<BoardSearchService>.Instance);
+    private BoardSearchService Search() => new(SearchTestIndex.Build(store, root, embedder.Object), new ExpandedModel(embedder.Object), NullLogger<BoardSearchService>.Instance);
     private async Task<BoardCardRecord> Card(string title = "Task", string description = "", string? project = null)
     {
         project ??= root;
@@ -131,8 +131,7 @@ public sealed class BoardSearchTests : IDisposable
         var result = Assert.Single(await Search().SearchAsync(root, "tyres", ct: Ct));
         Assert.Equal(card.Id, result.Id);
         Assert.Equal("semantic", result.MatchKind);
-        var cached = Assert.Single(await store.GetSearchDocumentsAsync(0, Ct));
-        Assert.All(cached.Passages, passage => Assert.NotNull(passage.Embedding));
+        Assert.True(SearchTestIndex.Build(store, root).GetProgress().Embedded > 0);
         // An older binary can change content without knowing the new index or touching UpdatedUTC.
         await using (var connection = new SqliteConnection(connectionString))
         {
@@ -142,9 +141,6 @@ public sealed class BoardSearchTests : IDisposable
             command.Parameters.AddWithValue("$card", card.Id);
             await command.ExecuteNonQueryAsync(Ct);
         }
-        var updated = Assert.Single(await store.GetSearchDocumentsAsync(0, Ct));
-        Assert.All(updated.Passages.Where(passage => passage.Id.StartsWith("card:", StringComparison.Ordinal)), passage => Assert.Null(passage.Embedding));
-        Assert.All(updated.Passages.Where(passage => passage.Id.StartsWith("title:", StringComparison.Ordinal)), passage => Assert.NotNull(passage.Embedding));
         Assert.Empty(await Search().SearchAsync(root, "tyres", ct: Ct));
         Assert.Equal(card.Id, Assert.Single(await Search().SearchAsync(root, "circuit", ct: Ct)).Id);
     }
@@ -165,18 +161,19 @@ public sealed class BoardSearchTests : IDisposable
     }
 
     [Fact]
-    public async Task IncrementalIndexBudgetDoesNotTruncateKeywordCoverageAndMakesProgress()
+    public async Task QueriesNeverAdvanceBackgroundWorkAndKeywordsCoverPendingChunks()
     {
-        var card = await Card(description: new string('x', 70000) + " distantneedle");
-        embedder.Setup(model => model.GenerateEmbedding(It.IsAny<string>())).Returns([0f, 0f]);
-        Assert.Single(await Search().SearchAsync(root, "distantneedle", ct: Ct));
-        var first = Assert.Single(await store.GetSearchDocumentsAsync(0, Ct));
-        Assert.Equal(32, first.Passages.Count(passage => passage.Embedding is not null));
-        Assert.Contains(first.Passages, passage => passage.Embedding is null);
-        Assert.Single(await Search().SearchAsync(root, "distantneedle", ct: Ct));
-        Assert.Equal(64, Assert.Single(await store.GetSearchDocumentsAsync(0, Ct)).Passages.Count(passage => passage.Embedding is not null));
-        for (var warmup = 0; warmup < 6; warmup++) await Search().SearchAsync(root, "distantneedle", ct: Ct);
-        Assert.All(Assert.Single(await store.GetSearchDocumentsAsync(0, Ct)).Passages, passage => Assert.NotNull(passage.Embedding));
+        await Card(description: new string('x', 70000) + " distantneedle");
+        var index = SearchTestIndex.Build(store, root);
+        var service = new BoardSearchService(index, new ExpandedModel(embedder.Object), NullLogger<BoardSearchService>.Instance);
+        var before = index.GetProgress();
+        Assert.Single(await service.SearchAsync(root, "distantneedle", ct: Ct));
+        Assert.Single(await service.SearchAsync(root, "distantneedle", ct: Ct));
+        Assert.Equal(before, index.GetProgress());
+        embedder.Setup(model => model.GenerateEmbedding(It.IsAny<string>())).Returns([1f, 0f]);
+        SearchTestIndex.Embed(index, embedder.Object);
+        Assert.True(index.GetProgress().Embedded > 0);
+        Assert.Equal(0, index.GetProgress().PendingSources);
     }
 
     [Fact]
@@ -185,7 +182,8 @@ public sealed class BoardSearchTests : IDisposable
         var keep = await Card("Keep");
         var excluded = await Card("Exclude");
         var source = await Card("Source");
-        var result = Assert.Single(await Search().SearchAsync(root, "", 1, source.Id, Ct, [excluded.Id]));
+        var service = new BoardSearchService(SearchTestIndex.Build(store, root), embedder.Object, NullLogger<BoardSearchService>.Instance);
+        var result = Assert.Single(await service.SearchAsync(root, "", 1, source.Id, Ct, [excluded.Id]));
         Assert.Equal(keep.Id, result.Id);
         embedder.Verify(model => model.GenerateEmbedding(It.IsAny<string>()), Times.Never);
     }
@@ -230,9 +228,9 @@ public sealed class BoardSearchTests : IDisposable
         var card = await Card(description: new string('x', 10000));
         await store.AddCommentAsync(root, card.Id, BoardAuthor.User(), "Unneeded discussion", Ct);
         var document = Assert.Single(await store.GetSearchDocumentsAsync(0, Ct, includeContent: false));
-        var passage = Assert.Single(document.Passages);
-        Assert.True(passage.Text.Length <= card.Title.Length + 261);
-        Assert.DoesNotContain("discussion", passage.Text);
+        Assert.Equal(2, document.Sources.Count);
+        Assert.True(document.Sources[1].Text.Length <= 260);
+        Assert.DoesNotContain(document.Sources, source => source.Text.Contains("discussion"));
     }
 
     [Fact]
@@ -255,35 +253,20 @@ public sealed class BoardSearchTests : IDisposable
         var card = await Card(title, description);
         var comment = (await store.AddCommentAsync(root, card.Id, BoardAuthor.User(), description, Ct))!;
         var document = Assert.Single(await store.GetSearchDocumentsAsync(0, Ct));
-        using var vocabulary = File.OpenRead(Path.Combine(BertV2TestAssets.GetBundledModelDirectory(), "vocab.txt"));
-        var tokenizer = BertTokenizer.Create(vocabulary, new BertOptions
+        var chunker = new SearchTextChunker(Path.Combine(BertV2TestAssets.GetBundledModelDirectory(), "vocab.txt"));
+        foreach (var source in document.Sources)
         {
-            LowerCaseBeforeTokenization = false, SeparatorToken = "[SEP]", ClassificationToken = "[CLS]",
-            UnknownToken = "[UNK]", PaddingToken = "[PAD]"
-        });
-        foreach (var passage in document.Passages)
-        {
-            var tokens = tokenizer.EncodeToIds(passage.Text, addSpecialTokens: true,
-                considerPreTokenization: true, considerNormalization: true);
-            Assert.InRange(tokens.Count, 1, 512);
-            Assert.DoesNotContain('�', passage.Text);
-            for (var index = 0; index < passage.Text.Length; index++)
+            var chunks = chunker.Split(source.Text, source.Title);
+            Assert.NotEmpty(chunks);
+            Assert.All(chunks, chunk => Assert.InRange(chunker.CountTokens(chunk), 1, 512));
+            // Every source tail survives, including dense Unicode and long title text.
+            Assert.EndsWith(source.Text[^Math.Min(20, source.Text.Length)..], chunks[^1]);
+            Assert.All(chunks, chunk => Assert.DoesNotContain('\uFFFD', chunk));
+            var covered = new bool[source.Text.Length];
+            foreach (var chunk in chunker.SplitChunks(source.Text, source.Title))
             {
-                if (char.IsHighSurrogate(passage.Text[index]))
-                    Assert.True(index + 1 < passage.Text.Length && char.IsLowSurrogate(passage.Text[++index]));
-                else Assert.False(char.IsLowSurrogate(passage.Text[index]));
-            }
-            Assert.StartsWith("bge-small-en-v1.5:board-search-2:", passage.Version);
-        }
-        foreach (var (source, text) in new[] { ("title", title), ("card", description), (comment.Id, description) })
-        {
-            var covered = new bool[text.Length];
-            foreach (var passage in document.Passages.Where(passage => passage.Id.StartsWith(source + ":", StringComparison.Ordinal)))
-            {
-                var offset = int.Parse(passage.Id[(source.Length + 1)..]);
-                var body = source == "title" ? passage.Text : passage.Text[(passage.Text.IndexOf('\n') + 1)..];
-                Assert.Equal(text.Substring(offset, body.Length), body);
-                Array.Fill(covered, true, offset, body.Length);
+                Assert.EndsWith(source.Text.Substring(chunk.Start, chunk.Length), chunk.Text);
+                Array.Fill(covered, true, chunk.Start, chunk.Length);
             }
             Assert.All(covered, Assert.True);
         }
@@ -303,16 +286,12 @@ public sealed class BoardSearchTests : IDisposable
         const string query = "Replace a flat tire";
         for (var index = 0; index < 51; index++) await Card("Add dark mode " + index, "Use darker menu colors");
         var foreign = await Card("Wheel repair", keywordMatch ? query : "Swap damaged wheel", root + "-other");
-        // Measured BGE examples: dark-mode/tire similarity=.532783; relevant tire=.942397.
-        // Seed every passage to test warm semantic ranking independently of index order.
-        foreach (var document in await store.GetSearchDocumentsAsync(0, Ct))
+        embedder.Setup(model => model.GenerateEmbedding(It.IsAny<string>())).Returns<string>(text =>
         {
-            var similarity = document.Id == foreign.Id ? .942397f : .532783f;
-            float[] vector = [similarity, MathF.Sqrt(1 - similarity * similarity)];
-            foreach (var passage in document.Passages)
-                await store.SaveSearchEmbeddingAsync(document.ProjectPath, document.Id, passage.Id, passage.Version, vector, Ct);
-        }
-        embedder.Setup(model => model.GenerateEmbedding(It.IsAny<string>())).Returns([1f, 0f]);
+            if (text == query) return [1f, 0f];
+            var similarity = text.Contains("Wheel repair") || text.Contains("Swap damaged") ? .942397f : .532783f;
+            return [similarity, MathF.Sqrt(1 - similarity * similarity)];
+        });
         var hits = await Search().SearchAsync(root, query, 50, ct: Ct);
         Assert.Equal(50, hits.Count);
         Assert.Equal(foreign.Id, hits[0].Id);
@@ -344,6 +323,12 @@ public sealed class BoardSearchTests : IDisposable
         var scoped = Assert.Single(await Search().SearchAsync(root, query, ct: Ct, projectScope: Path.Combine(root, ".")));
         Assert.Equal(local.Id, scoped.Id);
         Assert.True(scoped.IsCurrentProject);
+    }
+
+    private sealed class ExpandedModel(IBertV2BgeEmbedder model) : IBertV2BgeEmbedder
+    {
+        public float[] GenerateEmbedding(string text) => SearchTestIndex.Expand(model.GenerateEmbedding(text));
+        public void Dispose() { }
     }
 
     public void Dispose()

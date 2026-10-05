@@ -38,15 +38,11 @@ public class SessionSearchTool
 
     [McpServerTool]
     [Description(
-        "Recall previous work. When the user names a card, use get_board_card first. " +
-        "Explicit keys (e.g. 'what changed on VB-10?') return exact cards before history (short/display IDs are current-project; permanent keys search all local boards), " +
-        "including previous work, file references, commits and linked-session summaries; missing keys are explicit. " +
-        "Queries without keys also discover cards across all local boards using BGE and keywords, preferring the current repository. Foreign repositories are labeled. " +
-        "Search the developer's own captured agent history — past user messages and whole-session " +
-        "summaries from previous Claude/Codex/Copilot/Antigravity/OpenCode sessions in the local history corpus. Use this " +
-        "to recall what was previously asked, decided, tried, or fixed before redoing work or asking the " +
-        "user. Results are ranked by reciprocal-rank fusion across semantic (BGE embedding) and literal " +
-        "keyword matches, best first.")]
+        "Recall previous work, questions, decisions and fixes across captured user/session history and relevant Board cards. " +
+        "Use when the desired source is unknown or broader work history is needed. For a specific named card, get_board_card remains the first choice. " +
+        "Searches by meaning and exact keywords using the shared BGE retrieval system. Returns compact source attribution and follow-up read tools. " +
+        "Includes up to five discovered cards, or up to ten explicit card references, before separately ranked history results. " +
+        "Short/display card IDs keep their current-project meaning; permanent keys discover cards across all local boards. Other repositories are labeled.")]
     public async Task<string> SearchHistory(
         [Description("Natural-language query, e.g. 'how did we fix the websocket reconnect timeout'.")] string query,
         [Description("Maximum history matches (default 10, capped at 50), plus up to five discovered cards or ten exact references.")] int maxResults = 10,

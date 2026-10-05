@@ -24,6 +24,7 @@ public sealed partial class BoardRoutesTests
         for (var index = 0; index < 51; index++)
             await store.CreateCardAsync(foreignProject, new(null, query, "", null, "medium", null, [], false), ct);
         var path = "/api/v1/board/cards/link-candidates?q=" + Uri.EscapeDataString(query);
+        IndexBoard();
         using var global = await GetJsonAsync(path);
         Assert.Equal(50, global.RootElement.GetProperty("cards").GetArrayLength());
         Assert.All(global.RootElement.GetProperty("cards").EnumerateArray(), card => Assert.False(card.GetProperty("isCurrentProject").GetBoolean()));
@@ -69,6 +70,7 @@ public sealed partial class BoardRoutesTests
                 Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
             }
         }
+        IndexBoard();
         using var found = await GetJsonAsync("/api/v1/board/cards/search?q=indexed");
         var hits = found.RootElement.GetProperty("cards");
         Assert.Equal(local.Id, hits[0].GetProperty("id").GetString());
@@ -87,6 +89,7 @@ public sealed partial class BoardRoutesTests
         Assert.Equal("Local indexed", (await store.FindCardAsync(_project, local.Id, ct))!.Title);
         using var commented = await PostJsonAsync(path + "/comments", new { body = "distinctcommentterm" });
         commented.EnsureSuccessStatusCode();
+        IndexBoard();
         using var commentHit = await GetJsonAsync("/api/v1/board/cards/search?q=distinctcommentterm");
         Assert.Equal(foreign.Id, Assert.Single(commentHit.RootElement.GetProperty("cards").EnumerateArray()).GetProperty("id").GetString());
         using var linked = await PostJsonAsync(path + "/links", new { card = local.Id });

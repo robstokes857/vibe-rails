@@ -8,8 +8,7 @@ public class BertSearchServiceV2Tests : IDisposable
     private readonly string _tempDir;
     private readonly string _runtimeDir;
     private readonly BertV2BgeEmbedder _embedder;
-    private readonly BertV2VectorStore _store;
-    private readonly BertV2InputService _inputService;
+    private readonly SearchHistoryFixture _history;
     private readonly BertSearchDbService _searchDb;
     private readonly BertSearchServiceV2 _searchService;
 
@@ -24,13 +23,8 @@ public class BertSearchServiceV2Tests : IDisposable
         _embedder = new BertV2BgeEmbedder(
             Path.Combine(_runtimeDir, "model.onnx"),
             Path.Combine(_runtimeDir, "vocab.txt"));
-        _store = new BertV2VectorStore(Path.Combine(_tempDir, "bert_user_text_vectors.db"));
-        _inputService = new BertV2InputService(_embedder, _store);
-        // Pin state.db to a fresh, empty file so FTS5 lookups in SearchByText
-        // don't accidentally resolve against the developer's real state.db.
-        _searchDb = new BertSearchDbService(
-            Path.Combine(_tempDir, "bert_user_text_vectors.db"),
-            Path.Combine(_tempDir, "state.db"));
+        _history = new SearchHistoryFixture(_tempDir, _embedder);
+        _searchDb = _history.Search;
         _searchService = new BertSearchServiceV2(
             new IBertSearchStrategy[]
             {
@@ -44,7 +38,7 @@ public class BertSearchServiceV2Tests : IDisposable
     [Fact]
     public void Capture_StoresDocument_SearchFindsIt()
     {
-        _inputService.Capture("session-1", 1, "How do I reset my password?");
+        _history.Capture("session-1", 1, "How do I reset my password?");
 
         var response = _searchService.Search("password reset", "semantic", topK: 5);
         var results = response.Results;
@@ -56,11 +50,11 @@ public class BertSearchServiceV2Tests : IDisposable
     [Fact]
     public void Search_RanksSemanticallySimialarDocumentsHigher()
     {
-        _inputService.Capture("s1", 1, "How do I reset my password?");
-        _inputService.Capture("s1", 2, "The server crashed with an out of memory error");
-        _inputService.Capture("s1", 3, "Deploy the application to production");
-        _inputService.Capture("s1", 4, "Configure nginx reverse proxy settings");
-        _inputService.Capture("s1", 5, "I forgot my login credentials");
+        _history.Capture("s1", 1, "How do I reset my password?");
+        _history.Capture("s1", 2, "The server crashed with an out of memory error");
+        _history.Capture("s1", 3, "Deploy the application to production");
+        _history.Capture("s1", 4, "Configure nginx reverse proxy settings");
+        _history.Capture("s1", 5, "I forgot my login credentials");
 
         var response = _searchService.Search("I can't log in to my account", "semantic", topK: 5);
         var results = response.Results;
@@ -75,7 +69,7 @@ public class BertSearchServiceV2Tests : IDisposable
     public void Search_TopKLimitsResults()
     {
         for (int i = 1; i <= 10; i++)
-            _inputService.Capture("s1", i, $"Document number {i} about various topics");
+            _history.Capture("s1", i, $"Document number {i} about various topics");
 
         var response = _searchService.Search("document topics", "semantic", topK: 3);
         var results = response.Results;
@@ -86,8 +80,8 @@ public class BertSearchServiceV2Tests : IDisposable
     [Fact]
     public void Search_TextModeUsesKeywordMatching()
     {
-        _inputService.Capture("s1", 1, "customer account settings");
-        _inputService.Capture("s1", 2, "billing invoice summary");
+        _history.Capture("s1", 1, "customer account settings");
+        _history.Capture("s1", 2, "billing invoice summary");
 
         var response = _searchService.Search("invoice", "text", topK: 5);
 
@@ -99,8 +93,8 @@ public class BertSearchServiceV2Tests : IDisposable
     [Fact]
     public void Search_ScoresAreBetweenZeroAndOne()
     {
-        _inputService.Capture("s1", 1, "Machine learning model training");
-        _inputService.Capture("s1", 2, "Database migration scripts");
+        _history.Capture("s1", 1, "Machine learning model training");
+        _history.Capture("s1", 2, "Database migration scripts");
 
         var response = _searchService.Search("train a neural network", "semantic", topK: 2);
         var results = response.Results;
@@ -115,7 +109,7 @@ public class BertSearchServiceV2Tests : IDisposable
     [Fact]
     public void Search_UnrelatedQueryScoresLow()
     {
-        _inputService.Capture("s1", 1, "Fix the CSS styling on the login page");
+        _history.Capture("s1", 1, "Fix the CSS styling on the login page");
 
         var response = _searchService.Search("quantum physics thermodynamics", "semantic", topK: 1);
         var results = response.Results;
@@ -128,8 +122,8 @@ public class BertSearchServiceV2Tests : IDisposable
     [Fact]
     public void Capture_UpdatesExistingDocument()
     {
-        _inputService.Capture("s1", 1, "Original text about cooking recipes");
-        _inputService.Capture("s1", 1, "Updated text about server deployment");
+        _history.Capture("s1", 1, "Original text about cooking recipes");
+        _history.Capture("s1", 1, "Updated text about server deployment");
 
         var response = _searchService.Search("deploy to production", "semantic", topK: 1);
         var results = response.Results;
@@ -142,7 +136,6 @@ public class BertSearchServiceV2Tests : IDisposable
     public void Dispose()
     {
         _embedder.Dispose();
-        _store.Dispose();
         try { Directory.Delete(_tempDir, recursive: true); } catch { }
     }
 

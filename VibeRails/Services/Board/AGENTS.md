@@ -7,12 +7,15 @@ no-key `search_history` discovery. Search all local boards, prefer the current r
 return explicit board/lane/project metadata. Full permanent keys and row IDs identify foreign
 cards; short aliases keep their project meaning. Search includes current descriptions, titles,
 Comments, retained notes and handoffs, excluding change history and deleted/hidden discussion.
-Derived BGE passage vectors live behind `IBoardStore` in the additive `board-search/1` cache;
-full keyword coverage is available while at most 32 vectors warm per search.
+VIBE-55 derives complete sources through `IBoardStore` into the shared `search.db` component.
+The existing root indexing jobs build token-aware BGE chunks and sqlite-vec vectors; searches
+never index content or enrich results from state.db. Legacy JSON caches remain stored but unused.
+See the [shared search contract](../BertV2/README.md) for reconciliation, claims and UI progress.
 Merge and `!`/`#` reference pickers request `currentProjectOnly=true` on the existing draft
 candidate route. Filter to the server-derived project before ranking and limiting results;
-keep already-linked cards eligible for these unbound searches. Ordinary links and `@` card
-references retain all-local search.
+keep already-linked cards eligible for these unbound searches. Ordinary links retain all-local
+search. `@` searches only files; `!` searches card titles/keywords and opens their sessions.
+Only a complete GUID after `!` performs a session-history lookup (VIBE-59).
 
 Cross-project related-card links are local relationships and are excluded from hosted sync
 projection. Source operations remain scoped; foreign targets require immutable row IDs or full

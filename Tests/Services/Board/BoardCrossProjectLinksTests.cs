@@ -1,3 +1,4 @@
+using Tests.Services.BertV2;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -100,7 +101,7 @@ public sealed class BoardCrossProjectLinksTests : IDisposable
         await store.AddCommentAsync(otherProject, other.Id, BoardAuthor.User(), "The needle is in this discussion.", Ct);
         var embedder = new Mock<IBertV2BgeEmbedder>();
         embedder.Setup(model => model.GenerateEmbedding(It.IsAny<string>())).Throws<InvalidOperationException>();
-        var search = new BoardSearchService(store, embedder.Object, NullLogger<BoardSearchService>.Instance);
+        var search = new BoardSearchService(SearchTestIndex.Build(store, root), embedder.Object, NullLogger<BoardSearchService>.Instance);
         var service = new BoardService(store, Mock.Of<IBoardCommitService>(), new NullBoardLiveSessionProbe(), searchService: search);
         var found = Assert.Single((await service.GetCardLinkCandidatesAsync(project, source.Id, "needle", Ct))!.Cards);
         Assert.Equal(other.Id, found.Id);
@@ -118,7 +119,7 @@ public sealed class BoardCrossProjectLinksTests : IDisposable
         var source = await Create(otherProject, "Foreign source");
         var peer = await Create(otherProject, "Foreign peer");
         var search = useSearchService
-            ? new BoardSearchService(store, Mock.Of<IBertV2BgeEmbedder>(), NullLogger<BoardSearchService>.Instance)
+            ? new BoardSearchService(SearchTestIndex.Build(store, root), Mock.Of<IBertV2BgeEmbedder>(), NullLogger<BoardSearchService>.Instance)
             : null;
         var service = new BoardService(store, Mock.Of<IBoardCommitService>(), new NullBoardLiveSessionProbe(), searchService: search);
         var cards = (await service.GetCardLinkCandidatesAsync(otherProject, source.Id, "", Ct, preferredProjectPath: project))!.Cards;
@@ -152,7 +153,7 @@ public sealed class BoardCrossProjectLinksTests : IDisposable
         await store.LinkCardAsync(project, source.Id, local.Id, Ct);
         var model = new Mock<IBertV2BgeEmbedder>();
         model.Setup(embedder => embedder.GenerateEmbedding(It.IsAny<string>())).Throws<InvalidOperationException>();
-        var search = useSearchService ? new BoardSearchService(store, model.Object, NullLogger<BoardSearchService>.Instance) : null;
+        var search = useSearchService ? new BoardSearchService(SearchTestIndex.Build(store, root), model.Object, NullLogger<BoardSearchService>.Instance) : null;
         var service = new BoardService(store, Mock.Of<IBoardCommitService>(), new NullBoardLiveSessionProbe(), searchService: search);
         // Merge uses the unbound candidate search: existing relationships must not hide a destination.
         var scoped = (await service.GetCardLinkCandidatesAsync(project, null, "Matching", Ct,
@@ -167,5 +168,9 @@ public sealed class BoardCrossProjectLinksTests : IDisposable
         Assert.Equal(foreign.Id, Assert.Single(linkCandidates).Id);
     }
 
-    public void Dispose() => Directory.Delete(root, recursive: true);
+    public void Dispose()
+    {
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        Directory.Delete(root, recursive: true);
+    }
 }

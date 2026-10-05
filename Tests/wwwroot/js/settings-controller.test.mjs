@@ -16,70 +16,30 @@ test('settings page has no trailer-removal option or empty Git tab', () => {
     assert.doesNotMatch(source, /removeCoAuthorTrailers|setting-remove-co-author-trailers/);
 });
 
-test('Vibe AI has a default-off settings toggle and starts hidden in both navigation layouts', () => {
+test('Vibe AI is always shown in both navigation layouts and has no settings toggle', () => {
     const html = readFileSync(indexPath, 'utf8');
     const source = readFileSync(modulePath, 'utf8');
     const appSource = readFileSync(path.resolve('VibeRails/wwwroot/app.js'), 'utf8');
 
-    assert.match(html, /id="setting-show-vibe-ai-ui"/);
-    assert.match(html, /Show Vibe AI UI/);
-    assert.match(source, /showVibeAiUi:\s*false/);
-    assert.match(appSource, /applyVibeAiNavVisibility/);
+    assert.doesNotMatch(html, /setting-show-vibe-ai-ui|Show Vibe AI UI/);
+    assert.doesNotMatch(source, /showVibeAiUi|setting-show-vibe-ai-ui/);
+    assert.doesNotMatch(appSource, /showVibeAiUi|applyVibeAiNavVisibility/);
     const links = html.match(/<button\b[^>]*data-view="vibe-rails-ai"[^>]*>/g);
+    assert.equal(links.length, 2);
+    for (const link of links) assert.doesNotMatch(link, /\shidden/);
+    // The retired preference stays in settings.json for older versions; startup never writes it.
+    const initSource = readFileSync(path.resolve('VibeRails/Init.cs'), 'utf8');
+    assert.doesNotMatch(initSource, /settings\.ShowVibeAiUi\s*=/);
+});
+
+test('account sign-in links start hidden in both navigation layouts', () => {
+    const html = readFileSync(indexPath, 'utf8');
+    const links = html.match(/<button\b[^>]*data-account-nav[^>]*>/g);
     assert.equal(links.length, 2);
     for (const link of links) assert.match(link, /\shidden/);
     // Author display styles otherwise override the browser's hidden attribute rule.
     const css = readFileSync(path.resolve('VibeRails/wwwroot/style.css'), 'utf8');
     assert.match(css, /\.app-subnav-link\[hidden\][^{]*\{\s*display:\s*none\s*!important/);
-    const initSource = readFileSync(path.resolve('VibeRails/Init.cs'), 'utf8');
-    assert.doesNotMatch(initSource, /settings\.ShowVibeAiUi\s*=/);
-});
-
-test('saved visibility updates both navigation layouts and survives partial settings updates', (t) => {
-    const source = readFileSync(path.resolve('VibeRails/wwwroot/app.js'), 'utf8');
-    const classSource = source.slice(source.indexOf('export class VibeControlApp'), source.indexOf('// Initialize the app'))
-        .replace('export class VibeControlApp', 'class VibeControlApp');
-    const VibeControlApp = new Function('getTokenSaverEnabledSources', `${classSource}\nreturn VibeControlApp;`)(() => []);
-    const app = Object.create(VibeControlApp.prototype);
-    const links = [{ hidden: false }, { hidden: false }];
-    const previousDocument = globalThis.document;
-    t.after(() => { globalThis.document = previousDocument; });
-    globalThis.document = {
-        querySelectorAll(selector) {
-            assert.equal(selector, '.app-subnav-link[data-view="vibe-rails-ai"]');
-            return links;
-        }
-    };
-    app.applyVsCodeThemePreference = () => {};
-    app.updateAccountNav = () => {};
-
-    app.setAppSettings({});
-    assert.equal(app.appSettings.showVibeAiUi, false);
-    assert.ok(links.every(link => link.hidden));
-    app.setAppSettings({ showVibeAiUi: true });
-    assert.ok(links.every(link => !link.hidden));
-    app.setAppSettings({ apiKey: 'masked-key' });
-    assert.ok(links.every(link => !link.hidden));
-    app.setAppSettings({ showVibeAiUi: false });
-    assert.ok(links.every(link => link.hidden));
-});
-
-test('visibility participates in dirty tracking and saved controls reflect the server value', (t) => {
-    const previousWindow = globalThis.window;
-    t.after(() => { globalThis.window = previousWindow; });
-    globalThis.window = { VibeRailsPerformance: null };
-    const controller = new SettingsController({});
-    const toggle = { checked: false };
-    const root = { querySelector: selector => selector === '#setting-show-vibe-ai-ui' ? toggle : null };
-    controller._updateDataExportAvailability = () => {};
-    assert.match(controller._trackedSettingsSelector(), /#setting-show-vibe-ai-ui/);
-    const clean = controller._captureSettingsSnapshot(root);
-    toggle.checked = true;
-    assert.notEqual(controller._captureSettingsSnapshot(root), clean);
-    controller._applySavedSettingsToControls(root, { showVibeAiUi: false });
-    assert.equal(toggle.checked, false);
-    controller._applySavedSettingsToControls(root, { showVibeAiUi: true });
-    assert.equal(toggle.checked, true);
 });
 
 test('settings page always shares completed sessions and has no sharing switch', () => {
@@ -94,7 +54,7 @@ test('settings page always shares completed sessions and has no sharing switch',
     assert.match(html, /id="settings-export-data-button"/);
 });
 
-test('saving settings omits the retired trailer option and preserves following arguments', async () => {
+test('saving settings omits retired options and preserves following arguments', async () => {
     globalThis.window = { VibeRailsPerformance: null };
     const calls = [];
     const app = {
@@ -126,21 +86,22 @@ test('saving settings omits the retired trailer option and preserves following a
         /* grokTokenSaverEnabled */ true,
         /* routeThroughVibeRailsAi */ true,
         /* clearApiKey */ true,
-        /* showVibeAiUi */ true);
+        /* createVibeStoryTracking */ false);
 
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, '/api/v1/settings');
     assert.equal(calls[0].method, 'POST');
     assert.equal(calls[0].body.removeCoAuthorTrailers, undefined);
+    assert.equal(calls[0].body.showVibeAiUi, undefined);
     assert.equal(calls[0].body.routeThroughVibeRailsAi, true);
     assert.equal(calls[0].body.clearApiKey, true);
-    assert.equal(calls[0].body.showVibeAiUi, true);
+    assert.equal(calls[0].body.createVibeStoryTracking, false);
     assert.equal(calls[0].body.dataExportOptIn, true);
 
     await controller.saveSettings(false, '', false, true, '', false, 'subscription',
-        false, false, false, 'subscription', true, true, true, true, false, false, false);
-    assert.equal(calls[1].body.showVibeAiUi, false);
+        false, false, false, 'subscription', true, true, true, true, false, false);
     assert.equal(calls[1].body.clearApiKey, false);
+    assert.equal(calls[1].body.createVibeStoryTracking, true);
 });
 
 test('settings page groups its cards under a section tab bar', () => {

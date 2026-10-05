@@ -181,9 +181,9 @@ export function bindFileReferencePopup(input, { app, host = input?.parentElement
         const browseIndex = canBrowse(token) ? items.length : -1;
         const rows = items.map((file, index) => `
             <div class="board-file-popup-row${index === activeIndex ? ' is-active' : ''}" role="option"
-                aria-selected="${index === activeIndex}" data-board-file-row="${index}" title="${escapeHtml(file.label || file)}">
+                aria-selected="${index === activeIndex}" data-board-file-row="${index}" title="${escapeHtml([file.label || file, file.detail, file.title].filter(Boolean).join(' · '))}">
                 <i class="fa-regular fa-file board-file-popup-icon" aria-hidden="true"></i>
-                <span class="board-file-popup-path">${escapeHtml(file.label || file)}</span>
+                <span class="board-file-popup-path${file.detail ? ' text-wrap' : ''}">${escapeHtml(file.label || file)}${file.detail ? `<small class="d-block text-muted">${escapeHtml(file.detail)}</small>` : ''}</span>
             </div>`);
         let note = '';
         if (status === 'loading' && items.length === 0) note = 'Searching…';

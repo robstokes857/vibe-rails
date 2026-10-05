@@ -1,8 +1,7 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using VibeRails.Data.Sqlite;
 using VibeRails.DTOs;
+using VibeRails.Services.BertV2;
 
 namespace VibeRails.Services.Board;
 
@@ -16,7 +15,7 @@ public sealed partial class BoardStore
         """;
 
     public async Task<IReadOnlyList<BoardSearchDocument>> GetSearchDocumentsAsync(int offset, CancellationToken cancellationToken = default,
-        bool includeContent = true, string? afterCardId = null)
+        bool includeContent = true, string? afterCardId = null, int pageSize = 100)
     {
         await using var connection = await OpenAsync(cancellationToken);
         // A deferred read snapshot keeps card text, discussion tombstones and cache versions
@@ -35,29 +34,25 @@ public sealed partial class BoardStore
                 JOIN Boards b ON b.Id=col.BoardId
                 {CardPrefixJoinSql}
                 WHERE c.DeletedUTC IS NULL AND ($after IS NULL OR c.Id > $after)
-                ORDER BY c.Id LIMIT 100 OFFSET $offset
+                ORDER BY c.Id LIMIT $limit OFFSET $offset
                 """;
             command.Parameters.AddWithValue("$offset", Math.Max(0, offset));
             command.Parameters.AddWithValue("$legacyPrefix", BoardKeys.LegacyPrefix);
             command.Parameters.AddWithValue("$content", includeContent);
             command.Parameters.AddWithValue("$after", (object?)afterCardId ?? DBNull.Value);
+            command.Parameters.AddWithValue("$limit", Math.Clamp(pageSize, 1, 100));
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
                 var passages = new List<BoardSearchPassage>();
                 var title = reader.GetString(3);
                 var description = reader.GetString(17);
-                if (includeContent)
-                {
-                    AddSearchPassages(passages, "title", "", title);
-                    if (description.Length > 0) AddSearchPassages(passages, "card", title, description);
-                }
-                else AddSearchPassages(passages, "card", title, description);
                 documents.Add(new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
                     reader.GetString(4), reader.GetString(5), reader.GetString(6), reader.GetString(7), reader.GetString(8),
                     reader.GetInt32(9), reader.GetString(10), ParseDb(reader.GetString(11)), reader.GetString(12), reader.GetString(13),
                     reader.IsDBNull(14) ? null : reader.GetString(14), reader.GetBoolean(15), reader.GetBoolean(16), passages)
-                { KeywordSources = new List<string> { title, description } });
+                { KeywordSources = new List<string> { title, description },
+                    Sources = new List<SearchSource> { new("title", title), new("description", description, title) } });
             }
         }
         if (documents.Count == 0 || !includeContent) return documents;
@@ -67,11 +62,11 @@ public sealed partial class BoardStore
         {
             command.Transaction = transaction;
             command.CommandText = $"""
-                SELECT CardId, Id, Body FROM BoardComments m
+                SELECT CardId, 'discussion:' || Id, Body FROM BoardComments m
                 WHERE CardId IN ({ids}) AND Kind IN ('comment','note') AND DiscussionHidden=0
                     AND NOT EXISTS (SELECT 1 FROM BoardDeletedComments d WHERE d.CommentId=m.Id)
-                UNION ALL SELECT CardId, Id, Json FROM BoardHandoffs WHERE CardId IN ({ids})
-                ORDER BY CardId, Id
+                UNION ALL SELECT CardId, 'handoff:' || Id, Json FROM BoardHandoffs WHERE CardId IN ({ids})
+                ORDER BY 1, 2
                 """;
             for (var index = 0; index < documents.Count; index++) command.Parameters.AddWithValue("$id" + index, documents[index].Id);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -80,50 +75,26 @@ public sealed partial class BoardStore
                 var document = byId[reader.GetString(0)];
                 var text = reader.GetString(2);
                 ((List<string>)document.KeywordSources).Add(text);
-                AddSearchPassages((List<BoardSearchPassage>)document.Passages, reader.GetString(1), document.Title, text);
+                ((List<SearchSource>)document.Sources).Add(new(reader.GetString(1), text, document.Title));
             }
         }
-        var vectors = new Dictionary<(string Card, string Passage), (string Version, string Embedding)>();
-        await using (var command = connection.CreateCommand())
+        var prefixes = new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal);
+        for (var i = 0; i < documents.Count; i++)
         {
-            command.Transaction = transaction;
-            command.CommandText = $"SELECT CardId, PassageId, Version, Embedding FROM BoardSearchEmbeddings WHERE CardId IN ({ids})";
-            for (var index = 0; index < documents.Count; index++) command.Parameters.AddWithValue("$id" + index, documents[index].Id);
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
-                vectors[(reader.GetString(0), reader.GetString(1))] = (reader.GetString(2), reader.GetString(3));
+            var document = documents[i];
+            if (!prefixes.TryGetValue(document.ProjectPath, out var keys))
+                prefixes[document.ProjectPath] = keys = await GetRecallKeyPrefixesAsync(document.ProjectPath, cancellationToken);
+            documents[i] = document with
+            {
+                Sessions = await ReadSessionsAsync(connection, document.Id, cancellationToken),
+                Commits = await ReadCommitsAsync(connection, document.Id, cancellationToken, transaction, limit: 3),
+                FileCandidates = await GetHandoffCandidatesAsync(document.ProjectPath, document.Id, cancellationToken),
+                PreviousWork = await ReadHandoffAsync(connection, document.Id, cancellationToken),
+                KeyPrefixes = keys.ToArray()
+            };
         }
-        return documents.Select(document => document with
-        {
-            Passages = document.Passages.Select(passage => vectors.TryGetValue((document.Id, passage.Id), out var cached) && cached.Version == passage.Version
-                ? passage with { Embedding = JsonSerializer.Deserialize(cached.Embedding, StorageJsonSerializerContext.Default.SingleArray) }
-                : passage).ToArray()
-        }).ToArray();
+        return documents;
     }
-
-    private static void AddSearchPassages(List<BoardSearchPassage> passages, string source, string title, string text)
-    {
-        // BERT WordPiece can produce a token per character for punctuation and dense code.
-        // A complete input stays under 512 even then (96 title + newline + 384 body +
-        // two special tokens). The full title has separate passages; clipping its context
-        // prefix never loses title coverage. Overlap and boundaries preserve surrogate pairs.
-        const int size = 384;
-        const int overlap = 64;
-        var prefixLength = SearchBoundary(title, Math.Min(96, title.Length));
-        var prefix = prefixLength > 0 ? title[..prefixLength] + "\n" : "";
-        for (var offset = 0; ;)
-        {
-            var end = SearchBoundary(text, Math.Min(offset + size, text.Length));
-            var content = prefix + text[offset..end];
-            var version = "bge-small-en-v1.5:board-search-2:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
-            passages.Add(new(source + ":" + offset, content, version, null));
-            if (end >= text.Length) break;
-            offset = SearchBoundary(text, end - overlap);
-        }
-    }
-
-    private static int SearchBoundary(string text, int index) => index > 0 && index < text.Length
-        && char.IsHighSurrogate(text[index - 1]) && char.IsLowSurrogate(text[index]) ? index - 1 : index;
 
     public async Task SaveSearchEmbeddingAsync(string projectPath, string cardId, string passageId, string version,
         float[] embedding, CancellationToken cancellationToken = default)

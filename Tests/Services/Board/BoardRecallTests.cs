@@ -1,3 +1,4 @@
+using Tests.Services.BertV2;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -28,7 +29,12 @@ public sealed class BoardRecallTests : IDisposable
             s.Contains("overflow", StringComparison.OrdinalIgnoreCase) ? [1f, 0f] : [0f, 1f]);
     }
 
-    private BoardRecallService Recall() => new(store, projects.Object, embedder.Object, NullLogger<BoardRecallService>.Instance);
+    private BoardRecallService Recall(Func<IBertV2BgeEmbedder>? factory = null, IBertSearchDbService? history = null)
+    {
+        var index = SearchTestIndex.Build(store, root);
+        var search = new BoardSearchService(index, factory ?? (() => embedder.Object), NullLogger<BoardSearchService>.Instance);
+        return new(projects.Object, index, search, history);
+    }
     private async Task<BoardCardRecord> Card(string title = "Description overflow", string? project = null)
     {
         project ??= root;
@@ -53,7 +59,7 @@ public sealed class BoardRecallTests : IDisposable
         var tool = new SessionSearchTool(history.Object, Recall());
         var result = await tool.SearchHistory($"VB-1, VB-999, {foreign.Key}", 1, Ct);
         Assert.Contains(local.Title, result);
-        Assert.Contains("[exact card · project " + root, result);
+        Assert.Contains("[exact card - project " + root, result);
         Assert.Contains("No card matches VB-999", result);
         Assert.Contains(foreign.Title, result);
         Assert.Contains("WARNING: another repository", result);
@@ -146,11 +152,11 @@ public sealed class BoardRecallTests : IDisposable
         await Card("Deployment credentials");
         var result = await Recall().SearchAsync("where did we fix description overflow", 1, Ct);
         Assert.Contains(relevant.Key, result.Text);
-        Assert.Contains("card · BGE/keyword ranking", result.Text);
+        Assert.Contains("card - BGE/keyword ranking", result.Text);
         var docs = await store.GetSearchDocumentsAsync(0, Ct);
         Assert.All(docs.SelectMany(document => document.Passages), passage => Assert.NotNull(passage.Embedding));
         await store.SaveHandoffAsync(root, relevant.Id, new("Overflow is fixed", "Containment", "Browser checked", "", []), BoardAuthor.User(), Ct);
-        Assert.Contains((await store.GetSearchDocumentsAsync(0, Ct)).Single(d => d.Id == relevant.Id).Passages, p => p.Embedding is null);
+        Assert.Contains((await store.GetSearchDocumentsAsync(0, Ct)).Single(d => d.Id == relevant.Id).Sources, p => p.Text.Contains("Containment"));
         embedder.Setup(e => e.GenerateEmbedding(It.IsAny<string>())).Throws(new IOException("missing model"));
         Assert.Contains(relevant.Key, (await Recall().SearchAsync("containment", 1, Ct)).Text);
         await store.DeleteCardAsync(root, relevant.Id, Ct);
@@ -209,7 +215,7 @@ public sealed class BoardRecallTests : IDisposable
         await store.LinkSessionAsync(root, card.Id, session, null, "base:codex", "codex", "Original implementation", "launch", Ct);
         var history = new Mock<IBertSearchDbService>(MockBehavior.Strict);
         history.Setup(h => h.GetSessionRecallPage(session, 0, 2)).Returns([new(session + ":1", "Original implementation discussion", null)]);
-        var recall = new BoardRecallService(store, projects.Object, embedder.Object, NullLogger<BoardRecallService>.Instance, history.Object);
+        var recall = Recall(history: history.Object);
         Assert.Contains("Original implementation discussion", (await recall.SearchAsync("VB-1", 1, Ct)).Text);
         var service = new BoardService(store, new Mock<IBoardCommitService>().Object, new NullBoardLiveSessionProbe());
         var tool = new BoardTool(service, projects.Object, store, history: history.Object);
@@ -231,7 +237,7 @@ public sealed class BoardRecallTests : IDisposable
         Exception failure = invalidModelConfiguration
             ? new ArgumentException("invalid model configuration")
             : new IOException("model not installed");
-        var recall = new BoardRecallService(store, projects.Object, () => throw failure, NullLogger<BoardRecallService>.Instance);
+        var recall = Recall(() => throw failure);
         var search = new SessionSearchTool(() => throw failure, recall);
         Assert.Contains(card.Title, await search.SearchHistory("VB-1", 1, Ct));
         Assert.Contains(card.Title, await search.SearchHistory("description overflow", 1, Ct));

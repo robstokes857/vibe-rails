@@ -274,14 +274,10 @@ test('the editor opens as its own layer, never a second app.showModal', () => {
     assert.match(source, /setAttribute\('aria-hidden', 'true'\)/);
 });
 
-test('the environment form omits steps entirely until the editor has been used', () => {
-    const source = readFileSync(controllerPath, 'utf8');
-
-    // `null` on the wire means "leave them untouched"; sending [] from a form whose steps modal
-    // was never opened would wipe a configured setup chain.
+test('the shared environment editor omits steps until explicitly edited', () => {
+    const source = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/environment-editor.js'), 'utf8');
     assert.match(source, /let editedSteps = null;/);
-    assert.match(source, /if \(editedSteps\) payload\.steps = serializeSteps\(editedSteps\);/);
-    assert.match(source, /\.\.\.\(editedSteps \? \{ steps: serializeSteps\(editedSteps\) \} : \{\}\)/);
+    assert.match(source, /editedSteps !== null \? \{ steps: serializeSteps\(editedSteps\) \} : \{\}/);
 });
 
 test('step rows do not exceed the server-side maximum', () => {

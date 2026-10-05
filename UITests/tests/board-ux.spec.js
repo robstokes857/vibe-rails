@@ -178,7 +178,7 @@ test('purpose filters keep relevant agent comments, attention and unsaved drafts
 test('reference search routes GUIDs directly, finds card sessions and attaches commits without saving drafts', async ({ page }) => {
     let current;
     await openBoard(page, { onCard: card => { current = card; } });
-    const session = { id: '12345678-1234-1234-1234-123456789abc', displayName: 'Earlier investigation', workingDirectory: 'C:/board-fixture' };
+    const session = { id: '12345678-1234-1234-1234-123456789abc', displayName: 'Earlier investigation', workingDirectory: 'C:/board-fixture', cli: 'codex', createdAt: '2026-10-05T15:30:00Z', active: false };
     const commit = { sha: 'abcdef0123456789abcdef0123456789abcdef01', shortSha: 'abcdef0', message: 'Fix the issue' };
     let fileReads = 0, cardReads = 0, historyReads = 0, sessionLinks = 0, commitLinks = 0;
     await page.route('**/api/v1/board/files?*', route => { fileReads++; return route.fulfill({ json: { files: [] } }); });
@@ -198,18 +198,24 @@ test('reference search routes GUIDs directly, finds card sessions and attaches c
     const popup = composer.locator('[data-board-file-popup]');
     const initialCardReads = cardReads;
     await input.fill('@' + session.id.replaceAll('-', ''));
+    await expect(popup).toContainText('No matching files');
+    expect(historyReads).toBe(0); expect(fileReads).toBe(1); expect(cardReads).toBe(initialCardReads);
+    await input.fill('!' + session.id.replaceAll('-', ''));
     await expect(popup).toContainText('Earlier investigation');
-    expect(historyReads).toBe(1); expect(fileReads).toBe(0); expect(cardReads).toBe(initialCardReads);
+    expect(historyReads).toBe(1); expect(fileReads).toBe(1); expect(cardReads).toBe(initialCardReads);
     await input.press('Enter');
     await expect(input).toHaveValue('!' + session.id + ' ');
     expect(sessionLinks).toBe(1);
-    await input.fill('!VIBE-');
+    await input.fill('!Other card');
     await expect(popup).toContainText('Other card');
+    expect(historyReads).toBe(1);
     await input.press('Enter');
     await expect(popup).toContainText('Earlier investigation');
+    await expect(popup).toContainText('codex');
+    await expect(popup).toContainText(/Linked .*2026/);
     await input.press('Enter');
     await expect(input).toHaveValue('!' + session.id + ' ');
-    expect(historyReads).toBe(1); expect(fileReads).toBe(0); expect(sessionLinks).toBe(1);
+    expect(historyReads).toBe(1); expect(fileReads).toBe(1); expect(sessionLinks).toBe(1);
     await input.fill('#abcdef0');
     await expect(popup).toContainText('Link commit');
     await input.press('Enter');

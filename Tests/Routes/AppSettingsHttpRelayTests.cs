@@ -16,17 +16,6 @@ public sealed class AppSettingsHttpRelayTests
         Assert.False(settings!.RouteThroughVibeRailsAi);
     }
 
-    [Fact]
-    public void OlderSettingsFile_HidesVibeAiWhenTheKeyIsAbsent()
-    {
-        Assert.False(new Settings().ShowVibeAiUi);
-
-        var settings = JsonSerializer.Deserialize("{}", ConfigJsonContext.Default.Settings);
-
-        Assert.NotNull(settings);
-        Assert.False(settings!.ShowVibeAiUi);
-    }
-
     [Theory]
     [InlineData(true, null, "key", true)]
     [InlineData(false, null, "key", false)]

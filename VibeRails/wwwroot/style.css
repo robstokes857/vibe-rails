@@ -14531,7 +14531,7 @@ body.git-guard-focus-active #app-content {
 .job-inline-editor[hidden] { display: none; }
 
 .job-inline-form {
-    width: min(980px, 100%);
+    width: min(880px, 100%);
     margin: 0 auto;
     padding: 1.25rem;
     border: 1px solid var(--color-border);
@@ -19829,3 +19829,52 @@ body.performance-mode .brand-text-sm {
 
 /* Diff viewer: a short status beside the +/- counts (lazy loads, binary and truncated files). */
 .vb-diff-toolbar .vb-diff-notice { margin-left: 12px; font-size: 11px; color: var(--color-text-muted, #94a3b8); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Shared provider form, also mounted inside the Automation creation dialog. */
+.environment-editor { min-width: 0; container-type: inline-size; }
+.environment-editor .form-label, .environment-editor .form-check-label,
+.job-creation-form .form-label { text-transform: none; letter-spacing: normal; font-family: inherit; font-size: .9rem; font-weight: 600; }
+.environment-editor .form-text, .env-message-help { font-size: .82rem; color: var(--color-text-muted, #9a9a9a); }
+.environment-editor .form-control, .environment-editor .form-select { min-height: 42px; font-size: .9rem; }
+.env-primary-options { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(190px, 1.5fr) minmax(100px, .8fr) minmax(120px, .8fr); align-items: start; gap: 1rem; margin-bottom: 1.2rem; }
+.env-primary-options > * { min-width: 0; margin-bottom: 0 !important; }
+.env-primary-options .ts-wrapper { width: 100%; min-width: 0; }
+.env-primary-options .form-switch { display: flex; flex-direction: column; align-items: flex-start; gap: .7rem; padding: 0; }
+.env-primary-options .form-switch .form-check-label { order: -1; white-space: nowrap; }
+.env-primary-options .form-switch .form-check-input { float: none; margin: 0; }
+.env-primary-options small { display: block; margin-top: .4rem; overflow-wrap: anywhere; }
+.env-context-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.env-context-options [data-reviewer-policy] { grid-column: 1 / -1; }
+.env-editor-presets { display: flex; align-items: center; flex-wrap: wrap; gap: .6rem; margin: 0 0 1rem; font-size: .9rem; color: var(--color-text-muted, #9a9a9a); }
+.env-preset-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.env-message-help { margin-top: .65rem; }
+.env-message-help p { margin: .5rem 0; line-height: 1.5; }
+.env-prompt-variables { display: flex; flex-wrap: wrap; gap: .4rem; }
+.env-prompt-variable { border: 1px solid var(--color-border, #333); border-radius: 5px; background: var(--color-bg-base, #121212); padding: .35rem .5rem; font: inherit; cursor: pointer; }
+.env-prompt-variable code { background: transparent; padding: 0; color: var(--color-primary, #3b82f6); font-size: inherit; }
+.env-prompt-variable:hover, .env-prompt-variable:focus-visible { border-color: var(--color-primary, #3b82f6); outline: 2px solid var(--color-primary, #3b82f6); outline-offset: 1px; }
+.env-secondary-options { margin-top: 1.2rem; }
+.env-secondary-content [data-cli-settings-slot] { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 1.25rem; }
+.env-secondary-content [data-cli-settings-slot] > :has(textarea) { grid-column: 1 / -1; }
+.environment-editor textarea { min-height: 100px; }
+.job-creation-modal .modal-dialog { max-width: min(1060px, calc(100vw - 2rem)); }
+.job-creation-modal .modal-body { padding: 0; }
+.job-creation-modal .modal-title { text-transform: none; letter-spacing: normal; font-family: inherit; font-size: 1.2rem; }
+.job-creation-modal .job-creation-form { width: 100%; margin: 0; border: 0; border-radius: 0; padding: 1.25rem 1.5rem 0; }
+.job-creation-form .job-actions-fieldset { border: 0; background: transparent; padding: 0; margin-top: 1.2rem; }
+.job-simple-workflow .job-actions-fieldset > legend, .job-simple-workflow .job-worker-card > header { display: none; }
+.job-simple-workflow .job-worker-card { background: transparent; border: 0; }
+.job-simple-workflow .job-worker-card > .job-action-body { padding: 0; }
+.job-creation-form .job-actions-toolbar { display: block; margin: 1rem 0; }
+.job-creation-form .job-actions-toolbar > div { display: flex; flex-wrap: wrap; gap: .5rem; }
+.job-creation-form .job-trigger-choices { display: flex; flex-wrap: wrap; gap: .6rem; }
+.job-trigger-choices .job-trigger-option { flex: 1 1 180px; margin: 0; padding: .65rem .75rem; border: 1px solid var(--color-border, #333); border-radius: 7px; background: var(--color-bg-base, #121212); }
+.job-trigger-choices .job-trigger-option small { display: none; }
+.job-trigger-choices .job-trigger-option:has(#job-trigger-precommit:checked) small { display: block; }
+.job-trigger-choices .job-trigger-option:has(input:checked) { border-color: var(--color-primary, #3b82f6); }
+.job-more-options { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--color-border, #333); }
+.job-creation-form .job-inline-form-actions { position: sticky; bottom: 0; z-index: 5; margin: 1rem -1.5rem 0; padding: .9rem 1.5rem; border-top: 1px solid var(--color-border, #333); background: var(--color-bg-surface, #1e1e1e); }
+.job-creation-form [hidden], .environment-editor [hidden] { display: none !important; }
+@container (max-width: 720px) { .env-primary-options { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container (max-width: 450px) { .env-primary-options, .env-context-options, .env-secondary-content [data-cli-settings-slot] { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 600px) { .job-creation-modal .modal-dialog { max-width: none; margin: .5rem; } .job-creation-modal .job-creation-form { padding: 1rem 1rem 0; } .job-creation-form .job-inline-form-actions { margin-inline: -1rem; padding-inline: 1rem; } }

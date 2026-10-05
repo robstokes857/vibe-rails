@@ -230,8 +230,11 @@ export async function streamStepTest({
  *
  * @returns {{ close: () => void }} handle, mostly for tests and for teardown from the caller.
  */
-export function openStepsEditor(app, { steps = [], workingDirectory = null, onSave = null } = {}) {
-    const host = typeof document !== 'undefined' ? document.getElementById('modal-container') : null;
+export function openStepsEditor(app, { steps = [], workingDirectory = null, onSave = null, triggerElement = null } = {}) {
+    const modalHost = typeof document !== 'undefined' ? document.getElementById('modal-container') : null;
+    // Inline Automation forms have no visible outer modal. Mount at body level there,
+    // keeping the same focus trap and restoring the caller's inert state on close.
+    const host = triggerElement && !modalHost?.contains(triggerElement) ? document.body : modalHost;
     if (!host) return { close: () => { } };
 
     const layer = document.createElement('div');
@@ -304,7 +307,7 @@ export function openStepsEditor(app, { steps = [], workingDirectory = null, onSa
             else element.setAttribute('aria-hidden', ariaHidden);
         });
         if (restoreFocus) {
-            requestAnimationFrame(() => host.querySelector('[data-env-steps-open]')?.focus());
+            requestAnimationFrame(() => (triggerElement || host.querySelector('[data-env-steps-open]'))?.focus());
         }
     }
 

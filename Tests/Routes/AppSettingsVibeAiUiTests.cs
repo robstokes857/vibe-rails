@@ -9,13 +9,13 @@ namespace Tests.Routes;
 public sealed class AppSettingsVibeAiUiTests
 {
     [Theory]
-    [InlineData(false, null, false)]
-    [InlineData(true, null, true)]
-    [InlineData(false, false, false)]
-    [InlineData(false, true, true)]
-    [InlineData(true, false, false)]
-    [InlineData(true, true, true)]
-    public void Settings_PersistVisibilityAndPreserveItWhenOmitted(bool stored, bool? requested, bool expected)
+    [InlineData(false, null)]
+    [InlineData(true, null)]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void Settings_AlwaysReportVibeAiShown_AndPreserveTheRetiredStoredValue(bool stored, bool? requested)
     {
         var directory = Path.Combine(Path.GetTempPath(), $"viberails-ai-ui-settings-{Guid.NewGuid():N}");
         var remoteAccess = ParserConfigs.GetRemoteAccess();
@@ -28,15 +28,16 @@ public sealed class AppSettingsVibeAiUiTests
             using var store = new SettingsFile(Path.Combine(directory, "settings.json"));
             store.Save(new Settings { ShowVibeAiUi = stored });
 
-            // The narrow computer-name route must not reset the preference. Its response
-            // uses the same builder as GET /settings.
+            // The narrow computer-name route uses the same response builder as GET /settings.
             var read = AppSettingsRoutes.UpdateComputerName(new UpdateComputerNameDto("Fixture"), store);
-            Assert.Equal(stored, read.ShowVibeAiUi);
+            Assert.True(read.ShowVibeAiUi);
             Assert.Equal(stored, store.LoadFresh().ShowVibeAiUi);
 
+            // A request value, including an older client's false, cannot hide Vibe AI. Older
+            // versions on the same machine still read their own stored preference.
             var saved = AppSettingsRoutes.UpdateSettings(read with { ShowVibeAiUi = requested }, store);
-            Assert.Equal(expected, saved.ShowVibeAiUi);
-            Assert.Equal(expected, store.LoadFresh().ShowVibeAiUi);
+            Assert.True(saved.ShowVibeAiUi);
+            Assert.Equal(stored, store.LoadFresh().ShowVibeAiUi);
         }
         finally
         {

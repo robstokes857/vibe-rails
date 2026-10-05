@@ -3,119 +3,57 @@ using VibeRails.Services.BertV2;
 
 namespace VibeRails.Services.Board;
 
-/// <summary>Shared local Board retrieval for the UI and MCP, with incremental BGE indexing.</summary>
-public sealed partial class BoardSearchService(IBoardStore store, Func<IBertV2BgeEmbedder> embedder,
+/// <summary>Shared read-only local Board retrieval for the UI and MCP.</summary>
+public sealed partial class BoardSearchService(ISearchIndexStore store, Func<IBertV2BgeEmbedder> embedder,
     ILogger<BoardSearchService> logger)
 {
-    private static readonly SemaphoreSlim Indexing = new(1, 1);
-    private const int MaximumNewVectors = 32;
-
-    public BoardSearchService(IBoardStore store, IBertV2BgeEmbedder embedder, ILogger<BoardSearchService> logger)
+    private static readonly SemaphoreSlim QueryModel = new(1, 1);
+    public BoardSearchService(ISearchIndexStore store, IBertV2BgeEmbedder embedder, ILogger<BoardSearchService> logger)
         : this(store, () => embedder, logger) { }
 
-    /// <summary>Model loading is deferred until a nonempty semantic query and may fall back to keywords.</summary>
     public static BoardSearchService Create(IServiceProvider services) => new(
-        services.GetRequiredService<IBoardStore>(), () => services.GetRequiredService<IBertV2BgeEmbedder>(),
+        services.GetRequiredService<ISearchIndexStore>(), () => services.GetRequiredService<IBertV2BgeEmbedder>(),
         services.GetRequiredService<ILogger<BoardSearchService>>());
 
-    /// <summary>Searches all local boards, preferring the current project and preserving exact identity matches.</summary>
-    /// <remarks>The optional server-resolved projectScope filter applies before ranking and result limits.</remarks>
+    /// <summary>Searches indexed local cards, filtering project eligibility before ranking and limits.</summary>
     public async Task<IReadOnlyList<BoardSearchHit>> SearchAsync(string currentProjectPath, string query,
         int count = 50, string? excludeCardId = null, CancellationToken ct = default,
-        IReadOnlyCollection<string>? excludedCardIds = null, string? projectScope = null)
+        IReadOnlyCollection<string>? excludedCardIds = null, string? projectScope = null, bool exactOnly = false)
     {
         query = (query ?? "").Trim();
         if (query.Length > 1000) throw new BoardValidationException("Card search must be at most 1000 characters.");
         count = Math.Clamp(count, 1, 50);
-        var excluded = excludedCardIds?.ToHashSet(StringComparer.Ordinal);
+        var excluded = excludedCardIds?.ToHashSet(StringComparer.Ordinal) ?? [];
+        if (excludeCardId is not null) excluded.Add(excludeCardId);
         var words = Words().Matches(query).Select(match => match.Value).Where(word => word.Length > 1 && !StopWords.Contains(word))
             .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        // Exact permanent keys and row IDs do not need a model. Short/display aliases are
-        // still ranked in the owning project before ambiguous labels elsewhere.
-        var identityQuery = BoardKeys.TryParseStored(query, out _) || query.StartsWith("card_", StringComparison.Ordinal);
-        // Serialize cold index work within this host so simultaneous searches neither
-        // duplicate model work nor miss all semantic results while another query warms it.
-        // Acquire before loading/using the model so superseded queued keystrokes do no
-        // inference work. The store is independently safe across processes.
-        var ownsIndexing = query.Length > 0 && !identityQuery;
-        if (ownsIndexing) await Indexing.WaitAsync(ct);
-        var generated = 0;
-        var candidates = new List<Candidate>();
-        try
+        float[]? vector = null;
+        ct.ThrowIfCancellationRequested();
+        if (!exactOnly && query.Length > 0 && !BoardKeys.TryParseStored(query, out _) && !query.StartsWith("card_", StringComparison.Ordinal))
         {
-            float[]? queryVector = null;
-            if (ownsIndexing)
-            {
-                ct.ThrowIfCancellationRequested();
-                try { queryVector = embedder().GenerateEmbedding(query); }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                { logger.LogWarning(ex, "Board search model unavailable; using keywords"); }
-                if (queryVector is null) { Indexing.Release(); ownsIndexing = false; }
-            }
-            string? afterCardId = null;
-            while (true)
-            {
-                ct.ThrowIfCancellationRequested();
-                var page = await store.GetSearchDocumentsAsync(0, ct, includeContent: query.Length > 0, afterCardId: afterCardId);
-                foreach (var document in page)
-                {
-                    if (document.Id == excludeCardId || excluded?.Contains(document.Id) == true) continue;
-                    // Project-only consumers such as merge must constrain eligibility before
-                    // scoring and the result limit; foreign matches cannot consume their slots.
-                    if (projectScope is not null && !SameProject(document.ProjectPath, projectScope)) continue;
-                    var current = SameProject(document.ProjectPath, currentProjectPath);
-                    var exact = Exact(document, query, current);
-                    var lexical = query.Length == 0 ? 0 : TextScore(document.Title, query, words) * 3;
-                    var semantic = 0d;
-                    var snippet = document.Passages.FirstOrDefault()?.Text ?? document.Title;
-                    var snippetScore = -1d;
-                    // Keyword input retains the original source: an identifier or phrase
-                    // can be longer than an individual model passage or cross its boundary.
-                    foreach (var source in document.KeywordSources)
-                    {
-                        ct.ThrowIfCancellationRequested();
-                        var score = query.Length == 0 ? 0 : TextScore(source, query, words);
-                        lexical = Math.Max(lexical, score);
-                        if (score > snippetScore) { snippet = source; snippetScore = score; }
-                    }
-                    foreach (var passage in document.Passages)
-                    {
-                        ct.ThrowIfCancellationRequested();
-                        var score = query.Length == 0 ? 0 : TextScore(passage.Text, query, words);
-                        lexical = Math.Max(lexical, score);
-                        if (score > snippetScore) { snippet = passage.Text; snippetScore = score; }
-                        var vector = passage.Embedding;
-                        if (vector is null && ownsIndexing && generated < MaximumNewVectors)
-                        {
-                            try
-                            {
-                                vector = embedder().GenerateEmbedding(passage.Text);
-                                generated++;
-                                await store.SaveSearchEmbeddingAsync(document.ProjectPath, document.Id, passage.Id, passage.Version, vector, ct);
-                            }
-                            catch (Exception ex) when (ex is not OperationCanceledException)
-                            { logger.LogWarning(ex, "Board search indexing unavailable"); generated = MaximumNewVectors; }
-                        }
-                        if (queryVector is null || vector is null) continue;
-                        var similarity = Cosine(queryVector, vector);
-                        if (!double.IsFinite(similarity) || similarity <= semantic) continue;
-                        semantic = similarity;
-                        if (lexical == 0) snippet = passage.Text;
-                    }
-                    if (semantic < .45) semantic = 0;
-                    if (query.Length > 0 && exact == 0 && lexical == 0 && semantic == 0) continue;
-                    var hit = new BoardSearchHit(document.Id, document.Key, document.DisplayId, document.Title,
-                        document.BoardId, document.BoardName, document.ColumnId, document.ColumnName, document.ProjectPath,
-                        current, Snippet(snippet, words), exact > 0 ? "exact" : lexical > 0 && semantic > 0 ? "keyword+semantic"
-                            : lexical > 0 ? "keyword" : semantic > 0 ? "semantic" : "recent", 0,
-                        document.Type, document.Priority, document.Assignee, document.Blocked, document.Flagged);
-                    candidates.Add(new(hit, exact, lexical, semantic, document.UpdatedUtc));
-                }
-                if (page.Count < 100) break;
-                afterCardId = page[^1].Id;
-            }
+            await QueryModel.WaitAsync(ct);
+            try { vector = embedder().GenerateEmbedding(query); }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            { logger.LogWarning(ex, "Board search model unavailable; using keywords"); }
+            finally { QueryModel.Release(); }
         }
-        finally { if (ownsIndexing) Indexing.Release(); }
+        var candidates = new List<Candidate>();
+        // Card-level grouping happens in SQL, so a long card cannot consume multiple result slots.
+        foreach (var match in store.Search("board", query, vector, int.MaxValue, projectScope, excluded))
+        {
+            ct.ThrowIfCancellationRequested();
+            var document = match.Document.Board!;
+            var current = SameProject(document.ProjectPath, currentProjectPath);
+            var exact = Exact(document, query, current);
+            if (exactOnly && (exact == 0 || !current && !BoardKeys.TryParseStored(query, out _))) continue;
+            if (query.Length > 0 && exact == 0 && match.Lexical == 0 && match.Semantic == 0) continue;
+            var hit = new BoardSearchHit(document.Id, document.Key, document.DisplayId, document.Title,
+                document.BoardId, document.BoardName, document.ColumnId, document.ColumnName, document.ProjectPath,
+                current, Snippet(match.Text, words), exact > 0 ? "exact" : match.Lexical > 0 && match.Semantic > 0 ? "keyword+semantic"
+                    : match.Lexical > 0 ? "keyword" : match.Semantic > 0 ? "semantic" : "recent", 0,
+                document.Type, document.Priority, document.Assignee, document.Blocked, document.Flagged);
+            candidates.Add(new(hit, exact, match.Lexical, match.Semantic, document.UpdatedUtc));
+        }
 
         // Weight semantic evidence by its similarity, then give local matches a bounded
         // preference. A weak local match must not hide a much stronger foreign match.
@@ -168,19 +106,14 @@ public sealed partial class BoardSearchService(IBoardStore store, Func<IBertV2Bg
 
     private static string Snippet(string text, string[] words)
     {
-        var first = words.Select(word => text.IndexOf(word, StringComparison.OrdinalIgnoreCase)).Where(index => index >= 0).DefaultIfEmpty(0).Min();
+        var first = words.Select(word => text.IndexOf(word, StringComparison.OrdinalIgnoreCase)).Where(index => index >= 0).DefaultIfEmpty(-1).Min();
+        // A paraphrase may have no literal anchor. Show both ends of the matched chunk,
+        // including its tail, rather than always clipping a deep-source match out of view.
+        if (first < 0 && text.Length > 260) return text[..100] + " … " + text[^155..];
+        first = Math.Max(0, first);
         var start = Math.Max(0, first - 70);
         var length = Math.Min(260, text.Length - start);
         return (start > 0 ? "…" : "") + text.Substring(start, length) + (start + length < text.Length ? "…" : "");
-    }
-
-    private static double Cosine(float[] left, float[] right)
-    {
-        if (left.Length != right.Length || left.Length == 0) return 0;
-        double dot = 0, l = 0, r = 0;
-        for (var i = 0; i < left.Length; i++)
-        { dot += (double)left[i] * right[i]; l += (double)left[i] * left[i]; r += (double)right[i] * right[i]; }
-        return l == 0 || r == 0 ? 0 : dot / Math.Sqrt(l * r);
     }
 
     private sealed record Candidate(BoardSearchHit Hit, int Exact, double Lexical, double Semantic, DateTime UpdatedUtc);

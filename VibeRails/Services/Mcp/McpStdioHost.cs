@@ -111,17 +111,13 @@ public static class McpStdioHost
             var settings = sp.GetRequiredService<IBertSettings>();
             return new BertV2BgeEmbedder(settings.ModelPath, settings.VocabPath);
         });
-        // Explicit factory, NOT type activation. BertSearchDbService's ctor takes
-        // (vectorDatabasePath, stateDatabasePath) since the storage move, and this host
-        // deliberately never calls AddSqliteStorage -- that would register the scoped IRepository,
-        // and running state migrations from a short-lived MCP child is exactly what must not
-        // happen. Type activation therefore found no string factory and every search_history call
-        // threw "Unable to resolve service for type 'System.String'".
-        services.AddSingleton<IBertSearchDbService>(sp => new BertSearchDbService(
-            Path.Combine(sp.GetRequiredService<IBertSettings>().DataDirectory, BertSearchSchema.DatabaseFileName),
-            ResolveStatePath()));
+        // The short-lived child only reads search.db. Do not register IRepository or root
+        // indexing jobs here: schema population and source reconciliation belong to the root.
+        services.AddSingleton<ISearchIndexStore>(_ => new SqliteSearchIndexStore(
+            new SqliteStoragePaths(ResolveStatePath()).SearchDatabasePath, ResolveStatePath()));
+        services.AddSingleton<IBertSearchDbService>(sp => new BertSearchDbService(sp.GetRequiredService<ISearchIndexStore>()));
         services.AddSingleton<IBertDocumentResponseMapper, BertDocumentResponseMapper>();
-        services.AddSingleton<IUnifiedSearchService, UnifiedSearchService>();
+        services.AddSingleton<IUnifiedSearchService>(UnifiedSearchService.Create);
         services.AddScoped<SessionSearchTool>(SessionSearchTool.Create);
         services.AddScoped<VibeRails.Services.Board.BoardRecallService>(VibeRails.Services.Board.BoardRecallService.Create);
         services.AddScoped<VibeRails.Services.Board.BoardSearchService>(VibeRails.Services.Board.BoardSearchService.Create);

@@ -38,7 +38,7 @@ const GROUP_META = {
         tag: 'Strategy · 02',
         name: 'Sessions',
         technicalName: 'sess.sem',
-        explainer: 'Same vector match — but against full-session aggregate chunks (1600/800 windows).',
+        explainer: 'Finds related work within token-aware chunks of a captured session.',
         formula: 'score = 1 − cosine(query_emb, session_chunk_emb)',
         model: 'bge-small-en',
         scoreKind: 'similarity',
@@ -320,8 +320,7 @@ export class VibeRailsAiController {
         if (!s) return;
         // Compact pills
         this.nodes.statusPills.innerHTML = [
-            ['Vector DB', s.databaseExists, s.databaseExists ? 'ok' : 'bad'],
-            ['State DB', s.stateDatabaseExists, s.stateDatabaseExists ? 'ok' : 'warn'],
+            ['Search DB', s.databaseExists, s.databaseExists ? 'ok' : 'warn'],
             ['Model', s.modelAvailable, s.modelAvailable ? 'ok' : 'bad'],
             ['Semantic', s.semanticSearchAvailable, s.semanticSearchAvailable ? 'ok' : 'warn'],
         ].map(([label, _ok, tone]) =>
@@ -337,23 +336,30 @@ export class VibeRailsAiController {
         const sessStats = [
             ['chunks', fmtNum(s.sessionDocumentCount)],
             ['vectors', fmtNum(s.sessionVectorCount)],
-            ['window/stride', '1600/800'],
+            ['model window', '512 tokens'],
         ];
         const paths = [
             ['model', `${s.modelName || 'n/a'} · ${s.embeddingDimension || '?'}d`, s.modelPath],
-            ['vec db', fmtBytes(s.vectorDatabaseSizeBytes), s.databasePath],
-            ['state db', fmtBytes(s.stateDatabaseSizeBytes), s.stateDatabasePath],
+            ['search db', fmtBytes(s.vectorDatabaseSizeBytes), s.databasePath],
             ['data dir', '', s.dataDirectory],
             ['latest', s.latestCaptureUTC ? fmtDate(s.latestCaptureUTC) : 'none', ''],
         ];
 
-        this.nodes.diagPanel.innerHTML = `
+        const progress = s.indexing;
+        const indexing = progress ? `<div class="insp-diag-card" style="grid-column:1/-1">
+            <div class="insp-diag-label">Search indexing</div>
+            <div>${fmtNum(progress.embedded)} / ${fmtNum(progress.chunks)} chunks embedded across ${fmtNum(progress.documents)} documents.
+                ${fmtNum(progress.pendingSources)} sources awaiting chunking; ${fmtNum(progress.failed)} failures awaiting retry.</div>
+            ${progress.lastReconciledUtc ? `<div>Last reconciliation: ${esc(fmtDate(progress.lastReconciledUtc))}</div>` : ''}
+            ${progress.lastError ? `<div class="text-warning">${esc(progress.lastError)}</div>` : ''}
+        </div>` : '';
+        this.nodes.diagPanel.innerHTML = `${indexing}
             <div class="insp-diag-card">
-                <div class="insp-diag-label">Per-Message Store · bert_input_documents</div>
+                <div class="insp-diag-label">Captured messages</div>
                 <div class="insp-diag-stat-row">${msgStats.map(([k, v]) => `<div class="insp-diag-stat"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('')}</div>
             </div>
             <div class="insp-diag-card sess">
-                <div class="insp-diag-label">Per-Session Store · bert_session_documents</div>
+                <div class="insp-diag-label">Captured sessions</div>
                 <div class="insp-diag-stat-row">${sessStats.map(([k, v]) => `<div class="insp-diag-stat"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('')}</div>
             </div>
             <div class="insp-diag-card" style="grid-column:1/-1;border-left-color:var(--color-text-muted)">

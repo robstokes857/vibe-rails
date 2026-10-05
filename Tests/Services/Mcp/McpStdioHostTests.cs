@@ -92,7 +92,7 @@ public class McpStdioHostTests
 
         var search = provider.GetRequiredService<IBertSearchDbService>();
 
-        Assert.EndsWith("bert_user_text_vectors.db", search.VectorDatabasePath);
+        Assert.EndsWith("search.db", search.VectorDatabasePath);
         Assert.EndsWith("state.db", search.StateDatabasePath);
     }
 }

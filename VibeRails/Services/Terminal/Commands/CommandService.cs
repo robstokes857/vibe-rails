@@ -183,8 +183,10 @@ public class CommandService : ICommandService
         var prompt = !string.IsNullOrWhiteSpace(summary)
             ? summary
             : initialPrompt;
-        if (_createVibeStoryTrackingEnabled())
-            prompt = VibeStoryTrackingPrompt.Compose(prompt);
+        // Story tracking is the default prompt only. Explicit tasks (including Board and
+        // Automation prompts) and continuation summaries already own their instructions.
+        if (string.IsNullOrWhiteSpace(prompt) && _createVibeStoryTrackingEnabled())
+            prompt = VibeStoryTrackingPrompt.Guidance;
 
         if (!string.IsNullOrWhiteSpace(prompt))
         {

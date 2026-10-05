@@ -8,7 +8,7 @@ namespace VibeRails.Services.Mcp.Tools;
 public sealed partial class BoardTool
 {
     /// <summary>Searches the same local Board corpus used by the dashboard and link picker.</summary>
-    [McpServerTool, Description("Search cards across ALL local boards using semantic and keyword matches over titles, descriptions, comments, legacy notes and previous-work handoffs. Current-repository matches are preferred. Results identify the board, lane and project, and explicitly warn about other repositories. Use the returned permanent key or row ID with get_board_card/update_board_card; display IDs may repeat across projects.")]
+    [McpServerTool, Description("Find relevant cards across all local boards from a natural-language query or exact card key. Searches full titles, descriptions, comments, retained notes and handoffs using semantic and keyword matching. Returns matching snippets and permanent card identities with owning board, lane and project. Current-repository matches are preferred; other repositories are labeled. Use when the desired result is a card. Use the permanent key or row ID with get_board_card; display IDs may repeat across projects.")]
     public async Task<string> SearchBoardCards(
         [Description("Natural-language query, exact card key, display ID or row ID; at most 1000 characters.")] string query,
         [Description("Maximum matches, from 1 to 50; defaults to 20.")] int maxResults = 20,

@@ -61,7 +61,7 @@ public sealed class BertDocumentResponseMapper : IBertDocumentResponseMapper
     public BertSearchHitResponse ToSearchHit(BertStoredDocument document, BertInputMetadata? metadata)
     {
         var parsedId = BertDocumentId.Parse(document.DocumentId);
-        var preview = BuildPreview(metadata?.InputText, document.RawText);
+        var preview = BuildPreview(document.RawText, document.RawText);
 
         return new BertSearchHitResponse(
             document.DocumentId,

@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using VibeRails.DB;
+using VibeRails.Data.Sqlite;
 using Xunit;
 
 namespace Tests.DB;
@@ -10,7 +11,7 @@ public class ChatHistorySqlTests
     public async Task SelectChatHistoryBase_UsesRawPreview()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
-        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await using var connection = new SqliteConnection($"Data Source=chat-history-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
         await connection.OpenAsync(cancellationToken);
         await InitializeSchemaAsync(connection, cancellationToken);
 
@@ -36,34 +37,11 @@ public class ChatHistorySqlTests
         Assert.Equal("raw preview", reader.GetString(12));
     }
 
-    private static async Task InitializeSchemaAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    private static Task InitializeSchemaAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
-        await using (var foreignKeys = connection.CreateCommand())
-        {
-            foreignKeys.CommandText = SqlStrings.PragmaForeignKeys;
-            await foreignKeys.ExecuteNonQueryAsync(cancellationToken);
-        }
-
-        foreach (var sql in SqlStrings.InitStatements)
-        {
-            await using var cmd = connection.CreateCommand();
-            cmd.CommandText = sql;
-            await cmd.ExecuteNonQueryAsync(cancellationToken);
-        }
-
-        foreach (var migration in SqlStrings.MigrationStatements)
-        {
-            try
-            {
-                await using var cmd = connection.CreateCommand();
-                cmd.CommandText = migration;
-                await cmd.ExecuteNonQueryAsync(cancellationToken);
-            }
-            catch (SqliteException)
-            {
-                // Migrations are safe to re-run; ignore already-applied errors.
-            }
-        }
+        cancellationToken.ThrowIfCancellationRequested();
+        StateDatabaseSchema.Ensure(connection.ConnectionString);
+        return Task.CompletedTask;
     }
 
     private static async Task InsertSessionAsync(SqliteConnection connection, string sessionId, string startedUtc, CancellationToken cancellationToken)

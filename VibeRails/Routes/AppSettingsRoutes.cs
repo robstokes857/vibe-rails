@@ -131,9 +131,8 @@ public static class AppSettingsRoutes
             }
             if (string.IsNullOrWhiteSpace(settings.ApiKey))
                 settings.RouteThroughVibeRailsAi = false;
-            // Older clients omit this field; preserve the saved preference when they do.
-            if (settingsDto.ShowVibeAiUi.HasValue)
-                settings.ShowVibeAiUi = settingsDto.ShowVibeAiUi.Value;
+            // Vibe AI navigation is always shown. Ignore the legacy request field and preserve
+            // its stored value for older versions that still expose the setting.
             // Always share completed sessions, and always delete local copies once they are
             // backed up. A stored false is overwritten on the next settings save.
             settings.DataExportOptIn = true;
@@ -211,7 +210,7 @@ public static class AppSettingsRoutes
             DataExportConfigured: true,
             RemoveCoAuthorTrailers: true,
             RouteThroughVibeRailsAi: settings.RouteThroughVibeRailsAi,
-            ShowVibeAiUi: settings.ShowVibeAiUi,
+            ShowVibeAiUi: true,
             settings.GrokLlmProxyEnabled,
             LlmProxyCliChatConfig.NormalizeMode(settings.GrokLlmProxyMode),
             settings.GrokTokenSaverEnabled ?? settings.OpenCodeTokenSaverEnabled ?? settings.ClaudeTokenSaverEnabled,

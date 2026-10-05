@@ -19,10 +19,7 @@ public class UnifiedSearchServiceTests : IDisposable
     private readonly string _runtimeDir;
     private readonly string _stateDbPath;
     private readonly BertV2BgeEmbedder _embedder;
-    private readonly BertV2VectorStore _store;
-    private readonly BertV2SessionVectorStore _sessionStore;
-    private readonly BertV2InputService _inputService;
-    private readonly BertV2SessionEmbeddingService _sessionService;
+    private readonly SearchHistoryFixture _history;
     private readonly BertSearchDbService _searchDb;
     private readonly UnifiedSearchService _unifiedSearch;
 
@@ -41,14 +38,8 @@ public class UnifiedSearchServiceTests : IDisposable
             Path.Combine(_runtimeDir, "model.onnx"),
             Path.Combine(_runtimeDir, "vocab.txt"));
 
-        var vectorDbPath = Path.Combine(_tempDir, "bert_user_text_vectors.db");
-        _store = new BertV2VectorStore(vectorDbPath);
-        _sessionStore = new BertV2SessionVectorStore(vectorDbPath);
-        _inputService = new BertV2InputService(_embedder, _store);
-        _sessionService = new BertV2SessionEmbeddingService(_embedder, _sessionStore);
-        _searchDb = new BertSearchDbService(
-            vectorDbPath,
-            _stateDbPath);
+        _history = new SearchHistoryFixture(_tempDir, _embedder);
+        _searchDb = _history.Search;
         _unifiedSearch = new UnifiedSearchService(_embedder, _searchDb, new BertDocumentResponseMapper());
     }
 
@@ -56,7 +47,6 @@ public class UnifiedSearchServiceTests : IDisposable
     public void Search_ReturnsFourGroups_InExpectedOrder()
     {
         SeedUserInput("s1", 1, "How do I reset my password?");
-        _inputService.Capture("s1", 1, "How do I reset my password?");
 
         var response = _unifiedSearch.Search("password reset", topK: 5);
 
@@ -71,7 +61,6 @@ public class UnifiedSearchServiceTests : IDisposable
     public void Search_PerMessageSemantic_FindsCapturedDocument()
     {
         SeedUserInput("s1", 1, "How do I reset my password?");
-        _inputService.Capture("s1", 1, "How do I reset my password?");
 
         var response = _unifiedSearch.Search("forgot login", topK: 5);
 
@@ -82,13 +71,11 @@ public class UnifiedSearchServiceTests : IDisposable
     }
 
     [Fact]
-    public void Search_LexicalGroup_UsesFts5_AgainstStateDb()
+    public void Search_LexicalGroup_UsesFts5_AgainstSearchDb()
     {
         // Two messages, one with the literal token, one without.
         SeedUserInput("s1", 1, "billing invoice summary");
         SeedUserInput("s1", 2, "customer account settings");
-        _inputService.Capture("s1", 1, "billing invoice summary");
-        _inputService.Capture("s1", 2, "customer account settings");
 
         var response = _unifiedSearch.Search("invoice", topK: 5);
 
@@ -103,8 +90,6 @@ public class UnifiedSearchServiceTests : IDisposable
     {
         SeedUserInput("s1", 1, "deploy the application to production");
         SeedUserInput("s1", 2, "fix the css styling on the login page");
-        _inputService.Capture("s1", 1, "deploy the application to production");
-        _inputService.Capture("s1", 2, "fix the css styling on the login page");
 
         var response = _unifiedSearch.Search("deploy production release", topK: 5);
 
@@ -131,8 +116,6 @@ public class UnifiedSearchServiceTests : IDisposable
         SeedSession("s2", "Claude", endedSecondsAgo: 60);
         SeedUserInput("s1", 1, "review my pull request and tell me about the database migration");
         SeedUserInput("s2", 1, "what is the weather like in Paris");
-        _sessionService.CaptureSession("s1", new[] { "review my pull request and tell me about the database migration" });
-        _sessionService.CaptureSession("s2", new[] { "what is the weather like in Paris" });
 
         var response = _unifiedSearch.Search("schema change in the migration", topK: 5);
 
@@ -228,8 +211,6 @@ public class UnifiedSearchServiceTests : IDisposable
     public void Dispose()
     {
         _embedder.Dispose();
-        _store.Dispose();
-        _sessionStore.Dispose();
         try { Directory.Delete(_tempDir, recursive: true); } catch { }
     }
 
@@ -292,24 +273,7 @@ public class UnifiedSearchServiceTests : IDisposable
             userInputId = (long)cmd.ExecuteScalar()!;
         }
 
-        // Mirror the production path (SearchIndexWriter.Synchronize): filtered text goes into
-        // UserInputSearchDocuments and the AFTER INSERT trigger mirrors it into UserInputs_fts.
-        // Writing UserInputs_fts directly -- the pre-state/2 external-content shape over
-        // UserInputs -- would leave index entries with no backing content row, which is precisely
-        // the desync state/2 exists to remove.
-        var safe = VibeRails.Services.UserInOut.InputEtlFilter.Process(text);
-        if (!string.IsNullOrWhiteSpace(safe))
-        {
-            using var ftsCmd = connection.CreateCommand();
-            ftsCmd.CommandText = """
-                INSERT INTO UserInputSearchDocuments(UserInputId, InputText) VALUES ($rowid, $inputText)
-                    ON CONFLICT(UserInputId) DO UPDATE SET InputText = excluded.InputText;
-                DELETE FROM UserInputSearchPending WHERE UserInputId = $rowid;
-                """;
-            ftsCmd.Parameters.AddWithValue("$rowid", userInputId);
-            ftsCmd.Parameters.AddWithValue("$inputText", safe);
-            ftsCmd.ExecuteNonQuery();
-        }
+        _history.Refresh();
     }
 
     private void EnsureSessionRow(string sessionId)

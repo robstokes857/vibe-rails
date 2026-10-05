@@ -113,7 +113,8 @@ internal static class StateDatabaseSchema
                 SqliteSchema.Execute(db, transaction, "PRAGMA user_version=1;");
             logger?.LogInformation("Adopted state database search schema; queued {Count} prompts for indexing.", queued);
         });
-        DrainSearchIndexBacklog(connection, logger);
+        // Legacy search tables/triggers remain for older binaries. Current indexing and replay
+        // are owned by search.db; startup never drains or rebuilds the retired state index.
         SqliteMigrationRunner.Apply(connection, "state", 3, MigrationKind.Additive, (db, transaction) =>
         {
             // Retention's proof that a session's proxy exchanges were actually backed up.
@@ -132,6 +133,25 @@ internal static class StateDatabaseSchema
             // before this column existed stay NULL and are therefore never pruned.
             SqliteSchema.AdoptStatement(db, transaction, SqlStrings.MigrateSessionsAddExportedProxyMaxRowId);
         });
+        SqliteMigrationRunner.Apply(connection, "search-component-writer", 1, MigrationKind.Additive, (db, transaction) =>
+        {
+            // Only new writes opt in. Existing records and older binaries retain their legacy
+            // queue behavior; no stored text, search rows or completion marks are converted.
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE UserInputs ADD COLUMN SearchComponent TEXT");
+            SqliteSchema.Execute(db, transaction, """
+                DROP TRIGGER UserInputs_search_ai;
+                CREATE TRIGGER UserInputs_search_ai AFTER INSERT ON UserInputs
+                WHEN new.SearchComponent IS NULL BEGIN
+                    INSERT OR IGNORE INTO UserInputSearchPending(UserInputId) VALUES(new.Id);
+                END;
+                DROP TRIGGER UserInputs_search_au;
+                CREATE TRIGGER UserInputs_search_au AFTER UPDATE OF InputText ON UserInputs
+                WHEN old.InputText IS NOT new.InputText AND new.SearchComponent IS NULL BEGIN
+                    DELETE FROM UserInputSearchDocuments WHERE UserInputId=old.Id;
+                    INSERT OR IGNORE INTO UserInputSearchPending(UserInputId) VALUES(new.Id);
+                END;
+                """);
+        });
         JobStore.EnsureSessionLinkSchema(connection);
         // Every breaking step above has now been applied (or was already), so the file is at this
         // build's generation. Stamping after the fact also covers databases migrated before the
@@ -139,63 +159,4 @@ internal static class StateDatabaseSchema
         SqliteMigrationRunner.StampGeneration(connection, Generation);
     }
 
-    /// <summary>
-    /// Finishes the state/2 rebuild outside the migration transaction, in small committed batches,
-    /// so the exclusive write lock is released between them and concurrent vb processes are never
-    /// starved. Safe to interrupt: UserInputSearchPending is durable, so a process that dies
-    /// mid-drain leaves the remainder to the next startup or to SearchIndexMaintenanceJob.
-    /// </summary>
-    private static void DrainSearchIndexBacklog(SqliteConnection connection, ILogger? logger)
-    {
-        const int BatchSize = 500;
-        // Cheap read probe before taking any write lock. The backlog is empty on every startup
-        // except the one that adopts state/2 and any that resumes an interrupted drain, and with
-        // several vb processes starting at once an unconditional BEGIN IMMEDIATE here would
-        // contend for nothing.
-        using (var probe = connection.CreateCommand())
-        {
-            probe.CommandText = "SELECT 1 FROM UserInputSearchPending LIMIT 1;";
-            if (probe.ExecuteScalar() is null)
-                return;
-        }
-        var indexed = 0;
-        var legacyIndexed = 0;
-        while (true)
-        {
-            var batch = new List<(long Id, string? Text)>(BatchSize);
-            using var transaction = connection.BeginTransaction(deferred: false);
-            using (var read = connection.CreateCommand())
-            {
-                read.Transaction = transaction;
-                read.CommandText = SqliteSearchIndexMaintenanceStore.SelectPendingBatchSql;
-                read.Parameters.AddWithValue("$limit", BatchSize);
-                using var reader = read.ExecuteReader();
-                while (reader.Read())
-                {
-                    batch.Add((reader.GetInt64(0), reader.IsDBNull(1) ? null : reader.GetString(1)));
-                    if (reader.GetInt64(2) != 0)
-                        legacyIndexed++;
-                }
-            }
-            if (batch.Count == 0)
-            {
-                transaction.Rollback();
-                break;
-            }
-            foreach (var (id, text) in batch)
-                SearchIndexWriter.Synchronize(connection, transaction, id, text);
-            transaction.Commit();
-            indexed += batch.Count;
-        }
-        if (legacyIndexed > 0)
-        {
-            // Rows an older binary wrote straight into the FTS table now exist twice in it. The
-            // index is derived, so one rebuild from the content table is the whole repair.
-            using var transaction = connection.BeginTransaction(deferred: false);
-            SqliteSchema.Execute(connection, transaction, "INSERT INTO UserInputs_fts(UserInputs_fts) VALUES('rebuild');");
-            transaction.Commit();
-        }
-        if (indexed > 0)
-            logger?.LogInformation("Rebuilt the prompt search index for {Count} prompts ({Legacy} had been indexed directly by an older build).", indexed, legacyIndexed);
-    }
 }

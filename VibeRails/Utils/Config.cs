@@ -29,7 +29,8 @@ public class Settings
     public bool UseVsCodeTheme { get; set; } = false;
     /// <summary>Suggest optional Vibe Story tracking to every managed LLM terminal.</summary>
     public bool CreateVibeStoryTracking { get; set; } = true;
-    /// <summary>Show the Vibe AI inspector in navigation. Hidden by default.</summary>
+    // Retired setting, retained for older settings.json files and writers. Vibe AI navigation is
+    // always shown; neither the frontend nor the settings API reads this value.
     public bool ShowVibeAiUi { get; set; } = false;
     // Retained for settings.json/API compatibility. MCP registration is always on.
     public bool McpEnabled { get; set; } = true;

@@ -2050,8 +2050,8 @@ namespace VibeRails.DB
         {
             await using var connection = await OpenConnectionAsync();
             long userInputId;
-            // The raw-input trigger records pending search work in the same transaction. Capture
-            // survives an indexing failure; maintenance can finish it after a restart.
+            // Canonical capture only. Background reconciliation checkpoints and search work
+            // are committed independently in search.db and can replay this row after a restart.
             await using (var transaction = connection.BeginTransaction(deferred: false))
             {
                 using var command = connection.CreateCommand();
@@ -2064,16 +2064,6 @@ namespace VibeRails.DB
                 command.Parameters.AddWithValue("$timestampUTC", DateTime.UtcNow.ToString("O"));
                 userInputId = (long)(await command.ExecuteScalarAsync())!;
                 await transaction.CommitAsync();
-            }
-            try
-            {
-                using var transaction = connection.BeginTransaction(deferred: false);
-                SearchIndexWriter.Synchronize(connection, transaction, userInputId, inputText);
-                transaction.Commit();
-            }
-            catch (SqliteException ex)
-            {
-                _logger?.LogWarning(ex, "Search indexing deferred for input {InputId}; raw input and repair marker are saved.", userInputId);
             }
             return userInputId;
         }

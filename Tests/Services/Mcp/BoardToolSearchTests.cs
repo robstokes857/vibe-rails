@@ -1,3 +1,4 @@
+using Tests.Services.BertV2;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Data.Sqlite;
 using VibeRails.DTOs;
@@ -23,8 +24,9 @@ public sealed partial class BoardToolTests
             command.Parameters.AddWithValue("$id", foreign.Id);
             await command.ExecuteNonQueryAsync(Ct);
         }
-        var recall = new BoardRecallService(_store, _resolver, () => throw new IOException("Model unavailable"),
-            NullLogger<BoardRecallService>.Instance);
+        var index = SearchTestIndex.Build(_store, _project);
+        var recall = new BoardRecallService(_resolver, index, new BoardSearchService(index,
+            () => throw new IOException("Model unavailable"), NullLogger<BoardSearchService>.Instance));
         var text = (await recall.SearchAsync("uniqueforeignlegacy", 5, Ct)).Text;
         Assert.Contains($"More: get_board_card(card: \"{foreign.Id}\")", text);
         await _service.LinkCardAsync(_project, local.Id, foreign.Id, Ct);
@@ -41,7 +43,7 @@ public sealed partial class BoardToolTests
         var elsewhere = _project + "-other";
         var foreign = await _service.CreateCardAsync(elsewhere, new CreateBoardCardRequest(Title: "Foreign retrieval"), Ct);
         await _service.AddCommentAsync(elsewhere, foreign.Id, BoardAuthor.User(), "uniquesearchdiscussion", Ct);
-        var search = new BoardSearchService(_store, () => throw new IOException("Model unavailable"), NullLogger<BoardSearchService>.Instance);
+        var search = new BoardSearchService(SearchTestIndex.Build(_store, _project), () => throw new IOException("Model unavailable"), NullLogger<BoardSearchService>.Instance);
         var tool = new BoardTool(_service, _resolver, _store, search: search);
         _resolver.CurrentSessionId = "search-only";
         var results = await tool.SearchBoardCards("retrieval", cancellationToken: Ct);

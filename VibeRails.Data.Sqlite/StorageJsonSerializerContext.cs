@@ -3,6 +3,7 @@ using VibeRails.DTOs;
 namespace VibeRails.DTOs;
 [JsonSerializable(typeof(VibeRails.Services.Board.BoardHandoff))]
 [JsonSerializable(typeof(float[]))]
+[JsonSerializable(typeof(VibeRails.Services.BertV2.SearchDocument))]
 [JsonSerializable(typeof(VibeRails.Services.Board.BoardReviewRecord))]
 [JsonSerializable(typeof(ReviewerRouting))]
 [JsonSerializable(typeof(BoardReviewSettings))]

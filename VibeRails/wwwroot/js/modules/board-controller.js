@@ -1664,7 +1664,7 @@ export class BoardController {
                         title="Attach a file (or paste an image)"${off}>
                         <i class="fa-solid fa-paperclip" aria-hidden="true"></i><span>Attach</span>
                     </button>
-                    <span class="board-composer-hint">@ file/card · ! session · # commit</span>
+                    <span class="board-composer-hint">@ file · ! card/session · # commit</span>
                 </div>
                 <textarea class="form-control board-composer-input" data-board-composer-input
                     placeholder="${escapeHtml(placeholder)}" rows="3"${off}>${escapeHtml(value)}</textarea>
