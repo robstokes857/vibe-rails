@@ -63,7 +63,7 @@ export function mountSessionViewer(container, options = {}) {
             if (disposed) return;
             api = frame.contentWindow.sessionReplay;
             if (!api) throw new Error('The session viewer could not initialize');
-            api.configure({ request: options.request, library: options.library, view: options.view, onEvent: emit });
+            api.configure({ request: options.request, library: options.library, onEvent: emit });
             resolveInitialized();
             loading.remove();
             if (options.sessionId) {
@@ -97,7 +97,6 @@ export function mountSessionViewer(container, options = {}) {
         async seek(ms) { await ready; if (!disposed) await api?.seek(ms); },
         async setSpeed(speed) { await ready; if (!disposed) api?.setSpeed(speed); },
         async setSkipIdle(skip) { await ready; if (!disposed) api?.setSkipIdle(skip); },
-        async setView(view) { await ready; if (!disposed) api?.setView(view); },
         async reload() { await ready; if (!disposed) await api?.reload(); },
         dispose() {
             if (disposed) return;

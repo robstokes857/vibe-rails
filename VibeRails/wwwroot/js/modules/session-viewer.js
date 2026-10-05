@@ -5,18 +5,18 @@ function createModal(title, onClose) {
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:9999;';
 
     const modal = document.createElement('div');
-    modal.style.cssText = 'background:#1e1e1e;border:1px solid #444;border-radius:6px;display:flex;flex-direction:column;overflow:hidden;width:90vw;max-width:1100px;height:80vh;';
+    modal.style.cssText = 'background:var(--color-bg-surface, #1e1e1e);border:1px solid var(--color-border, #334155);border-radius:8px;display:flex;flex-direction:column;overflow:hidden;width:90vw;max-width:1100px;height:80vh;';
 
     const hdr = document.createElement('div');
-    hdr.style.cssText = 'display:flex;align-items:center;padding:8px 12px;border-bottom:1px solid #444;flex-shrink:0;gap:8px;';
+    hdr.style.cssText = 'display:flex;align-items:center;padding:8px 12px;border-bottom:1px solid var(--color-border, #334155);flex-shrink:0;gap:8px;';
 
     const titleEl = document.createElement('span');
-    titleEl.style.cssText = 'color:#ccc;font-size:13px;font-family:monospace;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    titleEl.style.cssText = 'color:var(--color-text-muted, #94a3b8);font-size:13px;font-family:monospace;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
     titleEl.textContent = title ?? '';
 
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';
-    closeBtn.style.cssText = 'background:none;border:none;color:#aaa;cursor:pointer;font-size:20px;line-height:1;padding:0 4px;';
+    closeBtn.style.cssText = 'background:none;border:none;color:var(--color-text-muted, #94a3b8);cursor:pointer;font-size:20px;line-height:1;padding:0 4px;';
     closeBtn.textContent = '\u00d7';
     closeBtn.setAttribute('aria-label', 'Close');
 
@@ -173,7 +173,7 @@ export async function showTranscriptModal(sessionId) {
 export async function showReplayModal(sessionId, { seekToUtc = null } = {}) {
     let viewer;
     const { body, close } = createModal(`Session Replay — ${sessionId}`, () => viewer?.dispose());
-    body.parentElement.style.cssText = 'background:#101319;border:1px solid #343b4d;border-radius:12px;display:flex;flex-direction:column;overflow:hidden;width:96vw;max-width:1800px;height:94dvh;';
+    body.parentElement.style.cssText = 'background:var(--color-bg-base, #121212);border:1px solid var(--color-border, #334155);border-radius:8px;display:flex;flex-direction:column;overflow:hidden;width:96vw;max-width:1800px;height:94dvh;';
     body.style.cssText = 'flex:1;min-height:0;overflow:hidden;position:relative;';
     viewer = mountSessionViewer(body, {
         sessionId, seekToUtc, autoplay: true,

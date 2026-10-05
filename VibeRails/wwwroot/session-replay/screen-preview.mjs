@@ -1,9 +1,18 @@
 // The terminal parser owns ANSI state. This module only reads its public buffer
 // after a completed write, then projects that screen into ordinary, safe HTML.
-const palette = ['#202632', '#f392a4', '#8bd2ab', '#e8cd91', '#94bfff', '#c7adff', '#88cfd5', '#d6dbea',
-    '#69758a', '#ffadbc', '#a7e9c1', '#ffe2a6', '#b4d2ff', '#dcc7ff', '#a6edf2', '#ffffff'];
+// ANSI colors 0-15 come from the replay terminal's own theme, so the readable screen and
+// xterm agree. The fallback is the live terminal's default palette (vibe-terminal.js).
+const ansiNames = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white', 'brightBlack', 'brightRed',
+    'brightGreen', 'brightYellow', 'brightBlue', 'brightMagenta', 'brightCyan', 'brightWhite'];
+const fallback = { background: '#1e1e1e', foreground: '#d4d4d4', palette: ['#1e1e1e', '#f44747', '#608b4e', '#dcdcaa',
+    '#569cd6', '#c586c0', '#4ec9b0', '#d4d4d4', '#808080', '#f44747', '#608b4e', '#dcdcaa', '#569cd6', '#c586c0', '#4ec9b0', '#ffffff'] };
 
-function color(cell, foreground) {
+function colors(theme = {}) {
+    return { background: theme.background || fallback.background, foreground: theme.foreground || fallback.foreground,
+        palette: ansiNames.map((name, index) => theme[name] || fallback.palette[index]) };
+}
+
+function color(cell, foreground, palette) {
     const value = foreground ? cell.getFgColor() : cell.getBgColor();
     if (foreground ? cell.isFgRGB() : cell.isBgRGB()) return `#${value.toString(16).padStart(6, '0')}`;
     if (!(foreground ? cell.isFgPalette() : cell.isBgPalette())) return null;
@@ -13,9 +22,9 @@ function color(cell, foreground) {
     return `rgb(${[Math.floor(index / 36), Math.floor(index / 6) % 6, index % 6].map(i => levels[i]).join(',')})`;
 }
 
-function attributes(cell) {
-    let fg = color(cell, true), bg = color(cell, false);
-    if (cell.isInverse()) [fg, bg] = [bg || '#101319', fg || '#cbd3e2'];
+function attributes(cell, theme) {
+    let fg = color(cell, true, theme.palette), bg = color(cell, false, theme.palette);
+    if (cell.isInverse()) [fg, bg] = [bg || theme.background, fg || theme.foreground];
     return { fg, bg, bold: !!cell.isBold(), italic: !!cell.isItalic(), dim: !!cell.isDim(),
         underline: !!cell.isUnderline(), strike: !!cell.isStrikethrough() };
 }
@@ -36,7 +45,7 @@ function sliceRuns(runs, start, end) {
 }
 
 export function readScreen(terminal) {
-    const buffer = terminal.buffer.active, lines = [];
+    const buffer = terminal.buffer.active, lines = [], theme = colors(terminal.options?.theme);
     // baseY is the live screen, regardless of where the xterm viewport is scrolled.
     for (let row = 0; row < terminal.rows; row++) {
         const line = buffer.getLine(buffer.baseY + row), runs = [];
@@ -44,7 +53,7 @@ export function readScreen(terminal) {
             const cell = line.getCell(col);
             if (!cell || cell.getWidth() === 0) continue; // second cell of a wide glyph
             const text = cell.isInvisible() ? ' '.repeat(cell.getWidth()) : cell.getChars() || ' ';
-            appendRun(runs, text, attributes(cell));
+            appendRun(runs, text, attributes(cell, theme));
         }
         lines.push({ runs, wrapped: !!line?.isWrapped });
     }
@@ -113,7 +122,7 @@ export function renderScreen(container, screen, mode = 'reading') {
 }
 
 // Sampling is called only at settled replay positions, never mid-write/rebuild.
-// Wall-clock time keeps a 100× replay from rebuilding the DOM 100× as often.
+// Wall-clock time keeps a fast replay from rebuilding the DOM as often as it writes.
 export class ScreenPreview {
     constructor({ content, status, time, geometry, refresh, modeButtons, phone, shell, interval = 3000 }) {
         Object.assign(this, { content, status, time, geometry, refresh, modeButtons, phone, shell, interval });

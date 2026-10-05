@@ -41,15 +41,14 @@ test('independent instances, patch/events, playback, rewind and complete disposa
     }, envelope);
     await expect(frame.locator('#position')).toHaveText('00:10');
     await expect(page.frameLocator('#second iframe').locator('#position')).toHaveText('00:00');
-    await frame.locator('#view-advanced').click();
     await frame.locator('.file-row').click();
     await expect(frame.locator('#editor')).toBeVisible();
     await frame.locator('#events-tab').click();
     await frame.locator('.activity-row').first().click();
     await expect(frame.locator('#event-body')).toContainText('Make it readable');
-    await page.evaluate(async()=>{await viewer.seek(viewer.getState().started);await viewer.setSpeed(100);await viewer.play();});
-    await expect.poll(()=>page.evaluate(()=>viewer.getState().position)).toBeGreaterThan(started);
-    await page.evaluate(()=>viewer.pause());
+    await page.evaluate(async()=>{await viewer.seek(viewer.getState().started);await viewer.setSpeed('max');await viewer.play();});
+    await expect(frame.locator('#playback-status')).toHaveText('End of recording');
+    expect(await page.evaluate(()=>{const state=viewer.getState();return [state.position===state.end,state.playing,state.frameIndex===state.frameCount];})).toEqual([true,false,true]);
     await page.evaluate(async()=>{await viewer.seek(viewer.getState().started);});
     await expect(frame.locator('#position')).toHaveText('00:00');
     await page.evaluate(()=>{viewer.dispose();viewer.dispose();other.dispose();});
@@ -155,7 +154,6 @@ test('desktop entry point carries tab auth, honors comment seek past end and clo
     const frame=page.frameLocator('iframe[data-session-replay]');
     await expect(frame.locator('#playback-status')).toHaveText('End of recording');
     expect(await page.evaluate(()=>modal.viewer.getState().playing)).toBe(false);
-    await frame.locator('#view-advanced').click();
     await frame.locator('#expand-panel').click();
     await page.keyboard.press('Escape');
     await expect(page.locator('iframe')).toHaveCount(1);
@@ -172,7 +170,7 @@ test('newer uploads expose their captured model, tool arguments and request/resp
             provider:'openai',method:'POST',path:'/responses',statusCode:200,elapsedMs:123,
             requestBefore:'{"model":"uploaded-model","reasoning":{"effort":"high"}}',requestAfter:'{"model":"uploaded-model"}',
             responseBody:JSON.stringify({output:[{type:'function_call',call_id:'call',name:'read_file',arguments:'{"path":"example.js"}'}]})}];
-        window.viewer=mountSessionViewer(document.getElementById('host'),{request:createEnvelopeSource(envelope),sessionId:'fixture',view:'advanced'});
+        window.viewer=mountSessionViewer(document.getElementById('host'),{request:createEnvelopeSource(envelope),sessionId:'fixture'});
         await viewer.ready;
     },envelope);
     const frame=page.frameLocator('#host iframe');
@@ -183,4 +181,24 @@ test('newer uploads expose their captured model, tool arguments and request/resp
     await expect(frame.locator('#event-body')).toContainText('example.js');
     await frame.getByRole('button',{name:'Response',exact:true}).click();
     await expect(frame.locator('#event-body')).toContainText('function_call');
+});
+
+test('one full view: no view switch, the inspector always shows, and Max replaces 100x',async({page})=>{
+    await shell(page);
+    const frame=await mount(page);
+    await expect(frame.locator('#view-simple, #view-advanced, .view-switch')).toHaveCount(0);
+    for(const id of ['#inspector-panel','.metadata','.tool-strip','#timeline-markers','#skip-idle']) await expect(frame.locator(id)).toBeVisible();
+    // Tom Select moves the selected option within the native select, so compare the set.
+    expect(Object.fromEntries(await frame.locator('#speed option').evaluateAll(options=>options.map(option=>[option.value,option.textContent]))))
+        .toEqual({1:'1× speed',2:'2× speed',5:'5× speed',10:'10× speed',25:'25× speed',max:'Max speed'});
+    expect(await page.evaluate(async()=>{try{await viewer.setSpeed(100);return 'accepted';}catch(error){return error.name;}})).toBe('RangeError');
+    expect(await page.evaluate(()=>'setView' in viewer)).toBe(false);
+    // Choosing Max in the picker plays from the playhead straight to the end.
+    await frame.locator('.play-controls .ts-control').click();
+    await frame.locator('#speed-ts-dropdown [data-value="max"]').click();
+    await expect(frame.locator('#speed')).toHaveValue('max');
+    await frame.locator('#play').click();
+    await expect(frame.locator('#playback-status')).toHaveText('End of recording');
+    await expect(frame.locator('#position')).toHaveText(await frame.locator('#total').textContent());
+    await expect(frame.locator('#play')).toContainText('Play');
 });

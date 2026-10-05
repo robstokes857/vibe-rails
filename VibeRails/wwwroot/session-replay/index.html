@@ -3,23 +3,21 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Session Replay · VibeRails</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23a89bff'/%3E%3Cpath d='m12 8 12 8-12 8z' fill='%23151922'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%233b82f6'/%3E%3Cpath d='m12 8 12 8-12 8z' fill='%23121212'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="../assets/xterm/xterm.css">
   <link rel="stylesheet" href="../assets/tom-select/tom-select.bootstrap5.min.css">
   <link rel="stylesheet" href="./style.css">
   <script src="../assets/xterm/xterm.min.js"></script>
+  <!-- Optional: the Terminal settings theme catalog. Without it the default palette applies. -->
+  <script src="../assets/xterm/terminal-themes.js"></script>
   <!-- Load Tom Select before Monaco installs its AMD loader. -->
   <script src="../assets/tom-select/tom-select.complete.min.js"></script>
   <script src="../assets/monaco/vs/loader.js"></script>
   <script type="module" src="./app.js"></script>
 </head>
-<body data-view="simple">
+<body>
   <header class="app-bar">
     <nav class="top-nav" aria-label="Session replay navigation">
-      <div class="view-switch" role="group" aria-label="Replay view">
-        <button id="view-simple" aria-pressed="true" title="Terminal and playback controls">Simple</button>
-        <button id="view-advanced" aria-pressed="false" title="Terminal, code changes, and activity">Advanced</button>
-      </div>
       <a class="brand" href="#" aria-label="VibeRails session replay">
         <span class="brand-mark" aria-hidden="true">▸</span>
         <span class="brand-copy"><span class="brand-name">VibeRails</span><span class="brand-section">SESSION REPLAY</span></span>
@@ -28,15 +26,15 @@
     </nav>
   </header>
   <main>
-    <section class="session-heading"><div><div class="eyebrow" id="project">YOUR SESSION, FRAME BY FRAME</div><h1 id="session-title">Replay the work.</h1><div class="session-sub"><span id="session-state" class="pill" hidden></span><span id="session-id" class="advanced-only">Choose a recording to explore its terminal, code, and tools.</span><button id="copy-id" class="text-button advanced-only" title="Copy session ID" hidden>Copy ID</button><span id="view-description">Just the session. At your pace.</span></div></div></section>
-    <section class="metadata advanced-only" aria-label="Session information"><div><span class="label">MODEL</span><strong id="model">—</strong></div><div><span class="label">REASONING EFFORT</span><strong id="effort">—</strong></div><div><span class="label">STARTED · LOCAL TIME</span><strong id="started">—</strong></div><div><span class="label">RECORDED DURATION</span><strong id="duration">—</strong></div><div><span class="label">ENVIRONMENT</span><strong id="environment">—</strong></div><div><span class="label">BOARD CARD</span><strong id="board">—</strong></div></section>
+    <section class="session-heading"><div><div class="eyebrow" id="project">YOUR SESSION, FRAME BY FRAME</div><h1 id="session-title">Replay the work.</h1><div class="session-sub"><span id="session-state" class="pill" hidden></span><span id="session-id">Choose a recording to explore its terminal, code, and tools.</span><button id="copy-id" class="text-button" title="Copy session ID" hidden>Copy ID</button></div></div></section>
+    <section class="metadata" aria-label="Session information"><div><span class="label">MODEL</span><strong id="model">—</strong></div><div><span class="label">REASONING EFFORT</span><strong id="effort">—</strong></div><div><span class="label">STARTED · LOCAL TIME</span><strong id="started">—</strong></div><div><span class="label">RECORDED DURATION</span><strong id="duration">—</strong></div><div><span class="label">ENVIRONMENT</span><strong id="environment">—</strong></div><div><span class="label">BOARD CARD</span><strong id="board">—</strong></div></section>
     <div id="notice" class="notice" role="status" hidden></div>
     <section class="transport" aria-label="Playback controls">
-      <div class="control-row"><div class="play-controls"><button id="restart" class="icon-button advanced-only" title="Restart" aria-label="Restart" disabled>↺</button><button id="rewind" class="icon-button" title="Rewind 10 seconds (left arrow)" aria-label="Rewind 10 seconds" disabled>−10</button><button id="play" class="play-button" disabled>▶ <span>Play</span></button><button id="forward" class="icon-button" title="Forward 10 seconds (right arrow)" aria-label="Forward 10 seconds" disabled>+10</button><span class="control-divider advanced-only"></span><select id="speed" aria-label="Playback speed"><option value="1">1× speed</option><option value="2">2× speed</option><option value="5" selected>5× speed</option><option value="10">10× speed</option><option value="25">25× speed</option><option value="100">100× speed</option></select><label class="skip-label advanced-only"><input id="skip-idle" type="checkbox" checked> Skip idle time</label></div><div class="time-display"><span id="position">00:00</span><span class="muted">/</span><span id="total">00:00</span></div></div>
-      <div class="timeline-wrap"><div class="advanced-only" id="timeline-markers" aria-hidden="true"></div><input id="scrubber" type="range" min="0" max="1000" value="0" aria-label="Replay position" disabled></div>
-      <div class="timeline-caption"><span id="playback-status" role="status">Select a session to begin</span><div class="legend advanced-only"><span><i class="dot prompt"></i>Prompts</span><span><i class="dot change"></i>Code changes</span><span><i class="dot tool"></i>Tool calls</span></div></div>
+      <div class="control-row"><div class="play-controls"><button id="restart" class="icon-button" title="Restart" aria-label="Restart" disabled>↺</button><button id="rewind" class="icon-button" title="Rewind 10 seconds (left arrow)" aria-label="Rewind 10 seconds" disabled>−10</button><button id="play" class="play-button" disabled>▶ <span>Play</span></button><button id="forward" class="icon-button" title="Forward 10 seconds (right arrow)" aria-label="Forward 10 seconds" disabled>+10</button><span class="control-divider"></span><select id="speed" aria-label="Playback speed"><option value="1">1× speed</option><option value="2">2× speed</option><option value="5" selected>5× speed</option><option value="10">10× speed</option><option value="25">25× speed</option><option value="max">Max speed</option></select><label class="skip-label"><input id="skip-idle" type="checkbox" checked> Skip idle time</label></div><div class="time-display"><span id="position">00:00</span><span class="muted">/</span><span id="total">00:00</span></div></div>
+      <div class="timeline-wrap"><div id="timeline-markers" aria-hidden="true"></div><input id="scrubber" type="range" min="0" max="1000" value="0" aria-label="Replay position" disabled></div>
+      <div class="timeline-caption"><span id="playback-status" role="status">Select a session to begin</span><div class="legend"><span><i class="dot prompt"></i>Prompts</span><span><i class="dot change"></i>Code changes</span><span><i class="dot tool"></i>Tool calls</span></div></div>
     </section>
-    <section class="tool-strip advanced-only" aria-label="Recent tool calls">
+    <section class="tool-strip" aria-label="Recent tool calls">
       <span class="tool-strip-label"><i class="status-dot"></i>Tool activity</span>
       <div class="tool-strip-content">
         <div id="toast-stack" class="toast-stack" aria-live="polite" aria-relevant="additions"></div>
@@ -44,7 +42,7 @@
       </div>
     </section>
     <div class="workspace">
-      <section class="panel terminal-panel"><div class="panel-heading"><h2><span class="terminal-icon">›_</span> Terminal</h2><div><span id="geometry" class="mono muted advanced-only">120 × 30</span><span class="panel-tag advanced-only">RECORDED OUTPUT</span></div></div><div id="terminal-viewport"><div id="terminal"></div><div id="terminal-empty" class="empty-state"><div class="empty-symbol">›_</div><h3>A front-row seat to the session</h3><p>Play back the terminal exactly as it was captured.<br>Code and tool activity will follow alongside it.</p><button id="choose-session" class="button primary">Browse recordings <span>→</span></button></div></div><section class="html-replay" aria-label="Readable replay screen">
+      <section class="panel terminal-panel"><div class="panel-heading"><h2><span class="terminal-icon">›_</span> Terminal</h2><div><span id="geometry" class="mono muted">120 × 30</span><span class="panel-tag">RECORDED OUTPUT</span></div></div><div id="terminal-viewport"><div id="terminal"></div><div id="terminal-empty" class="empty-state"><div class="empty-symbol">›_</div><h3>A front-row seat to the session</h3><p>Play back the terminal exactly as it was captured.<br>Code and tool activity will follow alongside it.</p><button id="choose-session" class="button primary">Browse recordings <span>→</span></button></div></div><section class="html-replay" aria-label="Readable replay screen">
       <div class="html-toolbar">
         <div class="html-modes" role="group" aria-label="Screen display mode"><button data-screen-mode data-mode="reading" aria-pressed="true">Reading</button><button data-screen-mode data-mode="screen" aria-pressed="false">Screen lines</button></div>
         <button id="html-refresh" class="text-button" disabled aria-label="Refresh screen">↻</button>
@@ -55,8 +53,8 @@
         <div id="html-screen" class="html-screen" tabindex="0" aria-label="Readable terminal snapshot" data-mode="reading"></div>
         <div class="html-screen-footer"><span id="html-geometry">Current screen</span><span>Read only</span></div>
       </div>
-    </section><div class="terminal-footer"><span id="working-directory">No recording selected</span><span class="advanced-only" id="frame-count">0 frames</span></div></section>
-      <section class="panel inspector-panel advanced-only" id="inspector-panel" aria-label="Recording inspector">
+    </section><div class="terminal-footer"><span id="working-directory">No recording selected</span><span id="frame-count">0 frames</span></div></section>
+      <section class="panel inspector-panel" id="inspector-panel" aria-label="Recording inspector">
         <div class="panel-heading inspector-heading">
           <div class="inspector-tabs" role="tablist" aria-label="Inspect recording">
             <button id="code-tab" role="tab" aria-selected="true" aria-controls="code-panel" tabindex="0"><span class="code-icon" aria-hidden="true">⌘</span> Code <span class="count" id="change-count">0</span></button>
@@ -89,7 +87,7 @@
         </div>
       </section>
     </div>
-    <footer class="page-footer"><span><i class="status-dot"></i> Session replay <span class="advanced-only" id="source-status"></span></span><button id="capture-notes" class="text-button">About this recording</button><span>Space to play / pause <span class="footer-divider">·</span> ← → to seek</span></footer>
+    <footer class="page-footer"><span><i class="status-dot"></i> Session replay <span id="source-status"></span></span><button id="capture-notes" class="text-button">About this recording</button><span>Space to play / pause <span class="footer-divider">·</span> ← → to seek</span></footer>
   </main>
   <dialog id="sessions-dialog"><div class="dialog-heading"><div><div class="eyebrow">RECORDING LIBRARY</div><h2>Find a session</h2></div><button class="icon-button" data-close="sessions-dialog" aria-label="Close sessions">×</button></div><div class="search-wrap"><input id="session-search" type="search" placeholder="Search by project, CLI, title, or session ID…" aria-label="Search sessions"></div><div id="session-list" class="session-list"></div><div class="dialog-footer"><span id="library-status">Recent recordings from state.db</span><button id="load-more" class="button" hidden>Load more</button></div></dialog>
   <dialog id="detail-dialog"><div class="dialog-heading"><div><div class="eyebrow" id="detail-kind">EVENT DETAILS</div><h2 id="detail-title">Activity</h2></div><button class="icon-button" data-close="detail-dialog" aria-label="Close details">×</button></div><div id="detail-meta" class="detail-meta"></div><div id="detail-tabs" class="detail-tabs"></div><pre id="detail-body" tabindex="0"></pre></dialog>

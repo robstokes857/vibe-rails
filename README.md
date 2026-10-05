@@ -66,8 +66,8 @@ and hand the report to an agent with **Fix code quality with…**.
 Every session is recorded, from the first prompt to the last command, so you can trace exactly
 how any piece of code was made.
 
-- **Replay** any session at 1× to 100× speed, with a scrubber and arrow-key seeking. Board cards
-  and Automation runs open the same player.
+- **Replay** any session at 1× to 25× speed, or at Max to run straight to the end, with a scrubber
+  and arrow-key seeking. Board cards and Automation runs open the same player.
 - **Review the session, not just the diff.** Board cards link each commit to the session that
   produced it, so a reviewer can watch the whole conversation behind a change.
 - **LLM as a judge.** Have an LLM review remote sessions.

@@ -53,6 +53,14 @@ export function advancePosition(position, elapsed, speed, end, nextActivity, ski
     return next;
 }
 
+// Max speed has no clock. Each tick writes the next bounded batch of output, so pause and
+// screen samples still interleave; once the output runs out the target is the recording end.
+export function maxSpeedTarget(frames, frameIndex, end, budget = 256 * 1024) {
+    let index = frameIndex, bytes = 0;
+    while (index < frames.length && bytes < budget) bytes += frames[index++].data.length;
+    return index < frames.length ? Math.min(end, frames[index - 1].at) : end;
+}
+
 export function eventsFor(manifest, exchanges) {
     const events = [
         ...manifest.prompts.map(prompt => ({ kind: 'prompt', at: prompt.at, title: prompt.text, prompt })),

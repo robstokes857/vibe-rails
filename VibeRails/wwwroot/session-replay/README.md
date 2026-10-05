@@ -14,7 +14,6 @@ const viewer = mountSessionViewer(container, {
     request: (path, { signal }) => recordingApi(path, signal),
     library: true,
     autoplay: false,
-    view: 'simple',
     onEvent: ({ type, state, error }) => { /* host UI */ }
 });
 await viewer.ready;
@@ -45,14 +44,17 @@ this integration, since ordinary browser CSP tests do not exercise VS Code resou
 
 `ready` resolves after initialization and optional initial load. Asset errors reject
 it. Recording errors appear inside the viewer and emit `error`; inspect `state.ready`.
-Methods: `load(id)`, `play()`, `pause()`, `seek(utcMilliseconds)`, `setSpeed(1|2|5|10|25|100)`,
-`setSkipIdle(boolean)`, `setView('simple'|'advanced')`, `reload()`, and idempotent `dispose()`.
+Methods: `load(id)`, `play()`, `pause()`, `seek(utcMilliseconds)`, `setSpeed(1|2|5|10|25|'max')`,
+`setSkipIdle(boolean)`, `reload()`, and idempotent `dispose()`. Max has no clock: each animation
+frame writes the next ~256 KB of output until the recording end, so Pause still stops it part way.
+There is one layout (terminal, code and events together); the Simple view, `setView`, the `view`
+option and `getState().view` were removed in VIBE-65.
 Async controls wait for initialization. Pause also cancels pending initial autoplay.
 `seekToUtc` accepts an epoch timestamp or ISO string and applies a 1.5s lead-in, used
 for Board comments. A seek past the recording end stays finished rather than restarting.
 
 `getState()` returns sessionId, ready, busy, playing, position, started, end,
-frameIndex, frameCount, cols, rows and view. Times are UTC epoch milliseconds.
+frameIndex, frameCount, cols and rows. Times are UTC epoch milliseconds.
 `subscribe(listener)` returns an unsubscribe function. Events are `state`, `loaded`,
 `error` (with error text), and `close-request` (unhandled Escape inside an embed).
 Hosts decide whether to close on that request. Inspector/dialog Escape takes priority.
@@ -109,6 +111,16 @@ A desktop exchange page contains at most 30 entries and a conservative 1 MiB JSO
 worst-case string escaping. The cursor advances only over returned entries, so a page stopped
 by the byte budget leaves its next exchange for the following request. The limits bound display
 and request memory; they are not capture quotas or retention rules.
+
+## Theme
+
+`style.css` declares the app's Focus Dark tokens (`--color-bg-base`, `--color-primary`, …) with
+the same names and values as `wwwroot/style.css`, and derives every color from them; buttons use
+the app's outline register. `session-viewer-timeline.test.mjs` fails if a token drifts from the
+app. The xterm palette is the live terminal's: VibeTerminal's default, or the Terminal settings
+theme saved in `localStorage.viberails_terminal_theme` and listed by
+`../assets/xterm/terminal-themes.js` (optional; without it the default applies). The editor uses
+the app's `viberails-dark` colors. The iframe does not follow the VS Code theme bridge.
 
 ## Mobile
 

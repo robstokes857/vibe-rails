@@ -87,7 +87,6 @@ try {
     await viewer.play();
     check(viewer.getState().playing, 'Playback did not start');
     viewer.pause();
-    await viewer.setView('advanced');
     doc.querySelector('.file-row').click();
     await until(() => doc.querySelector('.monaco-editor') && !doc.getElementById('editor').hidden);
     check(child.monaco.editor.getModels().some(model => model.getValue().includes('const works = true')), 'Patch did not load');

@@ -48,9 +48,9 @@ an agent.
 ## Audit trail and replay
 
 Every session is recorded, from the first prompt to the last command. Replay any of them at up to
-100× speed, follow a Board card from each commit back to the session that produced it, and sign
-your work with your own keys. **Send to…** hands a session to another LLM: VibeRails summarizes
-it and starts the new agent with that summary.
+25× speed or run straight to the end at Max, follow a Board card from each commit back to the
+session that produced it, and sign your work with your own keys. **Send to…** hands a session to
+another LLM: VibeRails summarizes it and starts the new agent with that summary.
 
 ![Replaying a recorded Claude Code session at 10× and then 100× speed](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/session-replay.gif)
 

@@ -1,4 +1,4 @@
-import { durationLabel, prepareFrames, upperBound, advancePosition, eventsFor } from './timeline.mjs';
+import { durationLabel, prepareFrames, upperBound, advancePosition, maxSpeedTarget, eventsFor } from './timeline.mjs';
 import { ScreenPreview } from './screen-preview.mjs';
 
 let disposed = false, host = null;
@@ -14,7 +14,6 @@ let loadController = null, term = null, editor = null, editorModel = null, edito
 let selectedChange = null, changeRequest = 0, eventSignature = '', lastFollowId = null;
 let libraryOffset = 0, searchRequest = 0, searchTimer = null, libraryItems = [];
 let toastTimers = [], tickHandle = null;
-let viewMode = 'simple';
 let selectedEvent = null, eventRequest = 0;
 let filePage = 0, eventPage = null;
 const filePageSize = 100, eventPageSize = 60;
@@ -38,26 +37,7 @@ for (const id of ['speed', 'activity-filter']) {
     });
 }
 
-function setView(mode) {
-    viewMode = mode === 'advanced' ? 'advanced' : 'simple';
-    document.body.dataset.view = viewMode;
-    $('view-simple').setAttribute('aria-pressed', String(viewMode === 'simple'));
-    $('view-advanced').setAttribute('aria-pressed', String(viewMode === 'advanced'));
-    text('view-description', viewMode === 'simple' ? 'Just the session. At your pace.' : 'Terminal, code, and tools in sync.');
-    try { localStorage.setItem('replay-view', viewMode); } catch { /* Storage may be disabled. */ }
-    Object.values(selects).forEach(select => select.close());
-    clearToasts();
-    if (viewMode === 'simple') expandInspector(false);
-    else if (ready) {
-        renderPosition(true);
-    }
-    requestAnimationFrame(() => { fitTerminal(); editor?.layout(); });
-    emitState();
-}
-$('view-simple').addEventListener('click', () => setView('simple'));
-$('view-advanced').addEventListener('click', () => setView('advanced'));
-try { viewMode = localStorage.getItem('replay-view') || 'simple'; } catch { /* Use Simple by default. */ }
-setView(viewMode);
+const maxSpeed = () => $('speed').value === 'max';
 
 function setInspectorTab(tab, focus = false) {
     for (const name of ['code', 'events']) {
@@ -124,7 +104,8 @@ function pause() {
     if (!busy) sampleScreen(true);
 }
 function updatePlaybackStatus() {
-    if (ready && manifest) text('playback-status', position >= manifest.end ? 'End of recording' : playing ? 'Playing' : 'Paused · ready to play');
+    if (ready && manifest) text('playback-status', position >= manifest.end ? 'End of recording'
+        : playing ? (maxSpeed() ? 'Playing at max speed to the end' : 'Playing') : 'Paused · ready to play');
 }
 function clearToasts() {
     toastTimers.forEach(clearTimeout); toastTimers = []; $('toast-stack').replaceChildren();
@@ -135,14 +116,27 @@ function fitTerminal() {
     term.options.fontSize = Math.max(8, Math.min(14, Math.floor(width / (term.cols * .61))));
     text('geometry', `${term.cols} × ${term.rows}`);
 }
+// The live terminal's palette: VibeTerminal's default (js/modules/vibe-terminal.js), or the
+// theme picked in Terminal settings, which shares this origin's localStorage.
+const terminalPalette = { background: '#1e1e1e', foreground: '#d4d4d4', cursor: '#d4d4d4', cursorAccent: '#1e1e1e',
+    selectionBackground: '#264f78', black: '#1e1e1e', red: '#f44747', green: '#608b4e', yellow: '#dcdcaa', blue: '#569cd6',
+    magenta: '#c586c0', cyan: '#4ec9b0', white: '#d4d4d4', brightBlack: '#808080', brightRed: '#f44747', brightGreen: '#608b4e',
+    brightYellow: '#dcdcaa', brightBlue: '#569cd6', brightMagenta: '#c586c0', brightCyan: '#4ec9b0', brightWhite: '#ffffff' };
+function terminalTheme() {
+    let key = null;
+    try { key = localStorage.getItem('viberails_terminal_theme'); } catch { /* Storage may be disabled. */ }
+    const theme = { ...terminalPalette, ...(key && Object.hasOwn(window.CXL_THEMES ?? {}, key) ? window.CXL_THEMES[key] : {}) };
+    document.documentElement.style.setProperty('--terminal-bg', theme.background);
+    document.documentElement.style.setProperty('--terminal-fg', theme.foreground);
+    return theme;
+}
 function createTerminal() {
     term?.dispose(); $('terminal').replaceChildren();
     if (!window.Terminal) throw new Error('The xterm assets are missing. Rebuild the project with VibeRailsRoot pointing at the main checkout.');
     const first = frames[0] || manifest?.geometry[0];
     term = new window.Terminal({ cols: first?.cols || 120, rows: first?.rows || 30, cursorBlink: false, disableStdin: true, allowProposedApi: true,
-        scrollback: 8000, fontSize: 12, fontFamily: 'Cascadia Code, Consolas, monospace', lineHeight: 1.14,
-        theme: { background: '#101319', foreground: '#cbd3e2', cursor: '#b4a3ff', selectionBackground: '#55457988',
-            black: '#202632', red: '#f392a4', green: '#8bd2ab', yellow: '#e8cd91', blue: '#94bfff', magenta: '#c7adff', cyan: '#88cfd5', white: '#d6dbea' } });
+        scrollback: 8000, fontSize: 12, fontFamily: 'Menlo, Monaco, Consolas, "Cascadia Mono", "Liberation Mono", "Courier New", monospace',
+        lineHeight: 1.14, theme: terminalTheme() });
     term.open($('terminal')); fitTerminal();
 }
 const terminalObserver = new ResizeObserver(fitTerminal);
@@ -334,7 +328,8 @@ async function tick(now) {
     const run = version;
     const elapsed = Math.max(0, Math.min(now - lastTick, 250)); lastTick = now;
     const nextActivity = Math.min(frames[frameIndex]?.at ?? Infinity, events[upperBound(events, position)]?.at ?? Infinity, manifest.end);
-    const target = advancePosition(position, elapsed, Number($('speed').value), manifest.end, nextActivity, $('skip-idle').checked);
+    const target = maxSpeed() ? maxSpeedTarget(frames, frameIndex, manifest.end)
+        : advancePosition(position, elapsed, Number($('speed').value), manifest.end, nextActivity, $('skip-idle').checked);
     busy = true;
     try {
         await writeUntil(target, run);
@@ -370,7 +365,6 @@ function renderPosition(force) {
     text('frame-count', `${frameIndex.toLocaleString()} / ${frames.length.toLocaleString()} frames`);
     updatePlaybackStatus();
     sampleScreen(force || !playing);
-    if (viewMode === 'simple') return;
     updateModel(); renderActivity(force);
     const reached = manifest.changes.filter(change => change.at <= position).at(-1);
     if (reached?.id !== lastFollowId) {
@@ -408,7 +402,6 @@ function renderActivity(force = false) {
     if (active) $('activity-list').scrollTop = active.offsetTop - $('activity-list').offsetTop - 40;
 }
 function showToast(event) {
-    if (viewMode !== 'advanced') return;
     const toast = node('button', 'tool-toast');
     const content = node('span', 'event-text'); content.append(node('span','toast-label','TOOL CALL'), document.createTextNode(event.tool.name));
     toast.append(node('span', 'event-icon', '↗'), content, node('span', 'event-time', durationLabel(event.at - manifest.session.started)));
@@ -426,9 +419,17 @@ function ensureEditor() {
         window.require(['vs/editor/editor.main'], () => {
             clearTimeout(timeout);
             if (disposed) { reject(new DOMException('Viewer disposed', 'AbortError')); return; }
-            monaco.editor.defineTheme('replay', { base: 'vs-dark', inherit: true, rules: [], colors: {
-                'editor.background': '#151922', 'editor.foreground': '#c6cedf', 'editorLineNumber.foreground': '#4f5a70',
-                'editor.lineHighlightBackground': '#1a202c', 'scrollbarSlider.background': '#49516b55' } });
+            // The app's editor colors (viberails-dark in js/modules/monaco-loader.js), with the
+            // terminal's selection blue instead of its purple.
+            monaco.editor.defineTheme('replay', { base: 'vs-dark', inherit: true, rules: [
+                { token: 'comment', foreground: '94A3B8' }, { token: 'type', foreground: '569CD6' },
+                { token: 'string', foreground: '6EE7B7' }, { token: 'invalid', foreground: 'FCA5A5' }
+            ], colors: {
+                'editor.background': '#1a1a22', 'editor.foreground': '#f0f0f5', 'editorGutter.background': '#1a1a22',
+                'editorLineNumber.foreground': '#6a6a7d', 'editorLineNumber.activeForeground': '#9ac6c5',
+                'editor.lineHighlightBackground': '#2b2b3640', 'editor.selectionBackground': '#264f78',
+                'editorWidget.background': '#232323', 'editorWidget.border': '#334155',
+                'scrollbarSlider.background': '#3e3e4a80', 'scrollbarSlider.hoverBackground': '#7785ac80' } });
             monaco.languages.register({ id:'captured-patch' });
             monaco.languages.setMonarchTokensProvider('captured-patch', { tokenizer:{ root:[
                 [/^diff .*$/, 'comment'], [/^@@.*$/, 'type'], [/^(---|\+\+\+).*$/, 'type'],
@@ -619,7 +620,7 @@ async function startStandalone() { try {
 function getState() {
     return { sessionId: manifest?.session.id ?? null, ready, busy, playing, position,
         started: manifest?.session.started ?? 0, end: manifest?.end ?? 0,
-        frameIndex, frameCount: frames.length, cols: term?.cols ?? 0, rows: term?.rows ?? 0, view: viewMode };
+        frameIndex, frameCount: frames.length, cols: term?.cols ?? 0, rows: term?.rows ?? 0 };
 }
 function emitState(type = 'state', error) { if (!disposed) host?.onEvent?.({ type, state: getState(), error }); }
 function dispose() {
@@ -638,11 +639,10 @@ window.sessionReplay = {
     configure(options) {
         host = options; document.body.dataset.embedded = 'true';
         document.body.dataset.library = String(options.library !== false);
-        if (options.view) setView(options.view);
     },
-    load: loadSession, pause, seek, setView, getState, dispose,
+    load: loadSession, pause, seek, getState, dispose,
     play: () => playing ? Promise.resolve() : togglePlay(),
-    setSpeed(value) { if (![1,2,5,10,25,100].includes(value)) throw new RangeError('Unsupported replay speed'); selects.speed.setValue(String(value)); },
+    setSpeed(value) { if (![1,2,5,10,25,'max'].includes(value)) throw new RangeError('Unsupported replay speed'); selects.speed.setValue(String(value)); },
     setSkipIdle(value) { $('skip-idle').checked = Boolean(value); },
     browse,
     reload: () => manifest ? loadSession(manifest.session.id) : Promise.resolve()
