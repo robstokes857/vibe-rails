@@ -27,6 +27,10 @@ public class TerminalRunner
     /// session adds nothing to it.
     /// </summary>
     private static readonly ConcurrentDictionary<string, PostStepContext> s_postStepContexts = new();
+    // Guards the hand-off from a registered context to its single in-flight run, so a caller that
+    // arrives while another owns the run waits for it instead of finding nothing to do.
+    private static readonly Lock s_postStepLock = new();
+    private static readonly Dictionary<string, Task> s_postStepRuns = new(StringComparer.Ordinal);
 
     private sealed record PostStepContext(int EnvironmentId, string? EnvironmentName, string WorkingDirectory);
 
@@ -680,8 +684,11 @@ public class TerminalRunner
 
     /// <summary>
     /// Runs the environment's post-exit steps for a session that has ended, if it registered any.
-    /// Idempotent: the context is removed on the first call, so the two callers that own a
-    /// session's end can both call it without double-firing.
+    /// Idempotent, and every caller waits for the same run: the first call removes the context and
+    /// owns the run; a call that arrives while it is in flight awaits that run instead of returning
+    /// at once. The two callers that own a session's end (exit cleanup, and an explicit stop or
+    /// agent completion) can therefore both call it without double-firing, and neither announces
+    /// the session closed while its steps are still running.
     ///
     /// Deliberately NOT hung off <c>terminal.Exited</c>. That is a synchronous
     /// <c>EventHandler&lt;int&gt;</c>, and on the Job path JobRunner finishes and the process exits
@@ -689,9 +696,41 @@ public class TerminalRunner
     /// </summary>
     public async Task RunPostStepsAsync(string sessionId, int exitCode, CancellationToken ct = default)
     {
-        if (!s_postStepContexts.TryRemove(sessionId, out var context))
-            return;
+        PostStepContext? context;
+        Task? inFlight = null;
+        TaskCompletionSource? owned = null;
+        lock (s_postStepLock)
+        {
+            if (s_postStepContexts.TryRemove(sessionId, out context))
+            {
+                owned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                s_postStepRuns[sessionId] = owned.Task;
+            }
+            else
+            {
+                s_postStepRuns.TryGetValue(sessionId, out inFlight);
+            }
+        }
 
+        if (owned is null)
+        {
+            if (inFlight is not null) await inFlight;
+            return;
+        }
+
+        try
+        {
+            await RunPostStepsCoreAsync(sessionId, exitCode, context!, ct);
+        }
+        finally
+        {
+            lock (s_postStepLock) s_postStepRuns.Remove(sessionId);
+            owned.SetResult();
+        }
+    }
+
+    private async Task RunPostStepsCoreAsync(string sessionId, int exitCode, PostStepContext context, CancellationToken ct)
+    {
         Log.Information(
             "[Steps] Running post-exit steps for session {SessionId} (environment {EnvironmentId}, exit code {ExitCode})",
             sessionId,
