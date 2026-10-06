@@ -3687,8 +3687,8 @@ export class TerminalController {
                             </svg>
                             <span>Reconnect</span>
                         </button>
-                        <button type="button" class="btn btn-sm btn-outline-light d-none d-inline-flex align-items-center gap-1 vb-terminal-card-link" id="terminal-card-link-btn">
-                            <i class="fa-solid fa-clipboard-list" aria-hidden="true"></i>
+                        <button type="button" class="btn btn-sm btn-link d-none d-inline-flex align-items-center gap-2 vb-terminal-card-link" id="terminal-card-link-btn">
+                            <i class="fa-solid fa-table-columns" aria-hidden="true"></i>
                             <span class="vb-terminal-card-link-label" id="terminal-card-link-label"></span>
                         </button>
                     </div>

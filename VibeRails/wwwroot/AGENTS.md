@@ -649,7 +649,9 @@ primary link from `IBoardStore.GetSessionCardsAsync`; a board.db failure drops o
 The server link is the source, not the browser-local `board-card:` task key, so it also covers
 other windows, lane Automation viewers and cards an agent attached itself. The active tab shows
 `#terminal-card-link-btn` (display ID; `ID · Title` in the tooltip) in the controls bar actions,
-after the hidden Reconnect button; it hides once an ordinary tab has no session. Restore, adoption
+after the hidden Reconnect button. VIBE-82 styles it as a compact `btn-link` with a columns icon,
+theme accent, hover/focus underline and keyboard focus outline; it hides once an ordinary tab has
+no session. Restore, adoption
 and `refreshAutomationTabs` (same session only) set `state.boardCard`; starting or stopping a
 session in the tab clears it. Clicking navigates to `board` with one-shot `openCardId`, which
 `BoardController.loadView` deletes, then `openCardFromNavigation` selects the card's board and opens

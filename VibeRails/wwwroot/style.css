@@ -2812,9 +2812,28 @@ code {
 }
 
 /* VIBE-36: link back to the tab's Board card; the full "ID · Title" lives in the tooltip. */
-#vb-terminal-panel .vb-terminal-controls-bar .vb-terminal-card-link {
+#vb-terminal-panel .vb-terminal-controls-bar .btn.vb-terminal-card-link {
     max-width: 14rem;
+    padding-inline: 0.45rem;
+    color: var(--color-accent, #06b6d4);
+    text-decoration: none;
     white-space: nowrap;
+}
+
+#vb-terminal-panel .vb-terminal-card-link i {
+    flex-shrink: 0;
+}
+
+#vb-terminal-panel .vb-terminal-card-link:hover .vb-terminal-card-link-label,
+#vb-terminal-panel .vb-terminal-card-link:focus-visible .vb-terminal-card-link-label {
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+}
+
+#vb-terminal-panel .vb-terminal-card-link:focus-visible {
+    outline: 2px solid var(--color-accent, #06b6d4);
+    outline-offset: 2px;
+    box-shadow: none;
 }
 
 #vb-terminal-panel .vb-terminal-card-link-label {
