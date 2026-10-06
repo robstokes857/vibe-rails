@@ -349,6 +349,10 @@ relationships do not automatically share sessions or commits. Refresh to see MCP
 Once the session is attached, one agent `link_board_commit` call shares the snapshot with all
 its attached cards; the frontend reads the ordinary commit lists and needs no extra request.
 
+The card title, description, comment composer, and Chat with agent question ask the browser
+for spell check (`spellcheck="true"`). Chromium leaves it off unless the field requests it.
+Commit SHAs, session ids, and other identifiers stay unchecked. The same request covers a
+foreign card's title, description, and comment, plus the board's agent-context messages.
 Descriptions always open as editable source, with no preview pane or Edit/Preview controls.
 Markdown is always enabled for rendered comments; the retired browser preference is ignored.
 Previous work remains available as a collapsed sidebar section for saved handoffs and file entry

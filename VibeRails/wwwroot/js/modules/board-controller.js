@@ -1282,7 +1282,7 @@ export class BoardController {
                     ${card && card.boardId !== this.state.boardId ? `<div class="alert alert-info" role="note">This card is on another board: <strong>${escapeHtml(this.boardById(card.boardId)?.name || '')}</strong>. Changes are saved to that board.</div>` : ''}
                     <input type="text" class="form-control board-editor-title" id="board-card-title"
                         placeholder="What needs to happen" value="${escapeHtml(card?.title || '')}"
-                        aria-label="Card title">
+                        aria-label="Card title" spellcheck="true">
 
                     <section class="board-block">
                         <h3 class="board-block-label">Description</h3>
@@ -1373,7 +1373,7 @@ export class BoardController {
                             </button>
                         </div>
                         <label class="board-editor-label mt-2" for="board-chat-question">Initial question (optional)</label>
-                        <textarea id="board-chat-question" class="form-control form-control-sm" data-board-chat-question maxlength="1000" rows="2"></textarea>
+                        <textarea id="board-chat-question" class="form-control form-control-sm" data-board-chat-question maxlength="1000" rows="2" spellcheck="true"></textarea>
                         <p class="board-editor-muted mt-2" id="board-chat-help">Ask about previous work. Leave the question empty to open a discussion and wait.</p>
                     </section>` : ''}
 
@@ -1392,7 +1392,7 @@ export class BoardController {
                         ${card ? `
                         <form class="board-side-form" data-board-add-commit>
                             <input type="text" class="form-control form-control-sm" name="sha"
-                                placeholder="Link a commit sha" autocomplete="off" aria-label="Commit sha">
+                                placeholder="Link a commit sha" autocomplete="off" spellcheck="false" aria-label="Commit sha">
                             <input type="hidden" name="message" value="">
                             <button type="submit" class="board-side-add" title="Link this commit" aria-label="Link this commit">
                                 <i class="fa-solid fa-plus" aria-hidden="true"></i>
@@ -1410,7 +1410,7 @@ export class BoardController {
                         ${card ? `
                         <form class="board-side-form" data-board-add-session>
                             <input type="text" class="form-control form-control-sm" name="displayName"
-                                placeholder="Paste a session id" autocomplete="off" aria-label="Session id or name">
+                                placeholder="Paste a session id" autocomplete="off" spellcheck="false" aria-label="Session id or name">
                             <button type="submit" class="board-side-add" title="Add this session" aria-label="Add this session">
                                 <i class="fa-solid fa-plus" aria-hidden="true"></i>
                             </button>
@@ -1429,7 +1429,7 @@ export class BoardController {
                     ${card ? `<section class="board-side-section"><details data-board-advanced>
                         <summary class="board-side-label">Advanced</summary>
                         <label class="board-editor-label mt-2" for="board-card-display-id">Display ID</label>
-                        <input class="form-control form-control-sm" id="board-card-display-id" maxlength="32" value="${escapeHtml(cardDisplayId(card))}">
+                        <input class="form-control form-control-sm" id="board-card-display-id" maxlength="32" spellcheck="false" value="${escapeHtml(cardDisplayId(card))}">
                         <p class="board-editor-muted mt-2">Permanent ID: <code>${escapeHtml(card.key)}</code></p>
                         ${contextSectionMarkup()}${historySection()}
                     </details></section>` : ''}
@@ -1675,7 +1675,7 @@ export class BoardController {
                     <span class="board-composer-hint">@ file · ! card/session · # commit</span>
                 </div>
                 <textarea class="form-control board-composer-input" data-board-composer-input
-                    placeholder="${escapeHtml(placeholder)}" rows="3"${off}>${escapeHtml(value)}</textarea>
+                    placeholder="${escapeHtml(placeholder)}" rows="3" spellcheck="true"${off}>${escapeHtml(value)}</textarea>
                 ${name === 'comment' ? '<div class="board-comment-body board-composer-live" data-board-composer-live aria-label="Live preview"></div>' : ''}
                 <input type="file" hidden data-board-composer-file multiple>
                 <div class="board-composer-busy" data-board-composer-busy hidden>Adding files…</div>
