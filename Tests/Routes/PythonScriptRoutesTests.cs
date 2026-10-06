@@ -64,6 +64,62 @@ public sealed class PythonScriptRoutesTests : IDisposable
         });
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("job.py")]
+    public async Task RunPinRequirementRoundTripsAndRejectsIncorrectPin(string? name)
+    {
+        await WithHostAsync(async baseUri =>
+        {
+            using var created = await PostAsync(
+                baseUri, "/api/v1/python-scripts/create",
+                new PythonScriptSaveRequest("job.py", "print(1)\n"),
+                AppJsonSerializerContext.Default.PythonScriptSaveRequest);
+            Assert.Equal(HttpStatusCode.OK, created.StatusCode);
+            using var configured = await PostAsync(
+                baseUri, "/api/v1/python-scripts/pin",
+                new SetPythonScriptPinRequest(null, "1234"),
+                AppJsonSerializerContext.Default.SetPythonScriptPinRequest);
+            Assert.Equal(HttpStatusCode.OK, configured.StatusCode);
+
+            using var enabled = await PostAsync(
+                baseUri, "/api/v1/python-scripts/run-pin",
+                new PythonScriptRunPinRequirementRequest(name, true, "1234"),
+                AppJsonSerializerContext.Default.PythonScriptRunPinRequirementRequest);
+            Assert.Equal(HttpStatusCode.OK, enabled.StatusCode);
+            var state = await enabled.Content.ReadFromJsonAsync(
+                AppJsonSerializerContext.Default.PythonScriptListResponse,
+                TestContext.Current.CancellationToken);
+            Assert.Equal(name is null, state!.RequirePinEachRun);
+            Assert.Equal(name is not null, Assert.Single(state.Scripts).RequirePinEachRun);
+
+            using var rejected = await PostAsync(
+                baseUri, "/api/v1/python-scripts/run-pin",
+                new PythonScriptRunPinRequirementRequest(name, false, "9999"),
+                AppJsonSerializerContext.Default.PythonScriptRunPinRequirementRequest);
+            Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+            using var saved = await SharedClient.GetAsync(
+                new Uri(baseUri, "/api/v1/python-scripts"), TestContext.Current.CancellationToken);
+            var savedState = await saved.Content.ReadFromJsonAsync(
+                AppJsonSerializerContext.Default.PythonScriptListResponse,
+                TestContext.Current.CancellationToken);
+            Assert.Equal(state.RequirePinEachRun, savedState!.RequirePinEachRun);
+            Assert.Equal(Assert.Single(state.Scripts).RequirePinEachRun,
+                Assert.Single(savedState.Scripts).RequirePinEachRun);
+
+            using var disabled = await PostAsync(
+                baseUri, "/api/v1/python-scripts/run-pin",
+                new PythonScriptRunPinRequirementRequest(name, false, "1234"),
+                AppJsonSerializerContext.Default.PythonScriptRunPinRequirementRequest);
+            Assert.Equal(HttpStatusCode.OK, disabled.StatusCode);
+            var disabledState = await disabled.Content.ReadFromJsonAsync(
+                AppJsonSerializerContext.Default.PythonScriptListResponse,
+                TestContext.Current.CancellationToken);
+            Assert.False(disabledState!.RequirePinEachRun);
+            Assert.False(Assert.Single(disabledState.Scripts).RequirePinEachRun);
+        });
+    }
+
     [Fact]
     public async Task SaveRenameAndDeleteMoveTheFileAndReportTheNewList()
     {
@@ -213,14 +269,14 @@ public sealed class PythonScriptRoutesTests : IDisposable
     }
 
     [Fact]
-    public async Task RunCarriesArgumentsAndStandardInputThroughTheAotJsonContext()
+    public async Task RunCarriesArgumentsStandardInputAndPinThroughTheAotJsonContext()
     {
-        // Arguments and stdin are new fields on an existing request record: they bind
-        // through the source-generated context, so a missing registration would only
-        // show up here, at runtime, as a silently empty argv.
+        // Exercise request binding through the source-generated context so argv,
+        // stdin and the run PIN cannot silently disappear during serialization.
         var scripts = new Mock<IPythonScriptService>(MockBehavior.Loose);
         IReadOnlyList<string>? forwardedArguments = null;
         string? forwardedStandardInput = null;
+        string? forwardedPin = null;
         scripts
             .Setup(service => service.RunAsync(
                 It.IsAny<string?>(),
@@ -232,6 +288,7 @@ public sealed class PythonScriptRoutesTests : IDisposable
             {
                 forwardedArguments = (IReadOnlyList<string>?)invocation.Arguments[1];
                 forwardedStandardInput = (string?)invocation.Arguments[2];
+                forwardedPin = (string?)invocation.Arguments[3];
             }))
             .ReturnsAsync(new PythonScriptRunResponse(
                 "report.py", 0, false, "{\"rows\": 3}", "", 12, DateTime.UtcNow.ToString("O"),
@@ -242,7 +299,7 @@ public sealed class PythonScriptRoutesTests : IDisposable
             using var response = await PostAsync(
                 baseUri,
                 "/api/v1/python-scripts/run",
-                new PythonScriptRunRequest("report.py", ["--out", "report.csv", "50"], "piped text"),
+                new PythonScriptRunRequest("report.py", ["--out", "report.csv", "50"], "piped text", "1234"),
                 AppJsonSerializerContext.Default.PythonScriptRunRequest);
             var body = await response.Content.ReadFromJsonAsync(
                 AppJsonSerializerContext.Default.PythonScriptRunResponse,
@@ -255,6 +312,7 @@ public sealed class PythonScriptRoutesTests : IDisposable
 
         Assert.Equal(new[] { "--out", "report.csv", "50" }, forwardedArguments);
         Assert.Equal("piped text", forwardedStandardInput);
+        Assert.Equal("1234", forwardedPin);
     }
 
     [Theory]
