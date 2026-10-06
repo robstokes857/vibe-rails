@@ -76,9 +76,12 @@ from being written into it, or into the member's own boards, by accident. None n
   board. An import stored with 0 before this change is brought up to 1 on its next sync tick by
   the current binary (the link's own state, written in the ordinary loop; not a startup backfill).
   The host guards the rest: `POST /api/v1/boards/publish` refuses to **create** a board whose
-  lanes include a lane id of any board the caller has or had a membership on, with HTTP 400 and
-  code `shared_board_copy`. The desktop reports it as an ordinary publish error and changes no
-  data; it also covers the older binary's 404 recreate path after revocation. A member's push
+  lanes include a lane id of any board the caller has or had a membership on, in its current
+  layout or in any earlier one (the hosted layout history), with HTTP 400 and code
+  `shared_board_copy`. The desktop reports it as an ordinary publish error and changes no
+  data; it also covers the older binary's 404 recreate path after revocation, including a copy
+  whose lanes the owner has since replaced. Only a board the owner deleted on viberails.ai
+  leaves nothing to recognize its copy by. A member's push
   may rename the board and edit lanes, but the host ignores `keyPrefix` and `displayPrefix` from
   anyone but the owner, so a ≤ v10.11.3 member build cannot relabel the shared board.
 - **Labels never cross the boundary.** Display IDs stay unique per project (the board/20 index is
