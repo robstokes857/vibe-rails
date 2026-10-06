@@ -501,7 +501,10 @@ inside `.monaco-editor` belongs to Monaco's own widgets and must be left alone. 
 Filters (search, assignee, type, priority, origin) persist per browser in
 `localStorage['viberails.board.filters.v1']`. Origin is `agent` or `human`: a card
 `create_board_card` made as an agent carries `agentMade` and shows a robot mark beside its key;
-every other card, including ones made before the mark existed, is human-made. Clicking a card's tag or avatar toggles that filter,
+every other card, including ones made before the mark existed, is human-made. Since VIBE-96 the
+mark's tooltip and the editor's provenance block (`board-agent-provenance.js`) name the agent
+(`agentMadeBy`), when (`createdAt`, with the year) and its session (`agentMadeSessionId`), whose
+button replays that session seeked to the creation moment; all three are escaped card data. Clicking a card's tag or avatar toggles that filter,
 which is why those two controls stop propagation before the card's own open handler runs.
 
 ## Chat history sidebar

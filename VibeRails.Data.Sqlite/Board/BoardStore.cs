@@ -565,14 +565,17 @@ public sealed partial class BoardStore : IBoardStore
             ? await ResolveDisplayIdAsync(connection, transaction, project, column.BoardId, id, card.DisplayId ?? cardKey, synced is not null, keyNumber, cancellationToken)
             : await AllocateDisplayIdAsync(connection, transaction, project, column.BoardId, id, cancellationToken, keyNumber);
 
+        // Who made it travels with the agent mark and nothing else, so a human card never names one.
+        var agentMadeBy = card.AgentMade ? card.AgentMadeBy : null;
+        var agentMadeSessionId = card.AgentMade ? card.AgentMadeSessionId : null;
         await using (var insert = connection.CreateCommand())
         {
             insert.Transaction = transaction;
             insert.CommandText = """
                 INSERT INTO BoardCards
-                    (Id, ProjectPath, Number, ColumnId, Position, Title, Description, Assignee, Priority, Type, Points, Tags, Blocked, Flagged, CreatedUTC, UpdatedUTC, CardKey, DisplayId, AgentMade)
+                    (Id, ProjectPath, Number, ColumnId, Position, Title, Description, Assignee, Priority, Type, Points, Tags, Blocked, Flagged, CreatedUTC, UpdatedUTC, CardKey, DisplayId, AgentMade, AgentMadeBy, AgentMadeSessionId)
                 VALUES
-                    ($id, $project, $number, $column, $position, $title, $description, $assignee, $priority, $type, $points, $tags, $blocked, $flagged, $created, $updated, $cardKey, $displayId, $agentMade);
+                    ($id, $project, $number, $column, $position, $title, $description, $assignee, $priority, $type, $points, $tags, $blocked, $flagged, $created, $updated, $cardKey, $displayId, $agentMade, $agentMadeBy, $agentMadeSession);
                 """;
             insert.Parameters.AddWithValue("$id", id);
             insert.Parameters.AddWithValue("$cardKey", cardKey);
@@ -591,6 +594,8 @@ public sealed partial class BoardStore : IBoardStore
             insert.Parameters.AddWithValue("$blocked", card.Blocked ? 1 : 0);
             insert.Parameters.AddWithValue("$flagged", card.Flagged ? 1 : 0);
             insert.Parameters.AddWithValue("$agentMade", card.AgentMade ? 1 : 0);
+            insert.Parameters.AddWithValue("$agentMadeBy", (object?)agentMadeBy ?? DBNull.Value);
+            insert.Parameters.AddWithValue("$agentMadeSession", (object?)agentMadeSessionId ?? DBNull.Value);
             insert.Parameters.AddWithValue("$created", ToDb(now));
             insert.Parameters.AddWithValue("$updated", ToDb(now));
             await insert.ExecuteNonQueryAsync(cancellationToken);
@@ -599,7 +604,8 @@ public sealed partial class BoardStore : IBoardStore
         await WriteBaseLlmOptionsAsync(connection, transaction, id, card.BaseLlmOptions, cancellationToken);
 
         var created = new BoardCardRecord(id, project, number, column.Id, position, card.Title, card.Description,
-            card.Assignee, card.Priority, card.Points, card.Tags, card.Blocked, 0, now, now, card.BaseLlmOptions, Type: card.Type, BoardId: column.BoardId, Flagged: card.Flagged, KeyPrefix: prefix, StoredKey: cardKey, StoredDisplayId: displayId, AgentMade: card.AgentMade);
+            card.Assignee, card.Priority, card.Points, card.Tags, card.Blocked, 0, now, now, card.BaseLlmOptions, Type: card.Type, BoardId: column.BoardId, Flagged: card.Flagged, KeyPrefix: prefix, StoredKey: cardKey, StoredDisplayId: displayId, AgentMade: card.AgentMade,
+            AgentMadeBy: agentMadeBy, AgentMadeSessionId: agentMadeSessionId);
         await LogCardCreatedAsync(connection, transaction, created, column.Name, author, cancellationToken, stamp);
         if (synced is not null) await ReconcileSyncedDisplayIdAsync(connection, transaction, created, card.DisplayId, cancellationToken);
         await InsertDraftLinksAsync(connection, transaction, created, card.LinkedCardIds, cancellationToken);
@@ -1263,7 +1269,7 @@ public sealed partial class BoardStore : IBoardStore
                (SELECT o.OptionsJson FROM BoardCardOptions o WHERE o.CardId = c.Id),
                c.Type,
                (SELECT k.BoardId FROM BoardColumns k WHERE k.Id = c.ColumnId), c.Flagged,
-               {CardPrefixSql}, c.CardKey, c.DisplayId, c.AgentMade
+               {CardPrefixSql}, c.CardKey, c.DisplayId, c.AgentMade, c.AgentMadeBy, c.AgentMadeSessionId
         FROM BoardCards c
         {CardPrefixJoinSql}
         """;
@@ -1452,7 +1458,9 @@ public sealed partial class BoardStore : IBoardStore
         KeyPrefix: reader.GetString(19),
         StoredKey: reader.IsDBNull(20) ? null : reader.GetString(20),
         StoredDisplayId: reader.IsDBNull(21) ? null : reader.GetString(21),
-        AgentMade: !reader.IsDBNull(22) && reader.GetInt32(22) != 0);
+        AgentMade: !reader.IsDBNull(22) && reader.GetInt32(22) != 0,
+        AgentMadeBy: reader.IsDBNull(23) ? null : reader.GetString(23),
+        AgentMadeSessionId: reader.IsDBNull(24) ? null : reader.GetString(24));
 
     private static async Task<IReadOnlyList<BoardCommentRecord>> ReadCommentsAsync(SqliteConnection connection, string cardId, CancellationToken cancellationToken)
     {
@@ -1865,6 +1873,14 @@ public sealed partial class BoardStore : IBoardStore
         });
         SqliteMigrationRunner.Apply(connection, "board", 26, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, SharedOriginsSchemaSql));
+        // board/27 (VIBE-96): the agent that made an AgentMade card and its VibeRails session, written
+        // once at insert beside AgentMade. Additive and nullable with no backfill: earlier agent cards
+        // keep only the mark, and an older binary never names the columns.
+        SqliteMigrationRunner.Apply(connection, "board", 27, MigrationKind.Additive, (db, transaction) =>
+        {
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardCards ADD COLUMN AgentMadeBy TEXT");
+            SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardCards ADD COLUMN AgentMadeSessionId TEXT");
+        });
         SqliteMigrationRunner.Apply(connection, "board-attention", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, AttentionSchemaSql));
         SqliteMigrationRunner.Apply(connection, "board-lane-dispatch", 1, MigrationKind.Additive, ApplyLaneDispatchSchema);

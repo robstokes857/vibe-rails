@@ -307,7 +307,9 @@ public sealed partial class BoardService(
             DisplayId: request.DisplayId is null ? null : BoardDisplayIds.Normalize(request.DisplayId), LinkedCardIds: request.LinkedCardIds,
             // The board UI and a synced pull omit this. Only the MCP create path sets it, and only
             // when that call's author is an agent, so a later edit cannot relabel a human card.
-            AgentMade: request.AgentMade == true && author?.Kind == BoardAuthor.AgentKind), cancellationToken, author);
+            // The agent's name and session go with the mark; the store drops them without it.
+            AgentMade: request.AgentMade == true && author?.Kind == BoardAuthor.AgentKind,
+            AgentMadeBy: request.AgentMadeBy, AgentMadeSessionId: request.AgentMadeSessionId), cancellationToken, author);
         return (await GetCardAsync(projectPath, card.Id, cancellationToken))!;
     }
 
@@ -579,7 +581,8 @@ public sealed partial class BoardService(
             detail.Attachments.Select(ToDto).ToList(),
             detail.Card.BaseLlmOptions,
             notes, summary.Type, summary.BoardId, summary.Flagged, hasActiveAutomation, summary.DisplayId, summary.AgentMade,
-            (await store.GetWaitingAutomationCardIdsAsync(detail.Card.ProjectPath, [detail.Card.Id], cancellationToken)).Count > 0)
+            (await store.GetWaitingAutomationCardIdsAsync(detail.Card.ProjectPath, [detail.Card.Id], cancellationToken)).Count > 0,
+            summary.AgentMadeBy, summary.AgentMadeSessionId)
         {
             LinkedCards = detail.LinkedCards.Select(card => ToDto(card, detail.Card.ProjectPath)).ToList(),
             PreviousWork = BoardHandoffService.WithFileStatus(detail.PreviousWork, detail.Card.ProjectPath),
@@ -612,7 +615,8 @@ public sealed partial class BoardService(
     internal static BoardCardSummaryResponse ToSummary(BoardCardRecord card, string? activeSessionId, string? activeTabId) => new(
         card.Id, card.Key, card.ColumnId, card.Position, card.Title, card.Description, PresentAssignee(card.Assignee), card.Priority,
         card.Points, card.Tags.ToList(), card.Blocked, card.CommentCount, activeSessionId, activeTabId, card.CreatedUtc, card.UpdatedUtc,
-        card.BaseLlmOptions, card.Type, card.BoardId, card.Flagged, DisplayId: card.DisplayId, AgentMade: card.AgentMade);
+        card.BaseLlmOptions, card.Type, card.BoardId, card.Flagged, DisplayId: card.DisplayId, AgentMade: card.AgentMade,
+        AgentMadeBy: card.AgentMadeBy, AgentMadeSessionId: card.AgentMadeSessionId);
 
     internal static BoardColumnResponse ToDto(BoardColumnRecord column) =>
         new(column.Id, column.Name, column.Position, column.Color, column.BoardId);

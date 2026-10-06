@@ -178,7 +178,7 @@ public sealed partial class BoardTool(
                 if (!string.IsNullOrWhiteSpace(card.Assignee)) builder.Append(" — assignee ").Append(card.Assignee);
                 if (card.Blocked) builder.Append(" — BLOCKED");
                 if (card.Flagged) builder.Append(" — FLAGGED: needs your attention");
-                if (card.AgentMade) builder.Append(" — agent-made");
+                if (card.AgentMade) builder.Append(" — agent-made").Append(card.AgentMadeBy is { } madeBy ? " by " + madeBy : "");
                 if (card.CommentCount > 0) builder.Append(" — ").Append(card.CommentCount).Append(" comment").Append(card.CommentCount == 1 ? "" : "s");
                 if (!string.IsNullOrWhiteSpace(card.ActiveTabId)) builder.Append(" — session open");
                 if (outsideProject) builder.Append(" — id ").Append(card.Id);
@@ -359,7 +359,8 @@ public sealed partial class BoardTool(
         + $"{MaxMcpImageBytes} bytes (5 MiB) through MCP. Open or download it in the Board viewer instead; "
         + "the stored attachment is unchanged.";
 
-    [McpServerTool, Description("Create a kanban card on any local board using board=<id> from list_boards. Returns its permanent key. Omit board for the launching card's board, else the current project's first board.")]
+    [McpServerTool, Description("Create a kanban card on any local board using board=<id> from list_boards. Returns its permanent key. Omit board for the launching card's board, else the current project's first board. "
+        + "Pass agentName, and sessionId when you have one: the Board shows which agent made the card, in which session, and when.")]
     public async Task<string> CreateBoardCard(
         [Description("Card title (required).")] string title,
         [Description("Longer description of the work. Optional.")] string? description = null,
@@ -368,6 +369,10 @@ public sealed partial class BoardTool(
         [Description("Comma-separated tags. Optional.")] string? tags = null,
         [Description("task | bug | feature | research-spike | chore. Defaults to task.")] string? type = null,
         [Description(BoardArgumentHelp)] string? board = null,
+        [Description("Your agent and model name as people should see it, e.g. Claude Opus 5.5 or Codex GPT-5. Shown on the card as who made it. "
+            + "Omitted: the CLI or environment name VibeRails knows for this session.")] string? agentName = null,
+        [Description("Your VibeRails session id, if you have one: the VIBERAILS_TOOL_CURRENT_SESSION_ID environment variable of a terminal VibeRails launched. "
+            + "Do not invent one. Ignored when this MCP server already knows the launching session.")] string? sessionId = null,
         CancellationToken cancellationToken = default,
         McpServer? server = null)
     {
@@ -389,6 +394,7 @@ public sealed partial class BoardTool(
             }
             if (await ResolveAuthorAsync(server, cancellationToken) is not { } author)
                 return UnnamedClientHint;
+            var maker = await ResolveCardMakerAsync(author, agentName, sessionId, cancellationToken);
             var created = await service.CreateCardAsync(project, new CreateBoardCardRequest(
                 Title: title,
                 ColumnId: columnId,
@@ -399,9 +405,14 @@ public sealed partial class BoardTool(
                 BoardId: target.BoardId,
                 // The tool is the agent path. A session whose author resolves to a person
                 // (a hand-driven call) stays a human card.
-                AgentMade: author.Kind == BoardAuthor.AgentKind), cancellationToken, author);
+                AgentMade: author.Kind == BoardAuthor.AgentKind,
+                AgentMadeBy: maker.Name, AgentMadeSessionId: maker.SessionId), cancellationToken, author);
             await AutoLinkSessionAsync(project, created.Id, cancellationToken);
             return $"Created {created.Key}: {created.Title}"
+                // Confirms what was recorded to a caller that supplied either; older callers' reply is unchanged.
+                + (created.AgentMade && (agentName is not null || sessionId is not null)
+                    ? "\n" + DescribeCardMaker(created.AgentMadeBy, created.AgentMadeSessionId, created.CreatedAt) : "")
+                + (maker.Note is null ? "" : "\n" + maker.Note)
                 + (outsideProject ? $"\nOther local project: {project} (board {target.BoardName}, id {target.BoardId})" : "");
         }
         catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
@@ -913,6 +924,8 @@ public sealed partial class BoardTool(
         if (card.Blocked) builder.Append(" · BLOCKED");
         if (card.Flagged) builder.Append(" · FLAGGED: needs your attention");
         builder.Append(card.AgentMade ? " · Agent-made" : " · Human-made");
+        if (card.AgentMade && card.AgentMadeBy is { } madeBy) builder.Append(" by ").Append(madeBy);
+        if (card.AgentMade && card.AgentMadeSessionId is { } madeIn) builder.Append(" in session ").Append(madeIn);
         if (card.Tags.Count > 0) builder.Append(" · Tags: ").Append(string.Join(", ", card.Tags));
         builder.Append('\n');
         if (!string.IsNullOrWhiteSpace(boardName))

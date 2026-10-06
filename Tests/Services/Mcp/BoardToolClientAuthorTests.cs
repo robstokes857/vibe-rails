@@ -19,7 +19,7 @@ namespace Tests.Services.Mcp;
 /// run the real tool registration over a stream transport (the stdio host's shape) with the
 /// initialize handshake Claude Code and Codex use, against a real temporary Board store.
 /// </summary>
-public sealed class BoardToolClientAuthorTests : IAsyncDisposable
+public sealed partial class BoardToolClientAuthorTests : IAsyncDisposable
 {
     private const string LegacyHandshake = "2025-06-18";
 

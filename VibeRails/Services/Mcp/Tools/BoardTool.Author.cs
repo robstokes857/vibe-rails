@@ -98,6 +98,39 @@ public sealed partial class BoardTool
         return BoardAuthor.IsGenericAgentLabel(label) ? null : label;
     }
 
+    /// <summary>Who made a new card, as stored beside its agent mark, and anything the caller should hear about it.</summary>
+    private readonly record struct CardMaker(string? Name, string? SessionId, string? Note);
+
+    /// <summary>
+    /// The name and session recorded on a card an agent creates (VIBE-96). The agent's own
+    /// <paramref name="agentName"/> is the most specific ("Claude Opus 5.5"), cleaned like any
+    /// client-supplied label; without it the author VibeRails resolved stands, unless that is only
+    /// the generic "Agent". The session this process was launched from wins over a supplied id;
+    /// a supplied id is kept only when it is a GUID VibeRails has recorded, so a guessed one never
+    /// shows as provenance.
+    /// </summary>
+    private async Task<CardMaker> ResolveCardMakerAsync(BoardAuthor author, string? agentName, string? suppliedSessionId,
+        CancellationToken cancellationToken)
+    {
+        if (author.Kind != BoardAuthor.AgentKind) return default;
+        var name = CleanClientLabel(agentName) ?? (BoardAuthor.IsGenericAgentLabel(author.Label) ? null : author.Label);
+        if (author.SessionId is not null || string.IsNullOrWhiteSpace(suppliedSessionId))
+            return new CardMaker(name, author.SessionId, null);
+        if (!Guid.TryParse(suppliedSessionId.Trim(), out var parsed))
+            return new CardMaker(name, null, "sessionId was not recorded: it is not a VibeRails session id (a GUID).");
+        var sessionId = parsed.ToString("D");
+        var session = await store.FindSessionAuthorAsync(sessionId, cancellationToken);
+        if (session is null)
+            return new CardMaker(name, null, $"sessionId {sessionId} was not recorded: VibeRails has no such session.");
+        return new CardMaker(name ?? (BoardAuthor.IsGenericAgentLabel(session.Label) ? null : session.Label), sessionId, null);
+    }
+
+    /// <summary>One line naming the agent, session and time behind an agent-made card.</summary>
+    internal static string DescribeCardMaker(string? name, string? sessionId, DateTime createdUtc) =>
+        "Made by " + (name ?? "an agent")
+        + (sessionId is null ? "" : " in session " + sessionId)
+        + " at " + createdUtc.ToString("u", CultureInfo.InvariantCulture);
+
     [GeneratedRegex("[^a-z0-9]+")]
     private static partial Regex NonAlphanumeric();
 }

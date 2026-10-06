@@ -45,6 +45,7 @@ import { cardAutomationControls, bindCardAutomations } from './board-card-automa
 import { contextSectionMarkup, bindCardContext } from './board-card-context.js';
 import { cardDisplayId, cardLabel } from './board-card-label.js';
 import { renderCommentHtml, wrapSelectionAsCode, toPlainPreview } from './board-text.js';
+import { agentMadeSummary, agentProvenanceHtml, bindAgentProvenance } from './board-agent-provenance.js';
 import { historySection, mountHistory } from './board-history.js';
 import { bindBoardReferences, canonicalSessionId } from './board-references.js';
 import { bindComposerPreview, boardTextOptions } from './board-composer-preview.js';
@@ -790,12 +791,12 @@ export class BoardController {
         // is-live paints the marching "an agent is on this" border (see the template CSS).
         return `
             <article class="board-card${card.flagged ? ' is-flagged' : ''}${card.blocked ? ' is-blocked' : ''}${card.activeTabId ? ' is-live' : ''}" data-card-id="${escapeHtml(card.id)}"
-                tabindex="0" role="button" aria-label="${escapeHtml(cardDisplayId(card))}: ${escapeHtml(card.title)}${card.agentMade ? ' — Made by an agent' : ''}${card.flagged ? ' — Needs your attention' : ''}">
+                tabindex="0" role="button" aria-label="${escapeHtml(cardDisplayId(card))}: ${escapeHtml(card.title)}${card.agentMade ? ` — ${escapeHtml(agentMadeSummary(card))}` : ''}${card.flagged ? ' — Needs your attention' : ''}">
                 <span class="board-card-rail" data-priority="${escapeHtml(card.priority)}"
                     title="${escapeHtml(card.priority)} priority"></span>
                 <div class="board-card-body">
                     <div class="board-card-top">
-                        <span class="board-key">${card.flagged ? '<i class="fa-solid fa-flag board-attention-flag" title="Needs your attention" aria-hidden="true"></i> ' : ''}${card.agentMade ? '<i class="fa-solid fa-robot board-agent-mark" title="Made by an agent" aria-label="Made by an agent"></i> ' : ''}${escapeHtml(cardDisplayId(card))}</span>
+                        <span class="board-key">${card.flagged ? '<i class="fa-solid fa-flag board-attention-flag" title="Needs your attention" aria-hidden="true"></i> ' : ''}${card.agentMade ? `<i class="fa-solid fa-robot board-agent-mark" title="${escapeHtml(agentMadeSummary(card))}" aria-label="${escapeHtml(agentMadeSummary(card))}"></i> ` : ''}${escapeHtml(cardDisplayId(card))}</span>
                         <span class="board-card-top-right">
                             <span class="board-type-chip" data-type="${escapeHtml(type.value)}"
                                 title="${escapeHtml(type.label)}">${escapeHtml(type.label)}</span>
@@ -1351,7 +1352,7 @@ export class BoardController {
                             </div>
                         </div>
                         <div data-board-launch-options></div>
-                        ${card?.agentMade ? `<p class="board-editor-muted"><i class="fa-solid fa-robot board-agent-mark" aria-hidden="true"></i> Made by an agent</p>` : ''}
+                        ${agentProvenanceHtml(card)}
                         <div class="form-check">
                             <input class="form-check-input" type="checkbox" id="board-card-flagged"
                                 data-board-flagged${card?.flagged ? ' checked' : ''}>
@@ -1579,6 +1580,8 @@ export class BoardController {
             app: this.app,
             onQueued: () => void this.refreshSessionActivity()
         });
+        bindAgentProvenance(editor.querySelector('[data-board-agent-provenance]'),
+            (sessionId, seekToUtc) => this.openSessionReplay({ id: sessionId }, { seekToUtc }));
         if (assigneeSelect) {
             this.assigneePickerDispose = mountLlmPicker(this.app, assigneeSelect, {
                 context: 'sandbox',

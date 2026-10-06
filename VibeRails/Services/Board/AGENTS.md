@@ -279,6 +279,17 @@ serialization or tool discovery into the Native AOT path.
   and from the sync change set. The lane tile shows a robot mark beside the key; the toolbar's
   origin filter (`agent` / `human`, query `origin`) applies to the whole board, including cards
   the browser has not loaded. `get_board_card` says `Agent-made` or `Human-made`.
+- **Who made it (VIBE-96).** `create_board_card` asks for optional `agentName` (the agent and
+  model, e.g. Claude Opus 5.5) and `sessionId` (the agent's `VIBERAILS_TOOL_CURRENT_SESSION_ID`).
+  `BoardCards.AgentMadeBy` / `AgentMadeSessionId` are written in the same insert as `AgentMade`
+  and only beside it; the store drops them on a human card. The name is cleaned like a handshake
+  label (one line, 60 characters) and falls back to the resolved author unless that is the generic
+  "Agent". The launching session (this process's environment) always wins; a supplied id is kept
+  only when it is a GUID VibeRails has recorded, and the reply says why one was dropped. The time
+  is the card's `CreatedUTC`. Same contract as the mark: never edited, absent from
+  `update_board_card` and from sync. The editor shows maker, date and a session button that
+  replays the session seeked to the creation moment; the robot tooltip names maker and time
+  (`board-agent-provenance.js`). Cards made earlier keep only the mark ("Made by an agent").
 - `Flagged` means **Needs your attention**, independently of `Blocked`. The editor saves it;
   the tile paints red with a flag icon. Agents set/clear `flagged` through `update_board_card`
   following the root [attention policy](../../../AGENTS.md#board-attention-flags). Reserve it for
@@ -399,7 +410,9 @@ the header displays the full card count. Tests should use realistic asynchronous
 ## Storage changes
 
 Read [database migration instructions](../../../VibeRails.Data.Sqlite/DB/AGENTS.md).
-`board/1`–`board/24` already exist. `board/24` (VIBE-11, additive) adds `BoardCards.AgentMade`
+`board/1`–`board/27` already exist. `board/27` (VIBE-96, additive) adds nullable
+`BoardCards.AgentMadeBy` / `AgentMadeSessionId`, written only beside `AgentMade`, no backfill.
+`board/24` (VIBE-11, additive) adds `BoardCards.AgentMade`
 (default 0, no backfill): set only when `create_board_card` runs as an agent, left alone by every
 later edit, and ignored by an older binary. `board/23` adds the activity schema version and durable rotation
 cursor on `BoardSyncLinks`. VIBE-13 automatically publishes all local boards and activity whenever
