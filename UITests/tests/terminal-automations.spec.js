@@ -92,6 +92,21 @@ test('session sharing handles sign-in errors, ready sessions and late replies af
     expect(count).toBe(3);
 });
 
+test('session sharing shows an actionable migration error on a phone', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 850 });
+    await openFixture(page, 1);
+    const message = 'The sharing server needs a database update. Ask the server administrator to apply the pending migrations.';
+    await page.route('**/sharing-links', route => route.fulfill({ json: {
+        success: false, status: 'schema_update_required', httpStatus: 503, message
+    } }));
+    await page.evaluate(() => { void window.app.terminalController.manager.shareTab('ordinary'); });
+    const modal = page.locator('#terminal-session-share');
+    await expect(modal).toContainText(message);
+    await expect(modal.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
+    await expect(modal.locator('[data-share-result]')).toBeHidden();
+    expect(await modal.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+});
+
 test('card attention colors the originating terminal and Automation menu until cleared', async ({ page }, testInfo) => {
     const fixture = await openFixture(page, 1);
     fixture.tabs.get('ordinary').needsAttention = true;

@@ -11,16 +11,19 @@ namespace VibeRails.Services.Integrations.VibeCodeRemote;
 
 public sealed record CreateSessionShareRequest(string DisplayName);
 public sealed record SessionShareResponse(bool Success, string Status, string Message,
-    string? Url = null, string? DisplayName = null, DateTimeOffset? ExpiresUtc = null);
+    string? Url = null, string? DisplayName = null, DateTimeOffset? ExpiresUtc = null,
+    int? HttpStatus = null);
 internal sealed record RemoteSessionShareRequest(Guid SessionId, string DisplayName);
 internal sealed record RemoteSessionShareResponse(Guid SessionId, string Key, string SharePath,
     DateTimeOffset ExpiresUtc, bool? UploadRequired);
+internal sealed record RemoteSessionShareError(string? Code);
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(CreateSessionShareRequest))]
 [JsonSerializable(typeof(SessionShareResponse))]
 [JsonSerializable(typeof(RemoteSessionShareRequest))]
 [JsonSerializable(typeof(RemoteSessionShareResponse))]
+[JsonSerializable(typeof(RemoteSessionShareError))]
 internal partial class SessionSharingJsonContext : JsonSerializerContext;
 
 /// <summary>Creates public capabilities at the pinned export origin and persists their upload intent.</summary>
@@ -51,12 +54,8 @@ public sealed class SessionSharingService(HttpClient client, ISessionStore sessi
             request.Content = JsonContent.Create(new RemoteSessionShareRequest(sessionId, name),
                 SessionSharingJsonContext.Default.RemoteSessionShareRequest);
             using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
-            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-                return Failure("invalid_api_key", "Sign in with an account key that allows session uploads and sharing.");
-            if (response.StatusCode == HttpStatusCode.TooManyRequests)
-                return Failure("rate_limited", "Too many sharing requests. Try again in a minute.");
             if (response.StatusCode != HttpStatusCode.Created)
-                return Failure("unavailable", "Could not create the link. Try again shortly.");
+                return await ServerFailureAsync(response, deadline.Token);
             var bytes = await ReadBoundedAsync(await response.Content.ReadAsStreamAsync(deadline.Token), 16 * 1024, deadline.Token);
             var remote = JsonSerializer.Deserialize(bytes, SessionSharingJsonContext.Default.RemoteSessionShareResponse);
             if (remote is null || remote.SessionId != sessionId || remote.Key is not { Length: 64 }
@@ -82,10 +81,67 @@ public sealed class SessionSharingService(HttpClient client, ISessionStore sessi
             return new(true, status, message, Endpoint.GetLeftPart(UriPartial.Authority) + remote.SharePath, name, remote.ExpiresUtc);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        { return Failure("timeout", "The sharing server took too long to respond. Try again shortly."); }
-        catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidDataException or JsonException)
-        { return Failure("unavailable", "Could not create the link. Try again shortly."); }
+        { return Failure("timeout", "viberails.ai did not respond in time. Check Sharing links before trying again; the link may already have been created."); }
+        catch (HttpRequestException ex)
+        {
+            return Failure("network_error", ex.HttpRequestError switch
+            {
+                HttpRequestError.NameResolutionError => "Could not find viberails.ai. Check your internet connection and DNS settings.",
+                HttpRequestError.SecureConnectionError => "Could not establish a secure connection to viberails.ai. Check your device clock and network, or contact the server administrator.",
+                _ => "Could not connect to viberails.ai. Check your internet connection and try again."
+            });
+        }
+        catch (InvalidDataException)
+        { return Failure("invalid_response", "The sharing server returned a response larger than expected. Contact the server administrator."); }
+        catch (JsonException)
+        { return Failure("invalid_response", "The sharing server returned an unreadable response. Check that the server and client are up to date."); }
+        catch (IOException)
+        { return Failure("network_error", "The connection to viberails.ai was interrupted. Check Sharing links before trying again; the link may already have been created."); }
         finally { CreationGate.Release(); }
+    }
+
+    private static async Task<SessionShareResponse> ServerFailureAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        var status = (int)response.StatusCode;
+        string? code = null;
+        var mediaType = response.Content.Headers.ContentType?.MediaType;
+        if (string.Equals(mediaType, "application/json", StringComparison.OrdinalIgnoreCase)
+            || mediaType?.EndsWith("+json", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            try
+            {
+                var bytes = await ReadBoundedAsync(await response.Content.ReadAsStreamAsync(ct), 16 * 1024, ct);
+                code = JsonSerializer.Deserialize(bytes, SessionSharingJsonContext.Default.RemoteSessionShareError)?.Code;
+            }
+            catch (Exception ex) when (ex is JsonException or IOException or InvalidDataException)
+            {
+                // Keep the HTTP status useful even when an error page is malformed or too large.
+            }
+        }
+
+        // Only known codes select our own messages. Never display remote error prose, SQL,
+        // redirect locations, response headers, or exception messages that might contain keys.
+        if (status >= 500 && code == "schema_update_required")
+            return Failure("schema_update_required", "The sharing server needs a database update. Ask the server administrator to apply the pending migrations.", status);
+        return response.StatusCode switch
+        {
+            HttpStatusCode.Unauthorized => Failure("invalid_api_key", code switch
+            {
+                "api_key_expired" => "Your VibeRails account key has expired. Sign in again before sharing.",
+                "api_key_revoked" => "Your VibeRails account key has been revoked. Sign in again before sharing.",
+                _ => "viberails.ai rejected your account key. Sign in again before sharing."
+            }, status),
+            HttpStatusCode.Forbidden => Failure("permission_denied", "Your account key does not allow session sharing. Sign in with a key that includes Sessions access.", status),
+            HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed or HttpStatusCode.NotImplemented =>
+                Failure("server_update_required", $"Session sharing is not available on the deployed server (HTTP {status}). Ask the server administrator to deploy the sharing update.", status),
+            HttpStatusCode.BadRequest or HttpStatusCode.UnprocessableEntity =>
+                Failure("invalid_request", $"The sharing server rejected the session or link name (HTTP {status}). Refresh the terminal and try again.", status),
+            HttpStatusCode.TooManyRequests => Failure("rate_limited", "Too many sharing requests. Try again in a minute.", status),
+            HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout =>
+                Failure("server_unavailable", $"viberails.ai is temporarily unavailable (HTTP {status}). Try again shortly, or contact the server administrator if it continues.", status),
+            _ when status is >= 300 and < 400 => Failure("unexpected_redirect", $"The sharing server returned an unexpected redirect (HTTP {status}). Ask the server administrator to check the deployment.", status),
+            _ => Failure("server_error", $"viberails.ai could not create the sharing link (HTTP {status}). Ask the server administrator to check the server logs and pending database migrations.", status)
+        };
     }
 
     // Bounds decoded bytes even for a chunked response; never read or echo remote error prose.
@@ -102,5 +158,6 @@ public sealed class SessionSharingService(HttpClient client, ISessionStore sessi
         }
     }
 
-    private static SessionShareResponse Failure(string status, string message) => new(false, status, message);
+    private static SessionShareResponse Failure(string status, string message, int? httpStatus = null)
+        => new(false, status, message, HttpStatus: httpStatus);
 }

@@ -99,6 +99,86 @@ public sealed class SessionSharingTests : IDisposable
         Assert.False(handler.UseCookies);
     }
 
+    [Theory]
+    [InlineData(503, "schema_update_required", "schema_update_required", "database update")]
+    [InlineData(500, null, "server_error", "HTTP 500")]
+    [InlineData(404, null, "server_update_required", "deploy the sharing update")]
+    [InlineData(405, null, "server_update_required", "HTTP 405")]
+    [InlineData(403, "capability_required", "permission_denied", "Sessions access")]
+    [InlineData(401, "api_key_expired", "invalid_api_key", "expired")]
+    [InlineData(401, "api_key_revoked", "invalid_api_key", "revoked")]
+    [InlineData(429, null, "rate_limited", "Try again in a minute")]
+    [InlineData(502, null, "server_unavailable", "HTTP 502")]
+    [InlineData(503, null, "server_unavailable", "HTTP 503")]
+    [InlineData(307, null, "unexpected_redirect", "redirect")]
+    public async Task RemoteFailuresExplainTheCauseWithoutEchoingRemoteDetails(int httpStatus, string? code, string status, string message)
+    {
+        using var client = new HttpClient(new Handler(_ => Task.FromResult(new HttpResponseMessage((HttpStatusCode)httpStatus)
+        {
+            Content = JsonContent.Create(new { code = code ?? ApiKey, error = "Sensitive SQL: " + ApiKey }),
+            Headers = { Location = new Uri("https://example.invalid/" + ApiKey) }
+        })));
+        var result = await Service(client).CreateAsync(_id, "Demo", Ct);
+        Assert.False(result.Success);
+        Assert.Equal(status, result.Status);
+        Assert.Equal(httpStatus, result.HttpStatus);
+        Assert.Contains(message, result.Message);
+        var json = System.Text.Json.JsonSerializer.Serialize(result, SessionSharingJsonContext.Default.SessionShareResponse);
+        Assert.DoesNotContain(ApiKey, json);
+        Assert.DoesNotContain("Sensitive SQL", json);
+        Assert.DoesNotContain("example.invalid", json);
+        Assert.Contains($"\"httpStatus\":{httpStatus}", json);
+        _repository.Verify(r => r.QueueSessionShareUploadAsync(It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("html")]
+    [InlineData("malformed")]
+    [InlineData("oversized")]
+    public async Task UnreadableErrorBodiesStillReportTheUpstreamHttpStatus(string variant)
+    {
+        using var client = new HttpClient(new Handler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError)
+        {
+            Content = variant switch
+            {
+                "html" => new StringContent("<html>" + ApiKey + "</html>", Encoding.UTF8, "text/html"),
+                "oversized" => new StringContent(new string('x', 17000), Encoding.UTF8, "application/json"),
+                _ => new StringContent("{broken:" + ApiKey, Encoding.UTF8, "application/json")
+            }
+        })));
+        var result = await Service(client).CreateAsync(_id, "Demo", Ct);
+        Assert.Equal("server_error", result.Status);
+        Assert.Equal(500, result.HttpStatus);
+        Assert.Contains("HTTP 500", result.Message);
+        Assert.DoesNotContain(ApiKey, result.Message);
+    }
+
+    [Theory]
+    [InlineData(HttpRequestError.NameResolutionError, "DNS")]
+    [InlineData(HttpRequestError.SecureConnectionError, "secure connection")]
+    [InlineData(HttpRequestError.ConnectionError, "internet connection")]
+    public async Task TransportFailuresHaveUsefulMessagesWithoutExceptionDetails(HttpRequestError error, string message)
+    {
+        using var client = new HttpClient(new Handler(_ => throw new HttpRequestException(error, ApiKey)));
+        var result = await Service(client).CreateAsync(_id, "Demo", Ct);
+        Assert.Equal("network_error", result.Status);
+        Assert.Null(result.HttpStatus);
+        Assert.Contains(message, result.Message);
+        Assert.DoesNotContain(ApiKey, result.Message);
+    }
+
+    [Fact]
+    public async Task MalformedSuccessReportsAnInvalidResponseWithoutExceptionDetails()
+    {
+        using var client = new HttpClient(new Handler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Created)
+        { Content = new StringContent("{broken:" + ApiKey, Encoding.UTF8, "application/json") })));
+        var result = await Service(client).CreateAsync(_id, "Demo", Ct);
+        Assert.Equal("invalid_response", result.Status);
+        Assert.Contains("unreadable response", result.Message);
+        Assert.DoesNotContain(ApiKey, result.Message);
+    }
+
     [Fact]
     public async Task LocalRoute_RequiresBothCredentials_BoundsBodies_AndKeepsRemote401ADomainOutcome()
     {

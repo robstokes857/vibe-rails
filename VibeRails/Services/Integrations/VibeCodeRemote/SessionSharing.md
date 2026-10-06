@@ -10,8 +10,14 @@ result while the creation request finishes; it does not deliberately cancel uplo
 `POST /api/v1/sessions/{sessionId:guid}/sharing-links` is active-root-only and requires both
 normal process/session and tab credentials through CookieAuthMiddleware. It accepts only
 `{ displayName }`, checks the local recording, caps JSON at 4 KiB and names at 160 characters,
-and returns no-store `{ success, status, message, url, displayName, expiresUtc }`. Remote errors
+and returns no-store `{ success, status, message, url, displayName, expiresUtc, httpStatus }`. Remote errors
 are HTTP-200 domain results so a remote 401 cannot trigger local bootstrap/repeat POSTs.
+Failed remote responses retain the numeric `httpStatus` and distinguish missing server updates,
+database migrations, account permissions, rate limits and server failures. Network, timeout and
+invalid-response failures have separate messages. Only recognized JSON error codes select local
+messages; arbitrary remote prose, SQL, headers and exception text are never echoed. Error bodies
+have the same 16 KiB bound as successful responses. A missing-schema response from Front uses
+`schema_update_required`; a generic HTTP 500 suggests checking migrations without assuming the cause.
 
 `SessionSharingService` sends header-only `X-Api-Key` to the fixed HTTPS export origin's
 `/api/v1/session-sharing-links`, without redirects/cookies, within 20 seconds/16 KiB. It validates

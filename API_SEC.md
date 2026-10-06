@@ -279,7 +279,9 @@ Root-only `POST /api/v1/sessions/{id}/sharing-links` requires both local credent
 the exact local recording. It creates the capability at fixed `https://viberails.ai` using only
 header `X-Api-Key`, no redirects/cookies, 20-second requests and 16-KiB responses. Local JSON is
 capped at 4 KiB. Returned session/key/path/expiry/upload-required fields are checked before a
-fixed-origin public URL is returned; raw credentials and remote errors never enter the modal.
+fixed-origin public URL is returned; raw credentials and remote error prose never enter the modal.
+Bounded, recognized error codes select fixed local messages; failure JSON may include the numeric
+upstream HTTP status. Unknown codes, SQL, headers and exception text are never reflected or logged.
 The sharing URL is itself a public-read capability; do not log it. Persistent upload requests
 store a key fingerprint, and uploads/ACKs stay bound to that exact captured key when settings
 change. They reuse the existing export protocol and locks. See the
