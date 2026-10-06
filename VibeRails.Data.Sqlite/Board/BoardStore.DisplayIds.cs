@@ -168,6 +168,12 @@ public sealed partial class BoardStore
         if (owner.Reserved)
             return await AllocateDisplayIdAsync(db, transaction, project, boardId, cardId, ct, keyNumber);
         var occupant = (await ReadCardAsync(db, transaction, project, owner.Id, ct, includeDeleted: true))!;
+        // VIBE-85: labels on an imported shared board belong to that board's owner, and this
+        // machine's own labels are nobody else's business. A collision on either side of the
+        // sharing boundary therefore renames no one: the incoming card takes a local label, and
+        // ReconcileSyncedDisplayIdAsync keeps that correction off the shared board.
+        if (await IsImportedBoardAsync(db, transaction, boardId, ct) || await IsImportedBoardAsync(db, transaction, occupant.BoardId, ct))
+            return await AllocateDisplayIdAsync(db, transaction, project, boardId, cardId, ct, keyNumber);
         var replacement = await AllocateDisplayIdAsync(db, transaction, project, occupant.BoardId, occupant.Id, ct, ParseKeyNumber(occupant.Key));
         await using var rename = db.CreateCommand();
         rename.Transaction = transaction;
@@ -181,11 +187,26 @@ public sealed partial class BoardStore
         return displayId;
     }
 
+    /// <summary>
+    /// Records that a pulled label could not be applied as sent. On an owned board the correction
+    /// is queued and pushed, so viberails.ai shows the label this machine settled on. On an imported
+    /// board the shared label stays authoritative for every collaborator (VIBE-85): the row is
+    /// local-only History (<c>RemoteSeq = 0</c>) explaining why this machine shows a different label.
+    /// </summary>
     private static async Task ReconcileSyncedDisplayIdAsync(SqliteConnection db, SqliteTransaction transaction,
         BoardCardRecord card, string? requested, CancellationToken ct)
     {
         if (requested is null || string.Equals(requested, card.DisplayId, StringComparison.OrdinalIgnoreCase)) return;
-        await LogCardChangedAsync(db, transaction, card with { StoredDisplayId = requested }, card,
-            null, null, BoardAuthor.System(), ct);
+        if (!await IsImportedBoardAsync(db, transaction, card.BoardId, ct))
+        {
+            await LogCardChangedAsync(db, transaction, card with { StoredDisplayId = requested }, card,
+                null, null, BoardAuthor.System(), ct);
+            return;
+        }
+        var log = new CardLogChanges();
+        log.Diff(card with { StoredDisplayId = requested }, card, null, null);
+        await InsertLogEntryAsync(db, transaction, card.Id, BoardAuthor.System(), BoardCommentKinds.Change,
+            $"Display ID {requested} is shown as {card.DisplayId} on this machine: another card in this project already answers to {requested}. The shared board keeps {requested}.",
+            log.ToJson(), card.UpdatedUtc, ct, localOnly: true);
     }
 }

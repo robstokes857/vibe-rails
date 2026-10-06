@@ -100,7 +100,13 @@ public sealed class BoardSyncService(
         {
             if (client.IsConfigured && existing.DestinationKey != client.DestinationKey)
                 throw new BoardValidationException("This shared board belongs to a different signed-in account. Its local data is retained; sign in to the original account to sync.");
-            return existing; // Never publish a collaborator's cached board as a new owner.
+            // Never publish a collaborator's cached board as a new owner. An import made before
+            // VIBE-85 stored ActivitySchema 0, which an older binary on this machine reads as "not
+            // published yet": bring the link up to the value new imports store so it leaves the
+            // board alone. This is the link's own state, written on its ordinary sync tick.
+            if (existing.ActivitySchema < BoardStore.ImportedLinkActivitySchema)
+                existing = await store.SaveSyncLinkAsync(existing with { ActivitySchema = BoardStore.ImportedLinkActivitySchema }, cancellationToken) ?? existing;
+            return existing;
         }
         if (!client.IsConfigured)
             return existing;

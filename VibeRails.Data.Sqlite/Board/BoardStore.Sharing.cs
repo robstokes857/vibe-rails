@@ -49,8 +49,12 @@ public sealed partial class BoardStore
             VALUES ($board,$project,$name,$position,$now,$now,$prefix);
             INSERT INTO BoardSharedOrigins (BoardId,RemoteBoardId,DestinationKey,KeyPrefix) VALUES ($board,$remote,$destination,$key);
             INSERT INTO BoardSyncLinks (BoardId,RemoteBoardId,Cursor,Enabled,CreatedUTC,UpdatedUTC,DestinationKey,ActivitySchema,LayoutHash)
-            VALUES ($board,$remote,0,1,$now,$now,$destination,0,$layout);
+            VALUES ($board,$remote,0,1,$now,$now,$destination,$activitySchema,$layout);
             """, cancellationToken, ("$board", boardId), ("$project", project), ("$name", remote.Name), ("$position", position),
+            // VIBE-85: an older binary (v10.11.4) that predates imports publishes any link whose
+            // ActivitySchema is below 1 as this account's own board. An import's link is complete
+            // from the start, so that binary leaves it alone and only syncs it.
+            ("$activitySchema", ImportedLinkActivitySchema),
             ("$now", ToDb(now)), ("$prefix", remote.DisplayPrefix ?? remote.KeyPrefix), ("$remote", remote.RemoteBoardId),
             ("$destination", destinationKey), ("$key", remote.KeyPrefix),
             ("$layout", BoardLayoutHash.Compute(remote.Name, remote.KeyPrefix, remote.DisplayPrefix ?? remote.KeyPrefix, remote.Lanes)));
@@ -141,6 +145,31 @@ public sealed partial class BoardStore
             stamp.CreatedUtc, cancellationToken, stamp);
         await tx.CommitAsync(cancellationToken);
         return true;
+    }
+
+    /// <summary>
+    /// The <c>BoardSyncLinks.ActivitySchema</c> an import stores (VIBE-85). It is the value an owned
+    /// publication reaches once activity sync is set up, so every binary's "already published"
+    /// predicate (<c>Enabled &amp;&amp; ActivitySchema &gt;= 1 &amp;&amp; same destination</c>) holds for it.
+    /// </summary>
+    public const int ImportedLinkActivitySchema = 1;
+
+    /// <summary>True when the board was imported from another account's shared board (VB-52).</summary>
+    private static async Task<bool> IsImportedBoardAsync(SqliteConnection db, SqliteTransaction? tx, string boardId, CancellationToken ct)
+        => await ScalarLongAsync(db, tx, "SELECT COUNT(*) FROM BoardSharedOrigins WHERE BoardId=$board", ("$board", boardId), ct) == 1;
+
+    /// <summary>
+    /// VIBE-85: a card never crosses the sharing boundary. Moving a card out of an imported board
+    /// would queue its departure on the shared board (deleting it for every collaborator) and
+    /// publish a copy under this account; moving one in would publish a local card into someone
+    /// else's board. The two boards are checked inside the caller's write transaction.
+    /// </summary>
+    private static async Task RequireSameSideOfSharingAsync(SqliteConnection db, SqliteTransaction tx,
+        string sourceBoardId, string targetBoardId, CancellationToken ct)
+    {
+        if (sourceBoardId == targetBoardId) return;
+        if (await IsImportedBoardAsync(db, tx, sourceBoardId, ct) || await IsImportedBoardAsync(db, tx, targetBoardId, ct))
+            throw new BoardValidationException("Cards cannot be moved between a shared board you imported and another board. Copy the card to the other board instead.");
     }
 
     private static async Task<bool> ColumnExistsAsync(SqliteConnection db, SqliteTransaction tx, string id, CancellationToken ct)

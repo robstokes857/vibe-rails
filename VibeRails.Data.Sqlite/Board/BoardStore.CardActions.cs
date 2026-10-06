@@ -94,6 +94,12 @@ public sealed partial class BoardStore
         var target = await ReadCardAsync(connection, transaction, project, targetId, cancellationToken);
         if (source is null || target is null) return null;
         if (source.Id == target.Id) throw new BoardValidationException("Choose a different card to merge into.");
+        // VIBE-85: a merge soft-deletes the source and rewrites the target. On an imported shared
+        // board both are another account's cards, and across the boundary it would copy one side's
+        // rails into the other's board. Either way the answer is to copy, not merge.
+        if (await IsImportedBoardAsync(connection, transaction, source.BoardId, cancellationToken)
+            || await IsImportedBoardAsync(connection, transaction, target.BoardId, cancellationToken))
+            throw new BoardValidationException("Cards on a shared board you imported cannot be merged. Copy the card instead.");
 
         var attachmentIds = new Dictionary<string, string>(StringComparer.Ordinal);
         await using (var read = connection.CreateCommand())

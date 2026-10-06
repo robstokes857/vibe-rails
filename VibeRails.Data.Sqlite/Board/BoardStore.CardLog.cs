@@ -44,10 +44,11 @@ public sealed partial class BoardStore
     /// </summary>
     private static async Task InsertLogEntryAsync(SqliteConnection connection, SqliteTransaction transaction,
         string cardId, BoardAuthor author, string kind, string body, string? changes, DateTime createdUtc,
-        CancellationToken cancellationToken, BoardSyncStamp? stamp = null, string? syncBoardId = null)
+        CancellationToken cancellationToken, BoardSyncStamp? stamp = null, string? syncBoardId = null, bool localOnly = false)
     {
         // A stamped entry was pulled from viberails.ai: it keeps its remote id and time, and its
-        // RemoteSeq is already known, so the push never sends it back.
+        // RemoteSeq is already known, so the push never sends it back. A localOnly entry is History
+        // this machine writes for itself (RemoteSeq 0): never sent, and it protects no field.
         await using var insert = connection.CreateCommand();
         insert.Transaction = transaction;
         insert.CommandText = """
@@ -67,7 +68,7 @@ public sealed partial class BoardStore
         insert.Parameters.AddWithValue("$created", ToDb(stamp?.CreatedUtc ?? createdUtc));
         insert.Parameters.AddWithValue("$rowKind", kind);
         insert.Parameters.AddWithValue("$changes", (object?)(stamp is null ? changes : stamp.Changes ?? changes) ?? DBNull.Value);
-        insert.Parameters.AddWithValue("$remoteSeq", stamp is null ? DBNull.Value : stamp.RemoteSeq);
+        insert.Parameters.AddWithValue("$remoteSeq", stamp is not null ? stamp.RemoteSeq : localOnly ? 0L : DBNull.Value);
         await insert.ExecuteNonQueryAsync(cancellationToken);
         await ApplyCommentDeletionAsync(connection, transaction, cardId, stamp?.Changes ?? changes, stamp?.CreatedUtc ?? createdUtc, cancellationToken);
         if (stamp is not null) await ForgetSkippedEntryAsync(connection, transaction, stamp, cancellationToken);

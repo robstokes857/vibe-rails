@@ -64,6 +64,42 @@ The companion Front `BoardSharing` migration adds invitations, memberships, bloc
 concurrency token. It must ship through the normal hosted release workflow before deploying
 sharing. This work does not apply production migrations; desktop setup remains automatic.
 
+### VIBE-85: the sharing boundary
+
+An imported board is another account's data with a local copy. Four rules keep a member's view
+from being written into it, or into the member's own boards, by accident. None needs a schema change.
+
+- **No republish by an older binary.** An import's `BoardSyncLinks` row stores
+  `ActivitySchema = 1` (`BoardStore.ImportedLinkActivitySchema`), the value an owned publication
+  reaches once activity sync is set up, so v10.11.4's "already published" predicate
+  (`Enabled && ActivitySchema >= 1 && same destination`) holds and that binary only syncs the
+  board. An import stored with 0 before this change is brought up to 1 on its next sync tick by
+  the current binary (the link's own state, written in the ordinary loop; not a startup backfill).
+  The host guards the rest: `POST /api/v1/boards/publish` refuses to **create** a board whose
+  lanes include a lane id of any board the caller has or had a membership on, with HTTP 400 and
+  code `shared_board_copy`. The desktop reports it as an ordinary publish error and changes no
+  data; it also covers the older binary's 404 recreate path after revocation. A member's push
+  may rename the board and edit lanes, but the host ignores `keyPrefix` and `displayPrefix` from
+  anyone but the owner, so a ≤ v10.11.3 member build cannot relabel the shared board.
+- **Labels never cross the boundary.** Display IDs stay unique per project (the board/20 index is
+  unchanged). When a pulled label collides with a card already on this machine, and either card is
+  on an imported board, no card is renamed: the incoming card takes a locally allocated label on its
+  own board's prefix, and the correction is recorded as local-only History (`RemoteSeq = 0`, body
+  "Display ID X is shown as Y on this machine …"), never queued, protecting no field. The shared
+  board keeps the owner's label, and a later web relabel still applies. The VB-69 rename-and-correct
+  path remains for collisions where both cards are on owned boards.
+- **Cards never move or merge across it.** A move whose source and destination boards differ is
+  refused when either board is imported, in `MoveCardAsync` and in a lane patch alike; a merge is
+  refused when either card is on an imported board. Both checks run inside the write transaction
+  and say "copy the card instead". Lane-to-lane moves inside an imported board stay ordinary
+  member edits. (A departure from an imported board would delete the card for every collaborator
+  and publish a copy under the member's account.)
+
+`Tests/Services/Board/BoardSharingSafetyTests.cs` holds the VIBE-14 proofs as regressions,
+including a replay of the older binary's predicate against the stored link row; the Front
+`BoardSharingTests` cover the host guard for a current and a revoked membership and the
+member prefix lock.
+
 ## VIBE-1: transfers and one discussion stream
 
 The Board settings sync section has been removed. Automatic publication and protected sync APIs
@@ -325,4 +361,6 @@ The hosted board accepts the first label, allocates an available numeric label o
 and appends a distinct correction event. It retains the original event unchanged for retries.
 Desktop imports reserve the incoming label, rename any local occupant, and queue that change
 atomically. Immutable legacy keys are reserved; an import colliding with one gets another label.
-The hosted LastSeq concurrency token serializes label allocation with all other card writes.
+When either card is on an imported shared board, nothing is renamed or queued; see the VIBE-85
+boundary rules above. The hosted LastSeq concurrency token serializes label allocation with all
+other card writes.

@@ -657,6 +657,7 @@ public sealed partial class BoardStore : IBoardStore
 
             if (stamp?.BoardId is { } syncBoard && column.BoardId != syncBoard)
                 throw new BoardValidationException("A synced move must stay on its published board.");
+            await RequireSameSideOfSharingAsync(connection, transaction, existing.BoardId, column.BoardId, cancellationToken);
             toLaneName = column.Name;
             fromLaneName = (await ReadColumnAsync(connection, transaction, project, existing.ColumnId, cancellationToken))?.Name;
         }
@@ -790,6 +791,7 @@ public sealed partial class BoardStore : IBoardStore
             return null;
         var column = await ReadColumnAsync(connection, transaction, project, columnId, cancellationToken)
             ?? throw new BoardValidationException($"Lane not found: {columnId}");
+        await RequireSameSideOfSharingAsync(connection, transaction, existing.BoardId, column.BoardId, cancellationToken);
 
         var sourceIds = (await ReadColumnCardIdsAsync(connection, transaction, existing.ColumnId, cancellationToken))
             .Where(id => id != existing.Id).ToList();
