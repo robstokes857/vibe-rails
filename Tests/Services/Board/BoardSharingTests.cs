@@ -34,7 +34,7 @@ public sealed class BoardSharingTests : IDisposable
         var card = (await store.FindCardAsync(root, "card_000000000001", Ct))!;
         Assert.Equal("VB-1", card.Key); Assert.Equal("Owner card", card.Title); // older published boards work too
         Assert.Equal(imported.BoardId, card.BoardId);
-        Assert.Equal(0, server.Publications); Assert.Equal(0, server.ActivityWrites);
+        Assert.Equal(0, server.Publications); Assert.Equal(1, server.ActivityWrites);
         await store.UpdateCardAsync(root, card.Id, new(Title: "Member edit"), Ct);
         await store.AddCommentAsync(root, card.Id, BoardAuthor.User(), "Member discussion", Ct);
         await sync.SyncNowAsync(root, imported.BoardId, Ct);
@@ -47,6 +47,24 @@ public sealed class BoardSharingTests : IDisposable
         Assert.Equal(imported.BoardId, (await sharing.ImportAsync(root, server.Remote.RemoteBoardId, Ct)).BoardId);
         Assert.Single(await store.GetBoardsAsync(root, Ct));
         Assert.Equal(0, server.Publications);
+    }
+
+    [Fact]
+    public async Task ImportedBoardPublishesMemberSessionsAndSavedCommits()
+    {
+        var imported = await sharing.ImportAsync(root, server.Remote.RemoteBoardId, Ct);
+        const string cardId = "card_000000000001";
+        var sessionId = Guid.NewGuid().ToString("D");
+        await store.LinkSessionAsync(root, cardId, sessionId, null, "base:codex", "codex", "Member work", BoardSessionRecord.McpOrigin, Ct);
+        await store.AddCommitAsync(root, cardId, new string('a', 40), "Member", "Saved member change", DateTime.UtcNow,
+            new([new("member.cs", "csharp", "before", "after")], 1), Ct);
+        var status = await sync.SyncNowAsync(root, imported.BoardId, Ct);
+        Assert.Null(status!.LastError);
+        Assert.Equal(0, server.Publications);
+        var activity = server.Activity[^1];
+        Assert.Equal(sessionId, Assert.Single(activity.Sessions).Id);
+        Assert.Equal("Saved member change", Assert.Single(activity.Commits).Message);
+        Assert.Equal("after", Assert.Single(activity.Commits[0].Files).After);
     }
 
     [Fact]
@@ -149,6 +167,7 @@ public sealed class BoardSharingTests : IDisposable
         public BoardRemoteDescriptor Remote = new(Guid.NewGuid().ToString("D"), "Shared", "VB", "VB", [new("col_shared", "Todo", null, 0)], false, 0);
         public List<BoardSyncPulledEntryWire> Events = [];
         public int Publications, ActivityWrites, Calls;
+        public List<BoardSyncActivityWire> Activity = [];
         public bool Revoked;
         private void Check(string? destination)
         { Calls++; Assert.Equal(DestinationKey, destination); if (Revoked) throw new BoardSyncClientException("Access no longer available", "board_not_found", 404); }
@@ -159,7 +178,7 @@ public sealed class BoardSharingTests : IDisposable
         public Task<BoardSyncPublishResponse> PublishAsync(BoardSyncPublishRequest body, CancellationToken ct, string? expectedDestination = null)
         { Publications++; throw new InvalidOperationException("Imported boards must never publish"); }
         public Task<BoardSyncActivityAck> PutActivityAsync(string board, string card, BoardSyncActivityWire body, CancellationToken ct, string? expectedDestination = null)
-        { ActivityWrites++; throw new InvalidOperationException("Member snapshots must not replace owner activity"); }
+        { Check(expectedDestination); Assert.Equal(Remote.RemoteBoardId, board); ActivityWrites++; Activity.Add(body); return Task.FromResult(new BoardSyncActivityAck(1, card)); }
         public Task<BoardSyncPullResponse> PullAsync(string board, long after, int limit, CancellationToken ct, string? expectedDestination = null)
         { Check(expectedDestination); return Task.FromResult(new BoardSyncPullResponse(Events.Where(e => e.Seq > after).Take(limit).ToList(), Events.Count, Events.Count > after + limit)); }
         public Task<BoardSyncPushResponse> PushAsync(string board, BoardSyncPushRequest body, CancellationToken ct, string? expectedDestination = null)

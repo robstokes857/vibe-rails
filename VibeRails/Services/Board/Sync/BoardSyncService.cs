@@ -239,9 +239,8 @@ public sealed class BoardSyncService(
         link = await RefreshLayoutAsync(link, cancellationToken);
         link = await PullAsync(link, cancellationToken);
         link = await RefreshLayoutAsync(link, cancellationToken);
-        // Activity snapshots still belong to their originating desktop. A collaborator's empty
-        // local rails must never replace the owner's published attachments/code/session links.
-        if (link.Imported) return link;
+        // The host attributes each snapshot to the authenticated publisher. Imported boards
+        // publish their own linked work without replacing the owner or other members.
         return await BoardSyncActivity.RefreshAsync(store, client, activityCache, link, cancellationToken, forceActivity);
     }
 

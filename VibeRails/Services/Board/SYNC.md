@@ -52,8 +52,13 @@ read local data but do not understand shared-board sync; use the updated version
 Cards and discussion reuse bounded Card Log push/pull. Portable layouts reconcile both ways;
 transactional snapshot checks preserve concurrent local edits. Removed lanes remain until pending
 card moves arrive. Launch settings, environments and Automations stay machine-local. Owner activity
-snapshots are readable by members on the website. Imported desktop boards neither import activity
-rails nor upload replacement snapshots. Session archives and live terminals retain their own ACLs.
+snapshots and collaborator contributions are readable by members on the website. Imported desktop
+boards publish their own session, commit, attachment and linked-card activity through the same bounded
+rotation. The host attributes uploads to the authenticated account and preserves other publishers,
+including when this desktop has empty rails. Hosted card playback checks current Board membership
+and the recording publisher; account-wide archives and live terminals retain their own ACLs.
+Apply the Front BoardActivityContributors migration and release its server changes before installing
+this companion update. This does not import another desktop's activity into local rails.
 
 The companion Front `BoardSharing` migration adds invitations, memberships, blocks and a
 concurrency token. It must ship through the normal hosted release workflow before deploying
