@@ -311,7 +311,7 @@ it. Never return the raw credential/fingerprint. See [account-link flow](docs/ac
 ### Local Front mode (VB-8NI09-170)
 
 `VIBERAILS_LOCAL_FRONT_ORIGIN` points one desktop process tree at VibeRails-Front's local Docker
-stack. It is active only in a Debug build under Development, for an https `localhost`/loopback
+stack. It is active only in a Debug build under Development, for an https `localhost`/`127.0.0.1`/`[::1]`
 origin with no credentials, path, query or fragment. Any other request stops the web host at
 startup. It adds no listener or route.
 

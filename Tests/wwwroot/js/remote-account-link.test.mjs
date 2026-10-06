@@ -333,11 +333,17 @@ test('a concurrent manual clear or save uses the current saved mask instead of a
 });
 
 test('local Front mode accepts only the loopback sign-in page the backend reports (VB-8NI09-170)', () => {
+    // The same three hosts LocalFrontMode.TryParseOrigin accepts.
     assert.equal(signInPageFor('https://localhost:5164'), 'https://localhost:5164/link');
     assert.equal(signInPageFor('https://127.0.0.1:5164'), 'https://127.0.0.1:5164/link');
-    for (const origin of [undefined, null, '', 'http://localhost:5164', 'https://evil.example', 'https://localhost.evil.example',
-        'https://user@localhost:5164', 'https://localhost:5164/api', 'https://localhost:5164/?x=1', 'not a url', 42]) {
+    assert.equal(signInPageFor('https://[::1]:5164'), 'https://[::1]:5164/link');
+    for (const origin of [undefined, null, '']) {
         assert.equal(signInPageFor(origin), SIGN_IN_URL);
+    }
+    // A reported origin the panel cannot accept never selects the production page (review R4).
+    for (const origin of ['http://localhost:5164', 'https://evil.example', 'https://localhost.evil.example', 'https://127.0.0.2:5164',
+        'https://user@localhost:5164', 'https://localhost:5164/api', 'https://localhost:5164/?x=1', 'not a url', 42]) {
+        assert.equal(signInPageFor(origin), null);
     }
     assert.equal(signInUrlForCode('ABCD-2345', 'https://localhost:5164/link'), 'https://localhost:5164/link#code=ABCD-2345');
 });
@@ -354,4 +360,14 @@ test('a local Front panel sends the browser to the local page and refuses the pr
     panel._apply(pending({ verificationUri: SIGN_IN_URL }));
     assert.equal(panel.state.status, 'error');
     assert.equal(field('open').href, undefined);
+});
+
+test('an unsupported local origin fails locally instead of accepting production or local pages', async t => {
+    const { panel, field } = harness(t);
+    panel.app.appSettings = { localFrontOrigin: 'https://127.0.0.2:5164' };
+    for (const verificationUri of [SIGN_IN_URL, 'https://127.0.0.2:5164/link']) {
+        panel._apply(pending({ verificationUri }));
+        assert.equal(panel.state.status, 'error');
+        assert.equal(field('open').href, undefined);
+    }
 });

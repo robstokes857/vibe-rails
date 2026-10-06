@@ -17,7 +17,7 @@ acceptance run are in the vibe-books runbook
 `LocalFrontMode.Current` reads these once per process. Rules, all fail closed:
 
 - **Active** only in a Debug build under `ASPNETCORE_ENVIRONMENT=Development`, with an https
-  origin on `localhost` or a loopback address and no user info, path, query or fragment. Any
+  origin on `localhost`, `127.0.0.1` or `[::1]` and no user info, path, query or fragment. Any
   other request makes `Program.cs` exit with code 2 before the web host is built. It never runs
   as a normal desktop.
 - **Any process that sees the origin variable**, valid or not, publishes nothing to production,

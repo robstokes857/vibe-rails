@@ -46,6 +46,9 @@ public static class LocalFrontMode
     /// <summary>The production Front origin shipped in appsettings.json.</summary>
     public const string ProductionOrigin = "https://viberails.ai";
 
+    // Uri lowercases host names, so an ordinal set is exact.
+    private static readonly HashSet<string> SupportedHosts = new(StringComparer.Ordinal) { "localhost", "127.0.0.1", "[::1]" };
+
     private static readonly Lazy<LocalFrontState> s_process = new(FromProcessEnvironment);
     // Tests scope an override to their own async flow so parallel test classes keep seeing Off.
     private static readonly AsyncLocal<LocalFrontState?> s_override = new();
@@ -101,8 +104,9 @@ public static class LocalFrontMode
     }
 
     /// <summary>
-    /// Accepts only an https origin on <c>localhost</c> or a loopback address, with no user
-    /// information, path, query or fragment. Returns it normalized with a trailing slash.
+    /// Accepts only an https origin on <c>localhost</c>, <c>127.0.0.1</c> or <c>[::1]</c>, with no
+    /// user information, path, query or fragment. Returns it normalized with a trailing slash. The
+    /// dashboard's sign-in panel accepts the same three hosts (remote-account-link.js).
     /// </summary>
     public static bool TryParseOrigin(string? raw, [NotNullWhen(true)] out Uri? origin, [NotNullWhen(false)] out string? error)
     {
@@ -132,11 +136,9 @@ public static class LocalFrontMode
             error = $"{OriginVariable} must be an origin with no path, query or fragment, such as {DefaultOrigin}.";
             return false;
         }
-        var loopbackName = string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase);
-        var loopbackAddress = uri.HostNameType is UriHostNameType.IPv4 or UriHostNameType.IPv6 && uri.IsLoopback;
-        if (!loopbackName && !loopbackAddress)
+        if (!SupportedHosts.Contains(uri.Host))
         {
-            error = $"{OriginVariable} must name localhost or a loopback address; {uri.Host} is not local.";
+            error = $"{OriginVariable} must name localhost, 127.0.0.1 or [::1]; {uri.Host} is not supported.";
             return false;
         }
         origin = new Uri(uri.GetLeftPart(UriPartial.Authority) + "/");

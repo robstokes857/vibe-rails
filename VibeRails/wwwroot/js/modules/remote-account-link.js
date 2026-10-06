@@ -4,19 +4,21 @@ const TERMINAL_STATUSES = new Set(['idle', 'linked', 'denied', 'expired', 'unava
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 
 // Local Front mode (VB-8NI09-170): the backend reports the loopback https origin this process
-// talks to, and its sign-in page is that origin plus /link. Anything else means the production
-// page, so a malformed value can never widen what the panel accepts.
+// talks to, and its sign-in page is that origin plus /link. No origin means the production page.
+// A reported origin this panel cannot accept returns null, so sign-in fails here instead of
+// choosing production. LOOPBACK_HOSTS matches LocalFrontMode.TryParseOrigin.
 export function signInPageFor(localFrontOrigin) {
-    if (typeof localFrontOrigin !== 'string' || !localFrontOrigin) return SIGN_IN_URL;
+    if (localFrontOrigin === undefined || localFrontOrigin === null || localFrontOrigin === '') return SIGN_IN_URL;
+    if (typeof localFrontOrigin !== 'string') return null;
     let url;
     try {
         url = new URL(localFrontOrigin);
     } catch {
-        return SIGN_IN_URL;
+        return null;
     }
     return url.protocol === 'https:' && LOOPBACK_HOSTS.has(url.hostname) && !url.username && !url.password
         && url.pathname === '/' && !url.search && !url.hash
-        ? `${url.origin}/link` : SIGN_IN_URL;
+        ? `${url.origin}/link` : null;
 }
 
 // The server must supply the fixed verification page. Only the validated public user code
@@ -54,7 +56,8 @@ export class RemoteAccountLinkPanel {
         };
     }
 
-    // The sign-in page this backend accepts: production, or the local Front in local mode.
+    // The sign-in page this backend accepts: production, the local Front in local mode, or null
+    // when the reported local origin is not one this panel supports.
     get signInPage() {
         return signInPageFor(this.app.appSettings?.localFrontOrigin);
     }
@@ -211,7 +214,7 @@ export class RemoteAccountLinkPanel {
         this.root.querySelector('[data-remote-link-code]').textContent = needsApproval ? this.state.userCode : '';
         const open = this.root.querySelector('[data-remote-link-open]');
         const page = this.root.querySelector('[data-remote-link-page]');
-        if (page) page.textContent = this.signInPage;
+        if (page) page.textContent = this.signInPage ?? '';
         if (needsApproval) {
             open.href = signInUrlForCode(this.state.userCode, this.signInPage);
             this._renderCountdown();

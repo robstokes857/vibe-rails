@@ -86,6 +86,8 @@ public sealed class LocalFrontModeResolveTests
     [InlineData("https://viberails.ai")]
     [InlineData("https://localhost.evil.example:5164")]
     [InlineData("https://10.0.0.5:5164")]
+    [InlineData("https://127.0.0.2:5164")]
+    [InlineData("https://[::ffff:127.0.0.1]:5164")]
     [InlineData("https://user:secret@localhost:5164")]
     [InlineData("https://localhost:5164/api")]
     [InlineData("https://localhost:5164/?x=1")]

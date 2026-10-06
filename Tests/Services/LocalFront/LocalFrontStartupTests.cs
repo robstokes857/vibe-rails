@@ -29,8 +29,18 @@ public sealed class LocalFrontStartupTests : IDisposable
 
     public void Dispose()
     {
-        if (Directory.Exists(_root))
-            Directory.Delete(_root, recursive: true);
+        // A just-killed fixture process can hold its working directory for a moment.
+        for (var attempt = 0; Directory.Exists(_root); attempt++)
+        {
+            try
+            {
+                Directory.Delete(_root, recursive: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException && attempt < 20)
+            {
+                Thread.Sleep(250);
+            }
+        }
     }
 
     // Every orchestration test stubs the Docker step: the real one runs `docker info` and may start

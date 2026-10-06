@@ -415,7 +415,8 @@ internal sealed class LocalFrontProcessRunner : ILocalFrontProcessRunner
         process.ErrorDataReceived += (_, e) => { if (e.Data is not null) onLine(e.Data); };
         using var job = KillOnCloseJob.TryCreate();
         process.Start();
-        job?.TryAdd(process);
+        // A process Windows refused to put in the job is stopped by a direct tree kill instead.
+        var bound = job is not null && job.TryAdd(process) ? job : null;
         try
         {
             process.StandardInput.Close();
@@ -430,7 +431,7 @@ internal sealed class LocalFrontProcessRunner : ILocalFrontProcessRunner
         {
             // Normal exit leaves nothing to stop; cancellation stops the script and everything it
             // started. Either way, wait until the tree is gone.
-            StopTree(process, job);
+            StopTree(process, bound);
         }
     }
 
@@ -439,8 +440,10 @@ internal sealed class LocalFrontProcessRunner : ILocalFrontProcessRunner
         if (job is not null)
         {
             job.Terminate();
-            job.WaitUntilEmpty(JoinTimeout);
-            return;
+            if (job.WaitUntilEmpty(JoinTimeout))
+                return;
+            Log.Warning("[LocalFront] The preflight's process tree was still running {Seconds}s after it was stopped; killing it directly",
+                JoinTimeout.TotalSeconds);
         }
         try
         {
