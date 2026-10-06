@@ -361,6 +361,24 @@ test('a failed load leaves the customize modal honest: error alert and no Save; 
     assert.equal(state.items.length, 3);
 });
 
+test('the customize modal body scrolls: its form must not break the modal flex chain', () => {
+    // modal-dialog-scrollable only reaches .modal-body through .modal-content's flex column. The
+    // <form> wrapping body + footer is a flex item with min-height: auto, so without this it
+    // refuses to shrink and a long automation list clips the Add section and the footer.
+    const css = readFileSync(stylePath, 'utf8');
+    const rule = css.match(
+        /\.llm-picker-customization-modal \[data-llm-picker-form\],\s*\.llm-picker-customization-modal \[data-automation-nav-form\]\s*\{[^}]*\}/);
+
+    assert.ok(rule, 'expected a flex-chain rule covering the automation launcher form');
+    assert.match(rule[0], /display:\s*flex/);
+    assert.match(rule[0], /flex-direction:\s*column/);
+    assert.match(rule[0], /min-height:\s*0/);
+
+    const source = readFileSync(modulePath, 'utf8');
+    assert.match(source, /modal-dialog-scrollable/);
+    assert.match(source, /<form data-automation-nav-form>/);
+});
+
 test('launcher CSS keeps a fallback on every colour token', () => {
     const css = readFileSync(stylePath, 'utf8');
     const start = css.indexOf('Nav Automation launcher');

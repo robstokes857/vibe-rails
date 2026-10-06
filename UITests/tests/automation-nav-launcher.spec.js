@@ -95,6 +95,37 @@ test('customize modal lists every automation and cancels cleanly', async ({ page
     await expect(page.locator('.llm-picker-customization-modal')).toHaveCount(0);
 });
 
+test('a short viewport scrolls the catalog and keeps the footer on screen', async ({ page, context }) => {
+    const prefs = (await (await context.request.get(PREFERENCES)).json()).items;
+    test.skip(prefs.length < 4, 'needs a catalog long enough to overflow a short dialog');
+
+    // Short enough that the automation list plus the Add section overflows the dialog.
+    // The <form> wrapping .modal-body + .modal-footer used to break Bootstrap's
+    // modal-dialog-scrollable flex chain, clipping the Add section and the footer.
+    await page.setViewportSize({ width: 900, height: 420 });
+    await openApp(page);
+    await openFlyout(page);
+    await page.locator('[data-automation-launch-action="customize"]').click();
+    const modal = page.locator('.llm-picker-customization-modal:visible');
+    await expect(modal).toBeVisible();
+
+    // The footer stays pinned. The Add section lives in the scrolling body, so a long
+    // catalog starts with it below the fold and scrolling must be able to reach it.
+    await expect(modal.locator('[data-automation-nav-action="save"]')).toBeInViewport();
+    expect(await modal.locator('.modal-body').evaluate(
+        (element) => element.scrollHeight > element.clientHeight + 1)).toBe(true);
+
+    const add = modal.locator('[data-automation-nav-action="import-repository"]');
+    await add.scrollIntoViewIfNeeded();
+    await expect(add).toBeInViewport();
+    await expect(modal.locator('[data-automation-nav-action="save"]')).toBeInViewport();
+
+    const lastRow = modal.locator('[data-automation-nav-key]').last();
+    await lastRow.scrollIntoViewIfNeeded();
+    await expect(lastRow).toBeInViewport();
+    await expect(modal.locator('[data-automation-nav-action="save"]')).toBeInViewport();
+});
+
 test('preferences API round-trips order and visibility and reset restores defaults', async ({ context }) => {
     const request = context.request;
     const items = (await (await request.get(PREFERENCES)).json()).items;
