@@ -3,7 +3,6 @@ using VibeRails.DTOs;
 using VibeRails.Services;
 using VibeRails.Services.HttpRelay;
 using VibeRails.Services.Integrations.VibeCodeRemote;
-using VibeRails.Services.LocalFront;
 using VibeRails.Utils;
 
 namespace VibeRails.Routes;
@@ -48,14 +47,8 @@ public static class AppSettingsRoutes
 
     // The internal store parameter is solely for isolated regression fixtures. Production calls
     // always use Config.Store and therefore the normal application settings path.
-    internal static AppSettingsDto UpdateSettings(AppSettingsDto settingsDto, SettingsFile store, IRemoteHttpRelayClient? relay = null,
-        LocalFrontKeyStore? localKeys = null)
+    internal static AppSettingsDto UpdateSettings(AppSettingsDto settingsDto, SettingsFile store, IRemoteHttpRelayClient? relay = null)
     {
-        // In local Front mode (VB-8NI09-170) the key field is the local Front's key. The saved
-        // production key, its email and fingerprint are neither read for display nor written.
-        var localFront = LocalFrontMode.Current;
-        if (localFront.Active)
-            localKeys ??= new LocalFrontKeyStore();
         using (store.AcquireWriteLock())
         {
             // LoadFresh, not Load: this handler writes the WHOLE Settings object back, including
@@ -80,17 +73,7 @@ public static class AppSettingsRoutes
 
             // Update only the app settings fields exposed by the UI
             settings.RemoteAccess = remoteAccess;
-            var previousLocalKey = string.Empty;
-            var localKey = string.Empty;
-            if (localFront.Active)
-            {
-                previousLocalKey = localKeys!.Read(localFront.OriginText)?.ApiKey ?? string.Empty;
-                localKey = clearApiKey ? string.Empty : apiKeyProvided ? settingsDto.ApiKey! : previousLocalKey;
-                // A pasted key has no approved email, exactly like a pasted production key.
-                if (!string.Equals(previousLocalKey, localKey, StringComparison.Ordinal))
-                    localKeys.Set(localFront.OriginText, localKey, accountEmail: null);
-            }
-            else if (clearApiKey)
+            if (clearApiKey)
                 settings.ApiKey = "";
             else if (apiKeyProvided)
                 settings.ApiKey = settingsDto.ApiKey!;
@@ -141,17 +124,14 @@ public static class AppSettingsRoutes
 
             // Nullable is the stale-client guard. Enabling is effective only with the final raw
             // key after clear/replace semantics above have been applied.
-            // In local Front mode a local key also lets the saved choice be on, so a local-only
-            // setup can use the relay; with a saved production key the choice behaves as before.
-            var relayKey = localFront.Active && !string.IsNullOrWhiteSpace(localKey) ? localKey : settings.ApiKey;
             if (settingsDto.RouteThroughVibeRailsAi.HasValue)
             {
                 settings.RouteThroughVibeRailsAi = ResolveHttpRelaySetting(
                     settings.RouteThroughVibeRailsAi,
                     settingsDto.RouteThroughVibeRailsAi,
-                    relayKey);
+                    settings.ApiKey);
             }
-            if (string.IsNullOrWhiteSpace(relayKey))
+            if (string.IsNullOrWhiteSpace(settings.ApiKey))
                 settings.RouteThroughVibeRailsAi = false;
             // Vibe AI navigation is always shown. Ignore the legacy request field and preserve
             // its stored value for older versions that still expose the setting.
@@ -165,30 +145,24 @@ public static class AppSettingsRoutes
 
             // Update static Configs so runtime reflects the change immediately
             ParserConfigs.SetRemoteAccess(remoteAccess);
-            if (localFront.Active)
-                ParserConfigs.SetApiKey(localKey);
-            else if (clearApiKey)
+            if (clearApiKey)
                 ParserConfigs.SetApiKey("");
             else if (apiKeyProvided)
                 ParserConfigs.SetApiKey(settingsDto.ApiKey!);
             ParserConfigs.SetUseVsCodeTheme(settingsDto.UseVsCodeTheme);
             ParserConfigs.SetMcpEnabled(true);
-            // The saved relay choice follows the production key; in local mode the relay would
-            // present the local key, so it also needs one.
-            ParserConfigs.SetRouteThroughVibeRailsAi(settings.RouteThroughVibeRailsAi
-                && (!localFront.Active || !string.IsNullOrWhiteSpace(localKey)));
+            ParserConfigs.SetRouteThroughVibeRailsAi(settings.RouteThroughVibeRailsAi);
 
             // The credential is deliberately bound to the WebSocket handshake. A toggle or key
             // update therefore invalidates any established socket; the next test request creates
             // one with current settings.
             if (previousRelaySetting != settings.RouteThroughVibeRailsAi
-                || !string.Equals(previousApiKey, settings.ApiKey, StringComparison.Ordinal)
-                || !string.Equals(previousLocalKey, localKey, StringComparison.Ordinal))
+                || !string.Equals(previousApiKey, settings.ApiKey, StringComparison.Ordinal))
             {
                 relay?.Reset();
             }
 
-            return BuildAppSettingsDto(settings, localKeys);
+            return BuildAppSettingsDto(settings);
         }
     }
 
@@ -207,17 +181,13 @@ public static class AppSettingsRoutes
         }
     }
 
-    internal static AppSettingsDto BuildAppSettingsDto(Settings settings, LocalFrontKeyStore? localKeys = null)
+    private static AppSettingsDto BuildAppSettingsDto(Settings settings)
     {
-        // Local Front mode shows only the local key and its email, never the production account.
-        var localFront = LocalFrontMode.Current;
-        var local = localFront.Active ? (localKeys ?? new LocalFrontKeyStore()).Read(localFront.OriginText) : null;
-        var displayedKey = localFront.Active ? local?.ApiKey ?? string.Empty : settings.ApiKey;
-        var maskedKey = string.IsNullOrWhiteSpace(displayedKey)
+        var maskedKey = string.IsNullOrWhiteSpace(settings.ApiKey)
             ? ""
-            : displayedKey.Length <= 4
-                ? new string('•', displayedKey.Length)
-                : new string('•', displayedKey.Length - 4) + displayedKey[^4..];
+            : settings.ApiKey.Length <= 4
+                ? new string('•', settings.ApiKey.Length)
+                : new string('•', settings.ApiKey.Length - 4) + settings.ApiKey[^4..];
 
         return new AppSettingsDto(
             settings.RemoteAccess,
@@ -247,10 +217,9 @@ public static class AppSettingsRoutes
             LlmProxyCliChatConfig.NormalizeMode(settings.GrokLlmProxyMode),
             settings.GrokTokenSaverEnabled ?? settings.OpenCodeTokenSaverEnabled ?? settings.ClaudeTokenSaverEnabled,
             DataExportOptIn: true,
-            RemoteAccountEmail: localFront.Active ? local?.AccountEmail : ApiKeyStore.GetAccountEmail(settings),
+            RemoteAccountEmail: ApiKeyStore.GetAccountEmail(settings),
             CreateVibeStoryTracking: settings.CreateVibeStoryTracking,
-            CreateVibeStoryTrackingCustomEnvs: settings.CreateVibeStoryTrackingCustomEnvs,
-            LocalFrontOrigin: localFront.Active ? localFront.OriginText : null
+            CreateVibeStoryTrackingCustomEnvs: settings.CreateVibeStoryTrackingCustomEnvs
         );
     }
 

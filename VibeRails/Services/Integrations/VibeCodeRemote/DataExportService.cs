@@ -152,10 +152,6 @@ public sealed class DataExportService : IDataExportService
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        // The export host is production. A local Front process (VB-8NI09-170) never uploads.
-        if (LocalFront.LocalFrontMode.PausesProductionPublishing)
-            return new DataExportResult(DataExportStatus.NotConfigured, Detail: LocalFront.LocalFrontMode.PausedMessage("Data export"));
-
         var apiKey = ParserConfigs.GetApiKey();
         if (string.IsNullOrWhiteSpace(apiKey))
         {

@@ -313,9 +313,8 @@ code, fixed verification URL, progress and masked/display information. The confi
 origin requires HTTPS (loopback fixtures excepted), with no credentials/path/query/fragment.
 The device-link client sends no existing key/cookies and follows no redirects; exchanges cap
 at 20 seconds/16 KiB, cleanup at five seconds. Returned verification URLs must equal that
-origin's `/link`. The dashboard/VS Code bridge permits only `https://viberails.ai/link` (the
-local origin's `/link` in local Front mode, dashboard only) and its optional strict
-`#code=ABCD-EFGH` public-code fragment. The hosted page removes that fragment
+origin's `/link`. The dashboard/VS Code bridge permits only `https://viberails.ai/link` and
+its optional strict `#code=ABCD-EFGH` public-code fragment. The hosted page removes that fragment
 before Auth0, retains it in same-tab storage for at most ten minutes, and requires explicit
 approval with fresh antiforgery.
 
@@ -323,30 +322,6 @@ Serialize/throttle the root's single in-memory attempt; cancellation/replacement
 responses. Compare the original saved key before replacement so manual changes win. Account
 email is response-only, written with the key and its full SHA-256 fingerprint; a mismatch hides
 it. Never return the raw credential/fingerprint. See [account-link flow](docs/account-link-auth-flow.md).
-
-### Local Front mode (VB-8NI09-170)
-
-`VIBERAILS_LOCAL_FRONT_ORIGIN` points one desktop process tree at VibeRails-Front's local Docker
-stack. It is active only in a Debug build under Development, for an https `localhost`/`127.0.0.1`/`[::1]`
-origin with no credentials, path, query or fragment. Any other request stops the web host at
-startup. It adds no listener or route.
-
-- **Key.** The runtime key is the local stack's key, stored per origin in
-  `~/.vibe_rails/local-front-keys.json`. Account linking and the Settings key field read and write
-  only that file. The production key is never shown, sent or replaced. The local key never leaves
-  for production.
-- **Sign-in page.** The dashboard accepts only the backend-reported origin's `/link` in place of
-  `https://viberails.ai/link`. The VS Code bridge is unchanged.
-- **Production publishing.** Any process that sees the variable, valid or not, publishes
-  nothing to production: no Board sync/share/import or remote Start polling, no session upload,
-  no backups or data export, no token savings and no signing-key sync. These pause before locks,
-  metadata changes or network calls. Its `IHttpClientFactory` clients refuse viberails.ai hosts.
-- **Redirects.** Every client that carries the key (summary, terminal registration, push,
-  linking and the publishing clients) follows no redirects. The tripwire sees only the first hop.
-- **HTTPS.** Certificates validate normally; there is no bypass.
-- **Shells.** PTY shells and CLIs do not inherit the variable.
-
-See [Services/LocalFront/AGENTS.md](VibeRails/Services/LocalFront/AGENTS.md).
 
 ### Jira (VB-40 / VIBE-102)
 

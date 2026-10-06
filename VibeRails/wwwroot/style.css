@@ -425,20 +425,6 @@ code {
     white-space: nowrap;
 }
 
-/* Local Front mode (VB-8NI09-170): this process talks to a Front stack on this machine. */
-.local-front-badge {
-    padding: 0.15rem 0.55rem;
-    border: 1px solid color-mix(in srgb, var(--color-warning) 55%, transparent);
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--color-warning) 16%, transparent);
-    color: var(--color-warning);
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.03em;
-    white-space: nowrap;
-    cursor: help;
-}
-
 .app-subnav-link {
     display: inline-flex;
     align-items: center;

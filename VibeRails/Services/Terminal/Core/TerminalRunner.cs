@@ -139,11 +139,6 @@ public class TerminalRunner
             {
                 preparedSession.Environment[kvp.Key] = kvp.Value;
             }
-            // Local Front mode belongs to this desktop process tree, not to the shells and CLIs it
-            // hosts: a `dotnet test` or another vb typed here must start normally. An empty value
-            // removes the variable from the PTY environment.
-            preparedSession.Environment[Services.LocalFront.LocalFrontMode.OriginVariable] = string.Empty;
-            preparedSession.Environment[Services.LocalFront.LocalFrontStartup.StartVariable] = string.Empty;
             _stateService.PublishSessionStart(sessionId, LlmParser.ToWireName(llm), workDir, envName, preparedSession.SetupCommands, preparedSession.LaunchCommand);
 
             // Environment Steps run here — after the session row exists (so a failure is recorded

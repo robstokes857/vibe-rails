@@ -1,35 +1,16 @@
 const LINK_API = '/api/v1/settings/remote-link';
 export const SIGN_IN_URL = 'https://viberails.ai/link';
 const TERMINAL_STATUSES = new Set(['idle', 'linked', 'denied', 'expired', 'unavailable', 'error', 'cancelled']);
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
-
-// Local Front mode (VB-8NI09-170): the backend reports the loopback https origin this process
-// talks to, and its sign-in page is that origin plus /link. No origin means the production page.
-// A reported origin this panel cannot accept returns null, so sign-in fails here instead of
-// choosing production. LOOPBACK_HOSTS matches LocalFrontMode.TryParseOrigin.
-export function signInPageFor(localFrontOrigin) {
-    if (localFrontOrigin === undefined || localFrontOrigin === null || localFrontOrigin === '') return SIGN_IN_URL;
-    if (typeof localFrontOrigin !== 'string') return null;
-    let url;
-    try {
-        url = new URL(localFrontOrigin);
-    } catch {
-        return null;
-    }
-    return url.protocol === 'https:' && LOOPBACK_HOSTS.has(url.hostname) && !url.username && !url.password
-        && url.pathname === '/' && !url.search && !url.hash
-        ? `${url.origin}/link` : null;
-}
 
 // The server must supply the fixed verification page. Only the validated public user code
 // may be added locally as a fragment; the website submits it in an antiforgery-protected POST.
-export function isSignInUrl(value, page = SIGN_IN_URL) {
-    return value === page;
+export function isSignInUrl(value) {
+    return value === SIGN_IN_URL;
 }
 
-export function signInUrlForCode(userCode, page = SIGN_IN_URL) {
+export function signInUrlForCode(userCode) {
     return typeof userCode === 'string' && userCode.length === 9 && /^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(userCode)
-        ? `${page}#code=${userCode}` : page;
+        ? `${SIGN_IN_URL}#code=${userCode}` : SIGN_IN_URL;
 }
 
 export class RemoteAccountLinkPanel {
@@ -54,16 +35,6 @@ export class RemoteAccountLinkPanel {
             this.suspended = false;
             void this.refresh();
         };
-    }
-
-    // The sign-in page this backend accepts: production, the local Front in local mode, or null
-    // when the reported local origin is not one this panel supports.
-    get signInPage() {
-        return signInPageFor(this.app.appSettings?.localFrontOrigin);
-    }
-
-    get siteName() {
-        return this.signInPage === SIGN_IN_URL ? 'viberails.ai' : 'the local Front';
     }
 
     mount() {
@@ -133,13 +104,13 @@ export class RemoteAccountLinkPanel {
             } else if (response.userCode == null && response.verificationUri == null && response.expiresAt == null) {
                 // Another dashboard can observe the shared attempt before its start completes.
                 this.state = { status: 'pending', preparing: true, interval };
-            } else if (!isSignInUrl(response.verificationUri, this.signInPage)
+            } else if (!isSignInUrl(response.verificationUri)
                 || typeof response.userCode !== 'string' || response.userCode.length !== 9 || !/^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(response.userCode)
                 || !Number.isFinite(expiresAt)) {
                 this.state = { status: 'error' };
             } else {
                 this.state = {
-                    status: 'pending', userCode: response.userCode, verificationUri: this.signInPage,
+                    status: 'pending', userCode: response.userCode, verificationUri: SIGN_IN_URL,
                     expiresAt, interval, error: response.error
                 };
                 this._startCountdown();
@@ -202,9 +173,8 @@ export class RemoteAccountLinkPanel {
         const start = this.root.querySelector('[data-remote-link-start]');
         start.disabled = this.busy || pending;
         start.hidden = pending;
-        const site = this.siteName;
         start.textContent = this.busy && !pending ? 'Connecting…'
-            : status === 'idle' ? (site === 'viberails.ai' ? 'Sign in to viberails.ai' : 'Sign in to local Front')
+            : status === 'idle' ? 'Sign in to viberails.ai'
                 : status === 'linked' ? 'Switch account' : 'Try sign-in again';
         const cancel = this.root.querySelector('[data-remote-link-cancel]');
         cancel.hidden = !pending && !this.busy;
@@ -213,10 +183,8 @@ export class RemoteAccountLinkPanel {
         this.root.querySelector('[data-remote-link-pending]').hidden = !needsApproval;
         this.root.querySelector('[data-remote-link-code]').textContent = needsApproval ? this.state.userCode : '';
         const open = this.root.querySelector('[data-remote-link-open]');
-        const page = this.root.querySelector('[data-remote-link-page]');
-        if (page) page.textContent = this.signInPage ?? '';
         if (needsApproval) {
-            open.href = signInUrlForCode(this.state.userCode, this.signInPage);
+            open.href = signInUrlForCode(this.state.userCode);
             this._renderCountdown();
         } else {
             open.removeAttribute('href');
@@ -229,12 +197,12 @@ export class RemoteAccountLinkPanel {
                 ? 'Sign-in approved. VibeRails could not save the key yet and will retry automatically.'
                 : this.state.preparing ? 'Preparing sign-in…'
                 : this.state.error === 'remote_error'
-                    ? `Waiting for ${site} to respond. VibeRails will retry automatically while this code is valid.`
+                    ? 'Waiting for viberails.ai to respond. VibeRails will retry automatically while this code is valid.'
                     : 'Open the sign-in page to continue. Your code is filled in automatically; check the account and computer before approving.',
             linked: email ? `Logged in ${email}` : 'API key configured',
-            denied: this.state.error === 'key_limit' ? `Your account has reached its API key limit. Manage your keys on ${site}, then try again.` : `The sign-in request was denied on ${site}.`,
+            denied: this.state.error === 'key_limit' ? 'Your account has reached its API key limit. Manage your keys on viberails.ai, then try again.' : 'The sign-in request was denied on viberails.ai.',
             expired: 'This sign-in code expired. Start again to get a new code.',
-            unavailable: `Sign-in is not available on ${site} yet. You can add an API key in Settings.`,
+            unavailable: 'Sign-in is not available on viberails.ai yet. You can add an API key in Settings.',
             error: this.state.error === 'cancel_failed'
                 ? 'Could not confirm cancellation. Check your connection before trying again.'
                 : this.state.error === 'key_changed'
@@ -256,7 +224,7 @@ export class RemoteAccountLinkPanel {
         // by this second click, never after awaiting the start request (popup blockers).
         if (typeof window.__viberails_openExternal__ === 'function') {
             try {
-                window.__viberails_openExternal__(signInUrlForCode(this.state.userCode, this.signInPage));
+                window.__viberails_openExternal__(signInUrlForCode(this.state.userCode));
                 event.preventDefault();
             } catch {
                 // Let the same user click follow the anchor if the bridge is unavailable.

@@ -466,7 +466,6 @@ export class VibeControlApp {
         });
         this.applyVsCodeThemePreference();
         this.updateAccountNav();
-        this.updateLocalFrontBadge();
         this.terminalTokenCompression?.setEnabledSources(getTokenSaverEnabledSources(this.appSettings));
     }
 
@@ -1113,28 +1112,12 @@ export class VibeControlApp {
         for (const link of document.querySelectorAll('[data-account-nav]')) {
             link.hidden = hasKey;
         }
-        const localFront = this.appSettings?.localFrontOrigin;
         for (const status of document.querySelectorAll('[data-account-status]')) {
             status.textContent = email ? `Logged in ${email}`
-                : hasKey ? 'API key configured'
-                    : localFront ? `Sign in to the local Front at ${localFront}.` : 'Sign in to your viberails.ai account.';
+                : hasKey ? 'API key configured' : 'Sign in to your viberails.ai account.';
         }
         for (const action of document.querySelectorAll('[data-account-settings-action]')) {
             action.textContent = hasKey ? 'Switch account' : 'Sign in';
-        }
-    }
-
-    // Local Front mode (VB-8NI09-170): say plainly which Front this dashboard talks to and that
-    // production publishing is paused, so a local session is never mistaken for a normal one.
-    updateLocalFrontBadge() {
-        const origin = this.appSettings?.localFrontOrigin;
-        for (const badge of document.querySelectorAll('[data-local-front-badge]')) {
-            badge.hidden = !origin;
-            if (!origin) continue;
-            badge.textContent = `Local Front · ${origin.replace(/^https:\/\//, '')}`;
-            badge.title = `This VibeRails process talks to the local Front at ${origin}. `
-                + 'Board sync, session upload, complete backups and token-savings publishing are paused here; '
-                + 'start VibeRails with a normal profile to resume them.';
         }
     }
 
@@ -1159,8 +1142,7 @@ export class VibeControlApp {
         const template = document.getElementById('remote-account-template');
         if (!template) return;
         let panel;
-        this.showModal(this.appSettings?.localFrontOrigin ? 'Local Front account' : 'viberails.ai account',
-            template.innerHTML, { onClose: () => panel?.unload() });
+        this.showModal('viberails.ai account', template.innerHTML, { onClose: () => panel?.unload() });
         const root = document.querySelector('#modal-container [data-remote-account-link]');
         if (!root) return;
         panel = new RemoteAccountLinkPanel(this, root, {

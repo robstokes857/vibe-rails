@@ -12,7 +12,6 @@ using VibeRails.Services.Terminal;
 using VibeRails.Services.VCA.Hooks;
 using VibeRails.Services.Jobs;
 using VibeRails.Services.PythonScripts;
-using VibeRails.Services.LocalFront;
 
 using VibeRails.Utils;
 
@@ -179,64 +178,6 @@ if (JobTickProcessHost.IsRequested(args))
     return;
 }
 
-// Local Front mode (VB-8NI09-170): VIBERAILS_LOCAL_FRONT_ORIGIN points this process at a Front
-// stack on this machine. A request this build or environment cannot honour stops here rather than
-// running as a normal desktop. The "VibeRails + Local Front" profile also asks the root backend to
-// start that stack first (VB-BB4ED-171); terminal-tab children and Automation runs inherit the
-// mode but never start Docker.
-var localFront = LocalFrontMode.Current;
-if (localFront.Requested && !localFront.Active)
-{
-    Log.Error("[LocalFront] Refusing to start: {Reason}", localFront.Error);
-    Console.Error.WriteLine($"VibeRails: {localFront.Error}");
-    Environment.ExitCode = LocalFrontStartup.SetupFailedExitCode;
-    return;
-}
-if (localFront.Active)
-{
-    Log.Information("[LocalFront] Local Front mode. origin={Origin} processId={ProcessId} debuggerAttached={DebuggerAttached}",
-        localFront.OriginText, Environment.ProcessId, Debugger.IsAttached);
-    if (LocalFrontStartup.IsRequested() && MapRegisterServices.IsActiveRootBackendProcess(args))
-    {
-        Console.WriteLine($"VibeRails + Local Front: preparing {localFront.OriginText}");
-        using var preflightCancel = new CancellationTokenSource();
-        ConsoleCancelEventHandler onCancel = (_, eventArgs) =>
-        {
-            eventArgs.Cancel = true;
-            preflightCancel.Cancel();
-        };
-        Console.CancelKeyPress += onCancel;
-        LocalFrontStartResult started;
-        try
-        {
-            started = await LocalFrontStartup.CreateDefault().RunAsync(
-                localFront,
-                Environment.GetEnvironmentVariable(LocalFrontStartup.CheckoutVariable),
-                exeDirectory,
-                LocalFrontStartup.DefaultLockPath(),
-                line => Console.WriteLine($"  {line}"),
-                preflightCancel.Token);
-        }
-        finally
-        {
-            Console.CancelKeyPress -= onCancel;
-        }
-        if (!started.Success)
-        {
-            Log.Error("[LocalFront] Local Front did not start. exitCode={ExitCode} checkout={Checkout} reason={Reason}",
-                started.ExitCode, started.Checkout ?? "(none)", started.Message);
-            Console.Error.WriteLine();
-            Console.Error.WriteLine($"VibeRails + Local Front did not start: {started.Message}");
-            if (Debugger.IsAttached)
-                Debugger.Log(0, "LocalFront", $"VibeRails + Local Front did not start: {started.Message}{Environment.NewLine}");
-            Environment.ExitCode = started.ExitCode;
-            return;
-        }
-        Log.Information("[LocalFront] Local Front ready. checkout={Checkout}", started.Checkout);
-        Console.WriteLine($"  {started.Message}");
-    }
-}
-
 var builder = WebApplication.CreateSlimBuilder(args);
 
 // Remove default host logging providers so Microsoft.Extensions.Logging does not
@@ -247,27 +188,6 @@ builder.Logging.ClearProviders();
 // CreateSlimBuilder doesn't load appsettings.json by default — add it explicitly
 builder.Configuration.AddJsonFile(Path.Combine(exeDirectory, "appsettings.json"), optional: false, reloadOnChange: false);
 builder.Configuration.AddJsonFile(Path.Combine(exeDirectory, $"appsettings.{builder.Environment.EnvironmentName}.json"), optional: true, reloadOnChange: false);
-
-if (localFront.Active)
-{
-    // Every reader of VibeRails:FrontendUrl (account linking, terminal registration and sockets,
-    // relay, notifications) now names the local origin. A FrontendUrl someone overrode to a third
-    // place is a conflict, not something to pick between.
-    var configuredFront = builder.Configuration["VibeRails:FrontendUrl"];
-    var conflict = !builder.Environment.IsDevelopment()
-        ? $"local Front mode requires the Development environment, but this host runs in {builder.Environment.EnvironmentName}."
-        : !LocalFrontMode.IsCompatibleFrontendSetting(configuredFront, localFront)
-            ? $"VibeRails:FrontendUrl is overridden to {configuredFront}, which conflicts with {LocalFrontMode.OriginVariable}={localFront.OriginText}. Remove one of them."
-            : null;
-    if (conflict is not null)
-    {
-        Log.Error("[LocalFront] Refusing to start: {Reason}", conflict);
-        Console.Error.WriteLine($"VibeRails: {conflict}");
-        Environment.ExitCode = LocalFrontStartup.SetupFailedExitCode;
-        return;
-    }
-    builder.Configuration.AddInMemoryCollection([new("VibeRails:FrontendUrl", localFront.OriginText)]);
-}
 
 // Configure JSON serialization for AOT
 builder.Services.ConfigureHttpJsonOptions(options =>
@@ -282,9 +202,6 @@ builder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.None);
 
 // Configure Kestrel with auto-selected port
 int port = PortFinder.FindOpenPort();
-// The desktop's own listener must never take the local Front's port, even while Front is down.
-if (localFront.Active && localFront.Origin.IsLoopback && port == localFront.Origin.Port)
-    port = PortFinder.FindOpenPort(port + 1);
 builder.WebHost.ConfigureKestrel(options =>
 {
     options.ListenLocalhost(port);
@@ -594,15 +511,6 @@ Console.WriteLine();
 Console.WriteLine("(Link expires in 2 minutes, can only be used once, and the server stops if unused)");
 Console.WriteLine("Press Ctrl+C to stop the server.");
 Console.WriteLine();
-if (localFront.Active)
-{
-    Console.WriteLine($"Local Front mode: {localFront.OriginText}");
-    Console.WriteLine("  Board sync, session upload, complete backups, token-savings and signing-key publishing are paused in this process.");
-    Console.WriteLine(string.IsNullOrWhiteSpace(ParserConfigs.GetApiKey())
-        ? $"  Not signed in to the local Front yet: open the dashboard, choose Sign in, and approve the code at {localFront.OriginText}/link (local sign-in at /dev/login)."
-        : "  Signed in to the local Front with its own key.");
-    Console.WriteLine();
-}
 
 
 // Wait for shutdown signal (Ctrl+C / SIGTERM / idle-owner watchdog)

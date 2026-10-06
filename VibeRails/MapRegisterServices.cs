@@ -35,7 +35,6 @@ using VibeRails.Services.GitPreflight;
 using VibeRails.Services.Jobs;
 using VibeRails.Services.HttpRelay;
 using VibeRails.Services.Diagnostics;
-using VibeRails.Services.LocalFront;
 
 namespace VibeRails
 {
@@ -51,15 +50,6 @@ namespace VibeRails
                 "1",
                 StringComparison.Ordinal);
             localApiBaseUrl ??= "http://127.0.0.1:0";
-            // Local Front mode (VB-8NI09-170) is decided once per process from its environment.
-            var localFront = LocalFrontMode.Current;
-            if (localFront.Requested)
-            {
-                // Fail closed: nothing this process sends through IHttpClientFactory may reach
-                // viberails.ai, whatever a client's configured or pinned URL says.
-                serviceCollection.ConfigureHttpClientDefaults(client =>
-                    client.AddHttpMessageHandler(() => new ProductionFrontTripwireHandler()));
-            }
 
             // Published so route mapping gates on the answer resolved here rather than deriving its
             // own from a different argv array. See <see cref="ProcessRole"/>.
@@ -81,15 +71,11 @@ namespace VibeRails
                 serviceCollection.AddSingleton<IFeatureLog>(NullFeatureLog.Instance);
             }
 
-            // Summary, terminal registration and push send X-Api-Key, so like every credential
-            // client they follow no redirects: an automatic redirect happens below the local-mode
-            // tripwire and would replay the key to wherever it points (VB-BB4ED-171 review R1).
             serviceCollection.AddHttpClient<ISummaryService, SummaryService>(
                 x =>
                 {
-                    x.BaseAddress = localFront.Active ? localFront.Origin : new Uri("https://viberails.ai");
-                })
-                .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
+                    x.BaseAddress = new Uri("https://viberails.ai");
+                });
 
             serviceCollection.AddScoped<IFileService, FileService>();
 
@@ -102,18 +88,7 @@ namespace VibeRails
                         AllowAutoRedirect = false,
                         UseCookies = false
                     });
-                if (localFront.Active)
-                {
-                    // Sign-in against the local Front saves its key in the local key file, never in
-                    // settings.json beside the production key.
-                    serviceCollection.AddSingleton<LocalFrontKeyStore>();
-                    serviceCollection.AddSingleton<IRemoteAccountKeyStore>(sp => new LocalFrontAccountKeyStore(
-                        sp.GetRequiredService<LocalFrontKeyStore>(), localFront.OriginText, sp.GetRequiredService<IRemoteHttpRelayClient>()));
-                }
-                else
-                {
-                    serviceCollection.AddSingleton<IRemoteAccountKeyStore, ApiKeyStore>();
-                }
+                serviceCollection.AddSingleton<IRemoteAccountKeyStore, ApiKeyStore>();
                 serviceCollection.AddSingleton(sp => new RemoteAccountLinkService(
                     sp.GetRequiredService<IHttpClientFactory>().CreateClient("remote-account-link"),
                     new Uri(sp.GetRequiredService<IConfiguration>()["VibeRails:FrontendUrl"]
@@ -125,10 +100,7 @@ namespace VibeRails
                 serviceCollection.AddSingleton<Services.SigningKeys.SigningKeyStore>();
                 serviceCollection.AddSingleton(sp => new Services.SigningKeys.SigningKeyService(
                     sp.GetRequiredService<IHttpClientFactory>().CreateClient("signing-key-registration"),
-                    sp.GetRequiredService<Services.SigningKeys.SigningKeyStore>(),
-                    // Signing-key registration is production-only: with no credential it reports
-                    // "not configured" and keeps the key local.
-                    () => LocalFrontMode.PausesProductionPublishing ? string.Empty : Config.LoadFresh().ApiKey));
+                    sp.GetRequiredService<Services.SigningKeys.SigningKeyStore>(), () => Config.LoadFresh().ApiKey));
             }
 
             // Host filesystem metadata is exposed only by an active root backend. Terminal-tab
@@ -230,8 +202,7 @@ namespace VibeRails
                 serviceCollection.AddSingleton<Services.Board.IBoardLiveSessionProbe, Services.Board.TerminalTabLiveSessionProbe>();
                 serviceCollection.AddScoped<Services.Board.IBoardLaunchService, Services.Board.BoardLaunchService>();
                 serviceCollection.AddScoped<Services.Board.Sync.BoardRemoteLaunchService>();
-                // Remote-board launch polling talks to the production board copy; local mode pauses it.
-                if (!isFakeCliTestProcess && !localFront.Requested)
+                if (!isFakeCliTestProcess)
                     serviceCollection.AddHostedService<Services.Board.Sync.BoardRemoteLaunchHostedService>();
                 // Agent-context measurement (VB-63): the card editor's estimate and the sample each
                 // launch records. Scoped like the launch service; it reads the scoped IRepository.
@@ -418,20 +389,9 @@ namespace VibeRails
                             client.Timeout = TimeSpan.FromSeconds(30);
                         })
                         .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
-                    if (localFront.Requested)
-                    {
-                        // These publish this machine's data to production. A local-mode process
-                        // leaves them to normal VibeRails processes; their queues, checkpoints and
-                        // saved settings are untouched, so the next normal run carries on.
-                        Serilog.Log.Information(
-                            "[LocalFront] Token-savings publishing, session upload and complete backups are paused in this process");
-                    }
-                    else
-                    {
-                        serviceCollection.AddHostedService<TokenSavingsPublishJob>();
-                        serviceCollection.AddHostedService<SessionDataDrainJob>();
-                        serviceCollection.AddHostedService<CompleteBackupJob>();
-                    }
+                    serviceCollection.AddHostedService<TokenSavingsPublishJob>();
+                    serviceCollection.AddHostedService<SessionDataDrainJob>();
+                    serviceCollection.AddHostedService<CompleteBackupJob>();
                     serviceCollection.AddHostedService<DataRetentionJob>();
                     serviceCollection.AddHostedService<SearchIndexMaintenanceJob>();
                 }
@@ -444,8 +404,7 @@ namespace VibeRails
             serviceCollection.AddSingleton<AppEventWebSocketHandler>();
 
             // Remote State Service (for terminal session remote registration)
-            serviceCollection.AddHttpClient<IRemoteStateService, RemoteStateService>()
-                .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
+            serviceCollection.AddHttpClient<IRemoteStateService, RemoteStateService>();
 
             // Incremental session export. The service creates its own repository scopes and owns
             // both process/cross-process gates, so it is safe for the singleton drain job.
@@ -480,8 +439,7 @@ namespace VibeRails
                 .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
 
             // Push Notification Service (forwards per-tab "ready/waiting" pushes to VibeRails-Front)
-            serviceCollection.AddHttpClient<IPushNotificationService, PushNotificationService>()
-                .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
+            serviceCollection.AddHttpClient<IPushNotificationService, PushNotificationService>();
 
             // Update Service (singleton with HttpClient)
             serviceCollection.AddHttpClient<UpdateService>();

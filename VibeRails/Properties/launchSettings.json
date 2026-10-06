@@ -14,16 +14,6 @@
         "ASPNETCORE_ENVIRONMENT": "Development"
       },
       "dotnetRunMessages": false
-    },
-    "VibeRails + Local Front": {
-      "commandName": "Project",
-      "commandLineArgs": "--web",
-      "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development",
-        "VIBERAILS_LOCAL_FRONT_ORIGIN": "https://localhost:5164",
-        "VIBERAILS_LOCAL_FRONT_START": "1"
-      },
-      "dotnetRunMessages": false
     }
   },
   "$schema": "https://json.schemastore.org/launchsettings.json"
