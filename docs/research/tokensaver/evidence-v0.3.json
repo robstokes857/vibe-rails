@@ -1,0 +1,1361 @@
+{
+  "meter_initial_snapshot": [
+    {
+      "agent": "Claude Code",
+      "days": 27,
+      "requests": 16238,
+      "rewritten": 8551,
+      "before_mb": 7710,
+      "removed_mb": 15.4,
+      "pct": 0.2
+    },
+    {
+      "agent": "Codex CLI",
+      "days": 28,
+      "requests": 16227,
+      "rewritten": 15065,
+      "before_mb": 9930,
+      "removed_mb": 343,
+      "pct": 3.45
+    },
+    {
+      "agent": "Grok CLI",
+      "days": 19,
+      "requests": 1212,
+      "rewritten": 658,
+      "before_mb": 673,
+      "removed_mb": 1.2,
+      "pct": 0.18
+    }
+  ],
+  "daily_later_snapshot": [
+    {
+      "date": "2026-07-29",
+      "partial": false,
+      "claude": {
+        "requests": 487.0,
+        "rewritten": 380.0,
+        "before_mb": 407.2,
+        "removed_mb": 0.31,
+        "pct": 0.08
+      },
+      "codex": {
+        "requests": 569.0,
+        "rewritten": 162.0,
+        "before_mb": 315.9,
+        "removed_mb": 1.99,
+        "pct": 0.63
+      }
+    },
+    {
+      "date": "2026-07-30",
+      "partial": false,
+      "claude": {
+        "requests": 37.0,
+        "rewritten": 24.0,
+        "before_mb": 12.0,
+        "removed_mb": 0.4,
+        "pct": 3.29
+      },
+      "codex": {
+        "requests": 209.0,
+        "rewritten": 98.0,
+        "before_mb": 102.3,
+        "removed_mb": 17.27,
+        "pct": 16.88
+      }
+    },
+    {
+      "date": "2026-07-31",
+      "partial": false,
+      "claude": {
+        "requests": 128.0,
+        "rewritten": 52.0,
+        "before_mb": 40.2,
+        "removed_mb": 0.0,
+        "pct": 0.01
+      },
+      "codex": {
+        "requests": 180.0,
+        "rewritten": 179.0,
+        "before_mb": 155.3,
+        "removed_mb": 26.16,
+        "pct": 16.84
+      }
+    },
+    {
+      "date": "2026-08-01",
+      "partial": false,
+      "claude": {
+        "requests": 582.0,
+        "rewritten": 388.0,
+        "before_mb": 442.8,
+        "removed_mb": 0.15,
+        "pct": 0.03
+      },
+      "codex": {
+        "requests": 344.0,
+        "rewritten": 0.0,
+        "before_mb": 193.6,
+        "removed_mb": 0.0,
+        "pct": 0.0
+      }
+    },
+    {
+      "date": "2026-08-02",
+      "partial": false,
+      "claude": {
+        "requests": null,
+        "rewritten": null,
+        "before_mb": null,
+        "removed_mb": null,
+        "pct": null
+      },
+      "codex": {
+        "requests": 319.0,
+        "rewritten": 0.0,
+        "before_mb": 163.7,
+        "removed_mb": 0.0,
+        "pct": 0.0
+      }
+    },
+    {
+      "date": "2026-08-03",
+      "partial": false,
+      "claude": {
+        "requests": 337.0,
+        "rewritten": 238.0,
+        "before_mb": 138.4,
+        "removed_mb": 0.72,
+        "pct": 0.52
+      },
+      "codex": {
+        "requests": 280.0,
+        "rewritten": 0.0,
+        "before_mb": 151.5,
+        "removed_mb": 0.0,
+        "pct": 0.0
+      }
+    },
+    {
+      "date": "2026-08-04",
+      "partial": false,
+      "claude": {
+        "requests": 334.0,
+        "rewritten": 199.0,
+        "before_mb": 180.1,
+        "removed_mb": 0.05,
+        "pct": 0.03
+      },
+      "codex": {
+        "requests": 87.0,
+        "rewritten": 0.0,
+        "before_mb": 31.0,
+        "removed_mb": 0.0,
+        "pct": 0.0
+      }
+    },
+    {
+      "date": "2026-08-05",
+      "partial": false,
+      "claude": {
+        "requests": 378.0,
+        "rewritten": 169.0,
+        "before_mb": 145.7,
+        "removed_mb": 0.25,
+        "pct": 0.17
+      },
+      "codex": {
+        "requests": 843.0,
+        "rewritten": 0.0,
+        "before_mb": 535.7,
+        "removed_mb": 0.0,
+        "pct": 0.0
+      }
+    },
+    {
+      "date": "2026-08-06",
+      "partial": false,
+      "claude": {
+        "requests": 110.0,
+        "rewritten": 53.0,
+        "before_mb": 31.8,
+        "removed_mb": 0.01,
+        "pct": 0.03
+      },
+      "codex": {
+        "requests": 158.0,
+        "rewritten": 0.0,
+        "before_mb": 70.8,
+        "removed_mb": 0.0,
+        "pct": 0.0
+      }
+    },
+    {
+      "date": "2026-08-07",
+      "partial": false,
+      "claude": {
+        "requests": 325.0,
+        "rewritten": 297.0,
+        "before_mb": 254.8,
+        "removed_mb": 0.13,
+        "pct": 0.05
+      },
+      "codex": {
+        "requests": 798.0,
+        "rewritten": 0.0,
+        "before_mb": 519.3,
+        "removed_mb": 0.0,
+        "pct": 0.0
+      }
+    },
+    {
+      "date": "2026-08-08",
+      "partial": false,
+      "claude": {
+        "requests": 767.0,
+        "rewritten": 460.0,
+        "before_mb": 649.3,
+        "removed_mb": 0.94,
+        "pct": 0.14
+      },
+      "codex": {
+        "requests": 50.0,
+        "rewritten": 0.0,
+        "before_mb": 13.7,
+        "removed_mb": 0.0,
+        "pct": 0.0
+      }
+    },
+    {
+      "date": "2026-08-09",
+      "partial": false,
+      "claude": {
+        "requests": 154.0,
+        "rewritten": 118.0,
+        "before_mb": 216.9,
+        "removed_mb": 0.0,
+        "pct": 0.0
+      },
+      "codex": {
+        "requests": 78.0,
+        "rewritten": 0.0,
+        "before_mb": 52.6,
+        "removed_mb": 0.0,
+        "pct": 0.0
+      }
+    },
+    {
+      "date": "2026-08-10",
+      "partial": false,
+      "claude": {
+        "requests": 405.0,
+        "rewritten": 251.0,
+        "before_mb": 203.0,
+        "removed_mb": 0.11,
+        "pct": 0.05
+      },
+      "codex": {
+        "requests": 741.0,
+        "rewritten": 0.0,
+        "before_mb": 388.8,
+        "removed_mb": 0.0,
+        "pct": 0.0
+      }
+    },
+    {
+      "date": "2026-08-11",
+      "partial": false,
+      "claude": {
+        "requests": 180.0,
+        "rewritten": 147.0,
+        "before_mb": 140.0,
+        "removed_mb": 0.03,
+        "pct": 0.02
+      },
+      "codex": {
+        "requests": 146.0,
+        "rewritten": 0.0,
+        "before_mb": 60.3,
+        "removed_mb": 0.0,
+        "pct": 0.0
+      }
+    },
+    {
+      "date": "2026-08-12",
+      "partial": false,
+      "claude": {
+        "requests": 244.0,
+        "rewritten": 80.0,
+        "before_mb": 159.5,
+        "removed_mb": 0.03,
+        "pct": 0.02
+      },
+      "codex": {
+        "requests": 818.0,
+        "rewritten": 0.0,
+        "before_mb": 526.2,
+        "removed_mb": 0.0,
+        "pct": 0.0
+      }
+    },
+    {
+      "date": "2026-08-13",
+      "partial": false,
+      "claude": {
+        "requests": 267.0,
+        "rewritten": 160.0,
+        "before_mb": 95.3,
+        "removed_mb": 0.71,
+        "pct": 0.74
+      },
+      "codex": {
+        "requests": 170.0,
+        "rewritten": 0.0,
+        "before_mb": 107.0,
+        "removed_mb": 0.0,
+        "pct": 0.0
+      }
+    },
+    {
+      "date": "2026-08-14",
+      "partial": false,
+      "claude": {
+        "requests": 171.0,
+        "rewritten": 95.0,
+        "before_mb": 51.0,
+        "removed_mb": 0.08,
+        "pct": 0.15
+      },
+      "codex": {
+        "requests": 67.0,
+        "rewritten": 0.0,
+        "before_mb": 45.8,
+        "removed_mb": 0.0,
+        "pct": 0.0
+      }
+    },
+    {
+      "date": "2026-08-15",
+      "partial": false,
+      "claude": {
+        "requests": 289.0,
+        "rewritten": 223.0,
+        "before_mb": 90.1,
+        "removed_mb": 0.63,
+        "pct": 0.7
+      },
+      "codex": {
+        "requests": 445.0,
+        "rewritten": 0.0,
+        "before_mb": 238.2,
+        "removed_mb": 0.0,
+        "pct": 0.0
+      }
+    },
+    {
+      "date": "2026-08-16",
+      "partial": false,
+      "claude": {
+        "requests": 437.0,
+        "rewritten": 220.0,
+        "before_mb": 141.3,
+        "removed_mb": 2.38,
+        "pct": 1.68
+      },
+      "codex": {
+        "requests": 1245.0,
+        "rewritten": 0.0,
+        "before_mb": 802.5,
+        "removed_mb": 0.0,
+        "pct": 0.0
+      }
+    },
+    {
+      "date": "2026-08-17",
+      "partial": false,
+      "claude": {
+        "requests": 278.0,
+        "rewritten": 188.0,
+        "before_mb": 88.9,
+        "removed_mb": 1.42,
+        "pct": 1.6
+      },
+      "codex": {
+        "requests": 1547.0,
+        "rewritten": 86.0,
+        "before_mb": 910.9,
+        "removed_mb": 8.58,
+        "pct": 0.94
+      }
+    },
+    {
+      "date": "2026-08-18",
+      "partial": false,
+      "claude": {
+        "requests": 391.0,
+        "rewritten": 257.0,
+        "before_mb": 133.4,
+        "removed_mb": 1.45,
+        "pct": 1.09
+      },
+      "codex": {
+        "requests": 907.0,
+        "rewritten": 879.0,
+        "before_mb": 533.6,
+        "removed_mb": 101.72,
+        "pct": 19.06
+      }
+    },
+    {
+      "date": "2026-08-19",
+      "partial": false,
+      "claude": {
+        "requests": null,
+        "rewritten": null,
+        "before_mb": null,
+        "removed_mb": null,
+        "pct": null
+      },
+      "codex": {
+        "requests": 95.0,
+        "rewritten": 91.0,
+        "before_mb": 42.4,
+        "removed_mb": 2.13,
+        "pct": 5.03
+      }
+    },
+    {
+      "date": "2026-08-20",
+      "partial": false,
+      "claude": {
+        "requests": 14.0,
+        "rewritten": 9.0,
+        "before_mb": 3.4,
+        "removed_mb": 0.01,
+        "pct": 0.2
+      },
+      "codex": {
+        "requests": 254.0,
+        "rewritten": 248.0,
+        "before_mb": 174.7,
+        "removed_mb": 37.27,
+        "pct": 21.33
+      }
+    },
+    {
+      "date": "2026-08-21",
+      "partial": false,
+      "claude": {
+        "requests": 565.0,
+        "rewritten": 204.0,
+        "before_mb": 286.1,
+        "removed_mb": 2.04,
+        "pct": 0.71
+      },
+      "codex": {
+        "requests": 662.0,
+        "rewritten": 645.0,
+        "before_mb": 489.6,
+        "removed_mb": 80.33,
+        "pct": 16.41
+      }
+    },
+    {
+      "date": "2026-08-22",
+      "partial": false,
+      "claude": {
+        "requests": 137.0,
+        "rewritten": 87.0,
+        "before_mb": 104.5,
+        "removed_mb": 0.06,
+        "pct": 0.05
+      },
+      "codex": {
+        "requests": 2016.0,
+        "rewritten": 1966.0,
+        "before_mb": 1378.3,
+        "removed_mb": 208.33,
+        "pct": 15.12
+      }
+    },
+    {
+      "date": "2026-08-23",
+      "partial": false,
+      "claude": {
+        "requests": 392.0,
+        "rewritten": 291.0,
+        "before_mb": 248.5,
+        "removed_mb": 4.35,
+        "pct": 1.75
+      },
+      "codex": {
+        "requests": 128.0,
+        "rewritten": 125.0,
+        "before_mb": 71.9,
+        "removed_mb": 7.12,
+        "pct": 9.91
+      }
+    },
+    {
+      "date": "2026-08-24",
+      "partial": false,
+      "claude": {
+        "requests": 440.0,
+        "rewritten": 110.0,
+        "before_mb": 160.6,
+        "removed_mb": 0.17,
+        "pct": 0.11
+      },
+      "codex": {
+        "requests": 430.0,
+        "rewritten": 399.0,
+        "before_mb": 268.1,
+        "removed_mb": 47.55,
+        "pct": 17.74
+      }
+    },
+    {
+      "date": "2026-08-25",
+      "partial": false,
+      "claude": {
+        "requests": 611.0,
+        "rewritten": 430.0,
+        "before_mb": 321.8,
+        "removed_mb": 1.8,
+        "pct": 0.56
+      },
+      "codex": {
+        "requests": 791.0,
+        "rewritten": 757.0,
+        "before_mb": 489.3,
+        "removed_mb": 98.04,
+        "pct": 20.04
+      }
+    },
+    {
+      "date": "2026-08-26",
+      "partial": false,
+      "claude": {
+        "requests": null,
+        "rewritten": null,
+        "before_mb": null,
+        "removed_mb": null,
+        "pct": null
+      },
+      "codex": {
+        "requests": 528.0,
+        "rewritten": 478.0,
+        "before_mb": 223.5,
+        "removed_mb": 34.88,
+        "pct": 15.61
+      }
+    },
+    {
+      "date": "2026-08-27",
+      "partial": false,
+      "claude": {
+        "requests": 811.0,
+        "rewritten": 490.0,
+        "before_mb": 1148.9,
+        "removed_mb": 16.69,
+        "pct": 1.45
+      },
+      "codex": {
+        "requests": 654.0,
+        "rewritten": 641.0,
+        "before_mb": 466.5,
+        "removed_mb": 104.25,
+        "pct": 22.35
+      }
+    },
+    {
+      "date": "2026-08-28",
+      "partial": false,
+      "claude": {
+        "requests": 910.0,
+        "rewritten": 412.0,
+        "before_mb": 322.1,
+        "removed_mb": 3.34,
+        "pct": 1.04
+      },
+      "codex": {
+        "requests": 257.0,
+        "rewritten": 246.0,
+        "before_mb": 153.5,
+        "removed_mb": 43.29,
+        "pct": 28.21
+      }
+    },
+    {
+      "date": "2026-08-29",
+      "partial": false,
+      "claude": {
+        "requests": 478.0,
+        "rewritten": 192.0,
+        "before_mb": 173.4,
+        "removed_mb": 1.99,
+        "pct": 1.15
+      },
+      "codex": {
+        "requests": 246.0,
+        "rewritten": 230.0,
+        "before_mb": 101.4,
+        "removed_mb": 18.43,
+        "pct": 18.16
+      }
+    },
+    {
+      "date": "2026-08-30",
+      "partial": false,
+      "claude": {
+        "requests": 529.0,
+        "rewritten": 380.0,
+        "before_mb": 205.6,
+        "removed_mb": 0.5,
+        "pct": 0.24
+      },
+      "codex": {
+        "requests": 1230.0,
+        "rewritten": 1182.0,
+        "before_mb": 739.7,
+        "removed_mb": 44.41,
+        "pct": 6.0
+      }
+    },
+    {
+      "date": "2026-08-31",
+      "partial": false,
+      "claude": {
+        "requests": 83.0,
+        "rewritten": 65.0,
+        "before_mb": 67.0,
+        "removed_mb": 0.0,
+        "pct": 0.01
+      },
+      "codex": {
+        "requests": 61.0,
+        "rewritten": 53.0,
+        "before_mb": 12.6,
+        "removed_mb": 0.74,
+        "pct": 5.88
+      }
+    },
+    {
+      "date": "2026-09-01",
+      "partial": false,
+      "claude": {
+        "requests": 14.0,
+        "rewritten": 9.0,
+        "before_mb": 4.7,
+        "removed_mb": 0.0,
+        "pct": 0.02
+      },
+      "codex": {
+        "requests": 273.0,
+        "rewritten": 265.0,
+        "before_mb": 218.7,
+        "removed_mb": 18.79,
+        "pct": 8.59
+      }
+    },
+    {
+      "date": "2026-09-02",
+      "partial": false,
+      "claude": {
+        "requests": 58.0,
+        "rewritten": 30.0,
+        "before_mb": 22.9,
+        "removed_mb": 0.06,
+        "pct": 0.24
+      },
+      "codex": {
+        "requests": 32.0,
+        "rewritten": 24.0,
+        "before_mb": 7.2,
+        "removed_mb": 0.23,
+        "pct": 3.27
+      }
+    },
+    {
+      "date": "2026-09-03",
+      "partial": false,
+      "claude": {
+        "requests": 368.0,
+        "rewritten": 194.0,
+        "before_mb": 148.0,
+        "removed_mb": 0.35,
+        "pct": 0.24
+      },
+      "codex": {
+        "requests": 1504.0,
+        "rewritten": 1441.0,
+        "before_mb": 985.8,
+        "removed_mb": 46.64,
+        "pct": 4.73
+      }
+    },
+    {
+      "date": "2026-09-04",
+      "partial": false,
+      "claude": {
+        "requests": 5475.0,
+        "rewritten": 1800.0,
+        "before_mb": 1226.4,
+        "removed_mb": 3.0,
+        "pct": 0.24
+      },
+      "codex": {
+        "requests": 195.0,
+        "rewritten": 182.0,
+        "before_mb": 95.2,
+        "removed_mb": 4.61,
+        "pct": 4.84
+      }
+    },
+    {
+      "date": "2026-09-05",
+      "partial": false,
+      "claude": {
+        "requests": 221.0,
+        "rewritten": 144.0,
+        "before_mb": 212.7,
+        "removed_mb": 0.32,
+        "pct": 0.15
+      },
+      "codex": {
+        "requests": 344.0,
+        "rewritten": 315.0,
+        "before_mb": 265.4,
+        "removed_mb": 0.3,
+        "pct": 0.11
+      }
+    },
+    {
+      "date": "2026-09-06",
+      "partial": false,
+      "claude": {
+        "requests": 111.0,
+        "rewritten": 107.0,
+        "before_mb": 61.3,
+        "removed_mb": 0.51,
+        "pct": 0.83
+      },
+      "codex": {
+        "requests": 395.0,
+        "rewritten": 375.0,
+        "before_mb": 346.9,
+        "removed_mb": 3.51,
+        "pct": 1.01
+      }
+    },
+    {
+      "date": "2026-09-07",
+      "partial": false,
+      "claude": {
+        "requests": 53.0,
+        "rewritten": 25.0,
+        "before_mb": 12.7,
+        "removed_mb": 0.01,
+        "pct": 0.06
+      },
+      "codex": {
+        "requests": 772.0,
+        "rewritten": 743.0,
+        "before_mb": 738.2,
+        "removed_mb": 1.52,
+        "pct": 0.21
+      }
+    },
+    {
+      "date": "2026-09-08",
+      "partial": false,
+      "claude": {
+        "requests": 485.0,
+        "rewritten": 268.0,
+        "before_mb": 541.0,
+        "removed_mb": 0.09,
+        "pct": 0.02
+      },
+      "codex": {
+        "requests": 167.0,
+        "rewritten": 156.0,
+        "before_mb": 95.8,
+        "removed_mb": 11.63,
+        "pct": 12.14
+      }
+    },
+    {
+      "date": "2026-09-09",
+      "partial": false,
+      "claude": {
+        "requests": 539.0,
+        "rewritten": 320.0,
+        "before_mb": 499.3,
+        "removed_mb": 0.15,
+        "pct": 0.03
+      },
+      "codex": {
+        "requests": 216.0,
+        "rewritten": 208.0,
+        "before_mb": 84.5,
+        "removed_mb": 0.01,
+        "pct": 0.01
+      }
+    },
+    {
+      "date": "2026-09-10",
+      "partial": false,
+      "claude": {
+        "requests": 339.0,
+        "rewritten": 216.0,
+        "before_mb": 189.9,
+        "removed_mb": 0.75,
+        "pct": 0.4
+      },
+      "codex": {
+        "requests": 326.0,
+        "rewritten": 308.0,
+        "before_mb": 187.2,
+        "removed_mb": 12.52,
+        "pct": 6.69
+      }
+    },
+    {
+      "date": "2026-09-11",
+      "partial": false,
+      "claude": {
+        "requests": 115.0,
+        "rewritten": 87.0,
+        "before_mb": 85.1,
+        "removed_mb": 0.08,
+        "pct": 0.1
+      },
+      "codex": {
+        "requests": 111.0,
+        "rewritten": 97.0,
+        "before_mb": 37.8,
+        "removed_mb": 0.03,
+        "pct": 0.08
+      }
+    },
+    {
+      "date": "2026-09-12",
+      "partial": false,
+      "claude": {
+        "requests": 853.0,
+        "rewritten": 409.0,
+        "before_mb": 318.0,
+        "removed_mb": 1.08,
+        "pct": 0.34
+      },
+      "codex": {
+        "requests": 65.0,
+        "rewritten": 57.0,
+        "before_mb": 19.4,
+        "removed_mb": 0.0,
+        "pct": 0.0
+      }
+    },
+    {
+      "date": "2026-09-13",
+      "partial": false,
+      "claude": {
+        "requests": 202.0,
+        "rewritten": 110.0,
+        "before_mb": 131.6,
+        "removed_mb": 0.5,
+        "pct": 0.38
+      },
+      "codex": {
+        "requests": 250.0,
+        "rewritten": 242.0,
+        "before_mb": 179.8,
+        "removed_mb": 19.4,
+        "pct": 10.79
+      }
+    },
+    {
+      "date": "2026-09-14",
+      "partial": false,
+      "claude": {
+        "requests": 418.0,
+        "rewritten": 192.0,
+        "before_mb": 178.1,
+        "removed_mb": 0.13,
+        "pct": 0.07
+      },
+      "codex": {
+        "requests": 1226.0,
+        "rewritten": 1182.0,
+        "before_mb": 844.6,
+        "removed_mb": 15.47,
+        "pct": 1.83
+      }
+    },
+    {
+      "date": "2026-09-15",
+      "partial": false,
+      "claude": {
+        "requests": 1024.0,
+        "rewritten": 333.0,
+        "before_mb": 303.9,
+        "removed_mb": 0.61,
+        "pct": 0.2
+      },
+      "codex": {
+        "requests": 637.0,
+        "rewritten": 618.0,
+        "before_mb": 382.7,
+        "removed_mb": 11.88,
+        "pct": 3.1
+      }
+    },
+    {
+      "date": "2026-09-16",
+      "partial": false,
+      "claude": {
+        "requests": 640.0,
+        "rewritten": 273.0,
+        "before_mb": 261.9,
+        "removed_mb": 0.28,
+        "pct": 0.11
+      },
+      "codex": {
+        "requests": 991.0,
+        "rewritten": 944.0,
+        "before_mb": 604.3,
+        "removed_mb": 10.12,
+        "pct": 1.67
+      }
+    },
+    {
+      "date": "2026-09-17",
+      "partial": false,
+      "claude": {
+        "requests": 311.0,
+        "rewritten": 168.0,
+        "before_mb": 166.7,
+        "removed_mb": 0.24,
+        "pct": 0.14
+      },
+      "codex": {
+        "requests": 96.0,
+        "rewritten": 80.0,
+        "before_mb": 29.6,
+        "removed_mb": 2.86,
+        "pct": 9.65
+      }
+    },
+    {
+      "date": "2026-09-18",
+      "partial": false,
+      "claude": {
+        "requests": 545.0,
+        "rewritten": 304.0,
+        "before_mb": 323.9,
+        "removed_mb": 0.74,
+        "pct": 0.23
+      },
+      "codex": {
+        "requests": 280.0,
+        "rewritten": 257.0,
+        "before_mb": 151.8,
+        "removed_mb": 6.25,
+        "pct": 4.11
+      }
+    },
+    {
+      "date": "2026-09-19",
+      "partial": false,
+      "claude": {
+        "requests": 61.0,
+        "rewritten": 46.0,
+        "before_mb": 55.9,
+        "removed_mb": 0.12,
+        "pct": 0.22
+      },
+      "codex": {
+        "requests": 87.0,
+        "rewritten": 75.0,
+        "before_mb": 43.6,
+        "removed_mb": 0.0,
+        "pct": 0.01
+      }
+    },
+    {
+      "date": "2026-09-20",
+      "partial": false,
+      "claude": {
+        "requests": null,
+        "rewritten": null,
+        "before_mb": null,
+        "removed_mb": null,
+        "pct": null
+      },
+      "codex": {
+        "requests": 343.0,
+        "rewritten": 316.0,
+        "before_mb": 187.4,
+        "removed_mb": 6.64,
+        "pct": 3.54
+      }
+    },
+    {
+      "date": "2026-09-21",
+      "partial": false,
+      "claude": {
+        "requests": 91.0,
+        "rewritten": 84.0,
+        "before_mb": 44.3,
+        "removed_mb": 0.03,
+        "pct": 0.07
+      },
+      "codex": {
+        "requests": 430.0,
+        "rewritten": 399.0,
+        "before_mb": 259.7,
+        "removed_mb": 11.9,
+        "pct": 4.58
+      }
+    },
+    {
+      "date": "2026-09-22",
+      "partial": false,
+      "claude": {
+        "requests": 536.0,
+        "rewritten": 415.0,
+        "before_mb": 427.0,
+        "removed_mb": 0.41,
+        "pct": 0.09
+      },
+      "codex": {
+        "requests": 312.0,
+        "rewritten": 272.0,
+        "before_mb": 104.7,
+        "removed_mb": 10.52,
+        "pct": 10.04
+      }
+    },
+    {
+      "date": "2026-09-23",
+      "partial": false,
+      "claude": {
+        "requests": 341.0,
+        "rewritten": 271.0,
+        "before_mb": 215.3,
+        "removed_mb": 0.27,
+        "pct": 0.12
+      },
+      "codex": {
+        "requests": 1312.0,
+        "rewritten": 1239.0,
+        "before_mb": 794.2,
+        "removed_mb": 45.81,
+        "pct": 5.77
+      }
+    },
+    {
+      "date": "2026-09-24",
+      "partial": false,
+      "claude": {
+        "requests": 191.0,
+        "rewritten": 157.0,
+        "before_mb": 81.5,
+        "removed_mb": 0.2,
+        "pct": 0.24
+      },
+      "codex": {
+        "requests": 420.0,
+        "rewritten": 325.0,
+        "before_mb": 245.2,
+        "removed_mb": 6.05,
+        "pct": 2.47
+      }
+    },
+    {
+      "date": "2026-09-25",
+      "partial": false,
+      "claude": {
+        "requests": 283.0,
+        "rewritten": 167.0,
+        "before_mb": 156.1,
+        "removed_mb": 0.02,
+        "pct": 0.01
+      },
+      "codex": {
+        "requests": 209.0,
+        "rewritten": 182.0,
+        "before_mb": 103.3,
+        "removed_mb": 2.87,
+        "pct": 2.78
+      }
+    },
+    {
+      "date": "2026-09-26",
+      "partial": false,
+      "claude": {
+        "requests": 229.0,
+        "rewritten": 117.0,
+        "before_mb": 120.9,
+        "removed_mb": 0.3,
+        "pct": 0.25
+      },
+      "codex": {
+        "requests": 349.0,
+        "rewritten": 318.0,
+        "before_mb": 203.8,
+        "removed_mb": 14.96,
+        "pct": 7.34
+      }
+    },
+    {
+      "date": "2026-09-27",
+      "partial": false,
+      "claude": {
+        "requests": 708.0,
+        "rewritten": 460.0,
+        "before_mb": 324.3,
+        "removed_mb": 0.91,
+        "pct": 0.28
+      },
+      "codex": {
+        "requests": 959.0,
+        "rewritten": 877.0,
+        "before_mb": 535.9,
+        "removed_mb": 15.95,
+        "pct": 2.98
+      }
+    },
+    {
+      "date": "2026-09-28",
+      "partial": false,
+      "claude": {
+        "requests": 1157.0,
+        "rewritten": 981.0,
+        "before_mb": 716.3,
+        "removed_mb": 1.78,
+        "pct": 0.25
+      },
+      "codex": {
+        "requests": 1288.0,
+        "rewritten": 1193.0,
+        "before_mb": 710.1,
+        "removed_mb": 39.71,
+        "pct": 5.59
+      }
+    },
+    {
+      "date": "2026-09-29",
+      "partial": false,
+      "claude": {
+        "requests": 586.0,
+        "rewritten": 510.0,
+        "before_mb": 636.6,
+        "removed_mb": 0.45,
+        "pct": 0.07
+      },
+      "codex": {
+        "requests": 1627.0,
+        "rewritten": 1500.0,
+        "before_mb": 1008.4,
+        "removed_mb": 46.0,
+        "pct": 4.56
+      }
+    },
+    {
+      "date": "2026-09-30",
+      "partial": false,
+      "claude": {
+        "requests": 376.0,
+        "rewritten": 328.0,
+        "before_mb": 193.2,
+        "removed_mb": 2.3,
+        "pct": 1.19
+      },
+      "codex": {
+        "requests": 2282.0,
+        "rewritten": 2109.0,
+        "before_mb": 1379.5,
+        "removed_mb": 40.47,
+        "pct": 2.93
+      }
+    },
+    {
+      "date": "2026-10-01",
+      "partial": true,
+      "claude": {
+        "requests": 902.0,
+        "rewritten": 793.0,
+        "before_mb": 779.9,
+        "removed_mb": 0.61,
+        "pct": 0.08
+      },
+      "codex": {
+        "requests": 1658.0,
+        "rewritten": 1553.0,
+        "before_mb": 883.5,
+        "removed_mb": 16.1,
+        "pct": 1.82
+      }
+    }
+  ],
+  "later_rounded_row_totals": {
+    "claude": {
+      "requests": 16792.0,
+      "rewritten": 9085.0,
+      "before_mb": 8263.8,
+      "removed_mb": 15.89,
+      "weighted_pct": 0.19228442121058112,
+      "active_days": 27
+    },
+    "codex": {
+      "requests": 17347.0,
+      "rewritten": 16122.0,
+      "before_mb": 10522.5,
+      "removed_mb": 357.09,
+      "weighted_pct": 3.3935851746258017,
+      "active_days": 28
+    }
+  },
+  "followup_counts": [
+    {
+      "group": "Claude: all",
+      "n": 35,
+      "explicit": 3,
+      "exact": 0,
+      "strict": 16,
+      "loose": 7,
+      "none": 9
+    },
+    {
+      "group": "Codex: classified",
+      "n": 448,
+      "explicit": 0,
+      "exact": 0,
+      "strict": 146,
+      "loose": 53,
+      "none": 249
+    },
+    {
+      "group": "Codex: diff/show/log",
+      "n": 284,
+      "explicit": 0,
+      "exact": 0,
+      "strict": 122,
+      "loose": 34,
+      "none": 128
+    },
+    {
+      "group": "Codex: grep",
+      "n": 106,
+      "explicit": 0,
+      "exact": 0,
+      "strict": 14,
+      "loose": 14,
+      "none": 78
+    }
+  ],
+  "derived": {
+    "strict_claude_pct": 54.285714285714285,
+    "strict_codex_pct": 32.589285714285715,
+    "strict_codex_diff_pct": 42.95774647887324,
+    "unresolved_lower_pct": 31.26338329764454,
+    "unresolved_upper_pct": 35.33190578158458,
+    "illustrative_gross_units": 3150.0000000000005,
+    "illustrative_break_even": 0.315
+  },
+  "units_note": "Meter: reported UTF-8 request-body bytes. Study A: reported meter bytes / deduplicated decoded characters (source label conflict). Tier counts: result instances. C# replay: UTF-16 code units; daily sizes rounded.",
+  "september8_bounded_requests": [
+    {
+      "provider": "anthropic",
+      "agent": "Claude Code",
+      "requests": 6209,
+      "before_bytes": 1698925099,
+      "removed_bytes": 3889891,
+      "pct": 0.22896188903734596
+    },
+    {
+      "provider": "openai",
+      "agent": "Codex CLI",
+      "requests": 1843,
+      "before_bytes": 1532592995,
+      "removed_bytes": 21603929,
+      "pct": 1.4096325032465649
+    },
+    {
+      "provider": "cli-chat",
+      "agent": "Grok CLI",
+      "requests": 234,
+      "before_bytes": 195745155,
+      "removed_bytes": 252138,
+      "pct": 0.12880931842221074
+    }
+  ],
+  "september8_replay": {
+    "variants": 8177,
+    "configurations": 4,
+    "cases": 32708,
+    "exceptions": 0,
+    "character_growth": 0,
+    "canonical_json_byte_growth": 0,
+    "nondeterministic": 0,
+    "nonidempotent": 0,
+    "historical_product_commit": "2d4ee1828f4fae8d513fb577e2bf36f6300ef04b",
+    "input_note": "Recorded after-text, with command correlation; UTF-16 string length in the C# replay. Historical replay, not rerun today."
+  },
+  "september8_claude_reported_usage": {
+    "input_tokens": 408496,
+    "cache_creation_input_tokens": 18718783,
+    "cache_read_input_tokens": 539740748,
+    "output_tokens": 3694448,
+    "cache_creation.ephemeral_5m_input_tokens": 9985648,
+    "cache_creation.ephemeral_1h_input_tokens": 8733135
+  },
+  "historical_file_read_replay": {
+    "sample_n": 261,
+    "detected_for_protection": 205,
+    "other_outputs": 56,
+    "original_removed_chars": 4056231,
+    "removal_associated_with_detected_reads": 2960996,
+    "wider_sample_n": 288,
+    "wider_detected": 217,
+    "wider_associated_chars": 3153691
+  },
+  "paper_version": "0.3",
+  "baseline_evidence_sha256": "36de9d163feeb7ef88789a5ea2a1ca399f640958d8ec31614904c28c130129c8",
+  "study_a_reported_mixed_units": [
+    {
+      "agent": "Claude",
+      "reported_meter_tally_bytes": 3337920,
+      "deduplicated_removed_characters": 264898,
+      "bytes_per_deduplicated_character": 12.60077463778511
+    },
+    {
+      "agent": "Codex",
+      "reported_meter_tally_bytes": 51728364,
+      "deduplicated_removed_characters": 1299384,
+      "bytes_per_deduplicated_character": 39.809913004931566
+    }
+  ],
+  "study_a_provenance_note": "Original report identifies meter bytes; later dossier labels the numerator characters. Scratch scripts unavailable. Preserve reported quantities separately; quotient is not a replay count.",
+  "review_recount": {
+    "saved_replay_variants": 8177,
+    "saved_cases": 32708,
+    "growth_flags": 0,
+    "nondeterminism_flags": 0,
+    "nonidempotence_flags": 0,
+    "allowlisted_after_text_changes": 45,
+    "whitespace_only_changes": 44,
+    "additional_truncation_utf16_units": 5977,
+    "new_pipeline_execution": false
+  },
+  "available_codex_usage": {
+    "requests_with_usage": 1743,
+    "missing_from_successful_requests": 100,
+    "input_tokens": 176018836,
+    "cached_input_tokens_subset": 168536064,
+    "cached_share_of_available_input": 0.9574887996645995,
+    "note": "Usage-weighted subset share; not a request cache-hit probability or a full-population estimate."
+  }
+}

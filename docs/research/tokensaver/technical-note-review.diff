@@ -1,0 +1,286 @@
+--- a/docs/research/tokensaver/note/tokens-saved-technical-note.html
++++ b/docs/research/tokensaver/note/tokens-saved-technical-note.html
+@@ -2,7 +2,7 @@
+ <html lang="en">
+ <head>
+ <meta charset="utf-8">
+-<title>What “tokens saved” means — VibeRails TokenSaver technical note 1.0</title>
++<title>What “tokens saved” means — VibeRails TokenSaver technical note 1.1</title>
+ <meta name="description" content="Definition, guarantees and evidence behind the VibeRails TokenSaver tokens-saved meter and public counter.">
+ <style>
+   :root {
+@@ -163,9 +163,10 @@
+ </head>
+ <body>
+ 
+-<p class="kicker">VibeRails technical note · Version 1.0 · 5 October 2026</p>
++<p class="kicker">VibeRails technical note · Version 1.1 · 5 October 2026</p>
+ <h1>What “tokens saved” means</h1>
+ <p class="subtitle">Definition, guarantees and evidence behind the TokenSaver meter and the public counter</p>
++<p>Revision 1.1 reconciles the Codex source and arithmetic review: meter and actual-token units, pilot-based experiment sizing, and narrower historical and implementation claims. Net task savings and preserved quality remain unmeasured.</p>
+ 
+ <div class="glance">
+   <p class="box-label">At a glance</p>
+@@ -177,7 +178,7 @@
+     <dt>Measured</dt>
+     <dd>On one developer workstation, from 4 September to 1 October 2026, accepted rewrites removed 3.45% of the request bytes Codex CLI submitted, 0.20% of Claude Code’s and 0.18% of Grok CLI’s.</dd>
+     <dt>Not measured</dt>
+-    <dd>Billed tokens, money, the total cost of finishing a task once follow-up reads and prompt-cache effects are counted, and whether tasks are completed equally well.</dd>
++    <dd>Avoided billable tokens or money relative to uncompressed tasks, net complete-task cost, and preserved task quality. Provider-reported usage was observed for the captured requests.</dd>
+     <dt>How to cite</dt>
+     <dd>“<i>N</i> estimated input tokens not sent to model providers (removed bytes ÷ 4, counted per request).” Not “<i>N</i> tokens saved on your bill”. Section 9 lists supported wording.</dd>
+   </dl>
+@@ -195,7 +196,7 @@
+ <p><var>T</var><sub>est</sub> is the number shown as tokens saved. The divisor 4 is a rule of thumb, about four bytes per token, applied when totals are read. No tokenizer is involved, and the result is not a provider’s token count.</p>
+ <p>A request is recorded only when all of the following hold:</p>
+ <ul class="tight">
+-  <li>it is a POST to a model inference path (<code>/v1/messages</code>, <code>/responses</code> or <code>/chat/completions</code>);</li>
++  <li>it is a POST with JSON Content-Type and a detectable body to a model inference path (<code>/v1/messages</code>, <code>/responses</code> or <code>/chat/completions</code>);</li>
+   <li>TokenSaver is enabled for that CLI and is not paused;</li>
+   <li>the body is at most 10 MiB (larger bodies are forwarded untouched and not recorded);</li>
+   <li>the provider’s response began with a 2xx status.</li>
+@@ -203,12 +204,12 @@
+ <p>Requests in which nothing was rewritten are recorded with zero savings. Bodies are measured as received; TokenSaver does not decode HTTP content encodings.</p>
+ 
+ <h3>1.2&nbsp;&nbsp;Each re-send is counted</h3>
+-<p>Coding CLIs resend the whole conversation with every request. TokenSaver’s rewriting is deterministic, so text shortened in one request is shortened again in every later request that carries it, and each of those requests adds the same removed bytes to <var>D</var>. <var>T</var><sub>est</sub> therefore counts input tokens not transmitted, summed over re-sends. It is not a count of distinct content removed. On two sample days in August the meter’s tally was 12.6 times (Claude Code) and 39.8 times (Codex CLI) the number of distinct characters removed. Those ratios mix bytes with characters and predate a 30 August change, so they illustrate the effect rather than measure a replay count.</p>
++<p>Coding CLIs can resend tool results as conversation history. With fixed input, command metadata, configuration and encoding, a carried result is rewritten consistently on qualifying requests. Compaction, server-managed history and changed settings can change which text is carried or rewritten. <var>T</var><sub>est</sub> counts byte/4 estimates of input tokens not transmitted, summed over qualifying requests. It is not a count of distinct content removed. On two sample days in August the meter’s tally was 12.6 times (Claude Code) and 39.8 times (Codex CLI) the number of distinct characters removed. Those ratios mix bytes with characters and predate a 30 August change, so they illustrate the effect rather than measure a replay count.</p>
+ 
+ <h3>1.3&nbsp;&nbsp;The public counter</h3>
+-<p>Each VibeRails installation with an API key reports its lifetime <var>T</var><sub>est</sub> to viberails.ai every 15 minutes. For each pair of API key and computer name the server keeps the largest total that pair has reported, and the public counter shows the sum of those values, refreshed at most every 15 minutes. It follows that:</p>
++<p>While an active VibeRails root backend is open, enabled publishing attempts to report its lifetime <var>T</var><sub>est</sub> using a configurable interval (15 minutes by default), when a usable API key and endpoint are available. For each pair of API key and computer name the server keeps the largest total that pair has reported, and the public endpoint sums those values with a 15-minute cache per server process. This describes inspected source, not an independent audit of deployed totals. It follows that:</p>
+ <ul class="tight">
+-  <li>the counter only rises: a reset local database cannot lower it;</li>
++  <li>reports cannot lower a stored maximum for a key/computer pair, so a local database reset alone does not reduce that pair’s reported total;</li>
+   <li>each report is a lifetime total, so a computer that later reports under a second API key or a new computer name contributes its whole history again;</li>
+   <li>the counter is a sum of per-machine estimates computed as in (1). The workload evidence in this note comes from one machine, and the counter’s total has not been independently audited.</li>
+ </ul>
+@@ -224,15 +225,15 @@
+     <tr><td>Grouping of <code>git status</code>, grep and find output</td><td>Reshaping</td><td>Rearranges recognised output into a more compact layout.</td></tr>
+     <tr><td>Passing-test collapse</td><td>Lossy</td><td>Replaces runs of passing-test lines from recognised test runners with <code>[... N passed ...]</code>; failures, skips and summaries stay.</td></tr>
+     <tr><td>Repeated-line collapse</td><td>Lossy</td><td>Writes three or more identical consecutive lines once, followed by <code>[xN]</code>.</td></tr>
+-    <tr><td>Long-output truncation</td><td>Lossy</td><td>Keeps the first 150 and the last 50 lines and replaces the middle with <code>[... N lines elided ...]</code>, but only when at least 10 lines and 4,096 characters would be removed.</td></tr>
+-    <tr><td>File-read budget</td><td>(limit)</td><td>For recognised file reads, truncation keeps 1,200 and 200 lines instead, provided the output is at most 262,144 characters; larger reads fall back to 150 and 50.</td></tr>
++    <tr><td>Long-output truncation</td><td>Lossy</td><td>Keeps the first 150 and the last 50 lines and replaces the middle with <code>[... N lines elided ...]</code>, but only when at least 10 lines and 4,096 UTF-16 code units would be removed.</td></tr>
++    <tr><td>File-read budget</td><td>(limit)</td><td>For recognised file reads, truncation keeps 1,200 and 200 lines instead, provided the post-dedupe output is at most 262,144 UTF-16 code units; larger reads fall back to 150 and 50.</td></tr>
+   </tbody>
+ </table>
+ 
+ <p>Further limits decide what is removed:</p>
+ <ul>
+   <li>Any output that contains an escape (ESC) or bell character, or a carriage return outside a Windows line ending, is left whole by the lossy stages. ANSI colour stripping is off by default, so coloured or progress-bar output is not truncated.</li>
+-  <li>Claude Code caps shell output at 30,000 characters before TokenSaver sees it, so on Claude Code truncation only ever shortens outputs of at most about 30 KB.</li>
++  <li>Historical sources report a Claude Code Bash cap near 30,000 characters, with 29,934 observed in the tiered window. This is not a universal current-client guarantee or a 30 KB byte limit.</li>
+   <li>File reads are recognised from the command (<code>cat</code>, <code>head</code>, <code>tail</code>, <code>sed</code>, <code>Get-Content</code> and similar). Reads through <code>awk</code> are not recognised and get the ordinary budget, and diffs are truncated deliberately.</li>
+   <li>A candidate replacement is used only if it is smaller than the original in its encoded form (Section 3). If anything fails, the original request is forwarded unchanged.</li>
+ </ul>
+@@ -256,7 +257,7 @@
+ 
+ <p><b>Corollary.</b> Every recorded request contributes <var>B</var><sub><var>j</var></sub> − <var>A</var><sub><var>j</var></sub> ≥ 0, so the meter can only increase.</p>
+ 
+-<p><b>How the implementation matches the model.</b> Each of the three provider rewriters (Anthropic Messages, OpenAI Responses and Chat Completions) copies the bytes between selected tokens verbatim, re-encodes a candidate, and accepts it only when its encoded byte count is strictly smaller than the original token’s, which keeps the client’s own escaping. Any failure forwards the original body. This correspondence was established by reading the source at commit 336373c0; it is not machine-verified. Regression tests assert whole-body byte identity outside rewritten tokens for the Anthropic rewriter.</p>
++<p><b>How the implementation matches the model.</b> Each of the three provider rewriters (Anthropic Messages, OpenAI Responses and Chat Completions) copies the bytes between selected tokens verbatim, re-encodes a candidate, and accepts it only when its encoded byte count is strictly smaller than the original token’s, which preserves client escaping outside accepted spans; accepted spans are re-encoded. Any failure forwards the original body. This correspondence was established by reading the source at commit 336373c0; it is not machine-verified. Regression tests assert whole-body byte identity outside rewritten tokens for the Anthropic rewriter.</p>
+ 
+ <div style="break-inside: avoid">
+ <p><b>What Proposition 1 does not say.</b></p>
+@@ -268,12 +269,12 @@
+ </div>
+ 
+ <h2>4&nbsp;&nbsp;Design invariants and tests</h2>
+-<p>Every stage is designed to be deterministic (a function of the text, the tool and the command only), idempotent (applying it again changes nothing) and never-growing. Determinism is what keeps compression compatible with prompt caching: a re-sent tool result must be rewritten exactly as it was the first time, or the cached prefix breaks.</p>
++<p>With a fixed configuration, every stage is designed to be deterministic (a function of the text and tool/command metadata), idempotent (applying it again changes nothing) and never-growing. Reproducing earlier rewritten bytes helps preserve cached prefixes; it does not guarantee a hit, which also depends on expiry, cache boundaries and provider behavior.</p>
+ <ul>
+-  <li><b>Tests.</b> 475 automated tests in ten TokenSaver test classes passed on 5 October 2026 (.NET SDK 10.0.401). They cover cleanup, condensation, golden fixtures, command shaping, file-read budgets, line endings and the three provider rewriters, including escaping edge cases (emoji and lone surrogates) for the Anthropic rewriter. Limits: the Codex and Chat Completions rewriter tests check parsed values rather than whole bodies; composition is tested on a two-stage fixture rather than the shipped pipeline; there are no randomised (property-based) tests; and the meter’s own accounting tests were not part of this run.</li>
+-  <li><b>Replay.</b> A historical study ran 8,177 distinct recorded tool outputs through the pipeline under four configurations (32,708 cases) and found no growth, non-determinism or non-idempotence. Its inputs were the texts that had actually been forwarded, so it tests the stability of already-compressed text rather than the raw-to-compressed step. Re-running the then-current defaults occasionally changed a recorded text, mostly in whitespace; the study attributed this to pauses, older builds and guard decisions.</li>
+-  <li><b>Live traffic.</b> Among 64 investigated Claude Code cache misses, each writing more than 50,000 cache tokens within five minutes of the previous request in the same conversation, none diverged at a differently compressed tool result.</li>
+-  <li><b>A known exception.</b> Settings and the pause switch are read on every request, and the whole history is recompressed each time. Pausing TokenSaver, or changing its settings, during a conversation therefore changes bytes that were already sent. The product documentation states that each pause costs two prompt-cache breaks. Paused requests are not recorded by the meter.</li>
++  <li><b>Tests.</b> 475 automated tests in ten TokenSaver test classes passed on 5 October 2026 (.NET SDK 10.0.401). They cover cleanup, condensation, golden fixtures, command shaping, file-read budgets, line endings and the three provider rewriters, including escaping edge cases (emoji and lone surrogates) for the Anthropic rewriter. Limits: adversarial escaping coverage is concentrated in Anthropic; Codex also checks whole-body no-op equality and byte shrinkage, with narrower changed-body checks; composition is tested on a two-stage fixture rather than the shipped pipeline; there are no randomised (property-based) tests; and the meter’s own accounting tests were not part of this run.</li>
++  <li><b>Replay.</b> A historical study ran 8,177 distinct recorded tool outputs through the pipeline under four configurations (32,708 cases) and found no growth, non-determinism or non-idempotence. Its inputs were the texts that had actually been forwarded, so it tests the stability of already-compressed text rather than the raw-to-compressed step. Re-running the then-current defaults occasionally changed a recorded text, mostly in whitespace; pauses, older builds, command metadata and guard decisions are possible explanations, not resolved attributions.</li>
++  <li><b>Live traffic.</b> Among 64 investigated Claude Code Window-B cache misses, each writing more than 50,000 cache tokens within five minutes of the previous request in the same conversation, none diverged at a differently compressed tool result.</li>
++  <li><b>A known exception.</b> Settings and the pause switch are read on every request, and the whole history is recompressed each time. Pausing TokenSaver, or changing its settings, can alter previously sent bytes. The product documentation warns of two cache-transition opportunities per pause, but actual misses depend on changed bytes, cached prefixes and provider behavior. Paused requests are not recorded by the meter.</li>
+ </ul>
+ 
+ <h2>5&nbsp;&nbsp;Measured results</h2>
+@@ -289,7 +290,7 @@
+ </table>
+ 
+ <figure>
+-  <img src="charts/daily-rates.svg" alt="Two stacked line charts of the daily share of request bytes removed. Codex CLI: about 1 percent in late July, zero from 1 to 16 August, 15 to 28 percent from 18 to 29 August, then mostly 0 to 12 percent with a 3.39 percent average from 4 September. Claude Code: mostly below 2 percent throughout, averaging 0.19 percent from 4 September.">
++  <img src="charts/daily-rates.svg" alt="Two stacked line charts of the daily share of request bytes removed. Codex CLI: about 1 percent in late July, zero from 1 to 16 August, variable daily rates reaching 28.21 percent in late August, then mostly 0 to 12 percent with a 3.39 percent average from 4 September. Claude Code: mostly below 2 percent throughout, averaging 0.19 percent from 4 September.">
+   <figcaption><b>Figure 1.</b> Daily share of submitted request bytes removed, per CLI. The two panels use different vertical scales. Shaded periods are explained in Table 3. The horizontal rules mark the byte-weighted share for 4 September – 1 October in a later reading of the same meter. Data: <code>daily-series.csv</code> in the evidence package.</figcaption>
+ </figure>
+ 
+@@ -306,8 +307,8 @@
+ 
+ <p><b>Reading the results.</b></p>
+ <ul>
+-  <li>The share depends on the workload. Codex days since 4 September ranged from 0.00% to 12.14% (median 3.04%), and five days account for 54% of the bytes Codex removed. A recount of 4–8 September from the request archive gives 1.41% for Codex and 0.23% for Claude Code. The archive includes every relayed request, so its population differs slightly from the meter’s.</li>
+-  <li>About half of the Claude Code requests in that recount were Claude Code’s own permission-classifier calls, which carry no tool output. Excluding them raises Claude Code’s share to about 0.3%.</li>
++  <li>The share depends on the workload. Codex days since 4 September ranged from 0.00% to 12.14% (median 3.04%), and five days account for 54% of the bytes Codex removed. A recount of 4–8 September from the request archive gives 1.41% for Codex and 0.23% for Claude Code. That archive analysis selected HTTP-200 model requests and excluded model-list/count-token endpoints. It uses a different population definition from the meter; the size of the selection effect is unmeasured.</li>
++  <li>About half of the Claude Code requests in that recount matched its known large-system/no-tools classifier family. If that family contributed zero removed bytes, subtracting its system-character lower bound on serialized bytes gives a conservative non-family reduction of at least 0.295%. The exact family byte subtotal and zero-removal condition were not independently established.</li>
+   <li>From 17 to 29 August, file reads were being truncated like logs, which was treated as a defect and changed on 30 August. Codex’s share fell from 14.93% in that period to 5.64% in the five days after the change and 3.39% from 4 September. Lifetime totals, including the public counter, still contain the bytes removed in August.</li>
+   <li>These shares compare each forwarded request with the request the CLI submitted. They are not the reduction relative to running without TokenSaver, because the submitted requests already include any follow-up reads that earlier compression may have caused (Section 7).</li>
+ </ul>
+@@ -315,10 +316,10 @@
+ <h2>6&nbsp;&nbsp;From estimated tokens to cost</h2>
+ 
+ <h3>6.1&nbsp;&nbsp;Bytes are not tokens</h3>
+-<p>Providers bill tokens produced by model-specific tokenizers, not bytes. Dividing by four is an estimate, and the JSON escaping of tool output inflates bytes relative to tokens. For orientation only: in the 4–8 September recount, Claude Code request bodies averaged about 3.0 bytes per billed input token. That whole-body average includes framing and tool definitions and is not a calibration for the removed text. Exact differences require counting tokens for the original and the forwarded body of each request with the provider’s tokenizer (Section 10).</p>
++<p>Providers bill tokens produced by model-specific tokenizers, not bytes. Dividing by four is an estimate, and the JSON escaping of tool output inflates bytes relative to tokens. For orientation only: in the 4–8 September recount, submitted Claude Code request bytes divided by forwarded-request input usage total about 3.0 bytes per reported input token. That whole-body average includes framing and tool definitions and is not a calibration for the removed text. Exact differences require counting tokens for the original and the forwarded body of each request with the provider’s tokenizer (Section 10).</p>
+ 
+ <h3>6.2&nbsp;&nbsp;Re-sent input is mostly billed at the cache-read price</h3>
+-<p>Providers discount input that repeats a prefix they have cached. At the time of writing, Anthropic charges 1.25 times the base input price to write a prefix into its five-minute cache, 2 times for its one-hour cache, and 0.1 times to read it; OpenAI’s automatic caching has no write charge and discounts cached input. In the 4–8 September recount, 96.6% of Claude Code’s billed input tokens were cache reads. Prices change and differ by model, so pin them per model and date before converting anything to money.</p>
++<p>Providers can discount input that repeats a cached prefix. The historical models use Anthropic-style multipliers of 1.25 for a five-minute write, 2 for a one-hour write and 0.1 for a read; the no-write-premium curve is an OpenAI-style example. These are illustrative parameters, not independently verified current prices for every model. In the 4–8 September recount, 96.6% of Claude Code’s provider-reported input tokens were cache reads. Pin the actual model, pricing date and billing agreement before converting usage to money.</p>
+ 
+ <div class="prop">
+   <p><span class="prop-label">Proposition 2 (avoided cost of a removed block).</span> Consider a block of <var>d</var> tokens that would appear in <var>m</var> requests of a conversation: written to the cache at multiplier <var>w</var> in the first and read at multiplier <var>α</var> in each of the other <var>m</var> − 1, with nothing else changing. Removing it avoids the input cost</p>
+@@ -326,22 +327,22 @@
+     <math display="block"><mi>G</mi><mo>=</mo><mi>d</mi><mspace width="0.17em"></mspace><mrow><mo>[</mo><mi>w</mi><mo>+</mo><mi>α</mi><mo stretchy="false">(</mo><mi>m</mi><mo>−</mo><mn>1</mn><mo stretchy="false">)</mo><mo>]</mo></mrow></math>
+     <span class="eqno">(3)</span>
+   </div>
+-  <p>in units of the base input price, while the meter counts <var>d</var>·<var>m</var> tokens. The avoided cost per counted token is therefore</p>
++  <p>in units of the base input price. Dividing by the <var>d</var>·<var>m</var> actual token appearances gives avoided cost per actual token appearance:</p>
+   <div class="eq">
+     <math display="block"><mi>v</mi><mo stretchy="false">(</mo><mi>m</mi><mo stretchy="false">)</mo><mo>=</mo><mfrac><mrow><mi>w</mi><mo>+</mo><mi>α</mi><mo stretchy="false">(</mo><mi>m</mi><mo>−</mo><mn>1</mn><mo stretchy="false">)</mo></mrow><mi>m</mi></mfrac><mo>,</mo></math>
+     <span class="eqno">(4)</span>
+   </div>
+   <p>which falls as <var>m</var> grows whenever <var>w</var> &gt; <var>α</var>, and approaches <var>α</var>.</p>
+ </div>
+-<p class="proof"><span class="proof-label">Proof.</span> The block is paid for once at <var>w</var>, when the first request carrying it writes it to the cache, and <var>m</var> − 1 times at <var>α</var>, when later requests read it. With nothing else changing, removing it avoids exactly <var>G</var>. The meter adds <var>d</var> once per request, <var>d</var>·<var>m</var> in total, and dividing gives (4). Its derivative is <math><mfrac><mrow><mi>d</mi><mi>v</mi></mrow><mrow><mi>d</mi><mi>m</mi></mrow></mfrac><mo>=</mo><mfrac><mrow><mi>α</mi><mo>−</mo><mi>w</mi></mrow><msup><mi>m</mi><mn>2</mn></msup></mfrac></math>, which is negative when <var>w</var> &gt; <var>α</var>, and <var>v</var>(<var>m</var>) → <var>α</var> as <var>m</var> → ∞. <span class="qed">∎</span></p>
++<p class="proof"><span class="proof-label">Proof.</span> The block is paid for once at <var>w</var>, when the first request carrying it writes it to the cache, and <var>m</var> − 1 times at <var>α</var>, when later requests read it. With nothing else changing, removing it avoids exactly <var>G</var>. There are <var>d</var>·<var>m</var> actual token appearances, so dividing by that quantity gives (4). The product meter instead divides removed bytes by four; equation (4) is not its monetary conversion. Its derivative is <math><mfrac><mrow><mi>d</mi><mi>v</mi></mrow><mrow><mi>d</mi><mi>m</mi></mrow></mfrac><mo>=</mo><mfrac><mrow><mi>α</mi><mo>−</mo><mi>w</mi></mrow><msup><mi>m</mi><mn>2</mn></msup></mfrac></math>, which is negative when <var>w</var> &gt; <var>α</var>, and <var>v</var>(<var>m</var>) → <var>α</var> as <var>m</var> → ∞. <span class="qed">∎</span></p>
+ 
+ <figure>
+-  <img src="charts/counted-token-value.svg" alt="Line chart of the avoided cost per counted token against the number of requests carrying a removed block, for write multipliers 2, 1.25 and 1 with cache-read multiplier 0.1. All three curves fall steeply from their starting values and approach 0.1, staying far below the base input price of 1.0 after a few requests.">
+-  <figcaption><b>Figure 2.</b> The value of one counted token, relative to the base input price, under Proposition 2 with <var>α</var> = 0.1. Each curve starts at its write multiplier <var>w</var> (dot) and approaches the cache-read price, 0.1 (thin rule near the bottom). Values at selected <var>m</var> are in Table 4.</figcaption>
++  <img src="charts/counted-token-value.svg" alt="Line chart of the avoided cost per actual token appearance against the number of requests carrying a removed block, for write multipliers 2, 1.25 and 1 with cache-read multiplier 0.1. All three curves fall steeply from their starting values and approach 0.1, staying far below the base input price of 1.0 after a few requests.">
++  <figcaption><b>Figure 2.</b> The value of one actual token appearance, relative to the base input price, under Proposition 2 with <var>α</var> = 0.1. Each curve starts at its write multiplier <var>w</var> (dot) and approaches the cache-read price, 0.1 (thin rule near the bottom). Values at selected <var>m</var> are in Table 4.</figcaption>
+ </figure>
+ 
+ <table>
+-  <caption><b>Table 4.</b> Avoided cost per counted token, <var>v</var>(<var>m</var>), with <var>α</var> = 0.1.</caption>
++  <caption><b>Table 4.</b> Avoided cost per actual token appearance, <var>v</var>(<var>m</var>), with <var>α</var> = 0.1.</caption>
+   <thead><tr><th class="num" style="width:10%"><var>m</var></th><th class="num"><var>w</var> = 1.25 (Anthropic, 5-minute write)</th><th class="num"><var>w</var> = 1 (no write premium)</th><th class="num"><var>w</var> = 2 (Anthropic, 1-hour write)</th></tr></thead>
+   <tbody>
+     <tr><td class="num">1</td><td class="num">1.250</td><td class="num">1.000</td><td class="num">2.000</td></tr>
+@@ -353,7 +354,7 @@
+   </tbody>
+ </table>
+ 
+-<p><b>Consequence.</b> In long conversations served from cache, one counted token is worth roughly a tenth to a fifth of a base-price input token. Converting <var>T</var><sub>est</sub> to money at list input prices therefore overstates the avoided input cost several-fold, before any follow-up cost is considered. Expiry pulls the other way: when a cache expires between requests (an idle gap), the prefix is written again at <var>w</var>, so removal saves more than (3). In the historical audit, expiry of the one-hour cache accounted for more cache-write tokens in large Claude Code cache misses than any other cause. A cache break caused by TokenSaver itself, such as a pause, pulls in the opposite direction.</p>
++<p><b>Consequence.</b> With the assumed write/read prices and unchanged cache behavior, repeated actual token appearances carry a lower average price than uncached input. This does not price the byte/4 meter. If each appearance removes b encoded bytes and d actual input tokens, avoided cost per meter-estimated token is approximately (4d/b) times equation (4), ignoring aggregate integer rounding. Here d must be the complete-request token delta attributable to the block; an isolated substring token count need not equal that delta. The full-request token delta, byte delta and cache categories must be measured before converting the meter to money. Expiry, misses and changed continuations require separate accounting.</p>
+ 
+ <h3>6.3&nbsp;&nbsp;Subscriptions</h3>
+ <p>On flat-rate subscription plans the relevant quantity is consumption of usage limits rather than billed tokens. This note does not establish how cached input counts toward those limits.</p>
+@@ -361,10 +362,10 @@
+ <h2>7&nbsp;&nbsp;What compression can cost</h2>
+ 
+ <h3>7.1&nbsp;&nbsp;Follow-up reads</h3>
+-<p>Truncation leaves a marker so the agent can ask for the missing part. A heuristic classifier found a related call in the next turn after 19 of 35 Claude Code truncations and 146 of 448 classified Codex CLI truncations, in conversations first seen between 30 August and 1 October. No comparison group of untruncated outputs was analysed, so these rates do not show that truncation caused the calls. Many are ordinary next steps, such as opening a file after reading its diff.</p>
++<p>Truncation leaves a marker so the agent can ask for the missing part. A heuristic classifier found a related call in the next turn after 19 of 35 Claude Code truncations and 146 of 448 classified Codex CLI truncations, in conversations first seen between 30 August and 1 October. No comparison group of untruncated outputs was analysed, so these rates do not show that truncation caused the calls. The classifier can count ordinary next steps, such as opening a file after reading its diff; their prevalence is not measured against a control group.</p>
+ 
+ <h3>7.2&nbsp;&nbsp;A model of the net effect</h3>
+-<p>Let <var>G</var> be the avoided cost of the lossy removals (Proposition 2), <var>q</var> the probability that a removal causes an extra recovery, <var>L</var> the expected cost of that recovery, <var>r</var> the probability that a removal silently degrades the result, <var>F</var> the cost of that degradation, and <var>K</var> any other effect, which may be positive (for example, cache breaks) or negative (for example, later or fewer context compactions). All are in base-price units. The expected net saving is</p>
++<p>Let <var>G</var> be the avoided cost of the lossy removals (Proposition 2), <var>q</var> the probability that a removal causes an extra recovery, <var>L</var> the expected cost of that recovery, <var>r</var> the probability that a removal silently degrades the result, <var>F</var> the cost of that degradation, and <var>K</var> any other effect, which may be positive (for example, cache breaks) or negative (for example, later or fewer context compactions). The probabilities q and r are dimensionless. G, L, F and K use a common monetary unit; F requires an explicit valuation of quality loss. Specify one intervention and continuation, include all recovery within it and avoid overlapping costs. Without that valuation, report monetary cost and quality separately. The expected net saving is</p>
+ <div class="eq">
+   <math display="block"><mi mathvariant="normal">E</mi><mo stretchy="false">[</mo><mi>N</mi><mo stretchy="false">]</mo><mo>=</mo><mi>G</mi><mo>−</mo><mi>q</mi><mi>L</mi><mo>−</mo><mi>r</mi><mi>F</mi><mo>−</mo><mi>K</mi><mo>,</mo></math>
+   <span class="eqno">(5)</span>
+@@ -378,14 +379,14 @@
+ 
+ <h3>7.3&nbsp;&nbsp;What lossy compression can preserve</h3>
+ <div class="prop">
+-  <p><span class="prop-label">Proposition 3 (no lossy compression preserves every task).</span> Let <var>φ</var>: <var>X</var> → <var>Z</var> map full tool outputs to compressed outputs, and let <var>g</var>: <var>X</var> → <var>Y</var> give the correct answer to some task. A decoder <var>h</var>: <var>Z</var> → <var>Y</var> with <var>h</var>(<var>φ</var>(<var>x</var>)) = <var>g</var>(<var>x</var>) for every <var>x</var> ∈ <var>X</var> exists if and only if</p>
++  <p><span class="prop-label">Proposition 3 (no lossy compression preserves every task).</span> For a nonempty task domain <var>X</var>, let <var>φ</var>: <var>X</var> → <var>Z</var> map full tool outputs to compressed outputs, and let <var>g</var>: <var>X</var> → <var>Y</var> give the correct answer to some task. A decoder <var>h</var>: <var>Z</var> → <var>Y</var> with <var>h</var>(<var>φ</var>(<var>x</var>)) = <var>g</var>(<var>x</var>) for every <var>x</var> ∈ <var>X</var> exists if and only if</p>
+   <div class="eq">
+     <math display="block"><mo>∀</mo><mi>x</mi><mo>,</mo><mi>y</mi><mo>∈</mo><mi>X</mi><mo>:</mo><mspace width="0.6em"></mspace><mi>φ</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mo>=</mo><mi>φ</mi><mo stretchy="false">(</mo><mi>y</mi><mo stretchy="false">)</mo><mspace width="0.4em"></mspace><mo>⇒</mo><mspace width="0.4em"></mspace><mi>g</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mo>=</mo><mi>g</mi><mo stretchy="false">(</mo><mi>y</mi><mo stretchy="false">)</mo><mo>.</mo></math>
+     <span class="eqno">(7)</span>
+   </div>
+ </div>
+ <p class="proof"><span class="proof-label">Proof.</span> If <var>h</var> exists and <var>φ</var>(<var>x</var>) = <var>φ</var>(<var>y</var>), then <var>g</var>(<var>x</var>) = <var>h</var>(<var>φ</var>(<var>x</var>)) = <var>h</var>(<var>φ</var>(<var>y</var>)) = <var>g</var>(<var>y</var>). Conversely, if (7) holds, define <var>h</var>(<var>z</var>) as the common value of <var>g</var> on the outputs that <var>φ</var> maps to <var>z</var>, and arbitrarily where there are none. Condition (7) makes this well defined, and <var>h</var>(<var>φ</var>(<var>x</var>)) = <var>g</var>(<var>x</var>) by construction. <span class="qed">∎</span></p>
+-<p><b>Corollary.</b> Truncation is not injective. The marker records only how many lines were removed, so two outputs that differ only in their removed middle lines, with the same number of lines, compress identically. For a task that asks about those lines, (7) fails, and no decoder, human or model, can answer from the compressed text alone. Whether compression is harmless therefore depends on the task, and has to be measured on task outcomes. An agent can also re-run a narrower command, which turns the information loss into the recovery cost <var>L</var> of Section 7.2.</p>
++<p><b>Corollary.</b> Truncation is not injective on an unrestricted output domain. Two outputs with the same retained lines and omitted-line count can differ in their removed middle lines yet compress identically. For a task that distinguishes those outputs, (7) fails: no decoder can answer correctly for both from the compressed text alone. A restricted task domain can satisfy (7); deployment quality still needs evaluation on task outcomes. An agent may attempt recovery with a narrower command, incurring the recovery cost <var>L</var> of Section 7.2, without a guarantee of success.</p>
+ 
+ <h2>8&nbsp;&nbsp;What has not been established</h2>
+ <ol>
+@@ -410,11 +411,11 @@
+ 
+ <h2>10&nbsp;&nbsp;How the open questions can be answered</h2>
+ <ol>
+-  <li><b>Exact gross token differences.</b> Count tokens for the original and the forwarded body of stored requests with each provider’s tokenizer or token-counting endpoint (Anthropic’s is free to use). This replaces the ÷ 4 estimate with measured token differences without running any task.</li>
++  <li><b>Gross token differences.</b> Count tokens for the original and forwarded requests using a model-compatible full-request tokenizer or provider counting endpoint. Check the counting method’s documented limits, pricing and agreement with provider-reported usage; this calibrates the ÷ 4 estimate without running a complete task.</li>
+   <li><b>A base rate for follow-ups.</b> Apply the same classifier to untruncated outputs, to outputs just below the truncation threshold, and to Codex traffic from 1–16 August, when no Codex request was rewritten.</li>
+   <li><b>A fork experiment.</b> Branch recorded conversations at each truncation and run the next turns with the full and with the truncated output from the same cached prefix, measuring follow-up calls, cost and the answer.</li>
+-  <li><b>Claude Code without truncation.</b> A before-and-after comparison with truncation switched off for Claude Code, as the underlying research recommends.</li>
+-  <li><b>Complete-task trials</b> for quality and cost noninferiority. Effects as small as 0.2% are beyond their reach (detecting one would take on the order of 10<sup>5</sup> paired tasks), so such trials can bound cost increases rather than establish savings.</li>
++  <li><b>Claude Code without truncation.</b> The underlying research recommends a before-and-after comparison with truncation switched off. Such a comparison is exploratory: workload, model and cache changes can confound it; causal attribution needs matched or randomized controls.</li>
++  <li><b>Complete-task trials</b> for quality and cost noninferiority. A pilot must determine the paired task-cost variance, detectable effect and noninferiority margins. For an assumed paired log-cost SD of 0.3, a 0.2% effect needs about 176,000 independent pairs at two-sided 5% significance and 80% power. Gross byte percentages are not task-cost effect sizes; neither variance nor impossibility is established here.</li>
+ </ol>
+ 
+ <h2>Appendix A&nbsp;&nbsp;Notation</h2>
+@@ -425,7 +426,7 @@
+     <tr><td><var>D</var>, <var>T</var><sub>est</sub></td><td>Total bytes removed; estimated tokens, ⌊<var>D</var> / 4⌋</td></tr>
+     <tr><td><var>s</var><sub><var>i</var></sub>, <var>c</var><sub><var>i</var></sub>, <var>a</var><sub><var>i</var></sub>, <var>v</var><sub><var>k</var></sub></td><td>Selected string tokens, candidates, accepted outputs, untouched bytes (Proposition 1)</td></tr>
+     <tr><td><var>d</var>, <var>m</var>, <var>w</var>, <var>α</var></td><td>Block size in tokens, number of requests carrying it, cache-write and cache-read multipliers (Proposition 2)</td></tr>
+-    <tr><td><var>G</var>, <var>v</var>(<var>m</var>)</td><td>Avoided cost of a block; avoided cost per counted token</td></tr>
++    <tr><td><var>G</var>, <var>v</var>(<var>m</var>)</td><td>Avoided cost of a block; avoided cost per actual token appearance</td></tr>
+     <tr><td><var>q</var>, <var>L</var>, <var>r</var>, <var>F</var>, <var>K</var></td><td>Recovery probability and cost; silent-degradation probability and cost; other effects (Section 7.2)</td></tr>
+     <tr><td><var>φ</var>, <var>g</var>, <var>h</var></td><td>Compression map, task answer, decoder (Proposition 3)</td></tr>
+   </tbody>
+@@ -436,15 +437,15 @@
+   <li><b>Product source.</b> VibeRails repository, TokenSaver library, read at commit 336373c0 (unchanged at the time of writing). Acceptance gate: <code>AnthropicMessagesRewriter.cs:188</code>, <code>CodexResponsesRewriter.cs:209</code>, <code>ChatCompletionsRewriter.cs:176</code>. Meter: <code>ITokenSavingsStore.cs:26</code> and <code>LlmProxyRelay.cs:140–158</code>. Stage catalogue: <code>CompressionCatalog.cs</code>.</li>
+   <li><b>Public counter.</b> viberails.ai server source: <code>TokenSavingsController</code> (one value per API key and computer name, increases only) and <code>PublicTokenSavingsController</code> (sum of all values, cached for 15 minutes).</li>
+   <li><b>Measurements.</b> TokenSaver research draft 0.2 and its evidence package (aggregates and the daily series), 5 October 2026, drawn from an internal research archive at commit cf3253b. Raw captured traffic is private and is not published.</li>
+-  <li><b>Review.</b> A separate review of draft 0.2 (findings R-01 to R-20, 5 October 2026), whose corrections this note incorporates.</li>
+-  <li><b>External.</b> Anthropic developer documentation, “Prompt caching” and “Token counting”, accessed 5 October 2026.</li>
++  <li><b>Review.</b> A separate review of draft 0.2 (findings R-01 to R-20, 5 October 2026), whose proposed corrections were independently checked by Codex; accepted findings and disagreements are documented in the 0.3 review and technical-note supplement.</li>
++  <li><b>External.</b> The original author cites Anthropic developer documentation, “Prompt caching” and “Token counting”, accessed 5 October 2026. This review did not independently retrieve those pages; current model-specific prices and counting guarantees remain unverified.</li>
+   <li><b>Method.</b> The analyses were carried out by AI coding agents working under the developer’s direction, using source inspection and arithmetic on saved aggregates. No new traffic was collected for this note.</li>
+ </ul>
+ 
+ <h2>Appendix C&nbsp;&nbsp;Numerical checks</h2>
+ <ul class="tight">
+   <li>Table 2 shares: 343 / 9,930 = 3.454%; 15.4 / 7,710 = 0.1997%; 1.2 / 673 = 0.178%. Estimated tokens: 343 MB ÷ 4 = 85.75 million; 15.4 MB ÷ 4 = 3.85 million; 1.2 MB ÷ 4 = 0.30 million.</li>
+-  <li>Section 5 recount (4–8 September): 21,603,929 / 1,532,592,995 bytes = 1.410% (Codex); 3,889,891 / 1,698,925,099 = 0.229% (Claude Code). The classifier calls’ system prompts alone total 381,468,024 characters, so excluding them gives at least 3,889,891 / 1,317,457,075 = 0.295%.</li>
++  <li>Section 5 recount (4–8 September): 21,603,929 / 1,532,592,995 bytes = 1.410% (Codex); 3,889,891 / 1,698,925,099 = 0.229% (Claude Code). The classifier calls’ system prompts alone total 381,468,024 characters, so, conditional on zero removal in that family, subtracting that byte lower bound gives at least 3,889,891 / 1,317,457,075 = 0.295%; this is not a matched family-byte exclusion.</li>
+   <li>Section 6: 539,740,748 cache-read tokens of 558,868,027 input tokens = 96.6%; 1,698,925,099 bytes / 558,868,027 tokens = 3.04 bytes per token.</li>
+   <li>Section 7: 19 / 35 = 54%; 146 / 448 = 33%.</li>
+   <li>Table 4: equation (4) with <var>α</var> = 0.1, for example <var>v</var>(10) = (1.25 + 0.9) / 10 = 0.215.</li>
+--- a/docs/research/tokensaver/note/make_charts.py
++++ b/docs/research/tokensaver/note/make_charts.py
+@@ -88,7 +88,7 @@
+             return bottom - (min(v, ymax) / ymax) * height
+ 
+         # Shaded regimes (drawn first, under everything).
+-        bands = [(date(2026, 8, 17), date(2026, 8, 29), ["File reads truncated", "(fixed 30 Aug)"])]
++        bands = [(date(2026, 8, 17), date(2026, 8, 29), ["File reads truncated", "(mitigation commit 30 Aug)"])]
+         if agent == "codex":
+             bands.insert(0, (date(2026, 8, 1), date(2026, 8, 16), ["Codex exec output", "not yet eligible"]))
+         for a, b, label in bands:
+@@ -161,7 +161,7 @@
+         return bottom - v / ymax * (bottom - top)
+ 
+     parts = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}" '
+-             f'font-family="{FONT}" role="img" aria-label="Avoided cost per counted token as a function of re-sends">',
++             f'font-family="{FONT}" role="img" aria-label="Avoided cost per actual token appearance as a function of re-sends">',
+              f'<rect width="{W}" height="{H}" fill="{SURFACE}"/>']
+     for t in [0, 0.5, 1.0, 1.5, 2.0]:
+         y = Y(t)
+@@ -172,7 +172,7 @@
+         parts.append(f'<line x1="{x:.1f}" x2="{x:.1f}" y1="{bottom}" y2="{bottom + 4}" stroke="{AXIS}" stroke-width="1"/>')
+         parts.append(text(x, bottom + 17, str(m), size=10, anchor="middle"))
+     parts.append(text((x0 + x1) / 2, bottom + 36, "m = number of requests that carry the removed block (first appearance included)", size=9.5, anchor="middle"))
+-    parts.append(text(16, (top + bottom) / 2, "Avoided cost per counted token (x base input price)", size=9.5,
++    parts.append(text(16, (top + bottom) / 2, "Cost / actual token appearance (x base input price)", size=9.5,
+                       anchor="middle", extra=f'transform="rotate(-90 16 {(top + bottom) / 2:.1f})"'))
+ 
+     # Reference lines: base input price and the limit alpha.
+--- a/docs/research/tokensaver/note/render_pdf.mjs
++++ b/docs/research/tokensaver/note/render_pdf.mjs
+@@ -20,7 +20,7 @@
+ const footer = `
+   <div style="font-family:'Segoe UI',sans-serif;font-size:7.5px;color:#898781;width:100%;
+               padding:0 0.85in;display:flex;justify-content:space-between;">
+-    <span>VibeRails technical note 1.0 · What “tokens saved” means</span>
++    <span>VibeRails technical note 1.1 · What “tokens saved” means</span>
+     <span><span class="pageNumber"></span> / <span class="totalPages"></span></span>
+   </div>`;
+ 

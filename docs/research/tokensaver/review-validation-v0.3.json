@@ -1,0 +1,148 @@
+{
+  "paper_version": "0.3",
+  "date": "2026-10-05",
+  "method": "Source and saved-aggregate inspection; no database query, new model experiment or pipeline execution by the primary reviewer. Separate automated review ran product tests; note exports were regenerated and visually checked.",
+  "baseline_package_files_checked": 44,
+  "all_baseline_package_hashes_match": true,
+  "original_source_hashes_checked": 18,
+  "all_original_source_hashes_match": true,
+  "claude_findings_adjudicated": 20,
+  "manuscript_figures": 9,
+  "revised_figures_visually_inspected": [
+    "01-study-a-units",
+    "04-daily-series",
+    "06-break-even"
+  ],
+  "equations": 6,
+  "unified_diff_matches_revised_manuscript": true,
+  "daily_recalculation": {
+    "claude": {
+      "active_days": 27,
+      "weighted_percent": 0.19228442121058112,
+      "top_five_removal_percent": 57.07992448080554,
+      "minimum_reported_percent": 0.01,
+      "maximum_reported_percent": 1.19,
+      "median_reported_percent": 0.15
+    },
+    "codex": {
+      "active_days": 28,
+      "weighted_percent": 3.3935851746258017,
+      "top_five_removal_percent": 53.59713237559159,
+      "minimum_reported_percent": 0.0,
+      "maximum_reported_percent": 12.14,
+      "median_reported_percent": 3.04
+    }
+  },
+  "saved_replay_recount": {
+    "saved_replay_variants": 8177,
+    "saved_cases": 32708,
+    "growth_flags": 0,
+    "nondeterminism_flags": 0,
+    "nonidempotence_flags": 0,
+    "allowlisted_after_text_changes": 45,
+    "whitespace_only_changes": 44,
+    "additional_truncation_utf16_units": 5977,
+    "new_pipeline_execution": false
+  },
+  "baseline_export_structural_checks": {
+    "docx_hash_matches": true,
+    "track_changes_enabled": true,
+    "native_equations": 6,
+    "pdf_pages": 16,
+    "number_set_comparison": "Regex (?<![A-Za-z0-9])\\d[\\d,.]*\\d(?![A-Za-z0-9]), length >= 3: equal sets in Markdown/DOCX w:t/PDF extracted text. Does not establish equation/image/layout identity.",
+    "full_visual_layout_recheck": false
+  },
+  "historical_test_record": {
+    "passed": 475,
+    "new_run": false
+  },
+  "unresolved_evidence": [
+    "Study A scratch computation and conflicting unit label",
+    "Matched September per-day/family-byte subtotals",
+    "Full T0 acknowledgment notes",
+    "Per-event build/configuration and cache effects",
+    "Current external pricing and actual billing regime",
+    "Matched complete-task cost and quality"
+  ],
+  "artifacts": {
+    "tokensaver-research-v0.3.md": "f1cc37460e95f992fc523be3f54afac9c3d36ba6280e4d303a0d80f4aa4d98f7",
+    "tokensaver-v0.2-to-v0.3.diff": "c0f8001876109026bb44b1745eddfbef3396b65390ce861408a6292c5e90ed7f",
+    "review-notes-codex.md": "48ee37edcb00a7581cb99731a26e3edbf9c27d23d17b225824f8ad2275a8cdfe",
+    "CHANGELOG.md": "ff42a1430cab3486f7a6ac4f0313bb8b7cef116c82cc7ed4834bdeb7b6303c32",
+    "evidence-v0.3.json": "92c0403d1d8044c720a686b17e63519a01ae3b13a0a04b8f7bf435f9f0f7bb21",
+    "build_review_figures.py": "e633a4db69640b83632515597b08d4a44edbca7226cf4257bbebd14b3324b11a",
+    "figures/v0.3/01-study-a-units.png": "197bc586cb8474f6f94b863a9c268b2cf57d422554697f6aebf8b9b01fac761b",
+    "figures/v0.3/01-study-a-units.svg": "b4d6be79f6bb4af9c5454dccca61669168b610ac88b3c37d377b9642e8915815",
+    "figures/v0.3/04-daily-series.png": "020eb49e9271015b8cecc47c50e791a4cd8487647a132eb7a1356f41513f3a1d",
+    "figures/v0.3/04-daily-series.svg": "09f5eca176b9edcab2481fef844cf3b24061944fd5cea3d9fc0362bfe99e1b81",
+    "figures/v0.3/06-break-even.png": "d0dbdb653eb896049dc1edc8ab842840015f03f67291d400ebb23fa3ad7ea6eb",
+    "figures/v0.3/06-break-even.svg": "b03090737007d953c0628892be7fa07695b9114f0651ade18b0da7e1c969e389",
+    "review-notes-codex-technical-note.md": "dd93be382374e7005eb0a874bdac5b9ff5f3edcfded19727bc2b5f1b4a01e3c3",
+    "technical-note-review.diff": "9216bad8019f6f3437177ad32c3fd9ed69656a6c39f709fa3c6d8019ff1d5c77",
+    "README.md": "dfa98d1cd98b5ebcc8687ff9b89ca1ad24eb30b3d88f10567ff23333c823c990",
+    "note/tokens-saved-technical-note.html": "0cbc2c68df5b5280ccc428ed2b7403c2d0318d354d8bfb7c1681efbd787b0c8c",
+    "note/make_charts.py": "a8c2975f6e06cefa992f9134af23120add53357fffa0d25c00e70b51ef44f00c",
+    "note/render_pdf.mjs": "eaa7197f0384abd60e13d972596e3a17859352fb731df5b4cdb40222c7a31c92",
+    "note/charts/daily-rates.svg": "07d312cf08bd8d28f83267b8791de5e5cc0c06863b5b65439abbc1eab2dd828b",
+    "note/charts/counted-token-value.svg": "b6883d37713cb63b9f8ddffa99c665dce1737206572fb25be45e86583596bd44",
+    "output/pdf/tokens-saved-technical-note.pdf": "aad925875d33fdc528a02793c8ffa661f7fadbda4c23223382f1c6b39eb2f2f6"
+  },
+  "concurrent_chart_snapshot_sha256": "69fc5d46119893327b29b0d83f9425bdf84e59a096f71dad5b95bdf00926f8d9",
+  "technical_note_snapshot": {
+    "html_sha256": "b8a1a0d6e63206226330ccaaedd4f91d8544450e13960f3da13c61aea44f78a4",
+    "chart_generator_sha256": "2832af200c888ba97fdee0482b3420d9eaacedfd8b575b7c70b587594783e812",
+    "frontend_sources": {
+      "TokenSavingsController.cs": "ca076d7f00b0cf7313a3471f13e95eeab94abf39ada808afb1d3a18de318e867",
+      "PublicTokenSavingsController.cs": "aed3a63ca71a196bf07581966a30a2f53fe6b780c375b7538ae4908de9b13651"
+    },
+    "status": "Original inspected 1.0 snapshot, preserved as provenance; source corrections applied in 1.1."
+  },
+  "technical_note_revision": {
+    "version": "1.1",
+    "source_diff_applied": true,
+    "git_apply_reverse_check_passed": true,
+    "pdf_pages": 11,
+    "all_pdf_pages_visually_inspected": true,
+    "revised_pages_reinspected": [
+      4,
+      6,
+      8,
+      9,
+      10,
+      11
+    ],
+    "original_research_pdf_unchanged": true,
+    "exports_regenerated": [
+      "note/charts/daily-rates.svg",
+      "note/charts/counted-token-value.svg",
+      "output/pdf/tokens-saved-technical-note.pdf"
+    ],
+    "review_findings_addressed": [
+      "F1",
+      "F2",
+      "N1",
+      "N2",
+      "TN-01",
+      "TN-02",
+      "TN-03",
+      "TN-04",
+      "TN-05",
+      "TN-06",
+      "TN-07"
+    ]
+  },
+  "automated_review_validation": {
+    "review_id": "dd8e312a19ad4ba5980ad96ed9dfc37b",
+    "result": "Findings; research-scope corrections subsequently applied and submitted for re-review",
+    "dotnet": {
+      "passed": 4598,
+      "skipped": 12,
+      "failed": 0
+    },
+    "frontend_node_passed": 822,
+    "playwright_history_passed": 7,
+    "playwright_replay_passed": 9,
+    "executed_by": "Separate Board review agent, not the primary reviewer",
+    "scope_limit": "Broad concurrent branch inventory; unrelated replay B1 is outside this research card. Canonical scope capture unavailable; independent inventories attached to the Board."
+  }
+}
