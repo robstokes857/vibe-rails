@@ -111,7 +111,7 @@ test('settings page groups its cards under a section tab bar', () => {
     const html = readFileSync(indexPath, 'utf8');
 
     assert.match(html, /class="settings-tabs" role="tablist" aria-label="Settings sections"/);
-    for (const id of ['general', 'llm', 'keys', 'integrations']) {
+    for (const id of ['general', 'llm', 'keys']) {
         assert.match(html, new RegExp(`id="settings-tab-${id}"`));
         assert.match(html, new RegExp(`id="settings-panel-${id}" role="tabpanel"`));
     }
@@ -145,7 +145,7 @@ test('every tracked settings control survives the tabbed layout', () => {
 test('settings tabs switch panels without removing any controls', () => {
     globalThis.window = { VibeRailsPerformance: null };
 
-    const ids = ['general', 'llm', 'keys', 'integrations'];
+    const ids = ['general', 'llm', 'keys'];
     const panels = Object.fromEntries(ids.map(id => [id, { hidden: id !== 'general' }]));
     const tabs = ids.map(id => {
         const tab = {
@@ -171,7 +171,7 @@ test('settings tabs switch panels without removing any controls', () => {
         querySelector(selector) {
             if (selector === '.settings-tabs') return tablist;
             if (selector === '[data-settings-keys]') return {};
-            const match = /^#settings-panel-(general|llm|keys|integrations)$/.exec(selector);
+            const match = /^#settings-panel-(general|llm|keys)$/.exec(selector);
             return match ? panels[match[1]] : null;
         }
     };
@@ -204,14 +204,14 @@ test('settings tabs switch panels without removing any controls', () => {
     assert.equal(tabs[2].focusCount, 1);
     assert.equal(keysActivations, 1);
 
-    // ArrowLeft wraps from General to Integrations.
+    // ArrowLeft wraps from General to KEYS.
     tablist.listeners.keydown.forEach(fn =>
         fn({ target: tabs[0], key: 'ArrowLeft', preventDefault() {} }));
-    assert.equal(panels.integrations.hidden, false);
-    assert.equal(tabs[3].focusCount, 1);
-    assert.equal(keysActivations, 1);
+    assert.equal(panels.keys.hidden, false);
+    assert.equal(tabs[2].focusCount, 2);
+    assert.equal(keysActivations, 2);
     tablist.listeners.click.forEach(fn => fn({ target: tabs[0] }));
-    assert.equal(secretClears, 3, 'leaving KEYS clears key passwords');
+    assert.equal(secretClears, 2, 'leaving KEYS clears key passwords');
 });
 
 test('a dirty settings form blocks navigation, asks in-app, and replays on yes', async () => {

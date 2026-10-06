@@ -64,7 +64,8 @@ public sealed class JiraFieldMappingTests
     {
         var issue = Issue("A", "Task", "Medium", [], raw);
         var points = JiraFieldMapping.MapPoints(issue, "customfield_10016", out var clear);
-        Assert.True(clear);
+        // Clear only when there is nothing to write: the card patch lets ClearPoints win over Points.
+        Assert.Equal(expected is null, clear);
         Assert.Equal(expected, points);
         Assert.Null(JiraFieldMapping.MapPoints(issue, null, out var untouched));
         Assert.False(untouched);

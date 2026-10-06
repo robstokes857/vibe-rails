@@ -29,7 +29,7 @@ function rule(css, selector) {
 
 test('the controller loads boards first, remembers the selection, and scopes lanes and cards to it', () => {
     const source = readFileSync(controllerPath, 'utf8');
-    // The key lives in board-selection.js so Settings → Integrations reads the same selection.
+    // Keep the remembered Board view selection in its shared helper.
     const selection = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/board-selection.js'), 'utf8');
     assert.match(selection, /export const BOARD_SELECTION_STORAGE_KEY = 'viberails\.board\.selected\.v1'/);
     assert.match(source, /import \{ BOARD_SELECTION_STORAGE_KEY \} from '\.\/board-selection\.js';/);

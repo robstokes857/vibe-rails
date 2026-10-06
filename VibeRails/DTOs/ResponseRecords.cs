@@ -149,6 +149,8 @@ namespace VibeRails.DTOs
 
     // Jira Cloud pull (VB-40). The API token is write-only: a response never carries it.
     // Last write wins from Jira on the mapped fields; the response says so with lastWriteWins.
+    // VIBE-102: a pasted board link replaces site + JQL. Columns, Lanes and SuggestedEmail are
+    // filled only for GET …/jira?settings=true (the board settings form).
     public record JiraConnectionResponse(
         string BoardId,
         string? SiteUrl,
@@ -162,17 +164,48 @@ namespace VibeRails.DTOs
         DateTime? LastTestedUtc,
         DateTime? LastPullUtc,
         string? LastReport,
-        bool LastWriteWins);
+        bool LastWriteWins,
+        string? BoardLink = null,
+        string? JiraBoardId = null,
+        string? JiraBoardName = null,
+        string? NarrowJql = null,
+        bool? SkipOldDone = null,
+        List<JiraColumnLaneResponse>? Columns = null,
+        List<JiraLaneOptionResponse>? Lanes = null,
+        string? SuggestedEmail = null);
 
+    public record JiraColumnLaneResponse(string Name, string? LaneId, string? LaneName, bool Automatic);
+
+    public record JiraLaneOptionResponse(string Id, string Name);
+
+    // BoardLink, when present, supplies the site and the issues, and SiteUrl/Jql are ignored. A null
+    // NarrowJql, SkipOldDone or ColumnMap keeps the saved value; ColumnMap maps a Jira column name to
+    // a lane id, or "" for automatic.
     public record SaveJiraConnectionRequest(
         string? SiteUrl = null,
         string? Email = null,
         string? ApiToken = null,
         string? StoryPointsFieldId = null,
         string? Jql = null,
-        bool Enabled = false);
+        bool Enabled = false,
+        string? BoardLink = null,
+        string? NarrowJql = null,
+        bool? SkipOldDone = null,
+        Dictionary<string, string>? ColumnMap = null);
 
-    public record JiraTestResponse(bool Ok, string? Account, string? Error);
+    public record JiraTestResponse(bool Ok, string? Account, string? Error, JiraBoardSummaryResponse? Board = null);
+
+    public record JiraBoardSummaryResponse(
+        string Id,
+        string? Name,
+        string? Type,
+        string? ProjectKey,
+        int? IssueCount,
+        string? StoryPointsFieldId,
+        string? StoryPointsFieldName,
+        string? Jql,
+        List<JiraColumnLaneResponse> Columns,
+        List<string> Warnings);
 
     public record JiraPullResponse(
         bool DryRun, string Outcome, int Created, int Updated, int Skipped, int Failed, string? Message);
@@ -1881,6 +1914,9 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(JiraConnectionResponse))]
     [JsonSerializable(typeof(SaveJiraConnectionRequest))]
     [JsonSerializable(typeof(JiraTestResponse))]
+    [JsonSerializable(typeof(JiraBoardSummaryResponse))]
+    [JsonSerializable(typeof(JiraColumnLaneResponse))]
+    [JsonSerializable(typeof(JiraLaneOptionResponse))]
     [JsonSerializable(typeof(JiraPullResponse))]
     [JsonSerializable(typeof(BoardSyncStatusResponse))]
     [JsonSerializable(typeof(VibeRails.Services.Board.BoardSharingState))]

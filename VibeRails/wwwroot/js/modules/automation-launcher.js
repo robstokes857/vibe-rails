@@ -36,9 +36,8 @@ function launcherItemIcon(item) {
 
 /**
  * Nav-bar Automation launcher: a flyout on the play half of the merged Automation
- * nav entry, listing the project's automations and the pwsh, bash and python scripts (run-now on
- * click; unsigned scripts are
- * shown disabled until they are signed on the Automation page), plus a customization
+ * nav entry, listing the project's automations and signed pwsh, bash and python scripts
+ * (run-now on click; unsigned scripts are omitted), plus a customization
  * modal giving each entry an order and show/hide switch — the same treatment Custom
  * Environments get in the LLM launch pickers. Preferences are server-persisted per
  * install (GET/PUT/DELETE /api/v1/automation-nav/preferences) and fetched fresh on every
@@ -277,21 +276,16 @@ export class AutomationNavLauncher {
 
     _renderFlyoutItem(item, index, running) {
         const label = escapeHtml(item.label);
-        const unsigned = !isLauncherItemRunnable(item);
-        const disabled = unsigned || running;
-        const title = unsigned
-            ? 'Sign it on the Automation page first'
-            : running ? `${label} is running` : `Run ${label} now`;
+        const title = running ? `${label} is running` : `Run ${label} now`;
         return `
-            <button type="button" class="automation-launch-item${unsigned ? ' is-unsigned' : ''}${running ? ' is-running' : ''}"
+            <button type="button" class="automation-launch-item${running ? ' is-running' : ''}"
                     role="menuitem" data-automation-launch-index="${index}"
-                    ${disabled ? 'disabled aria-disabled="true"' : ''}${running ? ' aria-busy="true"' : ''}
+                    ${running ? 'disabled aria-disabled="true" aria-busy="true"' : ''}
                     title="${title}">
                 ${running
                     ? '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span>'
                     : `<i class="${launcherItemIcon(item)}" aria-hidden="true"></i>`}
                 <span class="automation-launch-item-label">${label}</span>
-                ${unsigned ? '<span class="automation-launch-item-note">Not signed</span>' : ''}
             </button>`;
     }
 
@@ -308,12 +302,15 @@ export class AutomationNavLauncher {
             return;
         }
 
-        const visible = this.items.filter((item) => item.enabled);
+        const runnable = this.items.filter(isLauncherItemRunnable);
+        const visible = runnable.filter((item) => item.enabled);
         if (visible.length === 0) {
-            const hiddenCount = this.items.length - visible.length;
+            const hiddenCount = runnable.length - visible.length;
             target.innerHTML = hiddenCount > 0
                 ? '<div class="automation-launch-flyout-empty text-muted">All automations are hidden. Use "Customize list…" to show some.</div>'
-                : '<div class="automation-launch-flyout-empty text-muted">No automations yet. Create one from the Automation page.</div>';
+                : this.items.length > 0
+                    ? '<div class="automation-launch-flyout-empty text-muted">No automations or signed scripts available. Sign a script on the Automation page.</div>'
+                    : '<div class="automation-launch-flyout-empty text-muted">No automations yet. Create one from the Automation page.</div>';
         } else {
             const runningNames = this.app.jobController?.pythonScripts?.runningNames;
             target.innerHTML = visible.map((item, index) => this._renderFlyoutItem(

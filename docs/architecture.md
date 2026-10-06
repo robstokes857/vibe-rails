@@ -488,6 +488,27 @@ for data limits, vendor provenance, themes/CSP, lifecycle and regression tests.
 
 ### Vibe Board
 
+Jira Cloud connection controls live in the board settings modal (`board-jira.js`), bound to
+the edited board ID. They save separately from board metadata; the app Settings page has no
+Integrations tab. Existing per-board storage and Jira routes are unchanged.
+
+VIBE-102 connects a board from a pasted Jira board link plus an API token; there is no site, JQL
+or story points field to type. `JiraBoardLink.Parse` (`Services/Jira`) reads the site, board id
+and project from team-managed, company-managed and legacy `RapidBoard.jspa` links, and a project,
+issue or issue-search link becomes a JQL source. **Connect** saves, then `POST …/jira/test` checks
+the token and reads the board, its configuration (columns, kanban sub-query, estimation field),
+its filter's JQL and an approximate issue count. A board pull uses the enhanced
+`GET /rest/software/1.0/board/{id}/issue` and re-reads the configuration every pull: an issue's
+status id names its Jira column, and `JiraColumnMap` puts the column in a lane (same name, a
+whole-word match, first column to first lane, last column to Done, otherwise the "Jira" overflow
+lane), with per-column picks under Advanced. Each issue link records where the last pull placed
+it (`BoardJiraLinks.Mapping`), so a changed pick or points field re-applies unchanged issues,
+while a card dragged locally stays put until the issue or the mapping changes. Old Done issues are left out by default
+(`statusCategory != Done OR updated >= -30d`). The board filter's JQL is still written to
+`BoardJiraConnections.Jql`, so an older VibeRails keeps pulling the same issues. Without the
+configuration (a 403), lanes fall back to status-name matching and story points stay off unless
+a field is set. VB-40 site-plus-JQL connections keep working unchanged.
+
 VIBE-40 makes agent attention flags require `flagReason` on `update_board_card`. The store saves
 the flag, red comment marker and originating-session request atomically. Additive
 `board-attention/1` retains requests and resolves them when any writer clears the card flag.
@@ -837,6 +858,9 @@ git-hook helpers and BERT download scripts there, so those bundled helpers can a
 library. They are not created by opening the workbench and remain unsigned until explicitly signed.
 
 **Nav Automation launcher** (the nav "Launch" flyout; preferences persist per install in GlobalCache):
+
+The flyout shows visible automations and currently approved scripts; unsigned or modified scripts are omitted.
+
 - `GET /api/v1/automation-nav/preferences` - Catalog of the current project's automations
   (`job:{id}`) plus every signed-library script (`script:{name}`, with its signing `status`), each
   with its saved order and show/hide state

@@ -1192,6 +1192,45 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         saved.EnsureSuccessStatusCode();
         using (var body = await ReadJsonAsync(saved))
             Assert.False(body.RootElement.TryGetProperty("apiToken", out _));
+
+        // VIBE-102: a board link replaces site + JQL. The site alone is refused with a reason.
+        var link = new
+        {
+            boardLink = "https://acme.atlassian.net/jira/software/projects/PROJ/boards/4?filter=&groupBy=none",
+            email = "ada@example.com",
+            apiToken = "token",
+            enabled = true,
+            columnMap = new Dictionary<string, string> { ["To Do"] = "" }
+        };
+        using var siteOnly = await SendJsonAsync(HttpMethod.Put, $"/api/v1/board/boards/{boardId}/jira", link with { boardLink = "https://acme.atlassian.net" });
+        Assert.Equal(HttpStatusCode.BadRequest, siteOnly.StatusCode);
+        using (var body = await ReadJsonAsync(siteOnly))
+            Assert.Contains("not just the site", body.RootElement.GetProperty("error").GetString());
+
+        using var linked = await SendJsonAsync(HttpMethod.Put, $"/api/v1/board/boards/{boardId}/jira", link);
+        linked.EnsureSuccessStatusCode();
+        using (var body = await ReadJsonAsync(linked))
+        {
+            Assert.Equal("4", body.RootElement.GetProperty("jiraBoardId").GetString());
+            Assert.Equal("https://acme.atlassian.net/jira/software/projects/PROJ/boards/4", body.RootElement.GetProperty("boardLink").GetString());
+            Assert.True(body.RootElement.GetProperty("skipOldDone").GetBoolean());
+            Assert.False(body.RootElement.TryGetProperty("apiToken", out _));
+        }
+
+        using var plain = await GetJsonAsync($"/api/v1/board/boards/{boardId}/jira");
+        Assert.Equal(JsonValueKind.Null, plain.RootElement.GetProperty("lanes").ValueKind);
+        // Picks sent with a link that is not yet the saved board belong to some other board's columns.
+        using var settings = await GetJsonAsync($"/api/v1/board/boards/{boardId}/jira?settings=true");
+        Assert.True(settings.RootElement.GetProperty("lanes").GetArrayLength() > 0);
+        Assert.Equal(0, settings.RootElement.GetProperty("columns").GetArrayLength());
+        Assert.Equal(JsonValueKind.Null, settings.RootElement.GetProperty("suggestedEmail").ValueKind);
+
+        // Once it is the saved board, a pick is kept by column name.
+        using var picked = await SendJsonAsync(HttpMethod.Put, $"/api/v1/board/boards/{boardId}/jira", link with { apiToken = "" });
+        picked.EnsureSuccessStatusCode();
+        using var afterPick = await GetJsonAsync($"/api/v1/board/boards/{boardId}/jira?settings=true");
+        Assert.Equal("To Do", afterPick.RootElement.GetProperty("columns")[0].GetProperty("name").GetString());
+        Assert.True(afterPick.RootElement.GetProperty("columns")[0].GetProperty("automatic").GetBoolean());
     }
 
     private async Task<JsonDocument> GetJsonAsync(string path)

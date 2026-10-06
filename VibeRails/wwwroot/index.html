@@ -1093,8 +1093,6 @@
                             aria-controls="settings-panel-llm" aria-selected="false" tabindex="-1" data-settings-tab="llm">LLMs</button>
                         <button type="button" class="settings-tab" role="tab" id="settings-tab-keys"
                             aria-controls="settings-panel-keys" aria-selected="false" tabindex="-1" data-settings-tab="keys">KEYS</button>
-                        <button type="button" class="settings-tab" role="tab" id="settings-tab-integrations"
-                            aria-controls="settings-panel-integrations" aria-selected="false" tabindex="-1" data-settings-tab="integrations">Integrations</button>
                     </div>
                 </div>
             </div>
@@ -1432,60 +1430,6 @@
                 <div class="row justify-content-center">
                     <div class="col-md-8 col-lg-6 mb-4" data-settings-keys>
                         <p class="text-muted" role="status">Open KEYS to manage your signing keys.</p>
-                    </div>
-                </div>
-            </div>
-            <div class="settings-panel" id="settings-panel-integrations" role="tabpanel" aria-labelledby="settings-tab-integrations"
-                tabindex="0" hidden>
-                <div class="row justify-content-center">
-                    <div class="col-md-8 col-lg-6 mb-4" data-jira-panel>
-                        <div class="sandbox-item-card text-start">
-                            <div class="mb-2 d-flex justify-content-between align-items-center">
-                                <span class="sandbox-item-name">Jira Cloud</span>
-                                <span class="badge text-bg-secondary" data-jira-status>Not connected</span>
-                            </div>
-                            <p class="small mb-2">Board: <strong data-jira-board></strong></p>
-                            <p class="text-muted small">One saved JQL filter mirrors into the current board. Jira wins on title, description, lane, type, priority, tags and story points. A local edit to those fields is replaced on the next pull. Assignee, flagged, blocked, notes, sessions and commits stay here.</p>
-                            <div class="mb-3">
-                                <label class="form-label" for="jira-site-url">Site URL</label>
-                                <input class="form-control" id="jira-site-url" data-jira-site type="url" autocomplete="off"
-                                    placeholder="https://your-site.atlassian.net">
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label" for="jira-email">Email</label>
-                                <input class="form-control" id="jira-email" data-jira-email type="email" autocomplete="off"
-                                    placeholder="you@example.com">
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label" for="jira-token">API token</label>
-                                <input class="form-control" id="jira-token" data-jira-token type="password" autocomplete="new-password"
-                                    placeholder="Leave blank to keep the saved token">
-                                <small class="form-text text-muted">Saved on this machine with your other API keys. It is never written to the board and never shown again.</small>
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label" for="jira-jql">JQL filter</label>
-                                <textarea class="form-control" id="jira-jql" data-jira-jql rows="3"
-                                    placeholder="project = PROJ AND updated >= -30d ORDER BY updated DESC"></textarea>
-                                <small class="form-text text-muted">Jira requires a bounded query. An issue that leaves the filter stays on the board.</small>
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label" for="jira-points-field">Story points field id</label>
-                                <input class="form-control" id="jira-points-field" data-jira-points type="text" autocomplete="off"
-                                    placeholder="customfield_10016">
-                                <small class="form-text text-muted">Optional. Points are pulled only when this is the field's id. VibeRails does not guess it.</small>
-                            </div>
-                            <div class="form-check form-switch mb-3">
-                                <input class="form-check-input" type="checkbox" id="jira-enabled" data-jira-enabled>
-                                <label class="form-check-label" for="jira-enabled">Pull about every 15 minutes while VibeRails is open</label>
-                            </div>
-                            <div class="d-flex flex-wrap gap-2">
-                                <button type="button" class="btn btn-primary btn-sm" data-jira-action="save">Save connection</button>
-                                <button type="button" class="btn btn-outline-primary btn-sm" data-jira-action="test">Test</button>
-                                <button type="button" class="btn btn-outline-secondary btn-sm" data-jira-action="dry-run">Dry run</button>
-                                <button type="button" class="btn btn-outline-secondary btn-sm" data-jira-action="pull">Pull now</button>
-                            </div>
-                            <p class="text-muted small mt-3 mb-0" data-jira-report role="status"></p>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -4874,7 +4818,7 @@
                     <div class="board-stats" data-board-stats></div>
                     <div class="board-head-actions">
                         <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap" data-board-action="jira-pull"
-                            title="Pull the saved Jira filter into this board" hidden>
+                            title="Pull the connected Jira board into this board" hidden>
                             <i class="fa-brands fa-jira" aria-hidden="true"></i>
                             <span>Pull from Jira</span>
                         </button>

@@ -80,8 +80,8 @@ for (const width of [1440, 768, 390]) {
                 await header.getByRole('button', { name: 'Local', exact: true }).click();
                 await expect(page.locator('[data-mcp-local]')).toBeVisible();
             } else if (view === 'settings') {
-                await page.getByRole('tab', { name: 'Integrations', exact: true }).click();
-                await expect(page.locator('#settings-panel-integrations')).toBeVisible();
+                await page.getByRole('tab', { name: 'LLMs', exact: true }).click();
+                await expect(page.locator('#settings-panel-llm')).toBeVisible();
             }
             await header.screenshot({ path: testInfo.outputPath(`${view}-header.png`) });
         }

@@ -200,6 +200,33 @@ test('the current board shows its Jira pull button and last report', async () =>
     assert.equal(status.textContent, 'ok: 1 created');
 });
 
+test('a connection made from a Jira board link shows the pull button before Connect has read its filter', async () => {
+    const h = harness();
+    const { button } = jiraToolbar(h);
+    const pending = h.controller.refreshJiraPullButton();
+    h.requests.at(-1).resolve({ hasToken: true, jql: '', jiraBoardId: '7', lastReport: null });
+    await pending;
+    assert.equal(button.hidden, false);
+});
+
+for (const staleFails of [false, true]) {
+    test(`an older Jira status ${staleFails ? 'failure' : 'response'} cannot overwrite the post-save toolbar`, async () => {
+        const h = harness();
+        const { button, status } = jiraToolbar(h);
+        const initial = h.controller.refreshJiraPullButton();
+        const initialRequest = h.requests.at(-1);
+        const afterSave = h.controller.refreshJiraPullButton();
+        h.requests.at(-1).resolve({ hasToken: true, jql: 'project = A', lastReport: 'fresh status' });
+        await afterSave;
+        if (staleFails) initialRequest.reject(new Error('old request failed'));
+        else initialRequest.resolve({ hasToken: false, jql: '', lastReport: 'old status' });
+        await initial;
+        assert.equal(button.hidden, false);
+        assert.equal(status.hidden, false);
+        assert.equal(status.textContent, 'fresh status');
+    });
+}
+
 test('the Jira toolbar refresh never rejects, even without a mounted toolbar', async () => {
     const h = harness();
     await h.controller.refreshJiraPullButton();

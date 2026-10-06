@@ -347,23 +347,30 @@ public static partial class BoardRoutes
                 : NotFound("Session", sessionId)))
             .WithName("UnlinkBoardCardSession");
 
-        // Jira Cloud, one saved JQL filter per board. The token is accepted on save and never
-        // returned. Pull is one-way: Jira wins on the mapped fields.
-        app.MapGet("/api/v1/board/boards/{boardId}/jira", (IJiraPullService jira, string boardId, CancellationToken cancellationToken) =>
-            RunAsync(async () => Results.Ok(ToResponse(await jira.GetAsync(Project(), boardId, cancellationToken), boardId))))
+        // Jira Cloud, one Jira board (or saved JQL filter) per board. The token is accepted on save
+        // and never returned. Pull is one-way: Jira wins on the mapped fields. ?settings=true adds
+        // what the settings form shows, including the repository's git user.email as a suggestion.
+        app.MapGet("/api/v1/board/boards/{boardId}/jira", (IJiraPullService jira, string boardId, bool? settings, CancellationToken cancellationToken) =>
+            RunAsync(async () => settings == true
+                ? Results.Ok(ToResponse(await jira.GetDetailsAsync(Project(), boardId, cancellationToken), boardId))
+                : Results.Ok(ToResponse(await jira.GetAsync(Project(), boardId, cancellationToken), boardId))))
             .WithName("GetJiraConnection");
 
         app.MapPut("/api/v1/board/boards/{boardId}/jira", (IJiraPullService jira, string boardId, SaveJiraConnectionRequest request, CancellationToken cancellationToken) =>
             RunAsync(async () => Results.Ok(ToResponse(await jira.SaveAsync(Project(), boardId, new BoardJiraConnectionSave(
                 request.SiteUrl ?? string.Empty, request.Email ?? string.Empty, request.StoryPointsFieldId,
-                request.Jql ?? string.Empty, request.Enabled), request.ApiToken, cancellationToken), boardId))))
+                request.Jql ?? string.Empty, request.Enabled, request.BoardLink, request.NarrowJql, request.SkipOldDone,
+                request.ColumnMap?.ToDictionary(pair => pair.Key, pair => (string?)pair.Value)),
+                request.ApiToken, cancellationToken), boardId))))
             .WithName("SaveJiraConnection");
 
+        // Connect: checks the token and, for a board link, reads the board, its columns and its issue count.
         app.MapPost("/api/v1/board/boards/{boardId}/jira/test", (IJiraPullService jira, string boardId, CancellationToken cancellationToken) =>
             RunAsync(async () =>
             {
                 var result = await jira.TestAsync(Project(), boardId, cancellationToken);
-                return Results.Ok(new JiraTestResponse(result.Outcome == JiraCallOutcome.Ok, result.Value, result.Detail));
+                return Results.Ok(new JiraTestResponse(result.Ok, result.Account, result.Error,
+                    result.Board is { } board ? ToResponse(board) : null));
             }))
             .WithName("TestJiraConnection");
 
@@ -404,7 +411,23 @@ public static partial class BoardRoutes
             ? new JiraConnectionResponse(boardId, null, null, false, BoardJiraAuthStatus.None, null, null, false, null, null, null, null, true)
             : new JiraConnectionResponse(connection.BoardId, connection.SiteUrl, connection.Email, connection.HasToken,
                 connection.AuthStatus, connection.StoryPointsFieldId, connection.Jql, connection.Enabled,
-                connection.DisabledReason, connection.LastTestedUtc, connection.LastPullUtc, connection.LastReport, true);
+                connection.DisabledReason, connection.LastTestedUtc, connection.LastPullUtc, connection.LastReport, true,
+                connection.BoardLink, connection.JiraBoardId, connection.JiraBoardName, connection.NarrowJql, connection.SkipOldDone);
+
+    private static JiraConnectionResponse ToResponse(JiraConnectionDetails details, string boardId) =>
+        ToResponse(details.Connection, boardId) with
+        {
+            Columns = details.Columns.Select(ToResponse).ToList(),
+            Lanes = details.Lanes.Select(lane => new JiraLaneOptionResponse(lane.Id, lane.Name)).ToList(),
+            SuggestedEmail = details.SuggestedEmail
+        };
+
+    private static JiraColumnLaneResponse ToResponse(JiraColumnLane column) =>
+        new(column.Name, column.LaneId, column.LaneName, column.Automatic);
+
+    private static JiraBoardSummaryResponse ToResponse(JiraBoardSummary board) =>
+        new(board.Id, board.Name, board.Type, board.ProjectKey, board.IssueCount, board.StoryPointsFieldId,
+            board.StoryPointsFieldName, board.Jql, board.Columns.Select(ToResponse).ToList(), board.Warnings.ToList());
 
     private static string Project() => ParserConfigs.GetRootPath();
 

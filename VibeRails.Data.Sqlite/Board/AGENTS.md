@@ -179,6 +179,21 @@ deletes its Jira connection. It is a trigger rather than a foreign key because `
 shipped the table. No cleanup of existing rows; `GetJiraConnectionsAsync` skips a connection whose
 board is gone, and the next scheduled pull prunes tokens that no longer have a connection.
 
+`board/28` (VIBE-102, additive) adds six nullable `BoardJiraConnections` columns for a connection
+made from a pasted Jira board link: `BoardLink`, `JiraBoardId`, `JiraBoardName`, `ColumnMap`
+(JSON: the board's columns in order, each with a picked lane id or null for automatic),
+`NarrowJql` and `SkipOldDone`. No backfill: a VB-40 row (site plus JQL) keeps pulling as before.
+A board connection still writes the board filter's JQL into `Jql`, so an older binary, which reads
+only `Jql`, keeps pulling the same issues. An older binary's upsert names only the board/12
+columns, so it leaves these as the current version wrote them.
+
+`board/29` (VIBE-102, additive) adds nullable `BoardJiraLinks.Mapping`: where the last pull
+placed that issue (a board connection's lane target and story points field). A pull skips an
+issue whose Jira `updated` is unchanged only while this also matches, so a changed lane pick,
+points field or JQL-to-board switch re-applies existing cards without editing them in Jira. A
+NULL row (written before board/29, or by a JQL connection without a points field) still skips
+on a JQL connection and is re-applied once by a board connection. No backfill.
+
 `board/14` (VB-51, additive) adds `BoardCards.CardKey` (the stored random key of a new card,
 unique where not NULL), `BoardCards.DeletedUTC` (soft delete), `BoardComments.Changes` (the
 Card Log's field diff JSON), `BoardComments.RemoteSeq` (sync state; `IX_BoardComments_Unsent`

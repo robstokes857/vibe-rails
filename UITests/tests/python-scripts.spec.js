@@ -63,7 +63,7 @@ test('Automation page shows the Scripts section (pwsh, bash and python)', async 
     }
 
     // Every script surfaces in the nav Launch flyout catalog, carrying its signing status
-    // (the flyout disables the unsigned ones rather than dropping them).
+    // (the flyout itself only shows signed scripts).
     const prefs = await (await context.request.get('/api/v1/automation-nav/preferences')).json();
     const scriptItems = prefs.items.filter((item) => item.kind === 'script');
     expect(scriptItems.map((item) => item.label).sort()).toEqual(

@@ -37,13 +37,17 @@ public sealed partial class BoardStore
         await using var command = db.CreateCommand();
         // The board check and the write are one statement, so a board deleted concurrently cannot
         // be left with a connection. Id is updated too: a new site gets a new link namespace.
+        // An older binary's upsert names only the board/12 columns, so it leaves the board/28 ones
+        // (the board link and its options) as this version wrote them.
         command.CommandText = $"""
             INSERT INTO BoardJiraConnections
                 (Id, ProjectPath, BoardId, SiteUrl, Email, HasToken, AuthStatus, StoryPointsFieldId,
-                 Jql, Enabled, DisabledReason, OverflowColumnId, LastTestedUTC, LastPullUTC, LastReport)
+                 Jql, Enabled, DisabledReason, OverflowColumnId, LastTestedUTC, LastPullUTC, LastReport,
+                 BoardLink, JiraBoardId, JiraBoardName, ColumnMap, NarrowJql, SkipOldDone)
             SELECT
                 $id, $project, $board, $site, $email, $hasToken, $auth, $pointsField,
-                $jql, $enabled, $reason, $overflow, $tested, $pulled, $report
+                $jql, $enabled, $reason, $overflow, $tested, $pulled, $report,
+                $link, $jiraBoard, $jiraBoardName, $columnMap, $narrow, $skipOldDone
             WHERE EXISTS (SELECT 1 FROM Boards WHERE Id = $board AND ProjectPath = $project{ProjectPathCollation})
             ON CONFLICT(ProjectPath, BoardId) DO UPDATE SET
                 Id = excluded.Id,
@@ -51,7 +55,10 @@ public sealed partial class BoardStore
                 AuthStatus = excluded.AuthStatus, StoryPointsFieldId = excluded.StoryPointsFieldId,
                 Jql = excluded.Jql, Enabled = excluded.Enabled, DisabledReason = excluded.DisabledReason,
                 OverflowColumnId = excluded.OverflowColumnId, LastTestedUTC = excluded.LastTestedUTC,
-                LastPullUTC = excluded.LastPullUTC, LastReport = excluded.LastReport;
+                LastPullUTC = excluded.LastPullUTC, LastReport = excluded.LastReport,
+                BoardLink = excluded.BoardLink, JiraBoardId = excluded.JiraBoardId,
+                JiraBoardName = excluded.JiraBoardName, ColumnMap = excluded.ColumnMap,
+                NarrowJql = excluded.NarrowJql, SkipOldDone = excluded.SkipOldDone;
             """;
         command.Parameters.AddWithValue("$id", connection.Id);
         command.Parameters.AddWithValue("$project", NormalizeProjectPath(connection.ProjectPath));
@@ -68,6 +75,12 @@ public sealed partial class BoardStore
         command.Parameters.AddWithValue("$tested", connection.LastTestedUtc is DateTime tested ? ToDb(tested) : DBNull.Value);
         command.Parameters.AddWithValue("$pulled", connection.LastPullUtc is DateTime pulled ? ToDb(pulled) : DBNull.Value);
         command.Parameters.AddWithValue("$report", (object?)connection.LastReport ?? DBNull.Value);
+        command.Parameters.AddWithValue("$link", (object?)connection.BoardLink ?? DBNull.Value);
+        command.Parameters.AddWithValue("$jiraBoard", (object?)connection.JiraBoardId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$jiraBoardName", (object?)connection.JiraBoardName ?? DBNull.Value);
+        command.Parameters.AddWithValue("$columnMap", (object?)connection.ColumnMap ?? DBNull.Value);
+        command.Parameters.AddWithValue("$narrow", (object?)connection.NarrowJql ?? DBNull.Value);
+        command.Parameters.AddWithValue("$skipOldDone", connection.SkipOldDone is bool skip ? (skip ? 1 : 0) : DBNull.Value);
         if (await command.ExecuteNonQueryAsync(cancellationToken) == 0)
             return null;
         return await GetJiraConnectionAsync(connection.ProjectPath, connection.BoardId, cancellationToken);
@@ -94,8 +107,8 @@ public sealed partial class BoardStore
         {
             insert.Transaction = transaction;
             insert.CommandText = """
-                INSERT INTO BoardJiraLinks (CardId, SiteId, IssueId, IssueKey, AssigneeDisplay, IssueUpdated, LastPulledUTC)
-                VALUES ($card, $site, $issue, $key, $assignee, $updated, $pulled);
+                INSERT INTO BoardJiraLinks (CardId, SiteId, IssueId, IssueKey, AssigneeDisplay, IssueUpdated, LastPulledUTC, Mapping)
+                VALUES ($card, $site, $issue, $key, $assignee, $updated, $pulled, $mapping);
                 """;
             BindLink(insert, link with { CardId = created.Id });
             await insert.ExecuteNonQueryAsync(cancellationToken);
@@ -109,7 +122,7 @@ public sealed partial class BoardStore
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT CardId, SiteId, IssueId, IssueKey, AssigneeDisplay, IssueUpdated, LastPulledUTC
+            SELECT CardId, SiteId, IssueId, IssueKey, AssigneeDisplay, IssueUpdated, LastPulledUTC, Mapping
             FROM BoardJiraLinks WHERE SiteId = $site AND IssueId = $issue;
             """;
         command.Parameters.AddWithValue("$site", siteId);
@@ -123,8 +136,8 @@ public sealed partial class BoardStore
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO BoardJiraLinks (CardId, SiteId, IssueId, IssueKey, AssigneeDisplay, IssueUpdated, LastPulledUTC)
-            VALUES ($card, $site, $issue, $key, $assignee, $updated, $pulled);
+            INSERT INTO BoardJiraLinks (CardId, SiteId, IssueId, IssueKey, AssigneeDisplay, IssueUpdated, LastPulledUTC, Mapping)
+            VALUES ($card, $site, $issue, $key, $assignee, $updated, $pulled, $mapping);
             """;
         BindLink(command, link);
         await command.ExecuteNonQueryAsync(cancellationToken);
@@ -136,7 +149,7 @@ public sealed partial class BoardStore
         await using var command = connection.CreateCommand();
         command.CommandText = """
             UPDATE BoardJiraLinks SET IssueKey = $key, AssigneeDisplay = $assignee,
-                IssueUpdated = $updated, LastPulledUTC = $pulled
+                IssueUpdated = $updated, LastPulledUTC = $pulled, Mapping = $mapping
             WHERE SiteId = $site AND IssueId = $issue;
             """;
         BindLink(command, link);
@@ -145,7 +158,8 @@ public sealed partial class BoardStore
 
     private const string JiraConnectionSelect = """
         SELECT Id, ProjectPath, BoardId, SiteUrl, Email, HasToken, AuthStatus, StoryPointsFieldId,
-               Jql, Enabled, DisabledReason, OverflowColumnId, LastTestedUTC, LastPullUTC, LastReport
+               Jql, Enabled, DisabledReason, OverflowColumnId, LastTestedUTC, LastPullUTC, LastReport,
+               BoardLink, JiraBoardId, JiraBoardName, ColumnMap, NarrowJql, SkipOldDone
         FROM BoardJiraConnections
         """;
 
@@ -158,6 +172,7 @@ public sealed partial class BoardStore
         command.Parameters.AddWithValue("$assignee", (object?)link.AssigneeDisplay ?? DBNull.Value);
         command.Parameters.AddWithValue("$updated", ToDb(link.IssueUpdated));
         command.Parameters.AddWithValue("$pulled", ToDb(link.LastPulledUtc));
+        command.Parameters.AddWithValue("$mapping", (object?)link.Mapping ?? DBNull.Value);
     }
 
     private static BoardJiraConnectionRecord ReadJiraConnection(SqliteDataReader reader) => new(
@@ -169,12 +184,19 @@ public sealed partial class BoardStore
         reader.IsDBNull(11) ? null : reader.GetString(11),
         reader.IsDBNull(12) ? null : ParseDb(reader.GetString(12)),
         reader.IsDBNull(13) ? null : ParseDb(reader.GetString(13)),
-        reader.IsDBNull(14) ? null : reader.GetString(14));
+        reader.IsDBNull(14) ? null : reader.GetString(14),
+        reader.IsDBNull(15) ? null : reader.GetString(15),
+        reader.IsDBNull(16) ? null : reader.GetString(16),
+        reader.IsDBNull(17) ? null : reader.GetString(17),
+        reader.IsDBNull(18) ? null : reader.GetString(18),
+        reader.IsDBNull(19) ? null : reader.GetString(19),
+        reader.IsDBNull(20) ? null : reader.GetInt64(20) != 0);
 
     private static BoardJiraLinkRecord ReadJiraLink(SqliteDataReader reader) => new(
         reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
         reader.IsDBNull(4) ? null : reader.GetString(4),
-        ParseDb(reader.GetString(5)), ParseDb(reader.GetString(6)));
+        ParseDb(reader.GetString(5)), ParseDb(reader.GetString(6)),
+        reader.IsDBNull(7) ? null : reader.GetString(7));
 
     /// <summary>board/12: one Jira connection per board, and one link row per mirrored issue.</summary>
     internal const string JiraSchemaSql = """
@@ -220,4 +242,25 @@ public sealed partial class BoardStore
             DELETE FROM BoardJiraConnections WHERE BoardId = OLD.Id;
         END;
         """;
+
+    /// <summary>
+    /// board/28 (VIBE-102): a connection made from a pasted Jira board link. All nullable with no
+    /// backfill: a VB-40 row keeps pulling its JQL, and an older binary never names these columns.
+    /// </summary>
+    internal static readonly string[] JiraBoardLinkColumnsSql =
+    [
+        "ALTER TABLE BoardJiraConnections ADD COLUMN BoardLink TEXT",
+        "ALTER TABLE BoardJiraConnections ADD COLUMN JiraBoardId TEXT",
+        "ALTER TABLE BoardJiraConnections ADD COLUMN JiraBoardName TEXT",
+        "ALTER TABLE BoardJiraConnections ADD COLUMN ColumnMap TEXT",
+        "ALTER TABLE BoardJiraConnections ADD COLUMN NarrowJql TEXT",
+        "ALTER TABLE BoardJiraConnections ADD COLUMN SkipOldDone INTEGER"
+    ];
+
+    /// <summary>
+    /// board/29 (VIBE-102): where the last pull placed each mirrored issue (lane target and points
+    /// field). Nullable, no backfill: an older binary's link UPDATE leaves it as written, and a
+    /// NULL row is pulled again once by a board connection, which is the switch-over it needs.
+    /// </summary>
+    internal const string JiraLinkMappingColumnSql = "ALTER TABLE BoardJiraLinks ADD COLUMN Mapping TEXT";
 }

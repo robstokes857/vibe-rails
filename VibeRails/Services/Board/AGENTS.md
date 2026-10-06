@@ -421,7 +421,7 @@ an API key is configured; the old switch columns remain for compatibility. The s
 See [SYNC.md](SYNC.md) for the bounded activity transfer and automatic recovery.
 `board/22` (additive) adds `BoardSyncSkippedEntries.Version`, so
 a newer version retries what an earlier one skipped; `board/21` (additive) adds `BoardSyncSkippedEntries` (see
-[SYNC.md](SYNC.md)); `board/20` (VB-69) adds display IDs. `board/19` (VB-63, additive) adds `BoardContextSamples`. `board/12` adds the Jira connection and issue-link tables; `board/13` adds the trigger that deletes a board's Jira connection with the board. `board/8` is a breaking retirement (generation 3)
+[SYNC.md](SYNC.md)); `board/20` (VB-69) adds display IDs. `board/19` (VB-63, additive) adds `BoardContextSamples`. `board/12` adds the Jira connection and issue-link tables; `board/13` adds the trigger that deletes a board's Jira connection with the board. `board/28` (VIBE-102, additive) adds the nullable board-link columns to `BoardJiraConnections`, and `board/29` adds `BoardJiraLinks.Mapping`. `board/8` is a breaking retirement (generation 3)
 that drops history tables, WIP limits and removed-file retention through an automatic, backed-up upgrade;
 `board/9` adds the current-state attention flag. `board/10` adds `BoardAdditionalCardSessions`,
 leaving primary links in `BoardCardSessions` and reading both through the store without a backfill.

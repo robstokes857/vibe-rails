@@ -60,8 +60,9 @@ async function updateBoardAsync(boardId, patch) {
     return call(`/boards/${enc(boardId)}`, 'PUT', patch);
 }
 
-async function getJiraConnectionAsync(boardId) {
-    return call(`/boards/${enc(boardId)}/jira`);
+// settings: true adds the board settings form's extras (column-to-lane map, lanes, email suggestion).
+async function getJiraConnectionAsync(boardId, { settings = false } = {}) {
+    return call(`/boards/${enc(boardId)}/jira${settings ? '?settings=true' : ''}`);
 }
 
 async function saveJiraConnectionAsync(boardId, payload) {

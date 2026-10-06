@@ -6,6 +6,101 @@ const IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAw
 const DESCRIPTION = 'Repro screenshot\n![Screenshot.png](attachment:att_image)\n<img src=x onerror="window.__injected=true">';
 
 for (const width of [1440, 390]) {
+    test(`Jira connection lives in Board Settings and saves independently at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        const requests = await openBoard(page);
+        await page.route('**/api/v1/board/boards/brd_main/context', route => route.fulfill({ json: {
+            revision: 1, context: { defaultMessage: '', typeOverrides: [] }
+        } }));
+        // VIBE-102: one board link and a token. The server's answers are mocked; the shapes are the
+        // GET ?settings=true view, the PUT save and the Connect (test) report.
+        const boardLink = 'https://robstokes857.atlassian.net/jira/software/projects/SCRUM/boards/1?filter=&groupBy=none&atlOrigin=abc';
+        const savedLink = 'https://robstokes857.atlassian.net/jira/software/projects/SCRUM/boards/1';
+        const lanes = [{ id: 'col_ready', name: 'Ready' }, { id: 'col_done', name: 'Done' }];
+        const columns = [
+            { name: 'To Do', laneId: 'col_ready', laneName: 'Ready', automatic: true },
+            { name: 'In Progress', laneId: null, laneName: null, automatic: true },
+            { name: 'Done', laneId: 'col_done', laneName: 'Done', automatic: true }
+        ];
+        let saved = { boardId: 'brd_main', hasToken: false, authStatus: 'none', enabled: false, columns: [], lanes,
+            suggestedEmail: 'robstokes857@gmail.com' };
+        const writes = [];
+        let tests = 0;
+        await page.route(url => url.pathname === '/api/v1/board/boards/brd_main/jira', route => {
+            if (route.request().method() === 'PUT') {
+                const body = route.request().postDataJSON();
+                writes.push(body);
+                saved = { ...saved, ...body, apiToken: undefined, columnMap: undefined, boardLink: savedLink, jiraBoardId: '1',
+                    siteUrl: 'https://robstokes857.atlassian.net', jql: 'project = "SCRUM"', hasToken: true, authStatus: 'saved' };
+                return route.fulfill({ json: { ...saved, columns: null, lanes: null } });
+            }
+            return route.fulfill({ json: saved });
+        });
+        await page.route(url => url.pathname === '/api/v1/board/boards/brd_main/jira/test', route => {
+            tests++;
+            saved = { ...saved, jiraBoardName: 'SCRUM board', columns };
+            return route.fulfill({ json: { ok: true, account: 'Rob Stokes', board: { id: '1', name: 'SCRUM board', type: 'scrum',
+                issueCount: 12, storyPointsFieldId: 'customfield_10016', storyPointsFieldName: 'Story point estimate', columns,
+                warnings: [] } } });
+        });
+        await page.locator('[data-board-action="edit-board"]').click();
+        const panel = page.locator('[data-jira-panel]');
+        await panel.locator('summary').first().click();
+        await expect(panel.locator('[data-jira-board]')).toHaveText('Main');
+        await expect(panel.getByLabel('Jira board link')).toHaveValue('');
+        await expect(panel.getByLabel('Atlassian account email')).toHaveValue('robstokes857@gmail.com');
+        await expect(panel.getByLabel('API token')).toHaveValue('');
+        await expect(panel.getByRole('link', { name: 'Create a token' })).toHaveAttribute('href', 'https://id.atlassian.com/manage-profile/security/api-tokens');
+        await expect(panel.getByRole('link', { name: 'Create a token' })).toHaveAttribute('target', '_blank');
+        await expect(panel.getByLabel('Site URL')).toHaveCount(0);
+        await expect(panel.getByLabel('JQL filter')).toHaveCount(0);
+
+        await panel.getByLabel('Jira board link').fill(boardLink);
+        await panel.getByLabel('API token').fill('typed-secret');
+        await panel.getByRole('button', { name: 'Connect' }).click();
+        await expect(panel.locator('[data-jira-report]')).toHaveText('Connected as Rob Stokes.');
+        expect(writes).toHaveLength(1);
+        expect(writes[0]).toMatchObject({ boardLink, apiToken: 'typed-secret', email: 'robstokes857@gmail.com',
+            enabled: true, skipOldDone: true, narrowJql: '' });
+        expect(tests).toBe(1);
+        await expect(panel.locator('[data-jira-summary]')).toContainText('SCRUM board (scrum) · about 12 issues');
+        await expect(panel.locator('[data-jira-summary]')).toContainText('In Progress → Jira lane (unmatched)');
+        await expect(panel.getByLabel('API token')).toHaveValue('');
+        expect(requests.filter(request => request.method === 'PUT')).toEqual([]);
+        await expect(page.locator('[data-board-action="jira-pull"]')).toBeVisible();
+
+        // A lane picked for a column under Advanced is saved by the next Connect.
+        await panel.locator('[data-jira-advanced] summary').click();
+        await panel.getByLabel('In Progress', { exact: true }).selectOption('col_ready');
+        await panel.getByRole('button', { name: 'Connect' }).click();
+        await expect.poll(() => writes.length).toBe(2);
+        expect(writes[1].columnMap).toEqual({ 'To Do': '', 'In Progress': 'col_ready', Done: '' });
+        expect(writes[1].apiToken).toBe('');
+        expect(writes[1].boardLink).toBe(savedLink);
+        await expect(panel.locator('[data-jira-report]')).toHaveText('Connected as Rob Stokes.');
+
+        expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+        await panel.locator('[data-jira-lanes]').scrollIntoViewIfNeeded();
+        await page.screenshot({ path: testInfo.outputPath(`board-jira-connected-${width}.png`) });
+        await panel.locator('summary').first().scrollIntoViewIfNeeded();
+        await page.screenshot({ path: testInfo.outputPath(`board-jira-${width}.png`) });
+        await panel.getByLabel('API token').fill('unsaved-secret');
+        await page.evaluate(() => window.app.closeModal());
+        await page.locator('[data-board-action="edit-board"]').click();
+        await panel.locator('summary').first().click();
+        await expect(panel.getByLabel('Jira board link')).toHaveValue(savedLink);
+        await expect(panel.getByLabel('API token')).toHaveValue('');
+        await page.evaluate(() => window.app.boardController.openBoardEditor(null));
+        await expect(panel).toHaveCount(0);
+        await expect(page.locator('[data-board-board-editor]')).toContainText('Save the board to configure Jira');
+        await page.evaluate(() => { window.app.closeModal(); window.app.navigate('settings'); });
+        await expect(page.getByRole('tab', { name: 'General', exact: true })).toBeVisible();
+        await expect(page.getByRole('tab', { name: 'Integrations', exact: true })).toHaveCount(0);
+        await expect(panel).toHaveCount(0);
+    });
+}
+
+for (const width of [1440, 390]) {
     test(`attention comments stay red and readable at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 950 });
         await openBoard(page, { onCard: card => {

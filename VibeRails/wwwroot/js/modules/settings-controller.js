@@ -1,7 +1,6 @@
 import { showDataExportModal } from './data-export-modal.js';
 import { confirmDialog } from './utils.js';
 import { SettingsKeysPanel } from './settings-keys.js';
-import { SettingsJiraPanel } from './settings-jira.js';
 import { getToastTheme, setToastTheme } from './toast-service.js';
 
 export class SettingsController {
@@ -19,7 +18,6 @@ export class SettingsController {
         this._dataExportSizeBytes = null;
         this._settingsRoot = null;
         this._keysPanel = null;
-        this._jiraPanel = null;
         this._linkedKeyVersion = 0;
         // In-app leave-confirm (window.confirm is a silent no-op in the VS Code
         // webview). A field so tests can substitute a resolved value.
@@ -324,8 +322,6 @@ export class SettingsController {
     unload() {
         this._keysPanel?.unload();
         this._keysPanel = null;
-        this._jiraPanel?.clearSecrets();
-        this._jiraPanel = null;
         if (this._removeNavigationGuard) {
             this._removeNavigationGuard();
             this._removeNavigationGuard = null;
@@ -735,15 +731,6 @@ export class SettingsController {
                 }
             } else {
                 this._keysPanel?.clearSecrets();
-            }
-            if (id === 'integrations') {
-                const panel = root.querySelector('[data-jira-panel]');
-                if (panel) {
-                    this._jiraPanel ??= new SettingsJiraPanel(this.app, panel);
-                    void this._jiraPanel.activate();
-                }
-            } else {
-                this._jiraPanel?.clearSecrets();
             }
         };
 

@@ -43,7 +43,7 @@ title rules, uppercase utilities, inline letter spacing or gradient page titles.
 |------|---------|
 | [app.js](app.js) | Central controller, routing, API layer |
 | [js/modules/internal-tools-modal.js](js/modules/internal-tools-modal.js) | Triple-click the brand icon to open Internal tools: About/version, retained upload attempts, and filterable application/Demon logs and feature journal; lazy loaded with bounded pages and no polling |
-| [js/modules/settings-controller.js](js/modules/settings-controller.js) | App settings, split into General / LLMs / KEYS / Integrations section tabs (panels stay in the DOM so dirty tracking and the save bar keep reading hidden-tab controls; `_initSettingsTabs` owns click + arrow-key switching). Git Guard trailer cleanup and completed-session sharing are always on (no switches). The legacy one-shot **Export Data** button and progress modal remain ([js/modules/data-export-modal.js](js/modules/data-export-modal.js)) |
+| [js/modules/settings-controller.js](js/modules/settings-controller.js) | App settings, split into General / LLMs / KEYS section tabs (panels stay in the DOM so dirty tracking and the save bar keep reading hidden-tab controls; `_initSettingsTabs` owns click + arrow-key switching). Git Guard trailer cleanup and completed-session sharing are always on (no switches). The legacy one-shot **Export Data** button and progress modal remain ([js/modules/data-export-modal.js](js/modules/data-export-modal.js)) |
 | [js/modules/remote-account-link.js](js/modules/remote-account-link.js) | Navigation account modal: user code, external browser link, countdown, polling and cancellation over the protected local `settings/remote-link` API. |
 | [js/modules/settings-keys.js](js/modules/settings-keys.js) | Lazy KEYS panel: create password-protected RSA-4096 keys, sync public keys to the saved API-key account, download public/encrypted private PEMs, and sign a message/file into public-verification JSON. Independent of the settings save bar. |
 | [js/modules/terminal-multitab.js](js/modules/terminal-multitab.js) | Reusable xterm.js terminal manager with per-tab lifecycle and environment picker |
@@ -61,7 +61,7 @@ title rules, uppercase utilities, inline letter spacing or gradient page titles.
 | [js/modules/script-runtimes.js](js/modules/script-runtimes.js) | The `.ps1`/`.sh`/`.py` → pwsh/bash/python table (labels, icons, Monaco language, starter templates, name rule) every script surface reads |
 | [js/modules/python-script-workbench.js](js/modules/python-script-workbench.js) | `python-script` view: Monaco editor beside a docked agent terminal for one script (see "Python script workbench" below) |
 | [js/modules/python-run-window.js](js/modules/python-run-window.js) | The little run window: argument rows + stdin in, exit code / output / return value out, no terminal (see "Python script run window" below) |
-| [js/modules/automation-launcher.js](js/modules/automation-launcher.js) | Nav "Launch" flyout (automations + Python scripts, unsigned ones disabled) and its order/show-hide customize modal over `/api/v1/automation-nav/preferences` |
+| [js/modules/automation-launcher.js](js/modules/automation-launcher.js) | Nav "Launch" flyout (automations + signed scripts; unsigned or modified scripts omitted) and its order/show-hide customize modal over `/api/v1/automation-nav/preferences` |
 | [js/modules/board-controller.js](js/modules/board-controller.js) | `board` view: the lane board — drag cards between lanes, drag lanes to reorder, filter, and the card editor with comments |
 | [js/modules/board-api.js](js/modules/board-api.js) | Board data layer: a thin client over `/api/v1/board/*` (every call rides `app.apiCall`, so cookie + tab header apply). `BoardApi.attach(app)` once from the controller |
 | [js/modules/board-card-links.js](js/modules/board-card-links.js) | Linked cards rail: project-wide key/title search, immediate link/unlink, and navigation through the card editor's unsaved-edit guard |
@@ -189,6 +189,17 @@ rewrites it when a card is flagged or unflagged. Stored story points stay on the
 not shown. Search and filters share a second
 row on the same surface. Lane headers retain their card counts. There are no lane-bottom entry
 fields: **New card** opens the editor, whose Lane selector chooses the destination.
+The settings modal includes a collapsible **Jira Cloud** section (`board-jira.js`) for the
+explicit board being edited. Since VIBE-102 it asks for a Jira board link, an API token (with a
+"Create a token" link to Atlassian) and the account email, filled in from the saved value, then
+the server's git `user.email` suggestion (`GET …/jira?settings=true`), then
+`app.appSettings.remoteAccountEmail`. **Connect** saves and then reads the board (name, issue
+count, column-to-lane map, story points field); **Pull now** pulls. Narrowing JQL, a story points
+field override and per-column lane picks sit under a collapsed Advanced section and are saved by
+Connect. There is no site, JQL-filter or Dry run input. A VB-40 JQL connection shows what it pulls
+and keeps pulling it until a board link is pasted. Both actions are independent of
+Save board. Closing/replacing the modal clears the token and ignores late responses; saving
+refreshes the toolbar status, and a pull refreshes cards. New boards must be saved first.
 The settings modal also includes **Agent context**: a default message plus default-only,
 type-only, or combined messages for each card type. `board-settings.js` owns these asynchronous,
 abortable editors and revision-checked saves. Context is sent for both Start work and Chat with

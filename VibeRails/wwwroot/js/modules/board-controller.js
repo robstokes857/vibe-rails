@@ -36,6 +36,7 @@ import { BoardApi } from './board-api.js';
 import { BoardLaneAgents } from './board-lane-agents.js';
 import { BOARD_SELECTION_STORAGE_KEY } from './board-selection.js';
 import { boardContextSection, laneAutomationSection, mountBoardContext, mountLaneAutomation } from './board-settings.js';
+import { boardJiraSection, BoardJiraPanel } from './board-jira.js';
 import { cardOrganizeSection, bindCardOrganization } from './board-card-organize.js';
 import { openBoardSharing, openSharedBoards } from './board-sharing.js';
 import { renderCardLinksSection, bindCardLinks } from './board-card-links.js';
@@ -44,8 +45,8 @@ import { openLocalCardEditor } from './board-local-card.js';
 import { cardAutomationControls, bindCardAutomations } from './board-card-automations.js';
 import { contextSectionMarkup, bindCardContext } from './board-card-context.js';
 import { cardDisplayId, cardLabel } from './board-card-label.js';
-import { renderCommentHtml, wrapSelectionAsCode, toPlainPreview } from './board-text.js';
 import { agentMadeSummary, agentProvenanceHtml, bindAgentProvenance } from './board-agent-provenance.js';
+import { renderCommentHtml, wrapSelectionAsCode, toPlainPreview } from './board-text.js';
 import { historySection, mountHistory } from './board-history.js';
 import { bindBoardReferences, canonicalSessionId } from './board-references.js';
 import { bindComposerPreview, boardTextOptions } from './board-composer-preview.js';
@@ -64,7 +65,7 @@ const CARD_TYPES = [
 ];
 const LANE_COLORS = ['#64748b', '#3b82f6', '#06b6d4', '#f59e0b', '#10b981', '#a855f7', '#ec4899'];
 const FILTERS_STORAGE_KEY = 'viberails.board.filters.v1';
-// The last board the user looked at (shared with Settings → Integrations, see board-selection.js).
+// The last board the user looked at (see board-selection.js).
 const BOARD_STORAGE_KEY = BOARD_SELECTION_STORAGE_KEY;
 const RASTER_DATA_URL_RE = /^data:image\/(?:png|jpeg|gif|webp);base64,/i;
 
@@ -105,6 +106,7 @@ export class BoardController {
         this._openCardGeneration = 0;
         this._openCardAbort = null;
         this._refreshGeneration = 0;
+        this._jiraRefreshGeneration = 0;
         this._cardPageGeneration = -1;
         this._loadedBoardId = null;
         this._pageRequests = new Map();
@@ -1176,13 +1178,15 @@ export class BoardController {
     // The toolbar pull is shown only when this board has a saved Jira connection.
     // Jira wins on the mapped fields; the status line says when the last pull ran.
     // Called fire-and-forget from refresh(), so it never rejects. The answer is dropped when a
-    // later refresh, a board switch or a navigation owns the toolbar by the time it arrives.
+    // later status/board refresh, a board switch or a navigation owns the toolbar when it arrives.
     async refreshJiraPullButton() {
         const root = this.root;
         const boardId = this.state.boardId;
         const generation = this._refreshGeneration;
+        const jiraGeneration = ++this._jiraRefreshGeneration;
         const isCurrent = () => root === this.root && root?.isConnected
-            && boardId === this.state.boardId && generation === this._refreshGeneration;
+            && boardId === this.state.boardId && generation === this._refreshGeneration
+            && jiraGeneration === this._jiraRefreshGeneration;
         let connection = null;
         try {
             if (!boardId || !this.query('[data-board-action="jira-pull"]')) return;
@@ -1195,7 +1199,7 @@ export class BoardController {
             const button = this.query('[data-board-action="jira-pull"]');
             const status = this.query('[data-jira-pull-status]');
             if (!button) return;
-            button.hidden = !(connection?.hasToken && connection?.jql);
+            button.hidden = !(connection?.hasToken && (connection?.jql || connection?.jiraBoardId));
             if (status) {
                 status.hidden = !connection?.lastReport;
                 status.textContent = connection?.lastReport || '';
@@ -1207,7 +1211,7 @@ export class BoardController {
 
     async pullFromJira() {
         if (!this.state.boardId) return;
-        this.app.showToast('Jira', 'Pulling the saved filter. Jira replaces the mapped fields.', 'info');
+        this.app.showToast('Jira', 'Pulling from Jira. Jira replaces the mapped fields.', 'info');
         try {
             const report = await BoardApi.pullJiraAsync(this.state.boardId, false);
             this.app.showToast('Jira', report?.message || 'Pull finished.', report?.outcome === 'ok' ? 'success' : 'warning');
@@ -1576,12 +1580,12 @@ export class BoardController {
         this.disposeCardPickers();
         const assigneeSelect = editor.querySelector('#board-card-assignee');
         this.cardChecks = bindCardChecks(editor, card, this.app);
+        bindAgentProvenance(editor.querySelector('[data-board-agent-provenance]'),
+            (sessionId, seekToUtc) => this.openSessionReplay({ id: sessionId }, { seekToUtc }));
         this.cardAutomations = bindCardAutomations(editor, card, {
             app: this.app,
             onQueued: () => void this.refreshSessionActivity()
         });
-        bindAgentProvenance(editor.querySelector('[data-board-agent-provenance]'),
-            (sessionId, seekToUtc) => this.openSessionReplay({ id: sessionId }, { seekToUtc }));
         if (assigneeSelect) {
             this.assigneePickerDispose = mountLlmPicker(this.app, assigneeSelect, {
                 context: 'sandbox',
@@ -2548,7 +2552,7 @@ export class BoardController {
                     </button>` : '<span></span>'}
                     <button type="button" class="btn btn-sm btn-outline-primary" data-board-save-board>${board ? 'Save board' : 'Create'}</button>
                 </div>
-                ${board ? boardContextSection() + historySection() : '<p class="board-editor-muted">Save the board to configure agent context.</p>'}
+                ${board ? boardJiraSection() + boardContextSection() + historySection() : '<p class="board-editor-muted">Save the board to configure Jira and agent context.</p>'}
             </div>
         `, { onClose: () => { this.boardSettingsDispose?.(); this.boardSettingsDispose = null; } });
 
@@ -2558,7 +2562,13 @@ export class BoardController {
         if (board) {
             const disposeContext = mountBoardContext(this.app, editor.querySelector('[data-board-context]'), board.id);
             const disposeHistory = mountHistory(editor.querySelector('[data-board-history-view]'), board.id);
-            this.boardSettingsDispose = () => { disposeContext(); disposeHistory(); };
+            const jira = new BoardJiraPanel(this.app, editor.querySelector('[data-jira-panel]'), board, action => {
+                if (this.state.boardId !== board.id) return;
+                if (action === 'pull') void this.refresh();
+                else void this.refreshJiraPullButton();
+            });
+            this.boardSettingsDispose = () => { jira.dispose(); disposeContext(); disposeHistory(); };
+            void jira.activate();
         }
         editor.querySelector('[data-board-save-board]')?.addEventListener('click', () => this.saveBoard(editor, board));
         editor.querySelector('[data-board-delete-board]')?.addEventListener('click', () => this.deleteBoard(board));

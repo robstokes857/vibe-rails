@@ -1,6 +1,5 @@
 // The last board the user looked at. Board ids are unique across projects, so a stale id from
-// another workspace simply fails to match and the first board is used. The Board view writes it;
-// Settings → Integrations reads it so a Jira save/test/pull targets the board the user has open.
+// another workspace simply fails to match and the first board is used. The Board view owns it.
 export const BOARD_SELECTION_STORAGE_KEY = 'viberails.board.selected.v1';
 
 /** The remembered board when it still exists, else the first board by position. */

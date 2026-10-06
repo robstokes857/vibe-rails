@@ -78,18 +78,22 @@ public static class JiraFieldMapping
     /// <summary>
     /// Snap to the Fibonacci scale. A configured field whose value is missing or not on the scale
     /// clears the points, so a Jira edit that removes them is not left behind. No field id means
-    /// the pull does not touch points at all.
+    /// the pull does not touch points at all. <paramref name="clearPoints"/> is set only when there
+    /// is no value to write: the card patch treats it as "set to null" and it wins over a value.
     /// </summary>
     public static int? MapPoints(JiraIssue issue, string? storyPointsFieldId, out bool clearPoints)
     {
         clearPoints = false;
         if (string.IsNullOrWhiteSpace(storyPointsFieldId))
             return null;
-        clearPoints = true;
-        if (issue.StoryPoints is not double raw || double.IsNaN(raw) || raw <= 0)
-            return null;
-        var whole = (int)Math.Round(raw, MidpointRounding.AwayFromZero);
-        return PointScale.Contains(whole) ? whole : null;
+        int? points = null;
+        if (issue.StoryPoints is double raw && !double.IsNaN(raw) && raw > 0)
+        {
+            var whole = (int)Math.Round(raw, MidpointRounding.AwayFromZero);
+            points = PointScale.Contains(whole) ? whole : null;
+        }
+        clearPoints = points is null;
+        return points;
     }
 
     public static IReadOnlyList<string> MapLabels(IReadOnlyList<string>? labels)
@@ -129,6 +133,24 @@ public static class JiraFieldMapping
         if (string.Equals(chosen.Id, currentColumnId, StringComparison.Ordinal))
             return new JiraLaneDecision(JiraLaneMatch.AlreadyThere, chosen.Id, chosen.Name, false);
         var overflow = matches.Count == 0;
+        return new JiraLaneDecision(overflow ? JiraLaneMatch.Overflow : JiraLaneMatch.Matched, chosen.Id, chosen.Name, true);
+    }
+
+    /// <summary>
+    /// The same decision for a lane already chosen through the Jira board's columns (VIBE-102).
+    /// A null or vanished lane means overflow: the overflow lane when it exists, else unresolved.
+    /// </summary>
+    public static JiraLaneDecision DecideLane(
+        string? laneId, string? currentColumnId, IReadOnlyList<BoardColumnRecord> lanes, string? overflowColumnId)
+    {
+        var chosen = laneId is null ? null : lanes.FirstOrDefault(lane => string.Equals(lane.Id, laneId, StringComparison.Ordinal));
+        var overflow = chosen is null;
+        if (chosen is null && overflowColumnId is not null)
+            chosen = lanes.FirstOrDefault(lane => string.Equals(lane.Id, overflowColumnId, StringComparison.Ordinal));
+        if (chosen is null)
+            return new JiraLaneDecision(JiraLaneMatch.Unresolved, null, null, false);
+        if (string.Equals(chosen.Id, currentColumnId, StringComparison.Ordinal))
+            return new JiraLaneDecision(JiraLaneMatch.AlreadyThere, chosen.Id, chosen.Name, false);
         return new JiraLaneDecision(overflow ? JiraLaneMatch.Overflow : JiraLaneMatch.Matched, chosen.Id, chosen.Name, true);
     }
 }

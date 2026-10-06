@@ -353,6 +353,354 @@ public sealed class JiraPullServiceTests : IDisposable
         Assert.Null(document.RootElement.GetProperty("nextPageToken").GetString());
     }
 
+    // ---------------------------------------------------------------- VIBE-102: board link
+
+    private const string RobsLink =
+        "https://robstokes857.atlassian.net/jira/software/projects/SCRUM/boards/1?filter=&groupBy=none&atlOrigin=eyJpIjoiOWI3NmJkMjE1Yjc1NDVhZjhlNDk5NDhkMmYxZjcyNDkiLCJwIjoiaiJ9";
+
+    [Fact]
+    public async Task ABoardLinkSavesTheSiteAndBoard_IgnoresTheBoardViewQuery_AndKeepsAProjectJqlForOlderVersions()
+    {
+        var service = Service();
+        var board = await BoardWithLanes();
+        var saved = await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct);
+
+        Assert.Equal("https://robstokes857.atlassian.net", saved.SiteUrl);
+        Assert.Equal("https://robstokes857.atlassian.net/jira/software/projects/SCRUM/boards/1", saved.BoardLink);
+        Assert.Equal("1", saved.JiraBoardId);
+        Assert.Equal("project = \"SCRUM\"", saved.Jql);
+        Assert.True(saved.SkipOldDone);
+        Assert.True(saved.Enabled);
+
+        var site = await Assert.ThrowsAsync<JiraConfigException>(() =>
+            service.SaveAsync(_project, board.Id, LinkSave("https://robstokes857.atlassian.net/"), null, Ct));
+        Assert.Contains("not just the site", site.Message);
+    }
+
+    [Fact]
+    public async Task ConnectReadsTheBoard_WritesItsFilterJql_AndMapsJiraColumnsOntoLanes()
+    {
+        var service = Service();
+        var board = await BoardWithLanes();
+        await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct);
+        _jira.Configuration = ScrumConfiguration();
+        _jira.FilterJql = "project = SCRUM ORDER BY Rank ASC";
+
+        var report = await service.TestAsync(_project, board.Id, Ct);
+
+        Assert.True(report.Ok, report.Error);
+        Assert.Equal("Ada", report.Account);
+        var summary = Assert.IsType<JiraBoardSummary>(report.Board);
+        Assert.Equal("SCRUM board", summary.Name);
+        Assert.Equal(12, summary.IssueCount);
+        Assert.Equal("customfield_10016", summary.StoryPointsFieldId);
+        Assert.Equal("Story point estimate", summary.StoryPointsFieldName);
+        Assert.Empty(summary.Warnings);
+        Assert.Equal(["To Do→Backlog", "In Progress→", "Done→Done"], summary.Columns.Select(c => c.Name + "→" + c.LaneName));
+        Assert.All(summary.Columns, column => Assert.True(column.Automatic));
+        Assert.Equal(JiraJql.SkipOldDoneClause, Assert.Single(_jira.CountJql));
+
+        var stored = (await _store.GetJiraConnectionAsync(_project, board.Id, Ct))!;
+        Assert.Equal("project = SCRUM ORDER BY Rank ASC", stored.Jql);
+        Assert.Equal("SCRUM board", stored.JiraBoardName);
+        Assert.Equal(["To Do", "In Progress", "Done"], JiraColumnMap.Parse(stored.ColumnMap).Select(c => c.Name));
+        Assert.NotNull(stored.LastTestedUtc);
+    }
+
+    [Fact]
+    public async Task APullReadsTheBoardsIssues_PlacesThemByColumn_AndReadsTheBoardsStoryPointsField()
+    {
+        var service = Service();
+        var board = await BoardWithLanes();
+        await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct);
+        _jira.Configuration = ScrumConfiguration();
+        await service.TestAsync(_project, board.Id, Ct);
+        var lanes = await _store.GetColumnsAsync(_project, Ct, board.Id);
+
+        _jira.Pages.Enqueue(Page(
+            Issue("100", "SCRUM-1", "2026-09-01T00:00:00.000Z", "Plan it", "Story", "Medium", "To Do") with { StatusId = "10000", StoryPoints = 5 },
+            Issue("101", "SCRUM-2", "2026-09-01T00:00:00.000Z", "Build it", "Task", "Medium", "In Progress") with { StatusId = "3" },
+            Issue("102", "SCRUM-3", "2026-09-01T00:00:00.000Z", "Ship it", "Task", "Medium", "Done") with { StatusId = "10001" }));
+        var report = await service.PullAsync(_project, board.Id, dryRun: false, Ct);
+
+        Assert.Equal("ok", report.Outcome);
+        Assert.Equal(3, report.Created);
+        Assert.Equal(JiraJql.SkipOldDoneClause, Assert.Single(_jira.BoardSearchJql));
+        Assert.Equal("customfield_10016", Assert.Single(_jira.BoardSearchFields));
+        var cards = await _store.GetCardsAsync(_project, Ct, board.Id);
+        var planned = Assert.Single(cards, card => card.Title == "Plan it");
+        Assert.Equal(lanes.Single(lane => lane.Name == "Backlog").Id, planned.ColumnId);
+        Assert.Equal(5, planned.Points);
+        Assert.Equal(lanes.Single(lane => lane.Name == "Done").Id, Assert.Single(cards, card => card.Title == "Ship it").ColumnId);
+        var parked = Assert.Single(cards, card => card.Title == "Build it");
+        var overflow = Assert.Single(await _store.GetColumnsAsync(_project, Ct, board.Id), lane => lane.Name == "Jira");
+        Assert.Equal(overflow.Id, parked.ColumnId);
+        var comment = Assert.Single((await _store.GetCardDetailAsync(_project, parked.Id, Ct))!.Comments);
+        Assert.Contains("Jira column \"In Progress\"", comment.Body);
+
+        // A lane picked for the column under Advanced wins over the automatic match.
+        var build = lanes.Single(lane => lane.Name == "Build");
+        await service.SaveAsync(_project, board.Id, LinkSave() with
+        {
+            ColumnMap = new Dictionary<string, string?> { ["In Progress"] = build.Id }
+        }, null, Ct);
+        _jira.Pages.Enqueue(Page(
+            Issue("101", "SCRUM-2", "2026-09-02T00:00:00.000Z", "Build it", "Task", "Medium", "In Progress") with { StatusId = "3" }));
+        Assert.Equal(1, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).Updated);
+        Assert.Equal(build.Id, Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id), card => card.Title == "Build it").ColumnId);
+    }
+
+    [Fact]
+    public async Task WithoutTheBoardConfiguration_ConnectWarns_AndThePullMatchesStatusNamesWithoutPoints()
+    {
+        var service = Service();
+        var board = await BoardWithLanes();
+        await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct);
+        _jira.ConfigurationOutcome = JiraCallOutcome.Forbidden;
+
+        var report = await service.TestAsync(_project, board.Id, Ct);
+        Assert.True(report.Ok);
+        Assert.Contains("status names", Assert.Single(report.Board!.Warnings));
+        Assert.Empty(report.Board.Columns);
+        var stored = (await _store.GetJiraConnectionAsync(_project, board.Id, Ct))!;
+        Assert.Equal("project = \"SCRUM\"", stored.Jql);
+        Assert.Null(stored.ColumnMap);
+
+        _jira.Pages.Enqueue(Page(
+            Issue("100", "SCRUM-1", "2026-09-01T00:00:00.000Z", "Plan it", "Story", "Medium", "Review") with { StatusId = "10000", StoryPoints = 5 }));
+        Assert.Equal(1, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).Created);
+        Assert.Null(Assert.Single(_jira.BoardSearchFields));
+        var card = Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id));
+        Assert.Equal((await _store.GetColumnsAsync(_project, Ct, board.Id)).Single(lane => lane.Name == "Review").Id, card.ColumnId);
+        Assert.Null(card.Points);
+    }
+
+    [Fact]
+    public async Task AnExpiredTokenOnTheBoardConfigurationEndsThePullAsExpired()
+    {
+        var service = Service();
+        var board = await BoardWithLanes();
+        await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct);
+        _jira.ConfigurationOutcome = JiraCallOutcome.Unauthorized;
+
+        var report = await service.PullAsync(_project, board.Id, dryRun: false, Ct);
+        Assert.Equal("expired", report.Outcome);
+        Assert.Equal(0, _jira.Searches);
+        Assert.Equal(BoardJiraAuthStatus.Expired, (await _store.GetJiraConnectionAsync(_project, board.Id, Ct))!.AuthStatus);
+    }
+
+    [Fact]
+    public async Task ALanePickOrPointsFieldChangeReappliesUnchangedIssues_ButALocalMoveStaysWhileNothingChanges()
+    {
+        var service = Service();
+        var board = await BoardWithLanes();
+        await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct);
+        _jira.Configuration = ScrumConfiguration();
+        await service.TestAsync(_project, board.Id, Ct);
+        var lanes = await _store.GetColumnsAsync(_project, Ct, board.Id);
+        var issue = Issue("100", "SCRUM-1", "2026-09-01T00:00:00.000Z", "Plan it", "Story", "Medium", "To Do") with { StatusId = "10000", StoryPoints = 5 };
+        _jira.Pages.Enqueue(Page(issue));
+        await service.PullAsync(_project, board.Id, dryRun: false, Ct);
+        var card = Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id));
+        Assert.Equal(lanes.Single(lane => lane.Name == "Backlog").Id, card.ColumnId);
+
+        // Dragged here and nothing changed in Jira or in the map: the pull leaves it alone.
+        var ready = lanes.Single(lane => lane.Name == "Ready");
+        await _board.MoveCardAsync(_project, card.Id, new BoardCardMoveRequest(ready.Id, SkipLaneAutomations: true), Ct);
+        _jira.Pages.Enqueue(Page(issue));
+        Assert.Equal(1, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).Skipped);
+        Assert.Equal(ready.Id, Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id)).ColumnId);
+
+        // A lane picked for the column applies to the same, unedited issue.
+        var review = lanes.Single(lane => lane.Name == "Review");
+        await service.SaveAsync(_project, board.Id, LinkSave() with
+        {
+            ColumnMap = new Dictionary<string, string?> { ["To Do"] = review.Id }
+        }, null, Ct);
+        _jira.Pages.Enqueue(Page(issue));
+        Assert.Equal(1, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).Updated);
+        card = Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id));
+        Assert.Equal(review.Id, card.ColumnId);
+        Assert.Contains((await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Comments,
+            comment => comment.Body.Contains("lane mapping changed", StringComparison.Ordinal));
+
+        // So does a new estimation field on the board.
+        _jira.Configuration = ScrumConfiguration() with { EstimationFieldId = "customfield_10020" };
+        _jira.Pages.Enqueue(Page(issue with { StoryPoints = 8 }));
+        Assert.Equal(1, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).Updated);
+        Assert.Equal(8, Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id)).Points);
+        _jira.Pages.Enqueue(Page(issue with { StoryPoints = 8 }));
+        Assert.Equal(1, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).Skipped);
+    }
+
+    [Fact]
+    public async Task AJqlConnectionSwitchedToABoardLink_PlacesItsExistingCardsByColumn()
+    {
+        var service = Service();
+        var board = await BoardWithLanes();
+        await service.SaveAsync(_project, board.Id, Save("secret-token"), "secret-token", Ct);
+        var issue = Issue("100", "PROJ-1", "2026-09-01T00:00:00.000Z", "Plan it", "Story", "Medium", "To Do");
+        _jira.Pages.Enqueue(Page(issue));
+        await service.PullAsync(_project, board.Id, dryRun: false, Ct);
+        var overflow = Assert.Single(await _store.GetColumnsAsync(_project, Ct, board.Id), lane => lane.Name == "Jira");
+        Assert.Equal(overflow.Id, Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id)).ColumnId);
+
+        // Same site, so the saved token is kept; the issue itself is untouched in Jira.
+        await service.SaveAsync(_project, board.Id, LinkSave("https://acme.atlassian.net/jira/software/projects/PROJ/boards/1"), null, Ct);
+        _jira.Configuration = ScrumConfiguration();
+        await service.TestAsync(_project, board.Id, Ct);
+        _jira.Pages.Enqueue(Page(issue with { StatusId = "10000" }));
+        Assert.Equal(1, (await service.PullAsync(_project, board.Id, dryRun: false, Ct)).Updated);
+
+        var backlog = (await _store.GetColumnsAsync(_project, Ct, board.Id)).Single(lane => lane.Name == "Backlog");
+        Assert.Equal(backlog.Id, Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id)).ColumnId);
+    }
+
+    [Fact]
+    public async Task ATransientConfigurationFailureStopsThePull_InsteadOfMatchingStatusNames()
+    {
+        var service = Service();
+        var board = await BoardWithLanes();
+        await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct);
+        _jira.Configuration = ScrumConfiguration();
+        await service.TestAsync(_project, board.Id, Ct);
+        _jira.Pages.Enqueue(Page(Issue("100", "SCRUM-1", "2026-09-01T00:00:00.000Z", "Plan it", "Story", "Medium", "To Do") with { StatusId = "10000" }));
+        await service.PullAsync(_project, board.Id, dryRun: false, Ct);
+        var backlog = (await _store.GetColumnsAsync(_project, Ct, board.Id)).Single(lane => lane.Name == "Backlog");
+
+        _jira.ConfigurationOutcome = JiraCallOutcome.Failed;
+        _jira.Pages.Enqueue(Page(Issue("100", "SCRUM-1", "2026-09-02T00:00:00.000Z", "Plan it", "Story", "Medium", "To Do") with { StatusId = "10000" }));
+        var report = await service.PullAsync(_project, board.Id, dryRun: false, Ct);
+
+        Assert.Equal("failed", report.Outcome);
+        Assert.Contains("next interval", report.Message);
+        Assert.Single(_jira.BoardSearchJql);
+        Assert.Equal(backlog.Id, Assert.Single(await _store.GetCardsAsync(_project, Ct, board.Id)).ColumnId);
+        var connection = (await _store.GetJiraConnectionAsync(_project, board.Id, Ct))!;
+        Assert.True(connection.Enabled);
+        Assert.Equal(BoardJiraAuthStatus.Saved, connection.AuthStatus);
+    }
+
+    [Fact]
+    public async Task NarrowingJqlIsAndedOntoTheBoard_AndOrderByIsRefused()
+    {
+        var service = Service();
+        var board = await BoardWithLanes();
+        await service.SaveAsync(_project, board.Id, LinkSave() with { NarrowJql = "  assignee = currentUser()  ", SkipOldDone = false },
+            "secret-token", Ct);
+        _jira.Configuration = ScrumConfiguration() with { SubQuery = "resolution = EMPTY" };
+        _jira.Pages.Enqueue(Page());
+        await service.PullAsync(_project, board.Id, dryRun: false, Ct);
+        Assert.Equal("(resolution = EMPTY) AND (assignee = currentUser())", Assert.Single(_jira.BoardSearchJql));
+
+        var ordered = await Assert.ThrowsAsync<JiraConfigException>(() => service.SaveAsync(_project, board.Id,
+            LinkSave() with { NarrowJql = "assignee = currentUser() ORDER BY rank" }, null, Ct));
+        Assert.Contains("ORDER BY", ordered.Message);
+    }
+
+    [Fact]
+    public async Task SavingWithoutALinkKeepsTheBoard_AndADifferentBoardStartsItsColumnMapAgain()
+    {
+        var service = Service();
+        var board = await BoardWithLanes();
+        await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct);
+        _jira.Configuration = ScrumConfiguration();
+        _jira.FilterJql = "project = SCRUM ORDER BY Rank ASC";
+        await service.TestAsync(_project, board.Id, Ct);
+
+        // Only the switch changes: no link, no site, no JQL in the body.
+        var toggled = await service.SaveAsync(_project, board.Id,
+            new BoardJiraConnectionSave("", "ada@example.com", null, "", false), null, Ct);
+        Assert.Equal("1", toggled.JiraBoardId);
+        Assert.Equal("project = SCRUM ORDER BY Rank ASC", toggled.Jql);
+        Assert.NotNull(toggled.ColumnMap);
+        Assert.False(toggled.Enabled);
+
+        // The same board pasted again keeps what Connect read; another board starts over.
+        var again = await service.SaveAsync(_project, board.Id, LinkSave(), null, Ct);
+        Assert.Equal("SCRUM board", again.JiraBoardName);
+        Assert.NotNull(again.ColumnMap);
+        // Picks sent with another board's link were made for the previous board's columns.
+        var other = await service.SaveAsync(_project, board.Id,
+            LinkSave("https://robstokes857.atlassian.net/jira/software/c/projects/OPS/boards/7/backlog") with
+            {
+                ColumnMap = new Dictionary<string, string?> { ["To Do"] = "col_from_board_1" }
+            }, null, Ct);
+        Assert.Equal("7", other.JiraBoardId);
+        Assert.Null(other.JiraBoardName);
+        Assert.Null(other.ColumnMap);
+        Assert.Equal("project = \"OPS\"", other.Jql);
+        Assert.Equal(again.Id, other.Id);
+    }
+
+    [Fact]
+    public async Task DetailsResolveTheSavedColumnMap_AndASavedEmailNeedsNoSuggestion()
+    {
+        var service = Service();
+        var board = await BoardWithLanes();
+        Assert.Null((await service.GetDetailsAsync(_project, board.Id, Ct)).Connection);
+
+        await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct);
+        _jira.Configuration = ScrumConfiguration();
+        await service.TestAsync(_project, board.Id, Ct);
+
+        var details = await service.GetDetailsAsync(_project, board.Id, Ct);
+        Assert.Equal(["Backlog", null, "Done"], details.Columns.Select(column => column.LaneName));
+        Assert.Equal(5, details.Lanes.Count);
+        Assert.Null(details.SuggestedEmail);
+        Assert.True(details.Connection!.HasToken);
+    }
+
+    [Fact]
+    public async Task AnOlderVersionsUpsertLeavesTheBoardLinkColumnsAsTheyWere()
+    {
+        var service = Service();
+        var board = await BoardWithLanes();
+        var saved = await service.SaveAsync(_project, board.Id, LinkSave(), "secret-token", Ct);
+
+        // The board/12 statement an older binary runs: it names none of the board/28 columns.
+        await using (var db = new SqliteConnection(_connectionString))
+        {
+            await db.OpenAsync(Ct);
+            await using var command = db.CreateCommand();
+            command.CommandText = """
+                INSERT INTO BoardJiraConnections
+                    (Id, ProjectPath, BoardId, SiteUrl, Email, HasToken, AuthStatus, StoryPointsFieldId,
+                     Jql, Enabled, DisabledReason, OverflowColumnId, LastTestedUTC, LastPullUTC, LastReport)
+                SELECT $id, ProjectPath, BoardId, SiteUrl, Email, HasToken, AuthStatus, NULL,
+                       'project = SCRUM AND updated >= -7d', 0, NULL, NULL, NULL, NULL, 'ok: from 1.11'
+                FROM BoardJiraConnections WHERE Id = $id
+                ON CONFLICT(ProjectPath, BoardId) DO UPDATE SET
+                    Id = excluded.Id, SiteUrl = excluded.SiteUrl, Email = excluded.Email, HasToken = excluded.HasToken,
+                    AuthStatus = excluded.AuthStatus, StoryPointsFieldId = excluded.StoryPointsFieldId,
+                    Jql = excluded.Jql, Enabled = excluded.Enabled, DisabledReason = excluded.DisabledReason,
+                    OverflowColumnId = excluded.OverflowColumnId, LastTestedUTC = excluded.LastTestedUTC,
+                    LastPullUTC = excluded.LastPullUTC, LastReport = excluded.LastReport;
+                """;
+            command.Parameters.AddWithValue("$id", saved.Id);
+            Assert.Equal(1, await command.ExecuteNonQueryAsync(Ct));
+        }
+
+        var after = (await _store.GetJiraConnectionAsync(_project, board.Id, Ct))!;
+        Assert.Equal("project = SCRUM AND updated >= -7d", after.Jql);
+        Assert.Equal(saved.BoardLink, after.BoardLink);
+        Assert.Equal("1", after.JiraBoardId);
+        Assert.True(after.SkipOldDone);
+    }
+
+    private static BoardJiraConnectionSave LinkSave(string link = RobsLink) =>
+        new("", "ada@example.com", null, "", true, link);
+
+    private static JiraBoardConfiguration ScrumConfiguration() => new(
+        "10010", null,
+        [
+            new JiraBoardColumn("To Do", ["10000"]),
+            new JiraBoardColumn("In Progress", ["3"]),
+            new JiraBoardColumn("Done", ["10001"]),
+            new JiraBoardColumn("Unmapped", [])
+        ],
+        "customfield_10016", "Story point estimate");
+
     private string LockPath => Path.Combine(_root, JiraPullLock.FileName);
 
     private JiraPullService Service() => new(_store, _board, _jira, _secrets, new JiraPullLock(LockPath));
@@ -395,12 +743,66 @@ public sealed class JiraPullServiceTests : IDisposable
         }
     }
 
-    private sealed class ScriptedJira : IJiraCloudClient
+    internal sealed class ScriptedJira : IJiraCloudClient
     {
         public Queue<JiraSearchPage> Pages { get; } = new();
         public JiraCallOutcome Outcome { get; set; } = JiraCallOutcome.Ok;
         public string? Detail { get; set; }
         public int Searches { get; private set; }
+
+        // Board calls (VIBE-102).
+        public JiraBoard Board { get; set; } = new("1", "SCRUM board", "scrum", "SCRUM");
+        public JiraCallOutcome BoardOutcome { get; set; } = JiraCallOutcome.Ok;
+        public JiraBoardConfiguration? Configuration { get; set; }
+        public JiraCallOutcome ConfigurationOutcome { get; set; } = JiraCallOutcome.Ok;
+        public string? FilterJql { get; set; }
+        public int Count { get; set; } = 12;
+        public List<string?> BoardSearchJql { get; } = [];
+        public List<string?> BoardSearchFields { get; } = [];
+        public List<string?> CountJql { get; } = [];
+        public int BoardCalls { get; private set; }
+
+        public Task<JiraCallResult<JiraBoard>> GetBoardAsync(
+            string siteUrl, string email, string apiToken, string boardId, CancellationToken cancellationToken)
+        {
+            BoardCalls++;
+            return Task.FromResult(BoardOutcome == JiraCallOutcome.Ok
+                ? new JiraCallResult<JiraBoard>(JiraCallOutcome.Ok, Board with { Id = boardId }, null, null)
+                : new JiraCallResult<JiraBoard>(BoardOutcome, null, $"Jira has no board {boardId} that this account can see.", null));
+        }
+
+        public Task<JiraCallResult<JiraBoardConfiguration>> GetBoardConfigurationAsync(
+            string siteUrl, string email, string apiToken, string boardId, CancellationToken cancellationToken) =>
+            Task.FromResult(ConfigurationOutcome == JiraCallOutcome.Ok && Configuration is not null
+                ? new JiraCallResult<JiraBoardConfiguration>(JiraCallOutcome.Ok, Configuration, null, null)
+                : new JiraCallResult<JiraBoardConfiguration>(ConfigurationOutcome == JiraCallOutcome.Ok ? JiraCallOutcome.Forbidden : ConfigurationOutcome,
+                    null, $"Jira did not let this account read the configuration of board {boardId}.", null));
+
+        public Task<JiraCallResult<JiraSearchPage>> SearchBoardAsync(
+            string siteUrl, string email, string apiToken, string boardId, string? jql, string? nextPageToken,
+            string? storyPointsFieldId, CancellationToken cancellationToken)
+        {
+            Searches++;
+            Assert.Equal("secret-token", apiToken);
+            BoardSearchJql.Add(jql);
+            BoardSearchFields.Add(storyPointsFieldId);
+            if (Outcome != JiraCallOutcome.Ok)
+                return Task.FromResult(new JiraCallResult<JiraSearchPage>(Outcome, null, Detail, TimeSpan.FromSeconds(1)));
+            return Task.FromResult(new JiraCallResult<JiraSearchPage>(JiraCallOutcome.Ok, Pages.Dequeue(), null, null));
+        }
+
+        public Task<JiraCallResult<JiraIssueCount>> CountBoardIssuesAsync(
+            string siteUrl, string email, string apiToken, string boardId, string? jql, CancellationToken cancellationToken)
+        {
+            CountJql.Add(jql);
+            return Task.FromResult(new JiraCallResult<JiraIssueCount>(JiraCallOutcome.Ok, new JiraIssueCount(Count), null, null));
+        }
+
+        public Task<JiraCallResult<string>> GetFilterJqlAsync(
+            string siteUrl, string email, string apiToken, string filterId, CancellationToken cancellationToken) =>
+            Task.FromResult(FilterJql is null
+                ? new JiraCallResult<string>(JiraCallOutcome.NotFound, null, "No filter.", null)
+                : new JiraCallResult<string>(JiraCallOutcome.Ok, FilterJql, null, null));
 
         public Task<JiraCallResult<JiraSearchPage>> SearchAsync(
             string siteUrl, string email, string apiToken, string jql, string? nextPageToken,
@@ -440,6 +842,88 @@ public sealed class JiraCloudClientHttpTests
     }
 
     [Fact]
+    public async Task BoardCallsUseTheAgileAndEnhancedSoftwareEndpointsOnTheSavedOrigin()
+    {
+        var handler = new QueueHandler();
+        handler.Enqueue(HttpStatusCode.OK, """{"id":1,"name":"SCRUM board","type":"scrum","location":{"projectKey":"SCRUM"}}""");
+        handler.Enqueue(HttpStatusCode.OK, """
+            {"filter":{"id":"10010"},"subQuery":{"query":"resolution = EMPTY"},
+             "columnConfig":{"columns":[
+               {"name":"To Do","statuses":[{"id":"10000"},{"id":1}]},
+               {"name":"Done","statuses":[{"id":"10001"}]}]},
+             "estimation":{"type":"field","field":{"fieldId":"customfield_10016","displayName":"Story point estimate"}}}
+            """);
+        handler.Enqueue(HttpStatusCode.OK, """
+            {"isLast":true,"nextPageToken":"ignored","issues":[{"id":"100","key":"SCRUM-1","fields":{
+              "summary":"Plan it","status":{"id":"10000","name":"To Do"},"issuetype":{"name":"Story"},
+              "updated":"2026-09-01T00:00:00.000+0000","customfield_10016":3}}]}
+            """);
+        handler.Enqueue(HttpStatusCode.OK, """{"count":153}""");
+        handler.Enqueue(HttpStatusCode.OK, """{"id":"10010","jql":"project = SCRUM ORDER BY Rank ASC"}""");
+        using var http = new HttpClient(handler);
+        var client = new JiraCloudClient(http);
+        var ct = TestContext.Current.CancellationToken;
+        const string site = "https://acme.atlassian.net";
+
+        var board = await client.GetBoardAsync(site, "ada@example.com", "secret", "1", ct);
+        Assert.Equal(new JiraBoard("1", "SCRUM board", "scrum", "SCRUM"), board.Value);
+        Assert.Equal("/rest/agile/1.0/board/1", handler.Paths[^1]);
+
+        var config = (await client.GetBoardConfigurationAsync(site, "ada@example.com", "secret", "1", ct)).Value!;
+        Assert.Equal("/rest/agile/1.0/board/1/configuration", handler.Paths[^1]);
+        Assert.Equal("10010", config.FilterId);
+        Assert.Equal("resolution = EMPTY", config.SubQuery);
+        Assert.Equal(["10000", "1"], config.Columns[0].StatusIds);
+        Assert.Equal("customfield_10016", config.EstimationFieldId);
+        Assert.Equal("Story point estimate", config.EstimationFieldName);
+
+        var page = (await client.SearchBoardAsync(site, "ada@example.com", "secret", "1", "labels = ui", null, "customfield_10016", ct)).Value!;
+        Assert.StartsWith("/rest/software/1.0/board/1/issue?", handler.Paths[^1], StringComparison.Ordinal);
+        Assert.Contains("jql=labels%20%3D%20ui", handler.Paths[^1], StringComparison.Ordinal);
+        Assert.Contains("customfield_10016", handler.Paths[^1], StringComparison.Ordinal);
+        Assert.Null(page.NextPageToken);
+        var issue = Assert.Single(page.Issues);
+        Assert.Equal("10000", issue.StatusId);
+        Assert.Equal(3, issue.StoryPoints);
+
+        Assert.Equal(153, (await client.CountBoardIssuesAsync(site, "ada@example.com", "secret", "1", null, ct)).Value!.Count);
+        Assert.Equal("/rest/software/1.0/board/1/issue/approximate-count", handler.Paths[^1]);
+
+        Assert.Equal("project = SCRUM ORDER BY Rank ASC", (await client.GetFilterJqlAsync(site, "ada@example.com", "secret", "10010", ct)).Value);
+        Assert.Equal("/rest/api/3/filter/10010", handler.Paths[^1]);
+        Assert.All(handler.Hosts, host => Assert.Equal("acme.atlassian.net", host));
+        Assert.All(handler.Authorizations, value => Assert.StartsWith("Basic ", value, StringComparison.Ordinal));
+        Assert.DoesNotContain(handler.Paths, path => path.Contains("/rest/agile/1.0/board/1/issue", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task BoardRefusalsAreTyped_AndARedirectIsAFailureThatIsNotFollowed()
+    {
+        var handler = new QueueHandler();
+        handler.Enqueue(HttpStatusCode.Forbidden, "");
+        handler.Enqueue(HttpStatusCode.NotFound, "");
+        handler.Enqueue(HttpStatusCode.Unauthorized, "");
+        handler.Enqueue(HttpStatusCode.Redirect, "");
+        handler.Enqueue(HttpStatusCode.OK, """{"estimation":{"type":"field","field":{"fieldId":"timeoriginalestimate"}}}""");
+        using var http = new HttpClient(handler);
+        var client = new JiraCloudClient(http);
+        var ct = TestContext.Current.CancellationToken;
+        const string site = "https://acme.atlassian.net";
+
+        Assert.Equal(JiraCallOutcome.Forbidden, (await client.GetBoardConfigurationAsync(site, "a@b.c", "secret", "1", ct)).Outcome);
+        // The pull treats a board it can't see as a failed pull, not an expired token.
+        Assert.Equal(JiraCallOutcome.Failed, (await client.SearchBoardAsync(site, "a@b.c", "secret", "1", null, null, null, ct)).Outcome);
+        Assert.Equal(JiraCallOutcome.Unauthorized, (await client.GetBoardAsync(site, "a@b.c", "secret", "1", ct)).Outcome);
+        Assert.Equal(JiraCallOutcome.Failed, (await client.GetBoardAsync(site, "a@b.c", "secret", "1", ct)).Outcome);
+        Assert.Equal(4, handler.Paths.Count);
+        // Time tracking is not a story points field.
+        Assert.Null((await client.GetBoardConfigurationAsync(site, "a@b.c", "secret", "1", ct)).Value!.EstimationFieldId);
+
+        await Assert.ThrowsAsync<JiraConfigException>(() => client.GetBoardAsync(site, "a@b.c", "secret", "1/../2", ct));
+        await Assert.ThrowsAsync<JiraConfigException>(() => client.GetFilterJqlAsync(site, "a@b.c", "secret", "-1", ct));
+    }
+
+    [Fact]
     public async Task BadJqlReportsTheJiraMessage()
     {
         var handler = new QueueHandler();
@@ -458,6 +942,9 @@ public sealed class JiraCloudClientHttpTests
         private readonly Queue<HttpResponseMessage> _responses = new();
         public string? LastPath { get; private set; }
         public string? LastAuthorization { get; private set; }
+        public List<string> Paths { get; } = [];
+        public List<string> Hosts { get; } = [];
+        public List<string> Authorizations { get; } = [];
 
         public void Enqueue(HttpStatusCode status, string body, string? retryAfter = null)
         {
@@ -471,6 +958,9 @@ public sealed class JiraCloudClientHttpTests
         {
             LastPath = request.RequestUri!.PathAndQuery;
             LastAuthorization = request.Headers.Authorization?.ToString();
+            Paths.Add(LastPath);
+            Hosts.Add(request.RequestUri.Host);
+            Authorizations.Add(LastAuthorization ?? string.Empty);
             return Task.FromResult(_responses.Dequeue());
         }
     }

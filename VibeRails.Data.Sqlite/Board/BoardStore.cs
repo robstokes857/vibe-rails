@@ -1883,6 +1883,17 @@ public sealed partial class BoardStore : IBoardStore
             SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardCards ADD COLUMN AgentMadeBy TEXT");
             SqliteSchema.AdoptStatement(db, transaction, "ALTER TABLE BoardCards ADD COLUMN AgentMadeSessionId TEXT");
         });
+        // board/28 (VIBE-102): Jira connections made from a board link (BoardStore.Jira.cs). Additive and
+        // nullable with no backfill; an older binary's upsert never names the columns, so it keeps them.
+        SqliteMigrationRunner.Apply(connection, "board", 28, MigrationKind.Additive, (db, transaction) =>
+        {
+            foreach (var statement in JiraBoardLinkColumnsSql)
+                SqliteSchema.AdoptStatement(db, transaction, statement);
+        });
+        // board/29 (VIBE-102): BoardJiraLinks.Mapping, so a changed lane map or points field re-applies
+        // unchanged issues. Additive and nullable; an older binary's link writes never name it.
+        SqliteMigrationRunner.Apply(connection, "board", 29, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.AdoptStatement(db, transaction, JiraLinkMappingColumnSql));
         SqliteMigrationRunner.Apply(connection, "board-attention", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, AttentionSchemaSql));
         SqliteMigrationRunner.Apply(connection, "board-lane-dispatch", 1, MigrationKind.Additive, ApplyLaneDispatchSchema);
