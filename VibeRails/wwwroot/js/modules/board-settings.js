@@ -76,7 +76,7 @@ export function mountBoardContext(app, element, boardId) {
         load: extra => BoardApi.getBoardContextAsync(boardId, extra),
         render: ({ context }) => `
             <label class="board-editor-label" for="board-context-default">Default message</label>
-            <textarea id="board-context-default" class="form-control form-control-sm mb-3" rows="4" maxlength="4000" placeholder="Context for every card…">${escapeHtml(context.defaultMessage)}</textarea>
+            <textarea id="board-context-default" class="form-control form-control-sm mb-3" rows="4" maxlength="4000" placeholder="Context for every card…" spellcheck="true">${escapeHtml(context.defaultMessage)}</textarea>
             <p class="board-editor-muted">For each card type, use the default, replace it, or send both (default first). An empty type-only message sends no board context.</p>
             ${TYPES.map(([type, label]) => {
                 const override = context.typeOverrides.find(item => item.type === type);
@@ -86,7 +86,7 @@ export function mountBoardContext(app, element, boardId) {
                     <select id="board-context-mode-${type}" class="form-select form-select-sm mb-2" data-context-mode="${type}">
                         ${[['default', 'Default only'], ['replace', 'Type-specific only'], ['append', 'Default + type-specific']].map(([value, text]) => `<option value="${value}" ${value === mode ? 'selected' : ''}>${text}</option>`).join('')}
                     </select>
-                    <textarea class="form-control form-control-sm" rows="3" maxlength="4000" data-context-message="${type}" aria-label="${label} message">${escapeHtml(override?.message || '')}</textarea>
+                    <textarea class="form-control form-control-sm" rows="3" maxlength="4000" data-context-message="${type}" aria-label="${label} message" spellcheck="true">${escapeHtml(override?.message || '')}</textarea>
                 </details>`;
             }).join('')}
             <button type="button" class="btn btn-sm btn-outline-primary mt-2" data-settings-save>Save context</button>`,

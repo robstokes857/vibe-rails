@@ -16,9 +16,9 @@ export function localCardEditorHtml({ card, projectPath, boardName, columns }) {
             Changes are saved to that board.<div class="board-local-project">${escapeHtml(projectPath)}</div></div>
         <form data-local-card-form>
             <label class="form-label" for="local-card-title">Title</label>
-            <input id="local-card-title" class="form-control" name="title" required value="${escapeHtml(card.title || '')}">
+            <input id="local-card-title" class="form-control" name="title" required spellcheck="true" value="${escapeHtml(card.title || '')}">
             <label class="form-label mt-3" for="local-card-description">Description</label>
-            <textarea id="local-card-description" class="form-control" name="description" rows="8" maxlength="100000">${escapeHtml(card.description || '')}</textarea>
+            <textarea id="local-card-description" class="form-control" name="description" rows="8" maxlength="100000" spellcheck="true">${escapeHtml(card.description || '')}</textarea>
             <div class="row g-3 mt-1 mx-0">
                 <div class="col-sm-6"><label class="form-label" for="local-card-lane">Lane</label>
                     <select id="local-card-lane" class="form-select" name="columnId">${options((columns || []).map(column => [column.id, column.name]), card.columnId)}</select></div>
@@ -39,7 +39,7 @@ export function localCardEditorHtml({ card, projectPath, boardName, columns }) {
         <div data-local-card-comments></div>
         <form data-local-comment-form class="mt-3">
             <label class="form-label" for="local-card-comment">Add a comment</label>
-            <textarea id="local-card-comment" class="form-control" name="body" rows="3" required></textarea>
+            <textarea id="local-card-comment" class="form-control" name="body" rows="3" required spellcheck="true"></textarea>
             <button type="submit" class="btn btn-outline-primary btn-sm mt-2">Post comment</button>
         </form>
     </div>`;

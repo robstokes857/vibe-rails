@@ -75,6 +75,31 @@ test('the card editor fills the viewport and only .board-editor-scroll overflows
     assert.doesNotMatch(rule(css, '.board-comments'), /overflow-y:\s*auto/);
 });
 
+test('card prose asks the browser for spell check and identifiers do not', () => {
+    const source = readFileSync(controllerPath, 'utf8');
+    const open = source.slice(
+        source.indexOf('async openCardEditor'),
+        source.indexOf('bindCardEditor(editor, card)')
+    );
+    assert.match(open, /id="board-card-title"[\s\S]*?spellcheck="true"/);
+    assert.match(open, /id="board-chat-question"[\s\S]*?spellcheck="true"/);
+    const composer = source.slice(source.indexOf('composerMarkup({'), source.indexOf('bindComposer(composer,'));
+    assert.match(composer, /data-board-composer-input[\s\S]*?spellcheck="true"/);
+    assert.match(open, /name="sha"[\s\S]*?spellcheck="false"/);
+    assert.match(open, /name="displayName"[\s\S]*?spellcheck="false"/);
+    assert.match(open, /id="board-card-display-id"[^>]*spellcheck="false"/);
+    const html = readFileSync(indexPath, 'utf8');
+    assert.match(html, /data-board-search[\s\S]*?spellcheck="false"/);
+
+    const local = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/board-local-card.js'), 'utf8');
+    for (const id of ['local-card-title', 'local-card-description', 'local-card-comment']) {
+        assert.match(local, new RegExp(`id="${id}"[^>]*spellcheck="true"`));
+    }
+    const settings = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/board-settings.js'), 'utf8');
+    assert.match(settings, /id="board-context-default"[^>]*spellcheck="true"/);
+    assert.match(settings, /data-context-message="\$\{type\}"[^>]*spellcheck="true"/);
+});
+
 test('the new-card description stays in document flow while auto-growing', () => {
     const css = boardCss();
     const description = rule(css, '.board-block:first-of-type .board-composer-input');
