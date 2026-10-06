@@ -51,8 +51,11 @@ public static class DataExportRoutes
                 ("ok", "Data exported successfully."),
             DataExportStatus.NoApiKey =>
                 ("no_api_key", "Save a valid API key before exporting data."),
+            // Route-owned wording only: a local Front process (VB-8NI09-170) says why it is paused.
             DataExportStatus.NotConfigured =>
-                ("not_configured", "Data export is not configured."),
+                ("not_configured", VibeRails.Services.LocalFront.LocalFrontMode.PausesProductionPublishing
+                    ? VibeRails.Services.LocalFront.LocalFrontMode.PausedMessage("Data export")
+                    : "Data export is not configured."),
             DataExportStatus.Busy =>
                 ("busy", "A data export is already in progress."),
             DataExportStatus.InvalidApiKey =>

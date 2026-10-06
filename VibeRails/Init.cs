@@ -208,11 +208,18 @@ namespace VibeRails
             using var settingsLease = Config.AcquireWriteLock();
             var settings = Config.LoadFresh();
             ParserConfigs.SetRemoteAccess(settings.RemoteAccess);
-            ParserConfigs.SetApiKey(settings.ApiKey);
+            // Local Front mode (VB-8NI09-170) uses the key the local stack issued. The saved
+            // production key is never this process's runtime key, so no Front client can send it.
+            var localFront = Services.LocalFront.LocalFrontMode.Current;
+            var apiKey = localFront.Active
+                ? new Services.LocalFront.LocalFrontKeyStore().Read(localFront.OriginText)?.ApiKey ?? string.Empty
+                : settings.ApiKey;
+            ParserConfigs.SetApiKey(apiKey);
             // A hand-edited legacy/inconsistent file must never make the relay effective without
             // a credential, even if RouteThroughVibeRailsAi was set to true.
             ParserConfigs.SetRouteThroughVibeRailsAi(
-                settings.RouteThroughVibeRailsAi && !string.IsNullOrWhiteSpace(settings.ApiKey));
+                settings.RouteThroughVibeRailsAi && !string.IsNullOrWhiteSpace(settings.ApiKey)
+                && !string.IsNullOrWhiteSpace(apiKey));
             ParserConfigs.SetUseVsCodeTheme(settings.UseVsCodeTheme);
             if (!settings.McpEnabled || !settings.DataExportOptIn || !settings.DataRetentionEnabled)
             {

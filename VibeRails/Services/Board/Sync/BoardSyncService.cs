@@ -62,6 +62,16 @@ public sealed class BoardSyncService(
 {
     public const string FeatureName = "board-sync";
 
+    /// <summary>
+    /// Board sync is paused in a local Front process (VB-8NI09-170), before any lock, link change or
+    /// network call, so entering or leaving local mode changes no sync state.
+    /// </summary>
+    internal static void ThrowIfPausedForLocalFront()
+    {
+        if (LocalFront.LocalFrontMode.PausesProductionPublishing)
+            throw new BoardValidationException(LocalFront.LocalFrontMode.PausedMessage("Board sync"));
+    }
+
     // Bounds one tick: 25 × 20 entries each way. A board further behind catches up over ticks.
     private const int MaxPushBatchesPerSync = 25;
     private const int PushBatchSize = 20;
@@ -79,6 +89,7 @@ public sealed class BoardSyncService(
 
     public async Task<BoardSyncStatus?> SetPublishedAsync(string projectPath, string boardId, bool enabled, CancellationToken cancellationToken, bool includeActivity = false)
     {
+        ThrowIfPausedForLocalFront();
         using var held = syncLock.TryAcquire()
             ?? throw new BoardValidationException("A Board sync is already running. Try again when it finishes.");
         var board = await store.GetBoardAsync(projectPath, boardId, cancellationToken);
@@ -155,6 +166,7 @@ public sealed class BoardSyncService(
 
     public async Task<BoardSyncStatus?> SyncNowAsync(string projectPath, string boardId, CancellationToken cancellationToken)
     {
+        ThrowIfPausedForLocalFront();
         using var held = syncLock.TryAcquire()
             ?? throw new BoardValidationException("A Board sync is already running. Try again when it finishes.");
         var board = await store.GetBoardAsync(projectPath, boardId, cancellationToken);
@@ -168,6 +180,10 @@ public sealed class BoardSyncService(
 
     public async Task SyncDueAsync(CancellationToken cancellationToken)
     {
+        // A local Front process leaves sync to normal VibeRails processes; its queue, links and
+        // cursors are untouched, so nothing has to be undone afterwards.
+        if (LocalFront.LocalFrontMode.PausesProductionPublishing)
+            return;
         // Without a key nothing can leave the machine; the status view says so per board.
         if (!client.IsConfigured)
             return;

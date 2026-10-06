@@ -89,12 +89,17 @@ public sealed class SessionDataExportService : ISessionDataExportService
         _featureLog = featureLog ?? NullFeatureLog.Instance;
     }
 
-    public bool IsConfigured => TryResolveConfiguration(out _, out _);
+    public bool IsConfigured => !LocalFront.LocalFrontMode.PausesProductionPublishing && TryResolveConfiguration(out _, out _);
 
     public async Task<SessionDataExportResult> ExportSessionAsync(
         string sessionId,
         CancellationToken cancellationToken)
     {
+        // Uploads go to production. A local Front process (VB-8NI09-170) neither uploads nor
+        // records an attempt, so the session stays queued for the next normal run.
+        if (LocalFront.LocalFrontMode.PausesProductionPublishing)
+            return new SessionDataExportResult(SessionDataExportStatus.NotConfigured, sessionId,
+                Detail: LocalFront.LocalFrontMode.PausedMessage("Session upload"));
         var attempt = new UploadAttempt(
             Guid.NewGuid().ToString("D"),
             Guid.TryParse(sessionId, out var sourceId) ? sourceId.ToString("D") : "Unknown session");

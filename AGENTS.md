@@ -94,6 +94,7 @@ file; it is reference material, not instructions.
 | UI and end-to-end tests | [UITests guide](UITests/AGENTS.md) |
 | VS Code extension | [extension guide](vscode-viberails/AGENTS.md) |
 | API exposure and authentication | [API_SEC.md](API_SEC.md) |
+| Local Front development (VS "VibeRails + Local Front" profile) | [LocalFront guide](VibeRails/Services/LocalFront/AGENTS.md), [setup runbook](../vibe-books/local-development/visual-studio.md) |
 
 ## Rules that are easy to miss
 

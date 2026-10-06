@@ -1202,7 +1202,11 @@ namespace VibeRails.DTOs
         // Responses always contain an explicit value; the default/base LLM nudge defaults on.
         bool? CreateVibeStoryTracking = null,
         // Independent saved/custom-environment nudge, default off. Omitted requests preserve it.
-        bool? CreateVibeStoryTrackingCustomEnvs = null
+        bool? CreateVibeStoryTrackingCustomEnvs = null,
+        // Response-only: the local Front origin when this process runs in local Front mode
+        // (VB-8NI09-170). ApiKey and RemoteAccountEmail then describe the local key, and
+        // production publishing is paused. Null in a normal run.
+        string? LocalFrontOrigin = null
     );
     // Append new fields at the END of this record, with a default. Inserting one in the middle
     // shifts every positional argument after it: call sites only fail to compile when the types

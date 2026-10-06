@@ -35,6 +35,7 @@ using VibeRails.Services.GitPreflight;
 using VibeRails.Services.Jobs;
 using VibeRails.Services.HttpRelay;
 using VibeRails.Services.Diagnostics;
+using VibeRails.Services.LocalFront;
 
 namespace VibeRails
 {
@@ -50,6 +51,15 @@ namespace VibeRails
                 "1",
                 StringComparison.Ordinal);
             localApiBaseUrl ??= "http://127.0.0.1:0";
+            // Local Front mode (VB-8NI09-170) is decided once per process from its environment.
+            var localFront = LocalFrontMode.Current;
+            if (localFront.Requested)
+            {
+                // Fail closed: nothing this process sends through IHttpClientFactory may reach
+                // viberails.ai, whatever a client's configured or pinned URL says.
+                serviceCollection.ConfigureHttpClientDefaults(client =>
+                    client.AddHttpMessageHandler(() => new ProductionFrontTripwireHandler()));
+            }
 
             // Published so route mapping gates on the answer resolved here rather than deriving its
             // own from a different argv array. See <see cref="ProcessRole"/>.
@@ -74,7 +84,7 @@ namespace VibeRails
             serviceCollection.AddHttpClient<ISummaryService, SummaryService>(
                 x =>
                 {
-                    x.BaseAddress = new Uri("https://viberails.ai");
+                    x.BaseAddress = localFront.Active ? localFront.Origin : new Uri("https://viberails.ai");
                 });
 
             serviceCollection.AddScoped<IFileService, FileService>();
@@ -88,7 +98,18 @@ namespace VibeRails
                         AllowAutoRedirect = false,
                         UseCookies = false
                     });
-                serviceCollection.AddSingleton<IRemoteAccountKeyStore, ApiKeyStore>();
+                if (localFront.Active)
+                {
+                    // Sign-in against the local Front saves its key in the local key file, never in
+                    // settings.json beside the production key.
+                    serviceCollection.AddSingleton<LocalFrontKeyStore>();
+                    serviceCollection.AddSingleton<IRemoteAccountKeyStore>(sp => new LocalFrontAccountKeyStore(
+                        sp.GetRequiredService<LocalFrontKeyStore>(), localFront.OriginText, sp.GetRequiredService<IRemoteHttpRelayClient>()));
+                }
+                else
+                {
+                    serviceCollection.AddSingleton<IRemoteAccountKeyStore, ApiKeyStore>();
+                }
                 serviceCollection.AddSingleton(sp => new RemoteAccountLinkService(
                     sp.GetRequiredService<IHttpClientFactory>().CreateClient("remote-account-link"),
                     new Uri(sp.GetRequiredService<IConfiguration>()["VibeRails:FrontendUrl"]
@@ -100,7 +121,10 @@ namespace VibeRails
                 serviceCollection.AddSingleton<Services.SigningKeys.SigningKeyStore>();
                 serviceCollection.AddSingleton(sp => new Services.SigningKeys.SigningKeyService(
                     sp.GetRequiredService<IHttpClientFactory>().CreateClient("signing-key-registration"),
-                    sp.GetRequiredService<Services.SigningKeys.SigningKeyStore>(), () => Config.LoadFresh().ApiKey));
+                    sp.GetRequiredService<Services.SigningKeys.SigningKeyStore>(),
+                    // Signing-key registration is production-only: with no credential it reports
+                    // "not configured" and keeps the key local.
+                    () => LocalFrontMode.PausesProductionPublishing ? string.Empty : Config.LoadFresh().ApiKey));
             }
 
             // Host filesystem metadata is exposed only by an active root backend. Terminal-tab
@@ -202,7 +226,8 @@ namespace VibeRails
                 serviceCollection.AddSingleton<Services.Board.IBoardLiveSessionProbe, Services.Board.TerminalTabLiveSessionProbe>();
                 serviceCollection.AddScoped<Services.Board.IBoardLaunchService, Services.Board.BoardLaunchService>();
                 serviceCollection.AddScoped<Services.Board.Sync.BoardRemoteLaunchService>();
-                if (!isFakeCliTestProcess)
+                // Remote-board launch polling talks to the production board copy; local mode pauses it.
+                if (!isFakeCliTestProcess && !localFront.Requested)
                     serviceCollection.AddHostedService<Services.Board.Sync.BoardRemoteLaunchHostedService>();
                 // Agent-context measurement (VB-63): the card editor's estimate and the sample each
                 // launch records. Scoped like the launch service; it reads the scoped IRepository.
@@ -389,9 +414,20 @@ namespace VibeRails
                             client.Timeout = TimeSpan.FromSeconds(30);
                         })
                         .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
-                    serviceCollection.AddHostedService<TokenSavingsPublishJob>();
-                    serviceCollection.AddHostedService<SessionDataDrainJob>();
-                    serviceCollection.AddHostedService<CompleteBackupJob>();
+                    if (localFront.Requested)
+                    {
+                        // These publish this machine's data to production. A local-mode process
+                        // leaves them to normal VibeRails processes; their queues, checkpoints and
+                        // saved settings are untouched, so the next normal run carries on.
+                        Serilog.Log.Information(
+                            "[LocalFront] Token-savings publishing, session upload and complete backups are paused in this process");
+                    }
+                    else
+                    {
+                        serviceCollection.AddHostedService<TokenSavingsPublishJob>();
+                        serviceCollection.AddHostedService<SessionDataDrainJob>();
+                        serviceCollection.AddHostedService<CompleteBackupJob>();
+                    }
                     serviceCollection.AddHostedService<DataRetentionJob>();
                     serviceCollection.AddHostedService<SearchIndexMaintenanceJob>();
                 }

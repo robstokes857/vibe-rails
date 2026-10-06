@@ -23,7 +23,12 @@ public sealed class CompleteBackupService
 
     public CompleteBackupService(IDatabaseSnapshotStore snapshots, BackupTransport transport, BackupFiles files, IFeatureLog log)
         : this(snapshots, transport, ct => files.EnumerateAsync(Path.GetDirectoryName(ParserConfigs.GetStatePath())!, ct),
-            () => Path.GetDirectoryName(ParserConfigs.GetStatePath())!, ParserConfigs.GetApiKey, () => DateTime.UtcNow, log) { }
+            () => Path.GetDirectoryName(ParserConfigs.GetStatePath())!, ProductionKey, () => DateTime.UtcNow, log) { }
+
+    // Backups go to production with the production key. A local Front process (VB-8NI09-170) has
+    // no such key, so it neither uploads nor reads another account's checkpoints.
+    private static string ProductionKey() =>
+        LocalFront.LocalFrontMode.PausesProductionPublishing ? string.Empty : ParserConfigs.GetApiKey();
 
     internal CompleteBackupService(IDatabaseSnapshotStore snapshots, BackupTransport transport,
         Func<CancellationToken, Task<List<BackupFileSource>>> files, Func<string> root, Func<string> key,

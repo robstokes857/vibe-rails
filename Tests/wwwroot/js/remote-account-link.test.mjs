@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { RemoteAccountLinkPanel, SIGN_IN_URL, isSignInUrl, signInUrlForCode } from '../../../VibeRails/wwwroot/js/modules/remote-account-link.js';
+import { RemoteAccountLinkPanel, SIGN_IN_URL, isSignInUrl, signInPageFor, signInUrlForCode } from '../../../VibeRails/wwwroot/js/modules/remote-account-link.js';
 import { SettingsController } from '../../../VibeRails/wwwroot/js/modules/settings-controller.js';
 
 function deferred() {
@@ -330,4 +330,28 @@ test('a concurrent manual clear or save uses the current saved mask instead of a
         assert.equal(calls[0][0], '/api/v1/settings');
         assert.equal(calls[0][1], 'GET');
     }
+});
+
+test('local Front mode accepts only the loopback sign-in page the backend reports (VB-8NI09-170)', () => {
+    assert.equal(signInPageFor('https://localhost:5164'), 'https://localhost:5164/link');
+    assert.equal(signInPageFor('https://127.0.0.1:5164'), 'https://127.0.0.1:5164/link');
+    for (const origin of [undefined, null, '', 'http://localhost:5164', 'https://evil.example', 'https://localhost.evil.example',
+        'https://user@localhost:5164', 'https://localhost:5164/api', 'https://localhost:5164/?x=1', 'not a url', 42]) {
+        assert.equal(signInPageFor(origin), SIGN_IN_URL);
+    }
+    assert.equal(signInUrlForCode('ABCD-2345', 'https://localhost:5164/link'), 'https://localhost:5164/link#code=ABCD-2345');
+});
+
+test('a local Front panel sends the browser to the local page and refuses the production one', async t => {
+    const local = 'https://localhost:5164/link';
+    const { panel, field } = harness(t, async () => pending({ verificationUri: local }));
+    panel.app.appSettings = { localFrontOrigin: 'https://localhost:5164' };
+    panel._render();
+    assert.equal(field('start').textContent, 'Sign in to local Front');
+    await panel.start();
+    assert.equal(panel.state.status, 'pending');
+    assert.equal(field('open').href, `${local}#code=BXQK-2M7T`);
+    panel._apply(pending({ verificationUri: SIGN_IN_URL }));
+    assert.equal(panel.state.status, 'error');
+    assert.equal(field('open').href, undefined);
 });

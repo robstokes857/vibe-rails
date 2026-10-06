@@ -7,7 +7,8 @@ public sealed class BoardSharingService(IBoardStore store, IBoardSyncClient clie
     public async Task<BoardSharingState> GetAsync(string project, string boardId, CancellationToken ct)
     {
         if (await store.GetBoardAsync(project, boardId, ct) is null) throw new BoardValidationException("Board not found.");
-        if (!client.IsConfigured) return new(false, false, null, null);
+        // Sharing lives on the production board copy; a local Front process shows it as unavailable.
+        if (!client.IsConfigured || LocalFront.LocalFrontMode.PausesProductionPublishing) return new(false, false, null, null);
         var link = await LinkAsync(project, boardId, ct);
         var descriptor = await client.DescribeAsync(link.RemoteBoardId, ct, link.DestinationKey)
             ?? throw new BoardValidationException("Board sharing requires the updated viberails.ai server.");
@@ -18,6 +19,7 @@ public sealed class BoardSharingService(IBoardStore store, IBoardSyncClient clie
     /// <summary>Creates or updates an invitation through the hosted owner check.</summary>
     public async Task<BoardSharingResult> SaveAsync(string project, string boardId, string? inviteId, BoardSharingEmailRequest body, CancellationToken ct)
     {
+        BoardSyncService.ThrowIfPausedForLocalFront();
         if (body.Email is not { Length: > 0 and <= 320 }) throw new BoardValidationException("Enter an email address up to 320 characters.");
         var link = await LinkAsync(project, boardId, ct);
         await client.SaveInviteAsync(link.RemoteBoardId, inviteId, body, ct, link.DestinationKey);
@@ -27,6 +29,7 @@ public sealed class BoardSharingService(IBoardStore store, IBoardSyncClient clie
     /// <summary>Revokes an invitation through the hosted owner check.</summary>
     public async Task<BoardSharingResult> RemoveAsync(string project, string boardId, string inviteId, CancellationToken ct)
     {
+        BoardSyncService.ThrowIfPausedForLocalFront();
         var link = await LinkAsync(project, boardId, ct);
         await client.RemoveInviteAsync(link.RemoteBoardId, inviteId, ct, link.DestinationKey);
         return new(Saved: true);
@@ -35,6 +38,7 @@ public sealed class BoardSharingService(IBoardStore store, IBoardSyncClient clie
     /// <summary>Lists accepted shared boards for the configured account.</summary>
     public async Task<IReadOnlyList<BoardRemoteDescriptor>> DiscoverAsync(CancellationToken ct)
     {
+        if (LocalFront.LocalFrontMode.PausesProductionPublishing) return [];
         var destination = client.DestinationKey ?? throw new BoardValidationException("Sign in to viberails.ai to see shared boards.");
         return (await client.DiscoverAsync(ct, destination)).Where(b => !b.IsOwner).Take(100).ToList();
     }
@@ -42,6 +46,7 @@ public sealed class BoardSharingService(IBoardStore store, IBoardSyncClient clie
     /// <summary>Imports an accepted board into the current project and starts bounded sync.</summary>
     public async Task<BoardSharedImportResult> ImportAsync(string project, string remoteId, CancellationToken ct)
     {
+        BoardSyncService.ThrowIfPausedForLocalFront();
         BoardRecord board;
         using (var held = syncLock.TryAcquire() ?? throw new BoardValidationException("A Board sync is running. Try again when it finishes."))
         {
