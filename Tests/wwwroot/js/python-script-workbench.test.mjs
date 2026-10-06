@@ -667,7 +667,6 @@ test('loadView mounts the shell, fetches the content and starts polling; unload 
     assert.equal(root.el('[data-workbench-editor-state]').hidden, true);
     assert.equal(root.el('[data-workbench-hint]').textContent, 'Signed. Saving an edit clears the signature until you sign again.');
     assert.equal(root.el('[data-workbench-action="save"]').disabled, true, 'nothing to save yet');
-    assert.match(root.el('[data-workbench-rail-list]').innerHTML, /aria-current="page"/);
     // Ctrl/⌘+S is bound in the editor and typing re-renders the hint.
     assert.deepEqual(editor.commands.map((command) => command.keys), [2048 | 49]);
     editor.value = 'changed';
@@ -1069,7 +1068,7 @@ test('A 404 from the poll is not "deleted" while the list still knows the script
 
 // --- switching scripts in place ---
 
-test('Switching scripts from the rail confirms unsaved changes and keeps the navigation stack honest', async () => {
+test('Switching the editor after duplication confirms unsaved changes and keeps the navigation stack honest', async () => {
     const other = { name: 'weekly.py', status: 'unapproved', path: '/scripts/weekly.py', sizeBytes: 10 };
     const { workbench, app, editor } = mountedWorkbench({ scripts: [SCRIPT, other] });
     app.apiCall = async (url) => {
@@ -1094,12 +1093,6 @@ test('Switching scripts from the rail confirms unsaved changes and keeps the nav
     assert.equal(workbench.isDirty, false);
     assert.equal(app.calls[0].url, '/api/v1/python-scripts/content?name=weekly.py');
     assert.deepEqual(app.viewData, [{ name: 'weekly.py' }], 'the stack entry follows the open script');
-    // The rail highlights the new script and always ends with New script.
-    const rail = workbench.renderRailItems();
-    assert.match(rail, /data-workbench-open="weekly\.py"[^>]*aria-current="page"/);
-    assert.doesNotMatch(rail, /data-workbench-open="nightly\.py"[^>]*aria-current/);
-    assert.match(rail, /data-workbench-action="new"[\s\S]*New script/);
-
     // Same script → no-op.
     assert.equal(await workbench.switchTo('weekly.py'), false);
 });
@@ -1504,7 +1497,7 @@ test('Dragging the splitter resizes live and persists only on release; the separ
 
 // --- shell markup ---
 
-test('The shell renders a Back bar, the identity pill, the editor card with a rail, a splitter and the docked terminal', () => {
+test('The shell renders one script editor, Back, signing actions, a splitter and the docked terminal', () => {
     const { workbench } = mountedWorkbench();
     const html = workbench.renderShell('night <b>ly</b>.py');
 
@@ -1517,8 +1510,7 @@ test('The shell renders a Back bar, the identity pill, the editor card with a ra
         assert.match(html, new RegExp(`data-workbench-action="${action}"`), `missing ${action}`);
     }
     assert.match(html, /<section class="rules-section card python-workbench-editor-card"/);
-    assert.match(html, /<nav class="python-workbench-rail" aria-label="Scripts"/);
-    assert.match(html, /role="list" data-workbench-rail-list/);
+    assert.doesNotMatch(html, /python-workbench-rail|data-workbench-open|data-workbench-action="new"/);
     assert.match(html, /data-workbench-editor-mount/);
     // No matchMedia in node → stacked layout → a horizontal separator.
     assert.match(html, /role="separator"\s+aria-orientation="horizontal"[^>]*tabindex="0"/);
@@ -1745,13 +1737,7 @@ test('The workbench styles fill the viewport without overlap and carry fallbacks
     // Splitter affordance + reduced motion.
     assert.match(block, /\.python-workbench-splitter \{[^}]*cursor: row-resize;[^}]*touch-action: none;/);
     assert.match(block, /@media \(prefers-reduced-motion: reduce\) \{\s*\.python-workbench-splitter::before \{\s*transition: none;/);
-    // The rail collapses into a chip strip on narrow layouts (CSS only).
-    const narrow = block.slice(block.indexOf('@media (max-width: 1100px)'));
-    assert.match(narrow, /\.python-workbench-body \{\s*flex-direction: column;/);
-    assert.match(narrow, /\.python-workbench-rail-list \{[^}]*position: static;[^}]*flex-direction: row;[^}]*overflow-x: auto;/);
-    // Desktop: the list is absolutely filled so a long rail scrolls instead of growing the page.
-    assert.match(block, /\.python-workbench-rail \{[^}]*position: relative;/);
-    assert.match(block, /\.python-workbench-rail-list \{[^}]*position: absolute;[^}]*inset: 0;[^}]*overflow-y: auto;/);
+    assert.doesNotMatch(block, /python-workbench-rail/, 'no file rail or narrow-screen chip strip');
 
     for (const match of block.matchAll(/var\((--color-[a-z-]+)([^)]*)\)/g)) {
         assert.ok(match[2].includes(','), `${match[1]} is used without a fallback: ${match[0]}`);

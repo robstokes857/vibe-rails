@@ -980,7 +980,7 @@ See also: [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for back
   scripts still go through **New automation → Add script**. The API, view and class names
   keep their historical `python` spelling.
 - **Layout**: Back bar (`data-action="go-back"`, bound globally) + identity/status pill +
-  Run / Sign / kebab; a `.rules-section` card with a script rail and Monaco
+  Run / Sign / kebab; a `.rules-section` card with Monaco for the selected script
   (`viberails-dark`, Ctrl/⌘+S saves in place; the shared model's language follows the
   loaded file: python, powershell or shell); an optional last-run drawer; a draggable
   splitter (`role="separator"`, Arrow keys ±24px); and the agent terminal
@@ -992,7 +992,7 @@ See also: [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for back
   width — `--python-workbench-terminal-width`, persisted in localStorage
   `viberails.pythonWorkbench.terminalWidth`, ArrowLeft/Right. At desktop widths the
   `vb-python-workbench-active` shell bounds the flex chain to the available viewport;
-  Monaco, the script rail, and xterm scroll internally so the terminal prompt stays visible
+  Monaco and xterm scroll internally so the terminal prompt stays visible
   even in short windows. The editor body reserves space for code; the last-run drawer
   shrinks and scrolls with a sticky collapse control. Exceptionally short windows can
   scroll the editor card independently. 880px is the floor at which both columns clear their minimums
@@ -1000,8 +1000,8 @@ See also: [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for back
   docked VS Code webview still gets columns; **only below it do the panes stack**
   (horizontal splitter, `--python-workbench-terminal-height`, localStorage
   `viberails.pythonWorkbench.terminalHeight`, ArrowUp/Down; the floor drops to 180px on
-  viewports ≤ 720px tall). The script rail collapses to a chip strip under 1100px, because
-  side by side the editor column cannot spare 180px for it. The shell class
+  viewports ≤ 720px tall). The editor has no file rail or chip strip; use **Back** to
+  **Automation → Scripts** to select another script or create one. The shell class
   `vb-rules-workspace-active` is applied to this view too.
 - **Shared flows**: signing (PIN prompt), revoke, rename, delete, duplicate, copy path,
   run and `saveContent` are public methods on `PythonScriptsController`

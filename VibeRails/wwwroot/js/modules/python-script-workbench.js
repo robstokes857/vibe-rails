@@ -109,8 +109,8 @@ export function isStaleSaveError(message) {
 
 /**
  * The Python script workbench view ('python-script', data = { name }): a Back bar with the
- * script's identity and signing actions, a Monaco editor with a rail of all scripts, and
- * the agent terminal docked underneath (the same panel the Code quality page mounts),
+ * script's identity and signing actions, a Monaco editor for the selected script, and
+ * the docked agent terminal (the same panel the Code quality page mounts),
  * started in the scripts directory so "have Claude change the python" is one click.
  *
  * Every signing/authoring flow delegates to PythonScriptsController's public methods, so
@@ -137,7 +137,7 @@ export class PythonScriptWorkbench {
         this._generation = 0;
         this._loadToken = null;
         this._unsubscribeRun = null;
-        // The in-flight Monaco mount: overlapping loads (a rail click during the first
+        // The in-flight Monaco mount: overlapping loads (a script switch during the first
         // open) share it instead of each creating an editor in the same host.
         this._editorMounting = null;
         this._pollTimer = null;
@@ -251,7 +251,6 @@ export class PythonScriptWorkbench {
         this.status = this.script.status || 'unapproved';
         this.lastRun = scripts.lastRunByName?.get?.(name) || null;
         this._renderIdentity();
-        this._renderRail();
         this._renderOutput();
         void this._mountTerminal();
         await this._loadContent(generation);
@@ -372,9 +371,6 @@ export class PythonScriptWorkbench {
                         </header>
                         <div class="python-workbench-banner" role="status" data-workbench-banner hidden></div>
                         <div class="python-workbench-body">
-                            <nav class="python-workbench-rail" aria-label="Scripts" data-workbench-rail>
-                                <ul class="python-workbench-rail-list" role="list" data-workbench-rail-list></ul>
-                            </nav>
                             <div class="python-workbench-editor-host" data-workbench-editor-host>
                                 <div class="python-workbench-editor-mount" data-workbench-editor-mount></div>
                                 <div class="python-workbench-editor-state" data-workbench-editor-state role="status">
@@ -412,12 +408,6 @@ export class PythonScriptWorkbench {
     _handleClick(event) {
         const root = this.root;
         if (!root) return;
-        const opener = event.target.closest?.('[data-workbench-open]');
-        if (opener && root.contains(opener)) {
-            this._closeMenu();
-            void this.switchTo(opener.dataset.workbenchOpen);
-            return;
-        }
         const button = event.target.closest?.('[data-workbench-action]');
         if (!button || !root.contains(button)) {
             this._closeMenu();
@@ -439,7 +429,6 @@ export class PythonScriptWorkbench {
             case 'rename': return void this.rename();
             case 'copy-path': return void this.scripts?.copyPath?.(this.name);
             case 'delete': return void this.deleteScript();
-            case 'new': return void this.newScript();
             case 'reload': return void this.reloadFromDisk();
             case 'keep-edits': return void this.keepMyEdits();
             case 'recreate': return void this.recreateFromEditor();
@@ -591,36 +580,6 @@ export class PythonScriptWorkbench {
         ].filter(Boolean).join('');
     }
 
-    _renderRail() {
-        const list = this.root?.querySelector('[data-workbench-rail-list]');
-        if (list) list.innerHTML = this.renderRailItems();
-    }
-
-    /** Compact rows: name + signing dot; the open script is highlighted; "+ New script" last. */
-    renderRailItems() {
-        const rows = (this.state?.scripts || []).map((script) => {
-            const meta = PYTHON_SCRIPT_STATUS_META[script.status] || PYTHON_SCRIPT_STATUS_META.unapproved;
-            const name = escapeHtml(script.name);
-            const current = script.name === this.name;
-            return `
-            <li>
-                <button type="button" class="python-workbench-rail-item" data-workbench-open="${name}"
-                        ${current ? 'aria-current="page"' : ''} title="${name} · ${meta.label}">
-                    <span class="python-workbench-rail-dot" data-tone="${meta.tone}" aria-hidden="true"></span>
-                    <span class="python-workbench-rail-name">${name}</span>
-                </button>
-            </li>`;
-        });
-        rows.push(`
-            <li>
-                <button type="button" class="python-workbench-rail-item python-workbench-rail-new" data-workbench-action="new"
-                        title="Create a new script in the scripts folder">
-                    <i class="fa-solid fa-plus" aria-hidden="true"></i><span>New script</span>
-                </button>
-            </li>`);
-        return rows.join('');
-    }
-
     /**
      * The editor header's hint line, the dirty mark and the Save button's enabled state.
      * An explicit `message` sticks (list refreshes re-render the hint) until the next
@@ -760,7 +719,6 @@ export class PythonScriptWorkbench {
         this._hideEditorState();
         this._renderIdentity();
         this._renderHint();
-        this._renderRail();
         return true;
     }
 
@@ -771,7 +729,7 @@ export class PythonScriptWorkbench {
 
     async _ensureEditor(generation) {
         if (this.editor) return true;
-        // Two overlapping loads (a rail click while the first open is still waiting for
+        // Two overlapping loads (a script switch while the first open is still waiting for
         // Monaco) share one mount; a second create() would stack an editor in the host.
         if (this._editorMounting) return this._editorMounting;
         const mounting = (async () => {
@@ -854,7 +812,7 @@ export class PythonScriptWorkbench {
         await this._loadContent(this._generation);
     }
 
-    /** Switches the editor to another script in place (rail click, new, duplicate). */
+    /** Switches the editor to a duplicate in place without remounting the terminal. */
     async switchTo(name) {
         if (!name || name === this.name || !this.root) return false;
         if (this.isDirty) {
@@ -873,7 +831,6 @@ export class PythonScriptWorkbench {
         const script = scripts?.scriptByName(name);
         if (!script) {
             this.app.showToast('Script not found', `${name} is no longer in the scripts folder.`, 'warning');
-            this._renderRail();
             return false;
         }
         this.name = name;
@@ -887,7 +844,6 @@ export class PythonScriptWorkbench {
         // (a reload would remount the terminal and reconnect every tab).
         this.app.updateCurrentViewData?.({ name });
         this._renderIdentity();
-        this._renderRail();
         this._renderOutput();
         return this._loadContent(this._generation);
     }
@@ -1038,7 +994,7 @@ export class PythonScriptWorkbench {
         this._hideBanner();
         this._renderIdentity();
         this._renderHint(`Reloaded from disk · ${new Date().toLocaleTimeString()}`);
-        // Size / edited / status on the rail and pill come from the list endpoint.
+        // Size / edited / status on the identity pill come from the list endpoint.
         void this.scripts?.refresh?.({ quiet: true });
     }
 
@@ -1137,7 +1093,6 @@ export class PythonScriptWorkbench {
         this._hideBanner();
         this._renderIdentity();
         this._renderHint('Saved.');
-        this._renderRail();
         if (sign) await this.sign({ skipDirtyCheck: true });
         return true;
     }
@@ -1230,7 +1185,6 @@ export class PythonScriptWorkbench {
         // report.py → report.sh keeps the text but changes what runs it.
         this._applyEditorLanguage(newName);
         this._renderIdentity();
-        this._renderRail();
         this._renderHint();
         this._renderOutput();
         return newName;
@@ -1243,20 +1197,8 @@ export class PythonScriptWorkbench {
         const copy = await this._whileMutating(() => scripts.duplicate(name));
         if (!copy || !this.root) return copy;
         this.state = scripts.state || this.state;
-        this._renderRail();
         await this.switchTo(copy);
         return copy;
-    }
-
-    async newScript() {
-        const scripts = this.scripts;
-        if (!scripts || !this.root) return null;
-        const created = await this._whileMutating(() => scripts.newScript());
-        if (!created || !this.root) return created;
-        this.state = scripts.state || this.state;
-        this._renderRail();
-        await this.switchTo(created);
-        return created;
     }
 
     async deleteScript() {
@@ -1617,7 +1559,6 @@ export class PythonScriptWorkbench {
             this.status = script.status || 'unapproved';
         }
         this._renderIdentity();
-        this._renderRail();
         this._renderHint();
     }
 

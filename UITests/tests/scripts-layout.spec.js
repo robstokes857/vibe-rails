@@ -19,6 +19,7 @@ async function openScripts(page) {
         hasActiveSession: true, workingDirectory: 'C:/fixture/scripts' };
     await page.route('**/api/v1/**', route => {
         const path = new URL(route.request().url()).pathname;
+        const name = new URL(route.request().url()).searchParams.get('name') || script.name;
         const responses = {
             '/api/v1/context': { isInGit: true, rootPath: 'C:/fixture', launchDirectory: 'C:/fixture' },
             '/api/v1/settings': {},
@@ -30,7 +31,7 @@ async function openScripts(page) {
             '/api/v1/llm-picker/preferences': { items: [] },
             '/api/v1/python-scripts': { scriptsDirectory: 'C:/fixture/scripts', pinConfigured: true,
                 scripts: Array.from({ length: 40 }, (_, i) => i ? { ...script, name: `script-${i}.py` } : script) },
-            '/api/v1/python-scripts/content': { ...script, version: 'one', content: 'print("Hello")\n'.repeat(150) },
+            '/api/v1/python-scripts/content': { ...script, name, version: 'one', content: `print("${name}")\n`.repeat(150) },
             '/api/v1/python-scripts/run': { exitCode: 0, durationMs: 25,
                 standardOutput: Array.from({ length: 100 }, (_, i) => `Output line ${i + 1}`).join('\n'), standardError: '' },
             '/api/v1/terminal/tabs': { tabs: [agent], maxTabs: 100 },
@@ -49,6 +50,33 @@ async function expectTerminalFits(page, minimumHeight = 100) {
     }, minimumHeight)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollHeight - innerHeight)).toBeLessThanOrEqual(1);
 }
+
+test('one selected script fills the editor and Back opens the list to choose another', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openScripts(page);
+    await page.locator('.python-script-name').first().click();
+    await expect(page.locator('.monaco-editor')).toBeVisible();
+    await expect(page.locator('[data-workbench-name]')).toHaveText('example.py');
+    for (const width of [1440, 1000, 720]) {
+        await page.setViewportSize({ width, height: 900 });
+        await expect(page.locator('[data-workbench-rail], [data-workbench-open]')).toHaveCount(0);
+        await expect(page.locator('[data-workbench-editor-mount]')).toHaveCount(1);
+        await expect.poll(() => page.locator('[data-workbench-editor-host]').evaluate(node => {
+            const editor = node.getBoundingClientRect();
+            const body = node.parentElement.getBoundingClientRect();
+            return Math.abs(editor.left - body.left) + Math.abs(editor.right - body.right);
+        })).toBeLessThanOrEqual(1);
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.screenshot({ path: testInfo.outputPath('single-script-editor.png') });
+    await page.locator('[data-action="go-back"]').click();
+    await expect(page.locator('.python-script-row')).toHaveCount(40);
+    await page.locator('.python-script-name').filter({ hasText: /\bscript-1\.py\b/ }).click();
+    await expect(page.locator('[data-workbench-name]')).toHaveText('script-1.py');
+    await expect.poll(() => page.evaluate(() => window.app.pythonScriptWorkbench.editor.getValue()))
+        .toContain('print("script-1.py")');
+    await expect(page.locator('[data-workbench-editor-mount]')).toHaveCount(1);
+});
 
 test('verbose run output leaves the editor usable under the top navigation', async ({ page }, testInfo) => {
         await page.setViewportSize({ width: 1000, height: 500 });

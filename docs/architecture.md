@@ -830,6 +830,12 @@ gated by PIN-backed hash pinning; the extension picks the interpreter):
   scripts folder (root-dashboard backend only, like the filesystem picker; network/device
   paths and links are rejected)
 
+The script workbench edits one selected file beside the agent terminal. Its editor has no file
+rail; **Back → Automation → Scripts** is where users select another file or create one.
+The library enumerates supported files in `~/.vibe_rails/scripts`. Installed builds also ship
+git-hook helpers and BERT download scripts there, so those bundled helpers can appear in the
+library. They are not created by opening the workbench and remain unsigned until explicitly signed.
+
 **Nav Automation launcher** (the nav "Launch" flyout; preferences persist per install in GlobalCache):
 - `GET /api/v1/automation-nav/preferences` - Catalog of the current project's automations
   (`job:{id}`) plus every signed-library script (`script:{name}`, with its signing `status`), each
