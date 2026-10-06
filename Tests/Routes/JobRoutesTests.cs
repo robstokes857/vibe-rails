@@ -13,6 +13,7 @@ using VibeRails.DTOs;
 using VibeRails.Routes;
 using VibeRails.Services;
 using VibeRails.Services.Jobs;
+using VibeRails.Utils;
 using Xunit;
 
 namespace Tests.Routes;
@@ -22,11 +23,22 @@ namespace Tests.Routes;
 /// backend, and their bodies must bind through the AOT serializer context (a DTO missing from
 /// <see cref="AppJsonSerializerContext"/> compiles fine and then 500s on the first request).
 /// </summary>
+/// <remarks>
+/// The script routes resolve their repository from the process-global
+/// <see cref="ParserConfigs.GetRootPath"/> before falling back to <c>git rev-parse</c> in the
+/// launch directory. BoardRoutesTests, AutomationNavPreferenceServiceTests and
+/// BoardProjectResolverTests point that global at their own directories, so a catalog read racing
+/// one of them listed the wrong repository and came back empty (VIBE-109). The class therefore
+/// runs in the same serialised collection and pins the state it depends on per test.
+/// </remarks>
+[Collection("ProcessEnvIsolation")] // reads ParserConfigs.GetRootPath (process-global), which other members rewrite
 public sealed class JobRoutesTests : IDisposable
 {
     private static readonly HttpClient SharedClient = new();
 
     private readonly string _repoRoot;
+    private readonly string _originalRootPath = ParserConfigs.GetRootPath();
+    private readonly bool _originalIsInGit = ParserConfigs.GetIsInGit();
     private readonly Mock<IAutomationImportService> _importService = new();
     private readonly Mock<IJobService> _jobService = new();
 
@@ -36,6 +48,9 @@ public sealed class JobRoutesTests : IDisposable
         Directory.CreateDirectory(_repoRoot);
         RunGit("init");
         _repoRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(_repoRoot));
+        // No configured root: the routes must find the temp repository from the launch directory
+        // they were mapped with, which is the path these tests exercise.
+        ParserConfigs.SetGitState(string.Empty, isInGit: false);
     }
 
     [Fact]
@@ -306,6 +321,7 @@ public sealed class JobRoutesTests : IDisposable
 
     public void Dispose()
     {
+        ParserConfigs.SetGitState(_originalRootPath, _originalIsInGit);
         try { Directory.Delete(_repoRoot, recursive: true); }
         catch { /* a leftover temp repo is not worth failing a test run over */ }
     }

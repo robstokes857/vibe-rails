@@ -93,12 +93,18 @@ public sealed class RepositoryModuleResolverResourceTests
             files.Add((main, SourceOutline.Read(main, body)));
             if (depth > 0) files.Add((directory + "/mod.rs", SourceOutline.Read(directory + "/mod.rs", body)));
         }
+        _ = RepositoryCodeGraph.Build("warmup", [("warm.rs", SourceOutline.Read("warm.rs", "mod a;"))], false,
+            TestContext.Current.CancellationToken);
 
-        var stopwatch = Stopwatch.StartNew();
+        // Allocation, not wall-clock: the budget is a deterministic unit count, and a 10 s stopwatch
+        // bound tripped once under a fully parallel suite while the build took under a second alone
+        // (VIBE-109). The 4M-unit cut lands at about 1.4 GB of module-path strings; a looser budget
+        // or a lost cut grows that proportionally, so the bound is not far above the measured value.
+        var before = GC.GetAllocatedBytesForCurrentThread();
         var graph = RepositoryCodeGraph.Build("resource", files, false, TestContext.Current.CancellationToken);
-        stopwatch.Stop();
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
-        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(10), $"Building took {stopwatch.Elapsed}.");
+        Assert.True(allocated < 2L * 1024 * 1024 * 1024, $"Budget-cut crate maps allocated {allocated:N0} bytes.");
         Assert.True(graph.Truncated);
         Assert.Contains(graph.Diagnostics!.Omissions, omission => omission.Code == "module-work-limit" && omission.Count > 0);
         // Roots are walked shallowest first, so the top-level crate map completes before the cut

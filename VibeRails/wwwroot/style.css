@@ -17392,7 +17392,8 @@ body.vb-terminal-focus-active .app-subnav .nav-exit-btn-sm {
     white-space: nowrap;
 }
 
-/* Unsigned scripts are listed (so hide/order prefs still apply) but cannot be run. */
+/* A script with a run in flight keeps its row but cannot start a second run. Unsigned scripts
+   are not listed at all (the customize modal still carries them). */
 .automation-launch-item:disabled {
     cursor: default;
     color: var(--color-text-muted, #94a3b8);
@@ -17405,13 +17406,6 @@ body.vb-terminal-focus-active .app-subnav .nav-exit-btn-sm {
 .automation-launch-item:disabled > .fa-python,
 .automation-launch-item:disabled > .fa-terminal {
     color: inherit;
-}
-
-.automation-launch-item-note {
-    flex: 0 0 auto;
-    margin-left: auto;
-    font-size: 0.72rem;
-    color: var(--color-text-muted, #94a3b8);
 }
 
 .automation-launch-flyout-empty {

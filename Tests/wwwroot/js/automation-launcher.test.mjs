@@ -116,31 +116,46 @@ test('normalizeLauncherItems sorts by saved order, keeps hidden rows, and drops 
     assert.equal(isLauncherItemRunnable({ kind: 'script', status: 'unapproved' }), false);
 });
 
-test('unsigned scripts are listed but disabled; hidden rows never render; icons follow the kind', () => {
+test('unsigned scripts and hidden rows never render; icons follow the kind', () => {
     const launcher = launcherWith(CATALOG);
     launcher._renderFlyoutItems();
     const html = launcher.flyout.target.html;
 
-    // Visible rows only, in saved order.
+    // Visible, runnable rows only, in saved order. The unsigned tidy.py is omitted rather than
+    // shown disabled (the customize modal still lists it, so its order/show preference survives).
     assert.deepEqual([...html.matchAll(/automation-launch-item-label">([^<]+)</g)].map((match) => match[1]),
-        ['Nightly sweep', 'backup.py', 'tidy.py']);
+        ['Nightly sweep', 'backup.py']);
     assert.doesNotMatch(html, /Hidden one/);
+    assert.doesNotMatch(html, /tidy\.py/);
+    assert.doesNotMatch(html, /Not signed|is-unsigned|Sign it on the Automation page/);
 
     const rows = html.split('<button').slice(1);
-    const [job, signed, unsigned] = rows;
+    assert.equal(rows.length, 2);
+    const [job, signed] = rows;
     assert.match(job, /fa-solid fa-play/);
     assert.match(job, /title="Run Nightly sweep now"/);
     assert.doesNotMatch(job, /disabled/);
     assert.match(signed, /fa-brands fa-python/);
+    assert.match(signed, /title="Run backup\.py now"/);
     assert.doesNotMatch(signed, /disabled/);
-    // The unsigned script keeps its row (so hide/order preferences apply) but cannot be clicked.
-    assert.match(unsigned, /is-unsigned/);
-    assert.match(unsigned, /disabled aria-disabled="true"/);
-    assert.match(unsigned, /title="Sign it on the Automation page first"/);
-    assert.match(unsigned, /automation-launch-item-note">Not signed</);
-    assert.doesNotMatch(signed, /Not signed/);
-    // The muted suffix sits outside the label span (the e2e spec reads labels verbatim).
-    assert.match(unsigned, /automation-launch-item-label">tidy\.py<\/span>/);
+});
+
+test('the empty states tell an unsigned-only library, an all-hidden list and no automations apart', () => {
+    // Only an unsigned script: nothing is runnable, but the project is not empty either.
+    const unsignedOnly = launcherWith([CATALOG[0]]);
+    unsignedOnly._renderFlyoutItems();
+    assert.match(unsignedOnly.flyout.target.html,
+        /automation-launch-flyout-empty[^>]*>No automations or signed scripts available\. Sign a script on the Automation page\./);
+    assert.doesNotMatch(unsignedOnly.flyout.target.html, /<button/);
+
+    // Runnable rows exist but every one is hidden; the unsigned script does not count as hidden.
+    const allHidden = launcherWith([{ ...CATALOG[1], enabled: false }, CATALOG[0]]);
+    allHidden._renderFlyoutItems();
+    assert.match(allHidden.flyout.target.html, /All automations are hidden\. Use "Customize list/);
+
+    const nothing = launcherWith([]);
+    nothing._renderFlyoutItems();
+    assert.match(nothing.flyout.target.html, /No automations yet\. Create one from the Automation page\./);
 });
 
 test('a script with a run in flight shows a busy row instead of a second Run', () => {
@@ -164,13 +179,12 @@ test('clicking an automation launches it through JobController; a script goes to
     const scriptRuns = [];
     launcher._runScript = async (name) => { scriptRuns.push({ name }); };
     launcher._renderFlyoutItems();
-    const [jobButton, scriptButton, unsignedButton] = launcher.flyout.target.buttons;
+    const { buttons } = launcher.flyout.target;
+    assert.equal(buttons.length, 2, 'only the automation and the signed script get a row; the unsigned script has none to click');
+    const [jobButton, scriptButton] = buttons;
 
     await scriptButton.click();
     assert.deepEqual(scriptRuns, [{ name: 'backup.py' }]);
-
-    await unsignedButton.click();
-    assert.equal(scriptRuns.length, 1, 'an unsigned script must never be sent to run');
 
     await jobButton.click();
     assert.deepEqual(app.jobController.launched, [7]);
@@ -383,7 +397,7 @@ test('launcher CSS keeps a fallback on every colour token', () => {
     const css = readFileSync(stylePath, 'utf8');
     const start = css.indexOf('Nav Automation launcher');
     const block = css.slice(start, css.indexOf('Python scripts (Automation page section', start));
-    assert.ok(block.includes('.automation-launch-item-note'), 'expected the launcher CSS block');
+    assert.ok(block.includes('.automation-launch-flyout-empty'), 'expected the launcher CSS block');
     assert.match(block, /\.automation-launch-item > \.fa-python/);
     assert.match(block, /\.automation-launch-item:disabled/);
     for (const match of block.matchAll(/var\((--color-[a-z-]+)([^)]*)\)/g)) {
