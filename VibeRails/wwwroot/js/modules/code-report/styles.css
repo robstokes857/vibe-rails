@@ -132,7 +132,8 @@
 .code-report .metric-detail{padding:10px 12px;background:var(--surface-soft);border:1px solid var(--color-border);border-radius:5px;display:flex;justify-content:space-between;gap:12px;font-size:12px}
 .code-report .metric-detail strong{font-family:var(--report-font-mono);font-weight:500;color:var(--color-accent)}
 .code-report .snippet-heading{font-size:12px;color:var(--color-text-muted);margin:14px 0 8px}
-.code-report .code-excerpt{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--surface-soft);border:1px solid var(--color-border);padding:18px;border-radius:7px;font:13px/1.8 var(--report-font-mono);color:var(--color-primary);max-height:310px;overflow:auto;overscroll-behavior:contain}
+/* The excerpt chains to the details panel at its end (no overscroll containment here): viewer.js only swallows the wheel once neither can scroll. */
+.code-report .code-excerpt{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--surface-soft);border:1px solid var(--color-border);padding:18px;border-radius:7px;font:13px/1.8 var(--report-font-mono);color:var(--color-primary);max-height:310px;overflow:auto}
 .code-report .detail-note{font-size:13px;color:var(--color-text-muted);line-height:1.6}
 @container code-report (max-width:1250px){.code-report .graph-note{font-size:10px}
 }

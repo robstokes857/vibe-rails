@@ -128,7 +128,8 @@ test('the map keeps the wheel, fills the viewport, draws tinted spheres on a glo
     assert.match(viewerSource, /if \(!box\.height\) continue;/, 'a hidden sibling (the app footer) contributes nothing, not its margins');
     assert.match(viewerSource, /this\.resizeObserver\?\.disconnect\(\);/);
     assert.match(viewerCss, /\.code-report \.details-panel\{[^}]*overscroll-behavior:contain/);
-    assert.match(viewerCss, /\.code-report \.code-excerpt\{[^}]*overscroll-behavior:contain/);
+    // The excerpt must chain to the details panel at its end (codex review F1 on VIBE-71); the viewer's guard decides when to swallow.
+    assert.doesNotMatch(viewerCss, /\.code-report \.code-excerpt\{[^}]*overscroll-behavior/);
     assert.match(viewerCss, /\.code-report \.graph-options details\{[^}]*overscroll-behavior:contain/);
     assert.match(viewerCss, /\.code-report \.code-layout\{[^}]*height:var\(--code-report-height,clamp\(600px,calc\(100dvh - 180px\),880px\)\);max-height:1400px/);
     // Page: the stacked bottom spacing is one 14px gutter.
