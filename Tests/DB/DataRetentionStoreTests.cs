@@ -13,6 +13,21 @@ public sealed class DataRetentionStoreTests : IDisposable
     private string Proxy => Path.Combine(_directory, "proxy.db");
 
     [Fact]
+    public async Task PendingSharingUpload_PreventsRetentionOfPreviouslyExportedSession()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        Directory.CreateDirectory(_directory);
+        var repository = new Repository(State);
+        var id = await Session(repository, "pending-share", _now.AddMonths(-2), exported: true);
+        await repository.InsertUserInputAsync(id, 1, "retain for replay", null);
+        await repository.QueueSessionShareUploadAsync(id, "new-account-key", _now, ct);
+        var result = await new SqliteDataRetentionStore(State, Proxy).PruneAsync(_now, ct);
+        Assert.Equal(0, result.SessionsDeleted);
+        Assert.Equal(0, result.StateRowsDeleted);
+        Assert.NotNull(await repository.GetSessionByIdAsync(id, ct));
+    }
+
+    [Fact]
     public async Task DeletesOnlyOldAcknowledgedCompletedDataAndPreservesNewerReferences()
     {
         Directory.CreateDirectory(_directory);

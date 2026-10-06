@@ -88,7 +88,8 @@ public sealed class SqliteDataRetentionStore(
                         delete.CommandText = $"""
                             {action} WHERE rowid IN (
                                 SELECT rowid FROM {table} WHERE ({predicate}) LIMIT $limit
-                            ) AND EXISTS (SELECT 1 FROM Sessions WHERE Id=$id AND EndedUTC < $cutoff AND ExportedUTC IS NOT NULL);
+                            ) AND EXISTS (SELECT 1 FROM Sessions WHERE Id=$id AND EndedUTC < $cutoff AND ExportedUTC IS NOT NULL)
+                              AND NOT EXISTS (SELECT 1 FROM SessionShareUploads WHERE SessionId=$id AND CompletedUTC IS NULL);
                             """;
                         delete.Parameters.AddWithValue("$id", sessionId);
                         delete.Parameters.AddWithValue("$limit", StateBatchSize);
@@ -121,7 +122,10 @@ public sealed class SqliteDataRetentionStore(
                     delete.CommandText = "UPDATE Sessions SET ParentSessionId='' WHERE ParentSessionId=$id;";
                     delete.Parameters.AddWithValue("$id", sessionId);
                     await delete.ExecuteNonQueryAsync(cancellationToken);
-                    delete.CommandText = "DELETE FROM Sessions WHERE Id=$id AND EndedUTC < $cutoff AND ExportedUTC IS NOT NULL;";
+                    delete.CommandText = """
+                        DELETE FROM Sessions WHERE Id=$id AND EndedUTC < $cutoff AND ExportedUTC IS NOT NULL
+                        AND NOT EXISTS (SELECT 1 FROM SessionShareUploads WHERE SessionId=$id AND CompletedUTC IS NULL);
+                        """;
                     delete.Parameters.AddWithValue("$cutoff", ToDb(nowUtc.AddMonths(-1)));
                     sessionsDeleted += await delete.ExecuteNonQueryAsync(cancellationToken);
                     await transaction.CommitAsync(cancellationToken);
@@ -151,6 +155,7 @@ public sealed class SqliteDataRetentionStore(
             select.CommandText = """
                 SELECT s.Id FROM Sessions s
                 WHERE s.EndedUTC IS NOT NULL AND s.EndedUTC < $cutoff AND s.ExportedUTC IS NOT NULL
+                  AND NOT EXISTS (SELECT 1 FROM SessionShareUploads q WHERE q.SessionId=s.Id AND q.CompletedUTC IS NULL)
                 """ + (proxyUsable ? " AND NOT EXISTS (SELECT 1 FROM retention_proxy.ProxyExchanges p WHERE p.SessionId=s.Id)" : "")
                 + " ORDER BY s.EndedUTC, s.Id LIMIT 20;";
             select.Parameters.AddWithValue("$cutoff", ToDb(nowUtc.AddMonths(-1)));
@@ -260,6 +265,7 @@ public sealed class SqliteDataRetentionStore(
         select.CommandText = """
             SELECT Id, ExportedProxyMaxRowId FROM Sessions
             WHERE EndedUTC IS NOT NULL AND ExportedUTC IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM SessionShareUploads q WHERE q.SessionId=Sessions.Id AND q.CompletedUTC IS NULL)
               AND ExportedProxyCoverage='included' AND ExportedProxyMaxRowId IS NOT NULL
             ORDER BY EndedUTC, Id;
             """;

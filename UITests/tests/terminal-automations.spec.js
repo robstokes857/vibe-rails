@@ -12,6 +12,86 @@ const count = '#vb-terminal-automations-count';
 const menu = '#vb-terminal-automations-menu';
 const normalTabs = '#vb-terminal-tab-list .vb-terminal-tab-item:visible';
 
+for (const width of [1280, 390]) {
+    test(`session sharing captures the recording and safely shows a copyable link at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 850 });
+        await openFixture(page, 1);
+        const requests = [];
+        const shareUrl = 'https://viberails.ai/shared/session?key=' + 'a'.repeat(64);
+        await page.route('**/sharing-links', async route => {
+            requests.push({ url: route.request().url(), body: route.request().postDataJSON(), headers: route.request().headers() });
+            await route.fulfill({ json: { success: true, status: 'pending_upload', url: shareUrl,
+                expiresUtc: '2026-11-06T20:00:00Z', message: 'Available after the session ends and uploads.' } });
+        });
+        await page.evaluate(() => {
+            const manager = window.app.terminalController.manager;
+            const tab = manager.tabs.get('ordinary');
+            tab.state.sessionId = 'd88b7a85-0c2d-4203-acf1-6b9f22227f57';
+            tab.state.title = '<img src=x onerror=alert(1)> Demo';
+            manager.syncTabActionAvailability(tab);
+            Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+                writeText: async value => { window.copiedShare = value; }
+            } });
+        });
+        const tab = page.locator(normalTabs).first();
+        await tab.hover();
+        const share = tab.getByRole('button', { name: 'Share session', exact: true });
+        await expect(share).toBeEnabled();
+        await share.click();
+        const modal = page.locator('#terminal-session-share');
+        await expect(modal).toBeVisible();
+        await expect(modal.locator('#session-share-url')).toHaveValue(shareUrl);
+        await expect(modal.locator('[data-share-name]')).toHaveText('<img src=x onerror=alert(1)> Demo');
+        await expect(modal.locator('img')).toHaveCount(0);
+        await expect(modal).toContainText('Available after the session ends and uploads.');
+        await expect(modal).toContainText('Links expire after one month');
+        await modal.getByRole('button', { name: 'Copy link' }).click();
+        expect(await page.evaluate(() => window.copiedShare)).toBe(shareUrl);
+        await expect(modal.getByRole('button', { name: 'Copied' })).toBeVisible();
+        // Repeated Share while this modal is open must not create duplicate links, even
+        // when the underlying tab has moved on to a different recording.
+        await page.evaluate(() => {
+            const manager = window.app.terminalController.manager;
+            manager.tabs.get('ordinary').state.sessionId = 'replacement-session';
+            void manager.shareTab('ordinary');
+        });
+        expect(requests).toHaveLength(1);
+        expect(requests[0].url).toContain('/sessions/d88b7a85-0c2d-4203-acf1-6b9f22227f57/sharing-links');
+        expect(requests[0].body.displayName).toBe('<img src=x onerror=alert(1)> Demo');
+        expect(requests[0].headers.viberails_tab).toBe('automation-fixture');
+        expect(await modal.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+        await page.screenshot({ path: testInfo.outputPath(`session-sharing-${width}.png`) });
+        await page.keyboard.press('Escape');
+        await expect(modal).toHaveCount(0);
+    });
+}
+
+test('session sharing handles sign-in errors, ready sessions and late replies after modal replacement', async ({ page }) => {
+    await openFixture(page, 1);
+    let count = 0;
+    let release;
+    const held = new Promise(resolve => { release = resolve; });
+    await page.route('**/sharing-links', async route => {
+        count++;
+        if (count === 1) return route.fulfill({ json: { success: false, status: 'no_api_key', message: 'Sign in before sharing.' } });
+        await held;
+        return route.fulfill({ json: { success: true, status: 'ready', message: 'Your replay is ready to share.',
+            url: 'https://viberails.ai/shared/session?key=' + 'b'.repeat(64), expiresUtc: '2026-11-06T20:00:00Z' } });
+    });
+    await page.evaluate(() => { void window.app.terminalController.manager.shareTab('ordinary'); });
+    await expect(page.locator('#terminal-session-share')).toContainText('Sign in before sharing.');
+    await page.getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect.poll(() => count).toBe(2);
+    await page.evaluate(() => window.app.showModal('Replacement', '<p id="replacement-share-dialog">Unchanged</p>'));
+    release();
+    await expect(page.locator('#replacement-share-dialog')).toHaveText('Unchanged');
+    await expect(page.locator('#terminal-session-share')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => { void window.app.terminalController.manager.shareTab('ordinary'); });
+    await expect(page.locator('#terminal-session-share')).toContainText('Your replay is ready to share.');
+    expect(count).toBe(3);
+});
+
 test('card attention colors the originating terminal and Automation menu until cleared', async ({ page }, testInfo) => {
     const fixture = await openFixture(page, 1);
     fixture.tabs.get('ordinary').needsAttention = true;

@@ -411,6 +411,9 @@ namespace VibeRails
             serviceCollection.AddHttpClient<IRemoteStateService, RemoteStateService>()
                 .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
 
+            serviceCollection.AddHttpClient<SessionSharingService>(client => client.Timeout = TimeSpan.FromSeconds(20))
+                .ConfigurePrimaryHttpMessageHandler(SessionSharingService.CreateHandler);
+
             // Incremental session export. The service creates its own repository scopes and owns
             // both process/cross-process gates, so it is safe for the singleton drain job.
             serviceCollection

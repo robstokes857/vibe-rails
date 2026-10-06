@@ -4,6 +4,19 @@ namespace VibeRails.DB;
 
 public interface ISessionArchiveReader
 {
+    /// <summary>Persists an explicit upload request without clearing any prior export evidence.</summary>
+    Task<bool> QueueSessionShareUploadAsync(string sessionId, string keyFingerprint, DateTime requestedUtc, CancellationToken cancellationToken);
+
+    /// <summary>Next completed shared session for this destination key, including previously exported sessions.</summary>
+    Task<UnexportedSessionRef?> GetNextSharedSessionAsync(string keyFingerprint, DateTime nowUtc, CancellationToken cancellationToken);
+
+    /// <summary>Checks completion, pending work and the explicit share's destination before any payload is sent.</summary>
+    Task<bool> CanExportSessionToKeyAsync(string sessionId, string keyFingerprint, CancellationToken cancellationToken);
+
+    /// <summary>Atomically saves archive evidence and completes only share requests for the key that received it.</summary>
+    Task<bool> AcknowledgeSessionExportAsync(string keyFingerprint, string sessionId, DateTime exportedUtc,
+        string? proxyCoverage, long? proxyMaxRowId, CancellationToken cancellationToken);
+
     /// <summary>
     /// Oldest ended session whose independent data-export acknowledgement is absent and whose
     /// retry backoff (if any) has elapsed, together with its recorded attempt count.

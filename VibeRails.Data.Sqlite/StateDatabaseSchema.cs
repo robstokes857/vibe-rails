@@ -152,6 +152,18 @@ internal static class StateDatabaseSchema
                 END;
                 """);
         });
+        SqliteMigrationRunner.Apply(connection, "session-sharing", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, """
+                CREATE TABLE SessionShareUploads (
+                    SessionId TEXT NOT NULL REFERENCES Sessions(Id) ON DELETE CASCADE,
+                    KeyFingerprint TEXT NOT NULL,
+                    RequestedUTC TEXT NOT NULL,
+                    CompletedUTC TEXT NULL,
+                    PRIMARY KEY (SessionId, KeyFingerprint)
+                );
+                CREATE INDEX idx_session_share_uploads_pending
+                    ON SessionShareUploads(KeyFingerprint, RequestedUTC) WHERE CompletedUTC IS NULL;
+                """));
         JobStore.EnsureSessionLinkSchema(connection);
         // Every breaking step above has now been applied (or was already), so the file is at this
         // build's generation. Stamping after the fact also covers databases migrated before the

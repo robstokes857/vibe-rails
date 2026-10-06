@@ -10,6 +10,7 @@ import { TerminalSettings, renderTerminalSettingsPanelHtml } from './terminal-se
 import { TerminalMenu } from './terminal-menu.js';
 import { TerminalAutomationMenu, isAutomationTab } from './terminal-automation-menu.js';
 import { showReplayModal } from './session-viewer.js';
+import { showSessionShareModal } from './terminal-session-share.js';
 import { TerminalTab } from './terminal-tab.js';
 import {
     isAutoReconnectEnabled,
@@ -858,6 +859,17 @@ export class TerminalManager {
             this.beginRenameTab(state.id);
         });
 
+        const share = document.createElement('button');
+        share.type = 'button';
+        share.className = 'vb-terminal-tab-share';
+        share.innerHTML = '<i class="fa-solid fa-share-nodes"></i>';
+        share.title = 'Share session';
+        share.setAttribute('aria-label', 'Share session');
+        share.addEventListener('click', (event) => {
+            event.stopPropagation();
+            void this.shareTab(state.id);
+        });
+
         const min = document.createElement('button');
         min.type = 'button';
         min.className = 'vb-terminal-tab-min';
@@ -900,6 +912,7 @@ export class TerminalManager {
         const actions = document.createElement('span');
         actions.className = 'vb-terminal-tab-actions';
         actions.appendChild(edit);
+        actions.appendChild(share);
         actions.appendChild(pin);
         actions.appendChild(notify);
         actions.appendChild(min);
@@ -953,7 +966,7 @@ export class TerminalManager {
         }
         this.tabPanels?.appendChild(panel);
 
-        state.ui = { item, button, edit, pin, notify, min, close, actions, watchBadge, panel, terminalElement, toastLayer };
+        state.ui = { item, button, edit, share, pin, notify, min, close, actions, watchBadge, panel, terminalElement, toastLayer };
 
         const instance = new TerminalTab(this, state);
         instance.statusController = new TabStatusController(state, state.ui, {
@@ -1943,6 +1956,11 @@ export class TerminalManager {
         return colorPattern.test(color) ? color : null;
     }
 
+    shareTab(tabId) {
+        const state = this.tabs.get(tabId)?.state;
+        return showSessionShareModal(this.app, state?.sessionId, state?.title || state?.label);
+    }
+
     syncTabActionAvailability(tab) {
         const item = tab?.state?.ui?.item;
         const edit = tab?.state?.ui?.edit;
@@ -1965,6 +1983,7 @@ export class TerminalManager {
 
         [
             [edit, hasSession],
+            [tab?.state?.ui?.share, !!tab?.state?.sessionId],
             [pin, true],
             [notify, hasSession],
             [min, hasSession && !pinned],

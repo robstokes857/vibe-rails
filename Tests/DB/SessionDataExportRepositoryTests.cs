@@ -6,7 +6,7 @@ using Xunit;
 
 namespace Tests.DB;
 
-public sealed class SessionDataExportRepositoryTests : IDisposable
+public sealed partial class SessionDataExportRepositoryTests : IDisposable
 {
     private readonly string _root = Path.Combine(
         Path.GetTempPath(),

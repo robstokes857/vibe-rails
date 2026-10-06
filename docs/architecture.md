@@ -1,5 +1,13 @@
 # VibeRails architecture reference
 
+## Session sharing (VIBE-35)
+
+Terminal Share creates a public replay link through the protected root API. The existing drain
+job prioritizes completed recordings with durable requests pinned to the creating API key;
+already-exported sessions can be sent to the link's account without discarding prior evidence.
+See the [sharing contract](../VibeRails/Services/Integrations/VibeCodeRemote/SessionSharing.md)
+for boundaries, account changes, queue/retry behavior and server-first rollout.
+
 ## Board editor refresh (VIBE-44)
 
 The Board refreshes lane membership and card summaries every ten seconds while visible, and on

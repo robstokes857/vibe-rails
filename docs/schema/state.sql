@@ -65,6 +65,9 @@ CREATE INDEX idx_session_logs_session ON SessionLogs(SessionId);
 -- index idx_session_output_session
 CREATE UNIQUE INDEX idx_session_output_session ON sessionOutPut(SessionId);
 
+-- index idx_session_share_uploads_pending
+CREATE INDEX idx_session_share_uploads_pending ON SessionShareUploads(KeyFingerprint, RequestedUTC) WHERE CompletedUTC IS NULL;
+
 -- index idx_sessions_retention
 CREATE INDEX idx_sessions_retention ON Sessions(EndedUTC,Id) WHERE EndedUTC IS NOT NULL AND ExportedUTC IS NOT NULL;
 
@@ -148,6 +151,9 @@ CREATE TABLE SchemaMigrations ( Component TEXT NOT NULL, Version INTEGER NOT NUL
 
 -- table SessionLogs
 CREATE TABLE SessionLogs ( Id INTEGER PRIMARY KEY AUTOINCREMENT, SessionId TEXT NOT NULL, Timestamp TEXT NOT NULL, Content BLOB NOT NULL, IsError INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (SessionId) REFERENCES Sessions(Id) );
+
+-- table SessionShareUploads
+CREATE TABLE SessionShareUploads ( SessionId TEXT NOT NULL REFERENCES Sessions(Id) ON DELETE CASCADE, KeyFingerprint TEXT NOT NULL, RequestedUTC TEXT NOT NULL, CompletedUTC TEXT NULL, PRIMARY KEY (SessionId, KeyFingerprint) );
 
 -- table Sessions
 CREATE TABLE Sessions ( Id TEXT PRIMARY KEY, Cli TEXT NOT NULL, EnvironmentName TEXT, WorkingDirectory TEXT NOT NULL, ProjectDisplayName TEXT NOT NULL DEFAULT '', StartedUTC TEXT NOT NULL, EndedUTC TEXT, ExitCode INTEGER, Processed INTEGER NOT NULL DEFAULT 0, ParentSessionId TEXT DEFAULT '', SessionDisplayName TEXT DEFAULT '', OwnerPid INTEGER, OwnershipTracked INTEGER NOT NULL DEFAULT 1, JobRunId TEXT, ExportedUTC TEXT, ExportAttempts INTEGER NOT NULL DEFAULT 0, ExportNextAttemptUTC TEXT , AggregateEmbeddedUTC TEXT, AggregateEmbedFailureCount INTEGER NOT NULL DEFAULT 0, ExportedProxyCoverage TEXT NULL, ExportedProxyMaxRowId INTEGER NULL);

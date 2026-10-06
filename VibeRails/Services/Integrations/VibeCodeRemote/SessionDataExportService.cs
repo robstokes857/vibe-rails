@@ -170,6 +170,7 @@ public sealed class SessionDataExportService : ISessionDataExportService
         if (string.IsNullOrWhiteSpace(apiKey))
             return Failure(SessionDataExportStatus.NoApiKey, sessionId, detail: "No API key is configured.");
         var baseUri = DataExportEndpointConfiguration.ExportUri;
+        var keyFingerprint = SessionSharingService.KeyFingerprint(apiKey);
 
         if (!ExportGate.Wait(0))
             return Failure(SessionDataExportStatus.Busy, sessionId, detail: "Another data export is running.");
@@ -178,6 +179,13 @@ public sealed class SessionDataExportService : ISessionDataExportService
         string? inProgressPath = null;
         try
         {
+            await using (var scope = _scopeFactory.CreateAsyncScope())
+            {
+                if (!await scope.ServiceProvider.GetRequiredService<ISessionArchiveReader>()
+                    .CanExportSessionToKeyAsync(sessionId, keyFingerprint, cancellationToken))
+                    return Failure(SessionDataExportStatus.NotFound, sessionId,
+                        detail: "No completed session is pending upload for the configured account key.");
+            }
             var statePath = ParserConfigs.GetStatePath();
             fileLock = CrossProcessFileLock.TryAcquire(
                 CrossProcessFileLock.BesideStateDatabase(statePath, LockFileName));
@@ -269,7 +277,8 @@ public sealed class SessionDataExportService : ISessionDataExportService
                 var acknowledgedProxyMaxRowId = acknowledgedCoverage is not null
                     ? acknowledged.ProxyMaxRowId
                     : null;
-                if (!await repository.MarkSessionExportedAsync(
+                if (!await repository.AcknowledgeSessionExportAsync(
+                        keyFingerprint,
                         sessionId,
                         DateTime.UtcNow,
                         acknowledgedCoverage,
@@ -278,16 +287,18 @@ public sealed class SessionDataExportService : ISessionDataExportService
                 {
                     // The row may have been deleted or concurrently acknowledged and therefore
                     // may never be selected again. Do not strand sensitive spool data forever.
-                    DeleteSpoolBestEffort(compressedPath);
+                    if (!await repository.SessionAwaitsExportAsync(sessionId, cancellationToken))
+                        DeleteSpoolBestEffort(compressedPath);
                     return Failure(
                         SessionDataExportStatus.Failed,
                         sessionId,
                         sha256,
                         "The remote upload succeeded, but the local acknowledgement could not be saved.");
                 }
+                // Another account's explicit share can still need these exact immutable bytes.
+                if (!await repository.SessionAwaitsExportAsync(sessionId, cancellationToken))
+                    DeleteSpoolBestEffort(compressedPath);
             }
-
-            DeleteSpoolBestEffort(compressedPath);
             return upload;
         }
         catch (SessionNotFoundException)

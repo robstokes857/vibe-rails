@@ -866,6 +866,8 @@ namespace VibeRails.DB
               AND EndedUTC <= $endedBeforeUtc
               AND ExportedUTC IS NULL
               AND (ExportNextAttemptUTC IS NULL OR ExportNextAttemptUTC <= $nowUtc)
+              AND NOT EXISTS (SELECT 1 FROM SessionShareUploads q
+                  WHERE q.SessionId = Sessions.Id AND q.CompletedUTC IS NULL)
             ORDER BY EndedUTC ASC, Id ASC
             LIMIT 1;
             """;
@@ -877,7 +879,8 @@ namespace VibeRails.DB
                 ExportNextAttemptUTC = $nextAttemptUtc
             WHERE Id = $sessionId
               AND EndedUTC IS NOT NULL
-              AND ExportedUTC IS NULL;
+              AND (ExportedUTC IS NULL OR EXISTS (SELECT 1 FROM SessionShareUploads q
+                  WHERE q.SessionId = Sessions.Id AND q.CompletedUTC IS NULL));
             """;
 
         public const string SelectSessionForExport = """
@@ -886,7 +889,8 @@ namespace VibeRails.DB
             FROM Sessions
             WHERE Id = $sessionId
               AND EndedUTC IS NOT NULL
-              AND ExportedUTC IS NULL;
+              AND (ExportedUTC IS NULL OR EXISTS (SELECT 1 FROM SessionShareUploads q
+                  WHERE q.SessionId = Sessions.Id AND q.CompletedUTC IS NULL));
             """;
         public const string SelectSessionLogsForExport = """
             SELECT Id, Timestamp, Content, IsError
@@ -930,7 +934,8 @@ namespace VibeRails.DB
             FROM Sessions
             WHERE Id = $sessionId
               AND EndedUTC IS NOT NULL
-              AND ExportedUTC IS NULL
+              AND (ExportedUTC IS NULL OR EXISTS (SELECT 1 FROM SessionShareUploads q
+                  WHERE q.SessionId = Sessions.Id AND q.CompletedUTC IS NULL))
             LIMIT 1;
             """;
         public const string MarkSessionExported = """

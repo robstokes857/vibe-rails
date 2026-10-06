@@ -53,7 +53,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
             sourceId,
             () => envelope);
         repository
-            .Setup(repo => repo.MarkSessionExportedAsync(
+            .Setup(repo => repo.AcknowledgeSessionExportAsync(SessionSharingService.KeyFingerprint(ApiKey),
                 sessionId,
                 It.Is<DateTime>(value => value.Kind == DateTimeKind.Utc),
                 It.IsAny<string?>(),
@@ -89,9 +89,51 @@ public sealed class SessionDataExportServiceTests : IDisposable
         Assert.False(File.Exists(SpoolPath(sourceId)));
         repository.Verify(repo => repo.WriteSessionExportAsync(
             sessionId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once);
-        repository.Verify(repo => repo.MarkSessionExportedAsync(
+        repository.Verify(repo => repo.AcknowledgeSessionExportAsync(SessionSharingService.KeyFingerprint(ApiKey),
             sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Once);
+        repository.Verify(repo => repo.CanExportSessionToKeyAsync(It.IsAny<string>(),
+            SessionSharingService.KeyFingerprint(ApiKey), It.IsAny<CancellationToken>()), Times.AtMostOnce);
+        repository.Verify(repo => repo.SessionAwaitsExportAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.AtMostOnce);
         repository.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task ExportSessionAsync_ChangedAccountCannotSendPendingSharedSession()
+    {
+        var id = Guid.NewGuid().ToString("D");
+        var repo = new Mock<ISessionArchiveReader>(MockBehavior.Strict);
+        using var services = BuildServices(repo.Object);
+        repo.Setup(r => r.CanExportSessionToKeyAsync(id, SessionSharingService.KeyFingerprint(ApiKey),
+            It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        using var client = new HttpClient(new UnreachableHandler());
+        Assert.Equal(SessionDataExportStatus.NotFound,
+            (await CreateService(client, services).ExportSessionAsync(id, TestContext.Current.CancellationToken)).Status);
+        repo.Verify(r => r.WriteSessionExportAsync(It.IsAny<string>(), It.IsAny<Stream>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExportSessionAsync_AccountChangesDuringUpload_AcknowledgesCapturedKeyAndRetainsOtherPendingSpool()
+    {
+        var id = Guid.NewGuid();
+        var sessionId = id.ToString("D");
+        var repo = new Mock<ISessionArchiveReader>(MockBehavior.Strict);
+        SetupEnvelopeWrite(repo, sessionId, id, () => Encoding.UTF8.GetBytes("shared replay"),
+            () => ParserConfigs.SetApiKey("replacement-fixture-key"));
+        repo.Setup(r => r.AcknowledgeSessionExportAsync(SessionSharingService.KeyFingerprint(ApiKey),
+            sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        repo.Setup(r => r.SessionAwaitsExportAsync(sessionId, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        using var services = BuildServices(repo.Object);
+        var handler = new SingleUploadHandler(HttpStatusCode.Created, id, "stored");
+        using var client = new HttpClient(handler);
+        var service = CreateService(client, services);
+        Assert.Equal(SessionDataExportStatus.Success,
+            (await service.ExportSessionAsync(sessionId, TestContext.Current.CancellationToken)).Status);
+        Assert.Equal(ApiKey, handler.Request!.ApiKey);
+        Assert.True(File.Exists(SpoolPath(id)));
+        Assert.Equal(0, await service.SweepOrphanedSpoolAsync(TestContext.Current.CancellationToken));
+        repo.Verify(r => r.AcknowledgeSessionExportAsync(SessionSharingService.KeyFingerprint(ApiKey),
+            sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -110,7 +152,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
             proxyCoverage: "included",
             proxyMaxRowId: 7);
         repository
-            .Setup(repo => repo.MarkSessionExportedAsync(
+            .Setup(repo => repo.AcknowledgeSessionExportAsync(SessionSharingService.KeyFingerprint(ApiKey),
                 sessionId, It.IsAny<DateTime>(), "included", 7L, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         using var services = BuildServices(repository.Object);
@@ -127,8 +169,11 @@ public sealed class SessionDataExportServiceTests : IDisposable
             sessionId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once);
         // Retention may prune exactly what this envelope carried: its coverage and the snapshot's
         // largest rowid, as reported by the repository that streamed it.
-        repository.Verify(repo => repo.MarkSessionExportedAsync(
+        repository.Verify(repo => repo.AcknowledgeSessionExportAsync(SessionSharingService.KeyFingerprint(ApiKey),
             sessionId, It.IsAny<DateTime>(), "included", 7L, It.IsAny<CancellationToken>()), Times.Once);
+        repository.Verify(repo => repo.CanExportSessionToKeyAsync(It.IsAny<string>(),
+            SessionSharingService.KeyFingerprint(ApiKey), It.IsAny<CancellationToken>()), Times.AtMostOnce);
+        repository.Verify(repo => repo.SessionAwaitsExportAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.AtMostOnce);
         repository.VerifyNoOtherCalls();
     }
 
@@ -144,7 +189,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
             sourceId,
             () => Encoding.UTF8.GetBytes("{\"kind\":\"session\",\"value\":\"row-gone\"}"));
         repository
-            .Setup(repo => repo.MarkSessionExportedAsync(
+            .Setup(repo => repo.AcknowledgeSessionExportAsync(SessionSharingService.KeyFingerprint(ApiKey),
                 sessionId,
                 It.Is<DateTime>(value => value.Kind == DateTimeKind.Utc),
                 It.IsAny<string?>(),
@@ -171,8 +216,11 @@ public sealed class SessionDataExportServiceTests : IDisposable
         Assert.False(File.Exists(SpoolPath(sourceId)));
         repository.Verify(repo => repo.WriteSessionExportAsync(
             sessionId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once);
-        repository.Verify(repo => repo.MarkSessionExportedAsync(
+        repository.Verify(repo => repo.AcknowledgeSessionExportAsync(SessionSharingService.KeyFingerprint(ApiKey),
             sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Once);
+        repository.Verify(repo => repo.CanExportSessionToKeyAsync(It.IsAny<string>(),
+            SessionSharingService.KeyFingerprint(ApiKey), It.IsAny<CancellationToken>()), Times.AtMostOnce);
+        repository.Verify(repo => repo.SessionAwaitsExportAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.AtMostOnce);
         repository.VerifyNoOtherCalls();
     }
 
@@ -206,8 +254,11 @@ public sealed class SessionDataExportServiceTests : IDisposable
         Assert.True(File.Exists(SpoolPath(sourceId)));
         repository.Verify(repo => repo.WriteSessionExportAsync(
             sessionId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once);
-        repository.Verify(repo => repo.MarkSessionExportedAsync(
+        repository.Verify(repo => repo.AcknowledgeSessionExportAsync(SessionSharingService.KeyFingerprint(ApiKey),
             It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Never);
+        repository.Verify(repo => repo.CanExportSessionToKeyAsync(It.IsAny<string>(),
+            SessionSharingService.KeyFingerprint(ApiKey), It.IsAny<CancellationToken>()), Times.AtMostOnce);
+        repository.Verify(repo => repo.SessionAwaitsExportAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.AtMostOnce);
         repository.VerifyNoOtherCalls();
     }
 
@@ -224,9 +275,9 @@ public sealed class SessionDataExportServiceTests : IDisposable
         using var cancellationSource = CancellationTokenSource.CreateLinkedTokenSource(
             TestContext.Current.CancellationToken);
         repository
-            .Setup(repo => repo.MarkSessionExportedAsync(
+            .Setup(repo => repo.AcknowledgeSessionExportAsync(SessionSharingService.KeyFingerprint(ApiKey),
                 sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
-            .Returns((string _, DateTime _, string? _, long? _, CancellationToken token) =>
+            .Returns((string _, string _, DateTime _, string? _, long? _, CancellationToken token) =>
             {
                 if (cancelled)
                 {
@@ -343,8 +394,11 @@ public sealed class SessionDataExportServiceTests : IDisposable
         Assert.True(File.Exists(SpoolPath(sourceId)));
         repository.Verify(repo => repo.WriteSessionExportAsync(
             sessionId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once);
-        repository.Verify(repo => repo.MarkSessionExportedAsync(
+        repository.Verify(repo => repo.AcknowledgeSessionExportAsync(SessionSharingService.KeyFingerprint(ApiKey),
             It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Never);
+        repository.Verify(repo => repo.CanExportSessionToKeyAsync(It.IsAny<string>(),
+            SessionSharingService.KeyFingerprint(ApiKey), It.IsAny<CancellationToken>()), Times.AtMostOnce);
+        repository.Verify(repo => repo.SessionAwaitsExportAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.AtMostOnce);
         repository.VerifyNoOtherCalls();
     }
 
@@ -364,7 +418,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
             () => currentEnvelope,
             () => writeCount++);
         repository
-            .Setup(repo => repo.MarkSessionExportedAsync(
+            .Setup(repo => repo.AcknowledgeSessionExportAsync(SessionSharingService.KeyFingerprint(ApiKey),
                 sessionId,
                 It.IsAny<DateTime>(),
                 It.IsAny<string?>(),
@@ -416,8 +470,11 @@ public sealed class SessionDataExportServiceTests : IDisposable
         Assert.False(File.Exists(SpoolPath(sourceId)));
         repository.Verify(repo => repo.WriteSessionExportAsync(
             sessionId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once);
-        repository.Verify(repo => repo.MarkSessionExportedAsync(
+        repository.Verify(repo => repo.AcknowledgeSessionExportAsync(SessionSharingService.KeyFingerprint(ApiKey),
             sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Once);
+        repository.Verify(repo => repo.CanExportSessionToKeyAsync(It.IsAny<string>(),
+            SessionSharingService.KeyFingerprint(ApiKey), It.IsAny<CancellationToken>()), Times.Exactly(2));
+        repository.Verify(repo => repo.SessionAwaitsExportAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.AtMostOnce);
         repository.VerifyNoOtherCalls();
     }
 
@@ -431,7 +488,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
         var repository = new Mock<ISessionArchiveReader>(MockBehavior.Strict);
         SetupEnvelopeWrite(repository, sessionId, sourceId, () => envelope);
         repository
-            .Setup(repo => repo.MarkSessionExportedAsync(
+            .Setup(repo => repo.AcknowledgeSessionExportAsync(SessionSharingService.KeyFingerprint(ApiKey),
                 sessionId,
                 It.IsAny<DateTime>(),
                 It.IsAny<string?>(),
@@ -508,8 +565,11 @@ public sealed class SessionDataExportServiceTests : IDisposable
         Assert.False(File.Exists(SpoolPath(sourceId)));
         repository.Verify(repo => repo.WriteSessionExportAsync(
             sessionId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once);
-        repository.Verify(repo => repo.MarkSessionExportedAsync(
+        repository.Verify(repo => repo.AcknowledgeSessionExportAsync(SessionSharingService.KeyFingerprint(ApiKey),
             sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Once);
+        repository.Verify(repo => repo.CanExportSessionToKeyAsync(It.IsAny<string>(),
+            SessionSharingService.KeyFingerprint(ApiKey), It.IsAny<CancellationToken>()), Times.AtMostOnce);
+        repository.Verify(repo => repo.SessionAwaitsExportAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.AtMostOnce);
         repository.VerifyNoOtherCalls();
     }
 
@@ -595,7 +655,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
         var sessionId = sourceId.ToString("D");
         var frozen = await WriteFrozenSpoolAsync(sourceId, schemaVersion, chunked);
         var repository = new Mock<ISessionArchiveReader>(MockBehavior.Strict);
-        repository.Setup(repo => repo.MarkSessionExportedAsync(sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
+        repository.Setup(repo => repo.AcknowledgeSessionExportAsync(SessionSharingService.KeyFingerprint(ApiKey), sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         using var services = BuildServices(repository.Object);
         using var handler = new ChunkUploadHandler(sourceId);
@@ -608,7 +668,10 @@ public sealed class SessionDataExportServiceTests : IDisposable
         if (!chunked) Assert.Equal(frozen, Assert.Single(handler.Requests).Body);
         Assert.False(File.Exists(SpoolPath(sourceId, schemaVersion)));
         repository.Verify(repo => repo.WriteSessionExportAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Never);
-        repository.Verify(repo => repo.MarkSessionExportedAsync(sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Once);
+        repository.Verify(repo => repo.AcknowledgeSessionExportAsync(SessionSharingService.KeyFingerprint(ApiKey), sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Once);
+        repository.Verify(repo => repo.CanExportSessionToKeyAsync(It.IsAny<string>(),
+            SessionSharingService.KeyFingerprint(ApiKey), It.IsAny<CancellationToken>()), Times.AtMostOnce);
+        repository.Verify(repo => repo.SessionAwaitsExportAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.AtMostOnce);
         repository.VerifyNoOtherCalls();
     }
 
@@ -634,7 +697,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
                 "already_exists", int.Parse(request.SchemaVersion!));
         });
         var repository = new Mock<ISessionArchiveReader>(MockBehavior.Strict);
-        repository.Setup(repo => repo.MarkSessionExportedAsync(sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
+        repository.Setup(repo => repo.AcknowledgeSessionExportAsync(SessionSharingService.KeyFingerprint(ApiKey), sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         using var services = BuildServices(repository.Object);
         using var client = new HttpClient(handler);
@@ -653,7 +716,10 @@ public sealed class SessionDataExportServiceTests : IDisposable
             await File.ReadAllBytesAsync(reconciliation, TestContext.Current.CancellationToken));
         Assert.Equal(0, await service.SweepOrphanedSpoolAsync(TestContext.Current.CancellationToken));
         Assert.True(File.Exists(reconciliation));
-        repository.Verify(repo => repo.MarkSessionExportedAsync(sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Once);
+        repository.Verify(repo => repo.AcknowledgeSessionExportAsync(SessionSharingService.KeyFingerprint(ApiKey), sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Once);
+        repository.Verify(repo => repo.CanExportSessionToKeyAsync(It.IsAny<string>(),
+            SessionSharingService.KeyFingerprint(ApiKey), It.IsAny<CancellationToken>()), Times.AtMostOnce);
+        repository.Verify(repo => repo.SessionAwaitsExportAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.AtMostOnce);
         repository.VerifyNoOtherCalls();
     }
 
@@ -668,7 +734,7 @@ public sealed class SessionDataExportServiceTests : IDisposable
         await WriteFrozenSpoolAsync(sourceId, 1, true);
         var v2 = await WriteFrozenSpoolAsync(sourceId, 2, false);
         var repository = new Mock<ISessionArchiveReader>(MockBehavior.Strict);
-        repository.Setup(repo => repo.MarkSessionExportedAsync(sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
+        repository.Setup(repo => repo.AcknowledgeSessionExportAsync(SessionSharingService.KeyFingerprint(ApiKey), sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         using var services = BuildServices(repository.Object);
         using var handler = new ChunkUploadHandler(sourceId, conflictAt);
@@ -682,7 +748,10 @@ public sealed class SessionDataExportServiceTests : IDisposable
         Assert.Equal(v2, handler.Requests[^1].Body);
         Assert.False(File.Exists(SpoolPath(sourceId, 2)));
         Assert.Single(Directory.EnumerateFiles(_testRoot, "*.reconcile", SearchOption.AllDirectories));
-        repository.Verify(repo => repo.MarkSessionExportedAsync(sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Once);
+        repository.Verify(repo => repo.AcknowledgeSessionExportAsync(SessionSharingService.KeyFingerprint(ApiKey), sessionId, It.IsAny<DateTime>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Once);
+        repository.Verify(repo => repo.CanExportSessionToKeyAsync(It.IsAny<string>(),
+            SessionSharingService.KeyFingerprint(ApiKey), It.IsAny<CancellationToken>()), Times.AtMostOnce);
+        repository.Verify(repo => repo.SessionAwaitsExportAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.AtMostOnce);
         repository.VerifyNoOtherCalls();
     }
 
@@ -700,6 +769,9 @@ public sealed class SessionDataExportServiceTests : IDisposable
 
         Assert.Equal(SessionDataExportStatus.UploadFailed, result.Status);
         Assert.True(File.Exists(SpoolPath(sourceId, 1)));
+        repository.Verify(repo => repo.CanExportSessionToKeyAsync(It.IsAny<string>(),
+            SessionSharingService.KeyFingerprint(ApiKey), It.IsAny<CancellationToken>()), Times.AtMostOnce);
+        repository.Verify(repo => repo.SessionAwaitsExportAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.AtMostOnce);
         repository.VerifyNoOtherCalls();
     }
 
@@ -717,6 +789,9 @@ public sealed class SessionDataExportServiceTests : IDisposable
         Assert.Equal(0, await service.SweepOrphanedSpoolAsync(TestContext.Current.CancellationToken));
         Assert.True(File.Exists(SpoolPath(sourceId, 1)));
         Assert.True(File.Exists(SpoolPath(sourceId, 2)));
+        repository.Verify(repo => repo.CanExportSessionToKeyAsync(It.IsAny<string>(),
+            SessionSharingService.KeyFingerprint(ApiKey), It.IsAny<CancellationToken>()), Times.AtMostOnce);
+        repository.Verify(repo => repo.SessionAwaitsExportAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.AtMostOnce);
         repository.VerifyNoOtherCalls();
     }
 
@@ -771,10 +846,18 @@ public sealed class SessionDataExportServiceTests : IDisposable
             _featureLog);
     }
 
-    private static ServiceProvider BuildServices(ISessionArchiveReader repository) =>
-        new ServiceCollection()
-            .AddSingleton(repository)
-            .BuildServiceProvider();
+    private static ServiceProvider BuildServices(ISessionArchiveReader repository)
+    {
+        Mock.Get(repository).Setup(r => r.CanExportSessionToKeyAsync(It.IsAny<string>(),
+            It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        // ACK cleanup keeps spools only while another explicit destination still needs them.
+        // Sweeper tests override this default for their individual sessions below.
+        if (!Mock.Get(repository).Setups.Any(setup => setup.Expression.Body is System.Linq.Expressions.MethodCallExpression call
+            && call.Method.Name == nameof(ISessionArchiveReader.SessionAwaitsExportAsync)))
+            Mock.Get(repository).Setup(r => r.SessionAwaitsExportAsync(It.IsAny<string>(),
+                It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        return new ServiceCollection().AddSingleton(repository).BuildServiceProvider();
+    }
 
     private static void SetupEnvelopeWrite(
         Mock<ISessionArchiveReader> repository,

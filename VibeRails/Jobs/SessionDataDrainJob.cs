@@ -1,6 +1,7 @@
 ﻿using VibeRails.DB;
 using VibeRails.Services;
 using VibeRails.Services.Integrations.VibeCodeRemote;
+using VibeRails.Utils;
 
 namespace VibeRails.Jobs;
 
@@ -70,7 +71,9 @@ public sealed class SessionDataDrainJob : JobBase
         var repository = scope.ServiceProvider.GetRequiredService<IRepository>();
         var nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
         var endedBeforeUtc = nowUtc - SessionSettleDelay;
-        var pending = await repository.GetOldestUnexportedSessionAsync(
+        var fingerprint = SessionSharingService.KeyFingerprint(ParserConfigs.GetApiKey());
+        var pending = await repository.GetNextSharedSessionAsync(fingerprint, nowUtc, cancellationToken)
+            ?? await repository.GetOldestUnexportedSessionAsync(
             endedBeforeUtc,
             nowUtc,
             cancellationToken);

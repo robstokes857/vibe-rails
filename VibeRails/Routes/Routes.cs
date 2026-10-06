@@ -29,6 +29,7 @@ public static class RouteExtensions
         SessionRoutes.Map(app);
         ChatHistoryRoutes.Map(app);
         if (isActiveRootBackend) SessionReplayRoutes.Map(app);
+        if (isActiveRootBackend) SessionSharingRoutes.Map(app);
         LlmProxyRoutes.Map(app);
         LlmAnthropicProxyRoutes.Map(app);
         LlmZaiProxyRoutes.Map(app);

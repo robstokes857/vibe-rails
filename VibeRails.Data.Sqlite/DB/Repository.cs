@@ -9,7 +9,7 @@ using System.Text.Json;
 
 namespace VibeRails.DB
 {
-    public class Repository : IRepository
+    public partial class Repository : IRepository
     {
         /// <summary>
         /// One schema pass per distinct connection string per process. IRepository is scoped, so

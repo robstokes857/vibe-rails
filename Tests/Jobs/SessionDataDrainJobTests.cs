@@ -13,6 +13,23 @@ namespace Tests.Jobs;
 
 public sealed class SessionDataDrainJobTests
 {
+    [Fact]
+    public async Task ExecuteJob_PrioritizesSharedSession_WithoutReadingOrdinaryQueue()
+    {
+        var repository = new Mock<IRepository>(MockBehavior.Strict);
+        repository.Setup(repo => repo.GetNextSharedSessionAsync(It.IsAny<string>(), Now.UtcDateTime,
+            It.IsAny<CancellationToken>())).ReturnsAsync(new UnexportedSessionRef("shared", 0));
+        var exporter = ConfiguredExportService();
+        exporter.Setup(e => e.ExportSessionAsync("shared", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SessionDataExportResult(SessionDataExportStatus.Success, "shared"));
+        using var services = BuildServices(repository.Object);
+        await InvokeExecuteJobAsync(CreateJob(services, exporter.Object), TestContext.Current.CancellationToken);
+        repository.VerifyAll();
+        repository.Verify(r => r.GetOldestUnexportedSessionAsync(It.IsAny<DateTime>(), It.IsAny<DateTime>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        exporter.VerifyAll();
+    }
+
     private static readonly DateTimeOffset Now =
         new(2026, 9, 3, 18, 30, 0, TimeSpan.Zero);
 
@@ -218,13 +235,17 @@ public sealed class SessionDataDrainJobTests
         Assert.Equal(SessionDataDrainJob.MaxRetryBackoff, SessionDataDrainJob.BackoffFor(int.MaxValue));
     }
 
-    private static void SetupSelection(Mock<IRepository> repository, UnexportedSessionRef? selected) =>
+    private static void SetupSelection(Mock<IRepository> repository, UnexportedSessionRef? selected)
+    {
+        repository.Setup(repo => repo.GetNextSharedSessionAsync(It.IsAny<string>(), Now.UtcDateTime,
+            It.IsAny<CancellationToken>())).ReturnsAsync((UnexportedSessionRef?)null);
         repository
             .Setup(repo => repo.GetOldestUnexportedSessionAsync(
                 Now.UtcDateTime - SessionDataDrainJob.SessionSettleDelay,
                 Now.UtcDateTime,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(selected);
+    }
 
     private static void SetupSweep(Mock<ISessionDataExportService> service) =>
         service

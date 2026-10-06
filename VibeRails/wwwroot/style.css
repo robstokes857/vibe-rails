@@ -3500,6 +3500,7 @@ code {
 }
 
 #vb-terminal-panel .vb-terminal-tab-edit,
+#vb-terminal-panel .vb-terminal-tab-share,
 #vb-terminal-panel .vb-terminal-tab-pin,
 #vb-terminal-panel .vb-terminal-tab-notify,
 #vb-terminal-panel .vb-terminal-tab-min {
@@ -3577,6 +3578,7 @@ code {
    sets [hidden] otherwise). Author display rules override the UA [hidden]
    default, so keep this explicit. */
 #vb-terminal-panel .vb-terminal-tab-edit[hidden],
+#vb-terminal-panel .vb-terminal-tab-share[hidden],
 #vb-terminal-panel .vb-terminal-tab-pin[hidden],
 #vb-terminal-panel .vb-terminal-tab-notify[hidden],
 #vb-terminal-panel .vb-terminal-tab-min[hidden],
@@ -3889,6 +3891,7 @@ code {
 /* Chip hover offers exactly one action — restore. Rename/pin/close need the
    full tab (restore first); clicking anywhere else on the chip activates it. */
 #vb-terminal-panel .vb-terminal-tab-item.is-minimized .vb-terminal-tab-edit,
+#vb-terminal-panel .vb-terminal-tab-item.is-minimized .vb-terminal-tab-share,
 #vb-terminal-panel .vb-terminal-tab-item.is-minimized .vb-terminal-tab-pin,
 #vb-terminal-panel .vb-terminal-tab-item.is-minimized .vb-terminal-tab-notify,
 #vb-terminal-panel .vb-terminal-tab-item.is-minimized .vb-terminal-tab-close {

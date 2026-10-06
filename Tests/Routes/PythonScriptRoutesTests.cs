@@ -226,6 +226,7 @@ public sealed class PythonScriptRoutesTests : IDisposable
                 It.IsAny<string?>(),
                 It.IsAny<IReadOnlyList<string>?>(),
                 It.IsAny<string?>(),
+                It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
             .Callback(new InvocationAction(invocation =>
             {
