@@ -81,15 +81,16 @@ test('card prose asks the browser for spell check and identifiers do not', () =>
         source.indexOf('async openCardEditor'),
         source.indexOf('bindCardEditor(editor, card)')
     );
-    assert.match(open, /id="board-card-title"[\s\S]*?spellcheck="true"/);
-    assert.match(open, /id="board-chat-question"[\s\S]*?spellcheck="true"/);
+    // Stay inside the opening tag. A later field's attribute must not satisfy this field.
+    assert.match(open, /id="board-card-title"[^>]*spellcheck="true"/);
+    assert.match(open, /id="board-chat-question"[^>]*spellcheck="true"/);
     const composer = source.slice(source.indexOf('composerMarkup({'), source.indexOf('bindComposer(composer,'));
-    assert.match(composer, /data-board-composer-input[\s\S]*?spellcheck="true"/);
-    assert.match(open, /name="sha"[\s\S]*?spellcheck="false"/);
-    assert.match(open, /name="displayName"[\s\S]*?spellcheck="false"/);
+    assert.match(composer, /data-board-composer-input[^>]*spellcheck="true"/);
+    assert.match(open, /name="sha"[^>]*spellcheck="false"/);
+    assert.match(open, /name="displayName"[^>]*spellcheck="false"/);
     assert.match(open, /id="board-card-display-id"[^>]*spellcheck="false"/);
     const html = readFileSync(indexPath, 'utf8');
-    assert.match(html, /data-board-search[\s\S]*?spellcheck="false"/);
+    assert.match(html, /data-board-search[^>]*spellcheck="false"/);
 
     const local = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/board-local-card.js'), 'utf8');
     for (const id of ['local-card-title', 'local-card-description', 'local-card-comment']) {
